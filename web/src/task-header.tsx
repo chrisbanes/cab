@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { ActionLink, Button } from "./components.js";
 import {
@@ -21,7 +21,7 @@ export interface TaskHeaderReport {
   title: string;
   subtitle: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
-  stop: { title: string; affected: string; held: boolean };
+  stop: { affected: string; held: boolean };
 }
 
 export function taskHeaderReport(
@@ -49,7 +49,7 @@ export function taskHeaderReport(
           ariaLabel: `Back to ${project}`,
           history: false,
         },
-    stop: { title, affected, held },
+    stop: { affected, held },
   };
 }
 
@@ -70,6 +70,17 @@ export function TaskHeaderActions({
   const [open, setOpen] = useState(false),
     [sent, setSent] = useState(false);
   const keep = useRef<HTMLButtonElement>(null);
+  // A page restored from the back-forward cache after the Stop post starts closed again.
+  useEffect(() => {
+    const restored = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        setOpen(false);
+        setSent(false);
+      }
+    };
+    addEventListener("pageshow", restored);
+    return () => removeEventListener("pageshow", restored);
+  }, []);
   return (
     <div className="task-header-actions">
       <ActionLink variant="secondary" href={`/runtime/task/${report.taskId}`}>
@@ -80,7 +91,13 @@ export function TaskHeaderActions({
           Stop requested
         </Button>
       ) : (
-        <Dialog open={open} onOpenChange={setOpen}>
+        <Dialog
+          open={open}
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (!next) setSent(false);
+          }}
+        >
           <DialogTrigger asChild>
             <Button variant="destructive">Stop…</Button>
           </DialogTrigger>
@@ -92,7 +109,7 @@ export function TaskHeaderActions({
               keep.current?.focus();
             }}
           >
-            <DialogTitle>Stop {report.stop.title}?</DialogTitle>
+            <DialogTitle>Stop {report.title}?</DialogTitle>
             <DialogDescription className="body">
               {report.stop.affected}
             </DialogDescription>

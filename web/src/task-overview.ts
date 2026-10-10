@@ -19,8 +19,9 @@ export function briefParts(
     criterionId: c.criterionId,
     text: c.text,
   }));
-  if (source.body === null)
-    return { prose: "", criteria, coverage: "unknown" as const };
+  // Unknown coverage: no retained body, or an unknown count of omitted checklist lines.
+  const known = source.body !== null && source.criteriaOmittedCount !== null;
+  if (source.body === null) return { prose: "", criteria, known };
   const dropped = new Set(source.criteria.map((c) => c.position));
   const prose = source.body
     .split("\n")
@@ -28,15 +29,7 @@ export function briefParts(
     .join("\n")
     .replace(/\n\s*\n(\s*\n)+/g, "\n\n")
     .trim();
-  const coverage =
-    source.criteriaOmittedCount === null
-      ? ("unknown" as const)
-      : source.criteriaOmittedCount > 0
-        ? ("partial" as const)
-        : criteria.length
-          ? ("ok" as const)
-          : ("none" as const);
-  return { prose, criteria, coverage };
+  return { prose, criteria, known };
 }
 
 const outcomeWords = {

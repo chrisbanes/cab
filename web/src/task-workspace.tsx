@@ -1116,7 +1116,7 @@ export function TaskWorkspace({
                         ))}
                       </ol>
                     ) : (
-                      brief.coverage !== "unknown" && <p>None supplied</p>
+                      brief.known && <p>None supplied</p>
                     )}
                     <p className="metadata muted">
                       {source.kind} source revision {source.revision} ·{" "}
@@ -1327,12 +1327,7 @@ export function TaskWorkspace({
                     changed();
                     requestAnimationFrame(() => {
                       const files = document.getElementById("files");
-                      files?.scrollIntoView();
-                      const heading = files?.querySelector<HTMLElement>("h3");
-                      if (heading) {
-                        heading.tabIndex = -1;
-                        heading.focus({ preventScroll: true });
-                      }
+                      if (files) showSection(files);
                     });
                   }}
                 />

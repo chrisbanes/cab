@@ -1324,7 +1324,9 @@ as follows:
 - Criteria read C1, C2… in the brief and in the result's rows with the recorded
   outcome ("Supported by recorded evidence", "Failed recorded check",
   "Unverified"); no overall pass is derived. The literal brief, checklist syntax
-  included, stays in the "read supplied text" disclosure.
+  included, stays in the "read supplied text" disclosure. "Ask lead about
+  criterion" keeps its exact-reference draft, which names the criterion by its
+  line in the brief ("criterion 3 in source revision 1"), not by its C label.
 - The phone keeps one reading column with the same in-place sections; the drill-in
   screens of frames 47, 48, 51 and 55 are not built, so reading position,
   expansions and unsent replies are not split across history entries.

@@ -251,12 +251,33 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   const expanded = page.locator("#history details[open]").first();
   await expanded.waitFor();
   await page.getByLabel("Editable reply").fill("Unsent reply");
-  const reread = page.waitForResponse((r) =>
-    r.url().includes(`/api/operator/tasks/${a.taskId}`),
+  // Read the anchor with the result in view; the grid must not disturb restoration.
+  const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
+  await anchor.evaluate((e) => e.scrollIntoView());
+  await page.evaluate(() => scrollBy(0, -40));
+  const top = () => anchor.evaluate((e) => e.getBoundingClientRect().top);
+  const anchorTop = await top();
+  const reread = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
   );
-  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  // Dispatch without scrolling the button into view, as a timed re-read would.
+  await page
+    .getByRole("button", { name: "Refresh task", exact: true })
+    .dispatchEvent("click");
   await reread;
-  await expanded.waitFor();
+  // Settled: two frames after the read, the layout effect has restored the anchor.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const after = await top();
+  assert.ok(
+    Math.abs(after - anchorTop) <= 1,
+    `anchor ${anchorTop} -> ${after}`,
+  );
+  assert.equal(await page.locator("#history details[open]").count(), 1);
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Unsent reply",
@@ -307,7 +328,14 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   j.observe(page);
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password, "/app/tasks?view=board");
-  await page.locator(`[data-task-id="${a.taskId}"] .task-title`).click();
+  const card = page.locator(`[data-task-id="${a.taskId}"] .task-title`);
+  await card.waitFor();
+  const board = page.locator(".board-columns");
+  await board.evaluate((e) => {
+    e.scrollLeft = e.scrollWidth;
+  });
+  const boardScroll = await board.evaluate((e) => e.scrollLeft);
+  await card.click();
   const back = page.getByRole("link", {
     name: "Back to originating view",
     exact: true,
@@ -320,11 +348,19 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     (u) => u.pathname === "/app/tasks" && u.search === "?view=board",
   );
   assert.equal(await page.evaluate(() => history.length), length);
-  // Until a task read lands, the header reads "Task" rather than an earlier report.
-  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await card.waitFor();
+  assert.equal(await board.evaluate((e) => e.scrollLeft), boardScroll);
+  // After sign-out and sign-in the header reads "Task" until the new read lands.
+  await card.click();
   await page
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
     .waitFor();
+  await page.getByRole("button", { name: "Operator account" }).click();
+  await page
+    .getByRole("menu")
+    .getByRole("menuitem", { name: "Sign out", exact: true })
+    .click();
+  await page.getByLabel("Password").waitFor();
   let release: () => void = () => {};
   const held = new Promise<void>((r) => (release = r));
   await page.route(`**/api/operator/tasks/${a.taskId}`, async (route) => {
@@ -332,7 +368,9 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     await route.continue();
   });
   try {
-    await page.reload();
+    await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+    await page.getByLabel("Password").fill(web.password);
+    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page
       .getByRole("heading", { name: "Task", exact: true, level: 1 })
       .waitFor();
@@ -343,6 +381,61 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   await page
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
     .waitFor();
+});
+
+test("An empty local task says so honestly", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain(),
+    projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Fieldnotes",
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "Empty task",
+    outcome: "Write the field notes guide.",
+    ready: false,
+  });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
+  const review = page.locator("#review");
+  await review.getByText("No result recorded.", { exact: true }).waitFor();
+  await review.getByText("No assignments yet.", { exact: true }).waitFor();
+  await page
+    .locator("#brief")
+    .getByText("None supplied", { exact: true })
+    .waitFor();
+  assert.match(
+    (await page.locator(".page-header-title p").textContent()) ?? "",
+    /Accountable project lead: Unconfigured$/,
+  );
+  assert.ok(await noHorizontalScroll(page));
+  await captureBrowserEvidence(page, "task-detail-empty-phone", {
+    fullPage: false,
+  });
 });
 
 test("A question opened on the task page names its requester", async (_t, j) => {
@@ -460,7 +553,7 @@ for (const engine of [
     const session = await page.evaluate(() =>
       fetch("/api/operator/session").then((r) => r.json()),
     );
-    await dialog.getByRole("button", { name: "Stop task" }).click();
+    await dialog.getByRole("button", { name: "Stop task" }).dblclick();
     await page.waitForURL((u) => u.pathname === `/runtime/task/${a.taskId}`);
     assert.equal(stops.length, 1);
     assert.equal(stops[0]?.origin, web.origin);

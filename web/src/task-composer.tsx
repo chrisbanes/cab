@@ -59,7 +59,7 @@ export function TaskComposer({
     ),
     [linkText, setLinkText] = useState(state.input.links.join("\n")),
     [dependencyQuery, setDependencyQuery] = useState(""),
-    [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+    [optionalOpen, setOptionalOpen] = useState(false);
   const input = state.input,
     locked = state.phase !== "editable";
   const optionsLoader = useCallback(
@@ -108,19 +108,11 @@ export function TaskComposer({
       "Choose existing dependencies in this project.";
   const unavailableFields = Object.keys(unavailable).join();
   useEffect(() => {
-    if (!unavailableFields) return;
-    setExpanded((open) => {
-      const next = new Set(open);
-      for (const field of unavailableFields.split(","))
-        next.add(sectionOf[field] ?? field);
-      return next;
-    });
+    if (unavailableFields) setOptionalOpen(true);
   }, [unavailableFields]);
-  // Collapsed sections stay mounted, so an error target only needs its section opened.
+  // The collapsed section stays mounted, so an error target only needs it opened.
   const reveal = (field: string) => {
-    flushSync(() =>
-      setExpanded((open) => new Set(open).add(sectionOf[field] ?? field)),
-    );
+    if (field in optionalFields) flushSync(() => setOptionalOpen(true));
     document.getElementById(`composer-${field}`)?.focus();
   };
   async function submit(ready: boolean) {
@@ -399,11 +391,8 @@ export function TaskComposer({
           </label>
           <details
             className="composer-disclosure"
-            open={expanded.has("optional")}
-            onToggle={(e) => {
-              const open = e.currentTarget.open;
-              setExpanded(open ? new Set(["optional"]) : new Set());
-            }}
+            open={optionalOpen}
+            onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
           >
             <summary className="small-heading">{optional.summary}</summary>
             <label className="field body" htmlFor="composer-context">
@@ -526,7 +515,7 @@ export function TaskComposer({
               {error("blockerTaskIds")}
             </fieldset>
           </details>
-          {!expanded.has("optional") && (
+          {!optionalOpen && (
             <div className="composer-optional-values metadata muted">
               {optional.lines.map((line) => (
                 <p key={line}>{line}</p>
@@ -548,7 +537,7 @@ export function TaskComposer({
             <p className="metadata muted">
               {optionalError
                 ? "Not created. Values retained. Review optional settings to continue."
-                : "Creates ready work; waits for dependencies and other holds."}
+                : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
             </p>
           </div>
         )}
@@ -561,10 +550,3 @@ export function TaskComposer({
     </section>
   );
 }
-
-const sectionOf: Record<string, string> = {
-  context: "optional",
-  links: "optional",
-  profileId: "optional",
-  blockerTaskIds: "optional",
-};

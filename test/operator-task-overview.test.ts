@@ -39,7 +39,7 @@ test("briefParts keeps prose and labels retained criteria C1/C2", () => {
       ["C2", "Escape closes the menu"],
     ],
   );
-  assert.equal(parts.coverage, "ok");
+  assert.equal(parts.known, true);
   const lines = Array.from({ length: 130 }, (_, i) => `- [ ] item ${i}`);
   const partial = briefParts({
     body: lines.join("\n"),
@@ -51,15 +51,19 @@ test("briefParts keeps prose and labels retained criteria C1/C2", () => {
     criteriaOmittedCount: 2,
   });
   assert.equal(partial.prose, "- [ ] item 128\n- [ ] item 129");
-  assert.equal(partial.coverage, "partial");
+  assert.equal(partial.known, true);
   assert.deepEqual(
     briefParts({ body: null, criteria: [], criteriaOmittedCount: null }),
-    { prose: "", criteria: [], coverage: "unknown" },
+    { prose: "", criteria: [], known: false },
+  );
+  assert.deepEqual(
+    briefParts({ body: "Prose only", criteria: [], criteriaOmittedCount: 0 }),
+    { prose: "Prose only", criteria: [], known: true },
   );
   assert.equal(
-    briefParts({ body: "Prose only", criteria: [], criteriaOmittedCount: 0 })
-      .coverage,
-    "none",
+    briefParts({ body: "Prose", criteria: [], criteriaOmittedCount: null })
+      .known,
+    false,
   );
 });
 
