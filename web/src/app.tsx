@@ -47,12 +47,11 @@ import { loadTaskList, taskRouteSubtitle } from "./tasks.js";
 import { TaskComposer } from "./task-composer.js";
 import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
 import { ConfigurationDrafts } from "./settings-state.js";
-import {
-  SettingsWorkspace,
-  ProjectSetup,
-  ProjectConfiguration,
-  ProfileConfiguration,
-} from "./settings.js";
+import { ProjectSetup } from "./settings.js";
+import { SettingsWorkspace } from "./settings-index.js";
+import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
+import { ProjectConfiguration } from "./project-config.js";
+import { settingsHeader } from "./settings-view.js";
 import { Search, SearchState } from "./search.js";
 import { TaskWorkspace } from "./task-workspace.js";
 import { TaskHeaderActions, type TaskHeaderReport } from "./task-header.js";
@@ -73,7 +72,8 @@ function RouteLink({
   children,
 }: {
   href: string;
-  current: boolean;
+  /** `true` marks the current page; `"true"` marks a related current item (project settings). */
+  current: boolean | "true";
   navigate: (path: string) => void;
   icon: ReactNode;
   row: boolean;
@@ -86,7 +86,7 @@ function RouteLink({
     <a
       className={`nav-link${row ? " nav-row" : ""}${className ? ` ${className}` : ""}`}
       href={href}
-      aria-current={current ? "page" : undefined}
+      aria-current={current === true ? "page" : current || undefined}
       aria-describedby={describedBy}
       onClick={(e) => {
         if (
@@ -133,7 +133,7 @@ function ProjectNavigation({
   const pathname = path.split(/[?#]/)[0] ?? "";
   const link = (
     href: string,
-    current: boolean,
+    current: boolean | "true",
     icon: ReactNode,
     label: ReactNode,
     extra: {
@@ -201,7 +201,8 @@ function ProjectNavigation({
       {workspace?.data.projects.map((p) =>
         link(
           `/app/projects/${p.id}`,
-          pathname === `/app/projects/${p.id}`,
+          pathname === `/app/projects/${p.id}` ||
+            (pathname === `/app/projects/${p.id}/settings` && "true"),
           <Folder {...navIcon} />,
           p.name ?? "Name unavailable",
           {
@@ -339,7 +340,8 @@ export function App() {
     [drawer, setDrawer] = useState(false),
     [logoutPending, setLogoutPending] = useState(false),
     [logoutNotice, setLogoutNotice] = useState<string | null>(null),
-    [expiredNotice, setExpiredNotice] = useState(false);
+    [expiredNotice, setExpiredNotice] = useState(false),
+    [refreshNonce, setRefreshNonce] = useState(0);
   const searchState = useRef(new Map<string, SearchState>());
   const taskStates = useRef(new TaskWorkspaceStates());
   const questionStates = useRef(new QuestionResponseStates());
@@ -617,28 +619,33 @@ export function App() {
     (p) => p.id === projectId,
   );
   const unknownRoute = !knownRoute(pathname);
-  const title = unknownRoute
-    ? "Page not found"
-    : pathname === "/app/search"
-      ? "Search"
-      : pathname === "/app"
-        ? "Overview"
-        : /^\/app\/tasks\/[^/]+$/.test(pathname) &&
-            pathname !== "/app/tasks/new"
-          ? "Task"
-          : pathname === "/app/tasks"
-            ? "All tasks"
-            : pathname === "/app/tasks/new"
-              ? "Create a task"
-              : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname)
-                ? "Recovery"
-                : pathname === "/app/inbox"
-                  ? "Inbox"
-                  : pathname.startsWith("/app/settings") ||
-                      pathname.endsWith("/settings")
-                    ? "Settings"
-                    : (project?.name ?? "Project");
   const query = path.includes("?") ? path.slice(path.indexOf("?")) : "";
+  const settingsPage = unknownRoute
+    ? null
+    : settingsHeader(pathname, query, workspace.state.data);
+  const title = settingsPage
+    ? settingsPage.title
+    : unknownRoute
+      ? "Page not found"
+      : pathname === "/app/search"
+        ? "Search"
+        : pathname === "/app"
+          ? "Overview"
+          : /^\/app\/tasks\/[^/]+$/.test(pathname) &&
+              pathname !== "/app/tasks/new"
+            ? "Task"
+            : pathname === "/app/tasks"
+              ? "All tasks"
+              : pathname === "/app/tasks/new"
+                ? "Create a task"
+                : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname)
+                  ? "Recovery"
+                  : pathname === "/app/inbox"
+                    ? "Inbox"
+                    : pathname.startsWith("/app/settings") ||
+                        pathname.endsWith("/settings")
+                      ? "Settings"
+                      : (project?.name ?? "Project");
   const inboxCount =
     (onInboxRoute ? inboxRouteSummary : inboxSummaryOf(inboxSummary.state))
       ?.count ?? null;
@@ -662,6 +669,7 @@ export function App() {
   const refreshAll = () => {
     workspace.refresh();
     if (!onInboxRoute) inboxSummary.refresh();
+    if (settingsPage) setRefreshNonce((n) => n + 1);
   };
   // These pages own a refresh that already re-reads their data.
   const ownsRefresh =
@@ -785,7 +793,13 @@ export function App() {
           <PageHeader
             title={title}
             subtitle={headerSubtitle}
-            plain={unknownRoute}
+            plain={unknownRoute || Boolean(settingsPage)}
+            {...(settingsPage
+              ? {
+                  trail: settingsPage.trail,
+                  shortTitle: settingsPage.shortTitle,
+                }
+              : {})}
             badge={
               onInboxRoute && inboxCount !== null
                 ? `${inboxCount} unresolved`
@@ -843,6 +857,7 @@ export function App() {
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
+              refreshNonce={refreshNonce}
             />
           ) : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname) ? (
             <AssignmentRecovery
@@ -851,6 +866,7 @@ export function App() {
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
+              refreshNonce={refreshNonce}
               assignmentId={pathname.split("/")[3] ?? ""}
             />
           ) : pathname === "/app/settings" ? (
@@ -860,6 +876,7 @@ export function App() {
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
+              refreshNonce={refreshNonce}
             />
           ) : pathname === "/app/settings/projects/new" ? (
             <ProjectSetup
@@ -869,8 +886,15 @@ export function App() {
               workspace={workspace.state.data}
               refresh={workspace.refresh}
             />
-          ) : pathname === "/app/settings/profiles/new" ||
-            /^\/app\/profiles\/[^/]+\/settings$/.test(pathname) ? (
+          ) : pathname === "/app/settings/profiles/new" ? (
+            <ProfileCreate
+              client={client}
+              session={session}
+              drafts={drafts.current}
+              workspace={workspace.state.data}
+              refresh={workspace.refresh}
+            />
+          ) : /^\/app\/profiles\/[^/]+\/settings$/.test(pathname) ? (
             <ProfileConfiguration
               key={pathname}
               client={client}
@@ -878,9 +902,8 @@ export function App() {
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
-              {...(pathname.includes("/profiles/") && !pathname.endsWith("/new")
-                ? { profileId: pathname.split("/")[3] }
-                : {})}
+              refreshNonce={refreshNonce}
+              profileId={pathname.split("/")[3] ?? ""}
             />
           ) : /^\/app\/projects\/[^/]+\/settings$/.test(pathname) ? (
             <ProjectConfiguration
@@ -890,7 +913,9 @@ export function App() {
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
+              refreshNonce={refreshNonce}
               projectId={pathname.split("/")[3] ?? ""}
+              query={query}
             />
           ) : pathname === "/app/tasks/new" ? (
             <TaskComposer

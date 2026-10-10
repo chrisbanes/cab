@@ -580,3 +580,49 @@ test("complete configuration receipt predicates keep schema-valid mismatches unk
     }
   }
 });
+test("the store remembers a recorded save until purge, and never an unknown outcome", async () => {
+  const profileId = randomUUID();
+  let lose = false;
+  const client = new OperatorClient(async (_url, init) => {
+    if (lose) throw Error("lost");
+    const c = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "configuration",
+      key: c.key,
+      recorded: true,
+      result: {
+        commandType: "profile.configure",
+        resourceId: profileId,
+        version: c.expectedVersion + 1,
+        revoked: false,
+      },
+    });
+  });
+  const command = () => ({
+    type: "profile.configure" as const,
+    key: randomUUID(),
+    profileId,
+    expectedVersion: 2,
+    name: "Renamed",
+  });
+  const drafts = new ConfigurationDrafts();
+  const draft = drafts.get("profile.configure:a", () => {});
+  await draft.submit(client, command(), "csrf");
+  assert.equal(draft.phase, "recorded");
+  const saved = drafts.saved("profile.configure:a");
+  assert.equal(typeof saved?.at, "number");
+  assert.equal(saved?.receipt.key, draft.receipt?.key);
+  draft.startOperation({ name: "Renamed" });
+  assert.equal(draft.phase, "editing");
+  assert.equal(drafts.saved("profile.configure:a"), saved);
+  drafts.purge();
+  assert.equal(drafts.saved("profile.configure:a"), undefined);
+  lose = true;
+  const unknown = drafts.get("profile.configure:b", () => {});
+  await unknown.submit(client, command(), "csrf");
+  assert.equal(unknown.phase, "unknown");
+  assert.equal(drafts.saved("profile.configure:b"), undefined);
+  assert.equal(unknown.set("name", "x"), false);
+  unknown.startOperation({ name: "y" });
+  assert.equal(unknown.phase, "unknown");
+});

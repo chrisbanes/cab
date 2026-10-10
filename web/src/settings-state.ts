@@ -73,7 +73,10 @@ export class ConfigurationDraft {
     return this.lifecycle.receipt;
   }
   private generation = 0;
-  constructor(private changed: () => void = () => {}) {}
+  constructor(
+    private changed: () => void = () => {},
+    private onSaved: (receipt: CommandReceipt) => void = () => {},
+  ) {}
   bind(changed: () => void) {
     this.changed = changed;
   }
@@ -177,6 +180,7 @@ export class ConfigurationDraft {
     );
     if (disposition === "recorded") {
       this.phase = "recorded";
+      if (this.receipt) this.onSaved(this.receipt);
       this.notice =
         "Recorded. Latest observations may differ from this original receipt.";
     } else if (disposition === "unknown") {
@@ -198,8 +202,17 @@ export class ConfigurationDraft {
     this.changed();
   }
 }
+/** A save this browser session recorded: its original receipt and when it settled. */
+export interface SavedRecord {
+  at: number;
+  receipt: CommandReceipt;
+}
 export class ConfigurationDrafts {
   private drafts = new Map<string, ConfigurationDraft>();
+  private savedRecords = new Map<string, SavedRecord>();
+  saved(key: string) {
+    return this.savedRecords.get(key);
+  }
   unsettledPlacements(projectId: string) {
     return [...this.drafts.values()].flatMap((draft) =>
       draft.frozen?.type === "github.place" &&
@@ -225,7 +238,9 @@ export class ConfigurationDrafts {
   get(key: string, changed: () => void) {
     let draft = this.drafts.get(key);
     if (!draft) {
-      draft = new ConfigurationDraft(changed);
+      draft = new ConfigurationDraft(changed, (receipt) =>
+        this.savedRecords.set(key, { at: Date.now(), receipt }),
+      );
       this.drafts.set(key, draft);
     }
     draft.bind(changed);
@@ -234,5 +249,6 @@ export class ConfigurationDrafts {
   purge() {
     for (const draft of this.drafts.values()) draft.purge();
     this.drafts.clear();
+    this.savedRecords.clear();
   }
 }

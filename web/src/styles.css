@@ -591,10 +591,6 @@ nav {
   margin-block: var(--space-16);
 }
 
-.settings-card {
-  min-width: 0;
-}
-
 .settings-stack form {
   display: grid;
   gap: var(--space-16);

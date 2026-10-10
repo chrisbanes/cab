@@ -1,0 +1,291 @@
+/**
+ * Pure change lists and command builders for the settings forms. Each form edits current
+ * values in place; these functions compare the draft with the loaded read and name every
+ * change on one line. Private values (instructions, guidance, queries, filters, paths and
+ * reference names) never appear in a line.
+ */
+import type { z } from "zod";
+import type {
+  profileConfigurationSchema,
+  projectConfigurationSchema,
+  runtimeSettingsSchema,
+} from "../../src/operator/contracts.js";
+
+export type Values = Record<string, string | boolean | string[]>;
+export type ProjectConfigurationData = z.infer<
+  typeof projectConfigurationSchema
+>["data"];
+export type ProfileConfigurationData = z.infer<
+  typeof profileConfigurationSchema
+>["data"];
+export type RuntimeSettingsData = z.infer<typeof runtimeSettingsSchema>["data"];
+
+const PRIVATE_REPLACED = "(private, not shown after saving)";
+const nameOf = (
+  profiles: { id: string; name: string | null }[],
+  id: string | null | undefined,
+) =>
+  id
+    ? (profiles.find((p) => p.id === id)?.name ?? "Name unavailable")
+    : "Unconfigured";
+const list = (v: Values[string] | undefined) => (Array.isArray(v) ? v : []);
+
+function referenceChange(v: Values) {
+  return v.referenceMode === "set"
+    ? ["Credential reference: set new environment reference"]
+    : v.referenceMode === "clear"
+      ? ["Credential reference: cleared"]
+      : [];
+}
+
+export function projectChanges(data: ProjectConfigurationData, v: Values) {
+  const lines: string[] = [];
+  const name = data.project.name ?? "";
+  if (v.name !== undefined && v.name !== name)
+    lines.push(`Project name: ${name || "Name unavailable"} → ${v.name}`);
+  const lead = data.project.leadProfileId ?? "";
+  if (v.leadProfileId !== undefined && v.leadProfileId !== lead)
+    lines.push(
+      `Lead profile: ${nameOf(data.profiles, lead)} → ${nameOf(data.profiles, String(v.leadProfileId))}`,
+    );
+  if (v.paused !== undefined && Boolean(v.paused) !== data.project.paused)
+    lines.push(v.paused ? "Pause project" : "Unpause project");
+  if (v.replaceInstructions)
+    lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
+  return lines;
+}
+
+export function profileChanges(data: ProfileConfigurationData, v: Values) {
+  const lines: string[] = [];
+  const name = data.profile.name ?? "";
+  if (v.name !== undefined && v.name !== name)
+    lines.push(`Profile name: ${name || "Name unavailable"} → ${v.name}`);
+  if (v.summary !== undefined && v.summary !== (data.profile.summary ?? ""))
+    lines.push(`Summary: ${v.summary || "cleared"}`);
+  if (
+    data.capabilities === null
+      ? Boolean(v.replaceCapabilities)
+      : v.capabilities !== undefined && v.capabilities !== data.capabilities
+  )
+    lines.push("Capabilities edited");
+  if (v.replaceInstructions)
+    lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
+  if (v.revoked !== undefined && Boolean(v.revoked) !== data.profile.revoked)
+    lines.push(`${v.revoked ? "Revoke" : "Restore"} ${name || "profile"}`);
+  return lines;
+}
+
+/** Saved candidates that a routing save keeps: revoked profiles are not selectable. */
+export function savedCandidates(data: ProjectConfigurationData) {
+  return data.routing.candidateProfileIds.filter(
+    (id) => !data.profiles.find((p) => p.id === id)?.revoked,
+  );
+}
+
+export function routingChanges(data: ProjectConfigurationData, v: Values) {
+  const lines: string[] = [];
+  if (v.enabled !== undefined && Boolean(v.enabled) !== data.routing.enabled)
+    lines.push(v.enabled ? "Routing enabled" : "Routing disabled");
+  const saved = savedCandidates(data),
+    next = list(v.candidateProfileIds);
+  for (const id of next)
+    if (!saved.includes(id))
+      lines.push(`Candidate added: ${nameOf(data.profiles, id)}`);
+  for (const id of saved)
+    if (!next.includes(id))
+      lines.push(`Candidate removed: ${nameOf(data.profiles, id)}`);
+  if (v.replaceGuidance) lines.push(`Guidance replaced ${PRIVATE_REPLACED}`);
+  return [...lines, ...referenceChange(v)];
+}
+
+export function routingCommand(projectId: string, v: Values) {
+  return {
+    type: "routing.configure",
+    key: v.key,
+    projectId,
+    expectedVersion: Number(v.expectedVersion),
+    enabled: Boolean(v.enabled),
+    candidateProfileIds: list(v.candidateProfileIds),
+    ...(v.replaceGuidance ? { guidance: v.guidance } : {}),
+    ...reference(v),
+  };
+}
+
+export function reference(v: Values) {
+  return v.referenceMode === "clear"
+    ? { credentialRef: null }
+    : v.referenceMode === "set"
+      ? { credentialRef: v.credentialRef }
+      : {};
+}
+
+/** One row of the GitHub source form. Saved rows carry no private definition. */
+export type SourceRow = Record<string, string | boolean>;
+type Source = ProjectConfigurationData["source"];
+
+export function parseRows(value: Values[string] | undefined): SourceRow[] {
+  try {
+    const rows = JSON.parse(String(value ?? "[]"));
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+const kindLabel = (kind: unknown) =>
+  kind === "repository"
+    ? "Repository"
+    : kind === "project"
+      ? "GitHub Project"
+      : "Search";
+
+/**
+ * Draft values for the GitHub source form from the saved read. `incomplete` is true when a
+ * saved selection or link cannot be named, so an in-place save could not keep it.
+ */
+export function sourceRowsFrom(source: Source) {
+  return {
+    selections: source.selections.map((s) => ({
+      id: s.id ?? "",
+      kind: s.kind,
+      descriptor: s.descriptor ?? "",
+      active: s.active,
+      keep: true,
+    })),
+    repositories: source.repositories.map((r) => ({
+      repositoryId: r.repositoryId ?? "",
+      ref: r.ref ?? "",
+      keep: true,
+    })),
+    conditions: (
+      source.readiness?.conditions ?? [{ kind: "label", name: "ready" }]
+    ).map((c) => ({ ...c })),
+    mode: source.readiness?.mode ?? "all",
+    incomplete:
+      source.selections.some((s) => s.id === null) ||
+      source.repositories.some(
+        (r) => r.repositoryId === null || r.ref === null,
+      ),
+  };
+}
+
+/** The next free `S-<n>` above every saved or drafted id, so no removed id is reused. */
+export function nextSelectionId(saved: string[], drafted: string[]) {
+  const highest = Math.max(
+    0,
+    ...[...saved, ...drafted].map((id) =>
+      Number(/^S-(\d+)$/.exec(id)?.[1] ?? 0),
+    ),
+  );
+  return `S-${highest + 1}`;
+}
+
+const strip = ({ rowKey: _rowKey, ...row }: SourceRow) => row;
+const live = (rows: SourceRow[]) => rows.filter((r) => !r.removed);
+
+/** Whether the draft removes every saved repository link. */
+export function removesAllAccess(source: Source, v: Values) {
+  return (
+    source.repositories.length > 0 &&
+    live(parseRows(v.repositories)).length === 0
+  );
+}
+
+function newSelectionLine(r: SourceRow) {
+  const what =
+    r.kind === "repository"
+      ? `Repository ${r.owner}/${r.name}`
+      : r.kind === "project"
+        ? `GitHub Project ${r.projectNodeId} · filter private`
+        : "Search (query private)";
+  return `+ ${r.id} · ${what} · added inactive`;
+}
+
+const conditionsOf = (v: Values) =>
+  JSON.stringify({
+    mode: v.mode,
+    conditions: parseRows(v.conditions).map(strip),
+  });
+
+export function sourceChanges(source: Source, v: Values) {
+  const lines: string[] = [];
+  for (const r of parseRows(v.selections))
+    if (r.keep && r.removed)
+      lines.push(
+        `− ${r.id} · ${kindLabel(r.kind)}${r.descriptor ? ` ${r.descriptor}` : ""}`,
+      );
+    else if (!r.keep && !r.removed) lines.push(newSelectionLine(r));
+  const readiness = source.readiness;
+  if (
+    !readiness ||
+    conditionsOf(v) !==
+      JSON.stringify({ mode: readiness.mode, conditions: readiness.conditions })
+  )
+    lines.push(
+      `Readiness: ${v.mode === "any" ? "any" : "all"} of ${parseRows(v.conditions).length} condition${parseRows(v.conditions).length === 1 ? "" : "s"}${readiness ? "" : " (replaces unavailable readiness)"}`,
+    );
+  for (const r of parseRows(v.repositories)) {
+    if (r.keep && r.removed)
+      lines.push(`− Repository access: ${r.repositoryId}`);
+    else if (!r.keep && !r.removed)
+      lines.push(`+ Repository access: ${r.repositoryId} · ${r.ref}`);
+    else if (r.keep) {
+      const saved = source.repositories.find(
+        (s) => s.repositoryId === r.repositoryId,
+      );
+      if (saved && saved.ref !== r.ref)
+        lines.push(`Ref for ${r.repositoryId}: ${saved.ref} → ${r.ref}`);
+      if (r.replacePath)
+        lines.push(`Local path replaced for ${r.repositoryId} (private)`);
+    }
+  }
+  return [...lines, ...referenceChange(v)];
+}
+
+export function sourceCommand(projectId: string, v: Values) {
+  return {
+    type: "github.configure",
+    key: v.key,
+    projectId,
+    expectedVersion: Number(v.expectedVersion),
+    selections: live(parseRows(v.selections)).map((r) => {
+      if (r.keep) return { id: r.id, keep: true };
+      const { rowKey: _k, ...row } = r;
+      return row;
+    }),
+    readiness: {
+      mode: v.mode,
+      conditions: parseRows(v.conditions).map(strip),
+    },
+    repositories: live(parseRows(v.repositories)).map((r) =>
+      r.keep
+        ? {
+            repositoryId: r.repositoryId,
+            ref: r.ref,
+            ...(r.replacePath ? { path: r.path } : {}),
+          }
+        : { repositoryId: r.repositoryId, path: r.path, ref: r.ref },
+    ),
+    ...reference(v),
+  };
+}
+
+export function capacityChanges(data: RuntimeSettingsData, v: Values) {
+  const lines: string[] = [];
+  if (v.globalLimit !== undefined && Number(v.globalLimit) !== data.globalLimit)
+    lines.push(
+      `Global active-turn cap: ${data.globalLimit} → ${v.globalLimit}`,
+    );
+  for (const r of data.projects) {
+    const name = r.project.name ?? "Project";
+    const set = Boolean(v[`override-${r.project.id}`]),
+      limit = Number(v[`limit-${r.project.id}`]);
+    if (set && r.override === null)
+      lines.push(`${name}: override set to ${limit}`);
+    else if (!set && r.override !== null)
+      lines.push(`${name}: override cleared`);
+    else if (set && r.override !== limit)
+      lines.push(`${name} override: ${r.override} → ${limit}`);
+  }
+  return lines;
+}

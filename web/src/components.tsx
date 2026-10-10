@@ -246,6 +246,8 @@ export function PageHeader({
   back,
   desktopBack,
   plain,
+  trail,
+  shortTitle,
 }: {
   title: string;
   subtitle?: string | undefined;
@@ -258,6 +260,10 @@ export function PageHeader({
   desktopBack?: boolean;
   /** Omit the desktop divider under the header (the Not found frame has none). */
   plain?: boolean;
+  /** Desktop breadcrumb above the title; the last item is the current page. */
+  trail?: { label: string; href?: string }[];
+  /** Phone title, rendered in the same h1 and shown below 760px instead of `title`. */
+  shortTitle?: string | undefined;
 }) {
   return (
     <header
@@ -293,7 +299,35 @@ export function PageHeader({
         </PrimitiveButton>
       )}
       <div className="page-header-title">
-        <h1 className="page-heading">{title}</h1>
+        {trail && trail.length > 0 && (
+          <nav aria-label="Breadcrumb" className="page-header-trail metadata">
+            <ol>
+              {trail.map((c, i) => (
+                <li key={c.href ?? c.label}>
+                  {c.href && i < trail.length - 1 ? (
+                    <a href={c.href}>{c.label}</a>
+                  ) : (
+                    <span
+                      aria-current={i === trail.length - 1 ? "page" : undefined}
+                    >
+                      {c.label}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </nav>
+        )}
+        <h1 className="page-heading">
+          {shortTitle ? (
+            <>
+              <span className="page-title-full">{title}</span>
+              <span className="page-title-short">{shortTitle}</span>
+            </>
+          ) : (
+            title
+          )}
+        </h1>
         {subtitle && <p className="introduction muted">{subtitle}</p>}
       </div>
       {badge && (
