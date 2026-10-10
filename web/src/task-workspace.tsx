@@ -36,7 +36,7 @@ import {
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
 import { AssignmentRows, EntryLinks, showSection } from "./task-detail.js";
 import { type TaskHeaderReport, taskHeaderReport } from "./task-header.js";
-import { briefParts, criterionRows } from "./task-overview.js";
+import { briefParts, criterionRows, sourceLine } from "./task-overview.js";
 import { reasonLabels } from "./tasks.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
@@ -951,15 +951,7 @@ export function TaskWorkspace({
       <article className="task-workspace" aria-label="Task workspace">
         <ResourceStatus state={resource.state} retry={refreshAll} />
         <div className="task-source-line">
-          <p className="metadata muted">
-            {data.source
-              ? `GitHub · ${data.source.repositoryName ?? "repository unavailable"}#${data.source.number ?? "?"} · ${data.source.state ?? "state unknown"} · ${
-                  data.source.memberships[0]?.sync.lastSuccessfulAt
-                    ? `last successful sync ${data.source.memberships[0].sync.lastSuccessfulAt}`
-                    : "no successful sync"
-                } · read-only requirements`
-              : "Local task"}
-          </p>
+          <p className="metadata muted">{sourceLine(data.source)}</p>
           <div className="task-actions">
             {data.source && (
               <>
@@ -1087,7 +1079,8 @@ export function TaskWorkspace({
           <section id="brief">
             <h3 className="section-heading">Shared brief</h3>
             <p className="metadata muted task-provenance">
-              Requirements · {source?.kind === "github" ? "GitHub" : "Local"}
+              Requirements ·{" "}
+              {source?.kind === "github" || data.source ? "GitHub" : "Local"}
             </p>
             {state.selectedSource && !source && (
               <p role="alert">

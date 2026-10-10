@@ -9,6 +9,7 @@ import {
   briefParts,
   criterionRows,
   originLabel,
+  sourceLine,
   stopConsequences,
   taskStatusLine,
 } from "../web/src/task-overview.js";
@@ -284,4 +285,29 @@ test("optionalSummary counts supplied values and lets errors win", () => {
       .summary,
     "Optional settings · 2 errors",
   );
+});
+
+test("sourceLine reports the latest successful sync across every selection", () => {
+  const membership = (lastSuccessfulAt: string | null) => ({
+    sync: { lastSuccessfulAt },
+  });
+  const source = (memberships: unknown[]) =>
+    ({
+      repositoryName: "acme/atlas",
+      number: 142,
+      state: "open",
+      memberships,
+    }) as unknown as Data["source"];
+  assert.equal(sourceLine(null), "Local task");
+  assert.equal(
+    sourceLine(
+      source([
+        membership(null),
+        membership("2026-10-10T11:02:00Z"),
+        membership("2026-10-09T08:00:00Z"),
+      ]),
+    ),
+    "GitHub · acme/atlas#142 · open · last successful sync 2026-10-10T11:02:00Z · read-only requirements",
+  );
+  assert.match(sourceLine(source([membership(null)])), /no successful sync/);
 });

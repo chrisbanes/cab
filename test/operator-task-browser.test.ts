@@ -1369,6 +1369,15 @@ for (const viewport of [
       .getByRole("heading", { name: "Service integration", exact: true })
       .waitFor();
     assert.ok(page.url().includes("source=github"));
+    // An unavailable retained source revision keeps the imported task's provenance.
+    await page.goto(
+      `${web.origin}/app/tasks/${ids.importedId}?source=${randomUUID()}`,
+    );
+    await page.getByText(/^Selected source revision is unavailable/).waitFor();
+    assert.equal(
+      await page.locator("#brief .task-provenance").textContent(),
+      "Requirements · GitHub",
+    );
     await page.goto(`${web.origin}/app/tasks`);
     await page
       .getByRole("link", { name: "Normal Stop observation", exact: true })

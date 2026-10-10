@@ -142,6 +142,17 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
   };
 }
 
+/** The task's source identity and its latest successful sync across every selection. */
+export function sourceLine(source: Data["source"]) {
+  if (!source) return "Local task";
+  const synced = source.memberships
+    .map((m) => m.sync.lastSuccessfulAt)
+    .filter((t): t is string => t !== null)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))
+    .at(-1);
+  return `GitHub · ${source.repositoryName ?? "repository unavailable"}#${source.number ?? "?"} · ${source.state ?? "state unknown"} · ${synced ? `last successful sync ${synced}` : "no successful sync"} · read-only requirements`;
+}
+
 /** The view a task was opened from, for the header Back label. */
 export function originLabel(origin: string) {
   const [pathname, search = ""] = origin.split("?");
