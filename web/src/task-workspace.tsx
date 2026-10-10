@@ -28,7 +28,11 @@ import { Textarea } from "./ui/textarea.js";
 import { TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
 import { RetainedResultEvidence } from "./retained-evidence.js";
-import { leadFeedbackMode, leadResumeNotice } from "./lead-feedback.js";
+import {
+  leadFeedbackMode,
+  leadReceivesNotice,
+  leadResumeNotice,
+} from "./lead-feedback.js";
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
 import { AssignmentRows, EntryLinks, showSection } from "./task-detail.js";
 import { type TaskHeaderReport, taskHeaderReport } from "./task-header.js";
@@ -1634,7 +1638,7 @@ export function TaskWorkspace({
             </div>
           ))}
         </section>
-        <section id="reply">
+        <section id="reply" className="reply-card">
           <h3 className="section-heading">Reply</h3>
           <div className="task-actions">
             <Button
@@ -1670,6 +1674,9 @@ export function TaskWorkspace({
           )}
           {state.destination === "lead" && lead && leadMode === "resumes" && (
             <p role="status">{leadResumeNotice(leadName)}</p>
+          )}
+          {state.destination === "lead" && lead && leadMode === "receives" && (
+            <p className="metadata muted">{leadReceivesNotice(leadName)}</p>
           )}
           <label htmlFor="workspace-reply">Editable reply</label>
           <Textarea

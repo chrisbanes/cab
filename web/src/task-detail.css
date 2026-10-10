@@ -186,3 +186,10 @@
     align-items: center;
   }
 }
+
+.task-workspace section.reply-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-16);
+  background: var(--color-card);
+}

@@ -10,7 +10,10 @@ import { CoordinationStore } from "../src/core/coordination.js";
 import { ConversationHistoryStore } from "../src/standalone/conversation-history.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import { ExecutionState } from "../src/standalone/state.js";
-import { leadResumeNotice } from "../web/src/lead-feedback.js";
+import {
+  leadReceivesNotice,
+  leadResumeNotice,
+} from "../web/src/lead-feedback.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 const test = browserSuite("ui04-workspace");
 test("production workspace retains literal history, pending request, focused reply and exact result through updates and failed reads on desktop and phone", async (_t, j) => {
@@ -533,12 +536,25 @@ test("production workspace retains literal history, pending request, focused rep
     .messages.filter((m) => m.text === "Unfinished contextual reply");
   assert.equal(local.length, 1);
   assert.equal(local[0]?.reference?.resultId, r.resultId);
+  // A running lead receives feedback on its next eligible turn (frame 03a).
+  assert.equal(
+    await page
+      .getByText(leadReceivesNotice("Task lead"), { exact: true })
+      .count(),
+    1,
+  );
   a.result("Terminal accountable lead result");
   await page.getByRole("button", { name: "Refresh task", exact: true }).click();
   // A completed lead is resumed by feedback (#828): the line says so and Send stays enabled.
   await page
     .getByText(leadResumeNotice("Task lead"), { exact: true })
     .waitFor();
+  assert.equal(
+    await page
+      .getByText(leadReceivesNotice("Task lead"), { exact: true })
+      .count(),
+    0,
+  );
   await page
     .getByRole("button", { name: "Ask lead about result", exact: true })
     .click();

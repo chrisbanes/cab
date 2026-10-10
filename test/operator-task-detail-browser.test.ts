@@ -6,6 +6,8 @@ import {
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
+import { guideForm } from "./fixtures/question-data.js";
+import { seedOwnQuestion } from "./fixtures/questions.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 
 const test = browserSuite("ui-task-detail");
@@ -340,6 +342,36 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   }
   await page
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
+    .waitFor();
+});
+
+test("A question opened on the task page names its requester", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const q = await seedOwnQuestion(f, guideForm);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${q.taskId}?request=${q.interactionId}`,
+  );
+  await page
+    .getByRole("region", { name: "Exact question response" })
+    .getByText("Recommended by Task lead", { exact: true })
     .waitFor();
 });
 

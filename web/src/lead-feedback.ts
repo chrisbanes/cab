@@ -18,5 +18,8 @@ export function leadFeedbackMode(
 export const leadResumeNotice = (name: string) =>
   `${name} has completed its assignment and will resume to address this feedback.`;
 
+export const leadReceivesNotice = (name: string) =>
+  `Your message will reach ${name} on its next eligible turn. Sending does not bypass pause or stop.`;
+
 export const leadAwaitingRecoveryNotice = (name: string) =>
   `${name} is waiting for an operator message to continue after recovery. Sending this review won't resume it. Send an ordinary message to continue.`;
