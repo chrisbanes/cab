@@ -1347,6 +1347,44 @@ Execution → Resume (retained); Keep running and Escape send nothing; Optional
 settings collapse ↔ expand keeps values; a failed create keeps values and the
 existing receipt reconciliation.
 
+### Settings, profiles, routing, runtime and recovery
+
+Production Settings, project configuration, profiles, Runtime and assignment
+recovery ([#840](https://github.com/chrisbanes/ensemble/issues/840)) differ from
+frames 114 and 118–128 as follows:
+
+- No configuration timestamp is stored, so a section header shows its version
+  ("General version 3") and, only after a save in this browser session, "General
+  saved 10:52" from that save's receipt. A reload shows the version again.
+- Phone frames 121 and 128 draw read-only screens. The forms stay usable on a
+  phone; project settings lead with "Current state" and "Next step" cards built
+  from the configuration, source-observation and placement reads, and recovery
+  leads with "Current holds" and "Next step". Both keep the detail header (Back to
+  the static parent) rather than the drawn menu header. "Copy desktop link" is
+  not built.
+- Existing GitHub sources are shown read-only and can be removed; a changed
+  definition is a removal plus a new source with a fresh `S-<n>` id, added
+  inactive. Search queries and Project filters stay private: a row reads "Private
+  query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
+  Readiness Project-field conditions keep node-ID inputs (a name picker needs a
+  discovery read). Any GitHub source save leaves every selection inactive until it
+  is previewed again in Sync & placement.
+- Removing every linked repository shows a warning and a required "Remove all
+  repository access" checkbox inside "Changes to save" (no frame draws it).
+- Profile Revoke and Restore are one draft field saved by Save profile, so the
+  button reads "Revoke profile", "Restore profile" or "Undo …" while unsaved.
+- Routing guidance is replace-only behind "Replace routing guidance"; frame 124's
+  loaded guidance text is never shown. Revoked profiles are listed disabled and
+  are dropped from the candidates by the next routing save.
+- No short identifiers (RL-31, A-203, AT-151) are shown, and recovery omits "last
+  observed" and "requested by", which the recovery read does not carry. Its
+  breadcrumb is the static "Settings / Runtime / Assignment recovery".
+- The Settings index has no discovery-credential row (U7 #841 owns it). The
+  header keeps Refresh on every settings route, including Create profile, and it
+  re-reads the open page's own resources.
+- Switches are native checkboxes drawn as switches; the destructive tint of
+  Revoke profile uses the existing destructive tokens.
+
 ## Using this snapshot
 
 Worktrees may edit `design.pen` through Pen MCP, or use this Markdown reference
