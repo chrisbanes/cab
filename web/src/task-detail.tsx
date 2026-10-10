@@ -1,6 +1,6 @@
 import type { MouseEvent } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { ActionLink } from "./components.js";
+import { ActionLink, isPlainClick } from "./components.js";
 import { assignmentRow } from "./task-overview.js";
 import "./task-detail.css";
 
@@ -17,7 +17,12 @@ export function showSection(target: HTMLElement) {
 /** Keep this history entry, and so its origin, instead of pushing a hash entry. */
 function inPage(id: string, before?: () => void) {
   return (event: MouseEvent<HTMLElement>) => {
-    if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+    // Links keep modified clicks (new tab or window); the assignment buttons always act.
+    if (
+      event.currentTarget instanceof HTMLAnchorElement &&
+      !isPlainClick(event)
+    )
+      return;
     event.preventDefault();
     const show = () => {
       const target = document.getElementById(id);

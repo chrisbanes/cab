@@ -343,6 +343,16 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   });
   await back.waitFor();
   assert.equal(await back.innerText(), "Board");
+  // A modified click keeps the browser's own behaviour: a new tab at the origin.
+  const taskUrl = page.url();
+  const [tab] = await Promise.all([
+    page.context().waitForEvent("page"),
+    back.click({ modifiers: ["ControlOrMeta"] }),
+  ]);
+  await tab.waitForLoadState("domcontentloaded");
+  assert.equal(new URL(tab.url()).search, "?view=board");
+  await tab.close();
+  assert.equal(page.url(), taskUrl);
   const length = await page.evaluate(() => history.length);
   await back.click();
   await page.waitForURL(

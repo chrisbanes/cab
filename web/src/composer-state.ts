@@ -304,7 +304,9 @@ export class ComposerState {
         input: this.input,
         command,
       });
+      this.savedOnDevice = true;
     } catch {
+      this.savedOnDevice = false;
       if (!wasUnknown) {
         this.lifecycle.reset();
         this.phase = "editable";
@@ -347,7 +349,9 @@ export class ComposerState {
           status: "unfinished",
           input: this.input,
         });
+        this.savedOnDevice = true;
       } catch {
+        this.savedOnDevice = false;
         this.notice += " Recovery unavailable.";
       }
     }

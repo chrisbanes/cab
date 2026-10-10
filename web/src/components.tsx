@@ -4,6 +4,7 @@ import {
   type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import type { ResourceState } from "./resource.js";
@@ -23,6 +24,14 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "./ui/sheet.js";
+
+/** An unmodified primary click; other clicks keep the browser's own link behaviour. */
+export const isPlainClick = (event: MouseEvent) =>
+  event.button === 0 &&
+  !event.ctrlKey &&
+  !event.metaKey &&
+  !event.shiftKey &&
+  !event.altKey;
 
 export const Button = forwardRef<
   HTMLButtonElement,
@@ -270,6 +279,7 @@ export function PageHeader({
             onClick={
               back.history
                 ? (event) => {
+                    if (!isPlainClick(event)) return;
                     // Return to the origin entry rather than letting the shell push a new one.
                     event.preventDefault();
                     history.back();
