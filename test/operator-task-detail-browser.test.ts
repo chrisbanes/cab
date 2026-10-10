@@ -335,6 +335,7 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     e.scrollLeft = e.scrollWidth;
   });
   const boardScroll = await board.evaluate((e) => e.scrollLeft);
+  assert.ok(boardScroll > 0, "the board scrolls horizontally");
   await card.click();
   const back = page.getByRole("link", {
     name: "Back to originating view",
@@ -368,7 +369,8 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     await route.continue();
   });
   try {
-    await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+    // Sign in again in the same document, at the address sign-out kept.
+    assert.equal(new URL(page.url()).pathname, `/app/tasks/${a.taskId}`);
     await page.getByLabel("Password").fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page
