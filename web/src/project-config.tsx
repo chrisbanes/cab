@@ -321,7 +321,7 @@ function GeneralTab(p: TabProps) {
           title="Saving boundary"
           items={[
             "Saving never resumes work, clears holds or grants repository access.",
-            "A conflict keeps your input: “Configuration changed. Review the loaded revision before a new submission.”",
+            "A conflict keeps your input until you review the loaded revision.",
             "If a save's outcome is unknown, check what was saved before editing again.",
           ]}
         />
