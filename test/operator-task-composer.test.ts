@@ -648,3 +648,25 @@ test("typed post-commit notification failure remains unknown through creation co
   );
   assert.equal(f.runtime.turns, 0);
 });
+test("savedOnDevice is claimed only after a successful on-device write", () => {
+  let fail = false;
+  const saved = new Map<string, string>();
+  const state = new ComposerState({
+    getItem: (k) => saved.get(k) ?? null,
+    setItem: (k, v) => {
+      if (fail) throw Error("quota");
+      saved.set(k, v);
+    },
+    removeItem: (k) => saved.delete(k),
+  });
+  assert.equal(state.savedOnDevice, false);
+  state.edit({ title: "Saved" });
+  assert.equal(state.savedOnDevice, true);
+  fail = true;
+  state.edit({ title: "Not saved" });
+  assert.equal(state.savedOnDevice, false);
+  fail = false;
+  state.edit({ title: "Saved again" });
+  state.discard();
+  assert.equal(state.savedOnDevice, false);
+});

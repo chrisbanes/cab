@@ -1,0 +1,76 @@
+/* Composer (frames 02a, 34, 35, 35b): inherited project panel beside the fields. */
+.composer-saved {
+  margin: 0 0 var(--space-12);
+}
+
+.composer-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: var(--space-32);
+  align-items: start;
+}
+
+@media (min-width: 1121px) {
+  .composer {
+    max-width: none;
+  }
+
+  .composer-fields {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+
+  .composer-fields > * {
+    grid-column: 1;
+  }
+
+  .composer-fields > .composer-inherited {
+    grid-column: 2;
+    grid-row: 1 / span 6;
+    padding-left: var(--space-16);
+    border-left: 1px solid var(--border);
+  }
+}
+
+.composer-inherited .composer-policy {
+  padding: 0;
+  border: 0;
+  margin: 0;
+  display: grid;
+  gap: var(--space-8);
+}
+
+.composer-inherited p,
+.composer-inherited h3 {
+  margin: 0;
+}
+
+.composer-inherited-title {
+  text-transform: uppercase;
+  margin-bottom: var(--space-8);
+}
+
+.composer-inherited h3 {
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 1120px) {
+  .composer-inherited {
+    margin-bottom: var(--space-16);
+  }
+}
+
+.composer-optional-values p {
+  margin: 0 0 var(--space-4);
+}
+
+@media (max-width: 759px) {
+  .composer-actions {
+    flex-direction: column;
+  }
+
+  .composer-actions [data-slot="button"] {
+    width: 100%;
+    min-height: 44px;
+  }
+}
