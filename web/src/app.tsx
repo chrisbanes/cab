@@ -638,14 +638,9 @@ export function App() {
               ? "All tasks"
               : pathname === "/app/tasks/new"
                 ? "Create a task"
-                : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname)
-                  ? "Recovery"
-                  : pathname === "/app/inbox"
-                    ? "Inbox"
-                    : pathname.startsWith("/app/settings") ||
-                        pathname.endsWith("/settings")
-                      ? "Settings"
-                      : (project?.name ?? "Project");
+                : pathname === "/app/inbox"
+                  ? "Inbox"
+                  : (project?.name ?? "Project");
   const inboxCount =
     (onInboxRoute ? inboxRouteSummary : inboxSummaryOf(inboxSummary.state))
       ?.count ?? null;

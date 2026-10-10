@@ -556,7 +556,9 @@ export class DomainStore {
     let verified: LinkedRepository[];
     try {
       verified = await Promise.all(
-        command.repositories.map((link) => {
+        // Async, so a missing saved path rejects like a failed verification instead of
+        // throwing past `Promise.all` and leaving earlier verifications unhandled.
+        command.repositories.map(async (link) => {
           // A link without `path` keeps the saved path for that repository.
           const path =
             link.path ??

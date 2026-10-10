@@ -545,6 +545,7 @@ test("GitHub source conflict keeps rows and an unknown save reconciles once", as
       { id: "S-1", keep: true },
       { id: "S-2", keep: true },
       { id: "S-3", keep: true },
+      { id: "S-5", kind: "search", query: "PRIVATE ELSEWHERE" },
     ],
     readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
@@ -561,6 +562,9 @@ test("GitHub source conflict keeps rows and an unknown save reconciles once", as
     .getByRole("button", { name: "Review latest source revision" })
     .click();
   await page.getByText("Will be removed").waitFor();
+  // The source saved elsewhere joins the form as a kept row instead of being dropped.
+  await page.getByText("S-5 · Search").waitFor();
+  assert.equal((await changes(page).innerText()).includes("S-5"), false);
   const version = d.githubConfiguration(ids.atlas).version;
   await page.route("**/api/operator/commands", (r) => r.abort());
   let first: Record<string, unknown> | undefined;
@@ -581,6 +585,10 @@ test("GitHub source conflict keeps rows and an unknown save reconciles once", as
   assert.deepEqual(await replay, first);
   await page.getByText("Saved GitHub source ·", { exact: false }).waitFor();
   assert.equal(d.githubConfiguration(ids.atlas).version, version + 1);
+  assert.deepEqual(
+    d.githubConfiguration(ids.atlas).selections.map((s) => s.id),
+    ["S-1", "S-2", "S-5"],
+  );
 });
 
 test("Sync & placement shows preview, observations and the placement status line", async (_t, journey) => {

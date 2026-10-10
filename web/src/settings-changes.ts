@@ -11,6 +11,8 @@ import type {
   runtimeSettingsSchema,
 } from "../../src/operator/contracts.js";
 
+import { plural } from "./settings-view.js";
+
 export type Values = Record<string, string | boolean | string[]>;
 export type ProjectConfigurationData = z.infer<
   typeof projectConfigurationSchema
@@ -132,13 +134,6 @@ export function parseRows(value: Values[string] | undefined): SourceRow[] {
   }
 }
 
-const kindLabel = (kind: unknown) =>
-  kind === "repository"
-    ? "Repository"
-    : kind === "project"
-      ? "GitHub Project"
-      : "Search";
-
 /**
  * Draft values for the GitHub source form from the saved read. `incomplete` is true when a
  * saved selection or link cannot be named, so an in-place save could not keep it.
@@ -209,12 +204,21 @@ const conditionsOf = (v: Values) =>
 
 export function sourceChanges(source: Source, v: Values) {
   const lines: string[] = [];
-  for (const r of parseRows(v.selections))
+  const selections = parseRows(v.selections),
+    repositories = parseRows(v.repositories),
+    conditions = parseRows(v.conditions);
+  for (const r of selections)
     if (r.keep && r.removed)
       lines.push(
         `− ${r.id} · ${kindLabel(r.kind)}${r.descriptor ? ` ${r.descriptor}` : ""}`,
       );
     else if (!r.keep && !r.removed) lines.push(newSelectionLine(r));
+  // Saved rows the form does not hold (saved elsewhere since it loaded) are removed by a save.
+  for (const s of source.selections)
+    if (s.id !== null && !selections.some((r) => r.id === s.id))
+      lines.push(
+        `− ${s.id} · ${kindLabel(s.kind)} (saved since this form loaded)`,
+      );
   const readiness = source.readiness;
   if (
     !readiness ||
@@ -222,9 +226,9 @@ export function sourceChanges(source: Source, v: Values) {
       JSON.stringify({ mode: readiness.mode, conditions: readiness.conditions })
   )
     lines.push(
-      `Readiness: ${v.mode === "any" ? "any" : "all"} of ${parseRows(v.conditions).length} condition${parseRows(v.conditions).length === 1 ? "" : "s"}${readiness ? "" : " (replaces unavailable readiness)"}`,
+      `Readiness: ${v.mode === "any" ? "any" : "all"} of ${plural(conditions.length, "condition")}${readiness ? "" : " (replaces unavailable readiness)"}`,
     );
-  for (const r of parseRows(v.repositories)) {
+  for (const r of repositories) {
     if (r.keep && r.removed)
       lines.push(`− Repository access: ${r.repositoryId}`);
     else if (!r.keep && !r.removed)
@@ -239,8 +243,69 @@ export function sourceChanges(source: Source, v: Values) {
         lines.push(`Local path replaced for ${r.repositoryId} (private)`);
     }
   }
+  for (const s of source.repositories)
+    if (
+      s.repositoryId !== null &&
+      !repositories.some((r) => r.repositoryId === s.repositoryId)
+    )
+      lines.push(
+        `− Repository access: ${s.repositoryId} (saved since this form loaded)`,
+      );
   return [...lines, ...referenceChange(v)];
 }
+
+/**
+ * Kept rows that are no longer saved (removed elsewhere). A save cannot keep them, so the
+ * form blocks Save until the latest revision is reviewed.
+ */
+export function staleSourceRows(source: Source, v: Values) {
+  return [
+    ...parseRows(v.selections).filter(
+      (r) =>
+        r.keep && !r.removed && !source.selections.some((s) => s.id === r.id),
+    ),
+    ...parseRows(v.repositories).filter(
+      (r) =>
+        r.keep &&
+        !r.removed &&
+        !source.repositories.some((s) => s.repositoryId === r.repositoryId),
+    ),
+  ].map((r) => String(r.id ?? r.repositoryId));
+}
+
+/** Rows for a newly adopted revision: draft edits kept, rows saved since added, gone rows dropped. */
+export function adoptSourceRows(source: Source, v: Values) {
+  const loaded = sourceRowsFrom(source);
+  const merge = (
+    draft: SourceRow[],
+    saved: SourceRow[],
+    id: (r: SourceRow) => unknown,
+  ) => [
+    ...draft.filter((r) => !r.keep || saved.some((s) => id(s) === id(r))),
+    ...saved
+      .filter((s) => !draft.some((r) => id(r) === id(s)))
+      .map((s) => ({ ...s, rowKey: crypto.randomUUID() })),
+  ];
+  return {
+    selections: JSON.stringify(
+      merge(parseRows(v.selections), loaded.selections, (r) => r.id),
+    ),
+    repositories: JSON.stringify(
+      merge(
+        parseRows(v.repositories),
+        loaded.repositories,
+        (r) => r.repositoryId,
+      ),
+    ),
+  };
+}
+
+export const kindLabel = (kind: unknown) =>
+  kind === "repository"
+    ? "Repository"
+    : kind === "project"
+      ? "GitHub Project"
+      : "Search";
 
 export function sourceCommand(projectId: string, v: Values) {
   return {

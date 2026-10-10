@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   projectConfigurationSchema,
   runtimeSettingsSchema,
@@ -28,9 +28,10 @@ function useProjectConfigurations(
   nonce: number | undefined,
 ) {
   const [configs, setConfigs] = useState<Record<string, ConfigState>>({});
+  // One controller per load; a Retry shares it, so unmount or a new load cancels both.
+  const current = useRef(new AbortController());
   const read = useCallback(
-    (targets: string[]) => {
-      const abort = new AbortController();
+    (targets: string[], signal: AbortSignal) => {
       const queue = [...targets];
       const worker = async () => {
         for (let id = queue.shift(); id; id = queue.shift()) {
@@ -41,27 +42,31 @@ function useProjectConfigurations(
               await client.read(
                 `/api/operator/projects/${projectId}/configuration`,
                 projectConfigurationSchema,
-                abort.signal,
+                signal,
               )
             ).data;
           } catch {
             value = null;
           }
-          if (abort.signal.aborted) return;
+          if (signal.aborted) return;
           setConfigs((c) => ({ ...c, [projectId]: value }));
         }
       };
       void Promise.all(Array.from({ length: 4 }, worker));
-      return () => abort.abort();
     },
     [client],
   );
   const key = ids.join(",");
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the project list, scope or header Refresh changes.
-  useEffect(() => read(ids), [read, key, scope, nonce]);
+  useEffect(() => {
+    const abort = new AbortController();
+    current.current = abort;
+    read(ids, abort.signal);
+    return () => abort.abort();
+  }, [read, key, scope, nonce]);
   const retry = (id: string) => {
     setConfigs((c) => ({ ...c, [id]: undefined }));
-    read([id]);
+    read([id], current.current.signal);
   };
   return { configs, retry };
 }

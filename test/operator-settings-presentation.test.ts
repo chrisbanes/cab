@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
+  adoptSourceRows,
   capacityChanges,
   nextSelectionId,
   profileChanges,
@@ -12,6 +13,7 @@ import {
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
+  staleSourceRows,
   type ProfileConfigurationData,
   type ProjectConfigurationData,
   type RuntimeSettingsData,
@@ -369,4 +371,35 @@ test("settings headers, saved lines, state cards and hold pills", () => {
       "Uncertainty: Active",
     ],
   );
+});
+
+test("source changes list rows saved elsewhere, flag stale kept rows and merge them on adoption", () => {
+  const c = config();
+  const rows = sourceRowsFrom(c.source);
+  // The form loaded before S-5 and a second link were saved elsewhere, and S-3 was removed.
+  const loaded = {
+    selections: JSON.stringify(rows.selections),
+    repositories: JSON.stringify(rows.repositories),
+    conditions: JSON.stringify(rows.conditions),
+    mode: "all",
+  };
+  const latest = {
+    ...c.source,
+    selections: [
+      c.source.selections[0],
+      { id: "S-5", kind: "search", descriptor: null, active: false },
+    ],
+    repositories: [
+      ...c.source.repositories,
+      { repositoryId: "acme/extra", ref: "main" },
+    ],
+  } as ProjectConfigurationData["source"];
+  assert.deepEqual(sourceChanges(latest, loaded), [
+    "− S-5 · Search (saved since this form loaded)",
+    "− Repository access: acme/extra (saved since this form loaded)",
+  ]);
+  assert.deepEqual(staleSourceRows(latest, loaded), ["S-3"]);
+  const adopted = { ...loaded, ...adoptSourceRows(latest, loaded) };
+  assert.deepEqual(sourceChanges(latest, adopted), []);
+  assert.deepEqual(staleSourceRows(latest, adopted), []);
 });

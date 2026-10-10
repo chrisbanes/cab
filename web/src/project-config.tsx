@@ -191,8 +191,9 @@ function ProjectStateCards({ state, next }: { state: string[]; next: string }) {
       <section className="settings-aside" aria-label="Current state">
         <h2 className="small-heading">Current state</h2>
         <ul className="body">
-          {state.map((line) => (
-            <li key={line}>{line}</li>
+          {state.map((line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: lines can repeat; the list is rebuilt from the reads.
+            <li key={i}>{line}</li>
           ))}
         </ul>
       </section>
@@ -380,7 +381,7 @@ function CredentialReferences({
         "Routing · TypeSafe",
         routing
           ? "Reference configured"
-          : "Reference unconfigured · routing cannot be enabled until one is set",
+          : "Reference unconfigured · routing is unavailable until one is set",
         routing ? "Configured" : "Unconfigured",
         `${page}?tab=routing`,
         "Change in Routing",

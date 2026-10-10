@@ -92,15 +92,11 @@ export function DraftField({
   type?: string;
 }) {
   const id = useId(),
-    error = draft.errors[errorField],
-    locked =
-      draft.phase === "pending" ||
-      draft.phase === "unknown" ||
-      draft.phase === "recorded";
+    error = draft.errors[errorField];
   const props = {
     id,
     "aria-label": label,
-    disabled: locked,
+    disabled: locked(draft),
     "aria-invalid": Boolean(error),
     "aria-describedby": error ? `${id}-error` : undefined,
     className: "control",
@@ -148,11 +144,7 @@ export function DraftCheck({
         role={toggle ? "switch" : undefined}
         className={`native-check size-5 shrink-0 p-0 accent-foreground${toggle ? " settings-switch" : ""}`}
         checked={Boolean(draft.values[field])}
-        disabled={
-          draft.phase === "pending" ||
-          draft.phase === "unknown" ||
-          draft.phase === "recorded"
-        }
+        disabled={locked(draft)}
         onChange={(e) => draft.set(field, e.target.checked)}
       />
       {label}
@@ -294,8 +286,9 @@ export function ChangeList({
       </h3>
       {lines.length ? (
         <ul className="body">
-          {lines.map((line) => (
-            <li key={line}>{line}</li>
+          {lines.map((line, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: lines can repeat; the list is rebuilt from the draft.
+            <li key={i}>{line}</li>
           ))}
         </ul>
       ) : (

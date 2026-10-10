@@ -881,6 +881,34 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
     f.service.domain().githubConfiguration(projectId).version,
     current.version,
   );
+  // A failing new link followed by an unsaved pathless link rejects as one 400; the
+  // earlier verification's rejection is handled, so the service keeps running.
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", record);
+  try {
+    await assert.rejects(
+      reopened.execute({
+        ...edit,
+        key: randomUUID(),
+        expectedVersion: current.version,
+        selections: [{ id: "S-1", keep: true }],
+        repositories: [
+          { repositoryId: "new", path: "relative-path", ref: "main" },
+          { repositoryId: "unsaved", ref: "main" },
+        ],
+      }),
+      { status: 400 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+  assert.deepEqual(unhandled, []);
+  assert.equal(
+    f.service.domain().githubConfiguration(projectId).version,
+    current.version,
+  );
 });
 
 test("GitHub configuration command contract accepts only exact keep markers and unique ids", () => {

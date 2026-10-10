@@ -2,12 +2,15 @@ import type { ReactNode } from "react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
+  adoptSourceRows,
+  kindLabel,
   nextSelectionId,
   parseRows,
   removesAllAccess,
   sourceChanges,
   sourceCommand,
   sourceRowsFrom,
+  staleSourceRows,
   type SourceRow,
   type Values,
 } from "./settings-changes.js";
@@ -33,12 +36,6 @@ import { NativeSelect } from "./ui/native-select.js";
 
 const withKeys = (rows: object[]) =>
   JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));
-const kindLabel = (kind: unknown) =>
-  kind === "repository"
-    ? "Repository"
-    : kind === "project"
-      ? "GitHub Project"
-      : "Search";
 
 export function SourceTab(p: TabProps) {
   const { data, projectId } = p,
@@ -64,8 +61,12 @@ export function SourceTab(p: TabProps) {
     isLocked = locked(d);
   const lines = sourceChanges(data.source, v),
     removesAll = removesAllAccess(data.source, v),
+    stale = staleSourceRows(data.source, v),
     blocked =
-      loaded.incomplete || lines.length === 0 || (removesAll && !v.removeAll);
+      loaded.incomplete ||
+      stale.length > 0 ||
+      lines.length === 0 ||
+      (removesAll && !v.removeAll);
   const setRows = (field: string, rows: SourceRow[]) => {
     d.set(field, JSON.stringify(rows));
     if (field === "repositories" && rows.some((r) => !r.removed))
@@ -126,6 +127,13 @@ export function SourceTab(p: TabProps) {
         )
       }
     >
+      {stale.length > 0 && (
+        <Alert variant="destructive" role="alert">
+          {stale.join(", ")} {stale.length === 1 ? "is" : "are"} no longer
+          saved. Review the latest source revision, or discard changes, before
+          saving.
+        </Alert>
+      )}
       {loaded.incomplete && (
         <Alert variant="destructive" role="alert">
           A saved source or repository link cannot be shown here, so this form
@@ -572,11 +580,16 @@ export function SourceTab(p: TabProps) {
         discard={() => reloadDraft(d, initial)}
         onRecorded={p.refreshConfiguration}
       />
-      {d.phase === "conflict" && (
+      {(d.phase === "conflict" || stale.length > 0) && (
         <Button
           type="button"
           variant="secondary"
-          onClick={() => d.adoptVersion(data.source.version)}
+          onClick={() => {
+            d.adoptVersion(data.source.version);
+            const rows = adoptSourceRows(data.source, d.values);
+            d.set("selections", rows.selections);
+            d.set("repositories", rows.repositories);
+          }}
         >
           Review latest source revision
         </Button>
