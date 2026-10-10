@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   githubConfigurationSchema,
+  githubConfigurationCommandSchema,
   readinessSchema,
 } from "../core/github-source-contracts.js";
 import {
@@ -1819,7 +1820,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("routing.configure"),
       expectedVersion: revision,
       enabled: z.boolean(),
-      guidance: text,
+      guidance: text.optional(),
       credentialRef: z
         .string()
         .regex(/^env:[A-Z][A-Z0-9_]*$/)
@@ -1836,7 +1837,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       ...domainBase,
       type: z.literal("github.configure"),
       expectedVersion: revision,
-      ...githubConfigurationSchema.shape,
+      ...githubConfigurationCommandSchema.shape,
       credentialRef: githubConfigurationSchema.shape.credentialRef.optional(),
     })
     .strict(),

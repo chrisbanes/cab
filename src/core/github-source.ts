@@ -68,6 +68,7 @@ export {
   readinessSchema,
   selectionSchema,
   githubConfigurationSchema,
+  githubConfigurationCommandSchema,
   type GitHubConfigurationInput,
   type GitHubSelection,
 } from "./github-source-contracts.js";

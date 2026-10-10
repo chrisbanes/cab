@@ -6,6 +6,7 @@ import { DeliveryStore, deliveryPolicySchema } from "./delivery.js";
 import {
   GitHubSourceStore,
   githubConfigurationSchema,
+  githubConfigurationCommandSchema,
   linkedRepositorySchema,
   readinessSchema,
   selectionSchema,
@@ -119,7 +120,7 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       expectedVersion: z.number().int().positive(),
       enabled: z.boolean(),
-      guidance: prose,
+      guidance: prose.optional(),
       credentialRef: z
         .string()
         .regex(/^env:[A-Z][A-Z0-9_]*$/)
@@ -134,7 +135,7 @@ const commandSchema = z.discriminatedUnion("type", [
       type: z.literal("github.configure"),
       projectId: id,
       expectedVersion: z.number().int().positive(),
-      ...githubConfigurationSchema.shape,
+      ...githubConfigurationCommandSchema.shape,
       credentialRef: githubConfigurationSchema.shape.credentialRef.optional(),
     })
     .strict(),
@@ -551,10 +552,18 @@ export class DomainStore {
       { version: this.githubConfiguration(command.projectId).version },
       command.expectedVersion,
     );
+    const saved = this.githubConfiguration(command.projectId).repositories;
     let verified: LinkedRepository[];
     try {
       verified = await Promise.all(
-        command.repositories.map((link) => this.verifyRepository(link)),
+        command.repositories.map((link) => {
+          // A link without `path` keeps the saved path for that repository.
+          const path =
+            link.path ??
+            saved.find((item) => item.repositoryId === link.repositoryId)?.path;
+          if (path === undefined) throw new Error("No saved repository path");
+          return this.verifyRepository({ ...link, path });
+        }),
       );
     } catch {
       throw new DomainPolicyError(
@@ -1539,7 +1548,7 @@ export class DomainStore {
         this.operator(command);
         this.project(command.projectId);
         const current = this.required(
-          "SELECT version, credentialRef FROM project_routing WHERE projectId = ?",
+          "SELECT version, guidance, credentialRef FROM project_routing WHERE projectId = ?",
           command.projectId,
         );
         this.version(current, command.expectedVersion);
@@ -1551,7 +1560,7 @@ export class DomainStore {
           )
           .run(
             Number(command.enabled),
-            command.guidance,
+            command.guidance ?? present(current, "guidance"),
             command.credentialRef === undefined
               ? present(current, "credentialRef")
               : command.credentialRef,
@@ -1586,6 +1595,14 @@ export class DomainStore {
           throw new Error(
             "Linked GitHub configuration requires asynchronous verification",
           );
+        const selections = command.selections.map((selection) => {
+          if (!("keep" in selection)) return selection;
+          const kept = current.selections.find(
+            (saved) => saved.id === selection.id,
+          );
+          if (!kept) throw new DomainConflictError("Unknown GitHub selection");
+          return kept;
+        });
         this.db
           .prepare(
             "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, repositories = ? WHERE projectId = ?",
@@ -1594,7 +1611,7 @@ export class DomainStore {
             command.credentialRef === undefined
               ? current.credentialRef
               : command.credentialRef,
-            JSON.stringify(command.selections),
+            JSON.stringify(selections),
             JSON.stringify(command.readiness),
             JSON.stringify(repositories),
             command.projectId,
@@ -1605,7 +1622,7 @@ export class DomainStore {
           )
         ) {
           const selectionIds = JSON.stringify(
-            command.selections.map((selection) => selection.id),
+            selections.map((selection) => selection.id),
           );
           const members = this.db
             .prepare(`SELECT DISTINCT e.taskId FROM github_memberships m
