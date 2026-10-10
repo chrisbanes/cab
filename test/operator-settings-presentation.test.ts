@@ -403,3 +403,29 @@ test("source changes list rows saved elsewhere, flag stale kept rows and merge t
   assert.deepEqual(sourceChanges(latest, adopted), []);
   assert.deepEqual(staleSourceRows(latest, adopted), []);
 });
+
+test("adoption renumbers a new source whose id was saved elsewhere", () => {
+  const c = config();
+  const rows = sourceRowsFrom(c.source);
+  const draft = {
+    selections: JSON.stringify([
+      ...rows.selections,
+      { id: "S-4", kind: "search", query: "PRIVATE MINE", rowKey: "r" },
+    ]),
+    repositories: JSON.stringify(rows.repositories),
+  };
+  const latest = {
+    ...c.source,
+    selections: [
+      ...c.source.selections,
+      { id: "S-4", kind: "search", descriptor: null, active: false },
+    ],
+  } as ProjectConfigurationData["source"];
+  const adopted = JSON.parse(adoptSourceRows(latest, draft).selections);
+  assert.deepEqual(
+    adopted.map(
+      (r: { id: string; keep?: boolean }) => `${r.id}${r.keep ? "" : " new"}`,
+    ),
+    ["S-1", "S-3", "S-5 new", "S-4"],
+  );
+});

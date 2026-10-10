@@ -286,9 +286,22 @@ export function adoptSourceRows(source: Source, v: Values) {
       .filter((s) => !draft.some((r) => id(r) === id(s)))
       .map((s) => ({ ...s, rowKey: crypto.randomUUID() })),
   ];
+  // A new row whose id was saved elsewhere meanwhile takes the next free id, so a save never
+  // replaces that source under the same id.
+  const saved = source.selections.flatMap((x) => (x.id ? [x.id] : []));
+  const drafted = parseRows(v.selections);
+  const selections = drafted.map((r) => {
+    if (r.keep || !saved.includes(String(r.id))) return r;
+    const id = nextSelectionId(
+      saved,
+      drafted.map((x) => String(x.id)),
+    );
+    drafted.push({ id });
+    return { ...r, id };
+  });
   return {
     selections: JSON.stringify(
-      merge(parseRows(v.selections), loaded.selections, (r) => r.id),
+      merge(selections, loaded.selections, (r) => r.id),
     ),
     repositories: JSON.stringify(
       merge(
