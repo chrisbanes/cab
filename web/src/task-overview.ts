@@ -74,31 +74,43 @@ export function criterionRows(
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
-/** The header's second line: recorded state and wait, then the accountable lead. */
+/**
+ * The header's second line: recorded state and wait, then the accountable lead.
+ * Execution facts take the service's precedence (Stop, uncertain, active) over the
+ * task's terminal state, as the Board columns do.
+ */
 export function taskStatusLine(
   data: Pick<Data, "task" | "execution" | "admission" | "source" | "lead">,
 ) {
   const { task, execution } = data;
   const blocker = data.source?.nativeBlockers.find((b) => b.state === "open");
   const reason = data.admission.reasons.find((r) => r !== "task-unready");
-  const state =
+  const terminal =
     task.state === "done"
       ? "Done"
       : task.state === "cancelled"
         ? "Cancelled"
-        : execution.holds.stop
-          ? "Stopping; effects may continue"
-          : execution.holds.uncertainty
-            ? "Execution uncertain"
-            : !task.ready
-              ? "Draft"
-              : blocker
-                ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
-                : reason
-                  ? `Ready · ${lowerFirst(reasonLabels[reason])}`
-                  : execution.state === "idle"
-                    ? "Ready"
-                    : `Ready · ${execution.state}`;
+        : null;
+  const active =
+    execution.state === "running" || execution.state === "starting";
+  const state =
+    execution.holds.stop || execution.state === "stopping"
+      ? "Stopping; effects may continue"
+      : execution.holds.uncertainty || execution.state === "uncertain"
+        ? "Execution uncertain"
+        : terminal
+          ? active
+            ? `${terminal} · ${execution.state}`
+            : terminal
+          : !task.ready
+            ? "Draft"
+            : blocker
+              ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
+              : reason
+                ? `Ready · ${lowerFirst(reasonLabels[reason])}`
+                : execution.state === "idle"
+                  ? "Ready"
+                  : `Ready · ${execution.state}`;
   return `${state} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
 }
 

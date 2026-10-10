@@ -179,6 +179,35 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     line({ task: { state: "cancelled", ready: true } }),
     "Cancelled / Accountable project lead: Mira",
   );
+  // Execution facts outrank the terminal task state, as in OperatorApi.execution().
+  assert.equal(
+    line({
+      task: { state: "done", ready: true },
+      execution: { state: "stopping", holds: { ...holds, stop: true } },
+    }),
+    "Stopping; effects may continue / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
+      task: { state: "cancelled", ready: true },
+      execution: { state: "uncertain", holds },
+    }),
+    "Execution uncertain / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
+      task: { state: "done", ready: true },
+      execution: { state: "running", holds },
+    }),
+    "Done · running / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
+      task: { state: "open", ready: false },
+      execution: { state: "uncertain", holds },
+    }),
+    "Execution uncertain / Accountable project lead: Mira",
+  );
   assert.equal(
     line({ lead: null }),
     "Ready / Accountable project lead: Unconfigured",
