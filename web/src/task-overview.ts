@@ -93,6 +93,10 @@ export function taskStatusLine(
         : null;
   const active =
     execution.state === "running" || execution.state === "starting";
+  // The Board puts a paused project's tasks under Paused before Draft or Ready.
+  const paused =
+    execution.state === "paused" ||
+    data.admission.reasons.includes("project-paused");
   const state =
     execution.holds.stop || execution.state === "stopping"
       ? "Stopping; effects may continue"
@@ -102,15 +106,17 @@ export function taskStatusLine(
           ? active
             ? `${terminal} · ${execution.state}`
             : terminal
-          : !task.ready
-            ? "Draft"
-            : blocker
-              ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
-              : reason
-                ? `Ready · ${lowerFirst(reasonLabels[reason])}`
-                : execution.state === "idle"
-                  ? "Ready"
-                  : `Ready · ${execution.state}`;
+          : paused
+            ? `${task.ready ? "Ready" : "Draft"} · project paused`
+            : !task.ready
+              ? "Draft"
+              : blocker
+                ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
+                : reason
+                  ? `Ready · ${lowerFirst(reasonLabels[reason])}`
+                  : execution.state === "idle"
+                    ? "Ready"
+                    : `Ready · ${execution.state}`;
   return `${state} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
 }
 

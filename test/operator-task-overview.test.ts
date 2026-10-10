@@ -179,6 +179,21 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     line({ task: { state: "cancelled", ready: true } }),
     "Cancelled / Accountable project lead: Mira",
   );
+  // A paused project outranks readiness and other waits, as on the Board.
+  assert.equal(
+    line({
+      task: { state: "open", ready: false },
+      admission: { reasons: ["task-unready", "project-paused"] },
+    }),
+    "Draft · project paused / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
+      admission: { reasons: ["local-dependency", "project-paused"] },
+      execution: { state: "paused", holds },
+    }),
+    "Ready · project paused / Accountable project lead: Mira",
+  );
   // Execution facts outrank the terminal task state, as in OperatorApi.execution().
   assert.equal(
     line({
