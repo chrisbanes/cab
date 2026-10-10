@@ -137,10 +137,10 @@ test("List and Board preserve identical filtered task IDs and never submit comma
     .evaluate((el) => el.scrollLeft);
   await page.locator(`[data-task-id="${ids[0]}"] .task-title`).click();
   await page
-    .getByRole("heading", { name: "Evidence review", exact: true })
+    .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   assert.equal(
@@ -990,10 +990,10 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
     .locator(`.task-list [data-task-id="${ids.importedId}"] .task-title`)
     .click();
   await page
-    .getByRole("heading", { name: "Evidence review", exact: true })
+    .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   assert.equal(new URL(page.url()).searchParams.get("project"), ids.projectId);
   assert.deepEqual(
@@ -1346,9 +1346,7 @@ for (const viewport of [
       .getByRole("link", { name: ids.importedTitle, exact: true })
       .click();
     assert.ok(page.url().endsWith(`/app/tasks/${ids.importedId}`));
-    await page
-      .getByRole("link", { name: "Runtime / Stop / Resume", exact: true })
-      .waitFor();
+    await page.getByRole("link", { name: "Execution", exact: true }).waitFor();
     assert.equal(
       await page
         .locator('input[name="title"],textarea[name="outcome"]')
@@ -1358,7 +1356,7 @@ for (const viewport of [
     assert.equal(
       await page
         .getByRole("link", {
-          name: "Runtime / Stop / Resume",
+          name: "Execution",
           exact: true,
         })
         .count(),

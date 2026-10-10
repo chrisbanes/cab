@@ -43,9 +43,11 @@ test("briefParts keeps prose and labels retained criteria C1/C2", () => {
   const lines = Array.from({ length: 130 }, (_, i) => `- [ ] item ${i}`);
   const partial = briefParts({
     body: lines.join("\n"),
-    criteria: lines
-      .slice(0, 128)
-      .map((_, i) => ({ criterionId: `c${i}`, position: i, text: `item ${i}` })),
+    criteria: lines.slice(0, 128).map((_, i) => ({
+      criterionId: `c${i}`,
+      position: i,
+      text: `item ${i}`,
+    })),
     criteriaOmittedCount: 2,
   });
   assert.equal(partial.prose, "- [ ] item 128\n- [ ] item 129");
@@ -122,7 +124,9 @@ test("criterionRows reports recorded outcomes and never an aggregate", () => {
       "status",
       "text",
     ]);
-  (data.review?.sources as unknown[]).push(source(newer, 2));
+  (data.review as unknown as { sources: unknown[] }).sources.push(
+    source(newer, 2),
+  );
   assert.equal(criterionRows(data, resultId, sourceId)[0]?.stale, true);
 });
 
@@ -170,7 +174,10 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     line({ task: { state: "cancelled", ready: true } }),
     "Cancelled / Accountable project lead: Mira",
   );
-  assert.equal(line({ lead: null }), "Ready / Accountable project lead: Unconfigured");
+  assert.equal(
+    line({ lead: null }),
+    "Ready / Accountable project lead: Unconfigured",
+  );
 });
 
 test("stopConsequences counts unfinished delegated assignments", () => {
@@ -185,7 +192,10 @@ test("stopConsequences counts unfinished delegated assignments", () => {
     }) as unknown as Data;
   assert.deepEqual(
     stopConsequences(data([a("running", lead), a("running"), a("completed")])),
-    { affected: "Mira (lead) and 1 delegated assignment is affected.", held: false },
+    {
+      affected: "Mira (lead) and 1 delegated assignment is affected.",
+      held: false,
+    },
   );
   assert.equal(
     stopConsequences(data([a("running", lead), a("running"), a("pending")]))
@@ -220,7 +230,10 @@ test("assignmentRow names requester, destination, wait and short id", () => {
   assert.equal(row.title, `Builder · ${"x".repeat(80)}…`);
   assert.equal(row.flow, "Mira → Mira");
   assert.equal(row.wait, "Waiting reason unknown");
-  assert.equal(assignmentRow(lead as never, all).flow, "Operator → task result");
+  assert.equal(
+    assignmentRow(lead as never, all).flow,
+    "Operator → task result",
+  );
   assert.notEqual(row.id, assignmentRow(two as never, all).id);
   assert.equal(row.id.length, 8);
 });

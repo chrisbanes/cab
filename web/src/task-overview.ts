@@ -11,10 +11,9 @@ export const criterionLabel = (index: number) => `C${index + 1}`;
  * The supplied brief split into prose and its retained checklist criteria. Only lines
  * recorded as criteria (by `position`) leave the prose; omitted overflow stays literal.
  */
-export function briefParts(source: Pick<
-  Source,
-  "body" | "criteria" | "criteriaOmittedCount"
->) {
+export function briefParts(
+  source: Pick<Source, "body" | "criteria" | "criteriaOmittedCount">,
+) {
   const criteria = source.criteria.map((c, i) => ({
     label: criterionLabel(i),
     criterionId: c.criterionId,

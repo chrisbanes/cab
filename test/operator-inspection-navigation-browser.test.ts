@@ -56,7 +56,7 @@ test("inspection sections are reached from task origins and exact direct links w
   await files.getByRole("button", { name: /notes\.md/ }).click();
   await files.getByText("navigation notes", { exact: true }).waitFor();
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   assert.equal(page.url(), boardURL);
@@ -81,7 +81,7 @@ test("inspection sections are reached from task origins and exact direct links w
   await files.getByRole("button", { name: /notes\.md/ }).click();
   await files.getByText("navigation notes", { exact: true }).waitFor();
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   await page.locator(`[data-search-record="${result.resultId}"]`).waitFor();
   assert.equal(page.url(), searchURL);
@@ -162,7 +162,7 @@ test("overview, project list and inbox origins return correctly from Files", asy
     await files.getByRole("button", { name: /notes\.md/ }).click();
     await files.getByText("origin notes", { exact: true }).waitFor();
     await page
-      .getByRole("button", { name: "Back to originating view", exact: true })
+      .getByRole("link", { name: "Back to originating view", exact: true })
       .click();
   };
 

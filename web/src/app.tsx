@@ -55,6 +55,7 @@ import {
 } from "./settings.js";
 import { Search, SearchState } from "./search.js";
 import { TaskWorkspace } from "./task-workspace.js";
+import { TaskHeaderActions, type TaskHeaderReport } from "./task-header.js";
 import { TaskWorkspaceStates } from "./task-workspace-state.js";
 import { TaskViews } from "./task-views.js";
 import { Login, SignInBootstrap } from "./sign-in.js";
@@ -460,6 +461,7 @@ export function App() {
   const [inboxRouteSummary, setInboxRouteSummary] =
     useState<ReturnType<typeof inboxSummaryOf>>(null);
   const [inboxHeader, setInboxHeader] = useState<InboxHeader | null>(null);
+  const [taskHeader, setTaskHeader] = useState<TaskHeaderReport | null>(null);
   const inboxSummary = useOperatorResource(
     session?.authenticated ? session.csrfToken : null,
     inboxLoader,
@@ -623,11 +625,11 @@ export function App() {
         ? "Overview"
         : /^\/app\/tasks\/[^/]+$/.test(pathname) &&
             pathname !== "/app/tasks/new"
-          ? "Task workspace"
+          ? "Task"
           : pathname === "/app/tasks"
             ? "All tasks"
             : pathname === "/app/tasks/new"
-              ? "New task"
+              ? "Create a task"
               : /^\/app\/assignments\/[^/]+\/recovery$/.test(pathname)
                 ? "Recovery"
                 : pathname === "/app/inbox"
@@ -653,7 +655,9 @@ export function App() {
           workspace.state.data?.data ?? null,
           projectId,
         )
-      : undefined;
+      : pathname === "/app/tasks/new"
+        ? "Describe the result you want. The project lead stays accountable."
+        : undefined;
   // The Inbox route refreshes its own list (and so the count) when the workspace read changes.
   const refreshAll = () => {
     workspace.refresh();
@@ -686,6 +690,25 @@ export function App() {
     : inboxSubtitle
       ? { subtitle: inboxSubtitle }
       : {};
+  // The task page reports its title, status line, Back and Stop once its read lands.
+  const taskReport =
+    taskHeader && pathname === `/app/tasks/${taskHeader.taskId}`
+      ? taskHeader
+      : null;
+  const taskHeaderProps = taskReport
+    ? {
+        title: taskReport.title,
+        subtitle: taskReport.subtitle,
+        back: taskReport.back,
+        desktopBack: true,
+        action: (
+          <TaskHeaderActions
+            report={taskReport}
+            csrfToken={session.csrfToken}
+          />
+        ),
+      }
+    : {};
   async function logout() {
     navigationScope.current = crypto.randomUUID();
     clearPrivateNavigation();
@@ -796,6 +819,7 @@ export function App() {
               )
             }
             {...inboxHeaderProps}
+            {...taskHeaderProps}
           />
           {logoutNotice && (
             <p className="body error-text" role="alert">
@@ -911,6 +935,8 @@ export function App() {
               taskId={pathname.split("/")[3] ?? ""}
               path={path}
               onRefresh={refreshAll}
+              workspace={workspace.state.data}
+              onHeader={setTaskHeader}
               questionStates={questionStates.current}
               state={taskStates.current.forTask(
                 pathname.split("/")[3] ?? "",

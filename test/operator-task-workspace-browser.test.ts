@@ -113,7 +113,7 @@ test("production workspace retains literal history, pending request, focused rep
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
-    .getByRole("heading", { name: "Evidence review", exact: true })
+    .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   await page
     .locator("#history")
@@ -328,7 +328,7 @@ test("production workspace retains literal history, pending request, focused rep
   );
   await exactLink.click();
   const reviewHeading = page.getByRole("heading", {
-    name: "Evidence review",
+    name: "Latest result",
     exact: true,
   });
   await page

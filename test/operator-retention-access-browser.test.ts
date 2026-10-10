@@ -195,8 +195,8 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     .click();
   await page.getByText("Ancient review result", { exact: true }).waitFor();
   await page
-    .locator("#review")
-    .getByText(/Ancient criterion · supported/)
+    .locator("#review .criterion-row", { hasText: "Ancient criterion" })
+    .getByText("C1 · Supported by recorded evidence")
     .waitFor();
   assert.ok(page.url().includes(`result=${a.old.resultId}`));
   assert.ok(page.url().includes(`source=${a.source.sourceId}`));
@@ -252,8 +252,8 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       1,
     );
     await page
-      .locator("#review")
-      .getByText(/Ancient criterion · supported/)
+      .locator("#review .criterion-row", { hasText: "Ancient criterion" })
+      .getByText("C1 · Supported by recorded evidence")
       .scrollIntoViewIfNeeded();
     await captureBrowserEvidence(page, "1366-exact-old-review", {
       fullPage: false,
