@@ -1,7 +1,6 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { extname } from "node:path";
-import { gitEnvironment, stopOwnedChild } from "./git-process.js";
+import { runGit } from "./git-process.js";
 import {
   inspectionLimits,
   listWorkspaceDirectory,
@@ -303,85 +302,37 @@ async function readGit(
       remaining,
     ),
   );
-  return await new Promise((resolveRead) => {
-    let child: ChildProcess;
-    try {
-      child = spawn(
-        options.gitExecutable ?? "git",
-        [
-          "-C",
-          root,
-          "--no-replace-objects",
-          "-c",
-          "core.fsmonitor=false",
-          ...configOverrides,
-          ...args,
-        ],
-        {
-          stdio: ["ignore", "pipe", "pipe"],
-          windowsHide: true,
-          env: gitEnvironment(),
-        },
-      );
-    } catch {
-      resolveRead({ ok: false, reason: "failed" });
-      return;
-    }
-
-    const chunks: Buffer[] = [];
-    let outputBytes = 0;
-    let stdoutBytes = 0;
-    let settled = false;
-    let stopping = false;
-    let timer: NodeJS.Timeout | undefined;
-    let failure: "timed-out" | "output-limit" | "failed" | undefined;
-    const finish = (result: GitRead) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolveRead(result);
-    };
-    const stop = async (reason: "timed-out" | "output-limit" | "failed") => {
-      if (stopping || settled) return;
-      stopping = true;
-      failure = reason;
-      const exited = await stopOwnedChild(child, 50, 250);
-      child.stdin?.destroy();
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-      finish({ ok: false, reason: exited ? reason : "unsettled" });
-    };
-    child.once("error", () => void stop("failed"));
-    child.once("close", (code) => {
-      if (stopping || settled) return;
-      if (failure || code !== 0) {
-        finish({
-          ok: false,
-          reason: failure ?? "failed",
-          ...(failure === undefined
-            ? { exitCode: code, output: Buffer.concat(chunks, stdoutBytes) }
-            : {}),
-        });
-        return;
-      }
-      finish({ ok: true, output: Buffer.concat(chunks, stdoutBytes) });
-    });
-    child.stdout?.on("data", (chunk: Buffer) => {
-      outputBytes += chunk.length;
-      stdoutBytes += chunk.length;
-      if (outputBytes > workspaceComparisonLimits.maxGitOutputBytes) {
-        void stop("output-limit");
-        return;
-      }
-      chunks.push(chunk);
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      outputBytes += chunk.length;
-      if (outputBytes > workspaceComparisonLimits.maxGitOutputBytes)
-        void stop("output-limit");
-    });
-    timer = setTimeout(() => void stop("timed-out"), timeoutMs);
+  const result = await runGit({
+    executable: options.gitExecutable ?? "git",
+    args: [
+      "-C",
+      root,
+      "--no-replace-objects",
+      "-c",
+      "core.fsmonitor=false",
+      ...configOverrides,
+      ...args,
+    ],
+    timeoutMs,
+    terminationGraceMs: 50,
+    observationMs: 250,
+    maxOutputBytes: workspaceComparisonLimits.maxGitOutputBytes,
   });
+  if (result.status === "ok") return { ok: true, output: result.stdout };
+  if (result.status === "exit")
+    return {
+      ok: false,
+      reason: "failed",
+      exitCode: result.exitCode,
+      output: result.stdout,
+    };
+  // A started child whose exit was not observed is never reported as settled.
+  if (result.spawned && !result.childExitObserved)
+    return { ok: false, reason: "unsettled" };
+  return {
+    ok: false,
+    reason: result.kind === "cancelled" ? "failed" : result.kind,
+  };
 }
 
 function decodeUtf8(bytes: Buffer): string | undefined {

@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -28,20 +29,18 @@ export type GitInvocation = { args: string; env: Record<string, string> };
 export function gitEnvironmentProbe() {
   const directory = mkdtempSync(join(tmpdir(), "ensemble-git-environment-"));
   const binDirectory = join(directory, "bin");
-  const log = join(directory, "invocations.log");
+  const log = join(directory, "invocations");
   mkdirSync(binDirectory);
+  mkdirSync(log);
   const executable = join(binDirectory, "git");
   const realGit = spawnSync("which", ["git"], {
     encoding: "utf8",
   }).stdout.trim();
-  writeFileSync(log, "");
   writeFileSync(
     executable,
     `#!/bin/sh
-{
-  printf '%s\\n' "--invocation $*"
-  /usr/bin/env | /usr/bin/grep '^GIT_' | /usr/bin/sort
-} >> '${log}'
+# One file per invocation: concurrent probes must not interleave records.
+{ printf '%s\\n' "--invocation $*"; /usr/bin/env | /usr/bin/grep '^GIT_' | /usr/bin/sort; } > '${log}'/$$
 exec '${realGit}' "$@"
 `,
   );
@@ -51,7 +50,10 @@ exec '${realGit}' "$@"
     binDirectory,
     invocations(): GitInvocation[] {
       const result: GitInvocation[] = [];
-      for (const line of readFileSync(log, "utf8").split("\n")) {
+      const lines = readdirSync(log).flatMap((name) =>
+        readFileSync(join(log, name), "utf8").split("\n"),
+      );
+      for (const line of lines) {
         if (line.startsWith("--invocation "))
           result.push({ args: line.slice(13), env: {} });
         else if (line.includes("=")) {
@@ -61,9 +63,6 @@ exec '${realGit}' "$@"
         }
       }
       return result;
-    },
-    clear() {
-      writeFileSync(log, "");
     },
     async withPath<T>(fn: () => Promise<T>): Promise<T> {
       const previous = process.env.PATH;

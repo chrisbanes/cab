@@ -1,4 +1,3 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Stats } from "node:fs";
 import { constants } from "node:fs";
@@ -18,7 +17,7 @@ import {
   resolve,
   sep,
 } from "node:path";
-import { gitEnvironment, stopOwnedChild } from "./git-process.js";
+import { runGit } from "./git-process.js";
 import type { TaskWorkspaceBinding } from "./workspaces.js";
 
 export const inspectionLimits = Object.freeze({
@@ -657,7 +656,7 @@ const safeFsState = (error: unknown): WorkspaceDirectoryListing["state"] => {
   return "unavailable";
 };
 
-function checkGitIgnore(
+async function checkGitIgnore(
   executable: string,
   repositoryPath: string,
   paths: readonly string[],
@@ -666,130 +665,50 @@ function checkGitIgnore(
   const input = Buffer.concat(
     paths.map((path) => Buffer.from(`${path}\0`, "utf8")),
   );
-  if (input.length > gitIgnoreInputBytes)
-    return Promise.resolve({ complete: false });
-  return new Promise((resolveResult) => {
-    let child: ChildProcess;
-    try {
-      child = spawn(
-        executable,
-        [
-          "-C",
-          repositoryPath,
-          "-c",
-          "core.fsmonitor=false",
-          "check-ignore",
-          "-z",
-          "--stdin",
-        ],
-        {
-          stdio: ["pipe", "pipe", "pipe"],
-          windowsHide: true,
-          env: gitEnvironment(),
-        },
-      );
-    } catch {
-      resolveResult({ complete: false });
-      return;
-    }
-    let stdout = Buffer.alloc(0);
-    let outputBytes = 0;
-    let exitObserved = false;
-    let closeObserved = false;
-    let exitCode: number | null = null;
-    let failed = false;
-    let stopped = false;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    const finish = (result: IgnoreResult) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      resolveResult(result);
-    };
-    const stop = () => {
-      if (stopped) return;
-      stopped = true;
-      void stopOwnedChild(
-        child,
-        childTerminationGraceMs,
-        childTerminationObservationMs,
-      ).finally(() => {
-        child.stdin?.destroy();
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        finish({ complete: false });
-      });
-    };
-    child.once("error", () => {
-      failed = true;
-      stop();
-    });
-    child.once("exit", (code) => {
-      exitObserved = true;
-      exitCode = code;
-    });
-    child.once("close", (code) => {
-      closeObserved = true;
-      if (code !== null) exitCode = code;
-      if (stopped) return;
-      if (
-        failed ||
-        !exitObserved ||
-        !closeObserved ||
-        (exitCode !== 0 && exitCode !== 1)
-      ) {
-        finish({ complete: false });
-        return;
-      }
-      const ignored = new Set<string>();
-      if (stdout.length > 0 && stdout.at(-1) !== 0) {
-        finish({ complete: false });
-        return;
-      }
-      try {
-        const allowed = new Set(paths);
-        let start = 0;
-        while (start < stdout.length) {
-          const end = stdout.indexOf(0, start);
-          if (end < 0) {
-            finish({ complete: false });
-            return;
-          }
-          const value = new TextDecoder("utf-8", { fatal: true }).decode(
-            stdout.subarray(start, end),
-          );
-          if (!allowed.has(value)) {
-            finish({ complete: false });
-            return;
-          }
-          ignored.add(value);
-          start = end + 1;
-        }
-        finish({ complete: true, ignored });
-      } catch {
-        finish({ complete: false });
-      }
-    });
-    child.stdout?.on("data", (chunk: Buffer) => {
-      outputBytes += chunk.length;
-      if (outputBytes > gitIgnoreOutputBytes) {
-        stop();
-        return;
-      }
-      stdout = Buffer.concat([stdout, chunk]);
-    });
-    child.stderr?.on("data", (chunk: Buffer) => {
-      outputBytes += chunk.length;
-      if (outputBytes > gitIgnoreOutputBytes) stop();
-    });
-    child.stdin?.on("error", () => {
-      failed = true;
-      stop();
-    });
-    timer = setTimeout(stop, timeoutMs);
-    child.stdin?.end(input);
+  if (input.length > gitIgnoreInputBytes) return { complete: false };
+  const result = await runGit({
+    executable,
+    args: [
+      "-C",
+      repositoryPath,
+      "-c",
+      "core.fsmonitor=false",
+      "check-ignore",
+      "-z",
+      "--stdin",
+    ],
+    input,
+    timeoutMs,
+    terminationGraceMs: childTerminationGraceMs,
+    observationMs: childTerminationObservationMs,
+    maxOutputBytes: gitIgnoreOutputBytes,
   });
+  // Exit 1 means no listed path is ignored; any other failure leaves the answer unknown.
+  if (
+    result.status === "interrupted" ||
+    (result.status === "exit" && (result.exitCode !== 1 || result.signal))
+  )
+    return { complete: false };
+  const { stdout } = result;
+  if (stdout.length > 0 && stdout.at(-1) !== 0) return { complete: false };
+  try {
+    const allowed = new Set(paths);
+    const ignored = new Set<string>();
+    let start = 0;
+    while (start < stdout.length) {
+      const end = stdout.indexOf(0, start);
+      if (end < 0) return { complete: false };
+      const value = new TextDecoder("utf-8", { fatal: true }).decode(
+        stdout.subarray(start, end),
+      );
+      if (!allowed.has(value)) return { complete: false };
+      ignored.add(value);
+      start = end + 1;
+    }
+    return { complete: true, ignored };
+  } catch {
+    return { complete: false };
+  }
 }
 
 type DirectoryIdentity = {

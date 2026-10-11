@@ -1,8 +1,5 @@
-import { childProcessEnvironment } from "../core/child-environment.js";
-import { execFile } from "node:child_process";
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { promisify } from "node:util";
 import {
   checkoutOrigin,
   RepositoryVerificationError,
@@ -12,6 +9,7 @@ import type {
   CheckoutVerification,
   FolderListing,
 } from "../operator/contracts.js";
+import { runGit } from "./git-process.js";
 import type { DiscoveryReader } from "./github-discovery.js";
 import { isWithin } from "./workspace-inspection.js";
 
@@ -36,29 +34,21 @@ export function resolveHomePath(input: string, home: string): string {
   return input;
 }
 
-const execFileAsync = promisify(execFile);
-const probeEnv = () => ({
-  ...childProcessEnvironment(),
-  GIT_TERMINAL_PROMPT: "0",
-  GIT_OPTIONAL_LOCKS: "0",
-});
 const maxEntries = 200;
 const probeConcurrency = 4;
 const probeTimeout = 2000;
 
-async function currentBranch(dir: string, timeout: number) {
-  try {
-    const branch = (
-      await execFileAsync(
-        "git",
-        ["-C", dir, "symbolic-ref", "--short", "-q", "HEAD"],
-        { encoding: "utf8", timeout, env: probeEnv() },
-      )
-    ).stdout.trim();
-    return branch && branch.length <= 255 ? branch : null;
-  } catch {
-    return null;
-  }
+async function currentBranch(dir: string, timeoutMs: number) {
+  const result = await runGit({
+    args: ["-C", dir, "symbolic-ref", "--short", "-q", "HEAD"],
+    timeoutMs,
+    terminationGraceMs: 100,
+    observationMs: 500,
+    maxOutputBytes: 1024 * 1024,
+  });
+  if (result.status !== "ok") return null;
+  const branch = result.stdout.toString("utf8").trim();
+  return branch && branch.length <= 255 ? branch : null;
 }
 
 /** Real paths on both sides: macOS temp and home folders can sit behind symlinks. */

@@ -15,9 +15,17 @@ import { DomainPolicyError } from "../src/core/domain.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
 import { DiscoveryFailure } from "../src/standalone/github-discovery.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
-import { listHomeFolders } from "../src/standalone/operator-setup.js";
+import {
+  listHomeFolders,
+  verifyCheckout,
+} from "../src/standalone/operator-setup.js";
+import {
+  gitEnvironmentProbe,
+  hardenedGitEnvironment,
+  withHostileGitEnvironment,
+} from "./fixtures/git-environment.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
-import { createSetupHome, fakeDiscovery } from "./fixtures/setup-home.js";
+import { createSetupHome, fakeDiscovery, git } from "./fixtures/setup-home.js";
 
 const configure = (credentialRef: string | null) => ({
   type: "discovery.configure",
@@ -172,6 +180,54 @@ async function snapshot(root: string): Promise<string[]> {
   await walk(root);
   return out.sort();
 }
+
+test("setup probes run with the hardened environment", async (t) => {
+  const home = await createSetupHome();
+  const probe = gitEnvironmentProbe();
+  t.after(() => {
+    home.close();
+    probe.close();
+  });
+  await git(join(home.home, "src", "relay"), "checkout", "--detach", "--quiet");
+  const input = {
+    path: "~/src/atlas",
+    repository: { owner: "acme", name: "atlas" },
+    ref: "main",
+  };
+  const expected = {
+    listing: await listHomeFolders(home.home, { path: "~/src" }),
+    verification: await verifyCheckout(home.home, input),
+  };
+
+  const hostile = await withHostileGitEnvironment(() =>
+    probe.withPath(async () => ({
+      listing: await listHomeFolders(home.home, { path: "~/src" }),
+      verification: await verifyCheckout(home.home, input),
+    })),
+  );
+
+  assert.deepEqual(hostile, expected);
+  assert.deepEqual(hostile.verification, {
+    state: "verified",
+    origin: "acme/atlas",
+    branch: "main",
+  });
+  const relay = hostile.listing.entries.find((e) => e.name === "relay");
+  assert.deepEqual(relay, {
+    name: "relay",
+    kind: "git",
+    origin: "acme/relay",
+    branch: null,
+  });
+  const invocations = probe.invocations();
+  for (const command of ["remote", "symbolic-ref", "rev-parse"])
+    assert.ok(
+      invocations.some((item) => item.args.includes(command)),
+      `${command} was recorded`,
+    );
+  for (const invocation of invocations)
+    assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
+});
 
 test("home folder listing stays inside home, lists names and Git status only and verifies checkouts", async (t) => {
   const home = await createSetupHome();
