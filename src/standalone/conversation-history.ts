@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Database } from "../core/store.js";
+import { type Database, transaction } from "../core/store.js";
 import type { RuntimeConversationEvent } from "./codex.js";
 
 export type ConversationHistoryBinding = z.infer<typeof bindingSchema>;
@@ -28,6 +28,15 @@ const maxExcludedValueLength = 64 * 1024;
 const maxExclusionBytes = 256 * 1024;
 const maxBufferedEvents = 8192;
 const maxBufferedTextBytes = 4 * 1024 * 1024;
+const deltaFlushMs = 1000;
+// Matches the per-turn pending item bound in codex.ts.
+const maxPendingDeltaItems = 64;
+
+function validDeltaBytes(bytes: number): boolean {
+  return (
+    Number.isSafeInteger(bytes) && bytes > 0 && bytes <= maxHistoryTextBytes
+  );
+}
 
 const sensitiveAssignment =
   /((?:"?(?:password|token|api[_-]?key|secret)"?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|([^\s,;]+))/gi;
@@ -182,30 +191,8 @@ export class ConversationHistoryStore {
       return;
     }
     if (event.kind === "delta") {
-      if (
-        !Number.isSafeInteger(event.bytes) ||
-        event.bytes <= 0 ||
-        event.bytes > maxHistoryTextBytes
-      )
-        return;
-      this.db
-        .prepare(`INSERT INTO conversation_history_items
-          (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
-            profileRevision, conversationRevision, workRevision, threadId, turnId,
-            itemId, lifecycle, text, omissionReason, deltaBytes, createdAt, updatedAt)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'streaming', NULL, NULL, ?, ?, ?)
-          ON CONFLICT(workId, threadId, turnId, itemId) DO UPDATE SET
-            lifecycle = 'streaming', deltaBytes = MIN(?, deltaBytes + excluded.deltaBytes),
-            updatedAt = excluded.updatedAt
-          WHERE conversation_history_items.lifecycle IN ('started','streaming')`)
-        .run(
-          ...this.bindingValues(binding),
-          event.itemId,
-          event.bytes,
-          now,
-          now,
-          Number.MAX_SAFE_INTEGER,
-        );
+      if (validDeltaBytes(event.bytes))
+        this.addDeltaBytes(binding, event.itemId, event.bytes, now);
       return;
     }
     if (event.kind === "omitted") {
@@ -229,6 +216,19 @@ export class ConversationHistoryStore {
           updatedAt = excluded.updatedAt
         WHERE conversation_history_items.lifecycle IN ('started','streaming')`)
       .run(...this.bindingValues(binding), event.itemId, text, now, now);
+  }
+
+  /** Writes batched diagnostic byte counts in one transaction. */
+  recordDeltaBytes(
+    binding: ConversationHistoryBinding,
+    deltas: ReadonlyMap<string, number>,
+  ): void {
+    const now = this.checkedNow();
+    transaction(this.db, () => {
+      for (const [itemId, bytes] of deltas)
+        if (Number.isSafeInteger(bytes) && bytes > 0)
+          this.addDeltaBytes(binding, itemId, bytes, now);
+    });
   }
 
   recordEarlyBufferLimit(binding: ConversationHistoryBinding): void {
@@ -354,6 +354,32 @@ export class ConversationHistoryStore {
       .run(...this.bindingValues(binding), itemId, reason, now, now);
   }
 
+  private addDeltaBytes(
+    binding: ConversationHistoryBinding,
+    itemId: string,
+    bytes: number,
+    now: number,
+  ): void {
+    this.db
+      .prepare(`INSERT INTO conversation_history_items
+        (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
+          profileRevision, conversationRevision, workRevision, threadId, turnId,
+          itemId, lifecycle, text, omissionReason, deltaBytes, createdAt, updatedAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'streaming', NULL, NULL, ?, ?, ?)
+        ON CONFLICT(workId, threadId, turnId, itemId) DO UPDATE SET
+          lifecycle = 'streaming', deltaBytes = MIN(?, deltaBytes + excluded.deltaBytes),
+          updatedAt = excluded.updatedAt
+        WHERE conversation_history_items.lifecycle IN ('started','streaming')`)
+      .run(
+        ...this.bindingValues(binding),
+        itemId,
+        bytes,
+        now,
+        now,
+        Number.MAX_SAFE_INTEGER,
+      );
+  }
+
   private bindingValues(binding: ConversationHistoryBinding) {
     return [
       binding.workId,
@@ -392,6 +418,8 @@ export class ConversationHistoryCapture {
   private bufferedTextBytes = 0;
   private exceededBuffer = false;
   private closed = false;
+  private readonly pendingDeltas = new Map<string, number>();
+  private flushTimer: NodeJS.Timeout | undefined;
 
   constructor(private readonly options: ConversationHistoryCaptureOptions) {}
 
@@ -446,6 +474,8 @@ export class ConversationHistoryCapture {
 
   finish(): void {
     if (this.binding && !this.closed) {
+      // Before omitIncomplete: it settles the rows that guard the counts.
+      this.flush();
       try {
         this.options.store.omitIncomplete(this.binding);
       } catch {
@@ -456,6 +486,7 @@ export class ConversationHistoryCapture {
   }
 
   discard(): void {
+    this.flush();
     this.closed = true;
     this.clearBuffered();
   }
@@ -464,6 +495,12 @@ export class ConversationHistoryCapture {
     event: RuntimeConversationEvent,
     binding: ConversationHistoryBinding,
   ) {
+    if (event.kind === "delta") {
+      this.addDelta(event.itemId, event.bytes);
+      return;
+    }
+    // A settled row must never precede its item's pending count.
+    if (event.kind !== "started") this.flush();
     try {
       if (event.kind !== "completed") {
         this.options.store.record(binding, event, []);
@@ -485,6 +522,37 @@ export class ConversationHistoryCapture {
       else this.options.store.record(binding, event, [...start, ...current]);
     } catch {
       // A diagnostic storage failure cannot change execution control.
+    }
+  }
+
+  private addDelta(itemId: string, bytes: number) {
+    if (!validDeltaBytes(bytes)) return;
+    if (
+      !this.pendingDeltas.has(itemId) &&
+      this.pendingDeltas.size >= maxPendingDeltaItems
+    )
+      this.flush();
+    this.pendingDeltas.set(
+      itemId,
+      Math.min(
+        Number.MAX_SAFE_INTEGER,
+        (this.pendingDeltas.get(itemId) ?? 0) + bytes,
+      ),
+    );
+    this.flushTimer ??= setTimeout(() => this.flush(), deltaFlushMs).unref();
+  }
+
+  /** Never throws: it also runs from a timer callback. */
+  private flush() {
+    clearTimeout(this.flushTimer);
+    this.flushTimer = undefined;
+    if (!this.binding || this.pendingDeltas.size === 0) return;
+    const batch = new Map(this.pendingDeltas);
+    this.pendingDeltas.clear();
+    try {
+      this.options.store.recordDeltaBytes(this.binding, batch);
+    } catch {
+      // A diagnostic storage failure cannot change execution control; the batch is dropped.
     }
   }
 

@@ -1073,8 +1073,11 @@ Updates must not reopen collapsed groups or replace unfinished replies.
 
 The assignment view retains sanitized completed assistant text bound to the exact
 task, assignment, work and runtime turn, including its instruction and conversation
-revisions. Partial text is not persisted. The view labels unfinished or omitted
-items and limits the displayed item history; it is not a complete model/tool
+revisions. Partial text is not persisted. Streamed byte counts for an unfinished
+item are batched and written when the item completes or is omitted, at turn end or
+shutdown, or about one second after the first unwritten delta, so a crash can lose
+about one second of those counts; completed text is unaffected. The view labels unfinished or
+omitted items and limits the displayed item history; it is not a complete model/tool
 transcript. Known private instructions, all projects' declared routing, GitHub
 source and delivery credential references, their environment key names and values,
 environment values whose names match `TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL`,
