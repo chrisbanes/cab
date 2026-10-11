@@ -351,30 +351,38 @@ export class OperatorApi {
           credentials: Object.entries(process.env).filter(([key]) =>
             /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key),
           ),
-          // Every reference the exclusions read, with a digest of its resolved value, so a
-          // read fences when a reference or its value changes whatever the variable is named.
-          references: [
-            d.discoveryCredentialReference(),
-            ...d
-              .projects()
-              .flatMap((p) => [
-                d.routingCredentialReference(String(p.id)),
-                d.githubConfiguration(String(p.id)).credentialRef,
-                d.deliveryCredentialReference(String(p.id)),
-              ]),
-          ].map((ref) =>
-            ref
-              ? [
-                  ref,
-                  createHash("sha256")
-                    .update(process.env[ref.slice(4)] ?? "")
-                    .digest("hex"),
-                ]
-              : null,
-          ),
+          references: this.referenceFence(),
         }),
       )
       .digest("hex");
+  }
+  /**
+   * Every credential reference the exclusions read, with a digest of its resolved value, so
+   * a read fences when a reference or its value changes whatever the variable is named.
+   */
+  private referenceFence() {
+    const d = this.domain();
+    return JSON.stringify(
+      [
+        d.discoveryCredentialReference(),
+        ...d
+          .projects()
+          .flatMap((p) => [
+            d.routingCredentialReference(String(p.id)),
+            d.githubConfiguration(String(p.id)).credentialRef,
+            d.deliveryCredentialReference(String(p.id)),
+          ]),
+      ].map((ref) =>
+        ref
+          ? [
+              ref,
+              createHash("sha256")
+                .update(process.env[ref.slice(4)] ?? "")
+                .digest("hex"),
+            ]
+          : null,
+      ),
+    );
   }
   private domain() {
     return this.service.domain();
@@ -1815,10 +1823,11 @@ export class OperatorApi {
         }
       : null;
   }
-  /** Workspace fences per task plus the visibility fence, checked before a read returns. */
+  /** Workspace fences per task plus the credential reference fence, checked before a read returns. */
   private workspaceSnapshot(taskIds: readonly string[]) {
     return {
-      visibility: this.visibilityToken(),
+      // Credential references and values only; version races keep their existing handling.
+      references: this.referenceFence(),
       workspaces: new Map(
         taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
       ),
@@ -1827,7 +1836,7 @@ export class OperatorApi {
   private requireWorkspaceSnapshot(
     snapshot: ReturnType<OperatorApi["workspaceSnapshot"]>,
   ) {
-    if (snapshot.visibility !== this.visibilityToken())
+    if (snapshot.references !== this.referenceFence())
       throw new OperatorApiError(503, "unavailable");
     for (const [id, fingerprint] of snapshot.workspaces)
       if (this.service.taskWorkspaceVisibility(id) !== fingerprint)
