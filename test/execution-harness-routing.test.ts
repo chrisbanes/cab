@@ -1205,3 +1205,45 @@ test("a failed secondary runtime cannot start new tool calls", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const failure of ["callback", "start"] as const)
+  test(`a secondary runtime ${failure} failure cannot retract completed work`, async () => {
+    const root = mkdtempSync(
+      join(tmpdir(), "ensemble-harness-failed-request-"),
+    );
+    const runtimes = fakes();
+    const service = open(join(root, "data"), runtimes);
+    const describe = diagnostics(service, runtimes);
+    try {
+      await service.start();
+      const worker = profile(service, "claude");
+      const projectId = project(service, worker, [worker]);
+      const { assignmentIds } = await task(service, projectId, [worker]);
+      const workId = initial(assignmentIds[0] ?? "");
+      await waitUntil(
+        () => intent(service, workId)?.state === "completed",
+        describe,
+      );
+      const completed = intent(service, workId);
+      assert.ok(completed?.threadId);
+      assert.ok(completed.turnId);
+
+      if (failure === "start") {
+        await service.stop();
+        runtimes.claude.failStart = true;
+        await service.start();
+      } else runtimes.claude.crash();
+
+      // Queued callbacks must not invalidate retained success, including in
+      // the same tick as onFailure and after start() rejects without onFailure.
+      runtimes.claude.denyUnexpectedFor(completed.threadId, completed.turnId);
+      assert.equal(intent(service, workId)?.state, "completed");
+      runtimes.claude.reportAnomaly(completed.threadId, completed.turnId);
+      assert.equal(intent(service, workId)?.state, "completed");
+      runtimes.claude.reportUnidentifiedAnomaly();
+      assert.equal(intent(service, workId)?.state, "completed");
+    } finally {
+      await service.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });

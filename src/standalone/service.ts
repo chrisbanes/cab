@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -145,7 +145,10 @@ import {
   type WorkspaceTurnCaptureRecord,
   type WorkspaceTurnObservation,
 } from "./workspace-comparison.js";
-import type { WorkspaceInspectionCurrent } from "./workspace-inspection.js";
+import {
+  isWithin,
+  type WorkspaceInspectionCurrent,
+} from "./workspace-inspection.js";
 import {
   SqliteWorkspaceBindingStore,
   type TaskWorkspaceRepositoryInput,
@@ -335,6 +338,7 @@ export class StandaloneService {
   >();
   /** Per harness, so an unidentified anomaly can only retract its own work. */
   private readonly lastCompletedWorkId = new Map<ExecutionHarness, string>();
+  private canonicalDataDir: string | undefined;
   private readonly active = new Set<Promise<ExecutionIntent>>();
   private readonly activeByWorkId = new Map<string, Promise<ExecutionIntent>>();
   private readonly nativeWaiters = new Map<
@@ -398,6 +402,7 @@ export class StandaloneService {
     if (this.db || this.owner)
       throw new Error("Service already started or shutdown is incomplete");
     this.lastCompletedWorkId.clear();
+    this.canonicalDataDir = undefined;
     const dataDirectory = StandaloneDataDirectory.openExclusive(this.dataDir, {
       markerWriter: this.markerWriter,
     });
@@ -877,7 +882,13 @@ export class StandaloneService {
       )
         this.runtimeUnavailableSince.set(harness, Date.now());
     });
+    const acceptsNew = () =>
+      !refuseNew &&
+      this.runtimes.get(harness) === runtime &&
+      (harness === defaultExecutionHarness ||
+        !this.runtimeUnavailableSince.has(harness));
     runtime.onUnexpectedRequest((request) => {
+      if (!acceptsNew()) return;
       const active = state
         .activeExecutions()
         .filter((item) => ownWork(item.workId));
@@ -956,7 +967,7 @@ export class StandaloneService {
     });
     runtime.onUserInputRequest?.((request) => {
       if (
-        refuseNew ||
+        !acceptsNew() ||
         foreign(request.identity.threadId, request.identity.turnId)
       )
         runtime.cancelUserInput?.(
@@ -970,7 +981,7 @@ export class StandaloneService {
         this.handleUserInputOutcome(outcome);
     });
     runtime.onToolCall?.((call) =>
-      refuseNew || foreign(call.threadId, call.turnId)
+      !acceptsNew() || foreign(call.threadId, call.turnId)
         ? Promise.resolve({
             text: "Coordination call is not bound to current task work",
             success: false,
@@ -978,10 +989,11 @@ export class StandaloneService {
         : this.handleToolCall(call),
     );
     runtime.onConversationEvent?.((event) => {
-      if (!refuseNew && !foreign(event.threadId, event.turnId))
+      if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
     });
     runtime.onTerminalAnomaly?.((anomaly) => {
+      if (!acceptsNew()) return;
       const matched =
         anomaly.threadId && anomaly.turnId
           ? state
@@ -2302,6 +2314,10 @@ export class StandaloneService {
 
   taskHold(taskId: string): string | undefined {
     return this.requireState().taskHold(taskId);
+  }
+
+  isTaskStopped(taskId: string): boolean {
+    return this.taskHold(taskId) === "Task stopped";
   }
 
   /** A known survivor or unfinished tool callback keeps ownership held. */
@@ -4419,10 +4435,6 @@ export class StandaloneService {
         projectId,
         revisions?.instructionsRevision ?? Number(project.instructionsRevision),
       );
-      const reference = domain.routingCredentialReference(projectId);
-      const credential = reference?.startsWith("env:")
-        ? process.env[reference.slice("env:".length)]
-        : undefined;
       const discovery = domain.discoveryCredentialReference();
       const fixtureValues =
         this.options.conversationHistoryExclusions?.() ?? [];
@@ -4437,18 +4449,21 @@ export class StandaloneService {
             ]),
           ]
         : [];
-      const canonicalDataDir = existsSync(this.dataDir)
+      this.canonicalDataDir ??= existsSync(this.dataDir)
         ? realpathSync(this.dataDir)
         : this.dataDir;
       const values = [
         String(profileInstructions ?? ""),
         projectInstructions,
         this.dataDir,
-        canonicalDataDir,
+        this.canonicalDataDir,
         ...managedPaths,
         ...additionalPaths,
-        ...(reference ? [reference] : []),
-        ...(credential ? [credential] : []),
+        ...Object.entries(process.env).flatMap(([name, value]) =>
+          /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(name) && value
+            ? [value]
+            : [],
+        ),
         ...(discovery
           ? [
               discovery,
@@ -4458,12 +4473,14 @@ export class StandaloneService {
           : []),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
-          const ref = this.deliveryStore?.configuration(
-            String(p.id),
-          ).credentialRef;
-          return ref
-            ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""]
-            : [];
+          const id = String(p.id);
+          return [
+            domain.routingCredentialReference(id),
+            domain.githubConfiguration(id).credentialRef,
+            this.deliveryStore?.configuration(id).credentialRef,
+          ].flatMap((ref) =>
+            ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
+          );
         }),
       ];
       return values.filter((value) => value.length > 0);
@@ -4481,10 +4498,7 @@ export class StandaloneService {
       throw new Error("Workspace must be an existing real directory");
     const workspaceKey = realpathSync(workspace);
     const managedRoot = join(realpathSync(this.dataDir), "workspaces");
-    if (
-      workspaceKey === managedRoot ||
-      workspaceKey.startsWith(`${managedRoot}${sep}`)
-    )
+    if (isWithin(managedRoot, workspaceKey))
       throw new Error("Task workspaces require a durable assignment binding");
     return workspaceKey;
   }

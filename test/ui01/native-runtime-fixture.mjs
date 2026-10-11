@@ -251,14 +251,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       });
     else terminal();
   }
-  if (m.method === "thread/resume" && transport === "early-resolution")
-    setTimeout(
-      () =>
-        send({
-          method: "serverRequest/resolved",
-          params: { threadId: "native-thread", requestId: "native-id" },
-        }),
-      10,
-    );
+  if (m.method === "fixture/resolve-native" && transport === "early-resolution")
+    send({
+      method: "serverRequest/resolved",
+      params: { threadId: "native-thread", requestId: lastNative.id },
+    });
   if (m.id === "service-report" && m.result) terminal();
 });

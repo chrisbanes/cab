@@ -315,6 +315,25 @@ function knownRoute(pathname: string) {
     new RegExp(`^/app/(?:projects|profiles)/${id}/settings$`).test(pathname)
   );
 }
+function pushAppEntry(href: string, navigationScope: string) {
+  const fromSearch = location.pathname === "/app/search";
+  history.pushState(
+    {
+      origin: location.pathname + location.search,
+      workspaceOrigin: fromSearch
+        ? history.state?.workspaceOrigin
+        : location.pathname + location.search,
+      navigationScope,
+      navKey: crypto.randomUUID(),
+      entryIndex: (history.state?.entryIndex ?? 0) + 1,
+      workspaceIndex: fromSearch
+        ? (history.state?.workspaceIndex ?? 0)
+        : (history.state?.entryIndex ?? 0),
+    },
+    "",
+    href,
+  );
+}
 export function App() {
   const drafts = useRef(new ConfigurationDrafts());
   const acceptedIdentity = useRef<string | null>(null);
@@ -518,24 +537,7 @@ export function App() {
           { ...history.state, scrollY, focusedHref: href },
           "",
         );
-        history.pushState(
-          {
-            origin: location.pathname + location.search,
-            workspaceOrigin:
-              location.pathname === "/app/search"
-                ? history.state?.workspaceOrigin
-                : location.pathname + location.search,
-            navigationScope: navigationScope.current,
-            navKey: crypto.randomUUID(),
-            entryIndex: (history.state?.entryIndex ?? 0) + 1,
-            workspaceIndex:
-              location.pathname === "/app/search"
-                ? (history.state?.workspaceIndex ?? 0)
-                : (history.state?.entryIndex ?? 0),
-          },
-          "",
-          href,
-        );
+        pushAppEntry(href, navigationScope.current);
         setPath(href);
         setNavigationVersion((n) => n + 1);
         setDrawer(false);
@@ -556,24 +558,7 @@ export function App() {
   }, [pathname, addressPath]);
   const navigate = (next: string) => {
     history.replaceState({ ...history.state, scrollY }, "");
-    history.pushState(
-      {
-        origin: location.pathname + location.search,
-        workspaceOrigin:
-          location.pathname === "/app/search"
-            ? history.state?.workspaceOrigin
-            : location.pathname + location.search,
-        navigationScope: navigationScope.current,
-        navKey: crypto.randomUUID(),
-        entryIndex: (history.state?.entryIndex ?? 0) + 1,
-        workspaceIndex:
-          location.pathname === "/app/search"
-            ? (history.state?.workspaceIndex ?? 0)
-            : (history.state?.entryIndex ?? 0),
-      },
-      "",
-      next,
-    );
+    pushAppEntry(next, navigationScope.current);
     setPath(next);
     setNavigationVersion((n) => n + 1);
     setDrawer(false);

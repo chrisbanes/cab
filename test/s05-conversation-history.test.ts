@@ -900,3 +900,105 @@ test("the installation discovery credential is redacted when history is captured
     rmSync(f.root, { recursive: true, force: true });
   }
 });
+
+test("history capture and reads exclude every project's source and routing references and generic secret values", async (t) => {
+  const runtime = new HistoryRuntime(),
+    f = await fixture(runtime),
+    otherProjectId = randomUUID(),
+    keys = [
+      "FIXTURE_HISTORY_SOURCE_A",
+      "FIXTURE_HISTORY_ROUTE_A",
+      "FIXTURE_HISTORY_SOURCE_B",
+      "FIXTURE_HISTORY_ROUTE_B",
+      "FIXTURE_HISTORY_SECRET",
+    ],
+    previous = keys.map((key) => process.env[key]);
+  t.after(async () => {
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+    for (const [index, key] of keys.entries()) {
+      if (previous[index] === undefined) delete process.env[key];
+      else process.env[key] = previous[index];
+    }
+  });
+  command(f.service, {
+    type: "project.create",
+    actor: "operator",
+    projectId: otherProjectId,
+    name: "Other history project",
+    leadProfileId: f.profileId,
+  });
+  for (const [index, projectId] of [f.projectId, otherProjectId].entries()) {
+    command(f.service, {
+      type: "github.configure",
+      actor: "operator",
+      projectId,
+      expectedVersion: 1,
+      credentialRef: `env:${keys[index * 2]}`,
+      selections: [],
+      repositories: [],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+    });
+    command(f.service, {
+      type: "routing.configure",
+      actor: "operator",
+      projectId,
+      expectedVersion: 1,
+      credentialRef: `env:${keys[index * 2 + 1]}`,
+      enabled: false,
+      guidance: "",
+      candidateProfileIds: [],
+    });
+  }
+  for (const [index, key] of keys.entries())
+    process.env[key] = `CaptureAccessCanary${index}`;
+  // Each item isolates one exclusion, so another reference cannot hide a missed key/value.
+  const captureTexts = keys.flatMap((key, index) => [
+      ...(index < 4 ? [`Reference env:${key}`, `Key ${key}`] : []),
+      `Value CaptureAccessCanary${index}`,
+    ]),
+    futureTexts = keys.map((_, index) => `Value RotatedAccessCanary${index}`);
+  runtime.plan({
+    id: "reference-history-turn",
+    beforeReturn: (active, threadId, turnId) => {
+      for (const [index, text] of [
+        ...captureTexts,
+        ...futureTexts,
+        "Ordinary public update",
+      ].entries()) {
+        const itemId = `reference-${index}`;
+        active.emit({ threadId, turnId, itemId, kind: "started" });
+        active.emit({ threadId, turnId, itemId, kind: "completed", text });
+      }
+    },
+  });
+  f.activate();
+  const bound = await runtime.waitForTurnStart();
+  runtime.complete(bound.turnId);
+  await waitForExecutionState(f.service, f.workId, "completed");
+  const stored = JSON.stringify(
+    query(
+      f.root,
+      "SELECT text FROM conversation_history_items WHERE workId = ?",
+      f.workId,
+    ),
+  );
+  assert.ok(stored.includes("Ordinary public update"));
+  for (const [index, key] of keys.entries()) {
+    if (index < 4) assert.equal(stored.includes(key), false, key);
+    assert.equal(stored.includes(`CaptureAccessCanary${index}`), false);
+    assert.ok(stored.includes(`RotatedAccessCanary${index}`));
+    process.env[key] = `RotatedAccessCanary${index}`;
+  }
+  const read = JSON.stringify(
+    f.service.coordinationView().readAssignmentHistory(f.assignmentId),
+  );
+  assert.ok(read.includes("Ordinary public update"));
+  for (const [index, key] of keys.entries()) {
+    if (index < 4) assert.equal(read.includes(key), false, key);
+    assert.equal(read.includes(`RotatedAccessCanary${index}`), false);
+  }
+});

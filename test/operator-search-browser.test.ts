@@ -52,8 +52,14 @@ test("shared Search preserves exact historical target, dates, selected focus and
     .click();
   await page.locator(`[data-search-record="${r.resultId}"]`).waitFor();
   const searchURL = page.url();
-  assert.ok(await page.getByText(/Alpha · result/).count());
-  assert.ok(await page.getByText(/Beta · result/).count());
+  await page
+    .getByText(/Alpha · result/)
+    .first()
+    .waitFor({ state: "attached" });
+  await page
+    .getByText(/Beta · result/)
+    .first()
+    .waitFor({ state: "attached" });
   const desktopBounds = await page
     .locator(
       '.search-workspace select, .search-workspace input[type="date"], .search-matches a',

@@ -498,6 +498,13 @@ input and shows the newer version, and an unknown outcome blocks further edits
 until the original save is checked. Saving never resumes work, clears holds or
 grants access by implication.
 
+Project, task list, composer, runtime settings and assignment recovery reads
+rebuild once if project or profile instruction revisions change while the read is
+in flight; a second change makes the read unavailable. Credential and workspace
+fences still reject changed access material. Comment send receipts recheck
+visibility, task version and workspace after loading their redaction exclusions;
+a conflict does not undo the recorded provider operation or authorize a resend.
+
 Phone layouts support checking progress, creating tasks, messaging, answering
 questions and reviewing approvals. Complex configuration and recovery are
 desktop-first; narrow screens must still explain the current state and next step.
@@ -1021,7 +1028,9 @@ The assignment view retains sanitized completed assistant text bound to the exac
 task, assignment, work and runtime turn, including its instruction and conversation
 revisions. Partial text is not persisted. The view labels unfinished or omitted
 items and limits the displayed item history; it is not a complete model/tool
-transcript. Known private instructions, declared credential references and values,
+transcript. Known private instructions, all projects' declared routing, GitHub
+source and delivery credential references, their environment key names and values,
+environment values whose names match `TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL`,
 and workspace/control paths are excluded before storage; current exclusions are
 also applied when reading history. If safe redaction is unavailable, text is
 omitted. Diagnostic capture failures and missing history cannot establish

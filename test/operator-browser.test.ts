@@ -376,8 +376,14 @@ test("Chromium verifies the independent login and guarded browser session", asyn
     await page.locator("body").innerText(),
     /Private browser project/,
   );
-  assert.ok(await page.getByRole("link", { name: "Runtime" }).count());
-  assert.ok(await page.getByRole("link", { name: "Coordination" }).count());
+  await page
+    .getByRole("link", { name: "Runtime" })
+    .first()
+    .waitFor({ state: "attached" });
+  await page
+    .getByRole("link", { name: "Coordination" })
+    .first()
+    .waitFor({ state: "attached" });
   await page.getByRole("link", { name: "Runtime", exact: true }).click();
   assert.match(
     await page.locator("body").innerText(),

@@ -373,6 +373,21 @@ const verifiedTerminationSchema = z
   })
   .strict();
 
+// Binds the task id three times: ambiguity hold, writer hold, execution bindings.
+const archiveUnblockedClause = `NOT EXISTS (
+            SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?
+          ) AND NOT EXISTS (
+            SELECT 1 FROM task_writer_holds WHERE taskId = ?
+          ) AND NOT EXISTS (
+            SELECT 1 FROM task_execution_bindings b
+            JOIN execution_intents e ON e.workId = b.workId
+            WHERE b.taskId = ?
+            AND e.state IN ('ready','capacity-waiting','held','submitting','running')
+            AND NOT EXISTS (
+              SELECT 1 FROM execution_request_refusals r WHERE r.workId = e.workId
+            )
+          )`;
+
 function recoveryReason(kind: string): string {
   switch (kind) {
     case "exact-live":
@@ -976,19 +991,7 @@ export class ExecutionState {
           SELECT ?, 'Task archival in progress'
           WHERE NOT EXISTS (
             SELECT 1 FROM task_archival_holds WHERE taskId = ?
-          ) AND NOT EXISTS (
-            SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?
-          ) AND NOT EXISTS (
-            SELECT 1 FROM task_writer_holds WHERE taskId = ?
-          ) AND NOT EXISTS (
-            SELECT 1 FROM task_execution_bindings b
-            JOIN execution_intents e ON e.workId = b.workId
-            WHERE b.taskId = ?
-            AND e.state IN ('ready','capacity-waiting','held','submitting','running')
-            AND NOT EXISTS (
-              SELECT 1 FROM execution_request_refusals r WHERE r.workId = e.workId
-            )
-          ) RETURNING taskId`)
+          ) AND ${archiveUnblockedClause} RETURNING taskId`)
           .get(id, id, id, id, id) !== undefined;
       return acquired;
     });
@@ -1009,19 +1012,7 @@ export class ExecutionState {
         this.db
           .prepare(`SELECT 1 FROM task_archival_holds archival
           WHERE archival.taskId = ?
-          AND NOT EXISTS (
-            SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?
-          ) AND NOT EXISTS (
-            SELECT 1 FROM task_writer_holds WHERE taskId = ?
-          ) AND NOT EXISTS (
-            SELECT 1 FROM task_execution_bindings b
-            JOIN execution_intents e ON e.workId = b.workId
-            WHERE b.taskId = ?
-            AND e.state IN ('ready','capacity-waiting','held','submitting','running')
-            AND NOT EXISTS (
-              SELECT 1 FROM execution_request_refusals r WHERE r.workId = e.workId
-            )
-          )`)
+          AND ${archiveUnblockedClause}`)
           .get(id, id, id, id) !== undefined;
       return confirmed;
     });
@@ -2426,8 +2417,7 @@ export class ExecutionState {
     rejection: ArchivedResumeRejection,
   ): boolean {
     const value = archivedResumeRejectionSchema.parse(rejection);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return transaction(this.db, () => {
       const context = this.preTurnContext(workId);
       const intent = this.db
         .prepare("SELECT id,state FROM execution_intents WHERE workId=?")
@@ -2439,10 +2429,8 @@ export class ExecutionState {
         value.processIdentity.processId !== context.processId ||
         value.processIdentity.processStartedAt !== context.processStartedAt ||
         value.processIdentity.bootId !== context.bootId
-      ) {
-        this.db.exec("ROLLBACK");
+      )
         return false;
-      }
       this.db
         .prepare(
           "INSERT INTO execution_pre_turn_rejections (id,workId,source,contextMaterial,evidenceMaterial) VALUES (?,?,'runtime',?,?)",
@@ -2457,12 +2445,8 @@ export class ExecutionState {
         intent.id,
         `Runtime submission or observation uncertain: Error: ${JSON.stringify(value.error)}`,
       );
-      this.db.exec("COMMIT");
       return true;
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+    });
   }
   adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption): {
     witnessId: string;
@@ -2995,13 +2979,6 @@ export class ExecutionState {
     );
   }
 
-  runtimeQuestionFailureTarget(
-    threadId: string,
-    turnId: string,
-  ): ExecutionIntent | undefined {
-    return this.executionsForRuntimeIdentity(threadId, turnId)[0];
-  }
-
   holdReadyOnStartupFailure(reason: string): void {
     this.db
       .prepare(`UPDATE execution_intents SET state = 'held', reason = ?
@@ -3096,21 +3073,6 @@ export class ExecutionState {
       turnId: z.string().min(1).nullable().parse(row.turnId),
       processIdentity,
     };
-  }
-
-  recoveryCandidates(): RecoveryExecutionIdentity[] {
-    const workIds = this.db
-      .prepare(`SELECT identity.workId
-      FROM execution_recovery_identities identity
-      JOIN execution_intents intent ON intent.workId = identity.workId
-      WHERE intent.state IN ('held','submitting','running')
-      AND EXISTS (SELECT 1 FROM task_writer_admissions admission WHERE admission.workId = intent.workId)
-      ORDER BY intent.rowid`)
-      .all() as Array<{ workId: string }>;
-    return workIds.flatMap(({ workId }) => {
-      const identity = this.recoveryIdentity(workId);
-      return identity ? [identity] : [];
-    });
   }
 
   admittedWorkIds(): string[] {

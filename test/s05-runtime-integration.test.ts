@@ -28,7 +28,7 @@ function executableFixture(root: string, mode: FixtureMode) {
     `#!/usr/bin/env node
 import { createInterface } from "node:readline";
 import { closeSync } from "node:fs";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
 
 const mode = ${JSON.stringify(mode)};
 const proofPath = ${JSON.stringify(proofPath)};
@@ -37,7 +37,12 @@ try {
   previousTurns = JSON.parse(readFileSync(proofPath, "utf8")).turnStarts ?? 0;
 } catch {}
 const proof = { turnStarts: previousTurns, responses: [], threadPolicy: null, policy: null, terminalSent: false };
-const save = () => writeFileSync(proofPath, JSON.stringify(proof));
+// Publish complete snapshots while the parent polls this file.
+const save = () => {
+  const temporary = proofPath + ".tmp";
+  writeFileSync(temporary, JSON.stringify(proof));
+  renameSync(temporary, proofPath);
+};
 const send = (message) => process.stdout.write(JSON.stringify(message) + "\\n");
 const responseMethods = new Map();
 let threadId = "s05-thread";

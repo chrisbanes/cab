@@ -12,6 +12,7 @@ import type {
   FolderListing,
 } from "../operator/contracts.js";
 import type { DiscoveryReader } from "./github-discovery.js";
+import { isWithin } from "./workspace-inspection.js";
 
 /** Test seams for guided setup: the home folder and the discovery reader factory. */
 export interface OperatorSetupSeams {
@@ -68,8 +69,7 @@ async function insideHome(home: string, target: string) {
   } catch {
     throw new FolderAccessError(404);
   }
-  if (real !== root && !real.startsWith(root + sep))
-    throw new FolderAccessError(403);
+  if (!isWithin(root, real)) throw new FolderAccessError(403);
   // A symlink may resolve into a dot-folder inside home; that is hidden too.
   if (
     real

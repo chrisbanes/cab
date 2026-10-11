@@ -134,9 +134,6 @@ export class TaskChangesState {
   refreshNotice: { key: string; text: string } | null = null;
   comparisonReads: Record<string, WorkspaceComparisonRead["data"]> = {};
   repositoryIds: string[] = [];
-  repositoryState: WorkspaceDirectory["state"] | null = null;
-  repositoryObservedAt: number | null = null;
-  repositoryReadFailed = false;
   readingScrollTop = 0;
 }
 
