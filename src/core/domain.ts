@@ -80,6 +80,8 @@ const commandSchema = z.discriminatedUnion("type", [
       paused: z.boolean().optional(),
       instructions: prose.optional(),
       leadProfileId: id.nullable().optional(),
+      // Applies to executions admitted afterwards; absent leaves it unchanged.
+      diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
     })
     .strict(),
   z
@@ -386,7 +388,8 @@ export class DomainStore {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
     transaction(this.db, () => {
-      this.db.exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
+      this.db
+        .exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS domain_projects (
           id TEXT PRIMARY KEY REFERENCES projects(id), name TEXT NOT NULL,
           version INTEGER NOT NULL, paused INTEGER NOT NULL CHECK(paused IN (0,1)),
@@ -478,6 +481,10 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS claude_runtime_credentials (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
+        );
+        CREATE TABLE IF NOT EXISTS project_diagnostic_capture (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          mode TEXT NOT NULL CHECK(mode IN ('enhanced', 'baseline'))
         );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -980,10 +987,12 @@ export class DomainStore {
 
   readyTasksWithLead(): Row[] {
     return this.db
-      .prepare(`SELECT t.id, t.projectId, t.version, p.leadProfileId
+      .prepare(
+        `SELECT t.id, t.projectId, t.version, p.leadProfileId
         FROM domain_tasks t JOIN domain_projects p ON p.id = t.projectId
         WHERE t.ready = 1 AND t.state = 'open' AND p.leadProfileId IS NOT NULL
-        ORDER BY t.rowid`)
+        ORDER BY t.rowid`,
+      )
       .all() as Row[];
   }
 
@@ -995,7 +1004,8 @@ export class DomainStore {
   ): { rows: Row[]; total: number } {
     const where = `a.${target === "projectId" ? "projectId" : "profileId"} = ?`;
     const rows = this.db
-      .prepare(`SELECT a.id, a.taskId, a.projectId, a.profileId, a.state,
+      .prepare(
+        `SELECT a.id, a.taskId, a.projectId, a.profileId, a.state,
         a.profileRevision, a.instructionsRevision,
         pr.version AS currentProfileRevision,
         p.instructionsRevision AS currentInstructionsRevision,
@@ -1003,7 +1013,8 @@ export class DomainStore {
         FROM domain_assignments a
         JOIN profiles pr ON pr.id = a.profileId
         JOIN domain_projects p ON p.id = a.projectId
-        WHERE ${where} ORDER BY a.rowid LIMIT ?`)
+        WHERE ${where} ORDER BY a.rowid LIMIT ?`,
+      )
       .all(id.parse(targetId), limit) as Row[];
     const count = this.required(
       `SELECT COUNT(*) AS total FROM domain_assignments a WHERE ${where}`,
@@ -1014,8 +1025,10 @@ export class DomainStore {
 
   leadBindings(): Row[] {
     return this.db
-      .prepare(`SELECT taskId, projectId, profileId, profileRevision,
-        instructionsRevision, assignmentId FROM task_lead_bindings ORDER BY rowid`)
+      .prepare(
+        `SELECT taskId, projectId, profileId, profileRevision,
+        instructionsRevision, assignmentId FROM task_lead_bindings ORDER BY rowid`,
+      )
       .all() as Row[];
   }
 
@@ -1032,9 +1045,11 @@ export class DomainStore {
     const profile = this.activeProfile(String(leadProfileId));
     transaction(this.db, () => {
       this.db
-        .prepare(`INSERT OR IGNORE INTO task_lead_bindings
+        .prepare(
+          `INSERT OR IGNORE INTO task_lead_bindings
           (taskId, projectId, profileId, profileRevision, instructionsRevision, assignmentId)
-          VALUES (?, ?, ?, ?, ?, ?)`)
+          VALUES (?, ?, ?, ?, ?, ?)`,
+        )
         .run(
           key,
           present(task, "projectId"),
@@ -1203,6 +1218,15 @@ export class DomainStore {
   }
 
   /** Internal credential reference for the TypeSafe adapter; never part of routing(). */
+  /** Diagnostic capture for new executions; no row means the default, enhanced. */
+  diagnosticCaptureMode(projectId: string): "enhanced" | "baseline" {
+    const row = this.one(
+      "SELECT mode FROM project_diagnostic_capture WHERE projectId = ?",
+      id.parse(projectId),
+    );
+    return row?.mode === "baseline" ? "baseline" : "enhanced";
+  }
+
   routingCredentialReference(projectId: string): string | null {
     const row = this.required(
       "SELECT credentialRef FROM project_routing WHERE projectId = ?",
@@ -1326,11 +1350,13 @@ export class DomainStore {
           )
             reasons.push("source-hold");
           const memberships = this.db
-            .prepare(`SELECT CASE WHEN a.configVersion = c.version THEN s.complete ELSE 0 END AS complete FROM github_memberships m
+            .prepare(
+              `SELECT CASE WHEN a.configVersion = c.version THEN s.complete ELSE 0 END AS complete FROM github_memberships m
             LEFT JOIN github_sync_state s ON s.projectId = m.projectId AND s.selectionId = m.selectionId
             LEFT JOIN project_github_active a ON a.projectId = m.projectId AND a.selectionId = m.selectionId
             JOIN project_github_sources c ON c.projectId = m.projectId
-            WHERE m.nodeId = ? AND m.projectId = ?`)
+            WHERE m.nodeId = ? AND m.projectId = ?`,
+            )
             .all(String(external.nodeId), String(task.projectId)) as Row[];
           if (memberships.length === 0) {
             const closureOnlyHold =
@@ -1630,6 +1656,12 @@ export class DomainStore {
             revision,
             command.projectId,
           );
+        if (command.diagnosticCapture !== undefined)
+          this.db
+            .prepare(
+              "INSERT INTO project_diagnostic_capture (projectId, mode) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET mode = excluded.mode",
+            )
+            .run(command.projectId, command.diagnosticCapture);
         return this.project(command.projectId);
       }
       case "task.create": {
@@ -1828,9 +1860,11 @@ export class DomainStore {
             selections.map((selection) => selection.id),
           );
           const members = this.db
-            .prepare(`SELECT DISTINCT e.taskId FROM github_memberships m
+            .prepare(
+              `SELECT DISTINCT e.taskId FROM github_memberships m
             JOIN github_external_issues e ON e.nodeId = m.nodeId
-            WHERE m.projectId = ? AND m.selectionId NOT IN (SELECT value FROM json_each(?))`)
+            WHERE m.projectId = ? AND m.selectionId NOT IN (SELECT value FROM json_each(?))`,
+            )
             .all(command.projectId, selectionIds) as Row[];
           const affectedTasks = members.map((member) => String(member.taskId));
           for (const table of [
@@ -1851,24 +1885,32 @@ export class DomainStore {
             )
             .run(command.projectId);
           this.db
-            .prepare(`UPDATE domain_tasks SET importedBlockers = 'unknown'
-            WHERE projectId = ? AND id IN (SELECT taskId FROM github_imported_tasks)`)
+            .prepare(
+              `UPDATE domain_tasks SET importedBlockers = 'unknown'
+            WHERE projectId = ? AND id IN (SELECT taskId FROM github_imported_tasks)`,
+            )
             .run(command.projectId);
           this.db
-            .prepare(`UPDATE github_dependency_observations SET complete = 0, reason = 'configuration-changed'
+            .prepare(
+              `UPDATE github_dependency_observations SET complete = 0, reason = 'configuration-changed'
             WHERE nodeId IN (SELECT nodeId FROM github_imported_tasks WHERE taskId IN
-              (SELECT id FROM domain_tasks WHERE projectId = ?))`)
+              (SELECT id FROM domain_tasks WHERE projectId = ?))`,
+            )
             .run(command.projectId);
           this.db
-            .prepare(`UPDATE domain_tasks SET version = version + 1 WHERE id IN (
+            .prepare(
+              `UPDATE domain_tasks SET version = version + 1 WHERE id IN (
             SELECT d.taskId FROM local_dependencies d JOIN github_imported_tasks i ON i.taskId = d.blockerTaskId
             JOIN domain_tasks b ON b.id = i.taskId JOIN github_issue_status s ON s.nodeId = i.nodeId
-            WHERE b.projectId = ? AND s.status = 'closed')`)
+            WHERE b.projectId = ? AND s.status = 'closed')`,
+            )
             .run(command.projectId);
           this.db
-            .prepare(`UPDATE github_issue_status SET status = 'unknown', reason = 'configuration-changed'
+            .prepare(
+              `UPDATE github_issue_status SET status = 'unknown', reason = 'configuration-changed'
             WHERE nodeId IN (SELECT i.nodeId FROM github_imported_tasks i
-              JOIN domain_tasks t ON t.id = i.taskId WHERE t.projectId = ?)`)
+              JOIN domain_tasks t ON t.id = i.taskId WHERE t.projectId = ?)`,
+            )
             .run(command.projectId);
           this.db
             .prepare(
@@ -2214,9 +2256,11 @@ export class DomainStore {
               .run(projectId);
           else
             this.db
-              .prepare(`INSERT INTO scheduler_project_capacity_limits
+              .prepare(
+                `INSERT INTO scheduler_project_capacity_limits
                 (projectId, projectLimit) VALUES (?, ?)
-                ON CONFLICT(projectId) DO UPDATE SET projectLimit = excluded.projectLimit`)
+                ON CONFLICT(projectId) DO UPDATE SET projectLimit = excluded.projectLimit`,
+              )
               .run(projectId, projectLimit);
         }
         return this.capacityLimits(Object.keys(command.projectOverrides));
@@ -2240,11 +2284,13 @@ export class DomainStore {
     );
     const task = this.task(taskId);
     this.db
-      .prepare(`INSERT OR IGNORE INTO domain_assignments
+      .prepare(
+        `INSERT OR IGNORE INTO domain_assignments
         (id, taskId, projectId, version, profileId, profileRevision,
           instructionsRevision, brief, resultDestination, requesterAssignmentId,
           resultRecipientAssignmentId, resultRecipientDisposition, state)
-        VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'lead', NULL, ?, 'resolved', 'pending')`)
+        VALUES (?, ?, ?, 1, ?, ?, ?, ?, 'lead', NULL, ?, 'resolved', 'pending')`,
+      )
       .run(
         assignmentId,
         taskId,

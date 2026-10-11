@@ -143,6 +143,7 @@ const projectGet: BrowseCommand = {
             "Instructions",
             `revision ${d.instructionsRevision}, ${d.instructionPresent ? "present" : "empty"}`,
           ],
+          ["Diagnostic capture", d.diagnosticCapture ?? "not reported"],
           [
             "Routing",
             `${d.routing.availability} (${d.routing.enabled ? "enabled" : "disabled"}, ${d.routing.candidateProfileIds.length} candidates)`,

@@ -25,12 +25,7 @@ const text = z.string().max(16000);
 const safeText = text.nullable();
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 const scalar = z.union([z.null(), z.boolean(), z.number().finite(), text]);
 let boundedJson: z.ZodType<JsonValue> = scalar;
 for (let depth = 0; depth < 12; depth++) {
@@ -1849,6 +1844,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       paused: z.boolean().optional(),
       leadProfileId: uuid.nullable().optional(),
       instructions: text.optional(),
+      diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
     })
     .strict(),
   z
@@ -2243,6 +2239,8 @@ export const projectConfigurationSchema = envelope(
       profiles: z.array(profileSummarySchema),
       instructionsRevision: revision,
       instructionPresent: z.boolean(),
+      /** Optional so older services still parse; absent means not reported. */
+      diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       routing: z
         .object({
           version: revision,

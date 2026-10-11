@@ -262,12 +262,12 @@ function exactRetainedAnchorExcerpt(
   const range = retainedAnchorRange(source, anchor.startLine, anchor.endLine);
   return Boolean(
     range &&
-      range.byteStart === anchor.byteStart &&
-      range.byteEnd === anchor.byteEnd &&
-      range.bytes.equals(excerpt) &&
-      range.bytes.byteLength === anchor.size &&
-      createHash("sha256").update(range.bytes).digest("hex") ===
-        anchor.excerptSha256,
+    range.byteStart === anchor.byteStart &&
+    range.byteEnd === anchor.byteEnd &&
+    range.bytes.equals(excerpt) &&
+    range.bytes.byteLength === anchor.size &&
+    createHash("sha256").update(range.bytes).digest("hex") ===
+      anchor.excerptSha256,
   );
 }
 function retainedTextLineCount(text: string) {
@@ -636,10 +636,10 @@ export class OperatorApi {
   ) {
     return Boolean(
       current &&
-        current.taskId === initial.taskId &&
-        current.projectId === initial.projectId &&
-        current.taskVersion === initial.taskVersion &&
-        current.fingerprint === initial.fingerprint,
+      current.taskId === initial.taskId &&
+      current.projectId === initial.projectId &&
+      current.taskVersion === initial.taskVersion &&
+      current.fingerprint === initial.fingerprint,
     );
   }
   private async retainedPathUnavailable(
@@ -3764,6 +3764,7 @@ export class OperatorApi {
         profiles: this.profiles(excluded),
         instructionsRevision: Number(p.instructionsRevision),
         instructionPresent: Boolean(p.instructions),
+        diagnosticCapture: d.diagnosticCaptureMode(projectId),
         placements: this.service
           .githubSources()
           .conflicts()
