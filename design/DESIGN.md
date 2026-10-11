@@ -1382,8 +1382,7 @@ frames 114 and 118–128 as follows:
 - The Settings index has no discovery-credential row (U7 #841 owns it). The
   header keeps Refresh on every settings route, including Create profile, and it
   re-reads the open page's own resources.
-- Switches are native checkboxes drawn as switches; the destructive tint of
-  Revoke profile uses the existing destructive tokens.
+- Switches are native checkboxes drawn as switches.
 
 ## Using this snapshot
 

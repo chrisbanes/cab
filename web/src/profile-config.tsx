@@ -238,11 +238,10 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                   <div>
                     <Button
                       type="button"
-                      variant="secondary"
-                      className={
+                      variant={
                         toggleLabel === "Revoke profile"
-                          ? "settings-destructive"
-                          : undefined
+                          ? "destructive"
+                          : "secondary"
                       }
                       disabled={locked(d)}
                       onClick={() => d.set("revoked", !revoked)}

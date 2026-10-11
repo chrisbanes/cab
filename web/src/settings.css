@@ -292,12 +292,6 @@
   transform: translateX(16px);
 }
 
-.settings-destructive[data-slot="button"] {
-  border-color: transparent;
-  background: var(--nova-destructive-bg);
-  color: var(--nova-destructive-fg);
-}
-
 /* Breadcrumb and the phone title, shared by the page header. */
 .page-header-trail {
   flex-direction: row;
