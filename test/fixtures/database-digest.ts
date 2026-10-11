@@ -2,9 +2,10 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 /** Digest of every persisted row except CLI credential last-use metadata. */
-export function databaseDigest(f: {
-  seedPersistedState(seed: (db: DatabaseSync) => void): void;
-}): string {
+export function databaseDigest(
+  f: { seedPersistedState(seed: (db: DatabaseSync) => void): void },
+  skipTable: (name: string) => boolean = () => false,
+): string {
   const hash = createHash("sha256");
   f.seedPersistedState((db) => {
     const tables = db
@@ -13,7 +14,7 @@ export function databaseDigest(f: {
       )
       .all() as { name: string }[];
     for (const { name } of tables) {
-      if (name === "operator_cli_credentials") continue;
+      if (name === "operator_cli_credentials" || skipTable(name)) continue;
       const rows = db.prepare(`SELECT * FROM "${name}"`).all();
       hash.update(
         `${name}\n${JSON.stringify(
