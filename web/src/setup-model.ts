@@ -185,3 +185,11 @@ export function discoveryReasonCopy(reason: DiscoveryUnavailableReason) {
       return "GitHub discovery is unavailable: GitHub couldn't be read.";
   }
 }
+
+/** The folder to open first: the chosen path's parent when it is home-relative, else `~`. */
+export function pickerStart(path: string) {
+  const parts = path.trim().replace(/\/+$/, "").split("/");
+  return parts[0] === "~" && parts.length > 1
+    ? parts.slice(0, -1).join("/") || "~"
+    : "~";
+}

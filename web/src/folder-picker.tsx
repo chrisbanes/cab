@@ -3,7 +3,7 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import type { FolderListing } from "../../src/operator/contracts.js";
 import { ClientError, type OperatorClient } from "./api.js";
 import { Button, StatusBadge } from "./components.js";
-import { folderCaption, folderMatches } from "./setup-model.js";
+import { folderCaption, folderMatches, pickerStart } from "./setup-model.js";
 import {
   Dialog,
   DialogClose,
@@ -19,13 +19,6 @@ type Listing =
   | { state: "ready"; data: FolderListing["data"] }
   | { state: "failed"; message: string };
 
-/** The folder to open first: the chosen path's parent when it is home-relative, else `~`. */
-export function pickerStart(path: string) {
-  const parts = path.trim().replace(/\/+$/, "").split("/");
-  return parts[0] === "~" && parts.length > 1
-    ? parts.slice(0, -1).join("/") || "~"
-    : "~";
-}
 const failure = (error: unknown) =>
   error instanceof ClientError && (error.status === 403 || error.status === 400)
     ? "Folders outside your home folder can't be browsed. Type a path instead."

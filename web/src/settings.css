@@ -376,6 +376,7 @@
 
   .settings-page a[data-slot="button"],
   .settings-page button,
+  .settings-discovery input,
   .settings-tabs a {
     min-height: 44px;
   }

@@ -88,8 +88,10 @@ export function ProjectSetup(p: SettingsProps) {
   }, [p.client, csrf, attempt]);
   const ready = discovery.state === "ready" ? discovery : null;
   // A row with nothing chosen follows the current discovery state.
+  const mode: SetupRow["source"] =
+    discovery.state === "unavailable" ? "typed" : "discovered";
   const sourceOf = (r: SetupRow): SetupRow["source"] =>
-    r.repositoryId || r.text ? r.source : ready ? "discovered" : "typed";
+    r.repositoryId || r.text ? r.source : mode;
 
   // Branch lists per discovered repository; nothing is stored.
   const [branches, setBranches] = useState<Record<string, Branches>>({});
@@ -200,6 +202,36 @@ export function ProjectSetup(p: SettingsProps) {
       );
   };
 
+  // Once discovery recovers, typed rows naming a listed repository take its node ID.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: adopt only when a repository list lands.
+  useEffect(() => {
+    if (!ready || locked(d)) return;
+    const adopted: SetupRow[] = [];
+    const next = rows.map((r) => {
+      const match =
+        r.source === "typed" && r.owner
+          ? ready.repositories.find(
+              (x) =>
+                `${x.owner}/${x.name}`.toLowerCase() ===
+                repoOf(r).toLowerCase(),
+            )
+          : undefined;
+      if (!match) return r;
+      const row: SetupRow = {
+        ...r,
+        source: "discovered",
+        text: "",
+        repositoryId: match.repositoryId,
+        owner: match.owner,
+        name: match.name,
+      };
+      adopted.push(row);
+      return row;
+    });
+    if (!adopted.length) return;
+    setRows(next);
+    for (const row of adopted) verify(row);
+  }, [ready]);
   const values = {
     key: String(d.values.key ?? ""),
     projectId: String(d.values.projectId ?? ""),
@@ -220,8 +252,14 @@ export function ProjectSetup(p: SettingsProps) {
   const duplicates = duplicateRows(rows);
   const rejectedFields =
     d.phase === "rejected" && Object.keys(d.errors).length > 0;
-  const update = (i: number, row: SetupRow) =>
+  const update = (i: number, row: SetupRow) => {
+    // Editing a row retires the service's error for it; the next create checks again.
+    const k = rowIndex.indexOf(i);
+    if (k >= 0)
+      for (const field of Object.keys(d.errors))
+        if (field.startsWith(`repositories.${k}.`)) delete d.errors[field];
     setRows(rows.map((r, j) => (j === i ? row : r)));
+  };
   const recorded = d.phase === "recorded" ? d.frozen : null;
   const profiles = p.workspace?.data.profiles.filter((r) => !r.revoked) ?? [];
   const firstRun = p.workspace?.data.projects.length === 0;
@@ -393,7 +431,7 @@ export function ProjectSetup(p: SettingsProps) {
               <fieldset
                 key={row.id}
                 className="setup-row"
-                aria-label={i === 0 ? "Repository" : `Repository ${i + 1}`}
+                aria-label={`Repository row ${i + 1}`}
               >
                 <div className="settings-fields">
                   {source === "discovered" ? (
@@ -611,9 +649,7 @@ export function ProjectSetup(p: SettingsProps) {
                 type="button"
                 variant="secondary"
                 disabled={disabled}
-                onClick={() =>
-                  setRows([...rows, emptyRow(ready ? "discovered" : "typed")])
-                }
+                onClick={() => setRows([...rows, emptyRow(mode)])}
               >
                 Add another repository
               </Button>
@@ -677,6 +713,7 @@ function SetupField({
   caption?: ReactNode;
   children: (props: {
     id: string;
+    "aria-label": string;
     className: string;
     "aria-invalid": boolean;
     "aria-describedby": string;
@@ -689,6 +726,7 @@ function SetupField({
         {label}
         {children({
           id,
+          "aria-label": label,
           className: "control",
           "aria-invalid": Boolean(error),
           "aria-describedby": `${id}-note`,
