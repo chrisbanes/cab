@@ -28,6 +28,7 @@ const documented = [
   "result get",
   "result evidence",
   "artifact get",
+  "capacity get",
 ];
 
 test("every documented browse command runs read-only with a coverage envelope", async (t) => {
@@ -91,6 +92,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "result list": [taskId],
     "result get": [taskId, native.resultId],
     "result evidence": [taskId, native.resultId, native.textItem.itemId],
+    "capacity get": [],
     "artifact get": [
       taskId,
       native.artifactId!,
