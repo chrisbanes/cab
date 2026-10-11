@@ -235,7 +235,7 @@ test("the packed CLI installs offline and works against a real service over loop
   ]);
   assert.deepEqual(JSON.parse(r.out).data.receipt, applied.data.receipt);
   // CLI5: the inbox read and a receipted Stop through the installed binary.
-  r = await cli(["inbox", "list", "--output", "json"]);
+  r = await cli(["inbox", "list", "--connection", "local", "--output", "json"]);
   assert.equal(r.code, 0, r.err);
   assert.deepEqual(JSON.parse(r.out).data.items, []);
   r = await cli([
