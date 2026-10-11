@@ -543,14 +543,23 @@ test("keeps incomplete delta bytes out of SQLite and redacts both turn-start and
   try {
     f.activate();
     const bound = await runtime.waitForTurnStart();
-    assert.equal(countRows(f.root, workId), 1);
+    await waitUntil(() => countRows(f.root, workId) === 1);
+    // An omission is a deterministic flush trigger for the batched byte count.
+    runtime.emit({
+      threadId: bound.threadId,
+      turnId: bound.turnId,
+      itemId: "flush-trigger",
+      kind: "omitted",
+      reason: "size-limit",
+    });
     const activeRows = query<Record<string, unknown>>(
       f.root,
-      "SELECT * FROM conversation_history_items WHERE workId = ?",
+      "SELECT * FROM conversation_history_items WHERE workId = ? AND itemId = 'rotating-item'",
       workId,
     );
     assert.equal(activeRows[0]?.text, null);
     assert.equal(activeRows[0]?.lifecycle, "streaming");
+    assert.equal(activeRows[0]?.deltaBytes, 12);
 
     currentSecret = "ROTATED_NEW_SECRET_CANARY";
     runtime.emit({
@@ -564,13 +573,59 @@ test("keeps incomplete delta bytes out of SQLite and redacts both turn-start and
     await waitForExecutionState(f.service, workId, "completed");
     const completed = query<{ text: string | null }>(
       f.root,
-      "SELECT text FROM conversation_history_items WHERE workId = ?",
+      "SELECT text FROM conversation_history_items WHERE workId = ? AND itemId = 'rotating-item'",
       workId,
     )[0]?.text;
     assert.ok(completed);
     assert.ok(!completed.includes("ROTATED_OLD_SECRET_CANARY"));
     assert.ok(!completed.includes("ROTATED_NEW_SECRET_CANARY"));
     assert.match(completed, /Completed/);
+  } finally {
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("turn end and service shutdown write pending delta byte counts", async () => {
+  const runtime = new HistoryRuntime();
+  const f = await fixture(runtime);
+  const second = await createTaskAssignment(
+    f.service,
+    f.projectId,
+    f.profileId,
+  );
+  runtime.plan({ id: "ending-turn" }, { id: "shutdown-turn" });
+  const rows = (workId: string) =>
+    query<Record<string, unknown>>(
+      f.root,
+      "SELECT lifecycle, omissionReason, deltaBytes FROM conversation_history_items WHERE workId = ?",
+      workId,
+    ).map((row) => ({ ...row }));
+
+  try {
+    const initialStarts = runtime.turnStarts;
+    f.activate();
+    const endingTurn = await runtime.waitForTurnStart(initialStarts);
+    const startsBeforeSecond = runtime.turnStarts;
+    second.activate();
+    const stayingTurn = await runtime.waitForTurnStart(startsBeforeSecond);
+    for (const [turn, itemId, bytes] of [
+      [endingTurn, "ending-item", 7],
+      [stayingTurn, "staying-item", 5],
+    ] as const) {
+      runtime.emit({ ...turn, itemId, kind: "started" });
+      runtime.emit({ ...turn, itemId, kind: "delta", bytes });
+    }
+    runtime.complete(endingTurn.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+    assert.deepEqual(rows(f.workId), [
+      { lifecycle: "omitted", omissionReason: "turn-ended", deltaBytes: 7 },
+    ]);
+
+    await f.service.stop();
+    assert.deepEqual(rows(second.workId), [
+      { lifecycle: "streaming", omissionReason: null, deltaBytes: 5 },
+    ]);
   } finally {
     await f.service.stop().catch(() => {});
     rmSync(f.root, { recursive: true, force: true });
