@@ -15,6 +15,11 @@ import {
   type LinkedRepository,
 } from "./github-source.js";
 import { setupRepositorySchema } from "./github-source-contracts.js";
+import {
+  defaultProfileRuntime,
+  profileRuntimeSchema,
+  type ProfileRuntime,
+} from "./execution-runtime.js";
 
 const id = z.string().uuid();
 const label = z.string().trim().min(1).max(512);
@@ -122,6 +127,7 @@ const commandSchema = z.discriminatedUnion("type", [
       summary: summary.optional(),
       instructions: prose,
       capabilities: prose,
+      runtime: profileRuntimeSchema.optional(),
     })
     .strict(),
   z
@@ -135,6 +141,7 @@ const commandSchema = z.discriminatedUnion("type", [
       instructions: prose.optional(),
       capabilities: prose.optional(),
       revoked: z.boolean().optional(),
+      runtime: profileRuntimeSchema.optional(),
     })
     .strict(),
   z
@@ -377,12 +384,15 @@ export class DomainStore {
           id TEXT PRIMARY KEY, version INTEGER NOT NULL, name TEXT NOT NULL,
           instructions TEXT NOT NULL, capabilities TEXT NOT NULL,
           revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),
-          summary TEXT NOT NULL DEFAULT ''
+          summary TEXT NOT NULL DEFAULT '',
+          runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'
         );
         CREATE TABLE IF NOT EXISTS profile_revisions (
           profileId TEXT NOT NULL REFERENCES profiles(id), revision INTEGER NOT NULL,
           name TEXT NOT NULL, instructions TEXT NOT NULL, capabilities TEXT NOT NULL,
-          revoked INTEGER NOT NULL, PRIMARY KEY(profileId, revision)
+          revoked INTEGER NOT NULL,
+          runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}',
+          PRIMARY KEY(profileId, revision)
         );
         CREATE TABLE IF NOT EXISTS project_routing (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
@@ -488,6 +498,16 @@ export class DomainStore {
         this.db.exec(
           "ALTER TABLE profiles ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
         );
+      // Profiles written before runtime selection all ran on Codex.
+      for (const table of ["profiles", "profile_revisions"])
+        if (
+          !(this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).some(
+            (column) => column.name === "runtime",
+          )
+        )
+          this.db.exec(
+            `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,
+          );
       if (!routingColumns.some((column) => column.name === "brief"))
         this.db.exec(
           "ALTER TABLE routing_operations ADD COLUMN brief TEXT NOT NULL DEFAULT ''",
@@ -993,6 +1013,22 @@ export class DomainStore {
         revision,
       ).instructions,
     );
+  }
+
+  /** The profile's execution runtime, or that of one immutable revision. */
+  profileRuntime(profileId: string, revision?: number): ProfileRuntime {
+    const row =
+      revision === undefined
+        ? this.required(
+            "SELECT runtime FROM profiles WHERE id = ?",
+            id.parse(profileId),
+          )
+        : this.required(
+            "SELECT runtime FROM profile_revisions WHERE profileId = ? AND revision = ?",
+            id.parse(profileId),
+            revision,
+          );
+    return profileRuntimeSchema.parse(JSON.parse(String(row.runtime)));
   }
 
   profileRevision(profileId: string, revision: number): Row {
@@ -1600,7 +1636,7 @@ export class DomainStore {
         this.operator(command);
         this.db
           .prepare(
-            "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked) VALUES (?, 1, ?, ?, ?, ?, 0)",
+            "INSERT INTO profiles (id, version, name, summary, instructions, capabilities, revoked, runtime) VALUES (?, 1, ?, ?, ?, ?, 0, ?)",
           )
           .run(
             command.profileId,
@@ -1608,6 +1644,7 @@ export class DomainStore {
             command.summary ?? "",
             command.instructions,
             command.capabilities,
+            canonical(command.runtime ?? defaultProfileRuntime),
           );
         this.snapshotProfile(command.profileId);
         return this.profile(command.profileId);
@@ -1618,7 +1655,7 @@ export class DomainStore {
         this.version(current, command.expectedVersion);
         this.db
           .prepare(
-            "UPDATE profiles SET version = version + 1, name = ?, summary = ?, instructions = ?, capabilities = ?, revoked = ? WHERE id = ?",
+            "UPDATE profiles SET version = version + 1, name = ?, summary = ?, instructions = ?, capabilities = ?, revoked = ?, runtime = ? WHERE id = ?",
           )
           .run(
             command.name ?? present(current, "name"),
@@ -1628,6 +1665,9 @@ export class DomainStore {
             command.revoked === undefined
               ? present(current, "revoked")
               : Number(command.revoked),
+            canonical(
+              command.runtime ?? this.profileRuntime(command.profileId),
+            ),
             command.profileId,
           );
         this.snapshotProfile(command.profileId);
@@ -2158,7 +2198,7 @@ export class DomainStore {
     const p = this.profile(profileId);
     this.db
       .prepare(
-        "INSERT INTO profile_revisions (profileId, revision, name, instructions, capabilities, revoked) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO profile_revisions (profileId, revision, name, instructions, capabilities, revoked, runtime) VALUES (?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         profileId,
@@ -2167,6 +2207,7 @@ export class DomainStore {
         present(p, "instructions"),
         present(p, "capabilities"),
         present(p, "revoked"),
+        canonical(this.profileRuntime(profileId)),
       );
   }
 

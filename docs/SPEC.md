@@ -482,7 +482,11 @@ together, labelled separately, rather than as two unrelated lists.
 An agent profile has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary
 (for example "Eli · Repairs"). Like capabilities, the summary describes
-suitability; it grants no permission or repository access.
+suitability; it grants no permission or repository access. A profile also selects
+its execution runtime, Codex by default, with harness-specific settings (model and
+reasoning effort for Claude). An assignment conversation keeps the runtime that
+started it; work for an unconfigured or unavailable runtime waits visibly and never
+falls back to another. The Claude runtime is planned, not implemented.
 
 Configuration forms edit current values in place rather than requiring a complete
 replacement. Private values (instructions, routing guidance, search queries and

@@ -2590,6 +2590,7 @@ export class OperatorApi {
                   requestSequence: request.sequence,
                   instructionsRevision: request.instructionsRevision,
                   profileRevision: request.profileRevision,
+                  harness: this.service.bindingHarness(request.workId),
                 }
               : null,
         };
@@ -3317,6 +3318,7 @@ export class OperatorApi {
       .profiles()
       .find((p) => p.id === profileId);
     if (!row) throw new OperatorApiError(404, "not-found");
+    const runtime = this.domain().profileRuntime(profileId);
     const excluded = await this.exclusions();
     return profileConfigurationSchema.parse({
       data: {
@@ -3328,6 +3330,7 @@ export class OperatorApi {
         instructionPresent: Boolean(row.instructions),
         instructionRevision: Number(row.version),
         capabilities: this.safe(row.capabilities, excluded),
+        runtime,
       },
       observedAt: Date.now(),
     });

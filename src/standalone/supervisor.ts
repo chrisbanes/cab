@@ -141,7 +141,10 @@ export class ExecutionSupervisor {
 
   constructor(
     private readonly state: ExecutionState,
-    private readonly runtime: Runtime,
+    /** Resolves the runtime of the work's bound harness; never another. */
+    private readonly runtimeFor: (
+      workId: string,
+    ) => Pick<Runtime, "inspectExecution" | "interruptTurn"> | undefined,
     options: ExecutionSupervisorOptions = {},
     private readonly terminationVerifier: TerminationVerifier = new MacProcessTerminationVerifier(),
   ) {
@@ -163,14 +166,15 @@ export class ExecutionSupervisor {
         this.recordObservation(stored.workId, "no-proof");
         continue;
       }
-      if (!this.runtime.inspectExecution) {
+      const runtime = this.runtimeFor(stored.workId);
+      if (!runtime?.inspectExecution) {
         this.recordObservation(stored.workId, "unknown");
         continue;
       }
       let inspection: ExecutionInspection;
       try {
         inspection = executionInspectionSchema.parse(
-          await this.runtime.inspectExecution(identity),
+          await runtime.inspectExecution(identity),
         );
       } catch {
         this.recordObservation(stored.workId, "unknown");
@@ -421,7 +425,11 @@ export class ExecutionSupervisor {
     }
     if (!claimed) return;
     const action = Promise.resolve()
-      .then(() => this.runtime.interruptTurn(threadId, turnId))
+      .then(() => {
+        const runtime = this.runtimeFor(target.workId);
+        if (!runtime) throw new Error("Runtime unavailable");
+        return runtime.interruptTurn(threadId, turnId);
+      })
       .then(() =>
         this.state.recordStopInterrupt(target.workId, "acknowledged", null),
       )

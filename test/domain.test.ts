@@ -1237,3 +1237,77 @@ test("committed rich creation replays its original receipt after wakeup failure 
     f.close();
   }
 });
+
+test("profiles store a validated execution runtime per revision", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Codex",
+      instructions: "Build",
+      capabilities: "code",
+    });
+    assert.deepEqual(f.domain.profileRuntime(profile), { harness: "codex" });
+    const claude = {
+      harness: "claude" as const,
+      model: "opus",
+      reasoningEffort: "high",
+    };
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: q,
+      name: "Claude",
+      instructions: "Build",
+      capabilities: "code",
+      runtime: claude,
+    });
+    assert.deepEqual(f.domain.profileRuntime(q), claude);
+    assert.deepEqual(f.domain.profileRuntime(q, 1), claude);
+
+    for (const runtime of [
+      { harness: "codex", model: "x" },
+      { harness: "claude", model: "has space", reasoningEffort: null },
+      { harness: "other" },
+    ])
+      assert.throws(() =>
+        run(f.domain, {
+          type: "profile.configure",
+          actor: "operator",
+          profileId: profile,
+          expectedVersion: 1,
+          runtime,
+        } as WithoutKey<DomainCommand>),
+      );
+    assert.equal(f.domain.profile(profile).version, 1);
+    assert.deepEqual(f.domain.profileRuntime(profile), { harness: "codex" });
+
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 1,
+      runtime: { harness: "claude", model: null, reasoningEffort: null },
+    });
+    assert.equal(f.domain.profile(profile).version, 2);
+    assert.deepEqual(f.domain.profileRuntime(profile, 1), { harness: "codex" });
+    assert.deepEqual(f.domain.profileRuntime(profile, 2), {
+      harness: "claude",
+      model: null,
+      reasoningEffort: null,
+    });
+    // Other edits keep the runtime.
+    run(f.domain, {
+      type: "profile.configure",
+      actor: "operator",
+      profileId: profile,
+      expectedVersion: 2,
+      name: "Renamed",
+    });
+    assert.equal(f.domain.profileRuntime(profile, 3).harness, "claude");
+  } finally {
+    f.close();
+  }
+});

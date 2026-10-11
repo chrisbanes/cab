@@ -14,6 +14,10 @@ import {
   feedbackReferenceSchema,
   taskReviewReadSchema,
 } from "../core/task-review-contracts.js";
+import {
+  executionHarnessSchema,
+  profileRuntimeSchema,
+} from "../core/execution-runtime.js";
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
 const time = z.number().int().nonnegative().safe();
@@ -984,6 +988,7 @@ const generation = z
     requestSequence: revision,
     instructionsRevision: revision,
     profileRevision: revision,
+    harness: executionHarnessSchema.nullable(),
   })
   .strict();
 export const assignmentSchema = z
@@ -1826,6 +1831,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       summary: z.string().trim().max(120).optional(),
       instructions: text,
       capabilities: text,
+      runtime: profileRuntimeSchema.optional(),
     })
     .strict(),
   z
@@ -1839,6 +1845,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       instructions: text.optional(),
       capabilities: text.optional(),
       revoked: z.boolean().optional(),
+      runtime: profileRuntimeSchema.optional(),
     })
     .strict(),
   z
@@ -2188,6 +2195,7 @@ export const profileConfigurationSchema = envelope(
       instructionPresent: z.boolean(),
       instructionRevision: revision,
       capabilities: safeText,
+      runtime: profileRuntimeSchema,
     })
     .strict(),
 );
