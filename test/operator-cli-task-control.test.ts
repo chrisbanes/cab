@@ -74,6 +74,17 @@ test("task resume clears only the operator Stop and reports what remains", async
   r = await cli("rw", ["task", "stop", s.taskId]);
   assert.equal(r.json().data.stopInEffect, true);
   assert.equal(stopped(o, s.taskId), true);
+  // The ambiguity stays visible as uncertain execution beside the Stop.
+  const listed = (await (
+    await s.sessionGet(`/api/operator/task-list?projectId=${s.projectId}`)
+  ).json()) as {
+    data: { tasks: { id: string; attention: { codes: string[] } }[] };
+  };
+  assert.ok(
+    listed.data.tasks
+      .find((x) => x.id === s.taskId)
+      ?.attention.codes.includes("execution-uncertain"),
+  );
   assert.equal((await cli("rw", ["task", "resume", s.taskId])).code, 0);
   s.f.seedPersistedState((db) =>
     db
