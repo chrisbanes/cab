@@ -9,7 +9,10 @@ import {
   CoordinationStore,
   type CoordinationToolResponse,
 } from "../src/core/coordination.js";
-import { DomainStore } from "../src/core/domain.js";
+import {
+  DomainStaleDispositionError,
+  DomainStore,
+} from "../src/core/domain.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
 import type {
   RoutingChoiceClient,
@@ -18,6 +21,7 @@ import type {
 } from "../src/standalone/routing.js";
 import { RoutingFailure } from "../src/standalone/routing.js";
 import {
+  type BackgroundFailureDiagnostic,
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../src/standalone/service.js";
@@ -209,6 +213,7 @@ async function routedFixture(
     routingEnabled?: boolean;
     preassign?: "lead" | "worker";
     fillCapacity?: boolean;
+    backgroundDiagnosticSink?: StandaloneServiceOptions["backgroundDiagnosticSink"];
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-s04b-routing-race-"));
@@ -217,7 +222,13 @@ async function routedFixture(
     join(root, "data"),
     () => runtime,
     undefined,
-    { power: { enabled: false }, routingClient: client },
+    {
+      power: { enabled: false },
+      routingClient: client,
+      ...(options.backgroundDiagnosticSink
+        ? { backgroundDiagnosticSink: options.backgroundDiagnosticSink }
+        : {}),
+    },
   );
   const leadProfileId = randomUUID();
   const workerProfileId = randomUUID();
@@ -1046,6 +1057,184 @@ test("revision, routing, candidate and hold changes stale an in-flight recommend
       }
       await f.close();
     }
+  }
+});
+
+async function interceptedRouting(
+  intercept: (
+    original: DomainStore["recordRouting"],
+  ) => DomainStore["recordRouting"],
+) {
+  const firstResponse = deferred<RoutingChoiceResponse>();
+  const client = new FakeRoutingClient((request, index) =>
+    index === 0 ? firstResponse.promise : routeResponse(request, "lead_review"),
+  );
+  const diagnostics: BackgroundFailureDiagnostic[] = [];
+  const f = await routedFixture(client, {
+    backgroundDiagnosticSink: (event) => {
+      diagnostics.push(event);
+    },
+  });
+  await waitUntil(() => client.requests.length === 1);
+  const domain = f.service.domain();
+  domain.recordRouting = intercept(domain.recordRouting.bind(domain));
+  const firstRequest = client.requests[0];
+  assert.ok(firstRequest);
+  firstResponse.resolve(routeResponse(firstRequest, f.workerProfileId));
+  return {
+    f,
+    client,
+    diagnostics,
+    attempt: () =>
+      row(
+        f.service,
+        "SELECT status, staleReason FROM routing_attempt_operations WHERE taskId = ?",
+        f.taskId,
+      ),
+  };
+}
+
+function persistedRouting(root: string) {
+  const db = new DatabaseSync(join(root, "data", "standalone.sqlite"), {
+    readOnly: true,
+  });
+  try {
+    return {
+      stale: Number(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM routing_attempt_operations WHERE status = 'stale'",
+          )
+          .get()?.count,
+      ),
+      operations: Number(
+        db.prepare("SELECT COUNT(*) AS count FROM routing_operations").get()
+          ?.count,
+      ),
+      assignments: Number(
+        db.prepare("SELECT COUNT(*) AS count FROM domain_assignments").get()
+          ?.count,
+      ),
+    };
+  } finally {
+    db.close();
+  }
+}
+
+test("routing stale classification follows the typed domain error, not its message", async () => {
+  const cases = [
+    {
+      error: new DomainStaleDispositionError(
+        "reworded: nothing special",
+        "stale",
+      ),
+      staleReason: "domain-disposition-rejected",
+    },
+    {
+      error: new DomainStaleDispositionError("reworded", "external-admission"),
+      staleReason: "task-held",
+    },
+  ] as const;
+  for (const scenario of cases) {
+    let thrown = false;
+    const t = await interceptedRouting((original) => (input, admitted) => {
+      if (thrown) return original(input, admitted);
+      thrown = true;
+      throw scenario.error;
+    });
+    try {
+      await waitUntil(() => t.attempt()?.status === "stale");
+      assert.equal(t.attempt()?.staleReason, scenario.staleReason);
+      assert.equal(t.f.service.backgroundFailureObserved(), false);
+      assert.equal(t.f.service.domain().assignments(t.f.taskId).length, 0);
+    } finally {
+      await t.f.close();
+    }
+  }
+});
+
+test("a plain error with stale-looking wording is a background failure, not stale", async () => {
+  const t = await interceptedRouting(() => () => {
+    throw new Error("stale held candidate revision already assigned");
+  });
+  try {
+    await waitUntil(() => t.f.service.backgroundFailureObserved());
+    await waitUntil(() => t.diagnostics.length === 1);
+    assert.equal(t.diagnostics[0]?.errorCode, "unexpected-background-failure");
+    await t.f.service.waitForBackgroundShutdown();
+    assert.deepEqual(persistedRouting(t.f.root), {
+      stale: 0,
+      operations: 0,
+      assignments: 0,
+    });
+  } finally {
+    await t.f.close();
+  }
+});
+
+test("a selected profile outside the unchanged candidate set fails loudly without retry", async () => {
+  let leadProfileId = "";
+  const t = await interceptedRouting(
+    (original) => (input, admitted) =>
+      original(
+        {
+          ...input,
+          ...(input.assignment
+            ? { assignment: { ...input.assignment, profileId: leadProfileId } }
+            : {}),
+        },
+        admitted,
+      ),
+  );
+  leadProfileId = t.f.leadProfileId;
+  try {
+    await waitUntil(() => t.f.service.backgroundFailureObserved());
+    await waitUntil(() => t.diagnostics.length === 1);
+    assert.equal(t.diagnostics[0]?.errorCode, "unexpected-background-failure");
+    await t.f.service.waitForBackgroundShutdown();
+    assert.deepEqual(persistedRouting(t.f.root), {
+      stale: 0,
+      operations: 0,
+      assignments: 0,
+    });
+    assert.equal(t.client.requests.length, 1);
+  } finally {
+    await t.f.close();
+  }
+});
+
+test("a real record-time stale race throws the typed error and stays stale", async () => {
+  let thrown: unknown;
+  let service: StandaloneService | undefined;
+  let projectId = "";
+  let taskId = "";
+  const t = await interceptedRouting((original) => (input, admitted) => {
+    command(service as StandaloneService, {
+      type: "task.configure",
+      actor: "operator",
+      projectId,
+      taskId,
+      expectedVersion: 2,
+      outcome: "Ship a revised parser.",
+      ready: false,
+    });
+    try {
+      return original(input, admitted);
+    } catch (error) {
+      thrown = error;
+      throw error;
+    }
+  });
+  service = t.f.service;
+  projectId = t.f.projectId;
+  taskId = t.f.taskId;
+  try {
+    await waitUntil(() => t.attempt()?.status === "stale");
+    assert.ok(thrown instanceof DomainStaleDispositionError);
+    assert.equal(t.f.service.backgroundFailureObserved(), false);
+    assert.equal(t.f.service.domain().routingOperations(taskId).length, 0);
+  } finally {
+    await t.f.close();
   }
 });
 

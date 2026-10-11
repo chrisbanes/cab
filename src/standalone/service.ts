@@ -27,6 +27,7 @@ import {
 import {
   type CapacityConfigureCommand,
   type CapacityLimits,
+  DomainStaleDispositionError,
   DomainStore,
 } from "../core/domain.js";
 import {
@@ -3503,14 +3504,13 @@ export class StandaloneService {
           () => !state.taskHold(taskId),
         );
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
         const staleReason =
           this.routingStaleReason(domain, state, snapshot) ??
-          (message === "External admission rejected routing disposition"
-            ? "task-held"
-            : /stale|held|candidate|revision|already assigned/i.test(message)
-              ? "domain-disposition-rejected"
-              : undefined);
+          (error instanceof DomainStaleDispositionError
+            ? error.reason === "external-admission"
+              ? "task-held"
+              : "domain-disposition-rejected"
+            : undefined);
         if (!staleReason) throw error;
         routingAttempts.markStale(attempt.operationId, staleReason);
         continue;
