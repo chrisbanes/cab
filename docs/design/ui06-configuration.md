@@ -35,6 +35,7 @@ Every semicolon-separated foundation inventory control appears individually belo
 | project.create | lead | / | /app/settings/projects/new | Implemented replacement; original control retained. |
 | project.create | instructions, repositories, GitHub Project | none (React only) | /app/settings/projects/new | Implemented in guided setup; the retained `/` form keeps name and lead only. |
 | discovery.configure | discovery credential reference set/clear | none (React only) | /app/settings (Projects panel) | Implemented; shown only as configured or not configured. |
+| claude-token.configure | Claude token reference set/clear | none (React only) | /app/settings (Runtime and recovery panel) | Implemented; shown only as configured, available, missing value or restart required. |
 | discovery read | repositories, branches, GitHub Projects | none (React only) | /app/settings/projects/new | Implemented read-only GitHub lists; nothing stored. |
 | setup folders | list home subfolders and Git status | none (React only) | /app/settings/projects/new (Choose folder…) | Implemented authenticated POST; not available to agents. |
 | setup verify-checkout | verify a chosen checkout | none (React only) | /app/settings/projects/new | Implemented advisory check; the service checks again on create. |
@@ -42,6 +43,7 @@ Every semicolon-separated foundation inventory control appears individually belo
 | profile.create | name | / | /app/settings/profiles/new | Implemented replacement; original control retained. |
 | profile.create | instructions | / | /app/settings/profiles/new | Implemented replacement; original control retained. |
 | profile.create | capabilities | / | /app/settings/profiles/new | Implemented replacement; original control retained. |
+| profile.create | runtime, model and reasoning effort | none (React only) | /app/settings/profiles/new | Implemented; the retained `/` form creates a Codex profile. |
 | project.configure | name | /project/:id | /app/projects/:id/settings | Implemented replacement; original control retained. |
 | project.configure | lead | /project/:id | /app/projects/:id/settings | Implemented replacement; original control retained. |
 | project.configure | instructions | /project/:id | /app/projects/:id/settings | Write-only replacement in React, never loaded; exact current private values remain in the retained editor. |
@@ -50,6 +52,7 @@ Every semicolon-separated foundation inventory control appears individually belo
 | profile.configure | instructions | /profile/:id | /app/profiles/:id/settings | Write-only replacement in React, never loaded; exact current private values remain in the retained editor. |
 | profile.configure | capabilities | /profile/:id | /app/profiles/:id/settings | Edited in place in React from the loaded read; replace-only when the read omits them. Original control retained. |
 | profile.configure | revoke | /profile/:id | /app/profiles/:id/settings | Revoke and Restore toggle one draft field saved with the profile; original control retained. |
+| profile.configure | runtime, model and reasoning effort | /profile/:id (read-only) | /app/profiles/:id/settings | Implemented in React; the retained page shows the runtime and its save keeps it. A change saves a new revision for new conversations only. |
 | routing.configure | enable | /project/:id | /app/projects/:id/settings | Edited in place in React with a change list; omitted guidance keeps the saved text. Original control retained. |
 | routing.configure | guidance | /project/:id | /app/projects/:id/settings | Write-only replacement in React; omitted guidance keeps the saved text. Exact current guidance remains in the retained editor. |
 | routing.configure | candidates | /project/:id | /app/projects/:id/settings | Edited in place in React with a change list; omitted guidance keeps the saved text. Original control retained. |

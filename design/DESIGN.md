@@ -1434,6 +1434,18 @@ frames 114 and 118–128 as follows:
 - The header keeps Refresh on every settings route, including Create profile, and it
   re-reads the open page's own resources.
 - Switches are native checkboxes drawn as switches.
+- Execution runtimes ([#826](https://github.com/chrisbanes/ensemble/issues/826)),
+  which frames 114 and 118–128 do not draw, use existing fields, rows and asides:
+  profile pages add a Runtime select (Codex or Claude) with Model and Reasoning
+  effort for Claude (selects once the runtime has read its supported values, else
+  text), a not-enabled or unavailable note, a "Runtime change" aside (new
+  conversations only) and an "Execution policy" aside for the selected runtime;
+  each Settings profile row adds a "Runtime: …" line; the Runtime and recovery
+  panel carries the Claude subscription token row (like the discovery row); Runtime
+  adds an "Execution runtimes" panel with each runtime's state and effective policy.
+  Task rows, assignment history and recovery name the runtime, explain runtime
+  waits and held Claude failures with route links, and history adds an "Effective
+  execution policy" disclosure. The shell raises one alert per unavailable runtime.
 
 ## Using this snapshot
 

@@ -541,7 +541,10 @@ suitability; it grants no permission or repository access. A profile also select
 its execution runtime, Codex by default, with harness-specific settings (model and
 reasoning effort for Claude). An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
-falls back to another. The Claude runtime is planned, not implemented.
+falls back to another. The operator UI selects and shows each profile's runtime,
+the runtime of each assignment and each runtime's effective policy, and sets the
+Claude token as an `env:NAME` reference without showing it. The Claude runtime is
+planned, not implemented.
 
 Configuration forms edit current values in place rather than requiring a complete
 replacement. Private values (instructions, routing guidance, search queries and
