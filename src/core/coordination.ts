@@ -44,6 +44,34 @@ import {
 import { transaction, type Database } from "./store.js";
 import { LocalReviewStore } from "./local-review.js";
 
+// Results are unique per exact work; work revisions restart per conversation.
+const resultColumnNames = [
+  "resultId",
+  "taskId",
+  "assignmentId",
+  "workId",
+  "workRevision",
+  "assignmentVersion",
+  "summary",
+  "payloadHash",
+  "recipientAssignmentId",
+  "destinationDisposition",
+  "createdAt",
+];
+const resultColumns = `(
+        resultId TEXT PRIMARY KEY,
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
+        workId TEXT NOT NULL UNIQUE REFERENCES execution_intents(workId),
+        workRevision INTEGER NOT NULL CHECK(workRevision > 0),
+        assignmentVersion INTEGER NOT NULL CHECK(assignmentVersion > 0),
+        summary TEXT NOT NULL,
+        payloadHash TEXT NOT NULL,
+        recipientAssignmentId TEXT,
+        destinationDisposition TEXT NOT NULL
+          CHECK(destinationDisposition IN ('resolved','unresolved')),
+        createdAt INTEGER NOT NULL DEFAULT (unixepoch())
+      )`;
 const uuid = z.string().uuid();
 const summarySchema = z.string().trim().min(1).max(16000);
 const reportCallSchema = z
@@ -477,7 +505,66 @@ export class CoordinationStore {
     );
   }
 
+  /** Drops the legacy UNIQUE(assignmentId, workRevision) result constraint, preserving rows and rowids. */
+  private migrateResultWorkIdentity(): void {
+    const stored = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='coordination_results'",
+      )
+      .get() as { sql: string } | undefined;
+    if (
+      !stored ||
+      !/UNIQUE\s*\(\s*assignmentId\s*,\s*workRevision\s*\)/i.test(stored.sql)
+    )
+      return;
+    const columns = (
+      this.db
+        .prepare("PRAGMA table_info(coordination_results)")
+        .all() as Array<{ name: string }>
+    ).map((column) => column.name);
+    if (
+      JSON.stringify(columns) !== JSON.stringify(resultColumnNames) ||
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE tbl_name='coordination_results' AND (type='trigger' OR (type='index' AND sql IS NOT NULL AND name<>'coordination_results_task_created'))",
+        )
+        .get()
+    )
+      throw new Error(
+        "Unrecognized coordination result schema; migration refused",
+      );
+    const foreignKeys = (
+      this.db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number }
+    ).foreign_keys;
+    // foreign_keys cannot change inside a transaction, so this runs before migrate()'s.
+    this.db.exec("PRAGMA foreign_keys = OFF");
+    try {
+      transaction(this.db, () => {
+        const count = () =>
+          (
+            this.db
+              .prepare("SELECT count(*) AS count FROM coordination_results")
+              .get() as { count: number }
+          ).count;
+        const before = count();
+        const names = resultColumnNames.join(",");
+        this.db.exec(`CREATE TABLE coordination_results_v2 ${resultColumns};
+          INSERT INTO coordination_results_v2 (rowid,${names}) SELECT rowid,${names} FROM coordination_results;
+          DROP TABLE coordination_results;
+          ALTER TABLE coordination_results_v2 RENAME TO coordination_results;
+          CREATE INDEX coordination_results_task_created ON coordination_results(taskId,createdAt);`);
+        if (count() !== before)
+          throw new Error("Coordination result migration changed row count");
+        if (this.db.prepare("PRAGMA foreign_key_check").all().length)
+          throw new Error("Coordination result migration broke a foreign key");
+      });
+    } finally {
+      this.db.exec(`PRAGMA foreign_keys = ${foreignKeys}`);
+    }
+  }
+
   migrate(): void {
+    this.migrateResultWorkIdentity();
     new TaskReviewStore(this.db).migrate();
     transaction(this.db, () => {
       this.db.exec(`CREATE TABLE IF NOT EXISTS coordination_external_delivery_notices (taskId TEXT NOT NULL REFERENCES domain_tasks(id),identity TEXT NOT NULL,eventId TEXT NOT NULL,PRIMARY KEY(taskId,identity));
@@ -491,21 +578,7 @@ export class CoordinationStore {
         response TEXT NOT NULL,
         PRIMARY KEY(threadId, turnId, callId)
       );
-      CREATE TABLE IF NOT EXISTS coordination_results (
-        resultId TEXT PRIMARY KEY,
-        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
-        assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
-        workId TEXT NOT NULL UNIQUE REFERENCES execution_intents(workId),
-        workRevision INTEGER NOT NULL CHECK(workRevision > 0),
-        assignmentVersion INTEGER NOT NULL CHECK(assignmentVersion > 0),
-        summary TEXT NOT NULL,
-        payloadHash TEXT NOT NULL,
-        recipientAssignmentId TEXT,
-        destinationDisposition TEXT NOT NULL
-          CHECK(destinationDisposition IN ('resolved','unresolved')),
-        createdAt INTEGER NOT NULL DEFAULT (unixepoch()),
-        UNIQUE(assignmentId, workRevision)
-      );
+      CREATE TABLE IF NOT EXISTS coordination_results ${resultColumns};
       CREATE INDEX IF NOT EXISTS coordination_results_task_created ON coordination_results(taskId,createdAt);
       CREATE TABLE IF NOT EXISTS coordination_unresolved_result_destinations (
         resultId TEXT PRIMARY KEY REFERENCES coordination_results(resultId),
@@ -971,9 +1044,8 @@ export class CoordinationStore {
         );
       const priorResult = this.one(
         "SELECT resultId, taskId, assignmentId, workId, workRevision, assignmentVersion, summary, payloadHash, recipientAssignmentId, destinationDisposition, createdAt " +
-          "FROM coordination_results WHERE assignmentId = ? AND workRevision = ?",
-        String(binding.assignmentId),
-        Number(binding.workRevision),
+          "FROM coordination_results WHERE workId = ?",
+        String(binding.workId),
       );
       if (
         options.nativeResultCallback === true &&
