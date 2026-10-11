@@ -218,7 +218,6 @@ test("the submitted assignment prompt is unchanged", async () => {
 
 const PROFILE_TEXT =
   "PROFILE_INSTRUCTION_TEXT keeps FIXTURE_SECRET_CANARY private";
-const PROJECT_TEXT = "PROJECT_INSTRUCTION_TEXT token=abc123";
 
 async function finishTurn(
   f: Awaited<ReturnType<typeof fixture>>,
@@ -374,11 +373,14 @@ test("events bind to the exact turn, buffer until bound and count late arrivals"
       false,
     );
     const tool = items.find((i) => i.kind === "tool");
-    assert.equal(tool?.name, "not_a_coordination_tool");
-    assert.deepEqual((tool?.payload as { arguments: unknown }).arguments, {
-      note: "token=[redacted]",
-    });
-    assert.equal((tool?.payload as { success: boolean }).success, false);
+    assert.ok(tool);
+    assert.equal(tool.name, "not_a_coordination_tool");
+    const toolPayload = tool.payload as {
+      arguments: unknown;
+      success: boolean;
+    };
+    assert.deepEqual(toolPayload.arguments, { note: "token=[redacted]" });
+    assert.equal(toolPayload.success, false);
     const settings = items.find((i) => i.kind === "setting")?.payload as {
       entries: { name: string; value: unknown; source: string }[];
     };

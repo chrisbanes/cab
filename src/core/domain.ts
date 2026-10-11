@@ -388,8 +388,7 @@ export class DomainStore {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
     transaction(this.db, () => {
-      this.db
-        .exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
+      this.db.exec(`CREATE TABLE IF NOT EXISTS domain_schema (version INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS domain_projects (
           id TEXT PRIMARY KEY REFERENCES projects(id), name TEXT NOT NULL,
           version INTEGER NOT NULL, paused INTEGER NOT NULL CHECK(paused IN (0,1)),

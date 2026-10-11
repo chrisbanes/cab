@@ -25,7 +25,12 @@ const text = z.string().max(16000);
 const safeText = text.nullable();
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export type JsonValue =
-  null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 const scalar = z.union([z.null(), z.boolean(), z.number().finite(), text]);
 let boundedJson: z.ZodType<JsonValue> = scalar;
 for (let depth = 0; depth < 12; depth++) {
