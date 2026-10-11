@@ -225,7 +225,7 @@ test("origin and ref checks report one field, keep nothing and never echo creden
         instructions: "PRIVATE",
         repositories: [
           atlas("~/src/atlas"),
-          { ...atlas("~/src/relay"), repositoryId: "R_atlas2" },
+          { ...atlas("~/src/relay"), repositoryId: "R_docs", name: "docs" },
         ],
       }),
     ),
