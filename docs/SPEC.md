@@ -393,11 +393,11 @@ reconciliation evidence. Missing workspaces hold affected execution visibly.
 
 Every Git subprocess the service starts (workspace provisioning, cleanup and
 identity checks, file and comparison reads, setup probes and repository
-verification) clears inherited `GIT_*` variables, never prompts, lazily fetches
-objects or allows transport protocols, and uses bounded time and output. A
-repository that needs the network to supply objects therefore fails closed. This
-governs Ensemble's own Git; agent processes run their own Git with their runtime
-environment.
+verification) clears inherited `GIT_*` variables, never prompts on a terminal,
+lazily fetches objects or allows transport protocols, and uses bounded time and
+output. A repository that needs the network to supply objects therefore fails
+closed. This governs Ensemble's own Git; agent processes run their own Git with
+their runtime environment.
 
 New projects default to Codex `workspaceWrite` with explicit task writable roots,
 command network access disabled and approval policy `never`. Broader command
