@@ -6,6 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import {
   DomainCommands,
+  DomainConflictError,
   DomainPolicyError,
   DomainStore,
   type DomainCommand,
@@ -1340,6 +1341,174 @@ test("Claude token reference configures, clears and never returns the name", () 
       /Operator authority required/,
     );
     assert.equal(f.domain.claudeTokenReference(), null);
+  } finally {
+    f.close();
+  }
+});
+
+test("configuration command hashes stay byte-identical", () => {
+  const f = fixture();
+  try {
+    const k = (n: number) => `50000000-0000-4000-8000-00000000000${n}`;
+    const base = { actor: "operator" as const };
+    const commands: DomainCommand[] = [
+      {
+        ...base,
+        key: k(1),
+        type: "profile.create",
+        profileId: profile,
+        name: "Lead",
+        instructions: "i",
+        capabilities: "c",
+      },
+      {
+        ...base,
+        key: k(2),
+        type: "project.create",
+        projectId: p,
+        name: "Alpha",
+        leadProfileId: profile,
+        instructions: "p",
+      },
+      {
+        ...base,
+        key: k(3),
+        type: "project.configure",
+        projectId: p,
+        expectedVersion: 1,
+        instructions: "p2",
+      },
+      {
+        ...base,
+        key: k(4),
+        type: "profile.configure",
+        profileId: profile,
+        expectedVersion: 1,
+        summary: "s",
+      },
+      {
+        ...base,
+        key: k(5),
+        type: "routing.configure",
+        projectId: p,
+        expectedVersion: 1,
+        enabled: false,
+        candidateProfileIds: [profile],
+      },
+      {
+        ...base,
+        key: k(6),
+        type: "capacity.configure",
+        globalLimit: 4,
+        projectOverrides: { [p]: 3 },
+      },
+    ];
+    for (const command of commands) f.domain.execute(command);
+    const rows = f.db
+      .prepare(
+        "SELECT scope, key, payloadHash FROM command_receipts ORDER BY key",
+      )
+      .all() as { scope: string; payloadHash: string }[];
+    assert.deepEqual(
+      rows.map((r) => r.scope),
+      [`profile:${profile}`, p, p, `profile:${profile}`, p, "system:capacity"],
+    );
+    assert.deepEqual(
+      rows.map((r) => r.payloadHash),
+      [
+        "14952a93fe4757a5956ebb9ef842083396ae4b460e292ec9c72b71465ad13b2e",
+        "39f4b7e1c7691622fa2a10ba949264b6305d8466e1d8199de62958444e177f71",
+        "5f3ea4462901b3bb3e0f06158bd9f94c3fae30fbce8faf170dd64b32eb600339",
+        "d6fc29a1518156974b95dc694ff381d9667b3cbd09f2569d14f716c5f078a5a4",
+        "ee35f40a45a5fbf94c74a9e6647ffb27226bbcf277bc7a8fc0c29bf962d3acff",
+        "9a4def4ed9c1e0cdff521924954021e08fb823d0a8c4fb5e5b76bb50fb1503a5",
+      ],
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("capacity expectedCurrent guards concurrent edits and replays", () => {
+  const f = fixture();
+  try {
+    for (const projectId of [p, q])
+      run(f.domain, {
+        type: "project.create",
+        actor: "operator",
+        projectId,
+        name: "Project",
+        leadProfileId: null,
+      });
+    const limits = () => f.domain.capacityLimits();
+    const unused = key();
+    assert.equal(f.domain.recordedResult("system:capacity", unused), undefined);
+    const guarded = {
+      type: "capacity.configure" as const,
+      actor: "operator" as const,
+      key: key(),
+      globalLimit: 5,
+      projectOverrides: { [p]: 3 },
+      expectedCurrent: { globalLimit: 4, projectOverrides: { [p]: null } },
+    };
+    const applied = f.domain.execute(guarded);
+    assert.deepEqual(limits().projectOverrides, { [p]: 3 });
+    assert.deepEqual(
+      f.domain.recordedResult("system:capacity", guarded.key),
+      applied,
+    );
+    // Replay after the limits moved returns the recorded result before the guard.
+    f.domain.execute({
+      type: "capacity.configure",
+      actor: "operator",
+      key: key(),
+      globalLimit: 7,
+    });
+    assert.deepEqual(f.domain.execute(guarded), applied);
+    const receipts = () =>
+      (
+        f.db.prepare("SELECT COUNT(*) AS n FROM command_receipts").get() as {
+          n: number;
+        }
+      ).n;
+    const before = receipts();
+    for (const expectedCurrent of [
+      { globalLimit: 5, projectOverrides: {} },
+      { globalLimit: 7, projectOverrides: { [p]: null } },
+      { globalLimit: 7, projectOverrides: { [p]: 2 } },
+    ])
+      assert.throws(
+        () =>
+          f.domain.execute({
+            type: "capacity.configure",
+            actor: "operator",
+            key: key(),
+            globalLimit: 1,
+            projectOverrides: { [p]: 1 },
+            expectedCurrent,
+          }),
+        DomainConflictError,
+      );
+    assert.equal(receipts(), before);
+    assert.equal(limits().globalLimit, 7);
+    assert.deepEqual(limits().projectOverrides, { [p]: 3 });
+    // An override for an unlisted project is not compared.
+    f.domain.execute({
+      type: "capacity.configure",
+      actor: "operator",
+      key: key(),
+      globalLimit: 7,
+      projectOverrides: { [q]: 1 },
+      expectedCurrent: { globalLimit: 7, projectOverrides: { [q]: null } },
+    });
+    assert.throws(
+      () =>
+        f.domain.execute({
+          ...guarded,
+          expectedCurrent: { globalLimit: 5, projectOverrides: {} },
+        }),
+      DomainConflictError,
+    );
   } finally {
     f.close();
   }

@@ -264,6 +264,16 @@ const commandSchema = z.discriminatedUnion("type", [
       projectOverrides: z
         .record(id, z.number().int().positive().nullable())
         .default({}),
+      // Optional compare-and-swap: omitted, the command hashes and behaves as before.
+      expectedCurrent: z
+        .object({
+          globalLimit: z.number().int().positive(),
+          projectOverrides: z
+            .record(id, z.number().int().positive().nullable())
+            .default({}),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -724,6 +734,16 @@ export class DomainStore {
     const command = parseCommand(input);
     this.operator(command);
     return this.replayed(scopeOf(command), command.key, commandHash(command));
+  }
+
+  /** The stored result for a receipt scope and key, or undefined when unused. */
+  recordedResult(scope: string, key: string): unknown {
+    const row = this.one(
+      "SELECT result FROM command_receipts WHERE scope = ? AND key = ?",
+      scope,
+      id.parse(key),
+    );
+    return row ? JSON.parse(String(row.result)) : undefined;
   }
 
   /** The recorded result for a command key, or undefined when the key is unused. */
@@ -2140,6 +2160,18 @@ export class DomainStore {
       }
       case "capacity.configure": {
         this.operator(command);
+        if (command.expectedCurrent) {
+          const current = this.capacityLimits();
+          const expected = command.expectedCurrent;
+          if (
+            current.globalLimit !== expected.globalLimit ||
+            Object.entries(expected.projectOverrides).some(
+              ([projectId, limit]) =>
+                (current.projectOverrides[projectId] ?? null) !== limit,
+            )
+          )
+            throw new DomainConflictError("Capacity limits changed");
+        }
         this.db
           .prepare(
             "UPDATE scheduler_capacity_limits SET globalLimit = ? WHERE singleton = 1",

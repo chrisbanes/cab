@@ -39,6 +39,9 @@ import {
   inboxReadSchema,
   materialSchema,
   operatorCommandSchema,
+  operationReadSchema,
+  operationScopeSchema,
+  operationTypeSchema,
   profileConfigurationSchema,
   projectConfigurationSchema,
   projectSchema,
@@ -104,6 +107,7 @@ import {
   type LocalReviewSyncIdentity,
 } from "../core/local-review.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   compareRepository,
   type WorkspaceComparisonSideContent,
@@ -3621,6 +3625,46 @@ export class OperatorApi {
       );
     }
   }
+  /** Reads back one configuration or adoption receipt by scope, type and key. */
+  readOperation(query: URLSearchParams) {
+    const names = ["scope", "type", "key"];
+    if (
+      [...query.keys()].some((k) => !names.includes(k)) ||
+      names.some((k) => query.getAll(k).length !== 1)
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    const scope = operationScopeSchema.safeParse(query.get("scope")),
+      type = operationTypeSchema.safeParse(query.get("type")),
+      key = uuid.safeParse(query.get("key"));
+    if (!scope.success || !type.success || !key.success)
+      throw new OperatorApiError(400, "invalid-input");
+    const [kind, id = ""] = scope.data.split(":");
+    const expected =
+      type.data === "capacity.configure"
+        ? "system"
+        : type.data.startsWith("profile.")
+          ? "profile"
+          : "project";
+    if (kind !== expected) throw new OperatorApiError(400, "invalid-input");
+    // Domain receipt scopes: the bare project ID, `profile:<id>`, `system:capacity`.
+    const raw = this.domain().recordedResult(
+      kind === "project" ? id : scope.data,
+      key.data,
+    );
+    let data: unknown = { state: "not-recorded" };
+    if (raw !== undefined)
+      try {
+        data = {
+          state: "recorded",
+          receipt: commandReceipt(type.data, key.data, id, raw),
+        };
+      } catch (error) {
+        if (error instanceof ReceiptShapeError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+    return operationReadSchema.parse({ data, observedAt: Date.now() });
+  }
   async readProfileConfiguration(profileId: string) {
     uuid.parse(profileId);
     const row = this.domain()
@@ -4872,25 +4916,12 @@ export class OperatorApi {
             key: c.key,
             globalLimit: c.globalLimit,
             projectOverrides: c.projectOverrides,
+            ...(c.expectedCurrent
+              ? { expectedCurrent: c.expectedCurrent }
+              : {}),
           });
         }
-        const r = raw as {
-          globalLimit: number;
-          defaultProjectLimit: 2;
-          projectOverrides: Record<string, number>;
-        };
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: "system:capacity",
-            globalLimit: r.globalLimit,
-            defaultProjectLimit: r.defaultProjectLimit,
-            projectOverrides: r.projectOverrides,
-          },
-        });
+        return commandReceipt(c.type, c.key, "system:capacity", raw);
       }
       if (c.type === "discovery.configure") {
         const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
@@ -4930,50 +4961,32 @@ export class OperatorApi {
               }
             : c;
         const raw = await this.executeDomain({ ...command, actor: "operator" });
+        if (c.type !== "github.configure" && c.type !== "github.place")
+          return commandReceipt(
+            c.type,
+            c.key,
+            c.type === "routing.configure" ? c.projectId : "",
+            raw,
+          );
         const r = raw as Row;
         const result =
-          c.type === "project.create" || c.type === "project.configure"
+          c.type === "github.configure"
             ? {
                 commandType: c.type,
-                resourceId: String(r.id),
+                resourceId: c.projectId,
                 version: Number(r.version),
-                paused: Boolean(r.paused),
-                leadProfileId:
-                  r.leadProfileId === null ? null : String(r.leadProfileId),
-                instructionsRevision: Number(r.instructionsRevision),
+                credentialConfigured: r.credentialRef !== null,
+                selectionCount: (raw as { selections: unknown[] }).selections
+                  .length,
+                repositoryCount: (raw as { repositories: unknown[] })
+                  .repositories.length,
               }
-            : c.type === "profile.create" || c.type === "profile.configure"
-              ? {
-                  commandType: c.type,
-                  resourceId: String(r.id),
-                  version: Number(r.version),
-                  revoked: Boolean(r.revoked),
-                }
-              : c.type === "routing.configure"
-                ? {
-                    commandType: c.type,
-                    resourceId: c.projectId,
-                    version: Number(r.version),
-                    enabled: Boolean(r.enabled),
-                    credentialConfigured: Boolean(r.credentialAvailable),
-                  }
-                : c.type === "github.configure"
-                  ? {
-                      commandType: c.type,
-                      resourceId: c.projectId,
-                      version: Number(r.version),
-                      credentialConfigured: r.credentialRef !== null,
-                      selectionCount: (raw as { selections: unknown[] })
-                        .selections.length,
-                      repositoryCount: (raw as { repositories: unknown[] })
-                        .repositories.length,
-                    }
-                  : {
-                      commandType: c.type,
-                      resourceId: String(r.id),
-                      projectId: String(r.projectId),
-                      version: Number(r.version),
-                    };
+            : {
+                commandType: c.type,
+                resourceId: String(r.id),
+                projectId: String(r.projectId),
+                version: Number(r.version),
+              };
         return commandReceiptSchema.parse({
           kind: "configuration",
           key: c.key,
@@ -5010,24 +5023,16 @@ export class OperatorApi {
             );
           throw error;
         }
+        if (c.type === "assignment.apply")
+          return commandReceipt(c.type, c.key, c.projectId, raw);
         const r = raw as Row;
-        const result =
-          c.type === "assignment.apply"
-            ? {
-                id: String(r.id),
-                taskId: String(r.taskId),
-                projectId: String(r.projectId),
-                version: Number(r.version),
-                profileRevision: Number(r.profileRevision),
-                instructionsRevision: Number(r.instructionsRevision),
-              }
-            : {
-                id: String(r.id),
-                projectId: String(r.projectId),
-                version: Number(r.version),
-                state: r.state,
-                ready: Boolean(r.ready),
-              };
+        const result = {
+          id: String(r.id),
+          projectId: String(r.projectId),
+          version: Number(r.version),
+          state: r.state,
+          ready: Boolean(r.ready),
+        };
         return commandReceiptSchema.parse({
           kind: "domain",
           key: c.key,
