@@ -158,6 +158,39 @@ X01–X08. Recorded evidence is under
 | WI12 | Inspect a draft and send, retry a confirmed failure, or reconcile an uncertain submission | One logical review containing the exact comments and summary reaches the named accountable lead with a receipt. Confirmed failures preserve editable drafts; unknown outcomes retain the original operation for reconciliation without duplicate delivery. No GitHub call, approval, readiness/completion change, merge authority or hold release occurs. |
 | WI13 | Navigate among files, diffs and exact result evidence while drafting on desktop, phone and keyboard | Draft content and anchors survive navigation/refresh under session privacy rules. Sent feedback remains inspectable with its original context. Existing contextual feedback is preserved; no unrelated thread-resolution or retraction workflow is introduced. |
 
+### Operator CLI acceptance
+
+CLI01–CLI06 qualify the operator CLI release under
+[epic #893](https://github.com/chrisbanes/ensemble/issues/893) and
+[ADR-1010](adr/1010-operator-cli.md). They do not add requirements to the
+standalone MVP operational-release or cutover gates above. The
+[operator CLI design](design/operator-cli.md) defines the accepted contract;
+implementation and evidence remain unproved until the delivery slices qualify it.
+
+| ID | Scenario | Required outcome |
+| --- | --- | --- |
+| CLI01 | Authenticate from the host and another privately connected machine; investigate a failed task | Packaged CLI uses the live service, exposes bound instructions and available runtime evidence, compares current settings and prepares a configuration diff. Remote transport verifies HTTPS; no direct database access or cross-origin credential forwarding. |
+| CLI02 | Investigate with read-only credentials; attempt writes directly and through CLI; expire/revoke credentials during follow | Every write route rejects read-only credentials, including legacy routes and reads with side effects. Expiry/revocation ends access during follow. Browser Origin/CSRF protections remain enforced; credentials cannot mint, extend or broaden authority. |
+| CLI03 | Apply reviewed configuration, race with an edit, lose the response, reuse a UUID in another command scope, restore old content and adopt current instructions | Exact material applies once; stale revisions and changed material conflict. Persisted service/scope/UUID identity selects the intended receipt and exact retry without duplicate effects. Restoration creates a new revision; adoption is explicit for the next turn, never an active-turn rewrite. |
+| CLI04 | Answer questions, decide approvals, Stop/Resume and submit recovery through CLI and existing UI entry points | Shared material, version, policy and hold checks remain effective. Resume clears only operator Stop. Recovery rejects omitted or fabricated required assertions; staged external-comment operations retain review/confirm/send semantics. |
+| CLI05 | Inspect sensitive, oversized, unsupported and historical diagnostics; fail storage; expire/prune payloads | Dedicated instruction views retain authorised text while redacting credentials/private paths; general logs retain instruction redaction. Redaction, limits, bounded follow/pagination and explicit gaps cover unavailable, truncated, failed or expired capture. Pruning preserves durable safety evidence, receipts, revisions, baseline history and retained result/review evidence. Diagnostics cannot establish success or release ownership. |
+| CLI06 | Run the assembled external-agent investigation with a real runtime and deterministic failure fixtures | Bounded live evidence identifies submitted inputs and available tool activity on the host/private-remote journey without claiming complete runtime context. Deterministic evidence covers absent events, token controls, redaction, quotas, expiry, pagination, version conflicts and uncertain responses. |
+
+| Scenarios | Evidence state | Required evidence |
+| --- | --- | --- |
+| CLI01 | **Unproved** | Packaged-client local/private-remote authenticated investigation, with service/client and transport identities. |
+| CLI02 | **Unproved** | Server-side scope denial across all applicable routes; expiry/revocation during follow; browser-session protection and credential lifecycle fixtures. |
+| CLI03 | **Unproved** | Exact-change, concurrent-edit and lost-response fixtures, including identical UUIDs in distinct scopes, restoration and assignment adoption. |
+| CLI04 | **Unproved** | Shared CLI/UI action fixtures covering answers, approvals, Stop/Resume, recovery holds and staged delivery. |
+| CLI05 | **Unproved** | Redaction, instruction projection, historical gaps, capture/storage failure, age/quota pruning and bounded read/follow fixtures. |
+| CLI06 | **Unproved** | Integrated bounded real-runtime local/private-remote journey and deterministic boundary evidence, reusing valid slice evidence with explicit limits. |
+
+Delivery slices own their focused evidence; CLI8
+([#901](https://github.com/chrisbanes/ensemble/issues/901)) owns assembled
+qualification. Records belong in `docs/evidence/` and must identify the candidate,
+service/client/runtime, observed effects and limits. Documentation acceptance
+alone passes none of these scenarios.
+
 ### ChatGPT and native Codex acceptance
 
 These integrations are deferred until after the standalone MVP

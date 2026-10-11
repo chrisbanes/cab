@@ -209,7 +209,7 @@ ensemble --connection home logs --execution EXECUTION --after CURSOR --output js
 ensemble --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
 ensemble --connection home profile apply --file change.json --request-id REQUEST
 ensemble --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST
-ensemble --connection home operation get REQUEST --output json
+ensemble --connection home operation get REQUEST --scope SCOPE --output json
 ```
 
 ### Writes and execution effects
@@ -245,10 +245,14 @@ Expose whether the service is unavailable, history is unsupported, or requested
 payloads were redacted, truncated or expired.
 
 Use UUID request keys and existing service receipt semantics for mutations.
-Persist the selected key locally before sending when the caller does not supply
-`--request-id`. An uncertain network result returns that identity and an unknown
-outcome. Reconcile or retry using the same key and exact content; never resubmit
-with a fresh identity automatically. Same key/different content conflicts.
+Receipt identity includes the resolved service, command scope/type and UUID;
+a UUID alone is not a globally unique receipt lookup. Persist that identity
+locally before sending when the caller does not supply `--request-id`. An
+uncertain network result returns the full identity and an unknown outcome.
+`operation get` requires the scope/type to select the existing receipt store.
+Reconcile or retry in the same scope using the same key and exact content; never
+resubmit with a fresh identity automatically. Same scope/key with different
+content conflicts; reusing a UUID in another scope cannot select its receipt.
 Do not store secret request material in a convenience retry log. Nonzero exit
 statuses distinguish invalid input, authentication/authorization, revision/policy
 conflict, unavailability and uncertain outcomes.
@@ -259,6 +263,10 @@ Read-only credentials must receive a server denial even if a caller bypasses the
 CLI and submits a write directly.
 
 ## Acceptance scenarios
+
+The canonical [CLI01–CLI06 scenarios and evidence states](../acceptance.md#operator-cli-acceptance)
+qualify the CLI release under epic #893 without changing the standalone MVP or
+cutover gates. The scenarios correspond in order to the journeys below.
 
 1. An external agent on the host and on another privately connected machine can
    authenticate, find a failed task, inspect its bound instructions and available
@@ -281,6 +289,6 @@ CLI and submits a write directly.
    Deterministic tests cover absent events, token controls, redaction, quotas,
    expiry, pagination, version conflicts and ambiguous responses.
 
-These scenarios complement existing acceptance requirements. Delivery scope and
-sequencing belong to [epic #893](https://github.com/chrisbanes/ensemble/issues/893)
+These scenarios complement existing acceptance requirements for the CLI release.
+Delivery scope and sequencing belong to [epic #893](https://github.com/chrisbanes/ensemble/issues/893)
 and its native sub-issues; this document is not a parallel implementation plan.
