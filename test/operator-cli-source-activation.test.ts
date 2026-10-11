@@ -177,9 +177,8 @@ test("place-task chooses a matching project once, with the domain's placement ru
   const w = await world(t);
   const { atlas, relay, fieldnotes } = w.ids;
   const tasks = [randomUUID(), randomUUID(), randomUUID()];
-  tasks.forEach((taskId, i) =>
-    seedImportedConflict(w.s.f, taskId, [atlas, relay], `I_PLACE_${i}`, i + 1),
-  );
+  for (const [i, taskId] of tasks.entries())
+    seedImportedConflict(w.s.f, taskId, [atlas, relay], `I_PLACE_${i}`, i + 1);
   const [otherTask = "", plainTask = "", assignedTask = ""] = tasks;
   w.d.execute({
     type: "assignment.create",
