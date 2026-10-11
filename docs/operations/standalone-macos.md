@@ -219,3 +219,57 @@ remains required before operational use on the Mac. Do not migrate old work or
 enable competing production work based only on this snapshot or on recovery
 qualification. A separately authorised host-restart test may be needed for final
 recovery qualification.
+
+## Local stable build
+
+To use Ensemble locally without running a moving checkout, build a chosen commit
+into an immutable directory under `~/.config/ensemble-dev` and run it in the
+foreground. This is a personal instance for testing and evidence; it is not the
+Haze cutover and must not take over projects the prototype owns. Cite the build
+SHA with any evidence it produces.
+
+```sh
+scripts/local-build.sh COMMIT
+```
+
+The script archives exactly `COMMIT` into `builds/<sha>/`, installs and selects the
+commit's `.node-version` through nvm, and runs `npm ci` and `npm run build` with
+the pinned npm. Like CI, it ignores `~/.npmrc`, so user registry, proxy or auth
+settings do not apply. It refuses an existing build directory; remove it to
+rebuild. It creates private `data/`, `auth/` and `snapshots/` directories beside
+`builds/` and prints the absolute Node path and start command.
+
+The commands below use these values:
+
+```sh
+ROOT="$HOME/.config/ensemble-dev"
+NODE=/absolute/node/printed/by/the/script
+BUILD="$ROOT/builds/<sha>"
+```
+
+Initialize the operator password once ([Runtime and
+authentication](#runtime-and-authentication)). Call the build's CLI directly,
+because `npm run operator-auth` rebuilds first:
+
+```sh
+"$NODE" "$BUILD/dist/src/standalone/operator-auth-cli.js" init "$ROOT/auth/operator-auth.json"
+```
+
+Start with the printed command, which serves the operator UI on
+`http://127.0.0.1:8787`; stop it with Ctrl-C.
+
+To upgrade, stop the service and take a verified snapshot with the current build
+([Offline snapshot and restore](#offline-snapshot-and-restore)), then build and
+start the new commit against the same `data/`. Startup migrates the data forward,
+and an older build refuses a newer schema:
+
+```sh
+"$NODE" "$BUILD/dist/src/standalone/operations-cli.js" backup "$ROOT/data" "$ROOT/snapshots/<old-sha>-<date>"
+"$NODE" "$BUILD/dist/src/standalone/operations-cli.js" verify "$ROOT/snapshots/<old-sha>-<date>"
+scripts/local-build.sh NEW_COMMIT
+```
+
+Rollback is manual and discards everything after the upgrade: `restore` the
+snapshot to a new data directory under `$ROOT` and start the old build against
+it. Keep the previous build and its snapshot until the new build has proved
+itself.
