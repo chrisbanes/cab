@@ -219,3 +219,49 @@ remains required before operational use on the Mac. Do not migrate old work or
 enable competing production work based only on this snapshot or on recovery
 qualification. A separately authorised host-restart test may be needed for final
 recovery qualification.
+
+## Local stable build
+
+To use Ensemble locally without running a moving checkout, build a chosen commit
+into an immutable directory under `~/.config/ensemble-dev` and run it in the
+foreground. This is a personal instance for testing and evidence; it is not the
+Haze cutover and must not take over projects the prototype owns. Cite the build
+SHA with any evidence it produces.
+
+```sh
+scripts/local-build.sh COMMIT
+```
+
+The script archives exactly `COMMIT` into `builds/<sha>/`, installs and selects the
+commit's `.node-version` through nvm, and runs `npm ci` and `npm run build` with
+the pinned npm, ignoring the user npm config as CI does. It refuses an existing
+build directory; remove it to rebuild. It creates private `data/`, `auth/` and
+`snapshots/` directories beside `builds/` and prints the absolute Node path and
+start command.
+
+Initialize the operator password once with the build's own CLI, so the build
+directory is never rebuilt:
+
+```sh
+NODE=/absolute/node/printed/by/the/script
+BUILD="$HOME/.config/ensemble-dev/builds/<sha>"
+"$NODE" "$BUILD/dist/src/standalone/operator-auth-cli.js" init "$HOME/.config/ensemble-dev/auth/operator-auth.json"
+```
+
+Start with the printed command, which serves the operator UI on
+`http://127.0.0.1:8787`; stop it with Ctrl-C.
+
+To upgrade, stop the service, then back up and verify with the current build
+before starting the new one against the same data. Startup migrates the data
+forward, and an older build refuses a newer schema:
+
+```sh
+"$NODE" "$BUILD/dist/src/standalone/operations-cli.js" backup "$HOME/.config/ensemble-dev/data" "$HOME/.config/ensemble-dev/snapshots/<old-sha>-<date>"
+"$NODE" "$BUILD/dist/src/standalone/operations-cli.js" verify "$HOME/.config/ensemble-dev/snapshots/<old-sha>-<date>"
+scripts/local-build.sh NEW_COMMIT
+```
+
+Rollback is manual and discards everything after the upgrade: `restore` the
+snapshot to a new data directory under `~/.config/ensemble-dev` and start the old
+build against it. Keep the previous build and its snapshot until the new build
+has proved itself.
