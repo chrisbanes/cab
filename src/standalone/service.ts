@@ -1596,6 +1596,26 @@ export class StandaloneService {
     return this.requireState().recoveryView();
   }
 
+  executionForWork(workId: string): ExecutionIntent | undefined {
+    return this.requireState().byWorkId(workId);
+  }
+
+  recoveryFor(
+    assignmentId: string,
+    assignmentVersion: number,
+    workId?: string,
+  ): RecoveryRecord[] {
+    return this.requireState().recoveryFor(
+      assignmentId,
+      assignmentVersion,
+      workId,
+    );
+  }
+
+  recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[] {
+    return this.requireState().recoveryForTask(taskId, alsoWorkId);
+  }
+
   powerStatus() {
     return this.power?.status() ?? null;
   }
@@ -1683,6 +1703,28 @@ export class StandaloneService {
   turnRequests(): TurnRequest[] {
     if (!this.schedulerStore) throw new Error("Service is not started");
     return this.schedulerStore.list();
+  }
+
+  currentTurnRequest(
+    assignmentId: string,
+    version: number,
+  ): TurnRequest | undefined {
+    if (!this.schedulerStore) throw new Error("Service is not started");
+    return this.schedulerStore.current(assignmentId, version);
+  }
+
+  turnRequestsForTask(taskId: string): TurnRequest[] {
+    if (!this.schedulerStore) throw new Error("Service is not started");
+    return this.schedulerStore.forTask(taskId);
+  }
+
+  /** Whether either retained history table holds more than `limit` rows. */
+  retainedRowsExceed(limit: number): boolean {
+    if (!this.schedulerStore) throw new Error("Service is not started");
+    return (
+      this.schedulerStore.countUpTo(limit + 1) > limit ||
+      this.requireState().recoveryCountUpTo(limit + 1) > limit
+    );
   }
 
   taskReview() {

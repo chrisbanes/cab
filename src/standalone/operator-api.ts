@@ -11,6 +11,7 @@ import type { OperatorCommentReview } from "../core/delivery.js";
 import {
   DomainCommands,
   DomainConflictError,
+  DomainNotFoundError,
   DomainPolicyError,
 } from "../core/domain.js";
 import {
@@ -430,16 +431,30 @@ export class OperatorApi {
       throw new OperatorApiError(404, "not-found");
     return this.domain().project(id);
   }
+  /** Maps only a missing domain record to 404; other failures propagate. */
+  private existing<T>(read: () => T): T {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof DomainNotFoundError)
+        throw new OperatorApiError(404, "not-found");
+      throw error;
+    }
+  }
+  /** The bounded task catalogue; 503 above ten thousand identities. */
+  private catalog() {
+    const catalog = this.domain().taskCatalog();
+    if (catalog.length > 10000) throw new OperatorApiError(503, "unavailable");
+    return catalog;
+  }
+  /** Readable only while `projects()` lists the task's project. */
   private requireTask(id: string) {
     uuid.parse(id);
-    for (const p of this.domain().projects())
-      if (
-        this.domain()
-          .tasks(String(p.id))
-          .some((t) => t.id === id)
-      )
-        return this.domain().task(id);
-    throw new OperatorApiError(404, "not-found");
+    const d = this.domain(),
+      task = this.existing(() => d.task(id));
+    if (!d.projectListed(String(task.projectId)))
+      throw new OperatorApiError(404, "not-found");
+    return task;
   }
   private async exclusions(
     projectId?: string,
@@ -507,21 +522,16 @@ export class OperatorApi {
           values.push(repo.path, repo.gitCommonDirectory);
       }
       if (taskId) {
-        const requests = this.service.turnRequests(),
-          recovery = this.service.recoveryView(),
-          assignments = d.assignments(taskId);
-        if (
-          requests.length > 128 ||
-          recovery.length > 128 ||
-          assignments.length > 128 ||
-          historyBindings.length > 400
-        )
+        // The 128-row bounds are installation-wide; count before reading any row.
+        if (this.service.retainedRowsExceed(128)) return undefined;
+        const assignments = d.assignments(taskId);
+        if (assignments.length > 128 || historyBindings.length > 400)
           return undefined;
         const retained = [
-          ...requests.filter((r) => r.taskId === taskId),
-          ...recovery.flatMap((r) =>
-            r.binding?.taskId === taskId ? [r.binding] : [],
-          ),
+          ...this.service.turnRequestsForTask(taskId),
+          ...this.service
+            .recoveryForTask(taskId)
+            .flatMap((r) => (r.binding ? [r.binding] : [])),
           ...historyBindings,
         ];
         const assignmentIds = new Set(assignments.map((a) => String(a.id)));
@@ -2091,9 +2101,7 @@ export class OperatorApi {
     }
     const query = taskListQuerySchema.parse(values);
     if (query.projectId) this.requireProject(query.projectId);
-    const full = this.domain().taskCatalog();
-    if (full.length > 10000) throw new OperatorApiError(503, "unavailable");
-    const catalog = full.filter(
+    const catalog = this.catalog().filter(
       (t) =>
         (!query.projectId || t.projectId === query.projectId) &&
         (!query.state || t.state === query.state),
@@ -2130,8 +2138,7 @@ export class OperatorApi {
   private async readComposerOptionsOnce(projectId: string) {
     const p = this.requireProject(projectId),
       d = this.domain(),
-      catalog = d.taskCatalog();
-    if (catalog.length > 10000) throw new OperatorApiError(503, "unavailable");
+      catalog = this.catalog();
     const snapshot = this.workspaceSnapshot(
       catalog.filter((t) => t.projectId === projectId).map((t) => t.id),
     );
@@ -2318,8 +2325,7 @@ export class OperatorApi {
     const { limit = 100, kind, project } = filter.data;
     const visibility = this.visibilityToken(),
       items: InboxItem[] = [];
-    const catalog = this.domain().taskCatalog();
-    if (catalog.length > 10000) throw new OperatorApiError(503, "unavailable");
+    const catalog = this.catalog();
     const tasks = catalog.map((t) => this.requireTask(t.id)),
       snapshot = this.workspaceSnapshot(catalog.map((t) => t.id));
     let unavailable = false;
@@ -2931,12 +2937,7 @@ export class OperatorApi {
   }
   private requireAssignment(assignmentId: string) {
     uuid.parse(assignmentId);
-    let a: Row;
-    try {
-      a = this.domain().assignment(assignmentId);
-    } catch {
-      throw new OperatorApiError(404, "not-found");
-    }
+    const a = this.existing(() => this.domain().assignment(assignmentId));
     const task = this.requireTask(String(a.taskId));
     return { a, taskId: String(task.id), projectId: String(task.projectId) };
   }
@@ -4357,7 +4358,7 @@ export class OperatorApi {
                     known = new Set(assignments.map((a) => String(a.id))),
                     taskExcluded = await this.exclusions(id, taskId);
                   const records = this.service
-                    .recoveryView()
+                    .recoveryForTask(taskId)
                     .filter(
                       (r) =>
                         r.binding?.taskId === taskId &&
@@ -4402,14 +4403,8 @@ export class OperatorApi {
     );
   }
   private async readAssignmentRecoveryOnce(assignmentId: string) {
-    uuid.parse(assignmentId);
     const d = this.domain(),
-      entry = d
-        .taskCatalog()
-        .find((t) => d.assignments(t.id).some((a) => a.id === assignmentId));
-    if (!entry) throw new OperatorApiError(404, "not-found");
-    const taskId = entry.id,
-      projectId = entry.projectId,
+      { taskId, projectId } = this.requireAssignment(assignmentId),
       snapshot = this.workspaceSnapshot([taskId]),
       task = await this.readTask(taskId),
       assignment = task.data.assignments.find(
@@ -4420,7 +4415,7 @@ export class OperatorApi {
       known = new Set(d.assignments(taskId).map((a) => String(a.id))),
       excluded = await this.exclusions(projectId, taskId);
     const records = this.service
-      .recoveryView()
+      .recoveryForTask(taskId, selected?.workId)
       .filter((r) =>
         r.binding
           ? r.binding.taskId === taskId &&

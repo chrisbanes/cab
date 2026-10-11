@@ -381,25 +381,19 @@ export class CoordinationView {
       state: String(row.state),
     }));
     const history = this.state
-      .list()
-      .flatMap((intent) => {
-        const binding = this.state.taskBinding(intent.workId);
-        if (!binding || binding.taskId !== id) return [];
-        return [
-          {
-            workId: intent.workId,
-            assignmentId: binding.assignmentId,
-            assignmentVersion: binding.assignmentVersion,
-            conversationRevision: binding.conversationRevision,
-            state: intent.state,
-            ...(this.coordination.recoveryDispositionForWork(intent.workId)
-              ? { recoveryDisposition: "operator-reconciled" as const }
-              : {}),
-            threadId: intent.threadId,
-            turnId: intent.turnId,
-          },
-        ];
-      })
+      .taskExecutions(id)
+      .map(({ intent, binding }) => ({
+        workId: intent.workId,
+        assignmentId: binding.assignmentId,
+        assignmentVersion: binding.assignmentVersion,
+        conversationRevision: binding.conversationRevision,
+        state: intent.state,
+        ...(this.coordination.recoveryDispositionForWork(intent.workId)
+          ? { recoveryDisposition: "operator-reconciled" as const }
+          : {}),
+        threadId: intent.threadId,
+        turnId: intent.turnId,
+      }))
       .sort((a, b) => a.workId.localeCompare(b.workId));
     const inbox = assignments.flatMap((row) =>
       this.coordination.inboxEvents(String(row.id)),
@@ -420,8 +414,7 @@ export class CoordinationView {
     );
     const queued = new Set(
       this.coordination
-        .queuedDeliveries()
-        .filter((delivery) => delivery.taskId === id)
+        .queuedDeliveriesForTask(id)
         .flatMap((delivery) => delivery.events.map((event) => event.eventId)),
     );
     const messages = inbox

@@ -328,6 +328,13 @@ export class DomainStaleDispositionError extends Error {
   }
 }
 
+export class DomainNotFoundError extends Error {
+  constructor() {
+    super("Unknown domain record");
+    this.name = "DomainNotFoundError";
+  }
+}
+
 export class DomainPolicyError extends Error {
   constructor(
     readonly code: "forbidden" | "invalid-input",
@@ -948,6 +955,16 @@ export class DomainStore {
         "SELECT p.id, p.name, p.version, p.paused, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision ORDER BY p.name",
       )
       .all() as Row[];
+  }
+
+  /** Whether `projects()` lists this project, by primary key. */
+  projectListed(projectId: string): boolean {
+    return Boolean(
+      this.one(
+        "SELECT 1 AS listed FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision WHERE p.id = ?",
+        id.parse(projectId),
+      ),
+    );
   }
 
   /** Bounded catalog membership only; policy-bearing rows are projected separately. */
@@ -2391,7 +2408,7 @@ export class DomainStore {
     ...parameters: (string | number | null)[]
   ): Row {
     const row = this.one(sql, ...parameters);
-    if (!row) throw new Error("Unknown domain record");
+    if (!row) throw new DomainNotFoundError();
     return row;
   }
 }
