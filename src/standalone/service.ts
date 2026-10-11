@@ -194,6 +194,10 @@ export function powerSupervisionEnabled(
   );
 }
 
+/** Runtime-issued identities are only unique within one harness. */
+const runtimeKey = (harness: ExecutionHarness, identity: string) =>
+  JSON.stringify([harness, identity]);
+
 const harnessLabel: Record<ExecutionHarness, string> = {
   codex: "Codex",
   claude: "Claude",
@@ -879,7 +883,7 @@ export class StandaloneService {
     );
     runtime.onConversationEvent?.((event) => {
       if (!foreign(event.threadId, event.turnId))
-        this.receiveConversationEvent(event);
+        this.receiveConversationEvent(event, harness);
     });
     runtime.onTerminalAnomaly?.((anomaly) => {
       const matched =
@@ -3833,6 +3837,7 @@ export class StandaloneService {
       conversationCapture = this.beginConversationCapture(
         request,
         workspace,
+        runtimeKey(harness, threadId),
         threadId,
       );
       submissionStage = "turn";
@@ -3933,7 +3938,10 @@ export class StandaloneService {
       if (!turnBound) {
         conversationCapture?.discard();
         if (conversationCapture)
-          this.removeConversationCapture(threadId, conversationCapture);
+          this.removeConversationCapture(
+            runtimeKey(harness, threadId),
+            conversationCapture,
+          );
         throw new Error("Turn binding was held or changed");
       }
       if (turnCapture && comparisonStore) {
@@ -3966,7 +3974,10 @@ export class StandaloneService {
       const outcome = await runtime.waitForTurn(threadId, turnId);
       conversationCapture?.finish();
       if (conversationCapture)
-        this.removeConversationCapture(threadId, conversationCapture);
+        this.removeConversationCapture(
+          runtimeKey(harness, threadId),
+          conversationCapture,
+        );
       this.requireSupervisor().terminalObserved(
         request.workId,
         threadId,
@@ -4142,7 +4153,10 @@ export class StandaloneService {
       if (conversationCapture) {
         conversationCapture.discard();
         if (captureThreadId)
-          this.removeConversationCapture(captureThreadId, conversationCapture);
+          this.removeConversationCapture(
+            runtimeKey(harness, captureThreadId),
+            conversationCapture,
+          );
       }
     }
     return state.get(intent.id);
@@ -4151,6 +4165,7 @@ export class StandaloneService {
   private beginConversationCapture(
     request: TurnRequest,
     workspace: string,
+    captureKey: string,
     threadId: string,
   ): ConversationHistoryCapture | undefined {
     try {
@@ -4171,9 +4186,9 @@ export class StandaloneService {
         currentExclusions: () =>
           this.conversationExclusions(binding, workspace, false),
       });
-      const previous = this.conversationCaptures.get(threadId);
+      const previous = this.conversationCaptures.get(captureKey);
       previous?.discard();
-      this.conversationCaptures.set(threadId, capture);
+      this.conversationCaptures.set(captureKey, capture);
       return capture;
     } catch {
       return undefined;
@@ -4193,16 +4208,21 @@ export class StandaloneService {
     }
   }
 
-  private receiveConversationEvent(event: RuntimeConversationEvent): void {
-    this.conversationCaptures.get(event.threadId)?.receive(event);
+  private receiveConversationEvent(
+    event: RuntimeConversationEvent,
+    harness: ExecutionHarness,
+  ): void {
+    this.conversationCaptures
+      .get(runtimeKey(harness, event.threadId))
+      ?.receive(event);
   }
 
   private removeConversationCapture(
-    threadId: string,
+    captureKey: string,
     capture: ConversationHistoryCapture,
   ): void {
-    if (this.conversationCaptures.get(threadId) === capture)
-      this.conversationCaptures.delete(threadId);
+    if (this.conversationCaptures.get(captureKey) === capture)
+      this.conversationCaptures.delete(captureKey);
   }
 
   private clearConversationCaptures(): void {

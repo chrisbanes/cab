@@ -7,6 +7,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   FailureEvidence,
   Runtime,
+  RuntimeConversationEvent,
   RuntimeToolCall,
   RuntimeToolResult,
   UnexpectedRequest,
@@ -26,6 +27,8 @@ class HarnessRuntime implements Runtime {
   holdTurns = false;
   failNextTurn = false;
   failStart = false;
+  /** Lets two fakes return the same opaque thread ID. */
+  threadName: string | undefined;
   private threads = 0;
   private turns = 0;
   private readonly open = new Map<
@@ -46,6 +49,7 @@ class HarnessRuntime implements Runtime {
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
     | undefined;
   safety: RuntimeSafetyPort | undefined;
+  private conversation: ((event: RuntimeConversationEvent) => void) | undefined;
 
   constructor(private readonly name: ExecutionHarness) {}
 
@@ -60,7 +64,7 @@ class HarnessRuntime implements Runtime {
   }
   async startThread() {
     this.calls.push("startThread");
-    return `${this.name}-thread-${++this.threads}`;
+    return this.threadName ?? `${this.name}-thread-${++this.threads}`;
   }
   async resumeThread(threadId: string) {
     this.calls.push(`resumeThread:${threadId}`);
@@ -134,6 +138,14 @@ class HarnessRuntime implements Runtime {
     }) => void,
   ) {
     this.anomaly = listener;
+  }
+  onConversationEvent(listener: (event: RuntimeConversationEvent) => void) {
+    this.conversation = listener;
+  }
+  answer(threadId: string, turnId: string, text: string) {
+    const itemId = `${this.name}-answer`;
+    this.conversation?.({ threadId, turnId, itemId, kind: "started" });
+    this.conversation?.({ threadId, turnId, itemId, kind: "completed", text });
   }
   onToolCall(listener: (call: RuntimeToolCall) => Promise<RuntimeToolResult>) {
     this.tools = listener;
@@ -813,6 +825,65 @@ test("a runtime cannot act through another harness's execution or evidence", asy
     );
   } finally {
     runtimes.codex.releaseAll();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("overlapping turns on the same thread ID keep separate per-harness captures", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-captures-"));
+  const runtimes = fakes();
+  for (const runtime of Object.values(runtimes)) {
+    runtime.holdTurns = true;
+    runtime.threadName = "shared-thread";
+  }
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    const codexTask = await task(service, projectId, [lead]);
+    const codexWork = initial(codexTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, codexWork)?.state === "running",
+      describe,
+    );
+    const claudeTask = await task(service, projectId, [worker]);
+    const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, claudeWork)?.state === "running",
+      describe,
+    );
+    assert.equal(intent(service, codexWork)?.threadId, "shared-thread");
+    assert.equal(intent(service, claudeWork)?.threadId, "shared-thread");
+
+    // The later Claude capture must not replace or receive Codex's.
+    runtimes.codex.answer("shared-thread", "codex-turn-1", "Codex answer");
+    runtimes.claude.answer("shared-thread", "claude-turn-1", "Claude answer");
+    const db = (service as unknown as { db: DatabaseSync }).db;
+    const items = () =>
+      db
+        .prepare(
+          "SELECT workId, turnId, itemId FROM conversation_history_items ORDER BY workId",
+        )
+        .all() as Array<{ workId: string; turnId: string; itemId: string }>;
+    await waitUntil(
+      () => items().length === 2,
+      () => items(),
+    );
+    assert.deepEqual(
+      items().map((item) => [item.workId, item.turnId, item.itemId]),
+      [
+        [codexWork, "codex-turn-1", "codex-answer"],
+        [claudeWork, "claude-turn-1", "claude-answer"],
+      ].sort(([a], [b]) => String(a).localeCompare(String(b))),
+    );
+  } finally {
+    runtimes.codex.releaseAll();
+    runtimes.claude.releaseAll();
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }
