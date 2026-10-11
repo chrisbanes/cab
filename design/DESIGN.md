@@ -410,7 +410,8 @@ search frames have their own node tables in the sections below.
 
 Frames 133–142 draw the CLI credentials panel of the Settings index: the last panel
 in the right column, after Routing. On phone the two columns stack, and 140 shows
-the panel scrolled into view under the phone header.
+the panel scrolled into view under the phone header; phone states without a frame
+use the desktop copy.
 
 | State | Desktop | Phone |
 | --- | --- | --- |
@@ -430,7 +431,8 @@ the panel scrolled into view under the phone header.
   Expires and Last used ("never" until first use), plus Replaces on a rotation
   replacement and Revoked on a revoked credential. Names may repeat, so the short
   ID tells credentials apart. Active uses the secondary badge; Expired and Revoked
-  use the outline badge and have no actions.
+  use the outline badge and have no actions. Rows are listed by creation time,
+  oldest first.
 - The token is shown once in "CLI token for <name>", with Copy and Done. Copy
   reports "Copied to the clipboard." or "Copy failed. Select the token and copy it
   manually." Outside clicks do not close the dialog; Escape and Done discard the
@@ -438,12 +440,15 @@ the panel scrolled into view under the phone header.
 - Rotate has no confirmation. It issues a replacement with the same name and scope
   and a 90-day lifetime, reveals its token in the same dialog and leaves the old
   credential Active until it is revoked. Only the replacement row says Replaces.
-- Revoke asks first ("Revoke <name>?") and is irreversible by design. Recovery from
-  a lost, leaked or revoked token is rotating or issuing a new credential.
+- Revoke asks first ("Revoke <name>?") and is irreversible by design. A lost or
+  leaked active token is rotated (then the old credential revoked) or replaced by
+  a new credential; a revoked or expired credential can only be replaced by
+  issuing a new one.
 - A failed or unknown request re-reads the list and says "Check the list below
   before retrying"; in the revoke dialog the message appears inside the dialog.
 - Settings (account menu → `/app/settings`) is the only entry point, and the
-  page-title Refresh re-reads the list. No deep link, context menu, extension or
+  page-title Refresh re-reads the list (the phone frames draw only the top-level
+  header). No deep link, context menu, extension or
   notification surface applies, and the legacy HTML UI has no credential controls.
 - Phone inputs, selects and buttons, dialog actions included, are 44 px tall. Token
   values are fictional fixtures. Loading, a busy create button and an
@@ -1426,7 +1431,6 @@ frames 114 and 118–128 as follows:
 - No short identifiers (RL-31, A-203, AT-151) are shown, and recovery omits "last
   observed" and "requested by", which the recovery read does not carry. Its
   breadcrumb is the static "Settings / Runtime / Assignment recovery".
-- The CLI credentials section matches frames 133–142, which were drawn from it.
 - The header keeps Refresh on every settings route, including Create profile, and it
   re-reads the open page's own resources.
 - Switches are native checkboxes drawn as switches.
