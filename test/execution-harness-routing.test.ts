@@ -28,6 +28,8 @@ class HarnessRuntime implements Runtime {
   failNextTurn = false;
   failStart = false;
   hangIdentity = false;
+  /** When set, stop() waits for it, like a child slow to exit. */
+  stopGate: Promise<void> | undefined;
   /** Fails while a recovery inspection is pending and never settles it. */
   failDuringInspection = false;
   /** Lets two fakes return the same opaque thread ID. */
@@ -60,7 +62,10 @@ class HarnessRuntime implements Runtime {
     if (this.failStart) throw new Error("Runtime failed to start");
   }
   /** Like a lost App Server: pending waits reject without a terminal status. */
+  stops = 0;
   async stop() {
+    this.stops++;
+    await this.stopGate;
     for (const turn of this.open.values())
       turn.lose(new Error("Runtime stopped"));
     this.open.clear();
@@ -1043,6 +1048,54 @@ test("a harness failing during a pending recovery inspection does not stall star
       describe,
     );
   } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("start-up does not wait for a failed secondary runtime's cleanup, and shutdown does", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-cleanup-"));
+  const runtimes = fakes();
+  let release!: () => void;
+  runtimes.claude.failStart = true;
+  runtimes.claude.stopGate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  const settled = (promise: Promise<unknown>) =>
+    Promise.race([
+      promise.then(() => "settled"),
+      new Promise((resolve) => setTimeout(() => resolve("pending"), 200)),
+    ]);
+  try {
+    assert.equal(await settled(service.start()), "settled");
+    assert.equal(runtimes.claude.stops, 1);
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    const claudeTask = await task(service, projectId, [worker]);
+    await waitUntil(
+      () =>
+        intent(service, initial(claudeTask.assignmentIds[0] ?? ""))?.reason ===
+        "Claude runtime unavailable; restart the service",
+      describe,
+    );
+    const codexTask = await task(service, projectId, [lead]);
+    await waitUntil(
+      () =>
+        intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+        "completed",
+      describe,
+    );
+
+    // Shutdown still waits for the tracked cleanup before releasing state.
+    const stopping = service.stop();
+    assert.equal(await settled(stopping), "pending");
+    release();
+    await stopping;
+  } finally {
+    release();
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }

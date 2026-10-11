@@ -322,6 +322,8 @@ export class StandaloneService {
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
   /** Settles when a non-default runtime reports failure; see untilFailure. */
   private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
+  /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
+  private readonly detachedRuntimeStops = new Set<Promise<void>>();
   private conversationHistory: ConversationHistoryStore | undefined;
   private readonly conversationCaptures = new Map<
     string,
@@ -689,7 +691,10 @@ export class StandaloneService {
           if (harness === defaultExecutionHarness) throw error;
           this.runtimes.delete(harness);
           this.runtimeUnavailableSince.set(harness, Date.now());
-          await runtime.stop().catch(() => {});
+          // Healthy start-up never waits on a failed secondary's cleanup.
+          const cleanup = runtime.stop();
+          cleanup.catch(() => {});
+          this.detachedRuntimeStops.add(cleanup);
         }
       await this.supervisor.reconcileOnStart();
       await this.deliveryCoordinator.refresh();
@@ -778,11 +783,15 @@ export class StandaloneService {
           this.supervisor?.cancelObservations();
           await this.githubSynchronizer?.stop().catch(() => {});
           await this.deliveryCoordinator?.stop().catch(() => {});
-          await Promise.all(
-            [...this.runtimes.values()].map((runtime) =>
+          await Promise.all([
+            ...[...this.runtimes.values()].map((runtime) =>
               runtime.stop().catch(() => {}),
             ),
-          );
+            ...[...this.detachedRuntimeStops].map((cleanup) =>
+              cleanup.catch(() => {}),
+            ),
+          ]);
+          this.detachedRuntimeStops.clear();
           await workspaces?.settle();
           try {
             await scheduler?.settle();
@@ -1114,12 +1123,15 @@ export class StandaloneService {
       this.clearConversationCaptures(),
     );
     this.runtimes.clear();
+    const detachedStops = [...this.detachedRuntimeStops];
+    this.detachedRuntimeStops.clear();
     // Concurrent, so a hung runtime of one harness cannot keep another running.
-    await Promise.all(
-      [...runtimes.values()].map((runtime) =>
+    await Promise.all([
+      ...[...runtimes.values()].map((runtime) =>
         attempt("runtime stop", () => runtime.stop()),
       ),
-    );
+      ...detachedStops.map((cleanup) => attempt("runtime stop", () => cleanup)),
+    ]);
     await attempt("workspace settlement", () => workspaces?.settle());
     await attempt("scheduler settlement", () => scheduler?.settle());
     await attempt("active-work settlement", async () => {
