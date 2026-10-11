@@ -218,8 +218,11 @@ export async function readTokenFile(
 ): Promise<string> {
   let handle: Awaited<ReturnType<typeof open>>;
   try {
-    // O_NOFOLLOW refuses a symlink; stat and read use the same open file.
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NOFOLLOW refuses a symlink; O_NONBLOCK keeps a FIFO from hanging until isFile() rejects it.
+    handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
   } catch {
     throw new CliError(
       "invalid-token-file",

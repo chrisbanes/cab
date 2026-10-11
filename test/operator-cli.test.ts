@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -245,6 +246,9 @@ test("expired, revoked and malformed credentials fail safely", async (t) => {
   const link = join(h.dir, "link.token");
   symlinkSync(h.tokenFile(valid.token), link);
   assert.equal((await login("link", link)).code, 2);
+  const fifo = join(h.dir, "pipe.token");
+  execFileSync("mkfifo", ["-m", "600", fifo]);
+  assert.equal((await login("fifo", fifo)).code, 2);
   const config = JSON.parse(
     readFileSync(join(h.configDir, "connections.json"), "utf8"),
   );
