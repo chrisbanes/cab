@@ -318,6 +318,13 @@ export class OperatorWebBoundary {
         limit,
       );
     }
+    const instructions = path.match(
+      /^\/api\/operator\/(projects|profiles)\/([^/]+)\/instructions$/,
+    );
+    if (instructions)
+      return instructions[1] === "projects"
+        ? this.api.readProjectInstructions(instructions[2] ?? "", query)
+        : this.api.readProfileInstructions(instructions[2] ?? "", query);
     const records = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/(results|messages)$/,
     );
@@ -360,6 +367,13 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/assignments\/([^/]+)\/recovery$/,
     );
     if (recovery) return this.api.readAssignmentRecovery(recovery[1] ?? "");
+    const assignment = path.match(
+      /^\/api\/operator\/assignments\/([^/]+)(\/instructions)?$/,
+    );
+    if (assignment)
+      return assignment[2]
+        ? this.api.readAssignmentInstructions(assignment[1] ?? "")
+        : this.api.readAssignment(assignment[1] ?? "");
     let config = path.match(
       /^\/api\/operator\/projects\/([^/]+)\/configuration$/,
     );
@@ -421,7 +435,10 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/tasks\/[^/]+\/comparisons$/.test(path) ||
       /^\/api\/operator\/tasks\/[^/]+\/questions\/[^/]+$/.test(path) ||
       /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
-      /^\/api\/operator\/assignments\/[^/]+\/(?:history|recovery)$/.test(path)
+      /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
+        path,
+      ) ||
+      /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
     );
   }
 }

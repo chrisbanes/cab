@@ -253,7 +253,10 @@ export function operatorRouteAuthority(
       path,
     ) ||
     /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
-    /^\/api\/operator\/assignments\/[^/]+\/(?:history|recovery)$/.test(path)
+    /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
+      path,
+    ) ||
+    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
     ? "read"
     : undefined;
 }

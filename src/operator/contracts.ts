@@ -2728,4 +2728,115 @@ export const cliCapabilities = [
   "task.list",
   "task.search",
   "task.records",
+  "assignment.read",
+  "instructions.read",
 ] as const;
+/** Instruction views are reconstructed from retained revisions, never a captured prompt. */
+const instructionProvenanceSchema = z
+  .object({
+    source: z.literal("retained-revision-records"),
+    reconstructed: z.literal(true),
+    submittedPrompt: z.literal("not-captured"),
+  })
+  .strict();
+export const instructionProvenance = {
+  source: "retained-revision-records",
+  reconstructed: true,
+  submittedPrompt: "not-captured",
+} as const;
+export const instructionBodySchema = z
+  .object({
+    revision,
+    state: z.enum(["available", "omitted"]),
+    reason: z.literal("redaction-unavailable").nullable(),
+    text: text.nullable(),
+    redacted: z.boolean(),
+  })
+  .strict();
+const profileInstructionBodySchema = instructionBodySchema
+  .extend({
+    name: safeText,
+    capabilities: safeText,
+    revoked: z.boolean(),
+    runtime: profileRuntimeSchema,
+  })
+  .strict();
+const instructionRevisionListSchema = z
+  .array(
+    z
+      .object({ revision, current: z.boolean(), instructionChars: time })
+      .strict(),
+  )
+  .max(128);
+export const profileInstructionsSchema = envelope(
+  z
+    .object({
+      summary: profileSummarySchema,
+      currentRevision: revision,
+      revisions: instructionRevisionListSchema,
+      selected: profileInstructionBodySchema,
+      provenance: instructionProvenanceSchema,
+    })
+    .strict(),
+);
+export const projectInstructionsSchema = envelope(
+  z
+    .object({
+      summary: projectSummarySchema,
+      currentRevision: revision,
+      revisions: instructionRevisionListSchema,
+      selected: instructionBodySchema,
+      provenance: instructionProvenanceSchema,
+    })
+    .strict(),
+);
+const instructionPairSchema = z
+  .object({
+    profile: profileInstructionBodySchema,
+    project: instructionBodySchema,
+  })
+  .strict();
+const instructionComparisonSchema = z
+  .object({ sameRevision: z.boolean(), sameContent: z.boolean().nullable() })
+  .strict();
+export const assignmentInstructionsSchema = envelope(
+  z
+    .object({
+      assignmentId: uuid,
+      taskId: uuid,
+      projectId: uuid,
+      profileId: uuid,
+      bound: instructionPairSchema,
+      current: instructionPairSchema,
+      comparison: z
+        .object({
+          profile: instructionComparisonSchema,
+          project: instructionComparisonSchema,
+          boundIsCurrent: z.boolean(),
+        })
+        .strict(),
+      execution: z
+        .object({
+          workId: z.string().min(1),
+          requestSequence: revision,
+          profileRevision: revision,
+          instructionsRevision: revision,
+          matchesBound: z.boolean(),
+        })
+        .strict()
+        .nullable(),
+      provenance: instructionProvenanceSchema,
+    })
+    .strict(),
+);
+export const assignmentDetailSchema = envelope(
+  assignmentSchema
+    .extend({
+      taskId: uuid,
+      projectId: uuid,
+      taskVersion: revision,
+      lead: z.boolean(),
+      execution: executionSchema,
+    })
+    .strict(),
+);

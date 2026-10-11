@@ -54,6 +54,11 @@ import {
   sourceObservationSchema,
   taskListPageSchema,
   taskListQuerySchema,
+  assignmentDetailSchema,
+  assignmentInstructionsSchema,
+  instructionProvenance,
+  profileInstructionsSchema,
+  projectInstructionsSchema,
   taskMessagePageSchema,
   taskRecordQuerySchema,
   taskResultPageSchema,
@@ -423,6 +428,8 @@ export class OperatorApi {
     projectId?: string,
     taskId?: string,
     historyBindings: readonly ConversationHistoryBinding[] = [],
+    /** Only for dedicated instruction views: `profile:ID`/`project:ID` texts to leave unredacted. */
+    disclose: readonly string[] = [],
   ): Promise<string[] | undefined> {
     try {
       const d = this.domain(),
@@ -446,11 +453,12 @@ export class OperatorApi {
           return undefined;
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
-          values.push(
-            String(
-              d.profileRevision(String(profile.id), revision).instructions,
-            ),
-          );
+          if (!disclose.includes(`profile:${profile.id}`))
+            values.push(
+              String(
+                d.profileRevision(String(profile.id), revision).instructions,
+              ),
+            );
           covered.add(`profile:${profile.id}:${revision}`);
         }
       }
@@ -461,7 +469,8 @@ export class OperatorApi {
           return undefined;
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
-          values.push(d.instructionRevision(id, revision));
+          if (!disclose.includes(`project:${id}`))
+            values.push(d.instructionRevision(id, revision));
           covered.add(`project:${id}:${revision}`);
         }
         const g = d.githubConfiguration(id);
@@ -2749,6 +2758,237 @@ export class OperatorApi {
     return kind === "results"
       ? taskResultPageSchema.parse({ data: body, observedAt })
       : taskMessagePageSchema.parse({ data: body, observedAt });
+  }
+  /** One retained instruction revision, sanitized with the disclosure exclusions. */
+  private instructionBody(
+    revision: number,
+    raw: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const text = excluded ? sanitizeConversationText(raw, excluded) : undefined;
+    return text === undefined || text.length > 16000
+      ? {
+          revision,
+          state: "omitted" as const,
+          reason: "redaction-unavailable" as const,
+          text: null,
+          redacted: false,
+        }
+      : {
+          revision,
+          state: "available" as const,
+          reason: null,
+          text,
+          redacted: text !== raw,
+        };
+  }
+  private profileInstructionBody(
+    profileId: string,
+    revision: number,
+    excluded: readonly string[] | undefined,
+  ) {
+    const row = this.domain().profileRevision(profileId, revision);
+    return {
+      ...this.instructionBody(revision, String(row.instructions), excluded),
+      name: this.safe(row.name, excluded),
+      capabilities: this.safe(row.capabilities, excluded),
+      revoked: Boolean(row.revoked),
+      runtime: this.domain().profileRuntime(profileId, revision),
+    };
+  }
+  private revisionList(current: number, text: (revision: number) => string) {
+    return Array.from({ length: current }, (_, i) => ({
+      revision: i + 1,
+      current: i + 1 === current,
+      instructionChars: text(i + 1).length,
+    }));
+  }
+  private parseRevision(query: URLSearchParams, current: number) {
+    for (const key of query.keys())
+      if (key !== "revision" || query.getAll(key).length !== 1)
+        throw new OperatorApiError(400, "invalid-input");
+    const value = query.get("revision");
+    if (value === null) return current;
+    if (!/^[1-9][0-9]{0,8}$/.test(value))
+      throw new OperatorApiError(400, "invalid-input");
+    const revision = Number(value);
+    if (revision > current) throw new OperatorApiError(404, "not-found");
+    return revision;
+  }
+  /** Fails closed when instruction or credential visibility changes across the await. */
+  private async instructionExclusions(
+    disclose: string[],
+    projectId?: string,
+    taskId?: string,
+  ) {
+    const visibility = this.visibilityToken();
+    const excluded = await this.exclusions(projectId, taskId, [], disclose);
+    if (visibility !== this.visibilityToken())
+      throw new OperatorApiError(503, "unavailable");
+    return excluded;
+  }
+  async readProfileInstructions(profileId: string, query: URLSearchParams) {
+    uuid.parse(profileId);
+    const d = this.domain(),
+      row = d.profiles().find((p) => p.id === profileId);
+    if (!row) throw new OperatorApiError(404, "not-found");
+    const current = Number(row.version),
+      revision = this.parseRevision(query, current),
+      excluded = await this.instructionExclusions([`profile:${profileId}`]);
+    return profileInstructionsSchema.parse({
+      data: {
+        summary: this.profiles(excluded).find((p) => p.id === profileId),
+        currentRevision: current,
+        revisions: this.revisionList(current, (r) =>
+          String(d.profileRevision(profileId, r).instructions),
+        ),
+        selected: this.profileInstructionBody(profileId, revision, excluded),
+        provenance: instructionProvenance,
+      },
+      observedAt: Date.now(),
+    });
+  }
+  async readProjectInstructions(projectId: string, query: URLSearchParams) {
+    const p = this.requireProject(projectId),
+      d = this.domain(),
+      current = Number(p.instructionsRevision),
+      revision = this.parseRevision(query, current),
+      excluded = await this.instructionExclusions(
+        [`project:${projectId}`],
+        projectId,
+      );
+    return projectInstructionsSchema.parse({
+      data: {
+        summary: this.project(d.project(projectId), excluded),
+        currentRevision: current,
+        revisions: this.revisionList(current, (r) =>
+          d.instructionRevision(projectId, r),
+        ),
+        selected: this.instructionBody(
+          revision,
+          d.instructionRevision(projectId, revision),
+          excluded,
+        ),
+        provenance: instructionProvenance,
+      },
+      observedAt: Date.now(),
+    });
+  }
+  private requireAssignment(assignmentId: string) {
+    uuid.parse(assignmentId);
+    let a: Row;
+    try {
+      a = this.domain().assignment(assignmentId);
+    } catch {
+      throw new OperatorApiError(404, "not-found");
+    }
+    const task = this.requireTask(String(a.taskId));
+    return { a, taskId: String(task.id), projectId: String(task.projectId) };
+  }
+  async readAssignment(assignmentId: string) {
+    const { taskId, projectId } = this.requireAssignment(assignmentId);
+    const { data, observedAt } = await this.readTask(taskId);
+    const entry = data.assignments.find((x) => x.assignmentId === assignmentId);
+    if (!entry) throw new OperatorApiError(503, "unavailable");
+    return assignmentDetailSchema.parse({
+      data: {
+        ...entry,
+        taskId,
+        projectId,
+        taskVersion: data.task.version,
+        lead: data.leadAssignmentId === assignmentId,
+        execution: data.execution,
+      },
+      observedAt,
+    });
+  }
+  async readAssignmentInstructions(assignmentId: string) {
+    const { a, taskId, projectId } = this.requireAssignment(assignmentId),
+      d = this.domain(),
+      profileId = String(a.profileId),
+      bound = {
+        profile: Number(a.profileRevision),
+        project: Number(a.instructionsRevision),
+      },
+      current = {
+        profile: Number(d.profile(profileId).version),
+        project: Number(d.project(projectId).instructionsRevision),
+      },
+      request = this.selection(a).request;
+    const excluded = await this.instructionExclusions(
+      [`profile:${profileId}`, `project:${projectId}`],
+      projectId,
+      taskId,
+    );
+    const pair = (r: typeof bound) => ({
+      profile: this.profileInstructionBody(profileId, r.profile, excluded),
+      project: this.instructionBody(
+        r.project,
+        d.instructionRevision(projectId, r.project),
+        excluded,
+      ),
+    });
+    const boundView = pair(bound),
+      currentView = pair(current);
+    const sameContent = (
+      kind: "profile" | "project",
+      left: { state: string },
+      right: { state: string },
+    ) =>
+      left.state === "omitted" || right.state === "omitted"
+        ? null
+        : kind === "profile"
+          ? d.profileRevision(profileId, bound.profile).instructions ===
+            d.profileRevision(profileId, current.profile).instructions
+          : d.instructionRevision(projectId, bound.project) ===
+            d.instructionRevision(projectId, current.project);
+    if (Number(d.assignment(assignmentId).version) !== Number(a.version))
+      throw new OperatorApiError(503, "unavailable");
+    return assignmentInstructionsSchema.parse({
+      data: {
+        assignmentId,
+        taskId,
+        projectId,
+        profileId,
+        bound: boundView,
+        current: currentView,
+        comparison: {
+          profile: {
+            sameRevision: bound.profile === current.profile,
+            sameContent: sameContent(
+              "profile",
+              boundView.profile,
+              currentView.profile,
+            ),
+          },
+          project: {
+            sameRevision: bound.project === current.project,
+            sameContent: sameContent(
+              "project",
+              boundView.project,
+              currentView.project,
+            ),
+          },
+          boundIsCurrent:
+            bound.profile === current.profile &&
+            bound.project === current.project,
+        },
+        execution:
+          request?.profileRevision && request.instructionsRevision
+            ? {
+                workId: request.workId,
+                requestSequence: request.sequence,
+                profileRevision: request.profileRevision,
+                instructionsRevision: request.instructionsRevision,
+                matchesBound:
+                  request.profileRevision === bound.profile &&
+                  request.instructionsRevision === bound.project,
+              }
+            : null,
+        provenance: instructionProvenance,
+      },
+      observedAt: Date.now(),
+    });
   }
   private source(
     identity: NonNullable<ReturnType<OperatorApi["identity"]>>,
