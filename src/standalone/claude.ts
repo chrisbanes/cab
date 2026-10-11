@@ -328,6 +328,7 @@ export const claudePolicyLimits: readonly string[] = [
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
   "The sandboxed agent can write the per-task temporary directory; Ensemble checks only its top-level entries before each turn.",
   "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
+  "If the sandboxed agent changes the per-task temporary directory's permissions, the task's Claude work waits as not private until the operator repairs or removes it.",
 ];
 
 async function readBounded(path: string, limit: number): Promise<string> {
@@ -481,6 +482,8 @@ export class ClaudeRuntime implements Runtime {
   /** Model to supported efforts, read model-free from the installed CLI. */
   private supported: Map<string, readonly string[]> | undefined;
   private settingsReading = false;
+  private settingsRun: Promise<void> | undefined;
+  private settingsAbort: AbortController | undefined;
   private settingsFailedAt: number | undefined;
   private readonly sandboxProbes = new Map<
     string,
@@ -631,7 +634,7 @@ export class ClaudeRuntime implements Runtime {
       return "supported models could not be read";
     const generation = this.generation;
     this.settingsReading = true;
-    void this.readSettings(env, workspace).then(
+    this.settingsRun = this.readSettings(env, workspace).then(
       (supported) => {
         this.settingsReading = false;
         if (this.generation !== generation) return;
@@ -676,6 +679,7 @@ export class ClaudeRuntime implements Runtime {
     const sdk = this.sdk;
     if (!sdk) throw new Error("Runtime stopped");
     const abort = new AbortController();
+    this.settingsAbort = abort;
     let child: ChildProcess | undefined;
     let exited: Promise<void> | undefined;
     async function* never(): AsyncGenerator<SDKUserMessage> {
@@ -717,6 +721,12 @@ export class ClaudeRuntime implements Runtime {
           timer = setTimeout(
             () => reject(new Error("timed out")),
             settingsReadTimeoutMs,
+          ).unref();
+          // stop() ends a read that is still waiting.
+          abort.signal.addEventListener(
+            "abort",
+            () => reject(new Error("stopped")),
+            { once: true },
           );
         }),
       ]).finally(() => clearTimeout(timer));
@@ -754,7 +764,14 @@ export class ClaudeRuntime implements Runtime {
     this.generation = undefined;
     const pending = [...this.turns.values()].filter((turn) => !turn.done);
     for (const turn of pending) turn.abort.abort();
-    await Promise.allSettled(pending.map((turn) => turn.settled.promise));
+    this.settingsAbort?.abort();
+    await Promise.allSettled([
+      ...pending.map((turn) => turn.settled.promise),
+      this.settingsRun,
+    ]);
+    this.settingsReading = false;
+    this.settingsRun = undefined;
+    this.settingsAbort = undefined;
     this.turns.clear();
     this.sandboxProbes.clear();
     this.supported = undefined;

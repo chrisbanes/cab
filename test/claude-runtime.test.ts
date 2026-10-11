@@ -66,6 +66,7 @@ function fixture(
     environment?: () => ClaudeTurnEnvironment;
     verified?: boolean;
     selfTest?: () => boolean;
+    hangModels?: boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-claude-runtime-"));
@@ -74,7 +75,9 @@ function fixture(
   const safetyFixture = runtimeSafetyFixture();
   const log: string[] = [];
   const recorded: unknown[] = [];
-  const { sdk, sessions, queries } = fakeSdk(options.scripts ?? [], log);
+  const { sdk, sessions, queries } = fakeSdk(options.scripts ?? [], log, {
+    hangModels: options.hangModels ?? false,
+  });
   const runtime = new ClaudeRuntime({
     safety: {
       ...safetyFixture.safety,
@@ -934,6 +937,35 @@ test("coordination arguments parsed by the advertised schema keep their hook cor
       f.toolCalls.map((call) => [call.callId, call.tool, call.arguments]),
       inputs.map(([name, args], index) => [`toolu_ok_${index}`, name, args]),
     );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("stopping the runtime ends a settings read that is still waiting", async () => {
+  const f = fixture({ hangModels: true });
+  const reading = "Claude runtime unavailable: reading supported models";
+  const untilReading = async () => {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      if (
+        (await f.runtime.preflightTurn({ workspace: f.workspace })) === reading
+      )
+        return;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    throw new Error("Settings read never started");
+  };
+  try {
+    await f.runtime.start();
+    await untilReading();
+    assert.deepEqual(f.queries, ["settings"]);
+    const started = Date.now();
+    await f.runtime.stop();
+    assert.ok(Date.now() - started < 2000);
+    await f.runtime.start();
+    await untilReading();
+    // A fresh generation starts a new read instead of waiting on the stopped one.
+    assert.deepEqual(f.queries, ["settings", "settings"]);
   } finally {
     await f.cleanup();
   }
