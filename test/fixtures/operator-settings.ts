@@ -155,6 +155,39 @@ export async function seedSettingsWorld(f: Fixture) {
   return { profiles, atlas, relay, fieldnotes, checkout, taskId, assignmentId };
 }
 
+/**
+ * An imported task in the first project whose source issue is a member of every listed
+ * project, so the task has a placement conflict between them.
+ */
+export function seedImportedConflict(
+  f: Fixture,
+  taskId: string,
+  projectIds: string[],
+  nodeId = "I_PLACEMENT",
+  issueNumber = 1,
+) {
+  f.service.domain().execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: projectIds[0] as string,
+    taskId,
+    title: "Conflicting imported task",
+    outcome: "Work",
+    ready: false,
+  });
+  f.service.domain().markImportedTask(taskId, nodeId, "R_PLACEMENT");
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO github_external_issues VALUES ('github.com',?,?,'R_PLACEMENT','owner/repo',?,'Imported','Body','open','[]')",
+    ).run(nodeId, taskId, issueNumber);
+    for (const projectId of projectIds)
+      db.prepare(
+        "INSERT INTO github_memberships VALUES (?,'selection',?,'[]')",
+      ).run(projectId, nodeId);
+  });
+}
+
 /** One fixture with the settings world, one Chromium page, signed in on `path`. */
 export async function startSettings(
   journey: BrowserJourney,
