@@ -71,7 +71,7 @@ import {
   STANDALONE_MARKER_CONTENTS,
   StandaloneDataDirectory,
 } from "./data-directory.js";
-import { DeliveryCoordinator, deliveryRuntimeEnvironment } from "./delivery.js";
+import { credentialFreeEnvironment, DeliveryCoordinator } from "./delivery.js";
 import type { GitHubDeliveryProvider } from "./github-delivery.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
@@ -170,9 +170,18 @@ const immutableRevisionMismatches = new Set([
   "task-revision-changed",
 ]);
 
+/** The Claude turn's base environment and token, or why no turn may start. */
+export type ClaudeTurnEnvironment =
+  | { env: NodeJS.ProcessEnv; token: string }
+  | { unavailable: string };
+
 export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
   safety: RuntimeSafetyPort;
+  claude?: {
+    configDirectory: string;
+    turnEnvironment: () => ClaudeTurnEnvironment;
+  };
 }
 export function createRuntime(
   context: RuntimeSpawnContext,
@@ -648,16 +657,53 @@ export class StandaloneService {
               process.env[policy.credentialRef.slice(4)] ?? "",
             )),
       });
+      const deliveryCredentialNames = () =>
+        domain.projects().flatMap((p) => {
+          const ref = deliveryStore.configuration(String(p.id)).credentialRef;
+          return ref ? [ref.slice(4)] : [];
+        });
+      const claudeTokenName = () =>
+        domain.claudeTokenReference()?.slice(4) ?? null;
       const spawnEnvironment = {
         spawnEnvironment: () => {
-          const policies = domain
-            .projects()
-            .map((p) => deliveryStore.configuration(String(p.id)));
+          const claude = claudeTokenName();
           const snapshot = managedAssignmentEnvironment(
-            deliveryRuntimeEnvironment(process.env, policies),
+            credentialFreeEnvironment(process.env, [
+              ...deliveryCredentialNames(),
+              ...(claude ? [claude] : []),
+            ]),
           );
           this.runtimeSpawnSnapshot = snapshot;
           return { ...snapshot };
+        },
+      };
+      const unavailable = (reason: string) => ({
+        unavailable: `Claude runtime unavailable: ${reason}`,
+      });
+      // Never wider than what the running runtimes inherited at start.
+      const claude = {
+        configDirectory: join(this.dataDir, "claude", "config"),
+        turnEnvironment: (): ClaudeTurnEnvironment => {
+          const name = claudeTokenName();
+          if (!name) return unavailable("subscription token is not configured");
+          const snapshot = this.runtimeSpawnSnapshot ?? {};
+          const token = process.env[name];
+          if (
+            snapshot[name] !== undefined ||
+            (token && Object.values(snapshot).includes(token))
+          )
+            return unavailable(
+              "Claude token reference was configured after the service started; restart the service",
+            );
+          if (!token) return unavailable("subscription token is unavailable");
+          return {
+            env: credentialFreeEnvironment(
+              snapshot,
+              [...deliveryCredentialNames(), name],
+              process.env,
+            ),
+            token,
+          };
         },
       };
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
@@ -668,7 +714,7 @@ export class StandaloneService {
         try {
           // Keyed by the requested harness: test fakes do not declare one.
           runtime = this.runtimeFactory(
-            { ...spawnEnvironment, safety: runtimeSafety(harness) },
+            { ...spawnEnvironment, safety: runtimeSafety(harness), claude },
             harness,
           );
         } catch (error) {
@@ -4530,13 +4576,9 @@ export class StandaloneService {
             ? [value]
             : [],
         ),
-        ...(discovery
-          ? [
-              discovery,
-              discovery.slice(4),
-              process.env[discovery.slice(4)] ?? "",
-            ]
-          : []),
+        ...[discovery, domain.claudeTokenReference()].flatMap((ref) =>
+          ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
+        ),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
           const id = String(p.id);

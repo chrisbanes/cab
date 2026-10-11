@@ -1311,3 +1311,36 @@ test("profiles store a validated execution runtime per revision", () => {
     f.close();
   }
 });
+
+test("Claude token reference configures, clears and never returns the name", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.domain.claudeTokenReference(), null);
+    const configure = (credentialRef: string | null, actor = "operator") =>
+      f.domain.execute({
+        type: "claude-token.configure",
+        actor,
+        key: key(),
+        credentialRef,
+      } as DomainCommand);
+    const receipt = configure("env:CLAUDE_SUBSCRIPTION_TOKEN");
+    assert.deepEqual(receipt, { configured: true });
+    assert.doesNotMatch(JSON.stringify(receipt), /CLAUDE_SUBSCRIPTION/);
+    f.reopen();
+    assert.equal(
+      f.domain.claudeTokenReference(),
+      "env:CLAUDE_SUBSCRIPTION_TOKEN",
+    );
+    assert.deepEqual(configure(null), { configured: false });
+    assert.equal(f.domain.claudeTokenReference(), null);
+    for (const invalid of ["CLAUDE_TOKEN", "env:lower", "file:/x", ""])
+      assert.throws(() => configure(invalid));
+    assert.throws(
+      () => configure("env:CLAUDE_TOKEN", "agent"),
+      /Operator authority required/,
+    );
+    assert.equal(f.domain.claudeTokenReference(), null);
+  } finally {
+    f.close();
+  }
+});
