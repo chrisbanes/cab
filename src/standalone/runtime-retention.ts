@@ -1,5 +1,6 @@
 import type { ExecutionHarness } from "./execution-harness.js";
 import type { NativeInputEndpointIdentity } from "./native-input.js";
+import type { RuntimeProcessIdentity } from "./recovery-types.js";
 
 export type RuntimeTerminalStatus = "completed" | "failed";
 
@@ -82,4 +83,12 @@ export interface RuntimeSafetyPort {
   nativeEndpointHistory(
     identity: NativeInputEndpointIdentity,
   ): RuntimeNativeEndpointHistory;
+  /**
+   * Binds a per-turn process to the one submitting execution on this thread
+   * whose turn and process are still unknown; false when no such row exists.
+   */
+  recordTurnProcess?(input: {
+    threadId: string;
+    processIdentity: RuntimeProcessIdentity;
+  }): boolean;
 }

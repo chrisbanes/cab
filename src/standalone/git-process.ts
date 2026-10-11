@@ -1,7 +1,8 @@
 import type { ChildProcess } from "node:child_process";
+import { childProcessEnvironment } from "../core/child-environment.js";
 
 export function gitEnvironment(): NodeJS.ProcessEnv {
-  const environment: NodeJS.ProcessEnv = { ...process.env };
+  const environment = childProcessEnvironment();
   for (const key of Object.keys(environment))
     if (key.startsWith("GIT_")) delete environment[key];
   environment.GIT_ALLOW_PROTOCOL = "";

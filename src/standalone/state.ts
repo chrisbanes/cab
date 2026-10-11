@@ -330,7 +330,7 @@ export interface FailedGenerationResolution {
 /** Stored retry rows keep their original Codex-named column values. */
 const retryFailureSource: Record<ExecutionHarness, "codexErrorInfo" | null> = {
   codex: "codexErrorInfo",
-  // ponytail: Claude failures are held without retry until C3 maps them.
+  // Deliberate: Claude failures are classified and held, never retried (#825).
   claude: null,
 };
 
@@ -4034,6 +4034,35 @@ export class ExecutionState {
         }
       }
       return admitted;
+    });
+  }
+
+  /** Records a per-turn process identity before that turn's prompt is released. */
+  recordTurnProcess(
+    threadId: string,
+    processIdentity: RuntimeProcessIdentity,
+  ): boolean {
+    const identity = processIdentitySchema.parse(processIdentity);
+    return transaction(this.db, () => {
+      const rows = this.db
+        .prepare(`SELECT identity.workId FROM execution_recovery_identities identity
+          JOIN execution_intents intent ON intent.workId = identity.workId
+          WHERE identity.threadId = ? AND identity.turnId IS NULL
+            AND identity.processId IS NULL AND intent.state = 'submitting'
+            AND intent.threadId = ? AND intent.turnId IS NULL LIMIT 2`)
+        .all(threadId, threadId) as Array<{ workId: string }>;
+      const workId = rows.length === 1 ? rows[0]?.workId : undefined;
+      if (!workId) return false;
+      this.db
+        .prepare(`UPDATE execution_recovery_identities
+          SET processId = ?, processStartedAt = ?, bootId = ? WHERE workId = ?`)
+        .run(
+          identity.processId,
+          identity.processStartedAt,
+          identity.bootId,
+          workId,
+        );
+      return true;
     });
   }
 

@@ -172,3 +172,56 @@ test("summarize rejects a result that omits a declared facet", async () => {
   );
   assert.throws(() => summarize({}, { p1: ["F1.1"] }), /Missing result file/);
 });
+
+test("p9 judges each TMPDIR facet and selects redirect, then deny, then shared", async () => {
+  const { judge, selectOutcome } = await import(
+    pathToFileURL(resolve("test/claude-c0/p9-tmpdir.mjs")).href
+  );
+  const observed = {
+    ran: true,
+    insideWritten: true,
+    insideResultClean: true,
+    reportedIsShared: true,
+    reportedIsTaskRoot: false,
+    tmpdirWriteLanded: true,
+    sharedWriteLanded: true,
+  };
+  assert.deepEqual(judge("F9.3", observed), ["passed"]);
+  assert.deepEqual(judge("F9.2", observed), ["failed"]);
+  assert.deepEqual(
+    judge("F9.2", {
+      ...observed,
+      tmpdirWriteLanded: false,
+      sharedWriteLanded: false,
+    }),
+    ["passed"],
+  );
+  assert.deepEqual(
+    judge("F9.1", {
+      ...observed,
+      reportedIsShared: false,
+      reportedIsTaskRoot: true,
+      sharedWriteLanded: false,
+    }),
+    ["passed"],
+  );
+  assert.equal(judge("F9.1", { ...observed, ran: false })[0], "untested");
+  // Commands that run but report errors (a denied cwd file) do not count as a working shell.
+  assert.deepEqual(
+    judge("F9.2", {
+      ...observed,
+      insideResultClean: false,
+      tmpdirWriteLanded: false,
+      sharedWriteLanded: false,
+    }),
+    ["failed"],
+  );
+  const rows = (one: string, two: string) => [
+    { id: "F9.1", disposition: one },
+    { id: "F9.2", disposition: two },
+  ];
+  assert.equal(selectOutcome(rows("passed", "failed")), "redirect");
+  assert.equal(selectOutcome(rows("failed", "passed")), "deny");
+  assert.equal(selectOutcome(rows("failed", "failed")), "shared");
+  assert.equal(selectOutcome(rows("failed", "untested")), "undetermined");
+});

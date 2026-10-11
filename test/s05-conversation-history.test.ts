@@ -901,6 +901,52 @@ test("the installation discovery credential is redacted when history is captured
   }
 });
 
+test("the Claude token reference and value are redacted when history is captured", async () => {
+  const runtime = new HistoryRuntime();
+  const previous = process.env.FIXTURE_HISTORY_CLAUDE;
+  // The name deliberately avoids the generic TOKEN/SECRET environment pattern.
+  process.env.FIXTURE_HISTORY_CLAUDE = "CLAUDEVALUECANARY517";
+  const f = await fixture(runtime);
+  command(f.service, {
+    type: "claude-token.configure",
+    actor: "operator",
+    credentialRef: "env:FIXTURE_HISTORY_CLAUDE",
+  });
+  runtime.plan({
+    id: "claude-token-turn",
+    beforeReturn: (active, threadId, turnId) => {
+      active.emit({ threadId, turnId, itemId: "c-1", kind: "started" });
+      active.emit({
+        threadId,
+        turnId,
+        itemId: "c-1",
+        kind: "completed",
+        text: "Found CLAUDEVALUECANARY517 via env:FIXTURE_HISTORY_CLAUDE.",
+      });
+    },
+  });
+  try {
+    f.activate();
+    const bound = await runtime.waitForTurnStart();
+    runtime.complete(bound.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+    const stored = JSON.stringify(
+      query(
+        f.root,
+        "SELECT text FROM conversation_history_items WHERE workId = ?",
+        f.workId,
+      ),
+    );
+    assert.equal(stored.includes("CLAUDEVALUECANARY517"), false);
+    assert.equal(stored.includes("FIXTURE_HISTORY_CLAUDE"), false);
+  } finally {
+    if (previous === undefined) delete process.env.FIXTURE_HISTORY_CLAUDE;
+    else process.env.FIXTURE_HISTORY_CLAUDE = previous;
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test("history capture and reads exclude every project's source and routing references and generic secret values", async (t) => {
   const runtime = new HistoryRuntime(),
     f = await fixture(runtime),

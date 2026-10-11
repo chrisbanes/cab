@@ -479,6 +479,12 @@ export function unexpectedRequest(
   return { method };
 }
 
+/** Per-turn model settings from the bound profile revision (Claude only). */
+export interface RuntimeTurnSettings {
+  model: string | null;
+  reasoningEffort: string | null;
+}
+
 export interface Runtime {
   /** Declared by real harness runtimes; test fakes omit it. */
   readonly harness?: ExecutionHarness;
@@ -505,10 +511,21 @@ export interface Runtime {
     threadId: string,
     tools?: readonly RuntimeToolDefinition[],
   ): Promise<void>;
+  /**
+   * Checked before admission. A reason keeps the work waiting: no writer,
+   * capacity or uncertainty hold is taken because nothing has started.
+   */
+  preflightTurn?(input: {
+    workspace: string;
+    settings?: RuntimeTurnSettings;
+  }): Promise<string | undefined>;
+  /** Called when a preflight reason may have cleared, so waiting work is retried. */
+  onAdmissionChange?(listener: () => void): void;
   startTurn(
     threadId: string,
     workspace: string,
     prompt: string,
+    settings?: RuntimeTurnSettings,
   ): Promise<string>;
   interruptTurn(threadId: string, turnId: string): Promise<void>;
   waitForTurn(

@@ -42,7 +42,9 @@ import {
   type RuntimeConversationEvent,
   type RuntimeToolCall,
   type RuntimeToolResult,
+  type RuntimeTurnSettings,
 } from "./codex.js";
+import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
   managedAssignmentEnvironment,
@@ -71,7 +73,11 @@ import {
   STANDALONE_MARKER_CONTENTS,
   StandaloneDataDirectory,
 } from "./data-directory.js";
-import { DeliveryCoordinator, deliveryRuntimeEnvironment } from "./delivery.js";
+import { DeliveryCoordinator } from "./delivery.js";
+import {
+  credentialFreeEnvironment,
+  setChildCredentialExclusions,
+} from "../core/child-environment.js";
 import type { GitHubDeliveryProvider } from "./github-delivery.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
@@ -170,9 +176,18 @@ const immutableRevisionMismatches = new Set([
   "task-revision-changed",
 ]);
 
+/** The Claude turn's base environment and token, or why no turn may start. */
+export type ClaudeTurnEnvironment =
+  | { env: NodeJS.ProcessEnv; token: string }
+  | { unavailable: string };
+
 export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
   safety: RuntimeSafetyPort;
+  claude?: {
+    configDirectory: string;
+    turnEnvironment: () => ClaudeTurnEnvironment;
+  };
 }
 export function createRuntime(
   context: RuntimeSpawnContext,
@@ -186,7 +201,12 @@ export function createRuntime(
     case "codex":
       return new CodexRuntime("codex", context);
     case "claude":
-      throw new Error("Unsupported execution harness: claude");
+      if (!context.claude)
+        throw new Error("Claude runtime context unavailable");
+      return new ClaudeRuntime({
+        safety: context.safety,
+        claude: context.claude,
+      });
   }
 }
 
@@ -555,6 +575,10 @@ export class StandaloneService {
         },
         nativeEndpointHistory: (identity) =>
           coordination.runtimeNativeEndpointHistory(identity),
+        recordTurnProcess: ({ threadId, processIdentity }) => {
+          ownIdentity(harness, threadId);
+          return state.recordTurnProcess(threadId, processIdentity);
+        },
       });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
@@ -648,16 +672,58 @@ export class StandaloneService {
               process.env[policy.credentialRef.slice(4)] ?? "",
             )),
       });
+      const deliveryCredentialNames = () =>
+        domain.projects().flatMap((p) => {
+          const ref = deliveryStore.configuration(String(p.id)).credentialRef;
+          return ref ? [ref.slice(4)] : [];
+        });
+      const claudeTokenName = () =>
+        domain.claudeTokenReference()?.slice(4) ?? null;
+      // Helper children (git, ps, pmset, …) never inherit the Claude token either.
+      setChildCredentialExclusions(() => {
+        const name = claudeTokenName();
+        return name ? [name] : [];
+      });
       const spawnEnvironment = {
         spawnEnvironment: () => {
-          const policies = domain
-            .projects()
-            .map((p) => deliveryStore.configuration(String(p.id)));
+          const claude = claudeTokenName();
           const snapshot = managedAssignmentEnvironment(
-            deliveryRuntimeEnvironment(process.env, policies),
+            credentialFreeEnvironment(process.env, [
+              ...deliveryCredentialNames(),
+              ...(claude ? [claude] : []),
+            ]),
           );
           this.runtimeSpawnSnapshot = snapshot;
           return { ...snapshot };
+        },
+      };
+      const unavailable = (reason: string) => ({
+        unavailable: `Claude runtime unavailable: ${reason}`,
+      });
+      // Never wider than what the running runtimes inherited at start.
+      const claude = {
+        configDirectory: join(this.dataDir, "claude", "config"),
+        turnEnvironment: (): ClaudeTurnEnvironment => {
+          const name = claudeTokenName();
+          if (!name) return unavailable("subscription token is not configured");
+          const snapshot = this.runtimeSpawnSnapshot ?? {};
+          const token = process.env[name];
+          if (
+            snapshot[name] !== undefined ||
+            (token && Object.values(snapshot).includes(token))
+          )
+            return unavailable(
+              "Claude token reference was configured after the service started; restart the service",
+            );
+          if (!token) return unavailable("subscription token is unavailable");
+          return {
+            env: credentialFreeEnvironment(
+              snapshot,
+              [...deliveryCredentialNames(), name],
+              process.env,
+            ),
+            token,
+          };
         },
       };
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
@@ -668,7 +734,7 @@ export class StandaloneService {
         try {
           // Keyed by the requested harness: test fakes do not declare one.
           runtime = this.runtimeFactory(
-            { ...spawnEnvironment, safety: runtimeSafety(harness) },
+            { ...spawnEnvironment, safety: runtimeSafety(harness), claude },
             harness,
           );
         } catch (error) {
@@ -1045,6 +1111,13 @@ export class StandaloneService {
           })
         : this.handleToolCall(call),
     );
+    const generation = this.generation;
+    runtime.onAdmissionChange?.(() => {
+      if (acceptsNew() && generation)
+        this.observeBackgroundFailure(generation, "domain-wake", () =>
+          this.wakeScheduler(0, generation),
+        );
+    });
     runtime.onConversationEvent?.((event) => {
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
@@ -2319,11 +2392,16 @@ export class StandaloneService {
       });
     let releaseArchiveHold = false;
     try {
+      const path = this.workspaceBindings?.get(taskId)?.path;
+      const workspace = path && existsSync(path) ? realpathSync(path) : path;
       const result = await this.requireWorkspaces().archiveAndCleanup(
         taskId,
         evidence,
         () => state.confirmArchive(taskId),
       );
+      // The Claude sandbox temporary base lives exactly as long as the workspace.
+      if (result.outcome === "cleaned" && workspace)
+        await releaseClaudeTemporaryBase(workspace).catch(() => {});
       releaseArchiveHold =
         result.outcome === "cleaned" ||
         (result.outcome === "retained" &&
@@ -3860,6 +3938,34 @@ export class StandaloneService {
         return;
       if (waitForRuntime()) return;
       if (!runtime) return;
+      if (runtime.preflightTurn) {
+        const preflight = runtime.preflightTurn.bind(runtime);
+        const failed = `${harnessLabel[harness]} runtime unavailable: preflight failed`;
+        // A settings lookup failure waits like any other preflight failure.
+        const reason = await this.untilFailure(
+          runtime,
+          (async () => {
+            const settings = this.turnSettings(request);
+            return preflight({
+              workspace: workspaceKey,
+              ...(settings ? { settings } : {}),
+            });
+          })(),
+          () => failed,
+        ).catch(() => failed);
+        if (
+          this.runtimes.get(harness) !== runtime ||
+          this.generation !== generation ||
+          !generation.accepting
+        )
+          return;
+        if (waitForRuntime()) return;
+        if (reason !== undefined) {
+          state.wait(intent.id, reason);
+          store.wait(request.workId, reason);
+          return;
+        }
+      }
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
       const power = this.power;
@@ -3900,6 +4006,20 @@ export class StandaloneService {
       return;
     }
     this.startExecution(request, intent, workspaceKey, previous);
+  }
+
+  /** Model settings of the bound profile revision; only Claude profiles carry them. */
+  private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
+    if (!request.assignmentId || request.profileRevision === null)
+      return undefined;
+    const domain = this.domain();
+    const runtime = domain.profileRuntime(
+      String(domain.assignment(request.assignmentId).profileId),
+      request.profileRevision,
+    );
+    return runtime.harness === "claude"
+      ? { model: runtime.model, reasoningEffort: runtime.reasoningEffort }
+      : undefined;
   }
 
   /** Never awaited by admission: admissionResumed wakes the scheduler drain. */
@@ -4056,8 +4176,20 @@ export class StandaloneService {
       );
       submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
+      const settings = this.turnSettings(request);
       const turnId = await guard(
-        runtime.startTurn(threadId, workspace, this.executionPrompt(request)),
+        settings
+          ? runtime.startTurn(
+              threadId,
+              workspace,
+              this.executionPrompt(request),
+              settings,
+            )
+          : runtime.startTurn(
+              threadId,
+              workspace,
+              this.executionPrompt(request),
+            ),
       );
       const runtimeGeneration = runtime.currentUserInputGeneration?.();
       let turnBound = runtimeGeneration
@@ -4530,13 +4662,9 @@ export class StandaloneService {
             ? [value]
             : [],
         ),
-        ...(discovery
-          ? [
-              discovery,
-              discovery.slice(4),
-              process.env[discovery.slice(4)] ?? "",
-            ]
-          : []),
+        ...[discovery, domain.claudeTokenReference()].flatMap((ref) =>
+          ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
+        ),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
           const id = String(p.id);

@@ -32,6 +32,7 @@ const PROBES = {
   p4: "./p4-mcp.mjs",
   p5: "./p5-policy.mjs",
   p6: "./p6-sandbox.mjs",
+  p9: "./p9-tmpdir.mjs",
 };
 
 const text = (command, args, options = {}) => {
@@ -132,7 +133,7 @@ async function summary(root) {
   );
   const rows = summarize(results, present);
   const all = rows.flatMap((row) => row.facets);
-  for (let probe = 1; probe <= 8; probe++) {
+  for (let probe = 1; probe <= 9; probe++) {
     const facets = all.filter((item) => item.id.startsWith(`F${probe}.`));
     if (!facets.length) continue;
     console.log(`probe ${probe}: ${probeDisposition(facets)}`);
@@ -184,7 +185,9 @@ function exportTraces(root) {
         REPO,
         "docs",
         "evidence",
-        `issue-822-claude-sdk-probes-${step}-${date}.jsonl`,
+        step === "p9"
+          ? `issue-825-claude-tmpdir-proof-${date}.jsonl`
+          : `issue-822-claude-sdk-probes-${step}-${date}.jsonl`,
       ),
       `${lines.join("\n")}\n`,
     );

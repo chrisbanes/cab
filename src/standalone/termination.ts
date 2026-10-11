@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { childProcessEnvironment } from "../core/child-environment.js";
 import type {
   RuntimeProcessIdentity,
   TerminationVerification,
@@ -24,6 +25,7 @@ async function readText(
       encoding: "utf8",
       timeout: 3000,
       windowsHide: true,
+      env: childProcessEnvironment(),
     });
     const output = result.stdout.trim();
     return output.length > 0 ? output : null;

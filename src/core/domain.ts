@@ -276,6 +276,16 @@ const commandSchema = z.discriminatedUnion("type", [
         .nullable(),
     })
     .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("claude-token.configure"),
+      credentialRef: z
+        .string()
+        .regex(/^env:[A-Z][A-Z0-9_]*$/)
+        .nullable(),
+    })
+    .strict(),
 ]);
 
 function parseCommand(input: unknown) {
@@ -335,7 +345,9 @@ function scopeOf(command: ParsedCommand): string {
       ? `profile:${command.profileId}`
       : command.type === "discovery.configure"
         ? "system:discovery"
-        : "system:capacity";
+        : command.type === "claude-token.configure"
+          ? "system:claude-token"
+          : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -453,6 +465,10 @@ export class DomainStore {
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
         );
+        CREATE TABLE IF NOT EXISTS claude_runtime_credentials (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          credentialRef TEXT
+        );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           projectLimit INTEGER NOT NULL CHECK(projectLimit > 0)
@@ -564,6 +580,11 @@ export class DomainStore {
       this.db
         .prepare(
           "INSERT OR IGNORE INTO installation_discovery (singleton, credentialRef) VALUES (1, NULL)",
+        )
+        .run();
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO claude_runtime_credentials (singleton, credentialRef) VALUES (1, NULL)",
         )
         .run();
       this.db
@@ -687,6 +708,14 @@ export class DomainStore {
   discoveryCredentialReference(): string | null {
     const row = this.one(
       "SELECT credentialRef FROM installation_discovery WHERE singleton = 1",
+    );
+    return row?.credentialRef ? String(row.credentialRef) : null;
+  }
+
+  /** The Claude subscription token's `env:NAME` reference; never its value. */
+  claudeTokenReference(): string | null {
+    const row = this.one(
+      "SELECT credentialRef FROM claude_runtime_credentials WHERE singleton = 1",
     );
     return row?.credentialRef ? String(row.credentialRef) : null;
   }
@@ -2094,6 +2123,16 @@ export class DomainStore {
         this.db
           .prepare(
             "UPDATE installation_discovery SET credentialRef = ? WHERE singleton = 1",
+          )
+          .run(command.credentialRef);
+        // The receipt never carries the reference name.
+        return { configured: command.credentialRef !== null };
+      }
+      case "claude-token.configure": {
+        this.operator(command);
+        this.db
+          .prepare(
+            "UPDATE claude_runtime_credentials SET credentialRef = ? WHERE singleton = 1",
           )
           .run(command.credentialRef);
         // The receipt never carries the reference name.

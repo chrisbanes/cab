@@ -1,3 +1,4 @@
+import { credentialFreeEnvironment } from "../core/child-environment.js";
 import { isOperatorDeliveryCaller } from "../core/delivery.js";
 import type { z } from "zod";
 import {
@@ -463,17 +464,10 @@ export function deliveryRuntimeEnvironment(
   environment: NodeJS.ProcessEnv,
   policies: readonly DeliveryPolicy[],
 ): NodeJS.ProcessEnv {
-  const result = { ...environment },
-    keys = policies.flatMap((p) =>
+  return credentialFreeEnvironment(
+    environment,
+    policies.flatMap((p) =>
       p.credentialRef ? [p.credentialRef.slice(4)] : [],
-    );
-  const values = new Set(
-    keys.map((k) => environment[k]).filter((v): v is string => Boolean(v)),
+    ),
   );
-  for (const key of Object.keys(result)) {
-    const value = result[key];
-    if (keys.includes(key) || (value !== undefined && values.has(value)))
-      delete result[key];
-  }
-  return result;
 }
