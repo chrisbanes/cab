@@ -2730,6 +2730,8 @@ export const cliCapabilities = [
   "task.records",
   "assignment.read",
   "instructions.read",
+  "result.read",
+  "artifact.read",
 ] as const;
 /** Instruction views are reconstructed from retained revisions, never a captured prompt. */
 const instructionProvenanceSchema = z

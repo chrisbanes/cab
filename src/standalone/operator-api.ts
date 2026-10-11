@@ -3554,11 +3554,16 @@ export class OperatorApi {
           createHash("sha256").update(body).digest("hex") !== data.item.sha256
         )
           throw new OperatorApiError(503, "unavailable");
-        return { body, type: data.preview.mime };
+        return {
+          body,
+          type: data.preview.mime,
+          source: "retained" as const,
+          sha256: data.item.sha256,
+        };
       }
     }
     try {
-      return await previewRecordedArtifact(async () => {
+      const file = await previewRecordedArtifact(async () => {
         const visibility = this.visibilityToken();
         const workspaceVisibility =
           this.service.taskWorkspaceVisibility(taskId);
@@ -3599,6 +3604,11 @@ export class OperatorApi {
           }),
         };
       });
+      return {
+        ...file,
+        source: "recorded-workspace" as const,
+        sha256: createHash("sha256").update(file.body).digest("hex"),
+      };
     } catch (error) {
       if (error instanceof OperatorApiError) throw error;
       throw new OperatorApiError(

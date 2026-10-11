@@ -1588,6 +1588,8 @@ export class LocalOperatorHttp {
           ...headers,
           "content-type": data.type,
           "x-content-type-options": "nosniff",
+          "x-ensemble-evidence-source": data.source,
+          "x-ensemble-sha256": data.sha256,
         });
         response.end(data.body);
         return true;
@@ -1696,6 +1698,8 @@ export class LocalOperatorHttp {
             ...API_HEADERS,
             "content-type": file.type,
             "x-content-type-options": "nosniff",
+            "x-ensemble-evidence-source": file.source,
+            "x-ensemble-sha256": file.sha256,
           });
           response.end(file.body);
           return;
