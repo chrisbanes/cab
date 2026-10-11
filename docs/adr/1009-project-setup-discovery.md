@@ -6,9 +6,8 @@ status: accepted
 
 These decisions follow the settings and setup designs (`design/design.pen`, frames
 114–117 and 131) and amend the guided project setup in
-[SPEC.md](../SPEC.md#task-creation-and-project-setup). They are target contracts,
-not implemented behaviour: the current build asks for typed repository IDs, refs
-and local paths.
+[SPEC.md](../SPEC.md#task-creation-and-project-setup). The operator UI implements
+them at `/app/settings/projects/new` and in the Settings index.
 
 ## Discovery
 
@@ -21,21 +20,30 @@ for typed identifiers:
   Projects owned by the same owner.
 
 Discovery uses an installation-level GitHub credential reference (`env:NAME`),
-held server-side like other credentials and used only for reads. A project can
+held server-side like other credentials and used only for reads: repository and
+branch lists through REST GETs and Projects through one fixed GraphQL query. The
+keyed `discovery.configure` command sets or clears the reference; reads report only
+whether it is configured and has a value. The Codex runtime inherits the service
+environment, so the reference should name a dedicated read-only token. A project can
 still set its own source credential later. Discovered lists are suggestions for
 the form; they are not stored as access, sources or task data.
 
 When the credential is missing or a read fails, setup shows the reason and accepts
-typed owner/name and ref values. Local checkout verification still applies.
+typed owner/name and ref values. Local checkout verification still applies. A
+typed repository is recorded with the provisional identity `github.com/<owner>/<name>`
+(lower case), because no node ID can be read without discovery; delivery grants
+compare node IDs and fail closed for it until project configuration replaces it.
 
 ## Folder picker
 
 A web page cannot learn a folder's absolute path, and the operator may use the UI
 from another device. The Ensemble service therefore serves the picker. An
 authenticated operator route lists subfolder names and their Git status under the
-operator's home folder. It never returns file contents. A typed path stays
-available. Agents and model tools cannot use this route. Disclose it as listing
-folders on the host.
+operator's home folder. It never returns file contents or file names, dot-folders
+or symlinks, and returns home-relative paths only. Each checkout row adds its
+`github.com` origin as `owner/name` and its current branch, read with bounded,
+non-interactive Git commands. A typed path stays available. Agents and model tools
+cannot use this route. Disclose it as listing folders on the host.
 
 ## Verification
 
@@ -64,8 +72,13 @@ are unchanged.
 - **Storing discovered lists.** They go stale, and stored copies could be mistaken
   for access.
 
-## Open
+## One create command
 
-Setup still needs either one create command or chained keyed commands that report
-which steps were recorded after a partial failure. The design shows one
-"Create paused project" action.
+"Create paused project" is one keyed `project.create` carrying the name, lead,
+optional instructions, verified repositories and at most one linked GitHub Project.
+The service verifies every repository first, then records the project, instruction
+revision 1, the repository links and the inactive source in one transaction under
+one receipt. There are no partially recorded setups: a failed check names the
+field, records nothing and the form keeps every value. An unknown outcome is
+reconciled by replaying the original key and payload. A create without the setup
+fields keeps its existing receipt and hash.

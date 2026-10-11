@@ -469,7 +469,9 @@ repository and that the ref is available. Setup may link a GitHub Project
 discovered from the chosen repositories or owner; linking adds an inactive
 discovery source, and preview, readiness and activation follow in project
 configuration. When discovery is unavailable, setup accepts typed values and says
-so. Advanced routing and external source configuration can follow later.
+so. The service lists folders only under the operator's home folder, and a typed
+repository is recorded with a provisional identity until discovery can name it.
+Advanced routing and external source configuration can follow later.
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
