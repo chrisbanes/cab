@@ -177,10 +177,11 @@ function assignmentHref(assignmentId: string): string {
   return `/runtime/assignment/${encodeURIComponent(assignmentId)}`;
 }
 
-function statusForAssignment(
-  assignment: ReturnType<RuntimeDomain["assignment"]>,
-  api: RuntimeOperatorApi,
-): string {
+/** The turn request, recovery record and execution intent that describe an assignment's current execution. */
+export function selectAssignmentExecution(
+  assignment: { id?: unknown; version?: unknown },
+  api: Pick<RuntimeOperatorApi, "turnRequests" | "recoveryView" | "list">,
+) {
   const id = String(assignment.id);
   const requests = api
     .turnRequests()
@@ -210,7 +211,7 @@ function statusForAssignment(
         candidate.binding?.assignmentId === id &&
         candidate.binding.assignmentVersion === requestVersion,
     );
-  const recovery = request
+  const record = request
     ? recoveryRecords.find((candidate) => candidate.workId === request.workId)
     : recoveryRecords.reduce<RecoveryRecord | undefined>(
         (latest, candidate) =>
@@ -224,6 +225,19 @@ function statusForAssignment(
   const intent = request
     ? api.list().find((candidate) => candidate.workId === request.workId)
     : undefined;
+  return { request, record, intent };
+}
+
+function statusForAssignment(
+  assignment: ReturnType<RuntimeDomain["assignment"]>,
+  api: RuntimeOperatorApi,
+): string {
+  const id = String(assignment.id);
+  const {
+    request,
+    record: recovery,
+    intent,
+  } = selectAssignmentExecution(assignment, api);
   if (recovery?.holds.stop) return "Stopping; effects may continue";
   if (request?.state === "queued")
     return "Queued; waiting for capacity admission";

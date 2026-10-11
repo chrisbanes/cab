@@ -18,6 +18,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { gitEnvironment, stopOwnedChild } from "./git-process.js";
 import type { TaskWorkspaceBinding } from "./workspaces.js";
 
 export const inspectionLimits = Object.freeze({
@@ -340,58 +341,29 @@ async function createPathExclusion(
       ? { path: absolutePath, complete: true }
       : await canonicalPathWithExistingParent(absolutePath);
     if (!candidate) return true;
-    for (const control of controls) {
-      if (!control.canonical) {
-        if (
-          withinNormalized(absoluteRoot, control.path) &&
-          withinNormalized(control.path, absolutePath)
-        )
-          return true;
-        continue;
-      }
-      if (
-        control.canonical.complete &&
-        isWithin(control.canonical.path, candidate.path)
-      )
-        return true;
-    }
-    const possibleAliases = controls.some(
-      (control) =>
-        withinNormalized(absoluteRoot, control.path) &&
-        withinNormalized(control.path, absolutePath),
-    );
+    const normalizedHit = (control: (typeof controls)[number]) =>
+      withinNormalized(absoluteRoot, control.path) &&
+      withinNormalized(control.path, absolutePath);
+    const matches = (resolved: CanonicalPath) =>
+      controls.some((control) =>
+        control.canonical
+          ? control.canonical.complete &&
+            isWithin(control.canonical.path, resolved.path)
+          : normalizedHit(control),
+      );
+    if (matches(candidate)) return true;
+    const possibleAliases = controls.some(normalizedHit);
     if (options.fromDirectoryEntry && possibleAliases) {
       candidate = await canonicalPathWithExistingParent(absolutePath);
       if (!candidate) return true;
-      for (const control of controls) {
-        if (!control.canonical) {
-          if (
-            withinNormalized(absoluteRoot, control.path) &&
-            withinNormalized(control.path, absolutePath)
-          )
-            return true;
-          continue;
-        }
-        if (
-          control.canonical.complete &&
-          isWithin(control.canonical.path, candidate.path)
-        )
-          return true;
-      }
+      if (matches(candidate)) return true;
     }
     // If the candidate does not exist, retain conservative normalized matching.
-    return (
-      !candidate.complete &&
-      controls.some(
-        (control) =>
-          withinNormalized(absoluteRoot, control.path) &&
-          withinNormalized(control.path, absolutePath),
-      )
-    );
+    return !candidate.complete && possibleAliases;
   };
 }
 
-const privateSegmentsExcluded = (segments: readonly string[]) =>
+export const privateSegmentsExcluded = (segments: readonly string[]) =>
   segments.some(privateComponent);
 
 /**
@@ -685,30 +657,6 @@ const safeFsState = (error: unknown): WorkspaceDirectoryListing["state"] => {
   return "unavailable";
 };
 
-function waitForExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null)
-    return Promise.resolve(true);
-  return new Promise((resolveExit) => {
-    const finish = (exited: boolean) => {
-      clearTimeout(timer);
-      child.removeListener("exit", onExit);
-      resolveExit(exited);
-    };
-    const onExit = () => finish(true);
-    const timer = setTimeout(() => finish(false), timeoutMs);
-    child.once("exit", onExit);
-    if (child.exitCode !== null || child.signalCode !== null) finish(true);
-  });
-}
-
-async function stopOwnedChild(child: ChildProcess): Promise<boolean> {
-  if (child.exitCode !== null || child.signalCode !== null) return true;
-  child.kill("SIGTERM");
-  if (await waitForExit(child, childTerminationGraceMs)) return true;
-  child.kill("SIGKILL");
-  return waitForExit(child, childTerminationObservationMs);
-}
-
 function checkGitIgnore(
   executable: string,
   repositoryPath: string,
@@ -723,13 +671,6 @@ function checkGitIgnore(
   return new Promise((resolveResult) => {
     let child: ChildProcess;
     try {
-      const environment: NodeJS.ProcessEnv = { ...process.env };
-      for (const key of Object.keys(environment))
-        if (key.startsWith("GIT_")) delete environment[key];
-      environment.GIT_ALLOW_PROTOCOL = "";
-      environment.GIT_NO_LAZY_FETCH = "1";
-      environment.GIT_OPTIONAL_LOCKS = "0";
-      environment.GIT_TERMINAL_PROMPT = "0";
       child = spawn(
         executable,
         [
@@ -744,7 +685,7 @@ function checkGitIgnore(
         {
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
-          env: environment,
+          env: gitEnvironment(),
         },
       );
     } catch {
@@ -769,7 +710,11 @@ function checkGitIgnore(
     const stop = () => {
       if (stopped) return;
       stopped = true;
-      void stopOwnedChild(child).finally(() => {
+      void stopOwnedChild(
+        child,
+        childTerminationGraceMs,
+        childTerminationObservationMs,
+      ).finally(() => {
         child.stdin?.destroy();
         child.stdout?.destroy();
         child.stderr?.destroy();

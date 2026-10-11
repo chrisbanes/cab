@@ -81,25 +81,29 @@ function safeEqual(left: string, right: string): boolean {
   return timingSafeEqual(sha256(left), sha256(right));
 }
 
+/** The parsed canonical loopback origin, or undefined when `value` is not one; throws if it is not a URL. */
+export function canonicalLoopbackOrigin(value: string): URL | undefined {
+  const url = new URL(value);
+  return url.origin !== value ||
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username ||
+    url.password ||
+    url.pathname !== "/" ||
+    url.search ||
+    url.hash ||
+    (url.protocol === "http:" && url.hostname !== "127.0.0.1")
+    ? undefined
+    : url;
+}
+
 function canonicalOrigin(value: string): URL {
   try {
-    const url = new URL(value);
-    if (
-      url.origin !== value ||
-      (url.protocol !== "http:" && url.protocol !== "https:") ||
-      url.username ||
-      url.password ||
-      url.pathname !== "/" ||
-      url.search ||
-      url.hash ||
-      (url.protocol === "http:" && url.hostname !== "127.0.0.1")
-    ) {
-      throw invalidAuthConfiguration();
-    }
-    return url;
+    const url = canonicalLoopbackOrigin(value);
+    if (url) return url;
   } catch {
-    throw invalidAuthConfiguration();
+    // Fall through to the configuration error.
   }
+  throw invalidAuthConfiguration();
 }
 
 function deriveVerifier(password: string, salt: Buffer): Promise<Buffer> {

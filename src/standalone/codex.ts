@@ -118,8 +118,6 @@ const runtimeToolResultSchema = z
   .object({ text: z.string().max(16000), success: z.boolean() })
   .strict();
 
-export type CodexErrorInfo = z.infer<typeof codexErrorInfoSchema>;
-
 export interface RuntimeToolDefinition {
   type: "function";
   name: string;
@@ -285,6 +283,58 @@ const conversationIdentity = z
   .min(1)
   .max(maxConversationIdentityLength);
 
+const threadIdParamsSchema = z.object({ threadId: z.string() });
+const nonEmptyThreadIdParamsSchema = z.object({ threadId: z.string().min(1) });
+const threadTurnIdentitySchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+});
+const serverRequestResolvedSchema = z.object({
+  threadId: z.string(),
+  requestId: z.union([z.string(), z.number()]),
+});
+const nativeItemNotificationSchema = z.object({
+  threadId: z.string(),
+  turnId: z.string(),
+  item: z.object({
+    type: z.string(),
+    delivery: z.unknown().optional(),
+    questions: z.unknown().optional(),
+    name: z.unknown().optional(),
+  }),
+});
+const emptyResponseSchema = z.object({}).strict();
+const turnCompletedSchema = z.object({
+  threadId: z.string(),
+  turn: z.object({ id: z.string(), status: z.string() }),
+});
+const threadSettingsSchema = z.object({
+  model: z.string(),
+  modelProvider: z.string(),
+  reasoningEffort: z.string().nullable(),
+  serviceTier: z.string().nullable(),
+});
+const conversationItemStartedSchema = z.object({
+  threadId: conversationIdentity,
+  turnId: conversationIdentity,
+  item: z.object({ id: conversationIdentity, type: z.string().max(64) }),
+});
+const conversationDeltaSchema = z.object({
+  threadId: conversationIdentity,
+  turnId: conversationIdentity,
+  itemId: conversationIdentity,
+  delta: z.string(),
+});
+const conversationItemCompletedSchema = z.object({
+  threadId: conversationIdentity,
+  turnId: conversationIdentity,
+  item: z.object({
+    id: conversationIdentity,
+    type: z.string().max(64),
+    text: z.unknown().optional(),
+  }),
+});
+
 export function parseRuntimeToolCall(
   input: unknown,
 ): RuntimeToolCall | undefined {
@@ -419,15 +469,11 @@ export function unexpectedRequest(
     method === "item/fileChange/requestApproval" ||
     method === "item/permissions/requestApproval"
   ) {
-    const identity = z
-      .object({ threadId: z.string().min(1), turnId: z.string().min(1) })
-      .safeParse(params);
+    const identity = threadTurnIdentitySchema.safeParse(params);
     if (identity.success) return { method, ...identity.data };
   }
   if (method === "item/tool/call") {
-    const identity = z
-      .object({ threadId: z.string().min(1), turnId: z.string().min(1) })
-      .safeParse(params);
+    const identity = threadTurnIdentitySchema.safeParse(params);
     if (identity.success) return { method, ...identity.data };
   }
   return { method };
@@ -646,9 +692,7 @@ export class CodexRuntime implements Runtime {
       : undefined;
     const turnStartPending = [...this.pending.values()].some((pending) => {
       if (pending.method !== "turn/start") return false;
-      const params = z
-        .object({ threadId: z.string() })
-        .safeParse(pending.params);
+      const params = threadIdParamsSchema.safeParse(pending.params);
       return params.success && params.data.threadId === threadId;
     });
     const ownsThreadState =
@@ -1119,12 +1163,7 @@ export class CodexRuntime implements Runtime {
   }
   private receiveNativeNotification(method: string, params: unknown): void {
     if (method === "serverRequest/resolved") {
-      const parsed = z
-        .object({
-          threadId: z.string(),
-          requestId: z.union([z.string(), z.number()]),
-        })
-        .safeParse(params);
+      const parsed = serverRequestResolvedSchema.safeParse(params);
       if (!parsed.success) return;
       const waiting = this.nativeReadbacks.get(parsed.data.threadId);
       const endpoint = this.nativeGeneration
@@ -1177,18 +1216,7 @@ export class CodexRuntime implements Runtime {
       });
     }
     if (method === "item/started" || method === "item/completed") {
-      const parsed = z
-        .object({
-          threadId: z.string(),
-          turnId: z.string(),
-          item: z.object({
-            type: z.string(),
-            delivery: z.unknown().optional(),
-            questions: z.unknown().optional(),
-            name: z.unknown().optional(),
-          }),
-        })
-        .safeParse(params);
+      const parsed = nativeItemNotificationSchema.safeParse(params);
       if (parsed.success) {
         const { item, threadId, turnId } = parsed.data;
         if (
@@ -1252,9 +1280,7 @@ export class CodexRuntime implements Runtime {
     for (const pending of this.pending.values()) {
       if (pending.method !== "thread/resume" && pending.method !== "turn/start")
         continue;
-      const params = z
-        .object({ threadId: z.string().min(1) })
-        .safeParse(pending.params);
+      const params = nonEmptyThreadIdParamsSchema.safeParse(pending.params);
       if (params.success && params.data.threadId === threadId) return true;
     }
     return [...this.nativeEndpoints.values()].some(
@@ -1575,14 +1601,7 @@ export class CodexRuntime implements Runtime {
           } catch {
             throw new Error("Runtime thread safety baseline unavailable");
           }
-          const settings = z
-            .object({
-              model: z.string(),
-              modelProvider: z.string(),
-              reasoningEffort: z.string().nullable(),
-              serviceTier: z.string().nullable(),
-            })
-            .safeParse(raw);
+          const settings = threadSettingsSchema.safeParse(raw);
           this.threadSnapshots.set(started.thread.id, {
             tools: definitions,
             ...(settings.success && this.nativeExecutable
@@ -1680,9 +1699,9 @@ export class CodexRuntime implements Runtime {
 
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
     this.cancelNativeTurn(threadId, turnId, "Turn interrupted");
-    z.object({})
-      .strict()
-      .parse(await this.request("turn/interrupt", { threadId, turnId }));
+    emptyResponseSchema.parse(
+      await this.request("turn/interrupt", { threadId, turnId }),
+    );
   }
 
   processIdentity(): RuntimeProcessIdentity | null {
@@ -1740,12 +1759,7 @@ export class CodexRuntime implements Runtime {
     if (observed) return observed;
     return await new Promise((resolve, reject) => {
       const onTerminal = (data: unknown) => {
-        const parsed = z
-          .object({
-            threadId: z.string(),
-            turn: z.object({ id: z.string(), status: z.string() }),
-          })
-          .safeParse(data);
+        const parsed = turnCompletedSchema.safeParse(data);
         if (
           !parsed.success ||
           parsed.data.threadId !== threadId ||
@@ -1884,9 +1898,7 @@ export class CodexRuntime implements Runtime {
       this.pending.delete(Number(message.id));
       try {
         if (message.error !== undefined) {
-          const params = z
-            .object({ threadId: z.string() })
-            .safeParse(pending.params);
+          const params = threadIdParamsSchema.safeParse(pending.params);
           const rejection = archivedResumeRejectionSchema.safeParse({
             method: pending.method,
             requestId: message.id,
@@ -2004,16 +2016,7 @@ export class CodexRuntime implements Runtime {
 
   private projectConversationEvent(method: string, params: unknown): void {
     if (method === "item/started") {
-      const parsed = z
-        .object({
-          threadId: conversationIdentity,
-          turnId: conversationIdentity,
-          item: z.object({
-            id: conversationIdentity,
-            type: z.string().max(64),
-          }),
-        })
-        .safeParse(params);
+      const parsed = conversationItemStartedSchema.safeParse(params);
       if (!parsed.success || parsed.data.item.type !== "agentMessage") return;
       const { threadId, turnId, item } = parsed.data;
       const turn = this.conversationTurn(threadId, turnId, item.id);
@@ -2043,14 +2046,7 @@ export class CodexRuntime implements Runtime {
     }
 
     if (method === "item/agentMessage/delta") {
-      const parsed = z
-        .object({
-          threadId: conversationIdentity,
-          turnId: conversationIdentity,
-          itemId: conversationIdentity,
-          delta: z.string(),
-        })
-        .safeParse(params);
+      const parsed = conversationDeltaSchema.safeParse(params);
       if (!parsed.success) return;
       const { threadId, turnId, itemId, delta } = parsed.data;
       const turn = this.conversationTurns.get(
@@ -2084,17 +2080,7 @@ export class CodexRuntime implements Runtime {
     }
 
     if (method === "item/completed") {
-      const parsed = z
-        .object({
-          threadId: conversationIdentity,
-          turnId: conversationIdentity,
-          item: z.object({
-            id: conversationIdentity,
-            type: z.string().max(64),
-            text: z.unknown().optional(),
-          }),
-        })
-        .safeParse(params);
+      const parsed = conversationItemCompletedSchema.safeParse(params);
       if (!parsed.success || parsed.data.item.type !== "agentMessage") return;
       const { threadId, turnId, item } = parsed.data;
       const turn = this.conversationTurn(threadId, turnId, item.id);

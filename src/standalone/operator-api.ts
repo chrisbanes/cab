@@ -64,6 +64,7 @@ import {
 } from "../operator/contracts.js";
 import {
   type ConversationHistoryBinding,
+  isDisclosable,
   sanitizeConversationText,
 } from "./conversation-history.js";
 import type { CoordinationView } from "./coordination-view.js";
@@ -83,6 +84,7 @@ import {
   resolveHomePath,
   verifyCheckout,
 } from "./operator-setup.js";
+import { selectAssignmentExecution } from "./operator-runtime.js";
 import type { StandaloneService } from "./service.js";
 import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
 import { materialDigest } from "../core/delivery.js";
@@ -315,6 +317,12 @@ const conflicts = new Set([
   "Result destination is already reconciled",
   "Result destination revision conflict",
 ]);
+function githubIssueUrl(repositoryName: string | null, number: number | null) {
+  return repositoryName && number
+    ? `https://github.com/${repositoryName}/issues/${number}`
+    : null;
+}
+
 export class OperatorApi {
   private readonly commands: DomainCommands;
   private readonly activeReviewSends = new Map<string, string>();
@@ -538,6 +546,12 @@ export class OperatorApi {
       : null;
     return sanitized && sanitized.length > 16000 ? null : (sanitized ?? null);
   }
+  private disclosable(
+    value: unknown,
+    excluded: readonly string[] | undefined,
+  ): boolean {
+    return this.safe(value, excluded) === value;
+  }
   private exact(value: unknown, excluded: readonly string[] | undefined) {
     const safe = this.safe(value, excluded);
     return safe === String(value) ? safe : null;
@@ -622,7 +636,7 @@ export class OperatorApi {
     if (
       (repositoryId !== null &&
         !policy.authorizedRepositoryIds.includes(repositoryId)) ||
-      sanitizeConversationText(path, policy.excluded) !== path
+      !isDisclosable(path, policy.excluded)
     )
       return "excluded";
     if (await retainedPathExcluded(originRoot, segments, policy.controlPaths))
@@ -653,8 +667,7 @@ export class OperatorApi {
         (item.mime?.startsWith("text/") ||
           item.mime === "application/json; charset=utf-8" ||
           item.mime === "application/sql; charset=utf-8") &&
-        sanitizeConversationText(bytes.toString("utf8"), policy.excluded) !==
-          bytes.toString("utf8")
+        !isDisclosable(bytes.toString("utf8"), policy.excluded)
       )
         return "excluded";
       return undefined;
@@ -679,13 +692,9 @@ export class OperatorApi {
       if (unavailable) return unavailable;
     }
     const sourceText = bytes.toString("utf8");
-    if (sanitizeConversationText(sourceText, policy.excluded) !== sourceText)
-      return "excluded";
+    if (!isDisclosable(sourceText, policy.excluded)) return "excluded";
     for (const side of [diff.left, diff.right])
-      if (
-        side.state === "text" &&
-        sanitizeConversationText(side.text, policy.excluded) !== side.text
-      )
+      if (side.state === "text" && !isDisclosable(side.text, policy.excluded))
         return "excluded";
     return undefined;
   }
@@ -882,10 +891,9 @@ export class OperatorApi {
         if (error instanceof OperatorApiError) throw error;
         throw new OperatorApiError(404, "not-found");
       }
-      const latest = await this.retainedEvidencePolicy(taskId);
-      return this.sameRetainedPolicy(latest, policy)
-        ? unavailable("unavailable")
-        : unavailable("unavailable");
+      // Re-read for its task-existence check; the answer is the same either way.
+      await this.retainedEvidencePolicy(taskId);
+      return unavailable("unavailable");
     }
     const item = manifest.items.find(
       (candidate) => candidate.itemId === itemId,
@@ -1710,34 +1718,7 @@ export class OperatorApi {
     });
   }
   private selection(a: Row) {
-    const requests = this.service
-      .turnRequests()
-      .filter((r) => r.assignmentId === a.id);
-    const latest = (rows: typeof requests) =>
-      rows.reduce<(typeof requests)[number] | undefined>(
-        (old, r) => (!old || r.sequence > old.sequence ? r : old),
-        undefined,
-      );
-    const request =
-      latest(requests.filter((r) => r.state === "active")) ??
-      latest(requests.filter((r) => r.assignmentVersion === Number(a.version)));
-    const recovery = this.service
-      .recoveryView()
-      .filter(
-        (r) =>
-          r.binding?.assignmentId === a.id &&
-          r.binding?.assignmentVersion ===
-            (request?.assignmentVersion ?? Number(a.version)),
-      );
-    const record = request
-      ? recovery.find((r) => r.workId === request.workId)
-      : recovery.sort(
-          (x, y) => y.generation.requestSequence - x.generation.requestSequence,
-        )[0];
-    const intent = request
-      ? this.service.list().find((i) => i.workId === request.workId)
-      : undefined;
-    return { request, record, intent };
+    return selectAssignmentExecution(a, this.service);
   }
   private execution(task: Row): Execution {
     const selections = this.domain()
@@ -1745,7 +1726,7 @@ export class OperatorApi {
       .map((a) => this.selection(a));
     const holds = {
       stop:
-        this.service.taskHold(String(task.id)) === "Task stopped" ||
+        this.service.isTaskStopped(String(task.id)) ||
         selections.some((s) => s.record?.holds.stop),
       writer: selections.some((s) => s.record?.holds.writer),
       capacity: selections.some((s) => s.record?.holds.capacity),
@@ -1933,7 +1914,7 @@ export class OperatorApi {
     const repositoryName =
       rawName &&
       /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(rawName)) &&
-      this.safe(rawName, excluded) === rawName
+      this.disclosable(rawName, excluded)
         ? String(rawName)
         : null;
     const number =
@@ -1946,14 +1927,15 @@ export class OperatorApi {
       identity,
       repositoryName,
       number,
-      url:
-        repositoryName && number
-          ? `https://github.com/${repositoryName}/issues/${number}`
-          : null,
+      url: githubIssueUrl(repositoryName, number),
       state: issue?.observedState ?? null,
     };
   }
   private async taskSummary(taskId: string) {
+    return (await this.taskSummaryRead(taskId)).summary;
+  }
+  /** The summary plus the coordination view and exclusions it was derived from. */
+  private async taskSummaryRead(taskId: string) {
     const d = this.domain(),
       task = d.task(taskId),
       projectId = String(task.projectId),
@@ -1993,7 +1975,7 @@ export class OperatorApi {
     const uncertain =
       execution.holds.uncertainty ||
       (this.service.taskHold(taskId) !== undefined &&
-        this.service.taskHold(taskId) !== "Task stopped") ||
+        !this.service.isTaskStopped(taskId)) ||
       assignments.some((a) => {
         const s = this.selection(a);
         const confirmed =
@@ -2019,7 +2001,7 @@ export class OperatorApi {
         ? 1
         : 0,
     );
-    return {
+    const summary = {
       id: taskId,
       projectId,
       title: this.safe(task.title, excluded),
@@ -2034,6 +2016,7 @@ export class OperatorApi {
       source: this.sourceSummary(taskId, excluded),
       attention: { codes, count },
     };
+    return { summary, view, excluded };
   }
   async readTaskListPage(params = new URLSearchParams()) {
     const values: Record<string, string> = {};
@@ -2249,9 +2232,7 @@ export class OperatorApi {
       const task = tasks[i]!;
       const taskId = String(task.id);
       try {
-        const summary = await this.taskSummary(taskId),
-          view = this.coordination().readTask(taskId),
-          excluded = await this.exclusions(String(task.projectId), taskId);
+        const { summary, view, excluded } = await this.taskSummaryRead(taskId);
         if (!excluded) unavailable = true;
         const base = {
           taskId,
@@ -2387,7 +2368,7 @@ export class OperatorApi {
     if (i.materialJson !== null && excluded) {
       try {
         const parsed = materialSchema.parse(JSON.parse(i.materialJson));
-        if (this.safe(i.materialJson, excluded) === i.materialJson) {
+        if (this.disclosable(i.materialJson, excluded)) {
           material = parsed;
           materialUnavailable = false;
         }
@@ -2411,8 +2392,8 @@ export class OperatorApi {
       approvable:
         i.kind === "approval" &&
         !materialUnavailable &&
-        this.safe(i.action, excluded) === i.action &&
-        this.safe(i.target, excluded) === i.target,
+        this.disclosable(i.action, excluded) &&
+        this.disclosable(i.target, excluded),
       materialUnavailable,
       response: this.safe(i.response, excluded),
       revision: i.revision,
@@ -2699,10 +2680,7 @@ export class OperatorApi {
       identity,
       repositoryName,
       number,
-      url:
-        repositoryName && number
-          ? `https://github.com/${repositoryName}/issues/${number}`
-          : null,
+      url: githubIssueUrl(repositoryName, number),
       title: this.safe(issue?.observedTitle, excluded),
       body: this.safe(issue?.observedBody, excluded),
       state: issue?.observedState ?? null,
@@ -2953,8 +2931,10 @@ export class OperatorApi {
                     ["http:", "https:"].includes(
                       new URL(result.metadata.changes.reference).protocol,
                     ) &&
-                    this.safe(result.metadata.changes.reference, excluded) ===
-                      result.metadata.changes.reference
+                    this.disclosable(
+                      result.metadata.changes.reference,
+                      excluded,
+                    )
                       ? result.metadata.changes.reference
                       : undefined,
                   findings: result.metadata.changes.findings.map((f) => ({
@@ -2973,10 +2953,10 @@ export class OperatorApi {
                 this.safe(artifact.label, excluded) ?? "Content unavailable",
               availability:
                 excluded === undefined ||
-                this.safe(artifact.label, excluded) !== artifact.label
+                !this.disclosable(artifact.label, excluded)
                   ? "redacted"
                   : artifact.availability,
-              ...(url && this.safe(url, excluded) === url ? { url } : {}),
+              ...(url && this.disclosable(url, excluded) ? { url } : {}),
             };
           }),
         },
@@ -3119,11 +3099,11 @@ export class OperatorApi {
                 `${decision.attribution}: ${decision.text}`.slice(0, 16000) ||
               (reviewResult?.metadata.sourceId ?? null) !== sourceId ||
               [decision.attribution, decision.text].some(
-                (value) => this.safe(value, excluded) !== value,
+                (value) => !this.disclosable(value, excluded),
               ))) ||
           (source &&
             [source.title, source.body].some(
-              (value) => value !== null && this.safe(value, excluded) !== value,
+              (value) => value !== null && !this.disclosable(value, excluded),
             ))
         ) {
           omittedCount++;
@@ -3258,7 +3238,7 @@ export class OperatorApi {
           !record ||
           !artifact ||
           excluded === undefined ||
-          this.safe(artifact.label, excluded) !== artifact.label
+          !this.disclosable(artifact.label, excluded)
         )
           return undefined;
         return {
@@ -3483,7 +3463,8 @@ export class OperatorApi {
       );
     const taskHold = this.service.taskHold(taskId);
     const holds = {
-      stop: taskHold === "Task stopped" || records.some((r) => r.holds.stop),
+      stop:
+        this.service.isTaskStopped(taskId) || records.some((r) => r.holds.stop),
       writer: records.some((r) => r.holds.writer),
       capacity: records.some((r) => r.holds.capacity),
       uncertainty: records.some((r) => r.holds.uncertainty),
@@ -3649,7 +3630,7 @@ export class OperatorApi {
       active: true;
     };
     const excluded = await this.exclusions(c.projectId);
-    if (this.safe(r.selectionId, excluded) !== r.selectionId)
+    if (!this.disclosable(r.selectionId, excluded))
       throw new Error("Receipt unavailable");
     return commandReceiptSchema.parse({
       kind: "configuration",
@@ -3894,9 +3875,8 @@ export class OperatorApi {
       return (
         (anchor.repositoryId === null ||
           policy.authorizedRepositoryIds.includes(anchor.repositoryId)) &&
-        this.safe(anchor.path, policy.excluded) === anchor.path &&
-        (excerpt === undefined ||
-          this.safe(excerpt, policy.excluded) === excerpt)
+        this.disclosable(anchor.path, policy.excluded) &&
+        (excerpt === undefined || this.disclosable(excerpt, policy.excluded))
       );
     });
   }
@@ -3919,7 +3899,7 @@ export class OperatorApi {
         [
           draft.draft.summary,
           ...draft.draft.comments.map((comment) => comment.body),
-        ].every((value) => this.safe(value, policy.excluded) === value) &&
+        ].every((value) => this.disclosable(value, policy.excluded)) &&
         this.reviewAnchorsPermitted(
           taskId,
           draft.groups.flatMap((group) => group.anchorIds),
@@ -4114,7 +4094,7 @@ export class OperatorApi {
         c.draft.summary,
         ...c.draft.comments.map((comment) => comment.body),
       ];
-      if (values.some((value) => this.safe(value, policy.excluded) !== value))
+      if (values.some((value) => !this.disclosable(value, policy.excluded)))
         throw new OperatorApiError(403, "forbidden");
       // A stale tab must not stamp the current policy onto now-excluded anchors.
       const groupIds = c.draft.comments.flatMap(
@@ -4220,10 +4200,7 @@ export class OperatorApi {
       if (!this.reviewTaskIsOpen(c.taskId)) {
         return this.rejectLocalReview(c.key, requestHash, "task-not-open");
       }
-      if (
-        this.safe(prepared.payload.message, initial.excluded) !==
-        prepared.payload.message
-      ) {
+      if (!this.disclosable(prepared.payload.message, initial.excluded)) {
         return this.rejectLocalReview(c.key, requestHash, "excluded-content");
       }
       for (const group of prepared.payload.groups)
@@ -4249,8 +4226,7 @@ export class OperatorApi {
             );
           if (
             read.data.state === "available" &&
-            this.safe(read.data.anchor.path, initial.excluded) !==
-              read.data.anchor.path
+            !this.disclosable(read.data.anchor.path, initial.excluded)
           ) {
             return this.rejectLocalReview(
               c.key,
@@ -4446,7 +4422,7 @@ export class OperatorApi {
           this.requireTask(c.taskId).version !== task.version
         )
           throw new OperatorApiError(409, "conflict");
-        if ("body" in c && this.safe(c.body, excluded) !== c.body)
+        if ("body" in c && !this.disclosable(c.body, excluded))
           throw new OperatorApiError(403, "forbidden");
         if (c.type === "comment.review")
           return this.commentReviewReceipt(
@@ -4460,7 +4436,7 @@ export class OperatorApi {
             !r ||
             r.taskId !== c.taskId ||
             r.action.kind !== "issue.comment" ||
-            this.safe(r.action.body, excluded) !== r.action.body
+            !this.disclosable(r.action.body, excluded)
           )
             throw new OperatorApiError(403, "forbidden");
           return this.commentReviewReceipt(

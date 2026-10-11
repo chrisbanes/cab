@@ -35,7 +35,6 @@ import {
   columnCounts,
   filterTasks,
   parseTaskFilters,
-  safeSourceUrl,
   taskColumn,
   taskDetailHref,
   taskFiltersUrl,
@@ -121,7 +120,7 @@ export function TaskCard({
   task: TaskListSummary;
   request?: InboxItem | undefined;
 }) {
-  const url = safeSourceUrl(task.source?.url),
+  const url = task.source?.url,
     lead = leadName(task);
   return (
     <article data-task-id={task.id}>

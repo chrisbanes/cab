@@ -103,6 +103,14 @@ export function sanitizeConversationText(
   return result;
 }
 
+/** True when the text survives redaction unchanged, so it may be disclosed as-is. */
+export function isDisclosable(
+  text: string,
+  excludedValues: readonly string[],
+): boolean {
+  return sanitizeConversationText(text, excludedValues) === text;
+}
+
 /** Additive diagnostic storage; it never participates in execution decisions. */
 export class ConversationHistoryStore {
   constructor(

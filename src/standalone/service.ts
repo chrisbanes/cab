@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
@@ -143,7 +143,10 @@ import {
   type WorkspaceTurnCaptureRecord,
   type WorkspaceTurnObservation,
 } from "./workspace-comparison.js";
-import type { WorkspaceInspectionCurrent } from "./workspace-inspection.js";
+import {
+  isWithin,
+  type WorkspaceInspectionCurrent,
+} from "./workspace-inspection.js";
 import {
   SqliteWorkspaceBindingStore,
   type TaskWorkspaceRepositoryInput,
@@ -303,6 +306,7 @@ export class StandaloneService {
     ConversationHistoryCapture
   >();
   private lastCompletedWorkId: string | undefined;
+  private canonicalDataDir: string | undefined;
   private readonly active = new Set<Promise<ExecutionIntent>>();
   private readonly activeByWorkId = new Map<string, Promise<ExecutionIntent>>();
   private readonly nativeWaiters = new Map<
@@ -356,6 +360,7 @@ export class StandaloneService {
     if (this.db || this.owner)
       throw new Error("Service already started or shutdown is incomplete");
     this.lastCompletedWorkId = undefined;
+    this.canonicalDataDir = undefined;
     const dataDirectory = StandaloneDataDirectory.openExclusive(this.dataDir, {
       markerWriter: this.markerWriter,
     });
@@ -2044,6 +2049,10 @@ export class StandaloneService {
 
   taskHold(taskId: string): string | undefined {
     return this.requireState().taskHold(taskId);
+  }
+
+  isTaskStopped(taskId: string): boolean {
+    return this.taskHold(taskId) === "Task stopped";
   }
 
   /** A known survivor or unfinished tool callback keeps ownership held. */
@@ -4128,14 +4137,14 @@ export class StandaloneService {
             ]),
           ]
         : [];
-      const canonicalDataDir = existsSync(this.dataDir)
+      this.canonicalDataDir ??= existsSync(this.dataDir)
         ? realpathSync(this.dataDir)
         : this.dataDir;
       const values = [
         String(profileInstructions ?? ""),
         projectInstructions,
         this.dataDir,
-        canonicalDataDir,
+        this.canonicalDataDir,
         ...managedPaths,
         ...additionalPaths,
         ...(reference ? [reference] : []),
@@ -4172,10 +4181,7 @@ export class StandaloneService {
       throw new Error("Workspace must be an existing real directory");
     const workspaceKey = realpathSync(workspace);
     const managedRoot = join(realpathSync(this.dataDir), "workspaces");
-    if (
-      workspaceKey === managedRoot ||
-      workspaceKey.startsWith(`${managedRoot}${sep}`)
-    )
+    if (isWithin(managedRoot, workspaceKey))
       throw new Error("Task workspaces require a durable assignment binding");
     return workspaceKey;
   }
