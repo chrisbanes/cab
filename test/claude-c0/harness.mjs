@@ -24,7 +24,18 @@ export const ROOT_PREFIX = "ensemble-claude-c0-";
 export const QUERY_CAP = 60;
 export const QUERY_DEADLINE_MS = 120_000;
 export const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
-const STEPS = ["init", "p7", "p8", "p1", "p3", "p4", "p5", "p6", "cleanup"];
+const STEPS = [
+  "init",
+  "p7",
+  "p8",
+  "p1",
+  "p3",
+  "p4",
+  "p5",
+  "p6",
+  "p9",
+  "cleanup",
+];
 const verifier = new MacProcessTerminationVerifier();
 export const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 
@@ -47,7 +58,7 @@ export function requireLive(args) {
       : flag === "--root" && typeof root === "string" && root.length > 0);
   if (!ok)
     throw new Error(
-      "Refusing Claude SDK probes: use --live init, --live <p7|p8|p1|p3|p4|p5|p6|cleanup> --root <dir>, or summary|export --root <dir>",
+      "Refusing Claude SDK probes: use --live init, --live <p7|p8|p1|p3|p4|p5|p6|p9|cleanup> --root <dir>, or summary|export --root <dir>",
     );
   return { step: second, root };
 }
