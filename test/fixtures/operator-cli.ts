@@ -315,7 +315,7 @@ export async function deliveryWorld(
       (await (
         await s.sessionGet(`/api/operator/tasks/${f.taskId}`)
       )
-      // biome-ignore lint/suspicious/noExplicitAny: task reads are asserted structurally
+        // biome-ignore lint/suspicious/noExplicitAny: task reads are asserted structurally
         .json()) as { data: Record<string, any> }
     ).data;
   return { ...o, f, scripted: f.scripted.state, grant, ok, task };

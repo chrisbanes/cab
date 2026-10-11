@@ -657,7 +657,9 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           request: sent.request,
           data: { receipt: r, effect: "completed" },
           human: [
-            `Posted the comment on the task's GitHub issue (operation ${key}).`,
+            reached
+              ? `This request was sent before; the service returned its recorded outcome: the comment is posted (operation ${key}). Nothing new was posted.`
+              : `Posted the comment on the task's GitHub issue (operation ${key}).`,
             "The comment is public and Ensemble cannot edit or retract it. Rerunning this exact command replays this receipt; a deliberate second comment needs a new --request-id.",
           ].join("\n"),
         };
