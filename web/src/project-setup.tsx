@@ -122,7 +122,7 @@ export function ProjectSetup(p: SettingsProps) {
             })),
         );
     }
-  }, [discoveredRepos.join("\n"), p.client]);
+  }, [discoveredRepos.join("\n"), p.client, attempt]);
 
   // GitHub Projects for the first discovered repository.
   const projectRepo =
@@ -165,7 +165,7 @@ export function ProjectSetup(p: SettingsProps) {
     return () => {
       live = false;
     };
-  }, [projectKey, p.client, csrf]);
+  }, [projectKey, p.client, csrf, attempt]);
   const projectList =
     projects.repo === projectKey && projects.data.state === "ready"
       ? projects.data
@@ -214,35 +214,37 @@ export function ProjectSetup(p: SettingsProps) {
       );
   };
 
-  // Once discovery recovers, typed rows naming a listed repository take its node ID.
+  /** A typed row naming a listed repository takes its node ID; a blank typed row rejoins the list. */
+  const adoptListed = (r: SetupRow): SetupRow => {
+    if (!ready || r.source !== "typed") return r;
+    if (blankRow(r)) return { ...r, source: "discovered" };
+    const match = r.owner
+      ? ready.repositories.find(
+          (x) =>
+            `${x.owner}/${x.name}`.toLowerCase() === repoOf(r).toLowerCase(),
+        )
+      : undefined;
+    return match
+      ? {
+          ...r,
+          source: "discovered",
+          text: "",
+          repositoryId: match.repositoryId,
+          owner: match.owner,
+          name: match.name,
+        }
+      : r;
+  };
+  // Once discovery recovers, typed rows are adopted as above.
   // biome-ignore lint/correctness/useExhaustiveDependencies: adopt only when a repository list lands.
   useEffect(() => {
     if (!ready || locked(d)) return;
-    const adopted: SetupRow[] = [];
-    const next = rows.map((r) => {
-      const match =
-        r.source === "typed" && r.owner
-          ? ready.repositories.find(
-              (x) =>
-                `${x.owner}/${x.name}`.toLowerCase() ===
-                repoOf(r).toLowerCase(),
-            )
-          : undefined;
-      if (!match) return r;
-      const row: SetupRow = {
-        ...r,
-        source: "discovered",
-        text: "",
-        repositoryId: match.repositoryId,
-        owner: match.owner,
-        name: match.name,
-      };
-      adopted.push(row);
-      return row;
-    });
-    if (!adopted.length) return;
+    const next = rows.map(adoptListed);
+    if (next.every((r, i) => r === rows[i])) return;
     setRows(next);
-    for (const row of adopted) verify(row);
+    next.forEach((row, i) => {
+      if (row !== rows[i] && repoOf(row)) verify(row);
+    });
   }, [ready]);
   const values = {
     key: String(d.values.key ?? ""),
@@ -401,7 +403,11 @@ export function ProjectSetup(p: SettingsProps) {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => setAttempt((n) => n + 1)}
+                  onClick={() => {
+                    requested.current.clear();
+                    setBranches({});
+                    setAttempt((n) => n + 1);
+                  }}
                 >
                   Retry
                 </Button>
@@ -456,13 +462,15 @@ export function ProjectSetup(p: SettingsProps) {
                           ? ready.truncated
                             ? `Discovered from GitHub · the first ${ready.repositories.length} repositories visible to the credential. Choose "Type a repository" for one not listed.`
                             : `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential`
-                          : "Loading repositories from GitHub…"
+                          : discovery.state === "unavailable"
+                            ? "Chosen from GitHub earlier · discovery is unavailable now"
+                            : "Loading repositories from GitHub…"
                       }
                     >
                       {(props) => (
                         <NativeSelect
                           {...props}
-                          disabled={disabled || !ready}
+                          disabled={disabled || discovery.state === "loading"}
                           value={row.repositoryId}
                           onChange={(e) => {
                             if (e.target.value === typeOption) {
@@ -498,7 +506,7 @@ export function ProjectSetup(p: SettingsProps) {
                               {repoOf(row)}
                             </option>
                           )}
-                          {ready?.truncated && (
+                          {(!ready || ready.truncated) && (
                             <option value={typeOption}>
                               Type a repository not listed…
                             </option>
@@ -517,12 +525,15 @@ export function ProjectSetup(p: SettingsProps) {
                           {...props}
                           disabled={disabled}
                           value={row.text}
-                          onChange={(e) =>
-                            update(i, {
+                          onChange={(e) => {
+                            const typed: SetupRow = {
                               ...typeRepository(row, e.target.value),
                               source: "typed",
-                            })
-                          }
+                            };
+                            // A listed repository is recorded with its node ID, not the provisional one.
+                            const listed = adoptListed(typed);
+                            update(i, listed.repositoryId ? listed : typed);
+                          }}
                         />
                       )}
                     </SetupField>
@@ -538,11 +549,13 @@ export function ProjectSetup(p: SettingsProps) {
                           : null
                       }
                       caption={
-                        source === "typed" || !branchList
-                          ? "Typed · checked in the local checkout"
-                          : branchList.truncated
-                            ? "More branches than listed · type the ref; it is checked in the local checkout"
-                            : "Discovered refs · default branch preselected"
+                        source === "discovered" && b?.state === "unavailable"
+                          ? `${discoveryReasonCopy(b.reason)} Type the ref; it is checked in the local checkout.`
+                          : source === "typed" || !branchList
+                            ? "Typed · checked in the local checkout"
+                            : branchList.truncated
+                              ? "More branches than listed · type the ref; it is checked in the local checkout"
+                              : "Discovered refs · default branch preselected"
                       }
                     >
                       {(props) =>
@@ -676,6 +689,11 @@ export function ProjectSetup(p: SettingsProps) {
               d.set("githubProject", id);
             }}
           />
+          {rows.length >= 20 && (
+            <p className="metadata muted">
+              A project can have up to 20 repositories.
+            </p>
+          )}
           {!blankRow(rows[0] ?? emptyRow("typed")) && rows.length < 20 && (
             <div>
               <Button
@@ -798,7 +816,7 @@ function ProjectChoice({
       : !data || data.state === "loading"
         ? "Loading GitHub Projects…"
         : data.state === "unavailable"
-          ? "GitHub Projects couldn't be listed for this repository. Link one later in project configuration."
+          ? `${discoveryReasonCopy(data.reason)} Link a Project later in project configuration.`
           : data.linked.length === 1 && value === data.linked[0]?.projectNodeId
             ? `Found automatically: 1 GitHub Project linked to ${repo}. Linking adds an inactive discovery source; preview and readiness follow in project configuration.`
             : `${data.linked.length} GitHub Project${data.linked.length === 1 ? "" : "s"} linked to ${repo}${data.linked.length ? `: ${data.linked.map((x) => x.title).join(", ")}` : ""} · ${data.owned.length} more owned by ${data.ownerLogin}. Linking one adds an inactive discovery source; preview and readiness follow in project configuration.`;

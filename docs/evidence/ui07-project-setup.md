@@ -23,19 +23,21 @@ suite); the CI result for each head is on PR #870.
   rate limits.
 - `test/operator-setup-browser.test.ts`, `test/operator-setup-picker-browser.test.ts`,
   `test/operator-discovery-credential-browser.test.ts`: Chromium journeys at 1366×900 and
-  390×844, with WebKit smokes.
+  390×844, including truncated discovery lists; WebKit smokes cover setup and the picker.
 
 ## Live reads (11 October 2026)
 
-Both ran once from a local build of the branch. Only counts and booleans were recorded.
+Both ran once from a local build of commit `1f944e5a` (before the rebase onto `ecb4c2eb`).
+Only counts and booleans were recorded.
 
 | Read | Result |
 | --- | --- |
 | `GitHubDiscoveryReader` with an operator `gh` token: repositories, branches and Projects of `chrisbanes/ensemble` | 49 repositories, not truncated; `chrisbanes/ensemble` listed; `main` among its branches; Projects read succeeded with 1 linked and 5 owned |
 | `listHomeFolders` on the real home folder: `~` and one subfolder | `~` listed entries and none starting with `.`; the subfolder listed 18 entries, 16 of them checkouts, in 242 ms |
 
-Later commits changed only how the reader classifies failures (rate limits) and how many
-children the listing probes. The success paths these reads exercised did not change.
+Later commits changed how the reader classifies failures (rate limits) and capped the
+listing's probes at the first 200 names. For these inputs (49 repositories, at most 18
+entries per folder) the results are unchanged.
 
 ## Limits
 

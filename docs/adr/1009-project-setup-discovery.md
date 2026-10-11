@@ -29,7 +29,9 @@ still set its own source credential later. Discovered lists are suggestions for
 the form; they are not stored as access, sources or task data.
 
 When the credential is missing or a read fails, setup shows the reason and accepts
-typed owner/name and ref values. Local checkout verification still applies. A
+typed owner/name and ref values. When a list is truncated, setup says so and also
+accepts a typed repository or ref; a typed repository that the list does contain is
+recorded with its node ID. Local checkout verification still applies. A
 typed repository is recorded with the provisional identity `github.com/<owner>/<name>`
 (lower case), because no node ID can be read without discovery; delivery grants
 compare node IDs and fail closed for it until project configuration replaces it.

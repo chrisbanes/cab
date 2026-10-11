@@ -484,4 +484,11 @@ test("Setup surfaces truncated discovery lists and allows typed entry", async (_
     await page.getByLabel("Repository (owner/name)").inputValue(),
     "acme/hidden",
   );
+  // Typing a repository that is listed records its node ID, not the provisional identity.
+  await page.getByLabel("Repository (owner/name)").fill("Acme/Atlas");
+  await page.getByLabel("Repository", { exact: true }).waitFor();
+  assert.equal(
+    await page.getByLabel("Repository", { exact: true }).inputValue(),
+    "R_atlas",
+  );
 });

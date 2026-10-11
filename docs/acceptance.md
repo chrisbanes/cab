@@ -286,9 +286,10 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
 - **Guided project setup** (#841, ADR-1009) — **Passed** for deterministic
   coverage: real SQLite and temporary Git checkouts for the atomic create, origin
   matrix and folder boundaries (`project-setup`, `operator-setup-api`), a fake
-  `fetch` for the discovery reader (`github-discovery`), and Chromium plus WebKit
-  smokes for setup, picker and the credential row (`operator-setup-browser`,
-  `operator-setup-picker-browser`, `operator-discovery-credential-browser`). Live
+  `fetch` for the discovery reader (`github-discovery`), and Chromium journeys for
+  setup, picker and the credential row with WebKit smokes for setup and the picker
+  (`operator-setup-browser`, `operator-setup-picker-browser`,
+  `operator-discovery-credential-browser`). Live
   evidence is bounded to one read-only discovery probe against api.github.com and
   one real home-folder listing, recorded as counts in
   [project setup evidence](evidence/ui07-project-setup.md). Limits: typed repositories carry
