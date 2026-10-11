@@ -2908,6 +2908,28 @@ export class ExecutionState {
       });
   }
 
+  /** Bound harnesses of the executions on a thread, or on one turn of it. */
+  runtimeIdentityHarnesses(
+    threadId: string,
+    turnId?: string,
+  ): ExecutionHarness[] {
+    return (
+      this.db
+        .prepare(`SELECT DISTINCT COALESCE(binding.harness, ?) AS harness
+        FROM execution_intents intent
+        LEFT JOIN task_execution_bindings binding
+          ON binding.workId = intent.workId
+        WHERE intent.threadId = ? AND (? IS NULL OR intent.turnId = ?
+          OR intent.turnId IS NULL)`)
+        .all(
+          defaultExecutionHarness,
+          z.string().min(1).max(512).parse(threadId),
+          turnId ?? null,
+          turnId ?? null,
+        ) as Array<{ harness: unknown }>
+    ).map(({ harness }) => executionHarnessSchema.parse(harness));
+  }
+
   executionsForRuntimeIdentity(
     threadId: string,
     turnId: string,

@@ -97,6 +97,9 @@ class HarnessRuntime implements Runtime {
       ? ("failed" as const)
       : ("completed" as const);
   }
+  currentUserInputGeneration() {
+    return `${this.name}-generation`;
+  }
   processIdentity() {
     if (this.hangIdentity)
       return new Promise<never>(() => {
@@ -799,6 +802,61 @@ test("a runtime cannot act through another harness's execution or evidence", asy
     );
     // The owning runtime's identical call is accepted.
     assert.equal((await runtimes.codex.callTool(...pair)).success, true);
+
+    // A foreign terminal or thread write is refused before any side effect.
+    const db = (service as unknown as { db: DatabaseSync }).db;
+    const marks = () =>
+      db
+        .prepare(
+          "SELECT runtimeGeneration, terminalEvidenceObserved FROM execution_recovery_identities WHERE workId = ?",
+        )
+        .get(workId) as Record<string, unknown>;
+    const before = { ...marks() };
+    assert.deepEqual(before, {
+      runtimeGeneration: "codex-generation",
+      terminalEvidenceObserved: 0,
+    });
+    const foreignTerminal = {
+      threadId: pair[0],
+      turnId: pair[1],
+      status: "completed" as const,
+      runtimeGeneration: "codex-generation",
+    };
+    assert.throws(
+      () => runtimes.claude.safety?.recordTerminal(foreignTerminal),
+      /another harness/,
+    );
+    assert.throws(
+      () =>
+        runtimes.claude.safety?.registerThreadTools(pair[0], "f".repeat(64)),
+      /another harness/,
+    );
+    assert.equal(
+      count(
+        service,
+        "SELECT COUNT(*) AS n FROM runtime_terminal_evidence WHERE threadId = ?",
+        pair[0],
+      ),
+      0,
+    );
+    assert.equal(
+      count(
+        service,
+        "SELECT COUNT(*) AS n FROM runtime_thread_qualification WHERE threadId = ?",
+        pair[0],
+      ),
+      0,
+    );
+    assert.deepEqual({ ...marks() }, before);
+    // The owner then records its own terminal cleanly.
+    assert.equal(
+      runtimes.codex.safety?.recordTerminal(foreignTerminal).harness,
+      "codex",
+    );
+    assert.deepEqual(
+      { ...marks() },
+      { ...before, terminalEvidenceObserved: 1 },
+    );
 
     // Retained evidence is readable only by the harness that recorded it.
     const codex = runtimes.codex.safety;
