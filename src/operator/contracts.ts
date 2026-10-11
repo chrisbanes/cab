@@ -874,6 +874,8 @@ function taskSchemaAdmission() {
     })
     .strict();
 }
+// The server only builds https GitHub URLs; reject javascript: and data: links.
+const sourceUrl = z.url().startsWith("https://");
 export const taskSourceSummarySchema = z
   .object({
     identity: sourceIdentity,
@@ -882,7 +884,7 @@ export const taskSourceSummarySchema = z
       .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
       .nullable(),
     number: revision.nullable(),
-    url: z.string().url().nullable(),
+    url: sourceUrl.nullable(),
     state: z.enum(["open", "closed"]).nullable(),
   })
   .strict()
@@ -1105,7 +1107,7 @@ const source = z
       .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)
       .nullable(),
     number: revision.nullable(),
-    url: z.string().url().nullable(),
+    url: sourceUrl.nullable(),
     title: safeText,
     body: safeText,
     state: z.enum(["open", "closed"]).nullable(),
@@ -2613,6 +2615,5 @@ export type DiscoveryUnavailableReason =
   (typeof discoveryUnavailableReasons)[number];
 export type RepositoryVerificationReason =
   (typeof repositoryVerificationReasons)[number];
-export type DiscoveredRepository = z.infer<typeof discoveredRepositorySchema>;
 export type FolderListing = z.infer<typeof folderListingSchema>;
 export type CheckoutVerification = z.infer<typeof checkoutVerificationSchema>;

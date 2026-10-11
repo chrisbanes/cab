@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import { materialDigest } from "./delivery.js";
 export const questionIdentity = z.string().min(1).max(512);
 const text = z.string().min(1).max(16000);
 export const structuredQuestionSetSchema = z
@@ -76,21 +76,10 @@ export function validateStructuredAnswers(
   return answers;
 }
 
-function canonicalAnswers(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalAnswers).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.entries(value)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(
-        ([key, entry]) => `${JSON.stringify(key)}:${canonicalAnswers(entry)}`,
-      )
-      .join(",")}}`;
-  return JSON.stringify(value) ?? "null";
-}
 export function structuredAnswerDigest(
   answers: StructuredQuestionAnswers,
 ): string {
-  return createHash("sha256").update(canonicalAnswers(answers)).digest("hex");
+  return materialDigest(answers);
 }
 
 export const nativeInputRequestSchema = z

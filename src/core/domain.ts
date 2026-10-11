@@ -341,6 +341,10 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function commandHash(command: ParsedCommand): string {
+  return createHash("sha256").update(canonical(command)).digest("hex");
+}
+
 /** Durable S04a command and read boundary. All commands use one SQLite transaction. */
 export class DomainStore {
   constructor(
@@ -562,21 +566,12 @@ export class DomainStore {
         command.type === "project.create") &&
       (command.repositories?.length ?? 0) > 0
     ) {
-      const hash = createHash("sha256")
-        .update(canonical(command))
-        .digest("hex");
-      const prior = this.one(
-        "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+      const prior = this.replayed(
         command.projectId,
         command.key,
+        commandHash(command),
       );
-      if (prior) {
-        if (prior.payloadHash !== hash)
-          throw new DomainConflictError(
-            "Command key already used with different payload",
-          );
-        return JSON.parse(String(prior.result));
-      }
+      if (prior !== undefined) return prior;
       throw new Error(
         "Linked GitHub configuration requires asynchronous verification",
       );
@@ -590,19 +585,12 @@ export class DomainStore {
     const command = parseCommand(input);
     if (command.type !== "github.configure")
       throw new Error("Expected GitHub configuration");
-    const hash = createHash("sha256").update(canonical(command)).digest("hex");
-    const prior = this.one(
-      "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+    const prior = this.replayed(
       command.projectId,
       command.key,
+      commandHash(command),
     );
-    if (prior) {
-      if (prior.payloadHash !== hash)
-        throw new DomainConflictError(
-          "Command key already used with different payload",
-        );
-      return JSON.parse(String(prior.result));
-    }
+    if (prior !== undefined) return prior;
     this.operator(command);
     this.version(
       { version: this.githubConfiguration(command.projectId).version },
@@ -639,19 +627,12 @@ export class DomainStore {
     const command = parseCommand(input);
     if (command.type !== "project.create")
       throw new Error("Expected project creation");
-    const hash = createHash("sha256").update(canonical(command)).digest("hex");
-    const prior = this.one(
-      "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+    const prior = this.replayed(
       command.projectId,
       command.key,
+      commandHash(command),
     );
-    if (prior) {
-      if (prior.payloadHash !== hash)
-        throw new DomainConflictError(
-          "Command key already used with different payload",
-        );
-      return JSON.parse(String(prior.result));
-    }
+    if (prior !== undefined) return prior;
     this.operator(command);
     const verified: LinkedRepository[] = [];
     // In order, so the first failing row is the one reported; nothing is recorded on failure.
@@ -693,12 +674,15 @@ export class DomainStore {
   recordedCommand(input: DomainCommand): unknown | undefined {
     const command = parseCommand(input);
     this.operator(command);
-    const scope = scopeOf(command);
-    const hash = createHash("sha256").update(canonical(command)).digest("hex");
+    return this.replayed(scopeOf(command), command.key, commandHash(command));
+  }
+
+  /** The recorded result for a command key, or undefined when the key is unused. */
+  private replayed(scope: string, key: string, hash: string): unknown {
     const receipt = this.one(
       "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
       scope,
-      command.key,
+      key,
     );
     if (!receipt) return undefined;
     if (receipt.payloadHash !== hash)
@@ -713,24 +697,10 @@ export class DomainStore {
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
     const scope = scopeOf(command);
-    const hash = createHash("sha256").update(canonical(command)).digest("hex");
-    this.db.exec("BEGIN IMMEDIATE");
-    let committed = false;
-    try {
-      const receipt = this.one(
-        "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
-        scope,
-        command.key,
-      );
-      if (receipt) {
-        if (receipt.payloadHash !== hash)
-          throw new DomainConflictError(
-            "Command key already used with different payload",
-          );
-        this.db.exec("COMMIT");
-        committed = true;
-        return JSON.parse(String(receipt.result));
-      }
+    const hash = commandHash(command);
+    const outcome = transaction(this.db, () => {
+      const prior = this.replayed(scope, command.key, hash);
+      if (prior !== undefined) return { result: prior, recorded: false };
       const result = this.apply(command, verifiedRepositories);
       const review = new TaskReviewStore(this.db);
       if (
@@ -757,18 +727,17 @@ export class DomainStore {
           "INSERT INTO command_receipts (scope, key, payloadHash, result) VALUES (?, ?, ?, ?)",
         )
         .run(scope, command.key, hash, JSON.stringify(result));
-      this.db.exec("COMMIT");
-      committed = true;
-      this.onChange?.();
-      return result;
-    } catch (error) {
-      if (committed)
+      return { result, recorded: true };
+    });
+    if (outcome.recorded)
+      try {
+        this.onChange?.();
+      } catch (error) {
         throw new Error("Command committed but change notification failed", {
           cause: error,
         });
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      }
+    return outcome.result;
   }
 
   project(projectId: string): Row {
@@ -1364,8 +1333,7 @@ export class DomainStore {
       .strict()
       .parse(input);
     const hash = createHash("sha256").update(canonical(data)).digest("hex");
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    const created = transaction(this.db, () => {
       const existing = this.one(
         "SELECT id, payloadHash FROM routing_operations WHERE id = ? OR (projectId = ? AND taskId = ? AND taskVersion = ?)",
         data.id,
@@ -1376,8 +1344,7 @@ export class DomainStore {
       if (existing) {
         if (existing.id !== data.id || existing.payloadHash !== hash)
           throw new DomainConflictError("Routing operation conflict");
-        this.db.exec("COMMIT");
-        return this.routingOperation(data.id);
+        return false;
       }
       if (externallyAdmitted && !externallyAdmitted())
         throw new Error("External admission rejected routing disposition");
@@ -1453,13 +1420,10 @@ export class DomainStore {
           data.brief ?? String(task.outcome),
           hash,
         );
-      this.db.exec("COMMIT");
-      this.onChange?.();
-      return this.routingOperation(data.id);
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
+      return true;
+    });
+    if (created) this.onChange?.();
+    return this.routingOperation(data.id);
   }
 
   routingOperation(operationId: string): Row {

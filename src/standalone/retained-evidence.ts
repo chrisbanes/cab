@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
+import { materialDigest } from "../core/delivery.js";
 import type { ReviewMetadata } from "../core/task-review.js";
 import {
   emptyRetainedEvidenceCandidate,
@@ -11,7 +12,7 @@ import {
   type RetainedReviewAnchorCandidate,
   type RetainedEvidenceSourceObservation,
 } from "../core/retained-evidence.js";
-import { sanitizeConversationText } from "./conversation-history.js";
+import { isDisclosable } from "./conversation-history.js";
 import type {
   WorkspaceComparisonEntry,
   WorkspaceComparisonExport,
@@ -19,7 +20,9 @@ import type {
   WorkspaceTurnCaptureRecord,
 } from "./workspace-comparison.js";
 import {
+  isWithin,
   previewWorkspaceFile,
+  privateSegmentsExcluded,
   workspaceInspectionPathExcluded,
   type WorkspaceInspectionCurrent,
   type WorkspaceInspectionScope,
@@ -399,21 +402,10 @@ const lineCount = (text: string) => {
   return text.endsWith("\n") ? lines : lines + 1;
 };
 
-function canonicalMaterial(value: unknown): string {
-  if (Array.isArray(value))
-    return `[${value.map(canonicalMaterial).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalMaterial(item)}`)
-      .join(",")}}`;
-  return JSON.stringify(value) ?? "null";
-}
-
 export function retainedReviewAnchorMaterialHash(
   request: RetainedReviewAnchorStageRequest,
 ): string {
-  return createHash("sha256").update(canonicalMaterial(request)).digest("hex");
+  return materialDigest(request);
 }
 
 function anchorLineRange(
@@ -451,6 +443,24 @@ function anchorLineRange(
 const anchorReasonForPreview = (state: string): "missing" | "unavailable" =>
   state === "missing" ? "missing" : "unavailable";
 
+const anchorBase = (selection: RetainedReviewAnchorSelection) => ({
+  anchorId: randomUUID(),
+  taskId: selection.taskId,
+  repositoryId: selection.repositoryId,
+  path: selection.path,
+  sourceKind: selection.sourceKind,
+  context: selection.context,
+  ...(selection.comparisonId ? { comparisonId: selection.comparisonId } : {}),
+  ...(selection.resultId ? { resultId: selection.resultId } : {}),
+  ...(selection.resultItemId ? { resultItemId: selection.resultItemId } : {}),
+  ...(selection.workId ? { workId: selection.workId } : {}),
+  ...(selection.threadId ? { threadId: selection.threadId } : {}),
+  ...(selection.turnId ? { turnId: selection.turnId } : {}),
+  side: selection.side,
+  startLine: selection.startLine,
+  endLine: selection.endLine,
+});
+
 function gapReviewAnchorCandidate(
   selection: RetainedReviewAnchorSelection,
   reason: NonNullable<RetainedReviewAnchorCandidate["reason"]>,
@@ -458,21 +468,7 @@ function gapReviewAnchorCandidate(
   capturedAt = Date.now(),
 ): RetainedReviewAnchorCandidate {
   return {
-    anchorId: randomUUID(),
-    taskId: selection.taskId,
-    repositoryId: selection.repositoryId,
-    path: selection.path,
-    sourceKind: selection.sourceKind,
-    context: selection.context,
-    ...(selection.comparisonId ? { comparisonId: selection.comparisonId } : {}),
-    ...(selection.resultId ? { resultId: selection.resultId } : {}),
-    ...(selection.resultItemId ? { resultItemId: selection.resultItemId } : {}),
-    ...(selection.workId ? { workId: selection.workId } : {}),
-    ...(selection.threadId ? { threadId: selection.threadId } : {}),
-    ...(selection.turnId ? { turnId: selection.turnId } : {}),
-    side: selection.side,
-    startLine: selection.startLine,
-    endLine: selection.endLine,
+    ...anchorBase(selection),
     claimedSha256: selection.contentSha256,
     state: "gap",
     reason,
@@ -502,22 +498,8 @@ function availableReviewAnchorCandidate(
     .update(selected.bytes)
     .digest("hex");
   return {
-    anchorId: randomUUID(),
-    taskId: selection.taskId,
-    repositoryId: selection.repositoryId,
-    path: selection.path,
+    ...anchorBase(selection),
     originRoot,
-    sourceKind: selection.sourceKind,
-    context: selection.context,
-    ...(selection.comparisonId ? { comparisonId: selection.comparisonId } : {}),
-    ...(selection.resultId ? { resultId: selection.resultId } : {}),
-    ...(selection.resultItemId ? { resultItemId: selection.resultItemId } : {}),
-    ...(selection.workId ? { workId: selection.workId } : {}),
-    ...(selection.threadId ? { threadId: selection.threadId } : {}),
-    ...(selection.turnId ? { turnId: selection.turnId } : {}),
-    side: selection.side,
-    startLine: selection.startLine,
-    endLine: selection.endLine,
     sourceSha256,
     excerptSha256,
     byteStart: selected.byteStart,
@@ -541,32 +523,6 @@ function textFromBytes(bytes: Buffer): string | undefined {
   }
 }
 
-function reviewPathSegments(path: string): string[] | undefined {
-  if (
-    !path ||
-    path.startsWith("/") ||
-    path.startsWith("\\") ||
-    /^[a-z]:/i.test(path) ||
-    path.includes("\\") ||
-    Buffer.byteLength(path, "utf8") > 2048
-  )
-    return undefined;
-  const segments = path.split("/");
-  if (
-    segments.length > 32 ||
-    segments.some(
-      (segment) =>
-        !segment ||
-        segment === "." ||
-        segment === ".." ||
-        /\p{Cc}/u.test(segment) ||
-        Buffer.from(segment, "utf8").toString("utf8") !== segment,
-    )
-  )
-    return undefined;
-  return segments;
-}
-
 function anchorOriginRoot(
   binding: TaskWorkspaceBinding,
   repositoryId: string | null,
@@ -579,25 +535,6 @@ function anchorOriginRoot(
   return root;
 }
 
-function privateReviewPath(segments: readonly string[]): boolean {
-  return segments.some((segment) => {
-    const name = segment.normalize("NFC").toLocaleLowerCase("und");
-    return (
-      name === ".git" ||
-      name === ".ssh" ||
-      name === ".aws" ||
-      name === ".gnupg" ||
-      name === ".netrc" ||
-      name === ".npmrc" ||
-      name === ".pypirc" ||
-      name === ".env" ||
-      name.startsWith(".env.") ||
-      name.endsWith(".pem") ||
-      name.endsWith(".key")
-    );
-  });
-}
-
 async function assertReviewAnchorPathAllowed(
   taskId: string,
   repositoryId: string | null,
@@ -606,12 +543,12 @@ async function assertReviewAnchorPathAllowed(
   policy: RetainedEvidenceCapturePolicy,
   originRoot?: string,
 ): Promise<"ready" | "unavailable"> {
-  const segments = reviewPathSegments(path);
+  const segments = validRelativePath(path);
   if (!segments) throw new Error("Unsafe review anchor path");
   if (
     (repositoryId && !policy.authorizedRepositoryIds.includes(repositoryId)) ||
-    sanitizeConversationText(path, policy.excluded) !== path ||
-    privateReviewPath(segments)
+    !isDisclosable(path, policy.excluded) ||
+    privateSegmentsExcluded(segments)
   )
     throw new Error("Review anchor path is excluded");
   const current = await currentWorkspace();
@@ -634,15 +571,12 @@ async function assertReviewAnchorPathAllowed(
   }
   if (originRoot && isAbsolute(originRoot)) {
     const target = resolve(originRoot, ...segments);
-    if (
-      target !== originRoot &&
-      !target.startsWith(`${resolve(originRoot)}${sep}`)
-    )
+    if (!isWithin(resolve(originRoot), target))
       throw new Error("Unsafe retained review anchor path");
     for (const excluded of policy.excluded) {
       if (!isAbsolute(excluded)) continue;
       const resolved = resolve(excluded);
-      if (target === resolved || target.startsWith(`${resolved}${sep}`))
+      if (isWithin(resolved, target))
         throw new Error("Review anchor path is excluded");
     }
     return "ready";
@@ -721,7 +655,7 @@ export async function captureRetainedReviewAnchor(
   if (
     (selection.repositoryId &&
       !policy.authorizedRepositoryIds.includes(selection.repositoryId)) ||
-    sanitizeConversationText(selection.path, policy.excluded) !== selection.path
+    !isDisclosable(selection.path, policy.excluded)
   )
     throw new Error("Review anchor path is excluded");
 
@@ -808,7 +742,7 @@ export async function captureRetainedReviewAnchor(
         null,
         capturedAt,
       );
-    const segments = reviewPathSegments(selection.path);
+    const segments = validRelativePath(selection.path);
     if (!segments) throw new Error("Unsafe review anchor path");
     let scope: WorkspaceInspectionScope;
     const previewPath = segments;
@@ -969,7 +903,7 @@ export async function captureRetainedReviewAnchor(
     ...(entry.previousPath ? [entry.previousPath] : []),
   ];
   for (const path of entryPaths) {
-    const segments = reviewPathSegments(path);
+    const segments = validRelativePath(path);
     if (!segments) throw new Error("Unsafe review comparison path");
     if (
       await workspaceInspectionPathExcluded(
@@ -1105,11 +1039,7 @@ async function diffPayload(
   const sideTexts = [leftText, rightText].filter(
     (text): text is string => text !== undefined,
   );
-  if (
-    sideTexts.some(
-      (text) => sanitizeConversationText(text, policy.excluded) !== text,
-    )
-  )
+  if (sideTexts.some((text) => !isDisclosable(text, policy.excluded)))
     return { reason: "excluded" as const };
   const payload = {
     version: 1,
@@ -1131,10 +1061,7 @@ async function diffPayload(
   const bytes = Buffer.from(JSON.stringify(payload), "utf8");
   if (bytes.byteLength > retainedEvidenceLimits.maxDiffBytes)
     return { reason: "too-large" as const };
-  if (
-    sanitizeConversationText(bytes.toString("utf8"), policy.excluded) !==
-    bytes.toString("utf8")
-  )
+  if (!isDisclosable(bytes.toString("utf8"), policy.excluded))
     return { reason: "excluded" as const };
   return {
     bytes,
@@ -1302,10 +1229,7 @@ export async function captureRetainedResultEvidence(
     }
     let bytes: Buffer;
     if (preview.preview.kind === "text") {
-      if (
-        sanitizeConversationText(preview.preview.text, policy.excluded) !==
-        preview.preview.text
-      ) {
+      if (!isDisclosable(preview.preview.text, policy.excluded)) {
         items.push(
           gapItem({ ...baseItem, observedAt: preview.observedAt }, "excluded"),
         );

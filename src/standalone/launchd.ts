@@ -8,7 +8,9 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { canonicalLoopbackOrigin } from "./operator-auth.js";
+import { isWithin } from "./workspace-inspection.js";
 
 export type LaunchAgentConfiguration = {
   label: string;
@@ -88,22 +90,13 @@ function requirePrivateOutputPath(path: string, label: string): void {
 
 function validateOrigin(origin: string): void {
   assertText(origin, "Operator origin");
-  let url: URL;
+  let url: URL | undefined;
   try {
-    url = new URL(origin);
+    url = canonicalLoopbackOrigin(origin);
   } catch {
     throw new Error("Operator origin is invalid");
   }
-  if (
-    url.origin !== origin ||
-    (url.protocol !== "http:" && url.protocol !== "https:") ||
-    url.username ||
-    url.password ||
-    url.pathname !== "/" ||
-    url.search ||
-    url.hash ||
-    (url.protocol === "http:" && url.hostname !== "127.0.0.1")
-  )
+  if (!url)
     throw new Error("Operator origin must be canonical loopback HTTP or HTTPS");
 }
 
@@ -202,14 +195,7 @@ ${argumentsList.map((argument) => `    ${stringElement(argument)}`).join("\n")}
 function assertNotSystemLaunchdTarget(path: string): void {
   const absolute = isAbsolute(path) ? path : "";
   if (
-    ROOT_LAUNCHD_DIRECTORIES.some((directory) => {
-      const pathFromDirectory = relative(directory, absolute);
-      return (
-        pathFromDirectory === "" ||
-        (!pathFromDirectory.startsWith(`..${sep}`) &&
-          pathFromDirectory !== "..")
-      );
-    })
+    ROOT_LAUNCHD_DIRECTORIES.some((directory) => isWithin(directory, absolute))
   )
     throw new Error(
       "LaunchAgent output must not target a root/system launchd directory",

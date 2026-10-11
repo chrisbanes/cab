@@ -214,14 +214,6 @@ export function taskNext(task: TaskListSummary) {
   if (column === "Cancelled") return "Next: none · history retained";
   return "No operator decision";
 }
-/** zod's url() also accepts javascript: and data:, so only https links become anchors. */
-export function safeSourceUrl(url: string | null | undefined) {
-  try {
-    return url && new URL(url).protocol === "https:" ? url : null;
-  } catch {
-    return null;
-  }
-}
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 export function taskRouteSubtitle(
   kind: "overview" | "tasks" | "project",

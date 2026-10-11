@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   taskListSummarySchema,
+  taskSourceSummarySchema,
   type InboxItem,
   type TaskListSummary,
 } from "../src/operator/contracts.js";
@@ -13,7 +14,6 @@ import {
   columns,
   filterTasks,
   parseTaskFilters,
-  safeSourceUrl,
   taskNext,
   taskRouteSubtitle,
   visibleColumns,
@@ -137,20 +137,19 @@ test("the next actor is derived from recorded attention and state only", () => {
   assert.equal(attentionCandidate([summary(), columnOnly]), columnOnly);
 });
 
-test("only https source links become anchors", () => {
-  assert.equal(
-    safeSourceUrl("https://github.com/a/b/issues/1"),
-    "https://github.com/a/b/issues/1",
-  );
-  for (const bad of [
-    "javascript:alert(1)",
-    "http://x",
-    "data:text/html,x",
-    "nope",
-    "",
-    null,
-  ])
-    assert.equal(safeSourceUrl(bad), null);
+test("source summaries only accept https links", () => {
+  const source = (url: string | null) =>
+    taskSourceSummarySchema.safeParse({
+      identity: { provider: "github.com", nodeId: "n", repositoryId: "r" },
+      repositoryName: "a/b",
+      number: 1,
+      url,
+      state: "open",
+    }).success;
+  assert.equal(source("https://github.com/a/b/issues/1"), true);
+  assert.equal(source(null), true);
+  for (const bad of ["javascript:alert(1)", "http://x", "data:text/html,x"])
+    assert.equal(source(bad), false);
 });
 
 test("route subtitles count active tasks and name the accountable lead", () => {

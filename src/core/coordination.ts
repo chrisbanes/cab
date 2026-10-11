@@ -11,7 +11,7 @@ import {
   reviewMetadataSchema,
   feedbackReferenceSchema,
 } from "./task-review.js";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
   validateStructuredAnswers,
@@ -37,6 +37,8 @@ import {
   DeliveryStore,
   externalActionSchema,
   actionKinds,
+  canonicalMaterial,
+  materialDigest,
   type RuntimeDeliveryCaller,
 } from "./delivery.js";
 import { transaction, type Database } from "./store.js";
@@ -194,20 +196,6 @@ const completionFinalizeSchema = z
   })
   .strict();
 type Row = Record<string, string | number | null>;
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value && typeof value === "object")
-    return `{${Object.entries(value)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonical(entry)}`)
-      .join(",")}}`;
-  return JSON.stringify(value) ?? "null";
-}
-
-function payloadHash(value: unknown): string {
-  return createHash("sha256").update(canonical(value)).digest("hex");
-}
 
 export type RuntimeQuestionDeliveryState =
   | "unanswered"
@@ -900,7 +888,7 @@ export class CoordinationStore {
     if (
       row.tool !== call.tool ||
       row.payloadHash !==
-        payloadHash({ tool: call.tool, arguments: call.arguments })
+        materialDigest({ tool: call.tool, arguments: call.arguments })
     )
       throw new Error(
         "Coordination callback identity reused with different content",
@@ -918,12 +906,11 @@ export class CoordinationStore {
     replayed: boolean;
   } {
     const call = reportCallSchema.parse(input);
-    const callHash = payloadHash({
+    const callHash = materialDigest({
       tool: call.tool,
       arguments: call.arguments,
     });
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+    return transaction(this.db, () => {
       const prior = this.one(
         "SELECT threadId, turnId, callId, tool, payloadHash, taskId, assignmentId, workId, workRevision, response " +
           "FROM coordination_receipts WHERE threadId = ? AND turnId = ? AND callId = ?",
@@ -944,7 +931,6 @@ export class CoordinationStore {
           );
         const receipt = this.parseReceipt(prior);
         const result = this.resultByWork(receipt.workId);
-        this.db.exec("COMMIT");
         return { result, response: receipt.response, replayed: true };
       }
 
@@ -1161,16 +1147,8 @@ export class CoordinationStore {
           result.workRevision,
           JSON.stringify(response),
         );
-      this.db.exec("COMMIT");
       return { result, response, replayed: false };
-    } catch (error) {
-      try {
-        if (this.db.isTransaction !== false) this.db.exec("ROLLBACK");
-      } catch {
-        // Preserve the original failure if SQLite already aborted the transaction.
-      }
-      throw error;
-    }
+    });
   }
 
   delegate(
@@ -1259,14 +1237,14 @@ export class CoordinationStore {
 
   requestApproval(input: CoordinationCall): CoordinationToolResponse {
     const call = approvalCallSchema.parse(input);
-    const materialJson = canonical(call.arguments.material);
+    const materialJson = canonicalMaterial(call.arguments.material);
     if (new TextEncoder().encode(materialJson).byteLength > 8192)
       throw new Error("Approval material exceeds the 8 KiB operator limit");
     return this.requestInteraction(call, "approval", {
       prompt: `Approval requested for ${call.arguments.action}`,
       action: call.arguments.action,
       target: call.arguments.target ?? null,
-      materialHash: payloadHash(call.arguments.material),
+      materialHash: materialDigest(call.arguments.material),
       materialJson,
     });
   }
@@ -1477,7 +1455,7 @@ export class CoordinationStore {
     )
       throw new Error("Native request identity mismatch");
     const key = nativeEndpointKey(identity);
-    const digest = payloadHash(request);
+    const digest = materialDigest(request);
     return transaction(this.db, () => {
       const prior = this.one(
         "SELECT interactionId,requestDigest FROM coordination_runtime_questions WHERE endpointKey = ?",
@@ -1556,7 +1534,7 @@ export class CoordinationStore {
         command.key,
       );
       if (prior) {
-        if (prior.payloadHash !== payloadHash(payload))
+        if (prior.payloadHash !== materialDigest(payload))
           throw new Error("Operator command key reused with different content");
         return runtimeAnswerReceiptSchema.parse(
           JSON.parse(String(prior.result)),
@@ -1587,7 +1565,7 @@ export class CoordinationStore {
         question.request.questions,
         command.answers,
       );
-      const answerDigest = payloadHash(answers);
+      const answerDigest = materialDigest(answers);
       const receipt: RuntimeQuestionAnswerReceipt = {
         interactionId: question.interactionId,
         revision: question.revision + 1,
@@ -1608,7 +1586,7 @@ export class CoordinationStore {
         .prepare(
           `INSERT INTO coordination_operator_receipts (scope,commandKey,payloadHash,result) VALUES ('answer-runtime-question',?,?,?)`,
         )
-        .run(command.key, payloadHash(payload), JSON.stringify(receipt));
+        .run(command.key, materialDigest(payload), JSON.stringify(receipt));
       return receipt;
     });
   }
@@ -1874,7 +1852,7 @@ export class CoordinationStore {
       key,
     );
     if (!prior) return undefined;
-    if (prior.payloadHash !== payloadHash(payload))
+    if (prior.payloadHash !== materialDigest(payload))
       throw new Error("Operator command key reused with different content");
     return runtimeAnswerReceiptSchema.parse(JSON.parse(String(prior.result)));
   }
@@ -1978,7 +1956,7 @@ export class CoordinationStore {
         )
         .run(
           JSON.stringify(answers),
-          payloadHash(answers),
+          materialDigest(answers),
           command.interactionId,
         );
       this.db
@@ -2015,7 +1993,9 @@ export class CoordinationStore {
       action: command.action,
       target: command.target ?? null,
       materialHash:
-        command.material === undefined ? null : payloadHash(command.material),
+        command.material === undefined
+          ? null
+          : materialDigest(command.material),
     };
     return transaction(this.db, () => {
       const replay = this.replayOperatorEvent(
@@ -2056,7 +2036,7 @@ export class CoordinationStore {
           );
       } else if (
         command.material === undefined ||
-        canonical(command.material) !== interaction.materialJson ||
+        canonicalMaterial(command.material) !== interaction.materialJson ||
         interaction.materialHash !== payload.materialHash
       ) {
         throw new Error(
@@ -2171,7 +2151,7 @@ export class CoordinationStore {
         this.recordRecoveryContinuation(
           event,
           command.key,
-          payloadHash(payload),
+          materialDigest(payload),
         );
       return event;
     });
@@ -2220,8 +2200,8 @@ export class CoordinationStore {
         row.revoked === 0 &&
         row.action === request.action &&
         row.target === (request.target ?? null) &&
-        row.materialJson === canonical(request.material) &&
-        row.materialHash === payloadHash(request.material),
+        row.materialJson === canonicalMaterial(request.material) &&
+        row.materialHash === materialDigest(request.material),
     );
   }
 
@@ -3817,7 +3797,7 @@ export class CoordinationStore {
           .run(
             interactionId,
             JSON.stringify(value.form),
-            payloadHash(value.form),
+            materialDigest(value.form),
           );
       if (
         kind === "approval" &&
@@ -3828,7 +3808,7 @@ export class CoordinationStore {
         );
         if (
           material.kind !== value.action ||
-          canonical(material.target) !== value.target
+          canonicalMaterial(material.target) !== value.target
         )
           throw new Error(
             "External approval requires exact action and target material",
@@ -3878,7 +3858,7 @@ export class CoordinationStore {
         call.turnId,
         call.callId,
         call.tool,
-        payloadHash({ tool: call.tool, arguments: call.arguments }),
+        materialDigest({ tool: call.tool, arguments: call.arguments }),
         String(binding.taskId),
         String(binding.assignmentId),
         String(binding.workId),
@@ -3948,7 +3928,7 @@ export class CoordinationStore {
       key,
     );
     if (!row) return undefined;
-    if (row.payloadHash !== payloadHash(payload))
+    if (row.payloadHash !== materialDigest(payload))
       throw new Error("Operator command key reused with different content");
     const receipt = z
       .object({ eventId: z.string().uuid() })
@@ -3970,7 +3950,7 @@ export class CoordinationStore {
     this.db
       .prepare(`INSERT INTO coordination_operator_receipts
       (scope, commandKey, payloadHash, result) VALUES (?, ?, ?, ?)`)
-      .run(scope, key, payloadHash(payload), JSON.stringify({ eventId }));
+      .run(scope, key, materialDigest(payload), JSON.stringify({ eventId }));
   }
 
   private requireOpenInteraction(
@@ -4338,7 +4318,10 @@ export class CoordinationStore {
     const currentResultIds = currentResults
       .map((row) => String(row.resultId))
       .sort();
-    if (canonical(currentResultIds) !== canonical(request.reviewedResultIds))
+    if (
+      canonicalMaterial(currentResultIds) !==
+      canonicalMaterial(request.reviewedResultIds)
+    )
       reasons.push("current-results-not-fully-reviewed");
     if (currentResults.some((row) => row.destinationDisposition !== "resolved"))
       reasons.push("unresolved-result-destination");
