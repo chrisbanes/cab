@@ -3114,6 +3114,16 @@ export class CoordinationStore {
     return rows.map((row) => this.delivery(row.batchId));
   }
 
+  /** `queuedDeliveries()` for one task, in the same order. */
+  queuedDeliveriesForTask(taskId: string): InboxDelivery[] {
+    return (
+      this.db
+        .prepare(`SELECT batchId FROM coordination_delivery_batches
+      WHERE state = 'queued' AND taskId = ? ORDER BY createdAt, batchId`)
+        .all(uuid.parse(taskId)) as Array<{ batchId: string }>
+    ).map((row) => this.delivery(row.batchId));
+  }
+
   deliveryForWork(deliveryWorkId: string): InboxDelivery | undefined {
     const row = this.one(
       "SELECT batchId FROM coordination_delivery_batches WHERE deliveryWorkId = ?",

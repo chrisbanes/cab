@@ -68,11 +68,19 @@ type RuntimeDomain = Pick<
 
 export interface RuntimeOperatorApi {
   domain(): RuntimeDomain;
-  list(): ExecutionIntent[];
-  recoveryView(): RecoveryRecord[];
+  executionForWork(workId: string): ExecutionIntent | undefined;
+  recoveryFor(
+    assignmentId: string,
+    assignmentVersion: number,
+    workId?: string,
+  ): RecoveryRecord[];
+  recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[];
   powerStatus(): ReturnType<StandaloneService["powerStatus"]>;
   runtimeStatus(): ReturnType<StandaloneService["runtimeStatus"]>;
-  turnRequests(): TurnRequest[];
+  currentTurnRequest(
+    assignmentId: string,
+    version: number,
+  ): TurnRequest | undefined;
   capacityLimits(projectIds?: string[]): CapacityLimits;
   configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
@@ -180,51 +188,29 @@ function assignmentHref(assignmentId: string): string {
 /** The turn request, recovery record and execution intent that describe an assignment's current execution. */
 export function selectAssignmentExecution(
   assignment: { id?: unknown; version?: unknown },
-  api: Pick<RuntimeOperatorApi, "turnRequests" | "recoveryView" | "list">,
+  api: Pick<
+    RuntimeOperatorApi,
+    "currentTurnRequest" | "recoveryFor" | "executionForWork"
+  >,
 ) {
   const id = String(assignment.id);
-  const requests = api
-    .turnRequests()
-    .filter((candidate) => candidate.assignmentId === id);
-  const latestRequest = (candidates: TurnRequest[]) =>
-    candidates.reduce<TurnRequest | undefined>(
-      (latest, candidate) =>
-        !latest || candidate.sequence > latest.sequence ? candidate : latest,
-      undefined,
-    );
-  const request =
-    latestRequest(
-      requests.filter((candidate) => candidate.state === "active"),
-    ) ??
-    latestRequest(
-      requests.filter(
-        (candidate) =>
-          candidate.assignmentVersion === Number(assignment.version),
-      ),
-    );
+  const request = api.currentTurnRequest(id, Number(assignment.version));
   const requestVersion =
     request?.assignmentVersion ?? Number(assignment.version);
-  const recoveryRecords = api
-    .recoveryView()
-    .filter(
-      (candidate) =>
-        candidate.binding?.assignmentId === id &&
-        candidate.binding.assignmentVersion === requestVersion,
-    );
   const record = request
-    ? recoveryRecords.find((candidate) => candidate.workId === request.workId)
-    : recoveryRecords.reduce<RecoveryRecord | undefined>(
-        (latest, candidate) =>
-          !latest ||
-          candidate.generation.requestSequence >
-            latest.generation.requestSequence
-            ? candidate
-            : latest,
-        undefined,
-      );
-  const intent = request
-    ? api.list().find((candidate) => candidate.workId === request.workId)
-    : undefined;
+    ? api.recoveryFor(id, requestVersion, request.workId)[0]
+    : api
+        .recoveryFor(id, requestVersion)
+        .reduce<RecoveryRecord | undefined>(
+          (latest, candidate) =>
+            !latest ||
+            candidate.generation.requestSequence >
+              latest.generation.requestSequence
+              ? candidate
+              : latest,
+          undefined,
+        );
+  const intent = request ? api.executionForWork(request.workId) : undefined;
   return { request, record, intent };
 }
 
@@ -326,7 +312,7 @@ function recoveryRecordEvidence(
 
 function executionHoldSection(taskId: string, api: RuntimeOperatorApi): string {
   const records = api
-    .recoveryView()
+    .recoveryForTask(taskId)
     .filter((record) => record.binding?.taskId === taskId);
   const hold = api.taskHold(taskId);
   const stop = records.some((record) => record.holds.stop);
@@ -455,7 +441,7 @@ function taskPage(
     ? `<p>Accountable project lead: ${escapeHtml(leadProfile.name)}${leadAssignment ? `; <a href="${assignmentHref(String(leadAssignment.id))}">task-scoped lead execution</a>` : ""}.</p>`
     : "<p>No project lead is configured.</p>";
   const held = api
-    .recoveryView()
+    .recoveryForTask(taskId)
     .some(
       (record) =>
         record.binding?.taskId === taskId &&
@@ -470,7 +456,7 @@ function taskPage(
   );
   const taskAdmission = domain.admission(taskId);
   const status = api
-    .recoveryView()
+    .recoveryForTask(taskId)
     .some((record) => record.binding?.taskId === taskId && record.holds.stop)
     ? "Stopping; effects may continue"
     : assignmentStatuses.includes("Starting")

@@ -213,6 +213,42 @@ export class SchedulerStore {
     return row ? this.parse(row as Record<string, unknown>) : undefined;
   }
 
+  /** The assignment's newest active request, else its newest request of `version`. */
+  current(assignmentId: string, version: number): TurnRequest | undefined {
+    const row =
+      this.db
+        .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
+          AND state = 'active' ORDER BY sequence DESC LIMIT 1`)
+        .get(assignmentId) ??
+      (Number.isSafeInteger(version)
+        ? this.db
+            .prepare(`SELECT * FROM turn_requests WHERE assignmentId = ?
+              AND assignmentVersion = ? ORDER BY sequence DESC LIMIT 1`)
+            .get(assignmentId, version)
+        : undefined);
+    return row ? this.parse(row as Record<string, unknown>) : undefined;
+  }
+
+  forTask(taskId: string): TurnRequest[] {
+    return this.db
+      .prepare("SELECT * FROM turn_requests WHERE taskId = ? ORDER BY sequence")
+      .all(taskId)
+      .map((row) => this.parse(row as Record<string, unknown>));
+  }
+
+  /** Requests counted up to `limit`, reading at most `limit` rows. */
+  countUpTo(limit: number): number {
+    return Number(
+      (
+        this.db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM (SELECT 1 FROM turn_requests LIMIT ?)",
+          )
+          .get(limit) as { count: number }
+      ).count,
+    );
+  }
+
   /** Work IDs only: admission checks must not load every request's prompt. */
   heldWorkIds(assignmentId: string, excludeWorkId: string): string[] {
     return (

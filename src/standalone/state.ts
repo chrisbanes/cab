@@ -439,6 +439,10 @@ export class ExecutionState {
       profileRevision INTEGER NOT NULL, conversationRevision INTEGER NOT NULL,
       harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64)
     );
+    CREATE INDEX IF NOT EXISTS task_execution_bindings_task
+      ON task_execution_bindings(taskId);
+    CREATE INDEX IF NOT EXISTS task_execution_bindings_assignment
+      ON task_execution_bindings(assignmentId, assignmentVersion);
     CREATE TABLE IF NOT EXISTS task_writer_holds (
       taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
     );
@@ -3363,11 +3367,77 @@ export class ExecutionState {
   }
 
   recoveryView(): RecoveryRecord[] {
-    const workIds = (
+    return this.recoveryRecords(`SELECT workId FROM execution_recovery_identities
+      ORDER BY rowid`);
+  }
+
+  /** `recoveryView()` rows bound to one assignment version, optionally one work. */
+  recoveryFor(
+    assignmentId: string,
+    assignmentVersion: number,
+    workId?: string,
+  ): RecoveryRecord[] {
+    if (!Number.isSafeInteger(assignmentVersion)) return [];
+    return this.recoveryRecords(
+      `SELECT identity.workId FROM execution_recovery_identities identity
+      JOIN task_execution_bindings binding ON binding.workId = identity.workId
+      WHERE binding.assignmentId = ? AND binding.assignmentVersion = ?
+      ${workId === undefined ? "" : "AND binding.workId = ?"}
+      ORDER BY identity.rowid`,
+      assignmentId,
+      assignmentVersion,
+      ...(workId === undefined ? [] : [workId]),
+    );
+  }
+
+  /** `recoveryView()` rows bound to one task, plus one optional (possibly unbound) work. */
+  recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[] {
+    return this.recoveryRecords(
+      `SELECT identity.workId FROM execution_recovery_identities identity
+      WHERE identity.workId IN (
+        SELECT workId FROM task_execution_bindings WHERE taskId = ?
+        UNION SELECT ?)
+      ORDER BY identity.rowid`,
+      taskId,
+      alsoWorkId ?? null,
+    );
+  }
+
+  /** Recovery identities counted up to `limit`, reading at most `limit` rows. */
+  recoveryCountUpTo(limit: number): number {
+    return Number(
+      (
+        this.db
+          .prepare(`SELECT COUNT(*) AS count FROM
+          (SELECT 1 FROM execution_recovery_identities LIMIT ?)`)
+          .get(limit) as { count: number }
+      ).count,
+    );
+  }
+
+  /** One task's intents with their bindings, in intent order. */
+  taskExecutions(
+    taskId: string,
+  ): { intent: ExecutionIntent; binding: TaskExecutionBindingRecord }[] {
+    return (
       this.db
-        .prepare(`SELECT workId FROM execution_recovery_identities
-      ORDER BY rowid`)
-        .all() as Array<{ workId: string }>
+        .prepare(`SELECT binding.workId FROM task_execution_bindings binding
+        JOIN execution_intents intent ON intent.workId = binding.workId
+        WHERE binding.taskId = ? ORDER BY intent.rowid`)
+        .all(taskId) as Array<{ workId: string }>
+    ).flatMap(({ workId }) => {
+      const intent = this.byWorkId(workId),
+        binding = this.taskBinding(workId);
+      return intent && binding ? [{ intent, binding }] : [];
+    });
+  }
+
+  private recoveryRecords(
+    sql: string,
+    ...parameters: (string | number | null)[]
+  ): RecoveryRecord[] {
+    const workIds = (
+      this.db.prepare(sql).all(...parameters) as Array<{ workId: string }>
     ).map((row) => row.workId);
     return workIds.map((workId) => {
       const row = this.db
