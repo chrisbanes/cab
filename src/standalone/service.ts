@@ -2516,6 +2516,10 @@ export class StandaloneService {
       if (page.length === 0) break;
       for (const question of page) {
         cursor = question.interactionId;
+        // Generations are not unique across harnesses: reply only through the
+        // runtime the question's work is bound to; its own flush delivers it.
+        if (this.runtimeForWork(question.requestingWorkId) !== runtime)
+          continue;
         if (
           !question.answers ||
           question.replyIntentId ||

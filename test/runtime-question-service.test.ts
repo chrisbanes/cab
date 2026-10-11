@@ -193,15 +193,23 @@ class NativeRuntime implements Runtime {
 function command(service: StandaloneService, body: Record<string, unknown>) {
   return service.domain().execute({ key: randomUUID(), ...body } as never);
 }
-async function fixture(options: { early?: boolean } = {}) {
+async function fixture(options: { early?: boolean; claude?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-native-service-"));
   const runtime = new NativeRuntime();
   runtime.early = options.early ?? false;
+  // With `claude`, the work runs on a Claude-bound runtime beside an idle Codex
+  // runtime that exposes the same native generation token.
+  const other = new NativeRuntime();
   const service = new StandaloneService(
     join(root, "data"),
-    () => runtime,
+    (_context, harness) =>
+      harness === "codex" && options.claude ? other : runtime,
     undefined,
-    { power: { enabled: false }, supervisor: { observationMs: 5 } },
+    {
+      power: { enabled: false },
+      supervisor: { observationMs: 5 },
+      ...(options.claude ? { runtimeHarnesses: ["codex", "claude"] } : {}),
+    },
   );
   await service.start();
   const profileId = randomUUID(),
@@ -214,6 +222,9 @@ async function fixture(options: { early?: boolean } = {}) {
     name: "Lead",
     instructions: "Coordinate",
     capabilities: "work",
+    ...(options.claude
+      ? { runtime: { harness: "claude", model: null, reasoningEffort: null } }
+      : {}),
   });
   command(service, {
     type: "project.create",
@@ -267,6 +278,7 @@ async function fixture(options: { early?: boolean } = {}) {
   return {
     root,
     runtime,
+    other,
     service,
     projectId,
     taskId,
@@ -372,6 +384,30 @@ for (const hold of ["unready", "profile", "ownership", "power"] as const)
       await f.close();
     }
   });
+test("a native answer is delivered only through its bound harness when generations match", async () => {
+  const f = await fixture({ claude: true });
+  try {
+    assert.equal(f.other.generation, f.runtime.generation);
+    const q = runtimeQuestion(f.service, f.taskId);
+    await f.service.coordinationView().answerRuntimeQuestion({
+      taskId: f.taskId,
+      key: randomUUID(),
+      interactionId: q.interactionId,
+      expectedRevision: q.revision,
+      answers: { q: { answers: ["Local"] } },
+    });
+    await until(() => f.runtime.replies === 1);
+    assert.equal(f.other.replies, 0);
+    assert.deepEqual(f.other.cancelled, []);
+    assert.equal(f.other.turns, 0);
+    assert.equal(
+      runtimeQuestion(f.service, f.taskId).deliveryState,
+      "confirmed",
+    );
+  } finally {
+    await f.close();
+  }
+});
 test("Stop at the final native write gate records no answer effect and retains its accepted answer", async () => {
   const f = await fixture();
   try {
