@@ -873,6 +873,22 @@ export class StandaloneService {
       const active = state
         .activeExecutions()
         .filter((item) => ownWork(item.workId));
+      // A runtime naming another harness's execution is misbehaving: hold only
+      // its own active work and leave the named harness's work untouched.
+      if (
+        request.threadId &&
+        request.turnId &&
+        foreign(request.threadId, request.turnId)
+      ) {
+        for (const item of active) {
+          state.hold(
+            item.id,
+            `Runtime reported another harness's execution: ${request.method}`,
+          );
+          this.supervisor?.noteAnomaly(item.workId);
+        }
+        return;
+      }
       const bound =
         request.threadId && request.turnId
           ? state

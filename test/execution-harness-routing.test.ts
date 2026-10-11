@@ -618,11 +618,10 @@ test("an unconfigured or failed harness holds its work visibly without fallback"
         "completed",
       describe,
     );
-    assert.equal(
-      runtimes.claude.calls.filter((call) => call.startsWith("startTurn"))
-        .length,
-      1,
-    );
+    // Work queued after the failure never reaches the failed runtime. (A
+    // follow-up admitted just before the crash may still have started.)
+    assert.equal(intent(service, blocked)?.state, "ready");
+    assert.equal(intent(service, blocked)?.threadId, null);
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
@@ -1096,6 +1095,45 @@ test("start-up does not wait for a failed secondary runtime's cleanup, and shutd
     await stopping;
   } finally {
     release();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unexpected request naming another harness's turn holds only the emitter's work", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-unexpected-"));
+  const runtimes = fakes();
+  runtimes.codex.holdTurns = true;
+  runtimes.claude.holdTurns = true;
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    const codexTask = await task(service, projectId, [lead]);
+    const codexWork = initial(codexTask.assignmentIds[0] ?? "");
+    const claudeTask = await task(service, projectId, [worker]);
+    const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, codexWork)?.state === "running" &&
+        intent(service, claudeWork)?.state === "running",
+      describe,
+    );
+
+    runtimes.claude.denyUnexpectedFor("codex-thread-1", "codex-turn-1");
+    assert.equal(intent(service, codexWork)?.state, "running");
+    assert.equal(intent(service, claudeWork)?.state, "held");
+    assert.equal(
+      intent(service, claudeWork)?.reason,
+      "Runtime reported another harness's execution: item/tool/call",
+    );
+  } finally {
+    runtimes.codex.releaseAll();
+    runtimes.claude.releaseAll();
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }
