@@ -230,7 +230,7 @@ export async function writePrepared(
       "Changes:",
       ...prepared.changes.map(
         (c) =>
-          `  ${c.field}: ${c.from ?? (isCreation(prepared.kind) ? "(new)" : "(unavailable)")} -> ${c.to ?? "(none)"}`,
+          `  ${c.field}: ${c.from === "" ? "(empty)" : (c.from ?? (isCreation(prepared.kind) ? "(new)" : "(unavailable)"))} -> ${c.to ?? "(none)"}`,
       ),
       ...(shown.lines.length ? ["", ...shown.lines] : []),
       ...(shown.truncated || diff.truncated ? ["(diff truncated)"] : []),

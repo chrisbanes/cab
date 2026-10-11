@@ -34,19 +34,25 @@ export async function startCliService(
   const authOrigin = options.authOrigin ?? "http://127.0.0.1:8787";
   const auth = await OperatorAuth.open({ authFile, origin: authOrigin });
   t.after(() => auth.close());
-  const http = new LocalOperatorHttp(
-    new LocalOperatorUi(f.service.domain()),
-    auth,
-    {
+  const bundle = await OperatorWebBundle.open(bundlePath);
+  const build = () =>
+    new LocalOperatorHttp(new LocalOperatorUi(f.service.domain()), auth, {
       credentials: f.service.operatorCredentials(),
       web: new OperatorWebBoundary(
-        await OperatorWebBundle.open(bundlePath),
+        bundle,
         new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
       ),
-    },
-  );
+    });
+  let http = build();
   const port = await http.start();
   t.after(() => http.stop());
+  /** Restarts the service on the same database and port with fresh wiring. */
+  const restart = async () => {
+    await http.stop();
+    await f.reopen();
+    http = build();
+    await http.start(port);
+  };
   const origin = `http://127.0.0.1:${port}`;
   let r = await fetch(`${origin}/api/operator/session`);
   let cookie = r.headers.get("set-cookie")?.split(";")[0] ?? "";
@@ -133,7 +139,10 @@ export async function startCliService(
     });
   return {
     f,
-    http,
+    get http() {
+      return http;
+    },
+    restart,
     port,
     origin,
     authOrigin,

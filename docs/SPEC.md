@@ -58,8 +58,12 @@ browsing are implemented: Settings issues, lists, rotates and revokes CLI creden
 and the packaged `ensemble` executable supports `auth login|status|logout`,
 `connection list|use|remove`, project and profile list/get/instructions/revisions,
 task list/search/get/messages, assignment get/history/instructions, result
-list/get/evidence and artifact get. Writes, questions, approvals, recovery,
-execution diagnostics and receipts are planned;
+list/get/evidence and artifact get. Supported profile, project, routing and
+capacity configuration is changed through prepared, digest-bound change documents
+applied once by request key; `assignment apply-current` adopts current instructions
+for the next turn, and `operation get` reads configuration and adoption receipts
+back by scope, type and key. Task writes, GitHub and repository links, questions,
+approvals, recovery and execution diagnostics are planned;
 their delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 

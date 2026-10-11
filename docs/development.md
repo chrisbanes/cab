@@ -121,6 +121,47 @@ or run `node dist/src/cli/main.js` directly.
    match their digest; an existing path is refused (`output-exists`) and a mismatch
    (`integrity-mismatch`, exit 5) leaves no file.
 
+5. Configuration changes, with a read/write credential to apply:
+   - `profile prepare PROFILE_ID`, `profile prepare-create`, `project prepare
+     PROJECT_ID`, `project prepare-create`, `project prepare-routing PROJECT_ID` and
+     `capacity prepare` read the current state and write a change document to a new
+     `--out` file (mode `0600`). Nothing is sent. A document holds one command, the
+     service installation, the target and expected revision (capacity: the limits it
+     was prepared against), a diff and a preparation-time affected-assignment list.
+     That list is informational: assignments created later may also become stale,
+     and bound leads without an assignment row are not listed.
+   - `profile apply`, `project apply` (project and routing documents) and
+     `capacity apply` take `--file FILE [--request-id UUID]`. Apply refuses a
+     symlinked, group/other-readable, oversized, malformed or modified document
+     (`change-document-invalid`) and a document for another installation
+     (`wrong-service`), then sends exactly the stored command. It never prompts,
+     rebases or overwrites: a stale revision or capacity value is `conflict` (exit
+     4); prepare again.
+   - `--restore-revision N` proposes revision N's exact instructions as a new
+     revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
+     `--enabled`, `--candidates`, `--credential-ref env:NAME|none` and
+     `--project-limit PROJECT_ID=N|default` are the reverse paths. Creation is not
+     reversible: revoke a profile or pause a project instead. Routing guidance is
+     replace-only. Runtime, model, repository and GitHub settings are not offered.
+   - `assignment apply-current ASSIGNMENT_ID --expected-version N` rebinds the
+     assignment to the current profile and project revisions for its next turn; an
+     active turn is not rewritten. Adoption is one-way: restore older text as a new
+     revision and adopt again.
+   - `capacity get` shows global and per-project limits and usage.
+   - `operation get REQUEST_ID --scope project:ID|profile:ID|system:capacity --type
+     TYPE` reads a recorded receipt; the same UUID in another scope or type never
+     selects it.
+
+   Before sending, a write appends its service installation, scope, type, key and
+   document digest to `requests.jsonl` in the configuration directory (mode `0600`);
+   it never holds request bodies, instructions or tokens. Re-running `apply` on the
+   same document reuses that key, so the service replays the recorded receipt. A
+   lost or ambiguous response exits 6 with the full identity, a ready-to-run
+   `operation get` and the exact retry. Exit codes: 2 invalid input, 3
+   authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
+   unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
+   outcome, 7 unsupported service. Write commands reject flags they do not use.
+
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are
 rejected. Certificates are always verified; for a private CA set

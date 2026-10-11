@@ -188,8 +188,10 @@ implementation and evidence remain unproved until the delivery slices qualify it
 Slice evidence for authentication and task inspection, with its limits, is in the
 [CLI1 record](evidence/issue-894-cli1-2026-10-11.md), and for read-only browsing of
 work, instructions, history and retained evidence in the
-[CLI2 record](evidence/issue-895-cli2-2026-10-11.md). Neither qualifies a scenario
-on its own.
+[CLI2 record](evidence/issue-895-cli2-2026-10-11.md), and for reviewed configuration
+changes, receipts and adoption in the
+[CLI3 record](evidence/issue-896-cli3-2026-10-11.md). None qualifies a scenario on
+its own.
 
 The six journeys also require command-by-command coverage of the full
 [first-release command surface](design/operator-cli.md#command-surface).
