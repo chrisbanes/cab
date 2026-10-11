@@ -2505,25 +2505,7 @@ export class OperatorApi {
               : null,
         };
       }),
-      admission: {
-        eligible: d.admission(taskId).eligible,
-        reasons: d
-          .admission(taskId)
-          .reasons.map((r) =>
-            [
-              "project-paused",
-              "project-lead-unconfigured",
-              "project-lead-revoked",
-              "task-unready",
-              "task-not-open",
-              "local-dependency",
-              "imported-blockers-unknown",
-              "imported-blockers-blocked",
-            ].includes(r)
-              ? r
-              : "admission-blocked",
-          ),
-      },
+      admission: this.admission(taskId),
       execution: this.execution(t),
       localDependencies: d.dependencies(taskId).map((id) => {
         const b = d.task(id);

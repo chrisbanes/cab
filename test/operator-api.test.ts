@@ -1374,3 +1374,61 @@ test("catalog attention tracks current rejected completion and lead review, excl
     1,
   );
 });
+test("a task read reports source review, hold and unknown source as source-held", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const d = f.service.domain(),
+    projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Source project",
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "Imported",
+    outcome: "Provider outcome",
+    ready: true,
+  });
+  d.markImportedTask(taskId, "I1", "R1");
+  const api = new OperatorApi(f.service, [f.directory]);
+  const reasons = async () =>
+    (await api.readTask(taskId)).data.admission.reasons;
+  // No imported source rows: the domain reports source-unknown.
+  assert.deepEqual(
+    (await reasons()).filter(
+      (r) => r.startsWith("source-") || r === "admission-blocked",
+    ),
+    ["source-held"],
+  );
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO github_external_issues VALUES ('github.com','I1',?,'R1','owner/repo',1,'Imported','Body','open','[]')",
+    ).run(taskId);
+    db.prepare(
+      "INSERT INTO github_memberships VALUES (?,'repo','I1','[]')",
+    ).run(projectId);
+    db.prepare("INSERT INTO github_source_reviews VALUES (?,?,?,?,NULL)").run(
+      "I1",
+      "a".repeat(64),
+      "b".repeat(64),
+      "accept-revised-scope",
+    );
+    db.prepare(
+      "INSERT INTO github_source_holds VALUES ('I1',1,'source hold',1)",
+    ).run();
+  });
+  assert.ok(d.admission(taskId).reasons.includes("source-hold"));
+  assert.ok(d.admission(taskId).reasons.includes("source-review-required"));
+  const read = await reasons();
+  assert.ok(read.includes("source-held"), read.join());
+  assert.ok(!read.includes("admission-blocked"), read.join());
+});
