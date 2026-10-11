@@ -122,25 +122,21 @@ const resultGet: BrowseCommand = {
     const resultId = uuidArg(ctx.positionals[3] ?? "", "RESULT_ID");
     const client = await ctx.connect();
     const task = `${API}/tasks/${encodeURIComponent(taskId)}`;
-    const results = await client.get(
-      `${task}/results?resultId=${resultId}`,
-      taskResultPageSchema,
-    );
-    const reviewRead = await client.get(
-      `${task}/review?resultId=${resultId}`,
-      reviewReadSchema,
-    );
     // A result without a review record has no evidence manifest to read.
-    const evidence = await client
-      .get(
-        `${task}/results/${resultId}/evidence`,
-        retainedResultEvidenceReadSchema,
-      )
-      .catch((error: unknown) => {
-        if (error instanceof CliError && error.extra.status === 404)
-          return undefined;
-        throw error;
-      });
+    const [results, reviewRead, evidence] = await Promise.all([
+      client.get(`${task}/results?resultId=${resultId}`, taskResultPageSchema),
+      client.get(`${task}/review?resultId=${resultId}`, reviewReadSchema),
+      client
+        .get(
+          `${task}/results/${resultId}/evidence`,
+          retainedResultEvidenceReadSchema,
+        )
+        .catch((error: unknown) => {
+          if (error instanceof CliError && error.extra.status === 404)
+            return undefined;
+          throw error;
+        }),
+    ]);
     const result = results.data.results[0];
     if (!result) throw new CliError("not-found", "Result not found.");
     const review =

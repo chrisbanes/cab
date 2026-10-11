@@ -359,7 +359,14 @@ const taskMessages: BrowseCommand = {
     return browseOutput(ctx, {
       data: page,
       observedAt: read.observedAt,
-      gaps: anyNull(...page.messages.map((m) => m.text))
+      gaps: anyNull(
+        ...page.messages.flatMap((m) => [
+          m.text,
+          m.action,
+          m.target,
+          m.routingReason,
+        ]),
+      )
         ? ["content-unavailable"]
         : [],
       page: {

@@ -36,5 +36,4 @@ export type Values = {
   historical?: boolean | undefined;
   revision?: string | undefined;
   out?: string | undefined;
-  result?: string | undefined;
 };

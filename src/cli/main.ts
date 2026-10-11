@@ -113,7 +113,6 @@ export async function main(
         historical: { type: "boolean" },
         revision: { type: "string" },
         out: { type: "string" },
-        result: { type: "string" },
       },
     });
     if (
