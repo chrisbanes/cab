@@ -351,6 +351,27 @@ export class OperatorApi {
           credentials: Object.entries(process.env).filter(([key]) =>
             /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key),
           ),
+          // Every reference the exclusions read, with a digest of its resolved value, so a
+          // read fences when a reference or its value changes whatever the variable is named.
+          references: [
+            d.discoveryCredentialReference(),
+            ...d
+              .projects()
+              .flatMap((p) => [
+                d.routingCredentialReference(String(p.id)),
+                d.githubConfiguration(String(p.id)).credentialRef,
+                d.deliveryCredentialReference(String(p.id)),
+              ]),
+          ].map((ref) =>
+            ref
+              ? [
+                  ref,
+                  createHash("sha256")
+                    .update(process.env[ref.slice(4)] ?? "")
+                    .digest("hex"),
+                ]
+              : null,
+          ),
         }),
       )
       .digest("hex");

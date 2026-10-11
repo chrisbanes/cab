@@ -438,3 +438,88 @@ test("task text holding the discovery credential is never captured, before or af
     assert.equal(stored().includes("CAPTUREDISCOVERYCANARY841"), false);
   }
 });
+
+test("a task read fences when the discovery reference or its value changes mid-read", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const previous = process.env.FIXTURE_FENCE_DISCOVERY;
+  // The name deliberately avoids the generic TOKEN/SECRET environment pattern.
+  process.env.FIXTURE_FENCE_DISCOVERY = "FENCEDISCOVERYCANARY841";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_FENCE_DISCOVERY;
+    else process.env.FIXTURE_FENCE_DISCOVERY = previous;
+  });
+  const api = new OperatorApi(f.service, [f.directory]);
+  const d = f.service.domain();
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Fence",
+    leadProfileId: null,
+  } as never);
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Mentions FENCEDISCOVERYCANARY841",
+    outcome: "Fence",
+    ready: false,
+  } as never);
+  // Interleave a change after the read has taken its exclusion snapshot.
+  const during = async (change: () => void) => {
+    const target = api as unknown as {
+      exclusions: (...args: unknown[]) => Promise<unknown>;
+    };
+    const original = target.exclusions;
+    let changed = false;
+    target.exclusions = async (...args: unknown[]) => {
+      const snapshot = await original.apply(api, args);
+      if (!changed) {
+        changed = true;
+        change();
+      }
+      return snapshot;
+    };
+    try {
+      return await api.readTask(taskId).then(
+        (r) => JSON.stringify(r),
+        (e: { status?: number }) => e.status,
+      );
+    } finally {
+      target.exclusions = original;
+    }
+  };
+  // The reference is configured mid-read: the read is refused, not returned unredacted.
+  assert.equal(
+    await during(() =>
+      d.execute({
+        type: "discovery.configure",
+        actor: "operator",
+        key: randomUUID(),
+        credentialRef: "env:FIXTURE_FENCE_DISCOVERY",
+      } as never),
+    ),
+    503,
+  );
+  // The same reference resolves to a new value mid-read: refused as well.
+  process.env.FIXTURE_FENCE_DISCOVERY = "SOMETHING ELSE";
+  assert.equal(
+    await during(() => {
+      process.env.FIXTURE_FENCE_DISCOVERY = "FENCEDISCOVERYCANARY841";
+    }),
+    503,
+  );
+  // Settled reads exclude the current value.
+  assert.equal(
+    JSON.stringify(await api.readTask(taskId)).includes(
+      "FENCEDISCOVERYCANARY841",
+    ),
+    false,
+  );
+});
