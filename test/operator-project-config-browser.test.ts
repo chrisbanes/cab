@@ -662,7 +662,7 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
   await page
     .getByRole("button", { name: "Review latest source revision" })
     .click();
-  await page.getByText("listed twice", { exact: false }).waitFor();
+  await page.getByText("acme/new is linked twice", { exact: false }).waitFor();
   assert.equal(await save.isDisabled(), true);
   await page
     .getByRole("button", { name: "Remove new repository acme/new" })

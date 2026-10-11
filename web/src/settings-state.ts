@@ -108,13 +108,20 @@ export class ConfigurationDraft {
   adoptLatest(
     version: number,
     latest: Record<string, string | boolean | string[]>,
+    /** Fields adopted as one unit: all take the latest only when none was edited. */
+    groups: string[][] = [],
   ) {
     if (this.phase === "pending" || this.lifecycle.uncertain) return;
-    const same = (a: unknown, b: unknown) =>
-      JSON.stringify(a) === JSON.stringify(b);
+    // Lists are sets here (candidate ids), so order alone is not an edit.
+    const norm = (x: unknown) =>
+      JSON.stringify(Array.isArray(x) ? [...x].sort() : x);
+    const untouched = (field: string) =>
+      norm(this.values[field]) === norm(this.base[field]);
     const values = { ...this.values };
-    for (const [field, value] of Object.entries(latest))
-      if (same(values[field], this.base[field])) values[field] = value;
+    for (const [field, value] of Object.entries(latest)) {
+      const unit = groups.find((g) => g.includes(field)) ?? [field];
+      if (unit.every(untouched)) values[field] = value;
+    }
     this.values = values;
     this.base = { ...latest };
     this.adoptVersion(version);

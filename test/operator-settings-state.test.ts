@@ -644,4 +644,18 @@ test("adopting a newer revision keeps edited fields and takes the latest for unt
   draft.adoptLatest(4, { name: "Atlas", paused: false, expectedVersion: "4" });
   assert.equal(draft.values.paused, false);
   assert.equal(draft.values.name, "Atlas II");
+  // Grouped fields move together: an edited mode keeps the operator's conditions too.
+  const readiness = new ConfigurationDraft();
+  readiness.initialize({ mode: "all", conditions: "[1]", ids: ["a", "b"] });
+  readiness.set("mode", "any");
+  readiness.set("ids", ["b", "a"]);
+  readiness.adoptLatest(
+    2,
+    { mode: "all", conditions: "[1,2]", ids: ["a", "b", "c"] },
+    [["mode", "conditions"]],
+  );
+  assert.equal(readiness.values.mode, "any");
+  assert.equal(readiness.values.conditions, "[1]");
+  // Reordering a set is not an edit, so the latest list is taken.
+  assert.deepEqual(readiness.values.ids, ["a", "b", "c"]);
 });

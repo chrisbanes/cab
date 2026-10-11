@@ -161,13 +161,38 @@ test("routing lines and command keep guidance out unless replaced", () => {
       "Credential reference: set new environment reference",
     ],
   );
-  const command = routingCommand(projectId, {
-    key: "k",
-    expectedVersion: "2",
-    enabled: true,
-    candidateProfileIds: [worker],
-    guidance: "PRIVATE",
-  });
+  // A candidate revoked after it was checked is neither listed nor sent.
+  assert.deepEqual(
+    routingChanges(c, {
+      enabled: false,
+      candidateProfileIds: [worker, reviewer],
+    }),
+    [],
+  );
+  assert.deepEqual(
+    routingCommand(
+      projectId,
+      {
+        key: "k",
+        expectedVersion: "2",
+        enabled: false,
+        candidateProfileIds: [worker, reviewer],
+      },
+      c,
+    ).candidateProfileIds,
+    [worker],
+  );
+  const command = routingCommand(
+    projectId,
+    {
+      key: "k",
+      expectedVersion: "2",
+      enabled: true,
+      candidateProfileIds: [worker],
+      guidance: "PRIVATE",
+    },
+    c,
+  );
   assert.equal("guidance" in command, false);
 });
 
@@ -447,7 +472,7 @@ test("adoption resolves every identity collision explicitly", () => {
     repositories: JSON.stringify([
       { ...rows.repositories[0], ref: "dev" },
       { repositoryId: "acme/two", ref: "main", savedRef: "main", keep: true },
-      { repositoryId: "acme/gone", ref: "main", savedRef: "main", keep: true },
+      { repositoryId: "acme/gone", ref: "dev", savedRef: "main", keep: true },
       {
         repositoryId: "acme/new",
         ref: "main",
@@ -469,6 +494,8 @@ test("adoption resolves every identity collision explicitly", () => {
     ],
   } as ProjectConfigurationData["source"];
   const adopted = adoptSourceRows(latest, draft);
+  // The edited link removed elsewhere is named, not dropped silently.
+  assert.deepEqual(adopted.dropped, ["acme/gone"]);
   const selections = parse(adopted.selections);
   // Kept selections take the latest definition; the operator's removal survives.
   assert.deepEqual(
@@ -488,8 +515,9 @@ test("adoption resolves every identity collision explicitly", () => {
       ["acme/new", "main", true],
     ],
   );
+  const { dropped: _dropped, ...rowsOnly } = adopted;
   const values = {
-    ...adopted,
+    ...rowsOnly,
     conditions: JSON.stringify(rows.conditions),
     mode: "all",
   };

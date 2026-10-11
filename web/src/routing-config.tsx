@@ -69,7 +69,7 @@ export function RoutingTab(p: TabProps) {
                 d,
                 p.client,
                 p.session,
-                routingCommand(projectId, d.values),
+                routingCommand(projectId, d.values, data),
                 p.refreshConfiguration,
               )
             }

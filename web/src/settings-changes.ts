@@ -77,19 +77,19 @@ export function profileChanges(data: ProfileConfigurationData, v: Values) {
   return lines;
 }
 
-/** Saved candidates that a routing save keeps: revoked profiles are not selectable. */
-export function savedCandidates(data: ProjectConfigurationData) {
-  return data.routing.candidateProfileIds.filter(
-    (id) => !data.profiles.find((p) => p.id === id)?.revoked,
-  );
-}
+/** Candidates a routing save can keep: revoked profiles are not selectable. */
+const selectable = (data: ProjectConfigurationData, ids: string[]) =>
+  ids.filter((id) => !data.profiles.find((p) => p.id === id)?.revoked);
+export const savedCandidates = (data: ProjectConfigurationData) =>
+  selectable(data, data.routing.candidateProfileIds);
 
 export function routingChanges(data: ProjectConfigurationData, v: Values) {
   const lines: string[] = [];
   if (v.enabled !== undefined && Boolean(v.enabled) !== data.routing.enabled)
     lines.push(v.enabled ? "Routing enabled" : "Routing disabled");
+  // A draft candidate revoked since it was checked is dropped, as the save drops it.
   const saved = savedCandidates(data),
-    next = list(v.candidateProfileIds);
+    next = selectable(data, list(v.candidateProfileIds));
   for (const id of next)
     if (!saved.includes(id))
       lines.push(`Candidate added: ${nameOf(data.profiles, id)}`);
@@ -100,14 +100,18 @@ export function routingChanges(data: ProjectConfigurationData, v: Values) {
   return [...lines, ...referenceChange(v)];
 }
 
-export function routingCommand(projectId: string, v: Values) {
+export function routingCommand(
+  projectId: string,
+  v: Values,
+  data: ProjectConfigurationData,
+) {
   return {
     type: "routing.configure",
     key: v.key,
     projectId,
     expectedVersion: Number(v.expectedVersion),
     enabled: Boolean(v.enabled),
-    candidateProfileIds: list(v.candidateProfileIds),
+    candidateProfileIds: selectable(data, list(v.candidateProfileIds)),
     ...(v.replaceGuidance ? { guidance: v.guidance } : {}),
     ...reference(v),
   };
@@ -307,7 +311,17 @@ export function adoptSourceRows(source: Source, v: Values) {
     taken.push(id);
     return { ...r, id };
   });
+  // Kept links the operator edited but that were removed elsewhere; adoption drops them.
+  const dropped = parseRows(v.repositories)
+    .filter(
+      (r) =>
+        r.keep &&
+        (r.ref !== r.savedRef || r.replacePath) &&
+        !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
+    )
+    .map((r) => String(r.repositoryId));
   return {
+    dropped,
     selections: JSON.stringify(
       merge(
         selections,

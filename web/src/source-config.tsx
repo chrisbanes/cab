@@ -140,9 +140,8 @@ export function SourceTab(p: TabProps) {
       {duplicates.length > 0 && (
         <Alert variant="destructive" role="alert">
           {duplicates.join(", ")} {duplicates.length === 1 ? "is" : "are"}{" "}
-          listed twice, because it was also saved elsewhere. Remove one of the
-          rows before saving: remove the new row to keep the saved one, or
-          remove the saved one to replace it.
+          linked twice. Remove one of the rows before saving: remove the new row
+          to keep the saved link, or remove the saved link to replace it.
         </Alert>
       )}
       {loaded.incomplete && (
@@ -597,8 +596,12 @@ export function SourceTab(p: TabProps) {
           type="button"
           variant="secondary"
           onClick={() => {
-            d.adoptLatest(data.source.version, initial);
+            d.adoptLatest(data.source.version, initial, [
+              ["mode", "conditions"],
+            ]);
             const rows = adoptSourceRows(data.source, d.values);
+            if (rows.dropped.length)
+              d.notice = `Latest revision adopted. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
             d.set("selections", rows.selections);
             d.set("repositories", rows.repositories);
           }}
