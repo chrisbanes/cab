@@ -284,7 +284,12 @@ export function ProjectSetup(p: SettingsProps) {
   const duplicates = duplicateRows(rows);
   const rejectedFields =
     d.phase === "rejected" && Object.keys(d.errors).length > 0;
-  const update = (i: number, row: SetupRow) => {
+  const update = (i: number, edited: SetupRow) => {
+    // A row without a chosen repository keeps the form it was edited in, so a folder or
+    // ref typed while discovery was unavailable stays visible when the list returns.
+    const row: SetupRow = edited.repositoryId
+      ? edited
+      : { ...edited, source: sourceOf(edited) };
     // Editing a row retires the service's error for it; the next create checks again.
     const k = rowIndex.indexOf(i);
     // A row becoming blank or filled shifts the indices of the rows after it.
@@ -332,7 +337,9 @@ export function ProjectSetup(p: SettingsProps) {
                   {values.leadProfileId &&
                     !profiles.some((r) => r.id === values.leadProfileId) && (
                       <option value={values.leadProfileId}>
-                        Lead profile unavailable
+                        {p.workspace
+                          ? "Lead profile unavailable"
+                          : "Chosen lead (loading profiles)"}
                       </option>
                     )}
                 </DraftField>
@@ -492,13 +499,15 @@ export function ProjectSetup(p: SettingsProps) {
                       label="Repository"
                       error={repoError}
                       caption={
-                        ready
-                          ? ready.truncated
-                            ? `Discovered from GitHub · the first ${ready.repositories.length} repositories visible to the credential. Choose "Type a repository" for one not listed.`
-                            : `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential`
-                          : discovery.state === "unavailable"
-                            ? "Chosen from GitHub earlier · discovery is unavailable now"
-                            : "Loading repositories from GitHub…"
+                        ready && row.repositoryId && !chosen
+                          ? "Chosen earlier · not in the current list from GitHub"
+                          : ready
+                            ? ready.truncated
+                              ? `Discovered from GitHub · the first ${ready.repositories.length} repositories visible to the credential. Choose "Type a repository" for one not listed.`
+                              : `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential`
+                            : discovery.state === "unavailable"
+                              ? "Chosen from GitHub earlier · discovery is unavailable now"
+                              : "Loading repositories from GitHub…"
                       }
                     >
                       {(props) => (
@@ -508,7 +517,7 @@ export function ProjectSetup(p: SettingsProps) {
                           value={row.repositoryId}
                           onChange={(e) => {
                             const value = e.target.value;
-                            if (value === row.repositoryId) return;
+                            if (value && value === row.repositoryId) return;
                             // Typed entry keeps the chosen folder; the ref belonged to the old repository.
                             if (value === typeOption) {
                               update(i, {

@@ -619,3 +619,28 @@ test("Setup keeps a revoked lead visible instead of sending a hidden one", async
     .waitFor({ state: "attached" });
   assert.equal(await lead.inputValue(), profiles.Mira);
 });
+
+test("Setup keeps a folder chosen while discovery was unavailable visible after Retry", async (_t, journey) => {
+  const { page, discoveryState } = await setupJourney(journey);
+  discoveryState.failure = new DiscoveryFailure("rate-limited");
+  await page.reload();
+  await page
+    .getByText(
+      "GitHub discovery is unavailable: GitHub's rate limit was reached.",
+    )
+    .waitFor();
+  // The folder is chosen before the repository is typed.
+  await page.getByLabel("Local repository path").fill("~/src/atlas");
+  delete discoveryState.failure;
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  // Retry disappears once every discovery read has landed.
+  await page
+    .getByRole("button", { name: "Retry", exact: true })
+    .waitFor({ state: "detached" });
+  // The row stays in typed entry with its folder, never hidden behind the list.
+  assert.equal(
+    await page.getByLabel("Local repository path").inputValue(),
+    "~/src/atlas",
+  );
+  await page.getByLabel("Repository (owner/name)").waitFor();
+});
