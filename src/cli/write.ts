@@ -1,7 +1,10 @@
+import { createHash } from "node:crypto";
 import {
   type CliIdentity,
   type CommandReceipt,
   commandReceiptSchema,
+  operationTypeSchema,
+  questionCommandRawLimit,
 } from "../operator/contracts.js";
 import { uuidArg } from "./browse.js";
 import { CliError } from "./connections.js";
@@ -53,12 +56,33 @@ export function rejectUnusedFlags(values: Values, flags: readonly string[]) {
 
 /** The service rejects non-question command bodies above 64 KiB. */
 export const MAX_COMMAND_BYTES = 64 * 1024;
-export function checkCommandSize(body: string) {
-  if (Buffer.byteLength(body) > MAX_COMMAND_BYTES)
+const QUESTION_FORM_TYPES = ["question.form.answer", "question.native.answer"];
+export function checkCommandSize(body: string, type?: string) {
+  const limit = QUESTION_FORM_TYPES.includes(type ?? "")
+    ? questionCommandRawLimit
+    : MAX_COMMAND_BYTES;
+  if (Buffer.byteLength(body) > limit)
     throw new CliError(
       "invalid-input",
-      "The change is larger than the service accepts (64 KiB).",
+      `The change is larger than the service accepts (${Math.floor(limit / 1024)} KiB).`,
     );
+}
+
+/** A stable version-4-shaped UUID, so a retry with the same key rebuilds the same command. */
+export function derivedUuid(
+  service: string,
+  projectId: string,
+  key: string,
+  purpose: string,
+): string {
+  const b = createHash("sha256")
+    .update([service, projectId, key, purpose].join("\n"))
+    .digest()
+    .subarray(0, 16);
+  b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
+  b[8] = ((b[8] ?? 0) & 0x3f) | 0x80;
+  const h = b.toString("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 export const optionalRequestId = (values: Values) =>
@@ -106,6 +130,8 @@ export async function sendCommand(
     digest: string;
     resource: string;
     command: Record<string, unknown>;
+    /** Checks a 2xx receipt belongs to this request; defaults to the CLI3 matcher. */
+    match?: (receipt: CommandReceipt) => boolean;
   },
 ): Promise<{ receipt: CommandReceipt; request: RequestIdentity }> {
   const request: RequestIdentity = {
@@ -115,7 +141,7 @@ export async function sendCommand(
     key: o.key,
   };
   const body = JSON.stringify(o.command);
-  checkCommandSize(body);
+  checkCommandSize(body, o.type);
   await ctx.journal.append(request, o.digest, "sending");
   // A settle failure leaves the `sending` line, which `operation get` reconciles.
   const settle = (state: "recorded" | "rejected" | "unknown") =>
@@ -126,7 +152,13 @@ export async function sendCommand(
       ctx.deps.commandTimeoutMs ?? 60_000,
     );
     const receipt = commandReceiptSchema.safeParse(raw);
-    if (!receipt.success || !matches(receipt.data, request, o.resource))
+    if (
+      !receipt.success ||
+      receipt.data.key !== request.key ||
+      !(o.match
+        ? o.match(receipt.data)
+        : matches(receipt.data, request, o.resource))
+    )
       throw new CliError(
         "command-outcome-unknown",
         "The service response is not the expected receipt.",
@@ -144,9 +176,12 @@ export async function sendCommand(
     const unknown = error.code === "command-outcome-unknown";
     await settle(unknown ? "unknown" : "rejected");
     if (!unknown) throw withRequest(error, request);
+    const retry = `retry the same command with --request-id ${request.key}`;
     throw new CliError(
       error.code,
-      `${error.message} Check with '${reconcileHint(request)}', or retry the same command with --request-id ${request.key}.`,
+      operationTypeSchema.safeParse(request.type).success
+        ? `${error.message} Check with '${reconcileHint(request)}', or ${retry}.`
+        : `${error.message} To settle it, ${retry}.`,
       { ...error.extra, request },
     );
   }

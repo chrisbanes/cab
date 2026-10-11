@@ -73,7 +73,7 @@ function expectedOf(command: Record<string, unknown>): Record<string, unknown> {
 }
 
 /** Parses the exact command the service will receive, as the service does. */
-function exactCommand(command: Record<string, unknown>, key: string) {
+export function exactCommand(command: Record<string, unknown>, key: string) {
   const parsed = operatorCommandSchema.safeParse({ ...command, key });
   if (!parsed.success)
     throw new CliError(
