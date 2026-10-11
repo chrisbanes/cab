@@ -372,13 +372,15 @@ CLI and submits a write directly. Capability names are `cli.identity`,
 `assignment.read`, `instructions.read`, `result.read`, `artifact.read`,
 `configuration.write`, `operation.read`, `capacity.read`,
 `configuration.impact`, `execution.read`, `diagnostics.read`, `task.write`,
-`attention.read` and `attention.write`; a command whose capabilities the service does not
+`attention.read`, `attention.write`, `source.write` and `delivery.write`; a command whose capabilities the service does not
 advertise fails with `unsupported-service` before any other read.
 
 `GET /api/operator/operations?scope=&type=&key=` returns `recorded` with the
 receipt `POST /api/operator/commands` returned, or `not-recorded`. It accepts only
-the scopes `project:<id>`, `profile:<id>` and `system:capacity` with the seven
-configuration and adoption types, rebuilds the receipt from the stored result with
+the scopes `project:<id>`, `profile:<id>` and `system:capacity` with the
+configuration and adoption types and, for a project, `github.configure` and
+`github.preview` (a preview whose selection ID is now excluded text reads
+`503 unavailable`), rebuilds the receipt from the stored result with
 the same projection as `POST`, and reports a stored result of another shape as
 `409 conflict`. `GET /api/operator/projects/:id/impact` and
 `/profiles/:id/impact` list at most 200 bound assignments (default 200, `limit`
@@ -410,6 +412,37 @@ the same command with its key and checked with `task get`, `question get` or
 `approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
 `kind` (`question|approval|intervention`) and `project`, each at most once and
 applied before paging; a cursor from other parameters is `409`.
+
+Sources and delivery drive the existing operator commands; no route, command or
+receipt is added. `project prepare-source` writes a `github.configure` change
+document from a strict edit file: kept selections are sent as `{id, keep: true}` and
+kept links as `{repositoryId, ref}`, so no private query, filter or path is sent
+again, new selections take the next free `S-n`, and preview lines follow the web UI
+and never show a query, filter, path or reference name. Any save bumps the source
+version, so every selection is inactive until previewed again, and marks
+observations incomplete; removing a selection discards its definition.
+`project preview-source` records `github.preview` after a complete provider read;
+its receipt is the original activation, so the CLI also reports the live state.
+`project place-task` records `github.place`; its receipt is not readable through
+`operation get`, and a rerun after the task moved reports the placement from the
+task read. `delivery refresh` (`delivery.refresh`, installation-wide) post-reads
+delivery and reports `partial` with gap `evidence-gap` when the provider read failed
+or an action is unsettled. Comment requests are scoped `task:<id>`:
+`review-comment` uses its key as `operationId`, so `send-comment --review-id R`
+sends with key `R`, which the approval binds; before sending it replays the exact
+review and refuses unless it is `approved`. Comment keys use the default journal
+reuse, so an identical rerun replays the recorded receipt and a deliberate repeat
+needs a new `--request-id`. A send receipt in `confirmed-success` exits 0, `denied`
+exits 4 `policy-denied`, `confirmed-failure` exits 4 `conflict` (nothing posted),
+and `prepared`, `attempting` or `uncertain` exit 6: do not resend with a new key;
+run `delivery refresh`, then `delivery get`. A `409` whose operation the post-read
+finds recorded is also exit 6. Definite comment rejections (stale task, review or
+confirmation material, reused keys with other material, changed authority, held
+admission, a task without a bound issue) are `409`, and an approval without a grant
+is `403`; other failures stay `command-outcome-unknown`. Posted comments carry a
+hidden `<!-- ensemble-operation:ID -->` marker that the provider read-back matches.
+Installation-wide source refresh, `source.review`, handback settlement and a list of
+pending comment reviews are not CLI commands.
 
 ## Acceptance scenarios
 

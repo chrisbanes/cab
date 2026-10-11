@@ -194,7 +194,9 @@ changes, receipts and adoption in the
 diagnostics capture, reads and following in the
 [CLI7 record](evidence/issue-900-cli7-2026-10-11.md), and for task operation,
 attention and Stop/Resume in the
-[CLI5 record](evidence/issue-898-cli5-2026-10-11.md). None qualifies a scenario on
+[CLI5 record](evidence/issue-898-cli5-2026-10-11.md), and for GitHub sources,
+delivery and staged comments in the
+[CLI4 record](evidence/issue-897-cli4-2026-10-12.md). None qualifies a scenario on
 its own.
 
 The six journeys also require command-by-command coverage of the full
