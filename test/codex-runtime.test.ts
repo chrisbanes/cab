@@ -2056,10 +2056,30 @@ async function nativeTransport(mode: string) {
   runtime.onTerminalAnomaly((anomaly) =>
     terminalAnomalies.push(anomaly.reason),
   );
-  await runtime.start();
-  const threadId = await runtime.startThread(process.cwd());
-  await runtime.startTurn(threadId, process.cwd(), "fixture");
-  await received;
+  const fixture = runtimeFixtures.get(runtime);
+  if (!fixture) throw new Error("Runtime test safety fixture unavailable");
+  let threadId: string;
+  try {
+    await runtime.start();
+    threadId = await runtime.startThread(process.cwd());
+    await runtime.startTurn(threadId, process.cwd(), "fixture");
+    await nativeDeadline("native request callback", received, () => ({
+      mode,
+      requestCallbacks,
+      anomalies,
+      outcomes,
+    }));
+  } catch (error) {
+    try {
+      await runtime.stop();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Native transport setup and cleanup failed",
+      );
+    }
+    throw error;
+  }
   const internal = runtime as unknown as {
     events: { on(event: string, listener: (data: unknown) => void): void };
   };
@@ -2067,8 +2087,6 @@ async function nativeTransport(mode: string) {
     terminalEvents++;
     terminalEventData = data;
   });
-  const fixture = runtimeFixtures.get(runtime);
-  if (!fixture) throw new Error("Runtime test safety fixture unavailable");
   return {
     runtime,
     call,
@@ -2157,10 +2175,43 @@ async function nativeDeadline<T>(
     if (timer) clearTimeout(timer);
   }
 }
+test("native transport setup timeout reports anomalies and stops its child", {
+  timeout: 7000,
+}, async (t) => {
+  const stop = CodexRuntime.prototype.stop;
+  let child: ChildProcessWithoutNullStreams | undefined;
+  t.mock.method(
+    CodexRuntime.prototype,
+    "stop",
+    async function (this: CodexRuntime) {
+      child = (this as unknown as { child?: ChildProcessWithoutNullStreams })
+        .child;
+      await stop.call(this);
+    },
+  );
+  await assert.rejects(
+    nativeTransport("plan"),
+    /native request callback deadline: .*"mode":"plan".*"requestCallbacks":0.*unqualified-native-input/,
+  );
+  assert.ok(child, "Setup cleanup must stop the fixture it started");
+  assert.ok(child.exitCode !== null || child.signalCode !== null);
+});
 test("native early resolution makes an unanswered endpoint unavailable with zero reply effects", async () => {
   const f = await nativeTransport("early-resolution");
   try {
-    await nativeUntil(() => f.outcomes.length > 0);
+    // Qualification must finish before resolution, even if the parent is delayed.
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(f.outcomes.length, 0);
+    const child = (
+      f.runtime as unknown as { child: ChildProcessWithoutNullStreams }
+    ).child;
+    child.stdin.write(
+      `${JSON.stringify({ method: "fixture/resolve-native" })}\n`,
+    );
+    await nativeUntil(
+      () => f.outcomes.length > 0,
+      () => ({ anomalies: f.anomalies, outcomes: f.outcomes }),
+    );
     assert.equal(f.outcomes[0]?.outcome, "unavailable");
     let gate = 0;
     await assert.rejects(
