@@ -758,6 +758,9 @@ export class StandaloneService {
     runtime: Runtime,
     state: ExecutionState,
   ): void {
+    const ownWork = (workId: string) =>
+      (state.taskBinding(workId)?.harness ?? defaultExecutionHarness) ===
+      harness;
     runtime.onFailure?.(() => {
       if (
         this.runtimes.get(harness) === runtime &&
@@ -768,7 +771,7 @@ export class StandaloneService {
     runtime.onUnexpectedRequest((request) => {
       const active = state
         .activeExecutions()
-        .filter((item) => this.harnessForWork(item.workId) === harness);
+        .filter((item) => ownWork(item.workId));
       const bound =
         request.threadId && request.turnId
           ? state
@@ -842,7 +845,7 @@ export class StandaloneService {
             )
           : state
               .activeOrLastCompleted(this.lastCompletedWorkId)
-              .filter((item) => this.harnessForWork(item.workId) === harness);
+              .filter((item) => ownWork(item.workId));
       for (const item of matched) {
         this.retractWriterAndSuccessors(item, anomaly.reason);
         this.supervisor?.noteAnomaly(item.workId);
