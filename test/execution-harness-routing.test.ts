@@ -27,6 +27,7 @@ class HarnessRuntime implements Runtime {
   holdTurns = false;
   failNextTurn = false;
   failStart = false;
+  hangIdentity = false;
   /** Lets two fakes return the same opaque thread ID. */
   threadName: string | undefined;
   private threads = 0;
@@ -95,6 +96,10 @@ class HarnessRuntime implements Runtime {
       : ("completed" as const);
   }
   processIdentity() {
+    if (this.hangIdentity)
+      return new Promise<never>(() => {
+        // Never settles, like a wedged runtime process.
+      });
     return {
       processId: `${this.name}-process`,
       processStartedAt: "2026-10-01T00:00:00.000Z",
@@ -884,6 +889,44 @@ test("overlapping turns on the same thread ID keep separate per-harness captures
   } finally {
     runtimes.codex.releaseAll();
     runtimes.claude.releaseAll();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a failed harness with a hung identity blocks neither other work nor shutdown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-hung-"));
+  const runtimes = fakes();
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    runtimes.claude.crash();
+    runtimes.claude.hangIdentity = true;
+    const claudeTask = await task(service, projectId, [worker]);
+    const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, claudeWork)?.reason ===
+        "Claude runtime unavailable; restart the service",
+      describe,
+    );
+    const codexTask = await task(service, projectId, [lead]);
+    await waitUntil(
+      () =>
+        intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+        "completed",
+      describe,
+    );
+    const stopped = await Promise.race([
+      service.stop().then(() => "stopped"),
+      new Promise((resolve) => setTimeout(() => resolve("hung"), 3000)),
+    ]);
+    assert.equal(stopped, "stopped");
+  } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
   }

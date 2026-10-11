@@ -630,7 +630,11 @@ export class StandaloneService {
       }
       this.supervisor = new ExecutionSupervisor(
         state,
-        (workId) => this.runtimeForWork(workId),
+        // A failed harness is never awaited for inspection or interrupts.
+        (workId) =>
+          this.runtimeUnavailableSince.has(this.harnessForWork(workId))
+            ? undefined
+            : this.runtimeForWork(workId),
         this.options.supervisor,
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
@@ -730,8 +734,11 @@ export class StandaloneService {
           this.supervisor?.cancelObservations();
           await this.githubSynchronizer?.stop().catch(() => {});
           await this.deliveryCoordinator?.stop().catch(() => {});
-          for (const runtime of this.runtimes.values())
-            await runtime.stop().catch(() => {});
+          await Promise.all(
+            [...this.runtimes.values()].map((runtime) =>
+              runtime.stop().catch(() => {}),
+            ),
+          );
           await workspaces?.settle();
           try {
             await scheduler?.settle();
@@ -1041,8 +1048,12 @@ export class StandaloneService {
       this.clearConversationCaptures(),
     );
     this.runtimes.clear();
-    for (const runtime of runtimes.values())
-      await attempt("runtime stop", () => runtime.stop());
+    // Concurrent, so a hung runtime of one harness cannot keep another running.
+    await Promise.all(
+      [...runtimes.values()].map((runtime) =>
+        attempt("runtime stop", () => runtime.stop()),
+      ),
+    );
     await attempt("workspace settlement", () => workspaces?.settle());
     await attempt("scheduler settlement", () => scheduler?.settle());
     await attempt("active-work settlement", async () => {
@@ -3630,7 +3641,19 @@ export class StandaloneService {
     // A request with no admitted effect remains queued for ordinary restart.
     const harness = binding?.harness ?? defaultExecutionHarness;
     const runtime = this.runtimes.get(harness);
+    // Never falls back to another harness's runtime. Queued work stays queued:
+    // nothing is admitted or held until restart.
+    const waitForRuntime = () => {
+      const unavailable = this.runtimeWaitReason(harness);
+      if (unavailable) {
+        state.wait(intent.id, unavailable);
+        store.wait(request.workId, unavailable);
+      }
+      return unavailable !== undefined;
+    };
     try {
+      // Known-unavailable runtimes are never awaited: the scheduler is serial.
+      if (waitForRuntime()) return;
       const processIdentity = await Promise.resolve(
         runtime?.processIdentity?.() ?? null,
       ).catch(() => null);
@@ -3640,14 +3663,7 @@ export class StandaloneService {
         !generation.accepting
       )
         return;
-      // Never falls back to another harness's runtime.
-      const unavailable = this.runtimeWaitReason(harness);
-      if (unavailable) {
-        // Queued work stays queued: nothing is admitted or held until restart.
-        state.wait(intent.id, unavailable);
-        store.wait(request.workId, unavailable);
-        return;
-      }
+      if (waitForRuntime()) return;
       if (!runtime) return;
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
