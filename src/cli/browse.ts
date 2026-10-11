@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { CliError } from "./connections.js";
 import type { ServiceClient } from "./transport.js";
-import type { Result, Values } from "./types.js";
+import type { CliDeps, Result, Values } from "./types.js";
 
 /** Closed set of reasons a read is not a complete view. */
 export const COVERAGE_GAPS = [
@@ -37,12 +37,14 @@ export type BrowseContext = {
   /** All positionals, including the area and action. */
   positionals: string[];
   values: Values;
+  /** Streaming commands write to stdout and wait with these. */
+  deps: CliDeps;
   /** Negotiates the command's capabilities, then returns the client. */
   connect(): Promise<ServiceClient>;
 };
 export type BrowseOutput = Pick<
   Result,
-  "human" | "data" | "pagination" | "coverage"
+  "human" | "data" | "pagination" | "coverage" | "streamed"
 >;
 export type BrowseCommand = {
   usage: string;
@@ -149,7 +151,7 @@ export const cursorQuery = (filters: Record<string, unknown>): string =>
       .sort(([a], [b]) => a.localeCompare(b)),
   );
 
-function encodeCursor(
+export function encodeCursor(
   kind: string,
   query: string,
   cursor: string,
@@ -211,11 +213,16 @@ export async function readWithCursor<T>(
 const shellWord = (word: string) =>
   /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
 
-function nextCommand(ctx: BrowseContext, token: string): string {
+export function nextCommand(ctx: BrowseContext, token: string): string {
   const v = ctx.values;
   const flags: [string, string | boolean | undefined][] = [
     ["connection", v.connection],
     ["project", v.project],
+    ["task", v.task],
+    ["assignment", v.assignment],
+    ["execution", v.execution],
+    ["kind", v.kind],
+    ["severity", v.severity],
     ["state", v.state],
     ["type", v.type],
     ["after", v.after],
