@@ -7,6 +7,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
 import { DiscoveryCredentialRow } from "./discovery-credential.js";
+import { OperatorCredentialsSection } from "./operator-credentials.js";
 import { useOperatorResource } from "./resource.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
@@ -319,6 +320,7 @@ export function SettingsWorkspace(p: SettingsProps) {
               );
             })}
           </Panel>
+          <OperatorCredentialsSection {...p} />
         </div>
       </div>
     </div>

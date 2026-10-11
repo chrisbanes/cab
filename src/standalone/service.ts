@@ -44,6 +44,10 @@ import {
   type RuntimeToolResult,
 } from "./codex.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
+import {
+  managedAssignmentEnvironment,
+  OperatorCredentialStore,
+} from "./operator-credentials.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
   ConversationHistoryCapture,
@@ -317,6 +321,7 @@ export class StandaloneService {
   private workspaces: WorkspaceManager | undefined;
   private workspaceBindings: SqliteWorkspaceBindingStore | undefined;
   private workspaceComparisons: SqliteWorkspaceComparisonStore | undefined;
+  private operatorCredentialStore: OperatorCredentialStore | undefined;
   private schedulerStore: SchedulerStore | undefined;
   private inboxStartup: InboxStartupReconciliation | undefined;
   private scheduler: TurnScheduler | undefined;
@@ -430,6 +435,7 @@ export class StandaloneService {
       );
       new Store(db).ensureHost("standalone-codex");
       this.workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
+      this.operatorCredentialStore = new OperatorCredentialStore(db);
       this.conversationHistory = new ConversationHistoryStore(db);
       const domain = new DomainStore(db, () =>
         this.observeBackgroundFailure(generation, "domain-wake", () =>
@@ -647,7 +653,9 @@ export class StandaloneService {
           const policies = domain
             .projects()
             .map((p) => deliveryStore.configuration(String(p.id)));
-          const snapshot = deliveryRuntimeEnvironment(process.env, policies);
+          const snapshot = managedAssignmentEnvironment(
+            deliveryRuntimeEnvironment(process.env, policies),
+          );
           this.runtimeSpawnSnapshot = snapshot;
           return { ...snapshot };
         },
@@ -852,6 +860,7 @@ export class StandaloneService {
           this.workspaces = undefined;
           this.workspaceBindings = undefined;
           this.workspaceComparisons = undefined;
+          this.operatorCredentialStore = undefined;
           this.clearConversationCaptures();
           this.conversationHistory = undefined;
           this.state = undefined;
@@ -1264,6 +1273,7 @@ export class StandaloneService {
       this.workspaces = undefined;
       this.workspaceBindings = undefined;
       this.workspaceComparisons = undefined;
+      this.operatorCredentialStore = undefined;
       this.conversationHistory = undefined;
       this.activeByWorkId.clear();
       this.nativeWaiters.clear();
@@ -1670,6 +1680,12 @@ export class StandaloneService {
   domain(): DomainStore {
     if (!this.domainState) throw new Error("Service is not started");
     return this.domainState;
+  }
+
+  operatorCredentials(): OperatorCredentialStore {
+    if (!this.operatorCredentialStore)
+      throw new Error("Service is not started");
+    return this.operatorCredentialStore;
   }
 
   githubSources(): GitHubSourceStore {

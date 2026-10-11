@@ -8,6 +8,12 @@
     "node": ">=24"
   },
   "packageManager": "npm@12.2.0",
+  "bin": {
+    "ensemble": "dist/src/cli/main.js"
+  },
+  "files": [
+    "dist/src"
+  ],
   "scripts": {
     "service": "node dist/src/standalone/cli.js",
     "operations": "node dist/src/standalone/operations-cli.js",

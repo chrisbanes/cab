@@ -2486,6 +2486,8 @@ export const apiErrorSchema = z
           "local-review-batch-too-large",
           "local-review-recipient-unavailable",
           "local-review-comment-anchor-required",
+          "credential-invalid",
+          "insufficient-scope",
         ]),
         message: z.string().max(256),
         fieldPaths: z.array(z.string().max(128)).optional(),
@@ -2625,3 +2627,67 @@ export type RepositoryVerificationReason =
   (typeof repositoryVerificationReasons)[number];
 export type FolderListing = z.infer<typeof folderListingSchema>;
 export type CheckoutVerification = z.infer<typeof checkoutVerificationSchema>;
+
+export const operatorCredentialScopeSchema = z.enum(["read", "read-write"]);
+export const operatorCredentialNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(
+    (value) =>
+      ![...value].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127),
+  );
+export const operatorCredentialSchema = z
+  .object({
+    id: uuid,
+    name: operatorCredentialNameSchema,
+    scope: operatorCredentialScopeSchema,
+    createdAt: time,
+    expiresAt: time,
+    lastUsedAt: time.nullable(),
+    revokedAt: time.nullable(),
+    replacesId: uuid.nullable(),
+    state: z.enum(["active", "expired", "revoked"]),
+  })
+  .strict();
+export type OperatorCredential = z.infer<typeof operatorCredentialSchema>;
+export const operatorCredentialListSchema = envelope(
+  z
+    .object({ credentials: z.array(operatorCredentialSchema).max(1000) })
+    .strict(),
+);
+export const operatorCredentialIssueRequestSchema = z
+  .object({
+    name: operatorCredentialNameSchema,
+    scope: operatorCredentialScopeSchema,
+    expiresInDays: z.number().int().min(1).max(90).optional(),
+  })
+  .strict();
+export const operatorCredentialTokenSchema = z
+  .string()
+  .regex(/^ens_[0-9a-f-]{36}_[A-Za-z0-9_-]{43}$/);
+export const operatorCredentialIssuedSchema = z
+  .object({
+    credential: operatorCredentialSchema,
+    token: operatorCredentialTokenSchema,
+  })
+  .strict();
+export const cliIdentitySchema = z
+  .object({
+    apiVersion: z.number().int().positive().safe(),
+    capabilities: z.array(z.string().max(64)).max(64),
+    service: z
+      .object({ installationId: uuid, origin: z.string().max(2048) })
+      .strict(),
+    credential: z
+      .object({
+        id: uuid,
+        name: operatorCredentialNameSchema,
+        scope: operatorCredentialScopeSchema,
+        createdAt: time,
+        expiresAt: time,
+      })
+      .strict(),
+  })
+  .strict();
+export type CliIdentity = z.infer<typeof cliIdentitySchema>;

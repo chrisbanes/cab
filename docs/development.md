@@ -75,6 +75,50 @@ requires delivery and preservation evidence and refuses unresolved task work.
 These service contracts do not provide physical process containment. An untracked
 detached child may overlap a later writer after qualified normal success.
 
+## Operator CLI
+
+The packaged `ensemble` executable (`package.json` `bin`, built to
+`dist/src/cli/main.js`) talks only to a running `operator` service. Install it from
+a checkout with `npm run build && npm pack`, then `npm install -g ./ensemble-*.tgz`,
+or run `node dist/src/cli/main.js` directly.
+
+1. Sign in to the web UI and create a credential under **Settings → CLI
+   credentials**. Choose read-only or read/write and a lifetime of 7–90 days. The
+   token is shown once; rotate to issue a replacement, then revoke the old one.
+   Revocation is irreversible.
+2. `ensemble auth login --connection home --url ORIGIN` prompts for the token with
+   masked input and stores it in the macOS Keychain (service `ensemble-cli`, account
+   = connection name). For unattended callers, pass `--token-file PATH` instead: a
+   regular, non-symlink file owned by you with mode `0600` or stricter, holding one
+   token. The file is referenced, never copied. There is no literal-token flag and no
+   plaintext fallback; without the Keychain or a token file, login fails with
+   `credential-store-unavailable`.
+3. `ensemble auth status`, `ensemble task get TASK_ID [--output json]`,
+   `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
+   Logout and removal delete only local state; the server credential stays active
+   until revoked or expired.
+
+`ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
+`https://` origin for a separately managed private transport. Other `http:` URLs are
+rejected. Certificates are always verified; for a private CA set
+`NODE_EXTRA_CA_CERTS`. Redirects are never followed, so a credential cannot reach
+another origin. Connections live in `connections.json` under
+`$ENSEMBLE_CLI_CONFIG_DIR` (default `~/.config/ensemble`, directory `0700`, file
+`0600`). With several connections, pass `--connection`, set `ENSEMBLE_CONNECTION`, or set a
+default with `connection use`.
+
+Runtime children started by the service receive `ENSEMBLE_MANAGED_ASSIGNMENT=1` and
+no `ENSEMBLE_CONNECTION` or `ENSEMBLE_CLI_*` variables, and the CLI refuses to
+authenticate when the marker is set. This guards against accidental privilege
+crossing only; it is not OS isolation from same-user processes, and propagation of
+the marker into Codex tool shells is not yet proved.
+
+`npm run check` covers the CLI with injected fakes and a packed offline install
+against a real service over loopback and verified HTTPS. The Keychain test is
+opt-in on macOS: `npm run build && ENSEMBLE_KEYCHAIN_LIVE=1 node --test
+dist/test/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
+`ensemble-cli-test-<uuid>` item.
+
 ## Previous implementation
 
 The previous Rust pipeline implementation is preserved on the
