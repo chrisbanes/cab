@@ -185,6 +185,34 @@ implementation and evidence remain unproved until the delivery slices qualify it
 | CLI05 | **Unproved** | Redaction, instruction projection, historical gaps, capture/storage failure, age/quota pruning and bounded read/follow fixtures. |
 | CLI06 | **Unproved** | Integrated bounded real-runtime local/private-remote journey and deterministic boundary evidence, reusing valid slice evidence with explicit limits. |
 
+The six journeys also require command-by-command coverage of the full
+[first-release command surface](design/operator-cli.md#command-surface).
+Each operation below needs a packaged-CLI invocation through the authenticated
+service, its observable output/effect and applicable denial, revision and retry
+cases. The evidence inventory must identify each covered operation and any
+missing coverage; a representative journey cannot qualify omitted commands.
+These obligations remain **Unproved** until that evidence exists.
+
+| Area | Operations requiring evidence | Scenarios |
+| --- | --- | --- |
+| `auth`, `connection` | Login, status and local logout; select, list and remove named connections; local logout/removal does not revoke a server credential | CLI01, CLI02 |
+| `project` | List/get/create; inspect and prepare/apply supported configuration, instructions, routing and source settings | CLI01, CLI03 |
+| `profile` | List/get/create; inspect revisions; prepare/apply supported fields and restore earlier content as a new revision | CLI01, CLI03 |
+| `task` | List/search/get/create/configure; add/remove dependencies; existing task controls, addressed messages and follow-up | CLI01, CLI03, CLI04 |
+| `assignment` | Get/history; compare bound/current instructions; explicitly adopt current instructions with version checks | CLI01, CLI03 |
+| `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material | CLI01, CLI04 |
+| `execution`, `logs` | List/get; inspect supplied inputs, observed settings, events/tool activity and filtered service diagnostics; bounded follow | CLI01, CLI05, CLI06 |
+| `recovery` | Inspect eligibility/holds; prepare and submit each supported evidence-bearing recovery operation | CLI01, CLI04 |
+| `result`, `artifact`, `delivery` | Inspect results, retained evidence and existing delivery state; existing refresh and staged comment operations, including review/confirm/send | CLI01, CLI04 |
+| `operation` | Look up an existing mutation receipt by service/scope/UUID and reconcile an uncertain command outcome | CLI03 |
+
+CLI03 applies exact-material, revision and scoped retry requirements to every
+supported configuration write above. CLI04 checks each action's reported effect
+(saved configuration, queued work, requested cancellation or synchronous
+completion), applicable UI counterpart and independent holds. CLI02's server-side
+authority checks cover the entire command inventory. Host-local administration
+and deferred operations remain outside this CLI release.
+
 Delivery slices own their focused evidence; CLI8
 ([#901](https://github.com/chrisbanes/ensemble/issues/901)) owns assembled
 qualification. Records belong in `docs/evidence/` and must identify the candidate,
