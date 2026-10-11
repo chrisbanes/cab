@@ -704,9 +704,14 @@ export class StandaloneService {
         this.options.supervisor,
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
-      for (const [harness, runtime] of this.runtimes)
+      for (const [harness, runtime] of this.runtimes) {
+        let startup: Promise<void> | undefined;
+        let startupSettled = false;
         try {
-          await this.startRuntime(harness, runtime);
+          startup = runtime.start().finally(() => {
+            startupSettled = true;
+          });
+          await this.startRuntime(harness, runtime, startup);
         } catch (error) {
           if (harness === defaultExecutionHarness) throw error;
           this.runtimes.delete(harness);
@@ -715,7 +720,17 @@ export class StandaloneService {
           const cleanup = stopRuntime(runtime);
           cleanup.catch(() => {});
           this.detachedRuntimeStops.add(cleanup);
+          if (startup && !startupSettled) {
+            // stop() need not cancel start(). Retain ownership until startup
+            // settles, then stop any resources it created after the first stop.
+            const lateCleanup = Promise.allSettled([startup, cleanup]).then(
+              () => stopRuntime(runtime),
+            );
+            lateCleanup.catch(() => {});
+            this.detachedRuntimeStops.add(lateCleanup);
+          }
         }
+      }
       await this.supervisor.reconcileOnStart();
       await this.deliveryCoordinator.refresh();
       await this.reconcileOwnDeliveryClosures();
@@ -857,12 +872,13 @@ export class StandaloneService {
   private async startRuntime(
     harness: ExecutionHarness,
     runtime: Runtime,
+    startup: Promise<void>,
   ): Promise<void> {
-    if (harness === defaultExecutionHarness) return runtime.start();
+    if (harness === defaultExecutionHarness) return startup;
     let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
-        this.untilFailure(runtime, runtime.start(), runtimeFailedError),
+        this.untilFailure(runtime, startup, runtimeFailedError),
         new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new Error("Secondary runtime startup timed out")),

@@ -1252,10 +1252,18 @@ test("a secondary runtime with pending startup does not block healthy work", asy
   const root = mkdtempSync(join(tmpdir(), "ensemble-harness-hung-start-"));
   const runtimes = fakes();
   let release!: () => void;
+  let childAlive = false;
   runtimes.claude.start = () =>
     new Promise<void>((resolve) => {
       release = resolve;
+    }).then(() => {
+      childAlive = true;
     });
+  const stop = runtimes.claude.stop.bind(runtimes.claude);
+  runtimes.claude.stop = async () => {
+    await stop();
+    childAlive = false;
+  };
   const service = new StandaloneService(
     join(root, "data"),
     (context, harness) => {
@@ -1297,6 +1305,8 @@ test("a secondary runtime with pending startup does not block healthy work", asy
     );
     // A late resolution never returns the detached runtime to admission.
     release();
+    await waitUntil(() => runtimes.claude.stops === 2, describe);
+    assert.equal(childAlive, false);
     const codexTask = await task(service, projectId, [lead]);
     await waitUntil(
       () =>
@@ -1334,4 +1344,51 @@ test("secondary runtime startup deadlines reject invalid bounds", () => {
         }),
       /Secondary runtime startup timeout/,
     );
+});
+
+test("shutdown retains pending secondary startup until its late cleanup settles", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-late-start-"));
+  const runtimes = fakes();
+  let release!: () => void;
+  let childAlive = false;
+  runtimes.claude.start = () =>
+    new Promise<void>((resolve) => {
+      release = resolve;
+    }).then(() => {
+      childAlive = true;
+    });
+  const stop = runtimes.claude.stop.bind(runtimes.claude);
+  runtimes.claude.stop = async () => {
+    await stop();
+    childAlive = false;
+  };
+  const service = new StandaloneService(
+    join(root, "data"),
+    (_, harness) => runtimes[harness],
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      secondaryRuntimeStartTimeoutMs: 50,
+      power: { enabled: false },
+      routingClient: null,
+    },
+  );
+  let stopped = false;
+  try {
+    await service.start();
+    const shutdown = service.stop().then(() => {
+      stopped = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(stopped, false);
+    assert.equal(runtimes.claude.stops, 1);
+    release();
+    await shutdown;
+    assert.equal(runtimes.claude.stops, 2);
+    assert.equal(childAlive, false);
+  } finally {
+    release();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
 });
