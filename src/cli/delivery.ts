@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import {
   type CommandReceipt,
   commandReceiptSchema,
@@ -17,6 +17,7 @@ import type { ServiceClient } from "./transport.js";
 import type { RequestIdentity } from "./types.js";
 import {
   optionalRequestId,
+  requestKey,
   type Session,
   sendCommand,
   type WriteCommand,
@@ -141,27 +142,15 @@ const getCommand: BrowseCommand = {
 
 const scope = (taskId: string) => `task:${taskId}`;
 
-/** An explicit --request-id, else a journal key for the same material, else a new one. */
-async function requestKey(
+const keyFor = (
   ctx: WriteContext,
   session: Session,
   type: string,
   taskId: string,
   material: unknown[],
-) {
-  const service = session.identity.service.installationId;
-  const digest = createHash("sha256")
-    .update(JSON.stringify([service, scope(taskId), type, ...material]))
-    .digest("hex");
-  const key =
-    optionalRequestId(ctx.values) ??
-    (await ctx.journal.find(service, digest)) ??
-    randomUUID();
-  const reached =
-    (await ctx.journal.state({ service, scope: scope(taskId), type, key }))
-      ?.reached === true;
-  return { key, digest, reached };
-}
+  options: Parameters<typeof requestKey>[4] = {},
+) =>
+  requestKey(ctx, session, { scope: scope(taskId), type }, material, options);
 
 const expectedTaskVersion = (ctx: WriteContext) => {
   const v = positiveIntFlag(
@@ -243,12 +232,14 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         const before = await readTask(session.client, taskId).catch(
           () => undefined,
         );
-        const { key, digest } = await requestKey(
+        // Refresh is repeatable: reuse only a key whose outcome is still unknown.
+        const { key, digest } = await keyFor(
           ctx,
           session,
           "delivery.refresh",
           taskId,
           [taskId],
+          { repeatable: true },
         );
         const { receipt, request } = await sendCommand(ctx, session, {
           scope: scope(taskId),
@@ -330,7 +321,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           "task.read",
           "delivery.write",
         ]);
-        const { key, digest, reached } = await requestKey(
+        const { key, digest, reached } = await keyFor(
           ctx,
           session,
           "comment.review",
@@ -416,7 +407,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           "task.read",
           "delivery.write",
         ]);
-        const { key, digest } = await requestKey(
+        const { key, digest } = await keyFor(
           ctx,
           session,
           "comment.confirm",
@@ -499,33 +490,14 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
         ]);
         const service = session.identity.service.installationId;
         // The approval binds the review ID as the operation ID, so it is the send key.
-        const { key, digest, reached } = reviewId
-          ? {
-              key: reviewId,
-              digest: hash(
-                JSON.stringify([
-                  service,
-                  scope(taskId),
-                  "comment.send",
-                  expected,
-                  hash(text),
-                  reviewId,
-                ]),
-              ),
-              reached:
-                (
-                  await ctx.journal.state({
-                    service,
-                    scope: scope(taskId),
-                    type: "comment.send",
-                    key: reviewId,
-                  })
-                )?.reached === true,
-            }
-          : await requestKey(ctx, session, "comment.send", taskId, [
-              expected,
-              hash(text),
-            ]);
+        const { key, digest, state, reached } = await keyFor(
+          ctx,
+          session,
+          "comment.send",
+          taskId,
+          [expected, hash(text), ...(reviewId ? [reviewId] : [])],
+          reviewId ? { fixed: reviewId } : {},
+        );
         const command = exactCommand(
           {
             type: "comment.send",
@@ -592,9 +564,8 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           type: "comment.send",
           key,
         };
-        // A key this CLI used for other material may name someone else's operation.
-        const prior = await ctx.journal.state(request);
-        const ours = !prior || prior.digest === digest;
+        // A key this CLI may have sent with other material can name another operation.
+        const ours = !state?.reached || state.digest === digest;
         const sent = await sendCommand(ctx, session, {
           scope: request.scope,
           type: request.type,
@@ -607,9 +578,13 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             r.taskId === taskId &&
             r.operationId === key,
         }).catch(async (error: unknown) => {
+          // Only a service refusal (4xx) may hide a recorded operation.
+          const status = error instanceof CliError ? error.extra.status : 0;
           if (
             !(error instanceof CliError) ||
-            (error.code !== "conflict" && error.code !== "policy-denied")
+            !status ||
+            status < 400 ||
+            status >= 500
           )
             throw error;
           // A receipt the service refused after recording the operation is not "nothing posted".
@@ -619,15 +594,21 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             )
             .catch(() => undefined);
           if (recorded && ours) {
-            await ctx.journal
-              .append(request, digest, "unknown")
-              .catch(() => undefined);
+            await ctx.journal.append(request, digest, "unknown").catch(() => {
+              throw new CliError(
+                "journal-unavailable",
+                `The service recorded operation ${key} (${recorded.state}) without returning its receipt, and the local journal cannot record it. Rerun with --request-id ${key}; do not use a new key.`,
+                { retryable: true, request },
+              );
+            });
             throw new CliError(
               "command-outcome-unknown",
               `The service recorded operation ${key} (${recorded.state}) but did not return its receipt. ${UNKNOWN_GUIDANCE(taskId, key)}`,
               { ...error.extra, retryable: true, request },
             );
           }
+          if (error.code !== "conflict" && error.code !== "policy-denied")
+            throw error;
           throw new CliError(
             error.code,
             `Not sent: ${error.code === "conflict" ? "the task, its source or the delivery policy changed, or this request ID was used with other material" : "the project policy denies this comment"}. Nothing was posted.`,

@@ -430,7 +430,8 @@ delivery and reports `partial` with gap `evidence-gap` when the provider read fa
 or an action is unsettled. Comment requests are scoped `task:<id>`:
 `review-comment` uses its key as `operationId`, so `send-comment --review-id R`
 sends with key `R`, which the approval binds; before sending it replays the exact
-review and refuses unless it is `approved`. Comment keys use the default journal
+review and refuses unless it is `approved` (a `--review-id` that names no review
+is recorded as a new pending review by that replay; nothing is posted). Comment keys use the default journal
 reuse, so an identical rerun replays the recorded receipt and a deliberate repeat
 needs a new `--request-id`. A send receipt in `confirmed-success` exits 0, `denied`
 exits 4 `policy-denied`, `confirmed-failure` exits 4 `conflict` (nothing posted),

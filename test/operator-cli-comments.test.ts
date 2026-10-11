@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { chmodSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { databaseDigest } from "./fixtures/database-digest.js";
 import { deliveryWorld } from "./fixtures/operator-cli.js";
@@ -391,5 +393,73 @@ test("allow mode: lost replies, restarts and reruns post one comment per request
   );
   assert.equal(reviewed.data.receipt.kind, "comment-review");
   assert.equal(sent.data.receipt.kind, "delivery");
+  assert.equal(w.scripted.commentWrites, 4);
+});
+
+test("a refused send receipt is reconciled from the task read, never reposted", async (t) => {
+  const w = await comments(t, "allow");
+  const journal = join(w.h.configDir, "requests.jsonl");
+  const states = (key: string) =>
+    readFileSync(journal, "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l))
+      .filter((l) => l.key === key)
+      .map((l) => l.state);
+  /** Posts the command, then replaces the reply with the given 4xx. */
+  const after =
+    (status: number, code: string, before?: () => void): typeof fetch =>
+    async (input, init) => {
+      const response = await fetch(input, init);
+      if (!String(input).endsWith("/api/operator/commands")) return response;
+      before?.();
+      return Response.json({ error: { code, message: code } }, { status });
+    };
+  // A key refused before reaching the service, then used for other material.
+  const key = randomUUID();
+  const refused = await w.cli(
+    "rw",
+    await w.send("First", ["--request-id", key]),
+    {
+      fetch: async (input, init) =>
+        String(input).endsWith("/api/operator/commands")
+          ? Response.json(
+              { error: { code: "conflict", message: "conflict" } },
+              { status: 409 },
+            )
+          : fetch(input, init),
+    },
+  );
+  assert.equal(refused.code, 4, refused.out);
+  assert.equal(w.scripted.commentWrites, 0);
+  const fenced = await w.cli(
+    "rw",
+    await w.send("Second", ["--request-id", key]),
+    { fetch: after(409, "conflict") },
+  );
+  assert.equal(fenced.code, 6, fenced.out);
+  assert.equal(states(key).at(-1), "unknown");
+  assert.equal(w.scripted.commentWrites, 1);
+  // Any 4xx after a post is reconciled the same way.
+  for (const [status, code] of [
+    [400, "invalid-input"],
+    [404, "not-found"],
+  ] as const) {
+    const r = await w.cli("rw", await w.send(`After ${status}`), {
+      fetch: after(status, code),
+    });
+    assert.equal(r.code, 6, r.out);
+    assert.equal(states(r.json().error.request.key).at(-1), "unknown");
+  }
+  assert.equal(w.scripted.commentWrites, 3);
+  // A journal that cannot record the unknown outcome says so, with the key.
+  const locked = await w.cli("rw", await w.send("Locked journal"), {
+    fetch: after(409, "conflict", () => chmodSync(journal, 0o400)),
+  });
+  chmodSync(journal, 0o600);
+  assert.equal(locked.code, 5, locked.out);
+  assert.equal(locked.json().error.code, "journal-unavailable");
+  assert.match(locked.json().error.message, /--request-id/);
+  assert.ok(locked.json().error.request.key);
   assert.equal(w.scripted.commentWrites, 4);
 });

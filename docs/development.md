@@ -309,8 +309,9 @@ or run `node dist/src/cli/main.js` directly.
      be withdrawn, only denied. `delivery send-comment TASK_ID --body-file FILE
      --expected-task-version N [--review-id R]` posts a public comment Ensemble
      cannot edit or retract; with `--review-id` the request ID is the review ID and
-     the CLI first checks the review is approved for exactly this body. In
-     approval mode a send needs a review.
+     the CLI first checks the review is approved for exactly this body by replaying
+     it. An ID that is not an existing review is recorded as a new pending review
+     by that replay, and nothing is posted. In approval mode a send needs a review.
 
    Comment and refresh requests are scoped `task:TASK_ID`. An identical rerun
    reuses the journal key and replays the recorded outcome, so a comment is never

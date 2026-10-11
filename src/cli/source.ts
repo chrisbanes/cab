@@ -1,4 +1,3 @@
-import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
@@ -31,7 +30,7 @@ import { receiptLines } from "./operation.js";
 import { keyValues, table, unavailable } from "./render.js";
 import type { ServiceClient } from "./transport.js";
 import {
-  optionalRequestId,
+  requestKey,
   type Session,
   sendCommand,
   type WriteCommand,
@@ -421,28 +420,6 @@ async function liveSource(session: Session, projectId: string) {
   };
 }
 
-/** Key from --request-id, else the journal, else new; `reused` skips advisory pre-read gates. */
-async function sourceKey(
-  ctx: WriteContext,
-  session: Session,
-  identity: { scope: string; type: string },
-  material: unknown[],
-) {
-  const service = session.identity.service.installationId;
-  const digest = createHash("sha256")
-    .update(
-      JSON.stringify([service, identity.scope, identity.type, ...material]),
-    )
-    .digest("hex");
-  const key =
-    optionalRequestId(ctx.values) ??
-    (await ctx.journal.find(service, digest)) ??
-    randomUUID();
-  const reused =
-    (await ctx.journal.state({ service, ...identity, key }))?.reached === true;
-  return { key, digest, reused };
-}
-
 const requiredVersion = (ctx: WriteContext) => {
   const v = positiveIntFlag(ctx.values["expected-version"], "expected-version");
   if (v === undefined)
@@ -504,12 +481,11 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
           scope: `project:${projectId}`,
           type: "github.preview",
         };
-        const { key, digest, reused } = await sourceKey(
-          ctx,
-          session,
-          identity,
-          [selectionId, expected],
-        );
+        const {
+          key,
+          digest,
+          reached: reused,
+        } = await requestKey(ctx, session, identity, [selectionId, expected]);
         // Advisory gates; an earlier attempt with this key replays whatever it recorded.
         if (!reused) {
           const { source } = (await readProject(session.client, projectId))
@@ -611,12 +587,11 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         const before = await task();
         // The task's project changes when this applies, so the request is scoped to the task.
         const identity = { scope: `task:${taskId}`, type: "github.place" };
-        const { key, digest, reused } = await sourceKey(
-          ctx,
-          session,
-          identity,
-          [taskId, to, expected],
-        );
+        const {
+          key,
+          digest,
+          reached: reused,
+        } = await requestKey(ctx, session, identity, [taskId, to, expected]);
         if (!reused) {
           const placement = (
             await readProject(session.client, before.projectId)
