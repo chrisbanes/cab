@@ -70,6 +70,14 @@ async function insideHome(home: string, target: string) {
   }
   if (real !== root && !real.startsWith(root + sep))
     throw new FolderAccessError(403);
+  // A symlink may resolve into a dot-folder inside home; that is hidden too.
+  if (
+    real
+      .slice(root.length)
+      .split(sep)
+      .some((segment) => segment.startsWith("."))
+  )
+    throw new FolderAccessError(403);
   return real;
 }
 
@@ -92,8 +100,8 @@ export async function listHomeFolders(
   if (
     !segments ||
     segments.some(
-      (s) =>
-        !s || s === "." || s === ".." || s.includes("\0") || s.includes("\\"),
+      // Dot-folders are never listed, so a typed hidden segment is refused too.
+      (s) => !s || s.startsWith(".") || s.includes("\0") || s.includes("\\"),
     )
   )
     throw new FolderAccessError(400);

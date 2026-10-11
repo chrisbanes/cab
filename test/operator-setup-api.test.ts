@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { lstat, readdir, realpath, stat } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  readdir,
+  realpath,
+  stat,
+  symlink,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -170,6 +177,8 @@ test("home folder listing stays inside home, lists names and Git status only and
   const home = await createSetupHome();
   t.after(() => home.close());
   const realHome = await realpath(home.home);
+  await mkdir(join(home.home, "src", ".private", "inner"), { recursive: true });
+  await symlink(join(home.home, ".ssh"), join(home.home, "src", "dotlink"));
   const before = await snapshot(home.home);
   const listing = await listHomeFolders(home.home, { path: "~/src" });
   assert.deepEqual(listing, {
@@ -226,6 +235,10 @@ test("home folder listing stays inside home, lists names and Git status only and
   ])
     assert.equal(await status(bad), 400, bad);
   assert.equal(await status("~/src/escape"), 403);
+  // Hidden folders are refused at any depth, typed or behind a symlink.
+  for (const hidden of ["~/.ssh", "~/src/.private", "~/src/.private/inner"])
+    assert.equal(await status(hidden), 400, hidden);
+  assert.equal(await status("~/src/dotlink"), 403);
   assert.equal(await status("~/missing"), 404);
   assert.equal(await status("~/src/notes.txt"), 404);
   assert.deepEqual(await snapshot(home.home), before);

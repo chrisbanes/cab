@@ -470,7 +470,10 @@ test("Setup surfaces truncated discovery lists and allows typed entry", async (_
     "main",
   );
   await page
-    .getByText("Only the first 100 Projects are listed", { exact: false })
+    .getByText(
+      "Only the first 100 Projects of a repository or owner are listed",
+      { exact: false },
+    )
     .waitFor();
   await page
     .getByLabel("Repository", { exact: true })
@@ -553,4 +556,30 @@ test("Setup clears a row's folder and ref when its repository is removed", async
   const body = (await sent).postDataJSON() as Record<string, unknown>;
   assert.equal("repositories" in body, false);
   await page.getByText("Recorded Cleared as a paused project.").waitFor();
+});
+
+test("Setup lists GitHub Projects linked to every chosen repository once", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  const repositories = page.getByLabel("Repository", { exact: true });
+  const project = page.getByLabel("GitHub Project", { exact: true });
+  await chooseRepository(page, "acme/relay");
+  await page
+    .getByRole("button", { name: "Add another repository", exact: true })
+    .click();
+  await repositories.nth(1).selectOption({ label: "acme/atlas" });
+  // atlas is the second row, yet its linked Project is found and preselected.
+  await page
+    .getByText(
+      "Found automatically: 1 GitHub Project linked to acme/relay, acme/atlas.",
+      { exact: false },
+    )
+    .waitFor();
+  assert.equal(await project.inputValue(), "PVT_atlas");
+  const options = await project.locator("option").allTextContents();
+  assert.equal(
+    options.filter((o) => o.startsWith("Atlas roadmap")).length,
+    1,
+    JSON.stringify(options),
+  );
+  assert.ok(options.includes("Atlas roadmap · linked to acme/atlas"));
 });

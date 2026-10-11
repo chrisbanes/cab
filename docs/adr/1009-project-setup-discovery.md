@@ -42,7 +42,8 @@ A web page cannot learn a folder's absolute path, and the operator may use the U
 from another device. The Ensemble service therefore serves the picker. An
 authenticated operator route lists subfolder names and their Git status under the
 operator's home folder. It never returns file contents or file names, dot-folders
-or symlinks, and returns home-relative paths only. Each checkout row adds its
+or symlinks, and returns home-relative paths only. A requested path inside a
+dot-folder, typed or reached through a symlink, is refused. Each checkout row adds its
 `github.com` origin as `owner/name` and its current branch, read with bounded,
 non-interactive Git commands. A typed path stays available. Agents and model tools
 cannot use this route. Disclose it as listing folders on the host.

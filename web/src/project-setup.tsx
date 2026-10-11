@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   type CheckoutVerification,
+  type DiscoveryUnavailableReason,
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
@@ -131,54 +132,56 @@ export function ProjectSetup(p: SettingsProps) {
     }
   }, [discoveredRepos.join("\n"), p.client, attempt]);
 
-  // GitHub Projects for the first discovered repository.
-  const projectRepo =
-    rows.find((r) => r.source === "discovered" && repoOf(r)) ?? null;
-  const projectKey = projectRepo ? repoOf(projectRepo) : "";
-  const [projects, setProjects] = useState<{ repo: string; data: Projects }>({
-    repo: "",
-    data: { state: "loading" },
-  });
+  // GitHub Projects linked to every chosen repository, then their owners' others.
+  // Each repository is read once per round, so reads are bounded by the 20 rows.
+  const projectRepos = [...new Set(discoveredRepos)];
+  const projectKey = projectRepos.join(", ");
+  const [projectReads, setProjectReads] = useState<Record<string, Projects>>(
+    {},
+  );
+  const requestedProjects = useRef(new Set<string>());
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the repository list; each repository is requested once per round.
+  useEffect(() => {
+    const round = attempt;
+    for (const repo of projectRepos) {
+      if (requestedProjects.current.has(repo)) continue;
+      requestedProjects.current.add(repo);
+      setProjectReads((x) => ({ ...x, [repo]: { state: "loading" } }));
+      p.client
+        .read(
+          `/api/operator/discovery/projects?repository=${encodeURIComponent(repo)}`,
+          discoveryProjectsSchema,
+        )
+        .then(
+          (r) =>
+            round === attemptRef.current &&
+            setProjectReads((x) => ({ ...x, [repo]: r.data })),
+          () =>
+            round === attemptRef.current &&
+            setProjectReads((x) => ({
+              ...x,
+              [repo]: { state: "unavailable", reason: "unreadable" },
+            })),
+        );
+    }
+  }, [projectKey, p.client, attempt]);
+  const projects = aggregateProjects(
+    projectRepos.map((repo) => [repo, projectReads[repo]] as const),
+  );
   const chosenProject = String(d.values.githubProject ?? "");
   const projectChoiceTouched = useRef("");
-  // A Project choice belongs to the repository it was listed for: a new one starts at None.
+  // A Project choice belongs to the repositories it was listed for: a new set starts at None.
   const listedFor = useRef(projectKey);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the Project repository changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the Project repositories change.
   useEffect(() => {
     if (listedFor.current === projectKey || locked(d)) return;
     listedFor.current = projectKey;
     projectChoiceTouched.current = "";
     d.set("githubProject", "");
   }, [projectKey]);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the repository or session changes.
-  useEffect(() => {
-    if (!projectKey) return;
-    let live = true;
-    setProjects({ repo: projectKey, data: { state: "loading" } });
-    p.client
-      .read(
-        `/api/operator/discovery/projects?repository=${encodeURIComponent(projectKey)}`,
-        discoveryProjectsSchema,
-      )
-      .then(
-        (r) => live && setProjects({ repo: projectKey, data: r.data }),
-        () =>
-          live &&
-          setProjects({
-            repo: projectKey,
-            data: { state: "unavailable", reason: "unreadable" },
-          }),
-      );
-    return () => {
-      live = false;
-    };
-  }, [projectKey, p.client, csrf, attempt]);
-  const projectList =
-    projects.repo === projectKey && projects.data.state === "ready"
-      ? projects.data
-      : null;
+  const projectList = projects?.state === "ready" ? projects : null;
   // Frame 117: exactly one linked Project is preselected until the operator chooses.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: preselect only when a Project list lands or the repository changes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: preselect only when a Project list lands or the repositories change.
   useEffect(() => {
     if (
       projectList &&
@@ -188,7 +191,7 @@ export function ProjectSetup(p: SettingsProps) {
       !locked(d)
     )
       d.set("githubProject", projectList.linked[0]?.projectNodeId ?? "");
-  }, [projectList, projectKey]);
+  }, [projectList?.linked.length, projectKey]);
 
   // Advisory checkout verification; the service verifies again on create.
   const [verifications, setVerifications] = useState<
@@ -408,8 +411,9 @@ export function ProjectSetup(p: SettingsProps) {
             discoveredRepos.some(
               (repo) => branches[repo]?.state === "unavailable",
             ) ||
-            (projects.repo === projectKey &&
-              projects.data.state === "unavailable")) && (
+            projectRepos.some(
+              (repo) => projectReads[repo]?.state === "unavailable",
+            )) && (
             <div className="setup-inline-actions">
               {discovery.state === "unavailable" &&
               (discovery.reason === "unconfigured" ||
@@ -424,6 +428,8 @@ export function ProjectSetup(p: SettingsProps) {
                   onClick={() => {
                     requested.current.clear();
                     setBranches({});
+                    requestedProjects.current.clear();
+                    setProjectReads({});
                     setAttempt((n) => n + 1);
                   }}
                 >
@@ -718,13 +724,7 @@ export function ProjectSetup(p: SettingsProps) {
             disabled={disabled}
             discoveryReady={Boolean(ready)}
             repo={projectKey}
-            data={
-              projectKey
-                ? projects.repo === projectKey
-                  ? projects.data
-                  : { state: "loading" }
-                : null
-            }
+            data={projects}
             value={chosenProject}
             onChange={(id) => {
               projectChoiceTouched.current = projectKey;
@@ -846,7 +846,7 @@ function ProjectChoice({
   disabled: boolean;
   discoveryReady: boolean;
   repo: string;
-  data: Projects | null;
+  data: AggregatedProjects | null;
   value: string;
   onChange: (id: string) => void;
 }) {
@@ -862,10 +862,14 @@ function ProjectChoice({
           : data.linked.length === 1 && value === data.linked[0]?.projectNodeId
             ? `Found automatically: 1 GitHub Project linked to ${repo}. Linking adds an inactive discovery source; preview and readiness follow in project configuration.`
             : `${data.linked.length} GitHub Project${data.linked.length === 1 ? "" : "s"} linked to ${repo}${data.linked.length ? `: ${data.linked.map((x) => x.title).join(", ")}` : ""} · ${data.owned.length} more owned by ${data.ownerLogin}. Linking one adds an inactive discovery source; preview and readiness follow in project configuration.`;
+  const partial =
+    data?.state === "ready" && data.failure
+      ? ` Some repositories' Projects couldn't be listed: ${discoveryReasonCopy(data.failure)}`
+      : "";
   const shown =
-    list?.truncated && discoveryReady
-      ? `${caption} Only the first 100 Projects are listed; link another in project configuration.`
-      : caption;
+    (list?.truncated && discoveryReady
+      ? `${caption} Only the first 100 Projects of a repository or owner are listed; link another in project configuration.`
+      : caption) + partial;
   return (
     <SetupField label="GitHub Project" error={null} caption={shown}>
       {(props) => (
@@ -880,16 +884,73 @@ function ProjectChoice({
           </option>
           {list?.linked.map((x) => (
             <option key={x.projectNodeId} value={x.projectNodeId}>
-              {x.title} · linked to {repo}
+              {x.title} · linked to {x.repo}
             </option>
           ))}
           {list?.owned.map((x) => (
             <option key={x.projectNodeId} value={x.projectNodeId}>
-              {x.title} · owned by {list.ownerLogin}
+              {x.title} · owned by {x.owner}
             </option>
           ))}
         </NativeSelect>
       )}
     </SetupField>
   );
+}
+
+type ListedProject = {
+  projectNodeId: string;
+  title: string;
+  number: number;
+};
+type AggregatedProjects =
+  | { state: "loading" }
+  | { state: "unavailable"; reason: DiscoveryUnavailableReason }
+  | {
+      state: "ready";
+      ownerLogin: string;
+      linked: (ListedProject & { repo: string })[];
+      owned: (ListedProject & { owner: string })[];
+      truncated: boolean;
+      /** A reason when some repositories' reads failed but others listed. */
+      failure?: DiscoveryUnavailableReason;
+    };
+/** Linked Projects of every repository, deduplicated, then the owners' remaining ones. */
+function aggregateProjects(
+  entries: readonly (readonly [string, Projects | undefined])[],
+): AggregatedProjects | null {
+  if (!entries.length) return null;
+  if (entries.some(([, r]) => !r || r.state === "loading"))
+    return { state: "loading" };
+  const ready = entries.flatMap(([repo, r]) =>
+    r?.state === "ready" ? [{ repo, ...r }] : [],
+  );
+  const failed = entries.flatMap(([, r]) =>
+    r?.state === "unavailable" ? [r] : [],
+  )[0];
+  if (!ready.length)
+    return { state: "unavailable", reason: failed?.reason ?? "unreadable" };
+  const seen = new Set<string>();
+  const linked = ready.flatMap((r) =>
+    r.linked.flatMap((x) => {
+      if (seen.has(x.projectNodeId)) return [];
+      seen.add(x.projectNodeId);
+      return [{ ...x, repo: r.repo }];
+    }),
+  );
+  const owned = ready.flatMap((r) =>
+    r.owned.flatMap((x) => {
+      if (seen.has(x.projectNodeId)) return [];
+      seen.add(x.projectNodeId);
+      return [{ ...x, owner: r.ownerLogin }];
+    }),
+  );
+  return {
+    state: "ready",
+    ownerLogin: [...new Set(ready.map((r) => r.ownerLogin))].join(", "),
+    linked,
+    owned,
+    truncated: ready.some((r) => r.truncated),
+    ...(failed ? { failure: failed.reason } : {}),
+  };
 }
