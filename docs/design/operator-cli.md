@@ -162,6 +162,19 @@ Use the macOS credential store by default. Support protected token-file input
 for unattended callers; do not accept literal token flags or fall back silently
 to plaintext storage. Mask interactive token input and never print stored tokens.
 
+A token is `ens_<credential UUID>_<secret>`, with a 256-bit base64url secret; the
+service stores its SHA-256 and compares in constant time. Malformed, unknown,
+mismatched, expired and revoked tokens receive the same `credential-invalid` 401;
+a valid token outside its scope receives `insufficient-scope` 403. Lifetimes are
+1–90 days, defaulting to 90. Credential management uses dedicated session-only
+endpoints, not receipted commands, so a receipt replay cannot re-reveal a token.
+An explicit server-side route-authority table classifies every JSON API route as
+read, write or session-only and denies unknown routes; bearer requests never reach
+cookie sessions, legacy HTML or slot routes. `GET /api/operator/cli` returns the
+API version, capabilities, the service's persistent installation identity and the
+calling credential's metadata. A connection records the installation identity at
+login; a later mismatch fails as `service-identity-changed`.
+
 Remote connections require HTTPS with certificate verification. Existing loopback
 HTTP remains available on the host. Do not send credentials across redirects to
 another origin or add automatic insecure/public connectivity. Reads and writes
@@ -258,8 +271,10 @@ Reconcile or retry in the same scope using the same key and exact content; never
 resubmit with a fresh identity automatically. Same scope/key with different
 content conflicts; reusing a UUID in another scope cannot select its receipt.
 Do not store secret request material in a convenience retry log. Nonzero exit
-statuses distinguish invalid input, authentication/authorization, revision/policy
-conflict, unavailability and uncertain outcomes.
+statuses distinguish invalid input (2), authentication/authorization (3),
+revision/policy conflict (4), unavailability including TLS and redirect rejection
+(5), uncertain outcomes (6) and an unsupported service version or capability (7).
+The JSON envelope schema is `ensemble.cli/v1`.
 
 Advertise service API version and capabilities. Older clients ignore additive
 fields; unsupported operations or incompatible contracts fail explicitly.

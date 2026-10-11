@@ -53,8 +53,12 @@ runs are outside the first release. Source interfaces follow concrete integratio
 
 The accepted [operator CLI design](design/operator-cli.md) and
 [ADR-1010](adr/1010-operator-cli.md) specify an additional operator interface for
-external agents and terminal users. This interface is not implemented. Its
-delivery sequencing belongs in GitHub; design acceptance does not dispatch it.
+external agents and terminal users. Its authentication foundation and task inspection
+are implemented: Settings issues, lists, rotates and revokes CLI credentials, and the
+packaged `ensemble` executable supports `auth login|status|logout`,
+`connection list|use|remove` and `task get`. The remaining command areas are planned;
+their delivery sequencing belongs in GitHub under
+[epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 
 The CLI uses the running service locally or over the existing private network,
 with revocable read-only or read/write credentials. It covers everyday task
