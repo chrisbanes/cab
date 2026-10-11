@@ -330,7 +330,7 @@ export interface FailedGenerationResolution {
 /** Stored retry rows keep their original Codex-named column values. */
 const retryFailureSource: Record<ExecutionHarness, "codexErrorInfo" | null> = {
   codex: "codexErrorInfo",
-  // ponytail: Claude failures are held without retry until C3 maps them.
+  // Deliberate: Claude failures are classified and held, never retried (#825).
   claude: null,
 };
 

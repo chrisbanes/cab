@@ -44,6 +44,7 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import { ClaudeRuntime } from "./claude.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
   managedAssignmentEnvironment,
@@ -196,7 +197,12 @@ export function createRuntime(
     case "codex":
       return new CodexRuntime("codex", context);
     case "claude":
-      throw new Error("Unsupported execution harness: claude");
+      if (!context.claude)
+        throw new Error("Claude runtime context unavailable");
+      return new ClaudeRuntime({
+        safety: context.safety,
+        claude: context.claude,
+      });
   }
 }
 

@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { DomainStore } from "../src/core/domain.js";
 import { Store } from "../src/core/store.js";
+import { ClaudeRuntime } from "../src/standalone/claude.js";
 import { CodexRuntime } from "../src/standalone/codex.js";
 import type { ExecutionHarness } from "../src/standalone/execution-harness.js";
 import {
@@ -34,7 +35,23 @@ test("runtime factory constructs the requested harness and rejects unknown ones"
   assert.ok(runtime instanceof CodexRuntime);
   assert.equal(runtime.harness, "codex");
   assert.throws(
-    () => createRuntime(context, "claude" as ExecutionHarness),
+    () => createRuntime(context, "claude"),
+    /Claude runtime context unavailable/,
+  );
+  const claude = createRuntime(
+    {
+      ...context,
+      claude: {
+        configDirectory: "/nonexistent/claude/config",
+        turnEnvironment: () => ({ unavailable: "unused" }),
+      },
+    },
+    "claude",
+  );
+  assert.ok(claude instanceof ClaudeRuntime);
+  assert.equal(claude.harness, "claude");
+  assert.throws(
+    () => createRuntime(context, "opencode" as ExecutionHarness),
     /Unsupported execution harness/,
   );
 });
