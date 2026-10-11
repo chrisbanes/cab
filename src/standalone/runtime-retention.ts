@@ -1,3 +1,4 @@
+import type { ExecutionHarness } from "./execution-harness.js";
 import type { NativeInputEndpointIdentity } from "./native-input.js";
 
 export type RuntimeTerminalStatus = "completed" | "failed";
@@ -13,14 +14,15 @@ export interface RuntimeTerminalEvidence {
   firstObservedAt: number | null;
   lastObservedAt: number | null;
   failure: RuntimeTerminalFailureEvidence | null;
+  harness: ExecutionHarness;
 }
 
 /** Compact, validated first failure facts used by exact bound retry classification. */
 export interface RuntimeTerminalFailureEvidence {
   classification: "transient" | "permanent" | "unknown";
   reasonCode: string;
-  source: "codexErrorInfo" | "missing";
-  codexRetries: number | null;
+  source: "harness" | "missing";
+  harnessRetries: number | null;
 }
 
 export interface RuntimeTerminalObservation {
@@ -41,6 +43,7 @@ export interface RuntimeThreadQualification {
   reasoningEffort: string | null;
   serviceTier: string | null;
   developerInstructionsDigest: string | null;
+  harness: ExecutionHarness;
 }
 
 export interface RuntimeThreadQualificationEvidence {

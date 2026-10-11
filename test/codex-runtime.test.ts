@@ -258,8 +258,8 @@ test("failure evidence is exact-turn-bound and only classifies the retry allowli
     status: "failed",
     classification: "transient",
     reasonCode: "serverOverloaded",
-    source: "codexErrorInfo",
-    codexRetries: null,
+    source: "harness",
+    harnessRetries: null,
   });
   assert.equal(
     (evidence("thread", "rate-limit") as { classification: string })

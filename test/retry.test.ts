@@ -116,8 +116,8 @@ const transientEvidence = (
   status: "failed",
   classification: "transient",
   reasonCode: "serverOverloaded",
-  source: "codexErrorInfo",
-  codexRetries: 0,
+  source: "harness",
+  harnessRetries: 0,
 });
 
 async function fixture(runtime: RetryFixtureRuntime) {
@@ -306,19 +306,19 @@ test("missing, mismatched, generic, permanent, or uncounted failure evidence nev
     },
     {
       name: "missing Codex retry telemetry",
-      evidence: { ...transientEvidence(), codexRetries: null },
+      evidence: { ...transientEvidence(), harnessRetries: null },
     },
     {
       name: "negative retry telemetry",
-      evidence: { ...transientEvidence(), codexRetries: -1 },
+      evidence: { ...transientEvidence(), harnessRetries: -1 },
     },
     {
       name: "invalid retry telemetry",
-      evidence: { ...transientEvidence(), codexRetries: 2.5 },
+      evidence: { ...transientEvidence(), harnessRetries: 2.5 },
     },
     {
       name: "Codex exhausted shared allowance",
-      evidence: { ...transientEvidence(), codexRetries: 2 },
+      evidence: { ...transientEvidence(), harnessRetries: 2 },
     },
   ];
 
@@ -396,11 +396,11 @@ test("reported Codex retry usage consumes the same persisted allowance", async (
   runtime.retryGate.resolve();
   runtime.failuresByTurn.set("turn-1", {
     ...transientEvidence(),
-    codexRetries: 1,
+    harnessRetries: 1,
   });
   runtime.failuresByTurn.set("turn-2", {
     ...transientEvidence(),
-    codexRetries: 1,
+    harnessRetries: 1,
   });
   runtime.outcomesByTurn.set("turn-1", "failed");
   runtime.outcomesByTurn.set("turn-2", "failed");
@@ -440,7 +440,7 @@ test("retry count and queued generation survive restart without duplicating work
   const firstRuntime = new RetryFixtureRuntime();
   const firstFailureGate = deferred<void>();
   firstRuntime.failureGate = firstFailureGate.promise;
-  firstRuntime.failure = { ...transientEvidence(), codexRetries: 1 };
+  firstRuntime.failure = { ...transientEvidence(), harnessRetries: 1 };
   const f = await fixture(firstRuntime);
   const scheduler = (f.service as unknown as { scheduler: { stop(): void } })
     .scheduler;
@@ -467,7 +467,7 @@ test("retry count and queued generation survive restart without duplicating work
     await f.service.stop();
 
     const secondRuntime = new RetryFixtureRuntime();
-    secondRuntime.failure = { ...transientEvidence(), codexRetries: 1 };
+    secondRuntime.failure = { ...transientEvidence(), harnessRetries: 1 };
     const restarted = new StandaloneService(
       join(f.root, "data"),
       () => secondRuntime,
@@ -544,8 +544,9 @@ test("failed-generation release is atomic, idempotent, and stale proof cannot re
       terminalStatus: "failed" as const,
       classification: "transient" as const,
       reasonCode: "serverOverloaded" as const,
-      source: "codexErrorInfo" as const,
-      codexRetries: 0,
+      harness: "codex" as const,
+      source: "harness" as const,
+      harnessRetries: 0,
       callbacksEnded: true,
       noSurvivor: true,
       effects: "settled" as const,

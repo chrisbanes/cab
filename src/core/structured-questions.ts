@@ -119,7 +119,7 @@ export type NativeInputEndpointIdentity = z.infer<
 >;
 export const nativeInputQualificationSchema = z
   .object({
-    codexVersion: z.literal("codex-cli 0.159.0"),
+    codexVersion: z.string().min(1).max(128),
     executableHash: z.string().regex(/^[a-f0-9]{64}$/),
     threadId: questionIdentity,
     runtimeGeneration: questionIdentity,

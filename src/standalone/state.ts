@@ -13,6 +13,11 @@ import {
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import {
+  defaultExecutionHarness,
+  type ExecutionHarness,
+  executionHarnessSchema,
+} from "./execution-harness.js";
 import { transaction, type Database } from "../core/store.js";
 import type { ReconciledAssignmentProof } from "../core/coordination.js";
 import type {
@@ -82,6 +87,10 @@ export interface TaskExecutionContext {
 export interface TaskExecutionBinding extends TaskExecutionContext {
   workId: string;
   conversationRevision: number;
+}
+
+export interface TaskExecutionBindingRecord extends TaskExecutionBinding {
+  harness: ExecutionHarness;
 }
 
 export interface TaskTurnCaptureIdentity extends TaskExecutionBinding {
@@ -157,6 +166,16 @@ export interface WorkspaceNormalizationRow {
 const runtimeTerminalFailureEvidenceSchema = z
   .object({
     classification: z.enum(["transient", "permanent", "unknown"]),
+    reasonCode: z.string().min(1).max(64),
+    source: z.enum(["harness", "missing"]),
+    harnessRetries: z.number().int().nonnegative().safe().nullable(),
+  })
+  .strict();
+
+/** Rows written before harness-neutral evidence carried Codex field names. */
+const legacyRuntimeTerminalFailureEvidenceSchema = z
+  .object({
+    classification: z.enum(["transient", "permanent", "unknown"]),
     reasonCode: z.enum([
       "contextWindowExceeded",
       "sessionBudgetExceeded",
@@ -177,7 +196,19 @@ const runtimeTerminalFailureEvidenceSchema = z
     source: z.enum(["codexErrorInfo", "missing"]),
     codexRetries: z.number().int().nonnegative().safe().nullable(),
   })
-  .strict();
+  .strict()
+  .transform(
+    ({ source, codexRetries, ...rest }): RuntimeTerminalFailureEvidence => ({
+      ...rest,
+      source: source === "codexErrorInfo" ? "harness" : "missing",
+      harnessRetries: codexRetries,
+    }),
+  );
+
+const storedRuntimeTerminalFailureEvidenceSchema =
+  runtimeTerminalFailureEvidenceSchema.or(
+    legacyRuntimeTerminalFailureEvidenceSchema,
+  );
 
 const runtimeTerminalEvidenceRowSchema = z
   .object({
@@ -194,6 +225,7 @@ const runtimeTerminalEvidenceRowSchema = z
     firstObservedAt: z.number().int().nonnegative().nullable(),
     lastObservedAt: z.number().int().nonnegative().nullable(),
     failureEvidence: z.string().max(256).nullable(),
+    harness: executionHarnessSchema,
   })
   .strict();
 
@@ -202,7 +234,7 @@ function parseRuntimeTerminalEvidence(input: unknown): RuntimeTerminalEvidence {
   const failure: RuntimeTerminalFailureEvidence | null =
     row.failureEvidence === null
       ? null
-      : runtimeTerminalFailureEvidenceSchema.parse(
+      : storedRuntimeTerminalFailureEvidenceSchema.parse(
           JSON.parse(row.failureEvidence),
         );
   if (failure !== null && row.firstStatus !== "failed")
@@ -230,6 +262,7 @@ const runtimeThreadQualificationSchema = z
       .string()
       .regex(/^[a-f0-9]{64}$/)
       .nullable(),
+    harness: executionHarnessSchema,
   })
   .strict();
 
@@ -276,8 +309,9 @@ export interface FailureResolutionEvidence {
   terminalStatus: "failed";
   classification: "transient";
   reasonCode: "serverOverloaded" | "rateLimitExceeded";
-  source: "codexErrorInfo";
-  codexRetries: number;
+  harness: ExecutionHarness;
+  source: "harness";
+  harnessRetries: number;
   callbacksEnded: true;
   noSurvivor: true;
   effects: "settled";
@@ -289,9 +323,14 @@ export interface FailedGenerationResolution {
   retryWorkId: string;
   retryIndex: number;
   ensembleRetriesUsed: number;
-  codexRetriesUsed: number;
+  harnessRetriesUsed: number;
   nextEligibleAt: number;
 }
+
+/** Stored retry rows keep their original Codex-named column values. */
+const retryFailureSource: Record<ExecutionHarness, "codexErrorInfo"> = {
+  codex: "codexErrorInfo",
+};
 
 const failureResolutionSchema = z
   .object({
@@ -303,8 +342,9 @@ const failureResolutionSchema = z
     terminalStatus: z.literal("failed"),
     classification: z.literal("transient"),
     reasonCode: z.enum(["serverOverloaded", "rateLimitExceeded"]),
-    source: z.literal("codexErrorInfo"),
-    codexRetries: z.number().int().nonnegative().safe(),
+    harness: executionHarnessSchema,
+    source: z.literal("harness"),
+    harnessRetries: z.number().int().nonnegative().safe(),
     callbacksEnded: z.literal(true),
     noSurvivor: z.literal(true),
     effects: z.literal("settled"),
@@ -368,7 +408,8 @@ export class ExecutionState {
       workId TEXT PRIMARY KEY REFERENCES execution_intents(workId),
       taskId TEXT NOT NULL, assignmentId TEXT NOT NULL,
       assignmentVersion INTEGER NOT NULL, instructionsRevision INTEGER NOT NULL,
-      profileRevision INTEGER NOT NULL, conversationRevision INTEGER NOT NULL
+      profileRevision INTEGER NOT NULL, conversationRevision INTEGER NOT NULL,
+      harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64)
     );
     CREATE TABLE IF NOT EXISTS task_writer_holds (
       taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
@@ -505,6 +546,7 @@ export class ExecutionState {
       firstObservedAt INTEGER,
       lastObservedAt INTEGER,
       failureEvidence TEXT CHECK(failureEvidence IS NULL OR length(failureEvidence) <= 256),
+      harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64),
       PRIMARY KEY(threadId, turnId),
       CHECK((firstStatus IS NULL AND firstRuntimeGeneration IS NULL AND
         firstObservedAt IS NULL) OR (firstStatus IS NOT NULL AND
@@ -522,7 +564,8 @@ export class ExecutionState {
       modelProvider TEXT,
       reasoningEffort TEXT,
       serviceTier TEXT,
-      developerInstructionsDigest TEXT
+      developerInstructionsDigest TEXT,
+      harness TEXT NOT NULL DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64)
     );
     CREATE TABLE IF NOT EXISTS runtime_retention_migrations (
       migrationId TEXT PRIMARY KEY
@@ -577,6 +620,19 @@ export class ExecutionState {
       this.db.exec(`ALTER TABLE execution_recovery_identities
         ADD COLUMN terminalEvidenceObserved INTEGER NOT NULL DEFAULT 0
         CHECK(terminalEvidenceObserved IN (0,1))`);
+    for (const table of [
+      "task_execution_bindings",
+      "runtime_terminal_evidence",
+      "runtime_thread_qualification",
+    ]) {
+      const columns = this.db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all() as Array<{ name: string }>;
+      // Rows written before harness selection existed were all Codex executions.
+      if (!columns.some(({ name }) => name === "harness"))
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN harness TEXT NOT NULL
+          DEFAULT 'codex' CHECK(length(harness) BETWEEN 1 AND 64)`);
+    }
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
     // Workspace recovery runs before this state is opened. Keep the archival
@@ -974,7 +1030,9 @@ export class ExecutionState {
   bindTask(
     workId: string,
     context: TaskExecutionContext,
-  ): TaskExecutionBinding {
+    harness: ExecutionHarness = defaultExecutionHarness,
+  ): TaskExecutionBindingRecord {
+    const executionHarness = executionHarnessSchema.parse(harness);
     const input = z
       .object({
         taskId: z.string().uuid(),
@@ -1000,8 +1058,8 @@ export class ExecutionState {
     );
     this.db
       .prepare(`INSERT OR IGNORE INTO task_execution_bindings
-      (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision)
-      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision, harness)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
       .run(
         workId,
         input.taskId,
@@ -1010,6 +1068,7 @@ export class ExecutionState {
         input.instructionsRevision,
         input.profileRevision,
         revision,
+        executionHarness,
       );
     const binding = this.taskBinding(workId);
     if (
@@ -1045,8 +1104,14 @@ export class ExecutionState {
     const current = this.taskBinding(workId);
     if (
       !current ||
-      Object.entries({ ...input, workId, conversationRevision: revision }).some(
-        ([key, value]) => current[key as keyof TaskExecutionBinding] !== value,
+      Object.entries({
+        ...input,
+        workId,
+        conversationRevision: revision,
+        harness: executionHarness,
+      }).some(
+        ([key, value]) =>
+          current[key as keyof TaskExecutionBindingRecord] !== value,
       )
     )
       throw new Error(
@@ -1069,10 +1134,13 @@ export class ExecutionState {
     return current;
   }
 
-  taskBinding(workId: string): TaskExecutionBinding | undefined {
-    return this.db
+  taskBinding(workId: string): TaskExecutionBindingRecord | undefined {
+    const row = this.db
       .prepare("SELECT * FROM task_execution_bindings WHERE workId = ?")
-      .get(workId) as TaskExecutionBinding | undefined;
+      .get(workId) as (TaskExecutionBinding & { harness: unknown }) | undefined;
+    return (
+      row && { ...row, harness: executionHarnessSchema.parse(row.harness) }
+    );
   }
 
   taskTurnCaptureIdentity(workId: string): TaskTurnCaptureIdentity | undefined {
@@ -1707,7 +1775,9 @@ export class ExecutionState {
 
   recordRuntimeTerminal(
     input: RuntimeTerminalObservation,
+    harness: ExecutionHarness = defaultExecutionHarness,
   ): RuntimeTerminalEvidence {
+    const executionHarness = executionHarnessSchema.parse(harness);
     const value = z
       .object({
         threadId: z.string().min(1).max(512),
@@ -1727,7 +1797,7 @@ export class ExecutionState {
               classification: "unknown",
               reasonCode: "unknown",
               source: "missing",
-              codexRetries: null,
+              harnessRetries: null,
             },
           )
         : null;
@@ -1770,8 +1840,8 @@ export class ExecutionState {
           .prepare(`INSERT INTO runtime_terminal_evidence
             (threadId, turnId, firstStatus, conflicted, workId,
               firstRuntimeGeneration, lastRuntimeGeneration,
-              firstObservedAt, lastObservedAt, failureEvidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+              firstObservedAt, lastObservedAt, failureEvidence, harness)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
           .run(
             value.threadId,
             value.turnId,
@@ -1783,6 +1853,7 @@ export class ExecutionState {
             observedAt,
             observedAt,
             failureEvidence,
+            executionHarness,
           );
         if (matches.length === 1) {
           const marked = this.db
@@ -1796,6 +1867,8 @@ export class ExecutionState {
         }
       } else {
         const prior = parseRuntimeTerminalEvidence(rawPrior);
+        if (prior.harness !== executionHarness)
+          throw new Error("Runtime terminal evidence harness conflicts");
         const bindingMismatch =
           (matches.length > 1 && prior.workId !== null) ||
           (workId !== null && prior.workId !== null && workId !== prior.workId);
@@ -1836,7 +1909,12 @@ export class ExecutionState {
     return parseRuntimeTerminalEvidence(record);
   }
 
-  registerRuntimeThreadTools(threadId: string, toolDigest: string): void {
+  registerRuntimeThreadTools(
+    threadId: string,
+    toolDigest: string,
+    harness: ExecutionHarness = defaultExecutionHarness,
+  ): void {
+    const executionHarness = executionHarnessSchema.parse(harness);
     const id = z.string().min(1).max(512).parse(threadId);
     const digest = z
       .string()
@@ -1844,12 +1922,16 @@ export class ExecutionState {
       .parse(toolDigest);
     const inserted = this.db
       .prepare(
-        "INSERT OR IGNORE INTO runtime_thread_qualification (threadId, toolDigest) VALUES (?, ?)",
+        "INSERT OR IGNORE INTO runtime_thread_qualification (threadId, toolDigest, harness) VALUES (?, ?, ?)",
       )
-      .run(id, digest) as { changes: number };
+      .run(id, digest, executionHarness) as { changes: number };
     if (inserted.changes === 0) {
       const existing = this.runtimeThreadQualification(id);
-      if (!existing || existing.toolDigest !== digest)
+      if (
+        !existing ||
+        existing.toolDigest !== digest ||
+        existing.harness !== executionHarness
+      )
         throw new Error("Runtime thread tool baseline conflicts");
     }
   }
@@ -1859,7 +1941,7 @@ export class ExecutionState {
   ): RuntimeThreadQualification | null {
     const row = this.db
       .prepare(
-        "SELECT threadId, toolDigest, codexVersion, executableHash, model, modelProvider, reasoningEffort, serviceTier, developerInstructionsDigest FROM runtime_thread_qualification WHERE threadId = ?",
+        "SELECT threadId, toolDigest, codexVersion, executableHash, model, modelProvider, reasoningEffort, serviceTier, developerInstructionsDigest, harness FROM runtime_thread_qualification WHERE threadId = ?",
       )
       .get(z.string().min(1).max(512).parse(threadId));
     return row === undefined
@@ -1934,6 +2016,7 @@ export class ExecutionState {
           threadId: value.threadId,
           toolDigest: value.toolDigest,
           ...qualification,
+          harness: prior.harness,
         })
     )
       throw new Error("Runtime thread qualification could not be persisted");
@@ -4140,8 +4223,8 @@ export class ExecutionState {
           committed.threadId !== value.threadId ||
           committed.turnId !== value.turnId ||
           committed.reasonCode !== value.reasonCode ||
-          committed.failureSource !== value.source ||
-          committed.codexRetries !== value.codexRetries
+          committed.failureSource !== retryFailureSource[value.harness] ||
+          committed.codexRetries !== value.harnessRetries
         )
           throw new Error(
             "Retry resolution proof does not match the committed generation",
@@ -4151,7 +4234,7 @@ export class ExecutionState {
           retryWorkId: committed.retryWorkId,
           retryIndex: committed.retryIndex,
           ensembleRetriesUsed: committed.ensembleRetriesUsed,
-          codexRetriesUsed: committed.codexRetriesUsed,
+          harnessRetriesUsed: committed.codexRetriesUsed,
           nextEligibleAt: committed.nextEligibleAt,
         };
       }
@@ -4344,8 +4427,8 @@ export class ExecutionState {
           priorAttempt.threadId !== value.threadId ||
           priorAttempt.turnId !== value.turnId ||
           priorAttempt.reasonCode !== value.reasonCode ||
-          priorAttempt.failureSource !== value.source ||
-          priorAttempt.codexRetries !== value.codexRetries
+          priorAttempt.failureSource !== retryFailureSource[value.harness] ||
+          priorAttempt.codexRetries !== value.harnessRetries
         )
           throw new Error(
             "Retry attempt evidence conflicts with the recorded terminal failure",
@@ -4353,13 +4436,14 @@ export class ExecutionState {
         return undefined;
       }
 
-      const codexRetriesUsed = chain.codexRetriesUsed + value.codexRetries;
+      const failureSource = retryFailureSource[value.harness];
+      const harnessRetriesUsed = chain.codexRetriesUsed + value.harnessRetries;
       const ensembleRetriesUsed = chain.ensembleRetriesUsed + 1;
-      if (codexRetriesUsed + ensembleRetriesUsed > 2) {
+      if (harnessRetriesUsed + ensembleRetriesUsed > 2) {
         this.db
           .prepare(`UPDATE execution_retry_chains SET codexRetriesUsed = ?,
           nextEligibleAt = NULL WHERE chainId = ?`)
-          .run(codexRetriesUsed, generation.chainId);
+          .run(harnessRetriesUsed, generation.chainId);
         this.db
           .prepare(`INSERT INTO execution_retry_attempts
           (workId, chainId, workRevision, requestSequence, threadId, turnId,
@@ -4373,8 +4457,8 @@ export class ExecutionState {
             value.threadId,
             value.turnId,
             value.reasonCode,
-            value.source,
-            value.codexRetries,
+            failureSource,
+            value.harnessRetries,
             Date.now(),
           );
         return undefined;
@@ -4396,9 +4480,9 @@ export class ExecutionState {
       this.db
         .prepare(`INSERT INTO task_execution_bindings
         (workId, taskId, assignmentId, assignmentVersion, instructionsRevision,
-          profileRevision, conversationRevision)
+          profileRevision, conversationRevision, harness)
         SELECT ?, taskId, assignmentId, assignmentVersion, instructionsRevision,
-          profileRevision, conversationRevision FROM task_execution_bindings
+          profileRevision, conversationRevision, harness FROM task_execution_bindings
         WHERE workId = ?`)
         .run(retryWorkId, value.workId);
       this.db
@@ -4447,7 +4531,7 @@ export class ExecutionState {
         codexRetriesUsed = ?, nextEligibleAt = ? WHERE chainId = ?`)
         .run(
           ensembleRetriesUsed,
-          codexRetriesUsed,
+          harnessRetriesUsed,
           value.nextEligibleAt,
           generation.chainId,
         );
@@ -4468,8 +4552,8 @@ export class ExecutionState {
           value.threadId,
           value.turnId,
           value.reasonCode,
-          value.source,
-          value.codexRetries,
+          failureSource,
+          value.harnessRetries,
           Date.now(),
         );
       this.db
@@ -4489,10 +4573,10 @@ export class ExecutionState {
           value.threadId,
           value.turnId,
           value.reasonCode,
-          value.source,
-          value.codexRetries,
+          failureSource,
+          value.harnessRetries,
           ensembleRetriesUsed,
-          codexRetriesUsed,
+          harnessRetriesUsed,
           value.nextEligibleAt,
           Date.now(),
         );
@@ -4511,7 +4595,7 @@ export class ExecutionState {
         retryWorkId,
         retryIndex,
         ensembleRetriesUsed,
-        codexRetriesUsed,
+        harnessRetriesUsed,
         nextEligibleAt: value.nextEligibleAt,
       };
     });
