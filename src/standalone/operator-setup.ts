@@ -138,7 +138,7 @@ export async function listHomeFolders(
     if (entry.kind !== "git") return;
     const dir = join(real, entry.name);
     try {
-      const origin = await checkoutOrigin(dir, probeEnv(), probeTimeout);
+      const origin = await checkoutOrigin(dir, probeTimeout);
       entry.origin = `${origin.owner}/${origin.name}`;
     } catch {}
     entry.branch = await currentBranch(dir, probeTimeout);

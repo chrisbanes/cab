@@ -11,6 +11,7 @@ import {
   DomainStore,
 } from "../src/core/domain.js";
 import {
+  checkoutOrigin,
   parseGitHubOrigin,
   verifiedRepository,
 } from "../src/core/github-source.js";
@@ -18,6 +19,11 @@ import {
   OperatorApi,
   OperatorApiError,
 } from "../src/standalone/operator-api.js";
+import {
+  gitEnvironmentProbe,
+  hardenedGitEnvironment,
+  withHostileGitEnvironment,
+} from "./fixtures/git-environment.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { checkout, createSetupHome, git } from "./fixtures/setup-home.js";
 
@@ -283,6 +289,43 @@ test("the verifier reports typed reasons and keeps the no-origin path for config
     await reason(verifiedRepository(link(join(src, "atlas")))),
     "verified",
   );
+});
+
+test("repository verification ignores inherited GIT_* overrides", async (t) => {
+  const home = await createSetupHome();
+  const probe = gitEnvironmentProbe();
+  t.after(() => {
+    home.close();
+    probe.close();
+  });
+  const path = await realpath(join(home.home, "src", "atlas"));
+  const commonDirectory = await realpath(
+    (
+      await git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    ).stdout.trim(),
+  );
+  const hadGitDirectory = "GIT_DIR" in process.env;
+
+  const [verified, origin] = await withHostileGitEnvironment(() =>
+    probe.withPath(async () => [
+      await verifiedRepository(
+        { repositoryId: "R", path, ref: "main" },
+        { owner: "acme", name: "atlas" },
+      ),
+      await checkoutOrigin(path),
+    ]),
+  );
+
+  assert.equal(
+    (verified as { gitCommonDirectory: string }).gitCommonDirectory,
+    commonDirectory,
+  );
+  assert.deepEqual(origin, { owner: "acme", name: "atlas" });
+  const invocations = probe.invocations();
+  assert.ok(invocations.length >= 4, "every verification call is recorded");
+  for (const invocation of invocations)
+    assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
+  assert.equal("GIT_DIR" in process.env, hadGitDirectory);
 });
 
 test("unsafe refs, agents and legacy creates keep their existing boundaries", async (t) => {

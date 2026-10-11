@@ -1,4 +1,4 @@
-import { childProcessEnvironment } from "./child-environment.js";
+import { gitEnvironment } from "./child-environment.js";
 import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -144,7 +144,6 @@ export function parseGitHubOrigin(
 /** The `owner/name` of a checkout's origin, or the verification reason it fails with. */
 export async function checkoutOrigin(
   path: string,
-  env?: NodeJS.ProcessEnv,
   timeout = 5000,
 ): Promise<{ owner: string; name: string }> {
   let url: string;
@@ -153,7 +152,7 @@ export async function checkoutOrigin(
       await execFileAsync("git", ["-C", path, "remote", "get-url", "origin"], {
         encoding: "utf8",
         timeout,
-        env: env ?? childProcessEnvironment(),
+        env: gitEnvironment(),
       })
     ).stdout.trim();
   } catch {
@@ -186,7 +185,7 @@ export async function verifiedRepository(
       await execFileAsync(
         "git",
         ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        { encoding: "utf8", timeout: 5000, env: childProcessEnvironment() },
+        { encoding: "utf8", timeout: 5000, env: gitEnvironment() },
       )
     ).stdout.trim();
   } catch {
@@ -216,7 +215,7 @@ export async function verifiedRepository(
           "--verify",
           expectedOrigin ? `${input.ref}^{commit}` : input.ref,
         ],
-        { encoding: "utf8", timeout: 5000, env: childProcessEnvironment() },
+        { encoding: "utf8", timeout: 5000, env: gitEnvironment() },
       )
     ).stdout.trim();
   } catch {
