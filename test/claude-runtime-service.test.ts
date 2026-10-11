@@ -3,12 +3,23 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import {
+  ClaudeRuntime,
+  claudeTemporaryBase,
+} from "../src/standalone/claude.js";
 import type { Runtime } from "../src/standalone/codex.js";
 import type { ExecutionHarness } from "../src/standalone/execution-harness.js";
 import {
   type RuntimeSpawnContext,
   StandaloneService,
 } from "../src/standalone/service.js";
+import {
+  fakeSdk,
+  init,
+  result,
+  type Script,
+  sessionOf,
+} from "./fixtures/claude-sdk.js";
 import { tmpdir } from "./temp.js";
 
 /** Captures the spawn context; never starts a turn. */
@@ -397,4 +408,458 @@ test("a Claude preflight reason keeps work queued without admission, then the ne
   await service.provisionTask(codexTask);
   await waitUntil(() => runtimes.codex.startTurnArgs.length > 0, describe);
   assert.ok(runtimes.codex.startTurnArgs.every((args) => args.length === 3));
+});
+
+const T6_NAME = "FIXTURE_CLAUDE_T6_TOKEN_REF";
+const T6_TOKEN = "claude-t6-token-canary-7731";
+
+interface ClaudeHarnessControls {
+  selfTest: boolean;
+  verified: boolean;
+}
+
+/** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
+function claudeHarness(
+  dataDir: string,
+  scripts: Script[],
+  controls: ClaudeHarnessControls,
+) {
+  const codex = new SeamRuntime("codex", false);
+  const codexContexts: RuntimeSpawnContext[] = [];
+  const { sdk, sessions, queries } = fakeSdk(scripts, []);
+  const verifier = {
+    verify: async (identity: {
+      processId: string;
+      processStartedAt: string;
+      bootId: string;
+    }) =>
+      controls.verified
+        ? {
+            kind: "verified" as const,
+            processIdentity: identity,
+            verifiedAt: new Date().toISOString(),
+            method: "mac-pid-absent-same-boot" as const,
+          }
+        : { kind: "unknown" as const, reason: "unverifiable" },
+  };
+  const service = new StandaloneService(
+    dataDir,
+    (context, harness) => {
+      if (harness === "codex") {
+        codexContexts.push(context);
+        return codex;
+      }
+      assert.ok(context.claude);
+      return new ClaudeRuntime({
+        safety: context.safety,
+        claude: context.claude,
+        sdk,
+        captureProcessIdentity: async (pid) =>
+          pid
+            ? {
+                processId: String(pid),
+                processStartedAt: "Sat Oct 11 10:00:00 2026",
+                bootId: "claude-t6-boot",
+              }
+            : null,
+        terminationVerifier: verifier,
+        sandboxSelfTest: async () => controls.selfTest,
+        exitTimeoutMs: 2000,
+      });
+    },
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      power: { enabled: false },
+      routingClient: null,
+      terminationVerifier: verifier,
+      supervisor: { observationMs: 3000 },
+    },
+  );
+  const execute = (command: Record<string, unknown>) =>
+    service
+      .domain()
+      .execute({ key: randomUUID(), actor: "operator", ...command } as never);
+  const describe = () => ({
+    intents: service.list().map((i) => [i.workId, i.state, i.reason]),
+    requests: service.turnRequests().map((r) => [r.workId, r.state, r.reason]),
+    queries,
+  });
+  const intent = (workId: string) =>
+    service.list().find((item) => item.workId === workId);
+  const recovery = (workId: string) =>
+    service.recoveryView().find((record) => record.workId === workId);
+  const db = () =>
+    (service as unknown as { db: import("node:sqlite").DatabaseSync }).db;
+  const wake = () =>
+    (service as unknown as { wakeScheduler(): Promise<void> }).wakeScheduler();
+  /** A Codex lead project with one Claude worker profile. */
+  const setup = () => {
+    const lead = randomUUID();
+    const worker = randomUUID();
+    execute({
+      type: "profile.create",
+      profileId: lead,
+      name: "Codex lead",
+      instructions: "lead",
+      capabilities: "code",
+      runtime: { harness: "codex" },
+    });
+    execute({
+      type: "profile.create",
+      profileId: worker,
+      name: "Claude worker",
+      instructions: "build",
+      capabilities: "code",
+      runtime: { harness: "claude", model: "haiku", reasoningEffort: "low" },
+    });
+    const projectId = randomUUID();
+    execute({
+      type: "project.create",
+      projectId,
+      name: "T6",
+      leadProfileId: lead,
+    });
+    execute({
+      type: "project.configure",
+      projectId,
+      expectedVersion: 1,
+      paused: false,
+    });
+    execute({
+      type: "routing.configure",
+      projectId,
+      expectedVersion: 1,
+      enabled: false,
+      guidance: "",
+      candidateProfileIds: [worker],
+    });
+    return { projectId, worker };
+  };
+  /** A ready task with one Claude assignment; returns its work ID. */
+  const claudeTask = async (projectId: string, worker: string) => {
+    const taskId = randomUUID();
+    execute({
+      type: "task.create",
+      projectId,
+      taskId,
+      title: "Claude",
+      outcome: "Claude work",
+      ready: false,
+    });
+    await service.provisionTask(taskId);
+    const assignmentId = randomUUID();
+    execute({
+      type: "assignment.create",
+      actor: "agent",
+      projectId,
+      taskId,
+      assignmentId,
+      profileId: worker,
+      brief: "Build",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
+    execute({
+      type: "task.configure",
+      projectId,
+      taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    return { taskId, workId: `assignment:${assignmentId}:initial` };
+  };
+  return {
+    service,
+    codex,
+    codexContexts,
+    sessions,
+    queries,
+    execute,
+    describe,
+    intent,
+    recovery,
+    db,
+    wake,
+    setup,
+    claudeTask,
+  };
+}
+
+async function claudeServiceRun(
+  t: { after: (fn: () => Promise<void> | void) => void },
+  scripts: Script[],
+  controls: ClaudeHarnessControls = { selfTest: true, verified: true },
+  token: string | undefined = T6_TOKEN,
+) {
+  withEnvironment(t, { [T6_NAME]: token });
+  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-t6-"));
+  const h = claudeHarness(join(root, "data"), scripts, controls);
+  t.after(async () => {
+    await h.service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  });
+  await h.service.start();
+  h.execute({
+    type: "claude-token.configure",
+    credentialRef: `env:${T6_NAME}`,
+  });
+  // Configured before this start, so the running runtimes never inherited it.
+  await h.service.stop();
+  await h.service.start();
+  return { ...h, root };
+}
+
+const releaseTemporaryBase = (workspace: string | undefined) => {
+  if (workspace)
+    rmSync(claudeTemporaryBase(workspace), { recursive: true, force: true });
+};
+
+test("a Claude assignment turn completes, its coordination call carries the hook ID, and only Claude sees the token", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      const args = { summary: "Claude finished" };
+      await session.hook(
+        "mcp__ensemble__ensemble_report_result",
+        args,
+        "toolu_t6a",
+      );
+      const outcome = (await session.callTool(
+        "ensemble_report_result",
+        args,
+      )) as {
+        isError: boolean;
+      };
+      assert.equal(outcome.isError, false);
+      yield result(sessionOf(session));
+    },
+  ]);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const receipts = run
+    .db()
+    .prepare("SELECT callId FROM coordination_receipts WHERE callId = ?")
+    .all("toolu_t6a");
+  assert.equal(receipts.length, 1);
+  const env = run.sessions[0]?.options.env;
+  assert.equal(env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+  assert.equal(env?.CLAUDE_CODE_OAUTH_TOKEN, T6_TOKEN);
+  const codexEnvironment = run.codexContexts.at(-1)?.spawnEnvironment();
+  assert.ok(codexEnvironment);
+  assert.equal(JSON.stringify(codexEnvironment).includes(T6_TOKEN), false);
+});
+
+test("a missing token or failed sandbox self-test keeps Claude work waiting without holds while Codex proceeds", async (t) => {
+  const controls = { selfTest: false, verified: true };
+  const run = await claudeServiceRun(
+    t,
+    [
+      async function* (session) {
+        yield init(sessionOf(session));
+        yield result(sessionOf(session));
+      },
+    ],
+    controls,
+    "",
+  );
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  const request = () =>
+    run.service.turnRequests().find((r) => r.workId === workId);
+  const assertWaiting = (reason: string) => {
+    assert.equal(request()?.reason, reason);
+    assert.equal(request()?.state, "queued");
+    assert.equal(run.intent(workId)?.state, "ready");
+    assert.equal(run.intent(workId)?.reason, reason);
+    assert.equal(run.recovery(workId)?.holds.writer ?? false, false);
+    assert.deepEqual(
+      run
+        .db()
+        .prepare(
+          "SELECT workId FROM execution_recovery_identities WHERE workId = ?",
+        )
+        .all(workId),
+      [],
+    );
+  };
+  const missing =
+    "Claude runtime unavailable: subscription token is unavailable";
+  await waitUntil(() => request()?.reason === missing, run.describe);
+  assertWaiting(missing);
+  // Codex work in the same service is not blocked.
+  const codexTask = randomUUID();
+  run.execute({
+    type: "task.create",
+    projectId,
+    taskId: codexTask,
+    title: "Codex",
+    outcome: "Codex lead",
+    ready: true,
+  });
+  await run.service.provisionTask(codexTask);
+  await waitUntil(() => run.codex.startTurnArgs.length > 0, run.describe);
+
+  process.env[T6_NAME] = T6_TOKEN;
+  await run.wake();
+  const sandbox = "Claude runtime unavailable: sandbox self-test failed";
+  await waitUntil(() => request()?.reason === sandbox, run.describe);
+  assertWaiting(sandbox);
+  assert.deepEqual(run.queries, []);
+
+  controls.selfTest = true;
+  await run.wake();
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+});
+
+test("an invalid Claude token fails the turn visibly as unauthorized and is not retried", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      yield result(sessionOf(session), {
+        is_error: true,
+        terminal_reason: "api_error",
+        result: "Not logged in · Please run /login",
+      });
+      throw new Error("Claude Code returned an error result: Not logged in");
+    },
+  ]);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(() => run.intent(workId)?.state === "held", run.describe);
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  assert.equal(
+    run.intent(workId)?.reason,
+    "Bound turn failed or was interrupted",
+  );
+  const evidence = run
+    .db()
+    .prepare(
+      "SELECT failureEvidence FROM runtime_terminal_evidence WHERE turnId = ?",
+    )
+    .get(run.intent(workId)?.turnId ?? "") as { failureEvidence: string };
+  assert.equal(JSON.parse(evidence.failureEvidence).reasonCode, "unauthorized");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(
+    run.queries.filter((query) => query === "turn"),
+    ["turn"],
+  );
+});
+
+test("losing the Claude process mid-tool holds the work with its writer and capacity", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      yield {
+        type: "assistant",
+        uuid: "t6-tool",
+        message: {
+          content: [{ type: "tool_use", id: "toolu_lost", name: "Bash" }],
+        },
+      };
+      session.child.kill("SIGKILL");
+      await session.waitForExit();
+      throw new Error("Claude Code process terminated by signal SIGKILL");
+    },
+  ]);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(() => run.intent(workId)?.state === "held", run.describe);
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const holds = run.recovery(workId)?.holds;
+  assert.deepEqual([holds?.writer, holds?.capacity], [true, true]);
+});
+
+for (const verified of [true, false])
+  test(`Stop of a running Claude turn ${verified ? "observes its terminal" : "keeps the hold when exit is unverified"}`, async (t) => {
+    const controls = { selfTest: true, verified };
+    let streaming!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      streaming = resolve;
+    });
+    const run = await claudeServiceRun(
+      t,
+      [
+        async function* (session) {
+          yield init(sessionOf(session));
+          streaming();
+          await new Promise(() => {});
+        },
+      ],
+      controls,
+    );
+    const { projectId, worker } = run.setup();
+    const { taskId, workId } = await run.claudeTask(projectId, worker);
+    await reached;
+    await waitUntil(
+      () => run.intent(workId)?.state === "running",
+      run.describe,
+    );
+    {
+      const base = run.intent(workId)?.workspace;
+      t.after(() => releaseTemporaryBase(base));
+    }
+    const stopped = await run.service.stopTask(taskId);
+    const outcome = stopped.outcomes.find((item) => item.workId === workId);
+    assert.equal(outcome?.interrupt, "acknowledged");
+    if (verified) assert.equal(outcome?.terminal, "observed");
+    else {
+      await waitUntil(() => run.intent(workId)?.state === "held", run.describe);
+      assert.equal(run.recovery(workId)?.holds.writer, true);
+    }
+  });
+
+test("a restart with a running Claude execution holds it as unknown", async (t) => {
+  const scripts: Script[] = [
+    async function* (session) {
+      yield init(sessionOf(session));
+      await new Promise(() => {});
+    },
+  ];
+  const run = await claudeServiceRun(t, scripts);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(() => run.intent(workId)?.state === "running", run.describe);
+  const workspace = run.intent(workId)?.workspace;
+  t.after(() => releaseTemporaryBase(workspace));
+  const identity = run.recovery(workId)?.processIdentity;
+  assert.ok(identity);
+  await run.service.stop();
+  const restarted = claudeHarness(join(run.root, "data"), [], {
+    selfTest: true,
+    verified: true,
+  });
+  t.after(() => restarted.service.stop().catch(() => {}));
+  await restarted.service.start();
+  const record = restarted.recovery(workId);
+  assert.equal(record?.intent.state, "held");
+  assert.deepEqual(
+    record?.observations.map((observation) => observation.kind),
+    ["unknown"],
+  );
+  assert.deepEqual(
+    [record?.holds.writer, record?.holds.capacity, record?.holds.uncertainty],
+    [true, true, true],
+  );
 });
