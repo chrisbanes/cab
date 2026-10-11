@@ -42,7 +42,10 @@ credentials: the value stays in the service environment and is never stored or
 rendered back. The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
 resolves the reference at turn start and passes the token only into the Claude
 subprocess environment, never into Codex or other spawn environments, and never
-logs it. An invalid token is detected at turn start. Operator setup, clearing and
+logs it. As with delivery credentials, the token is excluded from those
+environments including nonempty exact-value aliases, and configuring a token
+reference already inherited by a running runtime holds activation until restart.
+An invalid token is detected at turn start. Operator setup, clearing and
 configured/available status belong to the harness UI
 ([#826](https://github.com/chrisbanes/ensemble/issues/826)).
 
