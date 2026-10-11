@@ -133,7 +133,7 @@ export function ProjectSetup(p: SettingsProps) {
   }, [discoveredRepos.join("\n"), p.client, attempt]);
 
   // GitHub Projects linked to every chosen repository, then their owners' others.
-  // Each repository is read once per round, so reads are bounded by the 20 rows.
+  // Each distinct chosen repository is read once per round (Retry starts a new round).
   const projectRepos = [...new Set(discoveredRepos)];
   const projectKey = projectRepos.join(", ");
   const [projectReads, setProjectReads] = useState<Record<string, Projects>>(
@@ -191,7 +191,7 @@ export function ProjectSetup(p: SettingsProps) {
       !locked(d)
     )
       d.set("githubProject", projectList.linked[0]?.projectNodeId ?? "");
-  }, [projectList?.linked.length, projectKey]);
+  }, [projectList?.linked.length, projectKey, chosenProject]);
 
   // Advisory checkout verification; the service verifies again on create.
   const [verifications, setVerifications] = useState<
@@ -736,7 +736,7 @@ export function ProjectSetup(p: SettingsProps) {
               A project can have up to 20 repositories.
             </p>
           )}
-          {!blankRow(rows[0] ?? emptyRow("typed")) && rows.length < 20 && (
+          {rows.some((r) => !blankRow(r)) && rows.length < 20 && (
             <div>
               <Button
                 type="button"
@@ -860,7 +860,7 @@ function ProjectChoice({
         : data.state === "unavailable"
           ? `${discoveryReasonCopy(data.reason)} Link a Project later in project configuration.`
           : data.linked.length === 1 && value === data.linked[0]?.projectNodeId
-            ? `Found automatically: 1 GitHub Project linked to ${repo}. Linking adds an inactive discovery source; preview and readiness follow in project configuration.`
+            ? `Found automatically: 1 GitHub Project linked to ${data.linked[0]?.repo ?? repo}. Linking adds an inactive discovery source; preview and readiness follow in project configuration.`
             : `${data.linked.length} GitHub Project${data.linked.length === 1 ? "" : "s"} linked to ${repo}${data.linked.length ? `: ${data.linked.map((x) => x.title).join(", ")}` : ""} · ${data.owned.length} more owned by ${data.ownerLogin}. Linking one adds an inactive discovery source; preview and readiness follow in project configuration.`;
   const partial =
     data?.state === "ready" && data.failure

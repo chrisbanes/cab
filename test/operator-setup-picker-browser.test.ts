@@ -100,7 +100,7 @@ test("Folder picker lists home folders, selects checkouts and keeps paths privat
   await dialog.getByLabel("Or enter a path").press("Enter");
   await dialog
     .getByText(
-      "Folders outside your home folder can't be browsed. Type a path instead.",
+      "Hidden folders and folders outside your home folder can't be browsed. Type a path instead.",
     )
     .waitFor();
   await page.keyboard.press("Escape");

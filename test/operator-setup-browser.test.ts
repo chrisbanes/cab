@@ -569,10 +569,9 @@ test("Setup lists GitHub Projects linked to every chosen repository once", async
   await repositories.nth(1).selectOption({ label: "acme/atlas" });
   // atlas is the second row, yet its linked Project is found and preselected.
   await page
-    .getByText(
-      "Found automatically: 1 GitHub Project linked to acme/relay, acme/atlas.",
-      { exact: false },
-    )
+    .getByText("Found automatically: 1 GitHub Project linked to acme/atlas.", {
+      exact: false,
+    })
     .waitFor();
   assert.equal(await project.inputValue(), "PVT_atlas");
   const options = await project.locator("option").allTextContents();

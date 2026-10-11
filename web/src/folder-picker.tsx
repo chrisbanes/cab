@@ -21,9 +21,9 @@ type Listing =
 
 const failure = (error: unknown) =>
   error instanceof ClientError && error.status === 400
-    ? "Enter a folder as ~/… without . or .. segments."
+    ? "Enter a folder as ~/… without hidden (.name) or .. segments."
     : error instanceof ClientError && error.status === 403
-      ? "Folders outside your home folder can't be browsed. Type a path instead."
+      ? "Hidden folders and folders outside your home folder can't be browsed. Type a path instead."
       : error instanceof ClientError && error.status === 404
         ? "This folder doesn't exist. Type a path instead."
         : "Folders couldn't be listed. Type a path instead.";
