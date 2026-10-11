@@ -329,9 +329,8 @@ export async function applyFile(
     type: document.kind,
     key,
   };
-  const earlier = (await ctx.journal.state(identity))?.state;
   // Only an attempt that may have reached the service can make an existing ID ours.
-  if (creation && !["sending", "unknown", "recorded"].includes(earlier ?? "")) {
+  if (creation && !(await ctx.journal.state(identity))?.reached) {
     // A duplicate ID with a fresh key is not yet a typed service error.
     const path = `/api/operator/${AREA[document.kind]}s/${document.target.id}/configuration`;
     const exists = await session.client

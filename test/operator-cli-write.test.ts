@@ -296,10 +296,16 @@ test("the journal finds earlier keys, keeps concurrent lines and fails closed", 
   const retry = randomUUID();
   await a.append(identity(retry), "digest-3", "sending");
   assert.equal(await a.find(service, "digest-3"), retry);
+  // A rejected retry of a key that may have been applied keeps the key.
+  await a.append(identity(retry), "digest-3", "unknown");
+  await a.append(identity(retry), "digest-3", "rejected");
+  assert.equal(await a.find(service, "digest-3"), retry);
+  assert.equal((await a.state(identity(retry)))?.reached, true);
   await b.append(identity(keys[7] ?? ""), "digest-7", "unknown");
   assert.deepEqual(await a.state(identity(keys[7] ?? "")), {
     state: "unknown",
     digest: "digest-7",
+    reached: true,
   });
 
   const blocked = join(dir, "blocked");
@@ -449,6 +455,7 @@ test("operation get reads receipts by scope and type only", async (t) => {
   assert.deepEqual(await journal.state(request), {
     state: "recorded",
     digest: "e".repeat(64),
+    reached: true,
   });
   r = await h.run(args);
   assert.equal(r.code, 0);

@@ -51,8 +51,11 @@ async function setup(t: After) {
     return path;
   };
   const out = (name = `${randomUUID()}.json`) => join(h.dir, name);
-  const cli = (connection: "ro" | "rw", args: string[]) =>
-    h.run([...args, "--connection", connection, "--output", "json"]);
+  const cli = (
+    connection: "ro" | "rw",
+    args: string[],
+    extra: Parameters<typeof h.run>[1] = {},
+  ) => h.run([...args, "--connection", connection, "--output", "json"], extra);
   const journal = () => {
     const path = join(h.configDir, "requests.jsonl");
     return existsSync(path)
@@ -353,6 +356,52 @@ test("project changes and creation apply exactly once", async (t) => {
   r = await cli("rw", ["profile", "apply", "--file", profile]);
   assert.equal(r.code, 0, r.err + r.out);
   assert.equal(r.json().data.receipt.result.version, 1);
+
+  // Lost reply (unknown), then a retry rejected before sending: the next bare apply
+  // keeps the key, skips the existence pre-check and replays the recorded receipt.
+  const lostId = randomUUID();
+  const lostDoc = out();
+  r = await cli("ro", [
+    "profile",
+    "prepare-create",
+    "--name",
+    "Lost",
+    "--instructions-file",
+    file("lost.md", "Lost reply"),
+    "--id",
+    lostId,
+    "--out",
+    lostDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const commands = (input: Parameters<typeof fetch>[0]) =>
+    String(input).endsWith("/api/operator/commands");
+  r = await cli("rw", ["profile", "apply", "--file", lostDoc], {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (commands(input))
+        throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+      return response;
+    },
+  });
+  assert.equal(r.code, 6, r.out);
+  const lostKey = r.json().error.request.key;
+  r = await cli("rw", ["profile", "apply", "--file", lostDoc], {
+    fetch: async (input, init) => {
+      if (commands(input))
+        throw new TypeError("fetch failed", {
+          cause: { code: "ECONNREFUSED" },
+        });
+      return fetch(input, init);
+    },
+  });
+  assert.equal(r.code, 5, r.out);
+  assert.equal(r.json().error.request.key, lostKey);
+  r = await cli("rw", ["profile", "apply", "--file", lostDoc]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().request.key, lostKey);
+  assert.equal(r.json().data.receipt.result.version, 1);
+  assert.equal(Number(d.profile(lostId).version), 1);
   assert.equal(h.outputs.length > 0, true);
 });
 
