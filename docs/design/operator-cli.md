@@ -117,9 +117,13 @@ silently substitute newer material or overwrite concurrent edits.
 
 Configuration preparation produces a local, inspectable change document containing
 the service identity, target IDs, expected revisions, exact proposed fields and
-a digest. The diff identifies affected assignments and the potential for work to
-become stale. Applying revalidates identity, digest, revision and service policy;
-it does not re-read a changed instructions file and substitute its contents.
+a digest. The diff identifies assignments affected at preparation time, labels
+that list with its observation time and explains the potential for work to become
+stale. The list is informational, not an apply-time fence: assignments created
+after preparation may also become stale or held under existing admission rules.
+Creating an assignment alone does not invalidate the prepared configuration change.
+Applying revalidates identity, digest, revision and service policy; it does not
+re-read a changed instructions file and substitute its contents.
 Change documents may contain private instructions and use owner-only file access.
 
 Edits preserve immutable prior revisions. Restoring previous content prepares
