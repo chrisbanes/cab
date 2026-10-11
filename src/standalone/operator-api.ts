@@ -92,6 +92,7 @@ import {
   DiagnosticCursorError,
   type DiagnosticExecution,
   type DiagnosticItem,
+  type ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
   type ConversationHistoryBinding,
@@ -3012,8 +3013,7 @@ export class OperatorApi {
       throw new OperatorApiError(400, "invalid-input");
     const request = this.service.turnRequest(workId);
     if (
-      !request ||
-      request.kind !== "assignment" ||
+      request?.kind !== "assignment" ||
       !request.taskId ||
       !request.assignmentId
     )
@@ -3412,7 +3412,7 @@ export class OperatorApi {
       const { taskId, projectId, record } = this.requireExecution(workId);
       const excluded = await this.exclusions(projectId, taskId);
       const store = this.service.executionDiagnostics();
-      let page;
+      let page: ReturnType<ExecutionDiagnosticsStore["events"]> | undefined;
       try {
         page = record
           ? store?.events(workId, {
