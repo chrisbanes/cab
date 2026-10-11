@@ -7,6 +7,7 @@ import {
 } from "./fixtures/browser-diagnostics.js";
 import { signOutFromSidebar } from "./fixtures/operator-account.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
+import { choiceForm } from "./fixtures/question-data.js";
 import { taskSchema, type TaskRead } from "../src/operator/contracts.js";
 import {
   seedOwnApproval,
@@ -732,4 +733,134 @@ test("returning to the Inbox restores the request the operator chose, not the on
     "true",
   );
   assert.equal(await rows.first().getAttribute("aria-pressed"), "false");
+});
+
+const pausedHold = "Project paused",
+  pausedDetail = "Task paused. Recording answers does not resume execution.";
+const seedHeldQuestions =
+  (...titles: string[]) =>
+  async (f: Fixture) => {
+    const seeded = [];
+    // seedOwnQuestion leaves each task in a paused project.
+    for (const [i, title] of titles.entries())
+      seeded.push(await seedOwnQuestion(f, choiceForm, title, projects[i % 3]));
+    return seeded;
+  };
+
+test("an Inbox question in a paused project shows its hold in the footer, records, and keeps the hold", async (_t, j) => {
+  const { page, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    seedHeldQuestions("Paused question", "Unread holds question"),
+  );
+  const form = page.getByRole("region", { name: "Exact question response" }),
+    footer = form.locator(".question-submit");
+  await page.locator(".inbox-row", { hasText: "Paused question" }).click();
+  await footer.getByText(pausedHold, { exact: true }).waitFor();
+  await footer.getByText(pausedDetail).waitFor();
+  assert.equal(await footer.getByText(/Approv/).count(), 0);
+  await captureBrowserEvidence(page, "1366-inbox-question-hold", {
+    fullPage: false,
+  });
+  await form.getByRole("radio", { name: /^Team owners/ }).check();
+  await footer.getByRole("button", { name: "Submit answer" }).click();
+  await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+  // The recorded confirmation replaces the footer; the same notices stay on it.
+  const recorded = form.locator(".question-recorded");
+  await recorded.getByText(pausedHold, { exact: true }).waitFor();
+  await recorded.getByText(pausedDetail).waitFor();
+
+  // A task read that fails shows no hold and does not block answering.
+  const taskUrl = `**/api/operator/tasks/${more[1]!.taskId}`;
+  await page.route(taskUrl, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  try {
+    await page
+      .locator(".inbox-row", { hasText: "Unread holds question" })
+      .click();
+    await footer.getByRole("button", { name: "Submit answer" }).waitFor();
+    await settle(page);
+    assert.equal(await page.getByText(pausedHold).count(), 0);
+    await form.getByRole("radio", { name: /^Team owners/ }).check();
+    await footer.getByRole("button", { name: "Submit answer" }).click();
+    await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+    assert.equal(await page.getByText(pausedHold).count(), 0);
+  } finally {
+    await page.unroute(taskUrl);
+  }
+});
+
+test("phone: the question hold sits in the sticky submit area without covering fields, and a loading task read does not block answering", async (_t, j) => {
+  const { page, more } = await openInbox(
+    j,
+    0,
+    { width: 390, height: 844 },
+    "/app/inbox",
+    seedHeldQuestions("Phone question"),
+  );
+  const form = page.getByRole("region", { name: "Exact question response" }),
+    footer = form.locator(".question-submit"),
+    detail = page.locator(".inbox-detail");
+  await page.locator(".inbox-row").first().click();
+  await footer.getByText(pausedDetail).waitFor();
+  await detail.evaluate((e) => {
+    e.scrollTop = e.scrollHeight;
+  });
+  await settle(page);
+  const last = (await form.locator(".question-option").last().boundingBox())!,
+    submit = (await footer.boundingBox())!,
+    box = (await detail.boundingBox())!;
+  assert.ok(last.y + last.height <= submit.y, JSON.stringify({ last, submit }));
+  assert.ok(
+    submit.y >= box.y && submit.y + submit.height <= box.y + box.height + 1,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  // The footer grows with its notices but is not a second scroller.
+  assert.deepEqual(
+    await footer.evaluate((e) => ({
+      overflowY: getComputedStyle(e).overflowY,
+      clipped: e.scrollHeight > e.clientHeight + 1,
+    })),
+    { overflowY: "visible", clipped: false },
+  );
+  await captureBrowserEvidence(page, "390-inbox-question-hold", {
+    fullPage: false,
+  });
+
+  // While the task read is still loading, answering is not gated and no hold is claimed.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const taskUrl = `**/api/operator/tasks/${more[0]!.taskId}`;
+  await page.route(taskUrl, async (route) => {
+    await gate;
+    await route.continue().catch(() => undefined);
+  });
+  try {
+    // The reload keeps the phone on the open request.
+    await page.reload();
+    const submitButton = footer.getByRole("button", { name: "Submit answer" });
+    await submitButton.waitFor();
+    assert.equal(await submitButton.isEnabled(), true);
+    assert.equal(await page.getByText(pausedHold).count(), 0);
+    await form.getByRole("radio", { name: /^Team owners/ }).check();
+    await submitButton.click();
+    await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+  } finally {
+    release();
+    await page.unroute(taskUrl);
+  }
 });

@@ -31,7 +31,7 @@ import {
   completedQuestionCount,
   type QuestionResponseStates,
 } from "./question-response-state.js";
-import { clockLabel } from "./inbox-presentation.js";
+import { clockLabel, type HoldNotice } from "./inbox-presentation.js";
 export function QuestionResponse({
   client,
   session,
@@ -42,6 +42,7 @@ export function QuestionResponse({
   requesterName,
   onBack,
   compactContext = false,
+  holds = [],
 }: {
   client: OperatorClient;
   session: Session;
@@ -55,6 +56,8 @@ export function QuestionResponse({
   onBack?: () => void;
   /** The caller's own intro already names the requester and links the conversation. */
   compactContext?: boolean;
+  /** Independent holds an answer does not clear; only the Inbox reads them. */
+  holds?: readonly HoldNotice[];
 }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -276,6 +279,7 @@ export function QuestionResponse({
                 Delivery waits for the requester's next eligible turn;
                 independent holds are unchanged.
               </p>
+              <QuestionHolds holds={holds} />
               {onBack && (
                 <Button variant="secondary" onClick={onBack}>
                   Back to Inbox
@@ -446,6 +450,7 @@ export function QuestionResponse({
                 {state.failureCode && state.outcome === "failed" && (
                   <p className="metadata muted">Reason: {state.failureCode}</p>
                 )}
+                <QuestionHolds holds={holds} />
                 <div className="question-actions">
                   <Button
                     type="submit"
@@ -481,6 +486,21 @@ export function QuestionResponse({
         </>
       )}
     </section>
+  );
+}
+
+/** Compact hold lines; the phone's sticky submit area has no room for alert cards. */
+function QuestionHolds({ holds }: { holds: readonly HoldNotice[] }) {
+  if (!holds.length) return null;
+  return (
+    <div className="question-holds">
+      {holds.map((hold) => (
+        <p key={hold.id} className="metadata">
+          <strong>{hold.title}</strong>
+          {hold.items.length > 0 && ` ${hold.items.join(", ")}`}. {hold.detail}
+        </p>
+      ))}
+    </div>
   );
 }
 

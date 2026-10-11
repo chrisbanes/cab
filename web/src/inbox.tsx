@@ -30,8 +30,11 @@ import {
   requestKindLabel,
 } from "./inbox-presentation.js";
 import { useOperatorResource, type ResourceState } from "./resource.js";
-import { ApprovalDetail, InterventionDetail } from "./inbox-detail.js";
-import { QuestionResponse } from "./question-response.js";
+import {
+  ApprovalDetail,
+  InboxQuestion,
+  InterventionDetail,
+} from "./inbox-detail.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 export class InboxState {
   project = "";
@@ -466,7 +469,7 @@ export function Inbox({
               )}
               {selected?.kind === "question" ||
               (!selected && !selectedId.startsWith("intervention:")) ? (
-                <QuestionResponse
+                <InboxQuestion
                   client={client}
                   session={session}
                   taskId={taskId}
@@ -476,6 +479,7 @@ export function Inbox({
                   requesterName={selected?.requesterName}
                   compactContext={Boolean(selected)}
                   onBack={back}
+                  observedAt={resource.state.fetchedAt}
                 />
               ) : selected?.kind === "approval" ? (
                 <ApprovalDetail
