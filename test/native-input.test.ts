@@ -5,6 +5,7 @@ import {
   encodeNativeInputReply,
   type NativeInputProtocolQualification,
 } from "../src/standalone/native-input.js";
+import { codexNativeInputQualificationSchema } from "../src/standalone/codex.js";
 const qualification: NativeInputProtocolQualification = {
   codexVersion: "codex-cli 0.159.0",
   executableHash: "a".repeat(64),
@@ -113,5 +114,25 @@ test("group answers are all-or-nothing and custom text is rejected without permi
       second: { answers: ["Remote"] },
     }).answers.second,
     { answers: ["Remote"] },
+  );
+});
+
+test("only the Codex runtime pins the qualified Codex CLI version", () => {
+  const otherVersion = { ...qualification, codexVersion: "codex-cli 0.160.0" };
+  assert.equal(parseNativeInputRequest(input, otherVersion).threadId, "thread");
+  assert.equal(
+    codexNativeInputQualificationSchema.safeParse(otherVersion).success,
+    false,
+  );
+  assert.equal(
+    codexNativeInputQualificationSchema.safeParse(qualification).success,
+    true,
+  );
+  assert.equal(
+    codexNativeInputQualificationSchema.safeParse({
+      ...qualification,
+      extra: true,
+    }).success,
+    false,
   );
 });

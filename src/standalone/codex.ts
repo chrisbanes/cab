@@ -26,6 +26,7 @@ import {
 import { EventEmitter } from "node:events";
 import { createInterface } from "node:readline";
 import { z } from "zod";
+import type { ExecutionHarness } from "./execution-harness.js";
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
@@ -65,6 +66,12 @@ const thread = z.object({
   sandbox: z.object({ type: z.literal("workspaceWrite") }),
 });
 const turn = z.object({ turn: z.object({ id: z.string() }) });
+const qualifiedCodexVersion = "codex-cli 0.159.0";
+/** Native input is qualified only for the pinned Codex CLI. */
+export const codexNativeInputQualificationSchema =
+  nativeInputQualificationSchema.extend({
+    codexVersion: z.literal(qualifiedCodexVersion),
+  });
 const codexErrorInfoSchema = z.enum([
   "contextWindowExceeded",
   "sessionBudgetExceeded",
@@ -303,14 +310,10 @@ function registeredTools(input: readonly RuntimeToolDefinition[] = []) {
   );
 }
 
-export interface FailureEvidence {
+export interface FailureEvidence extends RuntimeTerminalFailureEvidence {
   threadId: string;
   turnId: string;
   status: "failed";
-  classification: "transient" | "permanent" | "unknown";
-  reasonCode: CodexErrorInfo | "unknown";
-  source: "codexErrorInfo" | "missing";
-  codexRetries: number | null;
   retryAfterMs?: number;
 }
 
@@ -320,9 +323,9 @@ const failureEvidenceSchema = z
     turnId: z.string().min(1),
     status: z.literal("failed"),
     classification: z.enum(["transient", "permanent", "unknown"]),
-    reasonCode: codexErrorInfoSchema.or(z.literal("unknown")),
-    source: z.enum(["codexErrorInfo", "missing"]),
-    codexRetries: z.number().int().nonnegative().safe().nullable(),
+    reasonCode: z.string().min(1).max(64),
+    source: z.enum(["harness", "missing"]),
+    harnessRetries: z.number().int().nonnegative().safe().nullable(),
     retryAfterMs: z
       .number()
       .int()
@@ -357,10 +360,10 @@ function makeFailureClassification(
   return {
     classification,
     reasonCode: code ?? "unknown",
-    source: code ? "codexErrorInfo" : "missing",
+    source: code ? "harness" : "missing",
     // App Server's terminal TurnError exposes no per-turn retry count. Null is
     // deliberately non-retryable under the shared Ensemble/Codex budget.
-    codexRetries: null,
+    harnessRetries: null,
   };
 }
 
@@ -431,6 +434,8 @@ export function unexpectedRequest(
 }
 
 export interface Runtime {
+  /** Declared by real harness runtimes; test fakes omit it. */
+  readonly harness?: ExecutionHarness;
   onUserInputRequest?(
     listener: (request: RuntimeUserInputRequest) => void,
   ): void;
@@ -514,6 +519,7 @@ interface NativeEndpoint {
 
 /** One private stdio App Server process. It never sends an approval grant. */
 export class CodexRuntime implements Runtime {
+  readonly harness = "codex" as const;
   private child: ChildProcessWithoutNullStreams | undefined;
   private nativeGeneration: string | undefined;
   private nativeExecutable:
@@ -778,7 +784,7 @@ export class CodexRuntime implements Runtime {
         .update(await readFile(executable))
         .digest("hex");
       if (
-        stdout.trim() === "codex-cli 0.159.0" &&
+        stdout.trim() === qualifiedCodexVersion &&
         executableHash ===
           (this.options.qualifiedExecutableHash ??
             "e89718aa1969bfc4a471277bdc4679a3a3529293de0a309909822dfd67ddb77a")
@@ -840,7 +846,7 @@ export class CodexRuntime implements Runtime {
       return undefined;
     }
     if (!prior || prior.toolDigest !== toolDigest) return undefined;
-    const qualification = nativeInputQualificationSchema.safeParse({
+    const qualification = codexNativeInputQualificationSchema.safeParse({
       ...this.nativeExecutable,
       threadId,
       runtimeGeneration: this.nativeGeneration,

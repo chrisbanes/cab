@@ -111,6 +111,11 @@ import {
 } from "./routing.js";
 import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
+  defaultExecutionHarness,
+  type ExecutionHarness,
+  executionHarnessSchema,
+} from "./execution-harness.js";
+import {
   SchedulerStore,
   type TurnRequest,
   TurnScheduler,
@@ -160,6 +165,31 @@ export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
   safety: RuntimeSafetyPort;
 }
+export function createRuntime(
+  context: RuntimeSpawnContext,
+  harness: ExecutionHarness,
+): Runtime {
+  const parsed = executionHarnessSchema.safeParse(harness);
+  if (!parsed.success)
+    throw new Error(`Unsupported execution harness: ${String(harness)}`);
+  // Exhaustive: a new harness fails to compile until it is constructed here.
+  switch (parsed.data) {
+    case "codex":
+      return new CodexRuntime("codex", context);
+  }
+}
+
+/** Real harness runtimes are power-supervised; injected fakes stay unsupervised unless asked. */
+export function powerSupervisionEnabled(
+  power: StandaloneServiceOptions["power"],
+  runtime: Pick<Runtime, "harness">,
+): boolean {
+  return (
+    power?.enabled ??
+    (power?.eventSource !== undefined || runtime.harness !== undefined)
+  );
+}
+
 export interface StandaloneServiceOptions {
   delivery?: {
     fetcher?: typeof fetch;
@@ -283,6 +313,7 @@ export class StandaloneService {
   private readonly routingCoordinators = new Map<string, RoutingCoordinator>();
   private readonly retryNow: () => number;
   private readonly fallbackBackoffMs: number;
+  private readonly runtimeHarness: ExecutionHarness = defaultExecutionHarness;
   private readonly maxFallbackBackoffMs: number;
   private generation: ServiceGeneration | undefined;
   private stopPromise: Promise<void> | undefined;
@@ -296,7 +327,8 @@ export class StandaloneService {
     private readonly dataDir: string,
     private readonly runtimeFactory: (
       context: RuntimeSpawnContext,
-    ) => Runtime = (context) => new CodexRuntime("codex", context),
+      harness: ExecutionHarness,
+    ) => Runtime = createRuntime,
     private readonly markerWriter: (path: string, flag: "wx" | "w") => void = (
       path,
       flag,
@@ -414,13 +446,18 @@ export class StandaloneService {
       );
       this.coordination = coordination;
       const runtimeSafety: RuntimeSafetyPort = {
-        recordTerminal: (input) => state.recordRuntimeTerminal(input),
+        recordTerminal: (input) =>
+          state.recordRuntimeTerminal(input, this.runtimeHarness),
         terminal: (threadId, turnId, runtimeGeneration) =>
           state.runtimeTerminal(threadId, turnId, runtimeGeneration),
         terminalForWait: (threadId, turnId, runtimeGeneration) =>
           state.runtimeTerminalForWait(threadId, turnId, runtimeGeneration),
         registerThreadTools: (threadId, toolDigest) =>
-          state.registerRuntimeThreadTools(threadId, toolDigest),
+          state.registerRuntimeThreadTools(
+            threadId,
+            toolDigest,
+            this.runtimeHarness,
+          ),
         threadQualification: (threadId) =>
           state.runtimeThreadQualification(threadId),
         recordThreadQualification: (input) =>
@@ -533,7 +570,7 @@ export class StandaloneService {
       };
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       context.spawnEnvironment();
-      const runtime = this.runtimeFactory(context);
+      const runtime = this.runtimeFactory(context, this.runtimeHarness);
       this.runtime = runtime;
       this.runtimeUnavailableSince = undefined;
       runtime.onFailure?.(() => {
@@ -635,11 +672,7 @@ export class StandaloneService {
       // queued-inbox supersession finish; domain notifications cannot admit work.
       this.inboxStartup.reconcile();
       const powerOptions = this.options.power;
-      const powerEnabled =
-        powerOptions?.enabled ??
-        (powerOptions?.eventSource !== undefined ||
-          runtime instanceof CodexRuntime);
-      if (powerEnabled) {
+      if (powerSupervisionEnabled(powerOptions, runtime)) {
         const pollIntervalMs = powerOptions?.pollIntervalMs ?? 60_000;
         if (
           !Number.isSafeInteger(pollIntervalMs) ||
@@ -3419,7 +3452,9 @@ export class StandaloneService {
         workspaceKey,
         request.previousWorkId ?? undefined,
       );
-      binding = context ? state.bindTask(request.workId, context) : undefined;
+      binding = context
+        ? state.bindTask(request.workId, context, this.runtimeHarness)
+        : undefined;
     } catch (error) {
       store.hold(request.workId, `Request binding refused: ${String(error)}`);
       return;
@@ -3865,8 +3900,8 @@ export class StandaloneService {
           evidence.classification === "transient" &&
           (evidence.reasonCode === "serverOverloaded" ||
             evidence.reasonCode === "rateLimitExceeded") &&
-          evidence.source === "codexErrorInfo" &&
-          evidence.codexRetries !== null &&
+          evidence.source === "harness" &&
+          evidence.harnessRetries !== null &&
           callbacksEnded &&
           !this.requireSupervisor().hasKnownRisk(request.workId) &&
           !state.stopTarget(request.workId) &&
@@ -3886,8 +3921,9 @@ export class StandaloneService {
             terminalStatus: "failed",
             classification: "transient",
             reasonCode: evidence.reasonCode,
-            source: "codexErrorInfo",
-            codexRetries: evidence.codexRetries,
+            harness: this.runtimeHarness,
+            source: "harness",
+            harnessRetries: evidence.harnessRetries,
             callbacksEnded: true,
             noSurvivor: true,
             effects: "settled",
