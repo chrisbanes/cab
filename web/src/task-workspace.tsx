@@ -1486,144 +1486,153 @@ export function TaskWorkspace({
                 )}
             </div>
           ) : (
-            data.assignments.map((a) => (
-              <details
-                key={a.assignmentId}
-                data-record-id={a.assignmentId}
-                open={state.expanded.has(a.assignmentId)}
-                onToggle={(e) => {
-                  if (e.currentTarget.open) state.expanded.add(a.assignmentId);
-                  else state.expanded.delete(a.assignmentId);
-                  changed();
-                }}
-              >
-                <summary>
-                  {a.name ?? "Assignment"} · {a.state} · version {a.version}
-                </summary>
-                <p>
-                  Assignment {a.assignmentId} · profile revision{" "}
-                  {a.profileRevision} · instructions revision{" "}
-                  {a.instructionsRevision}
-                </p>
-                <p>Supplied responsibility / brief</p>
-                <Literal text={a.brief} />
-                <p>
-                  Requester assignment:{" "}
-                  {a.requesterAssignmentId ?? "Not recorded"}; result
-                  destination: {a.resultDestination ?? "Unavailable"}; resolved
-                  recipient: {a.resultRecipientAssignmentId ?? "Unavailable"} (
-                  {a.resultRecipientDisposition ?? "Unknown disposition"}).
-                </p>
-                <p>
-                  Execution: {executionSummary(a).line}
-                  {a.executionGeneration
-                    ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · profile revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
-                    : " · not yet admitted"}
-                  .
-                </p>
-                {executionSummary(a).note && (
-                  <p className="metadata muted">{executionSummary(a).note}</p>
-                )}
-                <p>
-                  Recorded wait / execution reason:{" "}
-                  {a.waitReason ?? "No recorded wait reason; unknown"}.
-                </p>
-                <ExecutionNotices assignment={a} />
-                <details>
-                  <summary>
-                    Effective execution policy ·{" "}
-                    {executionHarnessLabels[executionSummary(a).harness]}
-                  </summary>
-                  <PolicyDisclosure
-                    harness={executionSummary(a).harness}
-                    workspace={workspace}
-                  />
-                </details>
-                {data.results
-                  .filter((r) => r.assignmentId === a.assignmentId)
-                  .map((r) => (
-                    <p key={r.resultId}>
-                      <ActionLink
-                        href={`/app/tasks/${taskId}?section=review&assignment=${a.assignmentId}&result=${r.resultId}`}
-                      >
-                        Open exact assignment result {r.resultId}
-                      </ActionLink>
-                    </p>
-                  ))}
-                <ActionLink href={`/coordination/assignment/${a.assignmentId}`}>
-                  Advanced assignment and history controls
-                </ActionLink>
-                {historyErrors[a.assignmentId] && (
-                  <p role="alert">
-                    History refresh failed: {historyErrors[a.assignmentId]}.
-                    Unvalidated history is hidden; retry to read current
-                    material.
-                  </p>
-                )}
-                <p className="literal-preview">
-                  {histories[a.assignmentId]?.items
-                    .at(-1)
-                    ?.text?.slice(0, 500) ?? "Recent captured text unavailable"}
-                </p>
-                {histories[a.assignmentId]?.omittedItemCount ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      capture();
-                      void loadHistory(
-                        a.assignmentId,
-                        histories[a.assignmentId]?.items[0]?.sequence,
-                      );
-                    }}
-                  >
-                    Load earlier retained history (
-                    {histories[a.assignmentId]?.omittedItemCount})
-                  </Button>
-                ) : null}
-                {histories[a.assignmentId]?.omittedTurnCount ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => {
-                      capture();
-                      void loadHistory(
-                        a.assignmentId,
-                        undefined,
-                        histories[a.assignmentId]?.turnOmissions[0]?.sequence,
-                      );
-                    }}
-                  >
-                    Load earlier retained turn omissions (
-                    {histories[a.assignmentId]?.omittedTurnCount})
-                  </Button>
-                ) : null}
-                {histories[a.assignmentId]?.items.map((i) => (
-                  <Disclosure
-                    key={`${i.workId}:${i.itemId}`}
-                    id={`${i.workId}:${i.itemId}`}
-                    title={`${date(i.createdAt)} · ${i.lifecycle} · ${i.itemId}`}
-                    text={
-                      i.text ?? `Omitted: ${i.omissionReason ?? "unavailable"}`
-                    }
-                    state={state}
-                    changed={changed}
-                  />
-                ))}
-                {histories[a.assignmentId]?.turnOmissions.map((i) => (
-                  <TurnOmission
-                    key={`turn-omission:${i.workId}:${i.threadId}:${i.turnId}`}
-                    omission={i}
-                    state={state}
-                    changed={changed}
-                  />
-                ))}
-                <Button
-                  variant="secondary"
-                  onClick={() => void loadHistory(a.assignmentId)}
+            data.assignments.map((a) => {
+              const execution = executionSummary(a);
+              return (
+                <details
+                  key={a.assignmentId}
+                  data-record-id={a.assignmentId}
+                  open={state.expanded.has(a.assignmentId)}
+                  onToggle={(e) => {
+                    if (e.currentTarget.open)
+                      state.expanded.add(a.assignmentId);
+                    else state.expanded.delete(a.assignmentId);
+                    changed();
+                  }}
                 >
-                  Refresh captured history
-                </Button>
-              </details>
-            ))
+                  <summary>
+                    {a.name ?? "Assignment"} · {a.state} · version {a.version}
+                  </summary>
+                  <p>
+                    Assignment {a.assignmentId} · profile revision{" "}
+                    {a.profileRevision} · instructions revision{" "}
+                    {a.instructionsRevision}
+                  </p>
+                  <p>Supplied responsibility / brief</p>
+                  <Literal text={a.brief} />
+                  <p>
+                    Requester assignment:{" "}
+                    {a.requesterAssignmentId ?? "Not recorded"}; result
+                    destination: {a.resultDestination ?? "Unavailable"};
+                    resolved recipient:{" "}
+                    {a.resultRecipientAssignmentId ?? "Unavailable"} (
+                    {a.resultRecipientDisposition ?? "Unknown disposition"}).
+                  </p>
+                  <p>
+                    Execution: {execution.line}
+                    {a.executionGeneration
+                      ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · profile revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
+                      : " · not yet admitted"}
+                    .
+                  </p>
+                  {execution.note && (
+                    <p className="metadata muted">{execution.note}</p>
+                  )}
+                  <p>
+                    Recorded wait / execution reason:{" "}
+                    {a.waitReason ?? "No recorded wait reason; unknown"}.
+                  </p>
+                  <ExecutionNotices assignment={a} />
+                  <details>
+                    <summary>
+                      Effective execution policy ·{" "}
+                      {executionHarnessLabels[execution.harness]}
+                    </summary>
+                    <PolicyDisclosure
+                      harness={execution.harness}
+                      workspace={workspace}
+                    />
+                  </details>
+                  {data.results
+                    .filter((r) => r.assignmentId === a.assignmentId)
+                    .map((r) => (
+                      <p key={r.resultId}>
+                        <ActionLink
+                          href={`/app/tasks/${taskId}?section=review&assignment=${a.assignmentId}&result=${r.resultId}`}
+                        >
+                          Open exact assignment result {r.resultId}
+                        </ActionLink>
+                      </p>
+                    ))}
+                  <ActionLink
+                    href={`/coordination/assignment/${a.assignmentId}`}
+                  >
+                    Advanced assignment and history controls
+                  </ActionLink>
+                  {historyErrors[a.assignmentId] && (
+                    <p role="alert">
+                      History refresh failed: {historyErrors[a.assignmentId]}.
+                      Unvalidated history is hidden; retry to read current
+                      material.
+                    </p>
+                  )}
+                  <p className="literal-preview">
+                    {histories[a.assignmentId]?.items
+                      .at(-1)
+                      ?.text?.slice(0, 500) ??
+                      "Recent captured text unavailable"}
+                  </p>
+                  {histories[a.assignmentId]?.omittedItemCount ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        capture();
+                        void loadHistory(
+                          a.assignmentId,
+                          histories[a.assignmentId]?.items[0]?.sequence,
+                        );
+                      }}
+                    >
+                      Load earlier retained history (
+                      {histories[a.assignmentId]?.omittedItemCount})
+                    </Button>
+                  ) : null}
+                  {histories[a.assignmentId]?.omittedTurnCount ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        capture();
+                        void loadHistory(
+                          a.assignmentId,
+                          undefined,
+                          histories[a.assignmentId]?.turnOmissions[0]?.sequence,
+                        );
+                      }}
+                    >
+                      Load earlier retained turn omissions (
+                      {histories[a.assignmentId]?.omittedTurnCount})
+                    </Button>
+                  ) : null}
+                  {histories[a.assignmentId]?.items.map((i) => (
+                    <Disclosure
+                      key={`${i.workId}:${i.itemId}`}
+                      id={`${i.workId}:${i.itemId}`}
+                      title={`${date(i.createdAt)} · ${i.lifecycle} · ${i.itemId}`}
+                      text={
+                        i.text ??
+                        `Omitted: ${i.omissionReason ?? "unavailable"}`
+                      }
+                      state={state}
+                      changed={changed}
+                    />
+                  ))}
+                  {histories[a.assignmentId]?.turnOmissions.map((i) => (
+                    <TurnOmission
+                      key={`turn-omission:${i.workId}:${i.threadId}:${i.turnId}`}
+                      omission={i}
+                      state={state}
+                      changed={changed}
+                    />
+                  ))}
+                  <Button
+                    variant="secondary"
+                    onClick={() => void loadHistory(a.assignmentId)}
+                  >
+                    Refresh captured history
+                  </Button>
+                </details>
+              );
+            })
           )}
           {data.messages.map((m) => (
             <div key={m.eventId} data-record-id={m.eventId}>

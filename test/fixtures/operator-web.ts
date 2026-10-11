@@ -147,7 +147,7 @@ export interface OperatorFixture<R extends Runtime> {
 /** A Claude-shaped fake: the optional seams the operator UI reads, no SDK. */
 export class ClaudeShapedFixtureRuntime extends OperatorFixtureRuntime {
   readonly harness = "claude" as const;
-  supportedSettings() {
+  supportedSettings(): Record<string, string[]> | undefined {
     return { default: ["low", "high"], sonnet: ["high"] };
   }
   effectivePolicy(workspace: string) {

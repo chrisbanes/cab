@@ -166,10 +166,10 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
   return null;
 }
 
-/** A held Claude assignment whose latest turn failed; Codex presentation is unchanged. */
+/** A held Claude execution whose latest turn failed (the read reports only those). */
 export function failureNotice(a: Assignment): ExecutionNoticeModel | null {
   const g = a.executionGeneration;
-  if (g?.harness !== "claude" || !g.failure || a.state !== "held") return null;
+  if (g?.harness !== "claude" || !g.failure) return null;
   if (g.failure.reasonCode === "unauthorized")
     return {
       message:

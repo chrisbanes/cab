@@ -1777,14 +1777,17 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  /** Only Claude failures are reported; Codex presentation is unchanged. */
-  private generation(request: {
-    workId: string;
-    assignmentVersion: number;
-    sequence: number;
-    instructionsRevision: number;
-    profileRevision: number;
-  }) {
+  /** Only a held Claude execution's failure is reported; Codex presentation is unchanged. */
+  private generation(
+    request: {
+      workId: string;
+      assignmentVersion: number;
+      sequence: number;
+      instructionsRevision: number;
+      profileRevision: number;
+    },
+    held: boolean,
+  ) {
     const harness = this.service.bindingHarness(request.workId);
     return {
       workId: request.workId,
@@ -1794,7 +1797,7 @@ export class OperatorApi {
       profileRevision: request.profileRevision,
       harness,
       failure:
-        harness === "claude"
+        harness === "claude" && held
           ? this.service.terminalFailure(request.workId)
           : null,
     };
@@ -2710,13 +2713,16 @@ export class OperatorApi {
             request?.assignmentVersion &&
             request.instructionsRevision &&
             request.profileRevision
-              ? this.generation({
-                  workId: request.workId,
-                  sequence: request.sequence,
-                  assignmentVersion: request.assignmentVersion,
-                  instructionsRevision: request.instructionsRevision,
-                  profileRevision: request.profileRevision,
-                })
+              ? this.generation(
+                  {
+                    workId: request.workId,
+                    sequence: request.sequence,
+                    assignmentVersion: request.assignmentVersion,
+                    instructionsRevision: request.instructionsRevision,
+                    profileRevision: request.profileRevision,
+                  },
+                  s.intent?.state === "held",
+                )
               : null,
         };
       }),
@@ -5575,7 +5581,13 @@ export class OperatorApi {
           const supported = this.service.harnessSettings("claude");
           const field =
             supported && unsupportedRuntimeField(c.runtime, supported);
-          if (field) throw new OperatorApiError(400, "invalid-input", [field]);
+          // An exact replay returns its recorded receipt whatever is supported now.
+          if (
+            field &&
+            this.domain().recordedCommand({ ...c, actor: "operator" }) ===
+              undefined
+          )
+            throw new OperatorApiError(400, "invalid-input", [field]);
         }
         // Setup paths may be home-relative; the domain verifies and records absolute ones.
         const command =

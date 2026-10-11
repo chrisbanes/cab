@@ -187,7 +187,7 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
   assert.equal(waitRoute(assignment()), null);
 });
 
-test("only held Claude failures render a failure notice", () => {
+test("only Claude failures render a failure notice", () => {
   const failed = { classification: "permanent", reasonCode: "error_max_turns" };
   const notice = failureNotice(
     assignment({
@@ -212,9 +212,7 @@ test("only held Claude failures render a failure notice", () => {
     null,
   );
   assert.equal(
-    failureNotice(
-      assignment({ executionGeneration: generation("claude", failed) }),
-    ),
+    failureNotice(assignment({ executionGeneration: generation("claude") })),
     null,
   );
 });

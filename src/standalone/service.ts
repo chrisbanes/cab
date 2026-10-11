@@ -258,8 +258,6 @@ const runtimeFailedError = (): never => {
 const runtimeKey = (harness: ExecutionHarness, identity: string) =>
   JSON.stringify([harness, identity]);
 
-const harnessLabel = executionHarnessLabels;
-
 interface PromptPart {
   name:
     | "request"
@@ -1289,9 +1287,9 @@ export class StandaloneService {
   /** Why work bound to this harness cannot be admitted now, if anything. */
   private runtimeWaitReason(harness: ExecutionHarness): string | undefined {
     if (!this.runtimeHarnesses.includes(harness))
-      return `${harnessLabel[harness]} runtime is not configured`;
+      return `${executionHarnessLabels[harness]} runtime is not configured`;
     if (this.runtimeUnavailableSince.has(harness))
-      return `${harnessLabel[harness]} runtime unavailable; restart the service`;
+      return `${executionHarnessLabels[harness]} runtime unavailable; restart the service`;
     return undefined;
   }
 
@@ -4232,7 +4230,7 @@ export class StandaloneService {
       if (!runtime) return;
       if (runtime.preflightTurn) {
         const preflight = runtime.preflightTurn.bind(runtime);
-        const failed = `${harnessLabel[harness]} runtime unavailable: preflight failed`;
+        const failed = `${executionHarnessLabels[harness]} runtime unavailable: preflight failed`;
         // A settings lookup failure waits like any other preflight failure.
         const reason = await this.untilFailure(
           runtime,

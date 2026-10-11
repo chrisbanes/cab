@@ -196,9 +196,10 @@ for (const [name, viewport] of [
       const workId = f.service
         .list()
         .find((w) => w.reason === "Claude runtime is not configured")?.workId;
-      db.prepare("UPDATE domain_assignments SET state='held' WHERE id=?").run(
-        ids.workerId,
-      );
+      // A failed Claude turn holds the execution intent, not the assignment.
+      db.prepare(
+        "UPDATE execution_intents SET state='held', reason='Bound turn failed or was interrupted' WHERE workId=?",
+      ).run(String(workId));
       db.prepare(
         "INSERT INTO runtime_terminal_evidence (threadId,turnId,firstStatus,workId,firstRuntimeGeneration,lastRuntimeGeneration,firstObservedAt,lastObservedAt,failureEvidence,harness) VALUES ('t','u','failed',?,'g','g',1,1,?,'claude')",
       ).run(

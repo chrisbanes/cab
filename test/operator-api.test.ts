@@ -1597,6 +1597,13 @@ test("task reads report the persisted binding harness of each execution generati
       (a) => a.assignmentId === assignmentId,
     )?.executionGeneration?.failure;
   failed("unauthorized");
+  // Reported only while the execution intent is held.
+  assert.equal(await failure(), null);
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE execution_intents SET state = 'held' WHERE workId = ?")
+      .run(workId),
+  );
   assert.deepEqual(await failure(), {
     classification: "permanent",
     reasonCode: "unauthorized",
@@ -1756,4 +1763,82 @@ test("unknown well-shaped Claude values save while supported settings are unknow
     (f.service.domain().profileRuntime(profileId) as { model: string }).model,
     "future-model",
   );
+});
+
+test("an exact profile replay returns its receipt after supported settings become known", async (t) => {
+  class LateSettings extends ClaudeShapedFixtureRuntime {
+    known = false;
+    override supportedSettings() {
+      return this.known ? super.supportedSettings() : undefined;
+    }
+  }
+  const claude = new LateSettings();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) =>
+      harness === "claude" ? claude : new OperatorFixtureRuntime(),
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const command = {
+    type: "profile.create" as const,
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Claude",
+    instructions: "x",
+    capabilities: "x",
+    runtime: {
+      harness: "claude" as const,
+      model: "opus",
+      reasoningEffort: null,
+    },
+  };
+  const first = await api.execute(command);
+  claude.known = true;
+  assert.deepEqual(await api.execute(command), first);
+  await assert.rejects(
+    api.execute({ ...command, key: randomUUID(), profileId: randomUUID() }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.fieldPaths?.[0] === "runtime.model",
+  );
+});
+
+test("task reads redact the Claude token reference and its value", async (t) => {
+  const name = "FIXTURE_CLAUDE_REDACTION",
+    value = "claude-redaction-canary-7781";
+  const previous = process.env[name];
+  process.env[name] = value;
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const d = f.service.domain();
+  d.execute({
+    type: "claude-token.configure",
+    actor: "operator",
+    key: randomUUID(),
+    credentialRef: `env:${name}`,
+  });
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    expectedVersion: Number(d.task(ids.taskId).version),
+    outcome: `Use ${value} via ${name}`,
+  });
+  const read = JSON.stringify(
+    await new OperatorApi(f.service, [f.directory]).readTask(ids.taskId),
+  );
+  assert.equal(read.includes(value), false);
+  assert.equal(read.includes(name), false);
 });

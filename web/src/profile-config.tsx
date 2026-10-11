@@ -363,7 +363,10 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                         p.refresh();
                         resource.refresh();
                       },
-                      runtimeErrors(d.values, claudeSettings(p.workspace)),
+                      // An unchanged stored runtime is never re-validated.
+                      runtimeChanged(data.runtime, d.values)
+                        ? runtimeErrors(d.values, claudeSettings(p.workspace))
+                        : {},
                     )
                   }
                 >

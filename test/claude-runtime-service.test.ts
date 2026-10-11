@@ -23,6 +23,7 @@ import {
 } from "./fixtures/claude-sdk.js";
 import { tmpdir } from "./temp.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
+import { failureNotice } from "../web/src/execution-runtime.js";
 
 /** Captures the spawn context; never starts a turn. */
 class ContextRuntime implements Runtime {
@@ -756,7 +757,7 @@ test("an invalid Claude token fails the turn visibly as unauthorized and is not 
     },
   ]);
   const { projectId, worker } = run.setup();
-  const { workId } = await run.claudeTask(projectId, worker);
+  const { taskId, workId } = await run.claudeTask(projectId, worker);
   await waitUntil(() => run.intent(workId)?.state === "held", run.describe);
   {
     const base = run.intent(workId)?.workspace;
@@ -773,6 +774,27 @@ test("an invalid Claude token fails the turn visibly as unauthorized and is not 
     )
     .get(run.intent(workId)?.turnId ?? "") as { failureEvidence: string };
   assert.equal(JSON.parse(evidence.failureEvidence).reasonCode, "unauthorized");
+  // Task rows, history and recovery share this read and presenter.
+  const api = new OperatorApi(run.service, [run.root]);
+  const assignmentId = workId.split(":")[1] ?? "";
+  const fromTask = (await api.readTask(taskId)).data.assignments.find(
+    (a) => a.assignmentId === assignmentId,
+  );
+  const fromRecovery = (await api.readAssignmentRecovery(assignmentId)).data
+    .assignment;
+  for (const a of [fromTask, fromRecovery]) {
+    assert.ok(a);
+    assert.deepEqual(a.executionGeneration?.failure, {
+      classification: "permanent",
+      reasonCode: "unauthorized",
+    });
+    const notice = failureNotice(a);
+    assert.match(notice?.message ?? "", /Claude rejected the configured token/);
+    assert.deepEqual(
+      notice?.routes.map((r) => r.href),
+      ["/app/settings", `/app/assignments/${assignmentId}/recovery`],
+    );
+  }
   await new Promise((resolve) => setTimeout(resolve, 100));
   assert.deepEqual(
     run.queries.filter((query) => query === "turn"),

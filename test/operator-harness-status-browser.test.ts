@@ -138,3 +138,39 @@ test("Claude not enabled: policy appears once available and settings stay free t
     "INPUT",
   );
 });
+
+test("a name-only save keeps a stored Claude model the runtime no longer supports", async (_t, journey) => {
+  const { f, page, web } = await startSettings(
+    journey,
+    "/app/settings",
+    desktop,
+    undefined,
+    claudeEnabled,
+  );
+  const profileId = crypto.randomUUID();
+  const d = f.service.domain();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: crypto.randomUUID(),
+    profileId,
+    name: "Legacy Claude",
+    instructions: "x",
+    capabilities: "x",
+    runtime: { harness: "claude", model: "opus", reasoningEffort: null },
+  });
+  await page.goto(`${web.origin}/app/profiles/${profileId}/settings`);
+  await page
+    .getByLabel("Model", { exact: true })
+    .locator("option", { hasText: "opus (not supported)" })
+    .waitFor({ state: "attached" });
+  await page.getByLabel("Summary", { exact: true }).fill("Renamed summary");
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("Current revision 2.").waitFor();
+  assert.deepEqual(d.profileRuntime(profileId), {
+    harness: "claude",
+    model: "opus",
+    reasoningEffort: null,
+  });
+  assert.equal(d.profile(profileId).summary, "Renamed summary");
+});

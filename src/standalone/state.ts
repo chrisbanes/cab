@@ -1734,6 +1734,10 @@ export class ExecutionState {
         this.db.exec(
           "ALTER TABLE runtime_terminal_evidence ADD COLUMN failureEvidence TEXT",
         );
+      // Operator reads look up a work's latest terminal turn.
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS runtime_terminal_evidence_work_idx ON runtime_terminal_evidence(workId, lastObservedAt)",
+      );
       this.db
         .prepare(
           "INSERT OR IGNORE INTO runtime_retention_migrations (migrationId) VALUES (?)",
