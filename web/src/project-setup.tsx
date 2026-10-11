@@ -71,6 +71,8 @@ export function ProjectSetup(p: SettingsProps) {
   const setRows = (next: SetupRow[]) => d.set("rows", rowsToDraft(next));
   const disabled = locked(d);
   const [attempt, setAttempt] = useState(0);
+  const attemptRef = useRef(attempt);
+  attemptRef.current = attempt;
   const [discovery, setDiscovery] = useState<Discovery>({ state: "loading" });
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the session (CSRF token) or Retry changes.
   useEffect(() => {
@@ -104,6 +106,7 @@ export function ProjectSetup(p: SettingsProps) {
     .map(repoOf);
   // biome-ignore lint/correctness/useExhaustiveDependencies: keyed by the joined repository list; each repository is requested once.
   useEffect(() => {
+    const round = attempt;
     for (const repo of discoveredRepos) {
       if (requested.current.has(repo)) continue;
       requested.current.add(repo);
@@ -114,8 +117,12 @@ export function ProjectSetup(p: SettingsProps) {
           discoveryBranchesSchema,
         )
         .then(
-          (r) => setBranches((b) => ({ ...b, [repo]: r.data })),
+          // A response from before a Retry never overwrites the new round.
+          (r) =>
+            round === attemptRef.current &&
+            setBranches((b) => ({ ...b, [repo]: r.data })),
           () =>
+            round === attemptRef.current &&
             setBranches((b) => ({
               ...b,
               [repo]: { state: "unavailable", reason: "unreadable" },
@@ -232,6 +239,8 @@ export function ProjectSetup(p: SettingsProps) {
           repositoryId: match.repositoryId,
           owner: match.owner,
           name: match.name,
+          // An empty typed ref takes the listed default branch the Ref list shows.
+          ref: r.ref.trim() ? r.ref : match.defaultBranch,
         }
       : r;
   };
@@ -392,10 +401,14 @@ export function ProjectSetup(p: SettingsProps) {
                 : "Repositories and GitHub Projects are discovered from GitHub with the read-only discovery credential. Repository access is exactly what you add here; a linked GitHub Project grants none."}
             </p>
           </div>
-          {discovery.state === "unavailable" && (
+          {(discovery.state === "unavailable" ||
+            Object.values(branches).some((b) => b.state === "unavailable") ||
+            (projects.repo === projectKey &&
+              projects.data.state === "unavailable")) && (
             <div className="setup-inline-actions">
-              {discovery.reason === "unconfigured" ||
-              discovery.reason === "missing-credential" ? (
+              {discovery.state === "unavailable" &&
+              (discovery.reason === "unconfigured" ||
+                discovery.reason === "missing-credential") ? (
                 <ActionLink variant="secondary" href="/app/settings">
                   Set discovery credential
                 </ActionLink>
@@ -525,14 +538,19 @@ export function ProjectSetup(p: SettingsProps) {
                           {...props}
                           disabled={disabled}
                           value={row.text}
-                          onChange={(e) => {
-                            const typed: SetupRow = {
+                          onChange={(e) =>
+                            update(i, {
                               ...typeRepository(row, e.target.value),
                               source: "typed",
-                            };
-                            // A listed repository is recorded with its node ID, not the provisional one.
-                            const listed = adoptListed(typed);
-                            update(i, listed.repositoryId ? listed : typed);
+                            })
+                          }
+                          // On leaving the field, a listed repository is recorded with its node ID.
+                          onBlur={() => {
+                            const listed = adoptListed(row);
+                            if (listed !== row && listed.repositoryId) {
+                              update(i, listed);
+                              verify(listed);
+                            }
                           }}
                         />
                       )}
