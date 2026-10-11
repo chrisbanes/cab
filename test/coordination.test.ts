@@ -1742,6 +1742,423 @@ test("a replaced conversation without its own result cannot be resumed from the 
   }
 });
 
+/** Both lead conversations reach only work revision 1, the pre-#903 collision shape. */
+function replaceLeadAtRevisionOne(f: ReturnType<typeof fixture>) {
+  const lead = String(f.leadAssignment(taskA)?.id);
+  f.addWork(lead, "work-lead-old", "thread-lead-old", "turn-lead-old");
+  const inboxBefore = f.coordination.inboxEvents(lead).length;
+  const old = f.coordination.recordResult(
+    report("thread-lead-old", "turn-lead-old", "call-lead-old"),
+  );
+  const inboxPerResult = f.coordination.inboxEvents(lead).length - inboxBefore;
+  f.db
+    .prepare(
+      "UPDATE execution_intents SET state = 'completed' WHERE workId = 'work-lead-old'",
+    )
+    .run();
+  f.state.replaceConversation(lead);
+  f.addWork(lead, "work-lead-new", "thread-lead-new", "turn-lead-new");
+  if (f.coordination.bindDeliveryBatch(lead, "work-lead-new"))
+    f.coordination.completeDeliveryBatch("work-lead-new");
+  assert.deepEqual(
+    f.db
+      .prepare(
+        "SELECT workId, conversationRevision, workRevision FROM task_work_revisions WHERE workId LIKE 'work-lead-%' ORDER BY conversationRevision",
+      )
+      .all()
+      .map((row) => ({ ...row })),
+    [
+      { workId: "work-lead-old", conversationRevision: 1, workRevision: 1 },
+      { workId: "work-lead-new", conversationRevision: 2, workRevision: 1 },
+    ],
+  );
+  return { lead, old: old.result, inboxPerResult };
+}
+
+function resultEffectCounts(f: ReturnType<typeof fixture>, lead: string) {
+  const count = (table: string) =>
+    (
+      f.db.prepare(`SELECT count(*) AS count FROM ${table}`).get() as {
+        count: number;
+      }
+    ).count;
+  return {
+    results: count("coordination_results"),
+    receipts: count("coordination_receipts"),
+    evidence: count("retained_result_evidence"),
+    unresolved: count("coordination_unresolved_result_destinations"),
+    inbox: f.coordination.inboxEvents(lead).length,
+  };
+}
+
+test("replacement conversations at the same work revision record their own results", () => {
+  for (const summary of ["Completed work", "Different work"]) {
+    const f = fixture();
+    try {
+      const { lead, old, inboxPerResult } = replaceLeadAtRevisionOne(f);
+      const oldCall = report(
+        "thread-lead-old",
+        "turn-lead-old",
+        "call-lead-old",
+      );
+      const oldReplay = f.coordination.recordResult(oldCall);
+      const before = resultEffectCounts(f, lead);
+      const newCall = report(
+        "thread-lead-new",
+        "turn-lead-new",
+        "call-lead-new",
+        summary,
+      );
+      const recorded = f.coordination.recordResult(newCall);
+      assert.equal(recorded.result.workId, "work-lead-new", summary);
+      assert.equal(recorded.result.workRevision, 1);
+      assert.equal(recorded.replayed, false);
+      assert.notEqual(recorded.result.resultId, old.resultId);
+      assert.equal(
+        f.coordination.results(taskA).filter((r) => r.assignmentId === lead)
+          .length,
+        2,
+      );
+      assert.deepEqual(
+        {
+          ...(f.db
+            .prepare(
+              "SELECT workId, workRevision FROM coordination_receipts WHERE callId = 'call-lead-new'",
+            )
+            .get() as object),
+        },
+        { workId: "work-lead-new", workRevision: 1 },
+      );
+      assert.equal(
+        (
+          f.db
+            .prepare(
+              "SELECT state FROM execution_pending_effects WHERE workId = 'work-lead-new' AND effectKey = 'assignment-result'",
+            )
+            .get() as { state: string }
+        ).state,
+        "settled",
+      );
+      const after = resultEffectCounts(f, lead);
+      assert.deepEqual(after, {
+        ...before,
+        results: before.results + 1,
+        receipts: before.receipts + 1,
+        inbox: before.inbox + inboxPerResult,
+      });
+      f.reopen();
+      for (const [call, expected, response] of [
+        [oldCall, old.resultId, oldReplay.response],
+        [newCall, recorded.result.resultId, recorded.response],
+      ] as const) {
+        const replay = f.coordination.recordResult(call);
+        assert.equal(replay.replayed, true);
+        assert.equal(replay.result.resultId, expected);
+        assert.deepEqual(replay.response, response);
+      }
+      assert.throws(
+        () =>
+          f.coordination.recordResult(
+            report(
+              "thread-lead-new",
+              "turn-lead-new",
+              "call-lead-new",
+              "Changed",
+            ),
+          ),
+        /different content/,
+      );
+      assert.deepEqual(resultEffectCounts(f, lead), after);
+    } finally {
+      f.close();
+    }
+  }
+});
+
+test("same-work retries reuse the exact work result", () => {
+  const f = fixture();
+  try {
+    f.coordination.recordResult(
+      report("thread-nested-a", "turn-nested-a", "call-retry-nested"),
+    );
+    assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
+    const lead = String(f.leadAssignment(taskA)?.id);
+    const first = f.coordination.recordResult(
+      report("thread-child-a", "turn-child-a", "call-child-first"),
+    );
+    // Reporting completes the assignment; reopen it to reach the prior-result path.
+    f.db
+      .prepare("UPDATE domain_assignments SET state = 'running' WHERE id = ?")
+      .run(childA);
+    const before = resultEffectCounts(f, lead);
+    const retry = f.coordination.recordResult(
+      report("thread-child-a", "turn-child-a", "call-child-retry"),
+    );
+    assert.equal(retry.replayed, false);
+    assert.equal(retry.result.resultId, first.result.resultId);
+    const after = { ...before, receipts: before.receipts + 1 };
+    assert.deepEqual(resultEffectCounts(f, lead), after);
+    f.db
+      .prepare("UPDATE domain_assignments SET state = 'running' WHERE id = ?")
+      .run(childA);
+    assert.throws(
+      () =>
+        f.coordination.recordResult(
+          report(
+            "thread-child-a",
+            "turn-child-a",
+            "call-child-conflict",
+            "Different work",
+          ),
+        ),
+      /Result already recorded with different content/,
+    );
+    assert.deepEqual(resultEffectCounts(f, lead), after);
+  } finally {
+    f.close();
+  }
+});
+
+test("stale replaced-conversation callbacks are rejected without effects", () => {
+  const f = fixture();
+  try {
+    const { lead } = replaceLeadAtRevisionOne(f);
+    const before = resultEffectCounts(f, lead);
+    assert.throws(
+      () =>
+        f.coordination.recordResult(
+          report("thread-lead-old", "turn-lead-old", "call-lead-stale"),
+        ),
+      /not bound/,
+    );
+    assert.deepEqual(resultEffectCounts(f, lead), before);
+  } finally {
+    f.close();
+  }
+});
+
+test("a replacement-conversation result rolls back with its receipt", () => {
+  const f = fixture();
+  try {
+    const { lead } = replaceLeadAtRevisionOne(f);
+    const before = resultEffectCounts(f, lead);
+    const assignment = f.domain.assignment(lead);
+    const effect = () =>
+      (
+        f.db
+          .prepare(
+            "SELECT state FROM execution_pending_effects WHERE workId = 'work-lead-new' AND effectKey = 'assignment-result'",
+          )
+          .get() as { state: string }
+      ).state;
+    f.db.exec(
+      "CREATE TRIGGER fail_receipt BEFORE INSERT ON coordination_receipts BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END",
+    );
+    const call = report("thread-lead-new", "turn-lead-new", "call-lead-new");
+    assert.throws(
+      () => f.coordination.recordResult(call),
+      /injected receipt failure/,
+    );
+    assert.deepEqual(resultEffectCounts(f, lead), before);
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT 1 FROM coordination_results WHERE workId = 'work-lead-new'",
+        )
+        .get(),
+      undefined,
+    );
+    assert.equal(effect(), "pending");
+    assert.deepEqual(f.domain.assignment(lead), assignment);
+    f.db.exec("DROP TRIGGER fail_receipt");
+    assert.equal(f.coordination.recordResult(call).replayed, false);
+    assert.equal(f.coordination.recordResult(call).replayed, true);
+    assert.equal(effect(), "settled");
+  } finally {
+    f.close();
+  }
+});
+
+const legacyResultColumns = `(
+        resultId TEXT PRIMARY KEY,
+        taskId TEXT NOT NULL REFERENCES domain_tasks(id),
+        assignmentId TEXT NOT NULL REFERENCES domain_assignments(id),
+        workId TEXT NOT NULL UNIQUE REFERENCES execution_intents(workId),
+        workRevision INTEGER NOT NULL CHECK(workRevision > 0),
+        assignmentVersion INTEGER NOT NULL CHECK(assignmentVersion > 0),
+        summary TEXT NOT NULL,
+        payloadHash TEXT NOT NULL,
+        recipientAssignmentId TEXT,
+        destinationDisposition TEXT NOT NULL
+          CHECK(destinationDisposition IN ('resolved','unresolved')),
+        createdAt INTEGER NOT NULL DEFAULT (unixepoch()),
+        UNIQUE(assignmentId, workRevision)
+      )`;
+
+/** Restores the pre-#903 result table, keeping rows and rowids. */
+function restoreLegacyResultSchema(db: DatabaseSync) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  db.exec(`BEGIN;
+    CREATE TABLE coordination_results_legacy ${legacyResultColumns};
+    INSERT INTO coordination_results_legacy (rowid, resultId, taskId, assignmentId, workId, workRevision, assignmentVersion, summary, payloadHash, recipientAssignmentId, destinationDisposition, createdAt)
+      SELECT rowid, resultId, taskId, assignmentId, workId, workRevision, assignmentVersion, summary, payloadHash, recipientAssignmentId, destinationDisposition, createdAt FROM coordination_results;
+    DROP TABLE coordination_results;
+    ALTER TABLE coordination_results_legacy RENAME TO coordination_results;
+    CREATE INDEX coordination_results_task_created ON coordination_results(taskId,createdAt);
+    COMMIT;`);
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+function resultSchema(db: DatabaseSync) {
+  return (
+    db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='coordination_results'",
+      )
+      .get() as { sql: string }
+  ).sql;
+}
+
+function resultRows(db: DatabaseSync) {
+  return db
+    .prepare(
+      "SELECT rowid AS rowid, * FROM coordination_results ORDER BY rowid",
+    )
+    .all()
+    .map((row) => ({ ...row }));
+}
+
+test("legacy result uniqueness migrates on reopen preserving rows and replay", () => {
+  const f = fixture();
+  try {
+    const call = report("thread-child-a", "turn-child-a", "call-legacy");
+    f.coordination.recordResult(
+      report("thread-nested-a", "turn-nested-a", "call-legacy-nested"),
+    );
+    assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
+    const first = f.coordination.recordResult(call);
+    // Spread rowids so preservation is observable.
+    f.db.exec("UPDATE coordination_results SET rowid = rowid + 40");
+    restoreLegacyResultSchema(f.db);
+    assert.match(resultSchema(f.db), /UNIQUE\(assignmentId, workRevision\)/);
+    const rows = resultRows(f.db);
+    assert.equal(rows.length, 2);
+    f.reopen();
+    assert.doesNotMatch(resultSchema(f.db), /UNIQUE\s*\(\s*assignmentId/);
+    assert.deepEqual(resultRows(f.db), rows);
+    assert.equal(
+      (f.db.prepare("PRAGMA foreign_keys").get() as { foreign_keys: number })
+        .foreign_keys,
+      1,
+    );
+    assert.deepEqual(f.db.prepare("PRAGMA foreign_key_check").all(), []);
+    assert.ok(
+      f.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='index' AND name='coordination_results_task_created'",
+        )
+        .get(),
+    );
+    const replay = f.coordination.recordResult(call);
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.result.resultId, first.result.resultId);
+    assert.deepEqual(replay.response, first.response);
+    const migrated = resultSchema(f.db);
+    f.reopen();
+    assert.equal(resultSchema(f.db), migrated);
+    assert.deepEqual(resultRows(f.db), rows);
+  } finally {
+    f.close();
+  }
+});
+
+test("unrecognized legacy result schema refuses migration unchanged", () => {
+  const f = fixture();
+  try {
+    f.coordination.recordResult(
+      report("thread-nested-a", "turn-nested-a", "call-legacy-nested"),
+    );
+    restoreLegacyResultSchema(f.db);
+    f.db.exec(
+      "CREATE TRIGGER legacy_result_audit AFTER INSERT ON coordination_results BEGIN SELECT 1; END",
+    );
+    const schema = resultSchema(f.db);
+    const rows = resultRows(f.db);
+    assert.throws(
+      () => f.reopen(),
+      /Unrecognized coordination result schema; migration refused/,
+    );
+    const db = new DatabaseSync(
+      String(
+        (f.db.prepare("PRAGMA database_list").get() as { file: string }).file,
+      ),
+    );
+    try {
+      assert.equal(resultSchema(db), schema);
+      assert.deepEqual(resultRows(db), rows);
+    } finally {
+      db.close();
+    }
+  } finally {
+    f.close();
+  }
+});
+
+test("fresh result schema has no legacy work-revision uniqueness", () => {
+  const f = fixture();
+  try {
+    assert.doesNotMatch(resultSchema(f.db), /UNIQUE\s*\(\s*assignmentId/);
+    assert.equal(
+      f.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE name = 'coordination_results_v2'",
+        )
+        .get(),
+      undefined,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("a legacy collided receipt replays the result it recorded", () => {
+  const f = fixture();
+  try {
+    const { lead, old } = replaceLeadAtRevisionOne(f);
+    restoreLegacyResultSchema(f.db);
+    // Simulates a pre-#903 collision: a new-conversation key attributed to the old work.
+    f.db
+      .prepare(
+        "INSERT INTO coordination_receipts SELECT 'thread-lead-new', 'turn-lead-new', 'call-collided', tool, payloadHash, taskId, assignmentId, workId, workRevision, response FROM coordination_receipts WHERE callId = 'call-lead-old'",
+      )
+      .run();
+    f.reopen();
+    const before = resultEffectCounts(f, lead);
+    const receipts = f.db
+      .prepare("SELECT * FROM coordination_receipts ORDER BY rowid")
+      .all()
+      .map((row) => ({ ...row }));
+    const rows = resultRows(f.db);
+    const replay = f.coordination.recordResult(
+      report("thread-lead-new", "turn-lead-new", "call-collided"),
+    );
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.result.resultId, old.resultId);
+    assert.equal(replay.result.workId, "work-lead-old");
+    assert.deepEqual(resultEffectCounts(f, lead), before);
+    assert.deepEqual(resultRows(f.db), rows);
+    assert.deepEqual(
+      f.db
+        .prepare("SELECT * FROM coordination_receipts ORDER BY rowid")
+        .all()
+        .map((row) => ({ ...row })),
+      receipts,
+    );
+  } finally {
+    f.close();
+  }
+});
+
 test("contextual feedback to a completed lead carries its reference on the follow-up", () => {
   const f = fixture();
   try {
