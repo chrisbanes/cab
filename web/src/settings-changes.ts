@@ -316,6 +316,7 @@ export function adoptSourceRows(source: Source, v: Values) {
     .filter(
       (r) =>
         r.keep &&
+        !r.removed &&
         (r.ref !== r.savedRef || r.replacePath) &&
         !loaded.repositories.some((s) => s.repositoryId === r.repositoryId),
     )
