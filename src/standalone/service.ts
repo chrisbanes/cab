@@ -4119,10 +4119,6 @@ export class StandaloneService {
         projectId,
         revisions?.instructionsRevision ?? Number(project.instructionsRevision),
       );
-      const reference = domain.routingCredentialReference(projectId);
-      const credential = reference?.startsWith("env:")
-        ? process.env[reference.slice("env:".length)]
-        : undefined;
       const discovery = domain.discoveryCredentialReference();
       const fixtureValues =
         this.options.conversationHistoryExclusions?.() ?? [];
@@ -4147,8 +4143,11 @@ export class StandaloneService {
         this.canonicalDataDir,
         ...managedPaths,
         ...additionalPaths,
-        ...(reference ? [reference] : []),
-        ...(credential ? [credential] : []),
+        ...Object.entries(process.env).flatMap(([name, value]) =>
+          /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(name) && value
+            ? [value]
+            : [],
+        ),
         ...(discovery
           ? [
               discovery,
@@ -4158,12 +4157,14 @@ export class StandaloneService {
           : []),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
-          const ref = this.deliveryStore?.configuration(
-            String(p.id),
-          ).credentialRef;
-          return ref
-            ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""]
-            : [];
+          const id = String(p.id);
+          return [
+            domain.routingCredentialReference(id),
+            domain.githubConfiguration(id).credentialRef,
+            this.deliveryStore?.configuration(id).credentialRef,
+          ].flatMap((ref) =>
+            ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
+          );
         }),
       ];
       return values.filter((value) => value.length > 0);

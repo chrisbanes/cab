@@ -1804,10 +1804,38 @@ export class OperatorApi {
         }
       : null;
   }
+  private instructionFence() {
+    const d = this.domain();
+    return JSON.stringify({
+      profiles: d.profiles().map((p) => [p.id, p.version]),
+      projects: d.projects().map((p) => [p.id, p.instructionsRevision]),
+    });
+  }
+  /** Rebuild projections once if their instruction exclusions changed across an await. */
+  private async readWithInstructionFence<T>(
+    read: () => Promise<T>,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const instructions = this.instructionFence();
+      try {
+        const response = await read();
+        if (instructions === this.instructionFence()) return response;
+      } catch (error) {
+        // Nested reads can reject the same instruction race before we reach the fence.
+        if (
+          !(error instanceof OperatorApiError) ||
+          error.status !== 503 ||
+          instructions === this.instructionFence()
+        )
+          throw error;
+      }
+    }
+    throw new OperatorApiError(503, "unavailable");
+  }
   /** Workspace fences per task plus the credential reference fence, checked before a read returns. */
   private workspaceSnapshot(taskIds: readonly string[]) {
     return {
-      // Credential references and values only; version races keep their existing handling.
+      // Instruction revisions are fenced by readWithInstructionFence.
       references: this.referenceFence(),
       workspaces: new Map(
         taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
@@ -1824,6 +1852,9 @@ export class OperatorApi {
         throw new OperatorApiError(503, "unavailable");
   }
   async readProject(projectId: string) {
+    return this.readWithInstructionFence(() => this.readProjectOnce(projectId));
+  }
+  private async readProjectOnce(projectId: string) {
     const p = this.requireProject(projectId),
       rows = this.domain().tasks(projectId),
       snapshot = this.workspaceSnapshot(rows.map((t) => String(t.id))),
@@ -2019,6 +2050,11 @@ export class OperatorApi {
     return { summary, view, excluded };
   }
   async readTaskListPage(params = new URLSearchParams()) {
+    return this.readWithInstructionFence(() =>
+      this.readTaskListPageOnce(params),
+    );
+  }
+  private async readTaskListPageOnce(params = new URLSearchParams()) {
     const values: Record<string, string> = {};
     for (const [key, value] of params) {
       if (key in values) throw new OperatorApiError(400, "invalid-input");
@@ -2052,6 +2088,11 @@ export class OperatorApi {
     });
   }
   async readComposerOptions(projectId: string) {
+    return this.readWithInstructionFence(() =>
+      this.readComposerOptionsOnce(projectId),
+    );
+  }
+  private async readComposerOptionsOnce(projectId: string) {
     const p = this.requireProject(projectId),
       d = this.domain(),
       catalog = d.taskCatalog();
@@ -3362,6 +3403,9 @@ export class OperatorApi {
     });
   }
   async readRuntimeSettings() {
+    return this.readWithInstructionFence(() => this.readRuntimeSettingsOnce());
+  }
+  private async readRuntimeSettingsOnce() {
     const d = this.domain(),
       projects = d.projects(),
       taskRows = new Map(
@@ -3432,6 +3476,11 @@ export class OperatorApi {
     return runtimeSettingsSchema.parse(response);
   }
   async readAssignmentRecovery(assignmentId: string) {
+    return this.readWithInstructionFence(() =>
+      this.readAssignmentRecoveryOnce(assignmentId),
+    );
+  }
+  private async readAssignmentRecoveryOnce(assignmentId: string) {
     uuid.parse(assignmentId);
     const d = this.domain(),
       entry = d
@@ -4446,7 +4495,19 @@ export class OperatorApi {
           );
         }
         const saved = await this.service.postOperatorComment(c);
-        this.requireTask(c.taskId);
+        const receiptVisibility = this.visibilityToken(),
+          receiptTask = this.requireTask(c.taskId),
+          workspace = this.service.taskWorkspaceVisibility(c.taskId),
+          receiptExcluded = await this.exclusions(
+            String(task.projectId),
+            c.taskId,
+          );
+        if (
+          receiptVisibility !== this.visibilityToken() ||
+          this.requireTask(c.taskId).version !== receiptTask.version ||
+          workspace !== this.service.taskWorkspaceVisibility(c.taskId)
+        )
+          throw new OperatorApiError(409, "conflict");
         return commandReceiptSchema.parse({
           kind: "delivery",
           key: c.key,
@@ -4454,10 +4515,7 @@ export class OperatorApi {
           taskId: c.taskId,
           operationId: saved.operationId,
           state: saved.state,
-          reason: this.safe(
-            saved.observation?.reason,
-            await this.exclusions(String(task.projectId), c.taskId),
-          ),
+          reason: this.safe(saved.observation?.reason, receiptExcluded),
         });
       }
       if (c.type === "review.view") {
