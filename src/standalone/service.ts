@@ -194,6 +194,10 @@ export function powerSupervisionEnabled(
   );
 }
 
+const runtimeFailedError = (): never => {
+  throw new Error("Runtime failed");
+};
+
 /** Runtime-issued identities are only unique within one harness. */
 const runtimeKey = (harness: ExecutionHarness, identity: string) =>
   JSON.stringify([harness, identity]);
@@ -316,6 +320,8 @@ export class StandaloneService {
     number
   >();
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
+  /** Settles when a non-default runtime reports failure; see untilFailure. */
+  private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
   private conversationHistory: ConversationHistoryStore | undefined;
   private readonly conversationCaptures = new Map<
     string,
@@ -631,16 +637,39 @@ export class StandaloneService {
       this.supervisor = new ExecutionSupervisor(
         state,
         // A failed harness is never awaited for inspection or interrupts.
-        (workId) =>
-          this.runtimeUnavailableSince.has(this.harnessForWork(workId))
+        (workId) => {
+          const runtime = this.runtimeUnavailableSince.has(
+            this.harnessForWork(workId),
+          )
             ? undefined
-            : this.runtimeForWork(workId),
+            : this.runtimeForWork(workId);
+          if (!runtime) return undefined;
+          const inspect = runtime.inspectExecution?.bind(runtime);
+          return {
+            ...(inspect
+              ? {
+                  inspectExecution: (identity: Parameters<typeof inspect>[0]) =>
+                    this.untilFailure(
+                      runtime,
+                      inspect(identity),
+                      runtimeFailedError,
+                    ),
+                }
+              : {}),
+            interruptTurn: (threadId: string, turnId: string) =>
+              this.untilFailure(
+                runtime,
+                runtime.interruptTurn(threadId, turnId),
+                runtimeFailedError,
+              ),
+          };
+        },
         this.options.supervisor,
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
       for (const [harness, runtime] of this.runtimes)
         try {
-          await runtime.start();
+          await this.untilFailure(runtime, runtime.start(), runtimeFailedError);
         } catch (error) {
           if (harness === defaultExecutionHarness) throw error;
           this.runtimes.delete(harness);
@@ -800,7 +829,16 @@ export class StandaloneService {
         return true;
       }
     };
+    let failed = () => {};
+    if (harness !== defaultExecutionHarness)
+      this.runtimeFailed.set(
+        runtime,
+        new Promise<void>((resolve) => {
+          failed = resolve;
+        }),
+      );
     runtime.onFailure?.(() => {
+      failed();
       if (
         this.runtimes.get(harness) === runtime &&
         !this.runtimeUnavailableSince.has(harness)
@@ -917,6 +955,19 @@ export class StandaloneService {
 
   private runtimeForWork(workId: string): Runtime | undefined {
     return this.runtimes.get(this.harnessForWork(workId));
+  }
+
+  /**
+   * Shared paths never wait on a failed non-default runtime: its pending call
+   * settles as `onFailure` decides. The default runtime keeps its own bounds.
+   */
+  private untilFailure<T>(
+    runtime: Runtime,
+    work: Promise<T>,
+    onFailure: () => T,
+  ): Promise<T> {
+    const failed = this.runtimeFailed.get(runtime);
+    return failed ? Promise.race([work, failed.then(onFailure)]) : work;
   }
 
   /** Why work bound to this harness cannot be admitted now, if anything. */
@@ -3654,8 +3705,13 @@ export class StandaloneService {
     try {
       // Known-unavailable runtimes are never awaited: the scheduler is serial.
       if (waitForRuntime()) return;
-      const processIdentity = await Promise.resolve(
-        runtime?.processIdentity?.() ?? null,
+      const processIdentity = await (runtime
+        ? this.untilFailure(
+            runtime,
+            Promise.resolve(runtime.processIdentity?.() ?? null),
+            () => null,
+          )
+        : Promise.resolve(null)
       ).catch(() => null);
       if (
         this.runtimes.get(harness) !== runtime ||
@@ -3765,6 +3821,9 @@ export class StandaloneService {
     const harness = this.harnessForWork(request.workId);
     const runtime = this.runtimes.get(harness);
     if (!runtime) throw new Error("Runtime unavailable");
+    // Shutdown settles active work, so a failed runtime must not leave it pending.
+    const guard = <T>(work: Promise<T>) =>
+      this.untilFailure(runtime, work, runtimeFailedError);
     let submissionStage: "resume" | "thread" | "bound" | "turn" = "thread";
     let captureThreadId: string | undefined;
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
@@ -3836,12 +3895,12 @@ export class StandaloneService {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
         submissionStage = "resume";
-        await runtime.resumeThread(previous.threadId, tools);
+        await guard(runtime.resumeThread(previous.threadId, tools));
         threadId = previous.threadId;
       } else {
         if (state.get(intent.id).state !== "submitting")
           throw new Error("Execution admission was held");
-        threadId = await runtime.startThread(workspace, tools);
+        threadId = await guard(runtime.startThread(workspace, tools));
       }
       submissionStage = "bound";
       const threadBound = state.bindThread(intent.id, threadId);
@@ -3858,10 +3917,8 @@ export class StandaloneService {
       );
       submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
-      const turnId = await runtime.startTurn(
-        threadId,
-        workspace,
-        this.executionPrompt(request),
+      const turnId = await guard(
+        runtime.startTurn(threadId, workspace, this.executionPrompt(request)),
       );
       const runtimeGeneration = runtime.currentUserInputGeneration?.();
       let turnBound = runtimeGeneration
@@ -3987,7 +4044,7 @@ export class StandaloneService {
       );
       if (exactBinding) conversationCapture?.bind(exactBinding);
       else conversationCapture?.discard();
-      const outcome = await runtime.waitForTurn(threadId, turnId);
+      const outcome = await guard(runtime.waitForTurn(threadId, turnId));
       conversationCapture?.finish();
       if (conversationCapture)
         this.removeConversationCapture(

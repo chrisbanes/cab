@@ -142,7 +142,9 @@ export class ExecutionSupervisor {
   constructor(
     private readonly state: ExecutionState,
     /** Resolves the runtime of the work's bound harness; never another. */
-    private readonly runtimeFor: (workId: string) => Runtime | undefined,
+    private readonly runtimeFor: (
+      workId: string,
+    ) => Pick<Runtime, "inspectExecution" | "interruptTurn"> | undefined,
     options: ExecutionSupervisorOptions = {},
     private readonly terminationVerifier: TerminationVerifier = new MacProcessTerminationVerifier(),
   ) {

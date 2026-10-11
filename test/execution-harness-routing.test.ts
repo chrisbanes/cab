@@ -28,6 +28,8 @@ class HarnessRuntime implements Runtime {
   failNextTurn = false;
   failStart = false;
   hangIdentity = false;
+  /** Fails while a recovery inspection is pending and never settles it. */
+  failDuringInspection = false;
   /** Lets two fakes return the same opaque thread ID. */
   threadName: string | undefined;
   private threads = 0;
@@ -127,6 +129,12 @@ class HarnessRuntime implements Runtime {
     identity: ExactExecutionIdentity,
   ): Promise<ExecutionInspection> {
     this.calls.push(`inspect:${identity.threadId}`);
+    if (this.failDuringInspection) {
+      setTimeout(() => this.crash(), 10);
+      return new Promise<never>(() => {
+        // Never settles, like a runtime lost mid-request.
+      });
+    }
     return { kind: "unknown" } as ExecutionInspection;
   }
   onUnexpectedRequest(listener: (request: UnexpectedRequest) => void) {
@@ -926,6 +934,56 @@ test("a failed harness with a hung identity blocks neither other work nor shutdo
       new Promise((resolve) => setTimeout(() => resolve("hung"), 3000)),
     ]);
     assert.equal(stopped, "stopped");
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a harness failing during a pending recovery inspection does not stall start-up", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-inspect-"));
+  const dataDir = join(root, "data");
+  let runtimes = fakes();
+  let service = open(dataDir, runtimes);
+  let describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    runtimes.claude.holdTurns = true;
+    const claudeTask = await task(service, projectId, [worker]);
+    const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, claudeWork)?.state === "running",
+      describe,
+    );
+    await service.stop();
+
+    runtimes = fakes();
+    runtimes.claude.failDuringInspection = true;
+    service = open(dataDir, runtimes);
+    describe = diagnostics(service, runtimes);
+    const started = await Promise.race([
+      service.start().then(() => "started"),
+      new Promise((resolve) => setTimeout(() => resolve("stalled"), 3000)),
+    ]);
+    assert.equal(started, "started");
+    assert.deepEqual(runtimes.claude.calls, ["inspect:claude-thread-1"]);
+    assert.deepEqual(
+      service
+        .recoveryView()
+        .find((record) => record.workId === claudeWork)
+        ?.observations.map((observation) => observation.kind),
+      ["unknown"],
+    );
+    const codexTask = await task(service, projectId, [lead]);
+    await waitUntil(
+      () =>
+        intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+        "completed",
+      describe,
+    );
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
