@@ -159,6 +159,21 @@ test("the packed CLI installs offline and works against a real service over loop
   const envelope = JSON.parse(r.out);
   assert.equal(envelope.schema, "ensemble.cli/v1");
   assert.equal(envelope.data.task.id, s.taskId);
+  r = await cli(["project", "list", "--output", "json"]);
+  assert.equal(r.code, 0, r.err);
+  assert.ok(
+    JSON.parse(r.out).data.projects.some(
+      (p: { id: string }) => p.id === s.projectId,
+    ),
+  );
+  r = await cli(["task", "list", "--output", "json"]);
+  assert.equal(r.code, 0, r.err);
+  const list = JSON.parse(r.out);
+  assert.equal(list.coverage.complete, true);
+  assert.deepEqual(
+    list.data.tasks.map((x: { id: string }) => x.id),
+    [s.taskId],
+  );
   r = await cli(["task", "get", s.taskId], {
     ENSEMBLE_MANAGED_ASSIGNMENT: "1",
   });
