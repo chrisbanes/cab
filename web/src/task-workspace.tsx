@@ -1511,12 +1511,7 @@ export function TaskWorkspace({
                   <p>Supplied responsibility / brief</p>
                   <Literal text={a.brief} />
                   <p>
-                    Requester assignment:{" "}
-                    {a.requesterAssignmentId ?? "Not recorded"}; result
-                    destination: {a.resultDestination ?? "Unavailable"};
-                    resolved recipient:{" "}
-                    {a.resultRecipientAssignmentId ?? "Unavailable"} (
-                    {a.resultRecipientDisposition ?? "Unknown disposition"}).
+                    {`Requester assignment: ${a.requesterAssignmentId ?? "Not recorded"}; result destination: ${a.resultDestination ?? "Unavailable"}; resolved recipient: ${a.resultRecipientAssignmentId ?? "Unavailable"} (${a.resultRecipientDisposition ?? "Unknown disposition"}).`}
                   </p>
                   <p>
                     Execution: {execution.line}
