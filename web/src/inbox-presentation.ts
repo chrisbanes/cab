@@ -63,8 +63,26 @@ const heldLabels: Partial<Record<Reason, string>> = {
   "admission-blocked": "admission blocked",
 };
 
-/** Independent holds an approval does not clear, from the task read's admission facts. */
-export function holdNotices(task: TaskRead["data"]): HoldNotice[] {
+/** What answering a question says about each notice; any id not listed falls back to a generic line. */
+const answerDetails: Record<string, string> = {
+  blocked:
+    "Source-owned hold. Answering does not clear it; execution still waits for the GitHub blocker.",
+  "blockers-unknown":
+    "GitHub blockers could not be confirmed. Answering does not clear this hold.",
+  "source-held":
+    "Source review or hold is unresolved. Answering does not clear it.",
+  dependency: "Dependency hold. Answering does not clear it.",
+  paused: "Task paused. Recording answers does not resume execution.",
+};
+
+/**
+ * Independent holds an approval (or, with "answer", a recorded answer) does not clear, from the
+ * task read's admission facts. The wording is the only thing the action changes.
+ */
+export function holdNotices(
+  task: TaskRead["data"],
+  action: "approve" | "answer" = "approve",
+): HoldNotice[] {
   const reasons = new Set(task.admission.reasons),
     notices: HoldNotice[] = [],
     openBlockers = (task.source?.nativeBlockers ?? [])
@@ -127,5 +145,10 @@ export function holdNotices(task: TaskRead["data"]): HoldNotice[] {
       items: [],
       detail: "Approving does not clear it.",
     });
-  return notices;
+  return action === "answer"
+    ? notices.map((notice) => ({
+        ...notice,
+        detail: answerDetails[notice.id] ?? "Answering does not clear it.",
+      }))
+    : notices;
 }
