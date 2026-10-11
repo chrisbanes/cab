@@ -106,7 +106,17 @@ export function fakeDiscovery(
                 },
               ]
             : [],
+        // As on GitHub, the owner's Projects exclude only those linked to this repository.
         owned: [
+          ...(name === "atlas"
+            ? []
+            : [
+                {
+                  projectNodeId: "PVT_atlas",
+                  title: "Atlas roadmap",
+                  number: 1,
+                },
+              ]),
           { projectNodeId: "PVT_web", title: "Web", number: 2 },
           { projectNodeId: "PVT_ops", title: "Ops", number: 3 },
           { projectNodeId: "PVT_docs", title: "Docs", number: 4 },
