@@ -987,6 +987,31 @@ export class DomainStore {
       .all() as Row[];
   }
 
+  /** Assignments bound to a project or profile, oldest first, with current revisions. */
+  assignmentsBoundTo(
+    target: "projectId" | "profileId",
+    targetId: string,
+    limit: number,
+  ): { rows: Row[]; total: number } {
+    const where = `a.${target === "projectId" ? "projectId" : "profileId"} = ?`;
+    const rows = this.db
+      .prepare(`SELECT a.id, a.taskId, a.projectId, a.profileId, a.state,
+        a.profileRevision, a.instructionsRevision,
+        pr.version AS currentProfileRevision,
+        p.instructionsRevision AS currentInstructionsRevision,
+        EXISTS(SELECT 1 FROM task_lead_bindings b WHERE b.assignmentId = a.id) AS lead
+        FROM domain_assignments a
+        JOIN profiles pr ON pr.id = a.profileId
+        JOIN domain_projects p ON p.id = a.projectId
+        WHERE ${where} ORDER BY a.rowid LIMIT ?`)
+      .all(id.parse(targetId), limit) as Row[];
+    const count = this.required(
+      `SELECT COUNT(*) AS total FROM domain_assignments a WHERE ${where}`,
+      targetId,
+    );
+    return { rows, total: Number(count.total) };
+  }
+
   leadBindings(): Row[] {
     return this.db
       .prepare(`SELECT taskId, projectId, profileId, profileRevision,

@@ -257,7 +257,9 @@ export function operatorRouteAuthority(
     /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
       path,
     ) ||
-    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
+    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/(?:instructions|impact)$/.test(
+      path,
+    )
     ? "read"
     : undefined;
 }

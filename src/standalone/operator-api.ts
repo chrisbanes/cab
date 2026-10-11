@@ -39,6 +39,7 @@ import {
   inboxReadSchema,
   materialSchema,
   operatorCommandSchema,
+  configurationImpactSchema,
   operationReadSchema,
   operationScopeSchema,
   operationTypeSchema,
@@ -3624,6 +3625,65 @@ export class OperatorApi {
           : "not-found",
       );
     }
+  }
+  /** Bounded, informational list of assignments bound to a project or profile. */
+  readConfigurationImpact(
+    kind: "project" | "profile",
+    targetId: string,
+    query: URLSearchParams,
+  ) {
+    if (
+      [...query.keys()].some((k) => k !== "limit") ||
+      query.getAll("limit").length > 1
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    const raw = query.get("limit");
+    const limit = raw === null ? 200 : Number(raw);
+    if (!/^[0-9]{1,3}$/.test(raw ?? "200") || limit < 1 || limit > 200)
+      throw new OperatorApiError(400, "invalid-input");
+    if (!uuid.safeParse(targetId).success)
+      throw new OperatorApiError(400, "invalid-input");
+    return this.readWithInstructionFence(async () => {
+      const d = this.domain();
+      if (kind === "project") this.requireProject(targetId);
+      else if (!d.profiles().some((p) => p.id === targetId))
+        throw new OperatorApiError(404, "not-found");
+      const { rows, total } = d.assignmentsBoundTo(
+        kind === "project" ? "projectId" : "profileId",
+        targetId,
+        limit + 1,
+      );
+      return configurationImpactSchema.parse({
+        data: {
+          target: { kind, id: targetId },
+          assignments: rows.slice(0, limit).map((r) => ({
+            assignmentId: String(r.id),
+            taskId: String(r.taskId),
+            projectId: String(r.projectId),
+            profileId: String(r.profileId),
+            state: r.state,
+            lead: Boolean(r.lead),
+            bound: {
+              profileRevision: Number(r.profileRevision),
+              instructionsRevision: Number(r.instructionsRevision),
+            },
+            current: {
+              profileRevision: Number(r.currentProfileRevision),
+              instructionsRevision: Number(r.currentInstructionsRevision),
+            },
+            stale: {
+              profile: r.profileRevision !== r.currentProfileRevision,
+              instructions:
+                r.instructionsRevision !== r.currentInstructionsRevision,
+            },
+          })),
+          total,
+          truncated: total > limit,
+          limit,
+        },
+        observedAt: Date.now(),
+      });
+    });
   }
   /** Reads back one configuration or adoption receipt by scope, type and key. */
   readOperation(query: URLSearchParams) {

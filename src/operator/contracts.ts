@@ -2743,7 +2743,50 @@ export const cliCapabilities = [
   "configuration.write",
   "operation.read",
   "capacity.read",
+  "configuration.impact",
 ] as const;
+/** Assignments a profile or project change would affect, observed at read time. */
+export const configurationImpactSchema = envelope(
+  z
+    .object({
+      target: z
+        .object({ kind: z.enum(["project", "profile"]), id: uuid })
+        .strict(),
+      assignments: z
+        .array(
+          z
+            .object({
+              assignmentId: uuid,
+              taskId: uuid,
+              projectId: uuid,
+              profileId: uuid,
+              state: z.enum(["pending", "running", "completed", "held"]),
+              lead: z.boolean(),
+              bound: z
+                .object({
+                  profileRevision: revision,
+                  instructionsRevision: revision,
+                })
+                .strict(),
+              current: z
+                .object({
+                  profileRevision: revision,
+                  instructionsRevision: revision,
+                })
+                .strict(),
+              stale: z
+                .object({ profile: z.boolean(), instructions: z.boolean() })
+                .strict(),
+            })
+            .strict(),
+        )
+        .max(200),
+      total: time,
+      truncated: z.boolean(),
+      limit: z.number().int().min(1).max(200),
+    })
+    .strict(),
+);
 /** Commands whose receipts `GET /api/operator/operations` reads back. */
 export const operationTypeSchema = z.enum([
   "profile.create",

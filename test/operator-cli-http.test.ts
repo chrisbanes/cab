@@ -360,6 +360,8 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/projects/${id}/instructions`,
     `/api/operator/profiles/${id}/instructions`,
     "/api/operator/operations",
+    `/api/operator/projects/${id}/impact`,
+    `/api/operator/profiles/${id}/impact`,
   ];
   for (const path of [
     `/api/operator/tasks/${id}/results`,
@@ -369,6 +371,8 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/projects/${id}/instructions`,
     `/api/operator/profiles/${id}/instructions`,
     "/api/operator/operations",
+    `/api/operator/projects/${id}/impact`,
+    `/api/operator/profiles/${id}/impact`,
   ])
     assert.equal(operatorRouteAuthority("GET", path), "read", path);
   const known = Object.create(
