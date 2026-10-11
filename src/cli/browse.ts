@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { CliError } from "./connections.js";
-import { workspaceCommands } from "./browse-workspace.js";
 import type { ServiceClient } from "./transport.js";
 import type { Result, Values } from "./types.js";
 
@@ -52,13 +51,6 @@ export type BrowseCommand = {
   capabilities: readonly string[];
   run(ctx: BrowseContext): Promise<BrowseOutput>;
 };
-
-// ponytail: this module and its area modules import each other; entry points
-// must import browse.js (or main.js), never an area module first.
-/** Keyed "area action". */
-export const browseCommands = new Map<string, BrowseCommand>([
-  ...workspaceCommands,
-]);
 
 export function coverage(
   observedAt: number,

@@ -18,7 +18,7 @@ type After = { after(fn: () => unknown): void };
 /** A real operator service with the bearer path, a signed-in browser session and one task. */
 export async function startCliService(
   t: After,
-  options: { authOrigin?: string } = {},
+  options: { authOrigin?: string; controlPaths?: string[] } = {},
 ) {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -41,7 +41,7 @@ export async function startCliService(
       credentials: f.service.operatorCredentials(),
       web: new OperatorWebBoundary(
         await OperatorWebBundle.open(bundlePath),
-        new OperatorApi(f.service, [f.directory]),
+        new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
       ),
     },
   );

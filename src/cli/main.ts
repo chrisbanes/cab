@@ -18,7 +18,8 @@ import {
   KeychainCredentialStore,
   readTokenFile,
 } from "./connections.js";
-import { browseCommands, coverage } from "./browse.js";
+import { coverage } from "./browse.js";
+import { browseCommands } from "./commands.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 

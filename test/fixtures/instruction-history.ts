@@ -13,6 +13,7 @@ const credentialEnv = "CLI2_SYNTHETIC_ROUTING";
 export async function seedInstructionHistory(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
   controlPath = f.directory,
+  historyItems = 1,
 ) {
   const d = f.service.domain(),
     profileId = randomUUID(),
@@ -96,30 +97,32 @@ export async function seedInstructionHistory(
   if (!leadB) throw Error("Fixture lead absent");
   const assignmentA = String(leadA.id),
     workId = randomUUID();
-  f.seedPersistedState((db) =>
-    new ConversationHistoryStore(db).record(
-      {
-        workId,
-        taskId: taskA,
-        assignmentId: assignmentA,
-        assignmentVersion: Number(leadA.version),
-        instructionsRevision: 1,
-        profileRevision: 1,
-        conversationRevision: 1,
-        workRevision: 1,
-        threadId: workId,
-        turnId: workId,
-      },
-      {
-        kind: "completed",
-        threadId: workId,
-        turnId: workId,
-        itemId: "echo",
-        text: `I read: ${text.profile[0]}`,
-      },
-      [],
-    ),
-  );
+  f.seedPersistedState((db) => {
+    const store = new ConversationHistoryStore(db);
+    for (let i = 0; i < historyItems; i++)
+      store.record(
+        {
+          workId,
+          taskId: taskA,
+          assignmentId: assignmentA,
+          assignmentVersion: Number(leadA.version),
+          instructionsRevision: 1,
+          profileRevision: 1,
+          conversationRevision: 1,
+          workRevision: 1,
+          threadId: workId,
+          turnId: workId,
+        },
+        {
+          kind: "completed",
+          threadId: workId,
+          turnId: workId,
+          itemId: i ? `echo-${i}` : "echo",
+          text: `I read: ${text.profile[0]} (${i})`,
+        },
+        [],
+      );
+  });
   return {
     profileId,
     projectA,
