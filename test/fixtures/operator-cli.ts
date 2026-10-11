@@ -6,6 +6,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import type { Runtime } from "../../src/standalone/codex.js";
 import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
 import {
   OperatorWebBoundary,
@@ -31,16 +32,29 @@ type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 /** A real operator service with the bearer path, a signed-in browser session and one task. */
 export async function startCliService(
   t: After,
-  options: ServeOptions & { service?: StandaloneServiceOptions } = {},
+  options: ServeOptions & {
+    service?: StandaloneServiceOptions;
+    /** A test runtime in place of the fixture runtime (recovery generations). */
+    runtimeFactory?: () => Runtime;
+  } = {},
 ) {
-  const f = await createOperatorFixture(
-    null,
-    undefined,
-    undefined,
-    undefined,
-    undefined,
-    options.service,
-  );
+  const f = options.runtimeFactory
+    ? ((await createOperatorFixture(
+        null,
+        undefined,
+        undefined,
+        {},
+        options.runtimeFactory,
+        options.service,
+      )) as unknown as Fixture)
+    : await createOperatorFixture(
+        null,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        options.service,
+      );
   t.after(() => f.close());
   const served = await serveCli(t, f, options);
   const projectId = randomUUID(),

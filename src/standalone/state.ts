@@ -13,6 +13,7 @@ import {
   type ReplaceConversationCommand,
 } from "./pre-turn-recovery.js";
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -2348,7 +2349,7 @@ export class ExecutionState {
       row.scope !== scope ||
       row.payloadMaterial !== canonicalMaterial(command)
     )
-      throw new Error(
+      throw new RecoveryRejectedError(
         "Pre-turn command key was reused with different material",
       );
     return JSON.parse(row.result) as Record<string, string | number>;
@@ -2520,8 +2521,16 @@ export class ExecutionState {
           .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
           .get(value.workId)
       )
-        throw new Error(
+        throw new RecoveryRejectedError(
           "Historical no-turn adoption does not match the exact held generation",
+        );
+      if (
+        this.db
+          .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
+          .get(value.workId)
+      )
+        throw new RecoveryRejectedError(
+          "Historical no-turn submission is already recorded for this generation",
         );
       const result = { witnessId: randomUUID(), workId: value.workId };
       this.db
@@ -2670,8 +2679,16 @@ export class ExecutionState {
           )
           .get(value.workId)
       )
-        throw new Error(
+        throw new RecoveryRejectedError(
           "Historical pre-turn adoption does not match the exact held generation",
+        );
+      if (
+        this.db
+          .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
+          .get(value.workId)
+      )
+        throw new RecoveryRejectedError(
+          "Pre-turn rejection witness is already recorded for this generation",
         );
       const result = { witnessId: randomUUID(), workId: value.workId };
       this.db
@@ -2714,7 +2731,9 @@ export class ExecutionState {
         assignment.version !== value.expectedAssignmentVersion ||
         (conversation?.revision ?? 1) !== value.expectedConversationRevision
       )
-        throw new Error("Conversation replacement material is stale");
+        throw new RecoveryRejectedError(
+          "Conversation replacement material is stale",
+        );
       if (
         this.db
           .prepare(
@@ -2722,7 +2741,7 @@ export class ExecutionState {
           )
           .get(assignment.taskId, assignment.taskId, assignment.taskId)
       )
-        throw new Error("Task remains held for recovery");
+        throw new RecoveryRejectedError("Task remains held for recovery");
       const result = { revision: this.replaceConversation(value.assignmentId) };
       this.recordPreTurnCommand("replace-conversation", value, result);
       return result;
@@ -2891,17 +2910,24 @@ export class ExecutionState {
       );
   }
 
-  replaceConversation(assignmentId: string): number {
-    const id = z.string().uuid().parse(assignmentId);
-    const unresolved = this.db
-      .prepare(`SELECT 1 FROM task_execution_bindings b
+  /** Whether a bound, unrefused generation of the assignment is still unresolved. */
+  assignmentHasUnresolvedExecution(assignmentId: string): boolean {
+    return (
+      this.db
+        .prepare(`SELECT 1 FROM task_execution_bindings b
       JOIN execution_intents e ON e.workId = b.workId
       WHERE b.assignmentId = ? AND e.state IN ('ready','capacity-waiting','held','submitting','running')
       AND NOT EXISTS (
         SELECT 1 FROM execution_request_refusals r WHERE r.workId = e.workId
       ) LIMIT 1`)
-      .get(id);
-    if (unresolved) throw new Error("Assignment has unresolved execution");
+        .get(assignmentId) !== undefined
+    );
+  }
+
+  replaceConversation(assignmentId: string): number {
+    const id = z.string().uuid().parse(assignmentId);
+    if (this.assignmentHasUnresolvedExecution(id))
+      throw new RecoveryRejectedError("Assignment has unresolved execution");
     this.db
       .prepare(
         "INSERT OR IGNORE INTO assignment_conversations (assignmentId, revision) VALUES (?, 1)",
@@ -3735,7 +3761,9 @@ export class ExecutionState {
         | undefined;
       const identity = this.recoveryIdentity(value.workId);
       if (intent?.state !== "held" || !identity)
-        throw new Error("Execution generation is not held for recovery");
+        throw new RecoveryRejectedError(
+          "Execution generation is not held for recovery",
+        );
       const requestSequence = this.hasTurnRequests
         ? (
             this.db
@@ -3772,7 +3800,7 @@ export class ExecutionState {
           identity.processIdentity.processStartedAt ||
         proof.processIdentity.bootId !== identity.processIdentity.bootId
       )
-        throw new Error(
+        throw new RecoveryRejectedError(
           "Recovery receipt generation or execution identity does not match",
         );
       if (
@@ -3785,7 +3813,7 @@ export class ExecutionState {
           )
           .get(value.workId) === undefined
       )
-        throw new Error(
+        throw new RecoveryRejectedError(
           "Exact generation no longer owns its writer and capacity holds",
         );
 
@@ -3797,7 +3825,7 @@ export class ExecutionState {
         value.kind === "pre-turn-rejection" &&
         (!command || !preTurnWitness || preTurnWitness.id !== value.witnessId)
       )
-        throw new Error(
+        throw new RecoveryRejectedError(
           "Pre-turn recovery requires its exact persisted witness and keyed command",
         );
       const noTurnWitness =
@@ -3808,7 +3836,7 @@ export class ExecutionState {
         value.kind === "no-turn-submission" &&
         (!command || !noTurnWitness || noTurnWitness.id !== value.witnessId)
       )
-        throw new Error(
+        throw new RecoveryRejectedError(
           "No-turn recovery requires its exact persisted witness and keyed command",
         );
       if (
@@ -3817,14 +3845,18 @@ export class ExecutionState {
           .prepare("SELECT 1 FROM execution_no_turn_submissions WHERE workId=?")
           .get(value.workId)
       )
-        throw new Error("Other receipt kinds cannot adopt a no-turn witness");
+        throw new RecoveryRejectedError(
+          "Other receipt kinds cannot adopt a no-turn witness",
+        );
       if (
         value.kind !== "pre-turn-rejection" &&
         this.db
           .prepare("SELECT 1 FROM execution_pre_turn_rejections WHERE workId=?")
           .get(value.workId)
       )
-        throw new Error("Bound-turn receipt cannot adopt a pre-turn witness");
+        throw new RecoveryRejectedError(
+          "Bound-turn receipt cannot adopt a pre-turn witness",
+        );
       const receiptId = randomUUID();
       const changed = this.db
         .prepare(`UPDATE execution_intents
@@ -3835,7 +3867,7 @@ export class ExecutionState {
         | { id: string }
         | undefined;
       if (!changed)
-        throw new Error(
+        throw new RecoveryRejectedError(
           "Recovery generation changed during receipt validation",
         );
       this.db

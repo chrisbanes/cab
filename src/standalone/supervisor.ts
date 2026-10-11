@@ -1,4 +1,5 @@
 import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import { EventEmitter } from "node:events";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
@@ -223,7 +224,7 @@ export class ExecutionSupervisor {
       stored.turnId !== value.turnId ||
       !exactProcessIdentity(stored.processIdentity, value.processIdentity)
     )
-      throw new Error(
+      throw new RecoveryRejectedError(
         "Recovery receipt generation or execution identity does not match",
       );
 
@@ -234,7 +235,9 @@ export class ExecutionSupervisor {
       );
     } catch {
       this.recordObservation(value.workId, "termination-unknown");
-      throw new Error("Original process termination could not be verified");
+      throw new RecoveryRejectedError(
+        "Original process termination could not be verified",
+      );
     }
     if (verification.kind !== "verified") {
       this.recordObservation(
@@ -243,7 +246,7 @@ export class ExecutionSupervisor {
           ? "termination-conflict"
           : "termination-unknown",
       );
-      throw new Error(
+      throw new RecoveryRejectedError(
         verification.kind === "conflict"
           ? "Process termination evidence conflicts with the stored identity"
           : "Original process termination could not be verified",
@@ -256,7 +259,7 @@ export class ExecutionSupervisor {
       )
     ) {
       this.recordObservation(value.workId, "termination-conflict");
-      throw new Error(
+      throw new RecoveryRejectedError(
         "Verified termination proof has a different process identity",
       );
     }
