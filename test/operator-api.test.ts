@@ -965,6 +965,7 @@ test("global labels exclude retained private revisions without any task or proje
     profiles: () => d.profiles(),
     profile: d.profile.bind(d),
     profileRevision: d.profileRevision.bind(d),
+    profileRuntime: d.profileRuntime.bind(d),
     projects: () => [],
   };
   const isolated = new OperatorApi({
@@ -995,6 +996,7 @@ test("global snapshot privacy fails closed before excessive revision lookup work
       lookups++;
       return { instructions: "PRIVATE" };
     },
+    profileRuntime: () => ({ harness: "codex" }),
   };
   const api = new OperatorApi({
     domain: () => domain,

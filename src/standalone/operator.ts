@@ -1,4 +1,7 @@
-import { questionCommandRawLimit } from "../operator/contracts.js";
+import {
+  questionCommandRawLimit,
+  runtimeSummary,
+} from "../operator/contracts.js";
 import type { OperatorWebBoundary } from "./operator-web.js";
 import {
   OperatorApiError,
@@ -310,7 +313,7 @@ export class LocalOperatorUi {
 
   profile(profileId: string, csrfToken = ""): string {
     const profile = this.store.profile(profileId);
-    return `<main><h1>${escapeHtml(profile.name)}</h1><p>Revision ${escapeHtml(profile.version)}; ${profile.revoked ? "revoked" : "active"}</p>${form("profile.configure", field("profileId", profileId, "hidden") + field("expectedVersion", String(profile.version), "hidden") + field("name", String(profile.name)) + textarea("instructions", String(profile.instructions)) + textarea("capabilities", String(profile.capabilities)) + field("revoked", "1", "checkbox", Boolean(profile.revoked)), undefined, csrfToken)}</main>`;
+    return `<main><h1>${escapeHtml(profile.name)}</h1><p>Revision ${escapeHtml(profile.version)}; ${profile.revoked ? "revoked" : "active"}</p><p>Execution runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(profileId)))}. Change it in profile Settings; saving here keeps it.</p>${form("profile.configure", field("profileId", profileId, "hidden") + field("expectedVersion", String(profile.version), "hidden") + field("name", String(profile.name)) + textarea("instructions", String(profile.instructions)) + textarea("capabilities", String(profile.capabilities)) + field("revoked", "1", "checkbox", Boolean(profile.revoked)), undefined, csrfToken)}</main>`;
   }
 
   assignment(assignmentId: string): string {

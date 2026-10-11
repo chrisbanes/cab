@@ -32,3 +32,16 @@ export const executionHarnessLabels: Record<ExecutionHarness, string> = {
   codex: "Codex",
   claude: "Claude",
 };
+
+/** "Codex", "Claude · sonnet · high" or "Claude · default model and effort". */
+export function runtimeSummary(runtime: ProfileRuntime): string {
+  const label = executionHarnessLabels[runtime.harness];
+  if (runtime.harness === "codex") return label;
+  if (runtime.model === null && runtime.reasoningEffort === null)
+    return `${label} · default model and effort`;
+  return [
+    label,
+    runtime.model ?? "default model",
+    runtime.reasoningEffort ?? "default effort",
+  ].join(" · ");
+}

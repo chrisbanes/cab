@@ -4,7 +4,14 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
-import { phone, startSettings, trail } from "./fixtures/operator-settings.js";
+import type { Page } from "playwright";
+import {
+  noPageOverflow,
+  phone,
+  startSettings,
+  trail,
+} from "./fixtures/operator-settings.js";
+import { commandRequest } from "./fixtures/setup-browser.js";
 
 const test = browserSuite("ui08-settings-profiles");
 
@@ -194,4 +201,125 @@ test("project settings highlight the project in the sidebar; phone profile pages
     false,
   );
   await captureBrowserEvidence(page, "390-profile");
+});
+
+const controlHeights = (page: Page, labels: string[]) =>
+  Promise.all(
+    labels.map(
+      async (label) =>
+        (await page.getByLabel(label, { exact: true }).boundingBox())?.height ??
+        0,
+    ),
+  );
+
+test("Create profile chooses Claude with model and effort, rejecting invalid values before sending", async (_t, journey) => {
+  const { f, page } = await startSettings(
+    journey,
+    "/app/settings/profiles/new",
+  );
+  let sent = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sent++;
+  });
+  await page.getByLabel("Profile name", { exact: true }).fill("Claude tester");
+  await page.getByLabel("Instructions", { exact: true }).fill("Test");
+  await page.getByLabel("Capabilities", { exact: true }).fill("Tests");
+  assert.equal(
+    await page.getByLabel("Runtime", { exact: true }).inputValue(),
+    "codex",
+  );
+  assert.equal(await page.getByLabel("Model", { exact: true }).count(), 0);
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  await page
+    .getByText("The Claude runtime is not enabled on this service.", {
+      exact: false,
+    })
+    .waitFor();
+  await page.getByLabel("Model", { exact: true }).fill("a b");
+  await page
+    .getByRole("button", { name: "Create profile", exact: true })
+    .click();
+  await page.getByText("Model cannot contain spaces.").waitFor();
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("aria-label") === "Model",
+  );
+  assert.equal(sent, 0);
+  await page.getByLabel("Model", { exact: true }).fill("sonnet");
+  await page.getByLabel("Reasoning effort", { exact: true }).fill("high");
+  const request = commandRequest(page);
+  await page
+    .getByRole("button", { name: "Create profile", exact: true })
+    .click();
+  assert.deepEqual((await request).postDataJSON().runtime, {
+    harness: "claude",
+    model: "sonnet",
+    reasoningEffort: "high",
+  });
+  await page.getByText("Recorded profile.create", { exact: false }).waitFor();
+  const created = f.service
+    .domain()
+    .profiles()
+    .find((r) => r.name === "Claude tester");
+  assert.deepEqual(f.service.domain().profileRuntime(String(created?.id)), {
+    harness: "claude",
+    model: "sonnet",
+    reasoningEffort: "high",
+  });
+  await page.setViewportSize(phone);
+  await page
+    .getByRole("button", { name: "Create another profile", exact: true })
+    .click();
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  for (const height of await controlHeights(page, [
+    "Runtime",
+    "Model",
+    "Reasoning effort",
+  ]))
+    assert.ok(height >= 44, `control height ${height}`);
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "390-profile-create-runtime");
+});
+
+test("Profile configuration switches Codex to Claude and back as new revisions", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(journey, "/app/settings");
+  const builder = ids.profiles.Builder as string;
+  const d = f.service.domain();
+  await page.getByText("Runtime: Codex").first().waitFor();
+  await page.goto(`${web.origin}/app/profiles/${builder}/settings`);
+  await page
+    .getByRole("complementary", { name: "Runtime change" })
+    .getByText("affects new conversations only", { exact: false })
+    .waitFor();
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  await page.getByLabel("Model", { exact: true }).fill("sonnet");
+  await page.getByLabel("Reasoning effort", { exact: true }).fill("high");
+  const changes = page.getByRole("region", { name: "Changes to save" });
+  await changes.getByText("Runtime: Codex → Claude · sonnet · high").waitFor();
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  await page.getByText("Current revision 2.").waitFor();
+  assert.deepEqual(d.profileRuntime(builder), {
+    harness: "claude",
+    model: "sonnet",
+    reasoningEffort: "high",
+  });
+  await captureBrowserEvidence(page, "1366-profile-runtime-claude");
+  await page.getByLabel("Runtime", { exact: true }).selectOption("codex");
+  await changes.getByText("Runtime: Claude · sonnet · high → Codex").waitFor();
+  const request = commandRequest(page);
+  await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  assert.deepEqual((await request).postDataJSON().runtime, {
+    harness: "codex",
+  });
+  await page.getByText("Current revision 3.").waitFor();
+  assert.deepEqual(d.profileRuntime(builder), { harness: "codex" });
+  assert.deepEqual(d.profileRuntime(builder, 2), {
+    harness: "claude",
+    model: "sonnet",
+    reasoningEffort: "high",
+  });
+  await page.goto(`${web.origin}/app/settings`);
+  await page
+    .locator(".settings-row", { hasText: "Builder" })
+    .getByText("Runtime: Codex")
+    .waitFor();
 });

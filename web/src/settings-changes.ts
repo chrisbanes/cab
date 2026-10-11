@@ -11,6 +11,8 @@ import type {
   runtimeSettingsSchema,
 } from "../../src/operator/contracts.js";
 
+import type { ProfileRuntime } from "../../src/operator/contracts.js";
+import { runtimeCommand, runtimeSummary } from "./execution-runtime.js";
 import { plural } from "./settings-view.js";
 
 export type Values = Record<string, string | boolean | string[]>;
@@ -74,8 +76,14 @@ export function profileChanges(data: ProfileConfigurationData, v: Values) {
     lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
   if (v.revoked !== undefined && Boolean(v.revoked) !== data.profile.revoked)
     lines.push(`${v.revoked ? "Revoke" : "Restore"} ${name || "profile"}`);
+  if (v.runtimeHarness !== undefined && runtimeChanged(data.runtime, v))
+    lines.push(
+      `Runtime: ${runtimeSummary(data.runtime)} → ${runtimeSummary(runtimeCommand(v))}`,
+    );
   return lines;
 }
+export const runtimeChanged = (runtime: ProfileRuntime, v: Values) =>
+  JSON.stringify(runtimeCommand(v)) !== JSON.stringify(runtime);
 
 /** Candidates a routing save can keep: revoked profiles are not selectable. */
 const selectable = (data: ProjectConfigurationData, ids: string[]) =>

@@ -22,6 +22,7 @@ export {
   executionHarnessLabels,
   type ExecutionHarness,
   type ProfileRuntime,
+  runtimeSummary,
 } from "../core/execution-runtime.js";
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
@@ -93,11 +94,15 @@ export const harnessStatusSchema = z.discriminatedUnion("state", [
     .strict(),
 ]);
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
+/** Workspace profile rows also carry the current revision's execution runtime. */
+const workspaceProfileSchema = profileSummarySchema
+  .extend({ runtime: profileRuntimeSchema })
+  .strict();
 export const workspaceSchema = envelope(
   z
     .object({
       projects: z.array(projectSummarySchema),
-      profiles: z.array(profileSummarySchema),
+      profiles: z.array(workspaceProfileSchema),
       runtime: z.discriminatedUnion("state", [
         z.object({ state: z.literal("available") }).strict(),
         z.object({ state: z.literal("unavailable"), since: time }).strict(),

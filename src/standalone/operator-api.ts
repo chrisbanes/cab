@@ -1761,7 +1761,10 @@ export class OperatorApi {
         projects: this.domain()
           .projects()
           .map((p) => this.project(p, excluded)),
-        profiles: this.profiles(excluded),
+        profiles: this.profiles(excluded).map((p) => ({
+          ...p,
+          runtime: this.domain().profileRuntime(p.id),
+        })),
         runtime: this.service.runtimeStatus(),
         harnesses: this.service.harnessStatuses(),
       },

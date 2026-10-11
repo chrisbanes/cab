@@ -7,7 +7,18 @@ import {
   StatusBadge,
 } from "./components.js";
 import { useOperatorResource } from "./resource.js";
-import { profileChanges, type Values } from "./settings-changes.js";
+import {
+  profileChanges,
+  runtimeChanged,
+  type Values,
+} from "./settings-changes.js";
+import {
+  harnessNote,
+  runtimeCommand,
+  runtimeErrors,
+  runtimeValues,
+} from "./execution-runtime.js";
+import { Alert } from "./ui/alert.js";
 import {
   Aside,
   ChangeList,
@@ -25,15 +36,62 @@ import {
   useLoadedDraft,
   type SettingsProps,
 } from "./settings.js";
+import type { ConfigurationDraft } from "./settings-state.js";
 
 const emptyProfile = () => ({
   name: "",
   summary: "",
   instructions: "",
   capabilities: "",
+  ...runtimeValues({ harness: "codex" }),
   profileId: key(),
   key: key(),
 });
+
+const runtimeChangeNote =
+  "A runtime change saves a new profile revision and affects new conversations only; existing conversations keep their runtime.";
+
+/** Runtime selector, plus model and effort for Claude (blank uses the harness default). */
+function RuntimeFields({
+  draft,
+  workspace,
+}: {
+  draft: ConfigurationDraft;
+  workspace: SettingsProps["workspace"];
+}) {
+  const harness = draft.values.runtimeHarness,
+    note = harnessNote(
+      workspace?.data.harnesses.find((h) => h.harness === harness),
+    );
+  return (
+    <>
+      <DraftField draft={draft} field="runtimeHarness" label="Runtime">
+        <option value="codex">Codex</option>
+        <option value="claude">Claude</option>
+      </DraftField>
+      {harness === "claude" && (
+        <>
+          <DraftField
+            draft={draft}
+            field="runtimeModel"
+            errorField="runtime.model"
+            label="Model"
+          />
+          <DraftField
+            draft={draft}
+            field="runtimeEffort"
+            errorField="runtime.reasoningEffort"
+            label="Reasoning effort"
+          />
+          <p className="metadata muted">
+            Leave model or effort blank to use the Claude default.
+          </p>
+        </>
+      )}
+      {note && <Alert>{note}</Alert>}
+    </>
+  );
+}
 
 export function ProfileCreate(p: SettingsProps) {
   const d = useDraft(p.drafts, "profile.create");
@@ -64,8 +122,10 @@ export function ProfileCreate(p: SettingsProps) {
                   summary: d.values.summary,
                   instructions: d.values.instructions,
                   capabilities: d.values.capabilities,
+                  runtime: runtimeCommand(d.values),
                 },
                 p.refresh,
+                runtimeErrors(d.values),
               )
             }
           >
@@ -83,6 +143,7 @@ export function ProfileCreate(p: SettingsProps) {
               label="Capabilities"
               multiline
             />
+            <RuntimeFields draft={d} workspace={p.workspace} />
             <p className="metadata muted">
               The summary appears in Settings and routing. Capabilities describe
               suitability for routing and leads; neither is a permission grant.
@@ -116,6 +177,7 @@ export function ProfileCreate(p: SettingsProps) {
             "Saving creates revision 1. Existing assignments are unaffected.",
             "Capabilities guide suitability; project guidance still applies.",
             "Repository access stays project-owned.",
+            runtimeChangeNote,
           ]}
         />
       </div>
@@ -151,6 +213,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         replaceInstructions: false,
         instructions: "",
         revoked: data.profile.revoked,
+        ...runtimeValues(data.runtime),
         expectedVersion: String(data.profile.version),
       }
     : null;
@@ -179,6 +242,9 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
       ...(v.replaceInstructions ? { instructions: v.instructions } : {}),
       ...(Boolean(v.revoked) !== data.profile.revoked
         ? { revoked: Boolean(v.revoked) }
+        : {}),
+      ...(runtimeChanged(data.runtime, v)
+        ? { runtime: runtimeCommand(v) }
         : {}),
     };
   };
@@ -230,6 +296,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                         p.refresh();
                         resource.refresh();
                       },
+                      runtimeErrors(d.values),
                     )
                   }
                 >
@@ -287,6 +354,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                       multiline
                     />
                   )}
+                  <RuntimeFields draft={d} workspace={p.workspace} />
                   <ChangeList lines={lines} />
                   <DraftOutcome
                     draft={d}
@@ -327,6 +395,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                   "Revoking does not stop, cancel or recover running work.",
                 ]}
               />
+              <Aside title="Runtime change" items={[runtimeChangeNote]} />
               <Aside
                 title="Related"
                 items={[

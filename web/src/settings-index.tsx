@@ -7,6 +7,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
 import { DiscoveryCredentialRow } from "./discovery-credential.js";
+import { runtimeSummary } from "./execution-runtime.js";
 import { OperatorCredentialsSection } from "./operator-credentials.js";
 import { useOperatorResource } from "./resource.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
@@ -264,6 +265,9 @@ export function SettingsWorkspace(p: SettingsProps) {
                         {[r.summary, `revision ${r.version}`]
                           .filter(Boolean)
                           .join(" · ")}
+                      </p>
+                      <p className="metadata muted">
+                        Runtime: {runtimeSummary(r.runtime)}
                       </p>
                     </div>
                     <StatusBadge>
