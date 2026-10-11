@@ -169,6 +169,11 @@ export async function main(
         decision: { type: "string" },
         "expected-revision": { type: "string" },
         "material-hash": { type: "string" },
+        "edit-file": { type: "string" },
+        selection: { type: "string" },
+        "body-file": { type: "string" },
+        "expected-task-version": { type: "string" },
+        "review-id": { type: "string" },
       },
     });
     jsonl = values.output === "jsonl" && positionals[0] === "logs";

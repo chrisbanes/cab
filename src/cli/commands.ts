@@ -14,6 +14,7 @@ import { profileWriteCommands } from "./configure-profile.js";
 import { projectWriteCommands } from "./configure-project.js";
 import { routingWriteCommands } from "./configure-routing.js";
 import { operationCommands } from "./operation.js";
+import { sourceBrowseCommands, sourceWriteCommands } from "./source.js";
 import { taskControlCommands } from "./task-control.js";
 import { taskWriteCommands } from "./task-write.js";
 import type { WriteCommand } from "./write.js";
@@ -26,6 +27,7 @@ export const browseCommands = new Map<string, BrowseCommand>([
   ...executionCommands,
   ["logs", logsCommand],
   ...attentionBrowseCommands,
+  ...sourceBrowseCommands,
 ]);
 
 /** Configuration, adoption and receipt commands, keyed "area action". */
@@ -39,4 +41,5 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...taskWriteCommands,
   ...attentionWriteCommands,
   ...taskControlCommands,
+  ...sourceWriteCommands,
 ]);

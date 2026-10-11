@@ -47,6 +47,7 @@ const AREA: Record<ChangeKind, string> = {
   "project.configure": "project",
   "routing.configure": "project",
   "capacity.configure": "capacity",
+  "github.configure": "project",
 };
 export const isCreation = (kind: ChangeKind) => kind.endsWith(".create");
 
@@ -250,6 +251,11 @@ function effectNote(document: ChangeDocument): string[] {
     c.paused === false ||
     c.enabled === true ||
     c.type === "capacity.configure";
+  if (c.type === "github.configure")
+    return [
+      "Source configuration saved; nothing was imported, dispatched or started.",
+      "Every selection is now inactive until previewed again at the new version with 'ensemble project preview-source'; observations are incomplete until the next sync refresh.",
+    ];
   return [
     "Configuration saved; nothing was dispatched, started, stopped or cancelled.",
     ...(c.type === "profile.configure" ||
@@ -310,6 +316,7 @@ export async function applyFile(
     "cli.identity",
     "configuration.write",
     ...(creation ? ["workspace.read"] : []),
+    ...(document.kind === "github.configure" ? ["source.write"] : []),
   ]);
   if (
     session.identity.service.installationId !== document.service.installationId
