@@ -35,7 +35,18 @@ async function installPacked(dir: string) {
     ["pack", "--ignore-scripts", "--json", "--pack-destination", dir],
     { cwd: root, env: npmEnv },
   );
-  const [{ filename }] = JSON.parse(packed.stdout) as [{ filename: string }];
+  // npm 11 prints an array of pack results; npm 12 keys them by package name.
+  const results = JSON.parse(packed.stdout) as
+    | { filename: string }[]
+    | Record<string, { filename: string }>;
+  const [result, ...extra] = Array.isArray(results)
+    ? results
+    : Object.values(results);
+  assert.ok(
+    result?.filename && extra.length === 0,
+    packed.stdout.slice(0, 200),
+  );
+  const { filename } = result;
   const tarball = join(dir, filename);
   const project = join(dir, "project");
   rmSync(project, { recursive: true, force: true });
