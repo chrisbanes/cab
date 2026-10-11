@@ -27,6 +27,7 @@ export async function startCliService(
     authOrigin?: string;
     controlPaths?: string[];
     service?: StandaloneServiceOptions;
+    previewReader?: ConstructorParameters<typeof OperatorApi>[3];
   } = {},
 ) {
   const f = await createOperatorFixture(
@@ -63,7 +64,12 @@ export async function startCliService(
         credentials: f.service.operatorCredentials(),
         web: new OperatorWebBoundary(
           bundle,
-          new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
+          new OperatorApi(
+            f.service,
+            options.controlPaths ?? [f.directory],
+            undefined,
+            options.previewReader,
+          ),
         ),
       },
     );
