@@ -448,8 +448,8 @@ use the desktop copy.
   before retrying"; in the revoke dialog the message appears inside the dialog.
 - Settings (account menu → `/app/settings`) is the only entry point, and the
   page-title Refresh re-reads the list (the phone frames draw only the top-level
-  header). No deep link, context menu, extension or
-  notification surface applies, and the legacy HTML UI has no credential controls.
+  header). No deep link, context menu, extension or notification surface
+  applies, and the legacy HTML UI has no credential controls.
 - Phone inputs, selects and buttons, dialog actions included, are 44 px tall. Token
   values are fictional fixtures. Loading, a busy create button and an
   expiring-soon cue are not drawn.
