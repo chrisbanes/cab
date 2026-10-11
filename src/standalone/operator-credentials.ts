@@ -174,19 +174,7 @@ export class OperatorCredentialStore {
     replacesId: string | null,
     now: number,
   ) {
-    if (
-      !Number.isSafeInteger(expiresInDays) ||
-      expiresInDays < 1 ||
-      expiresInDays > 90
-    )
-      throw new z.ZodError([
-        {
-          code: "custom",
-          path: ["expiresInDays"],
-          message: "expiresInDays must be 1 to 90",
-          input: expiresInDays,
-        },
-      ]);
+    z.number().int().min(1).max(90).parse(expiresInDays);
     const id = randomUUID();
     const secret = randomBytes(32).toString("base64url");
     this.db

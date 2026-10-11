@@ -3,7 +3,10 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { taskSchema } from "../operator/contracts.js";
+import {
+  operatorCredentialTokenSchema,
+  taskSchema,
+} from "../operator/contracts.js";
 import { readHiddenPassword } from "../standalone/operator-hidden-password.js";
 import {
   CliError,
@@ -130,7 +133,7 @@ export async function main(
           data: result.data,
         })}\n`,
       );
-    else deps.stdout.write(`${result.human}\n`);
+    else deps.stdout.write(`${terminalSafe(result.human)}\n`);
     return 0;
   } catch (raw) {
     const error =
@@ -141,7 +144,13 @@ export async function main(
             String(raw.code).startsWith("ERR_PARSE_ARGS")
           ? new CliError("usage", `${raw.message}\n\n${USAGE}`)
           : new CliError("unavailable", "Unexpected CLI failure.");
-    const [exit, category] = EXIT[error.code] ?? [5, "unavailable"];
+    const [exit, category] =
+      EXIT[error.code] ??
+      (error.extra.status === 409
+        ? [4, "conflict"]
+        : error.extra.status && error.extra.status < 500
+          ? [2, "usage"]
+          : [5, "unavailable"]);
     if (json)
       deps.stdout.write(
         `${JSON.stringify({
@@ -161,10 +170,15 @@ export async function main(
       );
     else
       deps.stderr.write(
-        `ensemble: ${error.message} (${error.code}${error.extra.requestId ? `, request ${error.extra.requestId}` : ""})\n`,
+        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId ? `, request ${error.extra.requestId}` : ""})\n`,
       );
     return exit;
   }
+}
+
+/** Service text may hold terminal escape sequences; show only printable text and line breaks. */
+function terminalSafe(text: string): string {
+  return text.replace(/[^\P{Cc}\n\t]/gu, "\uFFFD");
 }
 
 type Values = {
@@ -223,7 +237,10 @@ async function run(
     expectArgs(positionals, 2);
     const current = await config.read();
     const { name, connection } = config.select(current, requested);
-    if (connection.credential?.kind === "keychain")
+    if (
+      connection.credential?.kind === "keychain" &&
+      deps.platform === "darwin"
+    )
       await deps.keychain().delete(connection.credential.account);
     const { credential: _removed, ...rest } = connection;
     current.connections[name] = rest;
@@ -267,7 +284,10 @@ async function run(
       throw new CliError("connection-not-found", `Unknown connection ${name}`);
     if (action === "use") current.default = name;
     else {
-      if (connection.credential?.kind === "keychain")
+      if (
+        connection.credential?.kind === "keychain" &&
+        deps.platform === "darwin"
+      )
         await deps.keychain().delete(connection.credential.account);
       delete current.connections[name];
       if (current.default === name) delete current.default;
@@ -397,7 +417,7 @@ async function login(
       "usage",
       "Enter the token in an interactive terminal, or pass --token-file PATH.",
     );
-  if (!/^ens_[0-9a-f-]{36}_[A-Za-z0-9_-]{43}$/.test(token))
+  if (!operatorCredentialTokenSchema.safeParse(token).success)
     throw new CliError("invalid-input", "That is not an Ensemble CLI token.");
   // Validate before storing anything.
   const identity = await new ServiceClient(origin, token, deps.fetch).identity([

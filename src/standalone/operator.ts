@@ -7,6 +7,7 @@ import {
 import {
   apiErrorSchema,
   cliIdentitySchema,
+  operatorCredentialIssueRequestSchema,
   operatorCredentialIssuedSchema,
   operatorCredentialListSchema,
   sessionSchema,
@@ -1516,7 +1517,8 @@ export class LocalOperatorHttp {
                 id,
                 z
                   .object({
-                    expiresInDays: z.number().int().min(1).max(90).optional(),
+                    expiresInDays:
+                      operatorCredentialIssueRequestSchema.shape.expiresInDays,
                   })
                   .strict()
                   .parse(body).expiresInDays,
@@ -1642,12 +1644,8 @@ export class LocalOperatorHttp {
     }
     const authority = operatorRouteAuthority(method, path);
     if (authority === undefined) {
-      deny(
-        web.knownApi(path) || path === "/api/operator/cli" ? 405 : 404,
-        web.knownApi(path) || path === "/api/operator/cli"
-          ? "method-not-allowed"
-          : "not-found",
-      );
+      if (web.knownApi(path)) deny(405, "method-not-allowed");
+      else deny(404, "not-found");
       return;
     }
     if (authority === "session-only") {

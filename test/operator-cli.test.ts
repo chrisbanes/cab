@@ -149,6 +149,26 @@ test("login, status and task get through a token file against the live service",
   assert.equal(r.json().error.code, "not-found");
   assert.match(r.json().error.requestId, /^[0-9a-f-]{36}$/);
 
+  // Service text cannot drive the terminal in human output.
+  const hostileId = randomUUID();
+  const created = await s.sessionPost("/api/operator/commands", {
+    type: "task.create",
+    key: randomUUID(),
+    projectId: s.projectId,
+    taskId: hostileId,
+    title: "Safe\u001b]52;c;cGF3bmVk\u0007 \u001b[31mred",
+    outcome: "line one\nline two\u009b",
+    ready: false,
+  });
+  assert.equal(created.status, 200);
+  r = await h.run(["task", "get", hostileId]);
+  assert.equal(r.code, 0, r.err);
+  for (const control of ["\u001b", "\u0007", "\u009b"])
+    assert.ok(!r.out.includes(control));
+  assert.match(r.out, /line one\nline two/);
+  r = await h.run(["task", "get", hostileId, "--output", "json"]);
+  assert.ok(r.json().data.task.title.includes("\u001b[31m"));
+
   // 2. The same read-only token cannot write directly.
   const direct = await s.bearer(read.token, "/api/operator/source-refresh", {
     method: "POST",

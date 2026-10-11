@@ -99,6 +99,7 @@ export class ServiceClient {
       throw new CliError(code, parsed.data?.error.message ?? code, {
         requestId,
         retryable: false,
+        status: response.status,
       });
     }
     const parsed = schema.safeParse(body);

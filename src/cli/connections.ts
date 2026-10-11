@@ -1,15 +1,21 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, readFile, rename } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { constants } from "node:fs";
 import { z } from "zod";
+import { operatorCredentialTokenSchema } from "../operator/contracts.js";
 
 export class CliError extends Error {
   constructor(
     readonly code: string,
     message: string,
-    readonly extra: { requestId?: string; retryable?: boolean } = {},
+    readonly extra: {
+      requestId?: string;
+      retryable?: boolean;
+      status?: number;
+    } = {},
   ) {
     super(message);
   }
@@ -18,7 +24,6 @@ export class CliError extends Error {
 export const connectionNameSchema = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/);
-const tokenSchema = z.string().regex(/^ens_[0-9a-f-]{36}_[A-Za-z0-9_-]{43}$/);
 
 const credentialRefSchema = z.discriminatedUnion("kind", [
   z
@@ -160,7 +165,7 @@ export class KeychainCredentialStore implements CredentialStore {
 
   async set(account: string, token: string): Promise<void> {
     const name = connectionNameSchema.parse(account);
-    tokenSchema.parse(token);
+    operatorCredentialTokenSchema.parse(token);
     // `security -i` reads the command from stdin, keeping the token out of argv.
     const result = await this.run(
       ["-i"],
@@ -211,29 +216,38 @@ export async function readTokenFile(
   path: string,
   uid = process.getuid?.(),
 ): Promise<string> {
-  let stat: Awaited<ReturnType<typeof lstat>>;
+  let handle: Awaited<ReturnType<typeof open>>;
   try {
-    stat = await lstat(path);
+    // O_NOFOLLOW refuses a symlink; stat and read use the same open file.
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch {
-    throw new CliError("invalid-token-file", "Token file is unreadable.");
+    throw new CliError(
+      "invalid-token-file",
+      "Token file must be a readable regular file, not a symlink.",
+    );
   }
-  if (!stat.isFile() || stat.isSymbolicLink())
-    throw new CliError(
-      "invalid-token-file",
-      "Token file must be a regular file.",
-    );
-  if ((uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0)
-    throw new CliError(
-      "invalid-token-file",
-      "Token file must be owned by you with mode 0600 or stricter.",
-    );
-  if (stat.size > 4096)
-    throw new CliError("invalid-token-file", "Token file is too large.");
-  const token = (await readFile(path, "utf8")).trim();
-  if (!tokenSchema.safeParse(token).success)
-    throw new CliError(
-      "invalid-token-file",
-      "Token file does not hold one Ensemble token.",
-    );
-  return token;
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile())
+      throw new CliError(
+        "invalid-token-file",
+        "Token file must be a regular file.",
+      );
+    if ((uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0)
+      throw new CliError(
+        "invalid-token-file",
+        "Token file must be owned by you with mode 0600 or stricter.",
+      );
+    if (stat.size > 4096)
+      throw new CliError("invalid-token-file", "Token file is too large.");
+    const token = (await handle.readFile("utf8")).trim();
+    if (!operatorCredentialTokenSchema.safeParse(token).success)
+      throw new CliError(
+        "invalid-token-file",
+        "Token file does not hold one Ensemble token.",
+      );
+    return token;
+  } finally {
+    await handle.close();
+  }
 }
