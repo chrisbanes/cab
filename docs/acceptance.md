@@ -192,7 +192,9 @@ work, instructions, history and retained evidence in the
 changes, receipts and adoption in the
 [CLI3 record](evidence/issue-896-cli3-2026-10-11.md), and for bounded execution
 diagnostics capture, reads and following in the
-[CLI7 record](evidence/issue-900-cli7-2026-10-11.md). None qualifies a scenario on
+[CLI7 record](evidence/issue-900-cli7-2026-10-11.md), and for task operation,
+attention and Stop/Resume in the
+[CLI5 record](evidence/issue-898-cli5-2026-10-11.md). None qualifies a scenario on
 its own.
 
 The six journeys also require command-by-command coverage of the full

@@ -217,6 +217,55 @@ or run `node dist/src/cli/main.js` directly.
    remain. The quota bounds stored payload text, not the database, WAL or backups,
    and older backups keep what they held.
 
+7. Operating tasks and attention. `inbox list`, `question get` and `approval get`
+   work with either scope; the rest need a read/write credential (a read-only one
+   exits 3 before anything is sent):
+   - `task create --project ID --title T --outcome-file FILE --ready true|false
+     [--blocker ID]... [--assignee PROFILE_ID]`, `task configure TASK_ID
+     --expected-version N [--title T] [--outcome-file FILE] [--ready true|false]`
+     and `task add-dependency|remove-dependency TASK_ID --blocker ID
+     --expected-version N`. Imported tasks keep provider-owned title and outcome
+     (`policy-denied`) and readiness. The task and initial-assignment ids are derived
+     from the request key, so a retry rebuilds the same command.
+   - `task message TASK_ID --to ASSIGNMENT_ID --expected-version N --message-file
+     FILE` addresses a pending or running assignment for its next eligible turn; it
+     admits no work. A completed project lead is refused with a pointer to `task
+     follow-up TASK_ID --expected-version N --message-file FILE` (N is the lead's
+     assignment version), which resumes the lead of an open task subject to
+     admission, pause, Stop, dependency and capacity holds. A done task is never
+     reopened.
+   - `inbox list [--kind question|approval|intervention] [--project ID] [--limit N]
+     [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`.
+   - `question get TASK_ID INTERACTION_ID` prints the form, marks recommended and
+     preselected options as information only and shows the answers-file shape:
+     `{"QUESTION_ID": {"optionIds": [...], "text": "..."}}`. `question answer TASK_ID
+     INTERACTION_ID --expected-revision N --answers-file FILE` (at most 256 KiB)
+     needs an explicit entry for every question, validates it locally, and sends
+     the same command as the web UI for plain, Ensemble-form and native questions.
+   - `approval get TASK_ID INTERACTION_ID` shows the exact action, target, material,
+     material hash, revision and task holds. `approval decide TASK_ID INTERACTION_ID
+     --decision approved|denied --expected-revision N [--material-hash HASH]` sends
+     exactly what the service disclosed; the hash is required whenever material was
+     recorded. Withheld or legacy material can only be denied.
+   - `task stop TASK_ID [--expected-version N]` is best-effort cancellation: new
+     turns are held, and effects may continue until termination is verified. It
+     reads nothing first. `task resume TASK_ID [--expected-version N]` clears only
+     the operator Stop and lists the holds that remain. Both are receipted
+     `task.stop`/`task.resume` commands; the web UI's Stop and the retained forms
+     use the same hold.
+
+   Output names the effect (`data.effect`): `saved`, `queued` (admission and holds
+   still decide), `cancellation-requested` or `none`. These writes reuse a journal
+   key only while its outcome is unresolved (`sending` or `unknown`): rerunning the
+   same command after exit 6 replays it once (`Reused unresolved request KEY`,
+   `data.reusedRequest`), while a recorded key is never reused, so a second Stop,
+   message or task is a new request. `--request-id` is always used as given. If a
+   replayed Stop or Resume contradicts the current state, `data.stopInEffect` and
+   the output say so; use a new `--request-id`. The exit-6 message names only the
+   retry: `operation get` does not read these types. Creation, messages,
+   follow-ups, answers and decisions cannot be undone; Stop/Resume, dependency
+   add/remove and `--ready` are each other's reverse.
+
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are
 rejected. Certificates are always verified; for a private CA set

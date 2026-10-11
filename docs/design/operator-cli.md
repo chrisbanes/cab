@@ -370,8 +370,9 @@ Read-only credentials must receive a server denial even if a caller bypasses the
 CLI and submits a write directly. Capability names are `cli.identity`,
 `task.read`, `workspace.read`, `task.list`, `task.search`, `task.records`,
 `assignment.read`, `instructions.read`, `result.read`, `artifact.read`,
-`configuration.write`, `operation.read`, `capacity.read` and
-`configuration.impact`; a command whose capabilities the service does not
+`configuration.write`, `operation.read`, `capacity.read`,
+`configuration.impact`, `execution.read`, `diagnostics.read`, `task.write`,
+`attention.read` and `attention.write`; a command whose capabilities the service does not
 advertise fails with `unsupported-service` before any other read.
 
 `GET /api/operator/operations?scope=&type=&key=` returns `recorded` with the
@@ -388,6 +389,27 @@ failure, a redirect or any 4xx did not apply the command; any other transport
 failure, timeout, 5xx or unexpected receipt is `command-outcome-unknown` (exit 6).
 The CLI exits 2 with `change-document-invalid` or `wrong-service` and 5 with
 `journal-unavailable` before sending anything.
+
+Task and attention writes (`task create|configure|add-dependency|remove-dependency|
+message|follow-up|stop|resume`, `question answer`, `approval decide`) drive the
+existing operator commands unchanged, plus two receipted commands on the same
+route: `task.stop` and `task.resume` (`{key, taskId, expectedVersion?}`). Their
+receipts, `task-stop {taskId, cancellationRequested}` and `task-resume {taskId,
+stopCleared, requeued}`, are recorded in one transaction with the Stop hold change,
+scoped to the task: the same key and content replays with no effect, other content
+conflicts. `expectedVersion` is optional, so an unrelated task edit cannot block a
+Stop. The keyless web Stop and retained Resume forms share the same hold. JSON
+`data.effect` is `saved`, `queued`, `cancellation-requested` or `none` (`completed`
+is reserved for synchronous operations). Because these intents are repeatable, the
+CLI reuses a journal key only while it is unresolved (latest state `sending` or
+`unknown`, never after `recorded` or a definite rejection); the output reports
+reuse and, for Stop and Resume, whether Stop is in effect after a possible replay.
+`operation get` does not read these types: domain task receipts do not record
+which task command produced them, so an uncertain outcome is settled by retrying
+the same command with its key and checked with `task get`, `question get` or
+`approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
+`kind` (`question|approval|intervention`) and `project`, each at most once and
+applied before paging; a cursor from other parameters is `409`.
 
 ## Acceptance scenarios
 
