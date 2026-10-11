@@ -53,7 +53,7 @@ export async function startOwnWork(
   return { a, d, work, priorTurns };
 }
 /** Pauses the project and completes the turn, leaving the request open for the operator. */
-async function finishOwnWork(
+export async function finishOwnWork(
   f: Fixture,
   { a, d, work, priorTurns }: Awaited<ReturnType<typeof startOwnWork>>,
 ) {
