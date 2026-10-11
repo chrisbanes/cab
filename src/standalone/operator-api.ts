@@ -3297,6 +3297,7 @@ export class OperatorApi {
       .profiles()
       .find((p) => p.id === profileId);
     if (!row) throw new OperatorApiError(404, "not-found");
+    const runtime = this.domain().profileRuntime(profileId);
     const excluded = await this.exclusions();
     return profileConfigurationSchema.parse({
       data: {
@@ -3308,7 +3309,7 @@ export class OperatorApi {
         instructionPresent: Boolean(row.instructions),
         instructionRevision: Number(row.version),
         capabilities: this.safe(row.capabilities, excluded),
-        runtime: this.domain().profileRuntime(profileId),
+        runtime,
       },
       observedAt: Date.now(),
     });
