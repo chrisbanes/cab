@@ -80,6 +80,8 @@ async function insideHome(home: string, target: string) {
 export async function listHomeFolders(
   home: string,
   input: { path: string },
+  /** Checkout marker probe; injectable so tests can count filesystem work. */
+  probe: (path: string) => Promise<unknown> = lstat,
 ): Promise<FolderListing["data"]> {
   const segments =
     input.path === "~"
@@ -99,22 +101,24 @@ export async function listHomeFolders(
   if (!(await stat(real)).isDirectory()) throw new FolderAccessError(404);
   const folders = (await readdir(real, { withFileTypes: true }))
     .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-    .map((d) => d.name);
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b));
+  // Bound the page before probing: at most 200 children are ever stat-ed or run Git.
+  const kept = folders.slice(0, maxEntries);
   const checkouts = new Set<string>();
-  await pool(folders, probeConcurrency, async (name) => {
+  await pool(kept, probeConcurrency, async (name) => {
     try {
-      await lstat(join(real, name, ".git"));
+      await probe(join(real, name, ".git"));
       checkouts.add(name);
     } catch {}
   });
-  const sorted = folders.sort((a, b) =>
+  kept.sort((a, b) =>
     checkouts.has(a) === checkouts.has(b)
       ? a.localeCompare(b)
       : checkouts.has(a)
         ? -1
         : 1,
   );
-  const kept = sorted.slice(0, maxEntries);
   const entries = kept.map((name) => ({
     name,
     kind: checkouts.has(name) ? ("git" as const) : ("folder" as const),
@@ -139,7 +143,7 @@ export async function listHomeFolders(
         : `~/${segments.slice(0, -1).join("/")}`
       : null,
     entries,
-    truncated: sorted.length > maxEntries,
+    truncated: folders.length > maxEntries,
   };
 }
 

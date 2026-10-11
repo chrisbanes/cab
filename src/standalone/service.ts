@@ -4114,6 +4114,7 @@ export class StandaloneService {
       const credential = reference?.startsWith("env:")
         ? process.env[reference.slice("env:".length)]
         : undefined;
+      const discovery = domain.discoveryCredentialReference();
       const fixtureValues =
         this.options.conversationHistoryExclusions?.() ?? [];
       const workspace = this.workspaceBindings?.get(taskId);
@@ -4139,6 +4140,13 @@ export class StandaloneService {
         ...additionalPaths,
         ...(reference ? [reference] : []),
         ...(credential ? [credential] : []),
+        ...(discovery
+          ? [
+              discovery,
+              discovery.slice(4),
+              process.env[discovery.slice(4)] ?? "",
+            ]
+          : []),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
           const ref = this.deliveryStore?.configuration(

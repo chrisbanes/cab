@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readdir, realpath, stat } from "node:fs/promises";
+import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -201,9 +201,15 @@ test("home folder listing stays inside home, lists names and Git status only and
     ["big", "src"],
   );
   assert.equal(root.parent, null);
-  const big = await listHomeFolders(home.home, { path: "~/big" });
+  let probes = 0;
+  const big = await listHomeFolders(home.home, { path: "~/big" }, (path) => {
+    probes++;
+    return lstat(path);
+  });
   assert.equal(big.entries.length, 200);
   assert.equal(big.truncated, true);
+  // Probing is bounded by the page, not by the directory's 205 children.
+  assert.equal(probes, 200);
   const status = (path: string) =>
     listHomeFolders(home.home, { path }).then(
       () => 200,
@@ -359,4 +365,63 @@ test("setup routes require an operator session, CSRF and same origin and are not
     ),
     false,
   );
+});
+
+test("task text holding the discovery credential is never captured, before or after the reference changes", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const previous = process.env.FIXTURE_CAPTURE_DISCOVERY;
+  // The name deliberately avoids the generic TOKEN/SECRET environment pattern.
+  process.env.FIXTURE_CAPTURE_DISCOVERY = "CAPTUREDISCOVERYCANARY841";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_CAPTURE_DISCOVERY;
+    else process.env.FIXTURE_CAPTURE_DISCOVERY = previous;
+  });
+  const api = new OperatorApi(f.service, [f.directory]);
+  await api.execute(configure("env:FIXTURE_CAPTURE_DISCOVERY"));
+  const d = f.service.domain();
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Capture",
+    leadProfileId: null,
+  } as never);
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Uses CAPTUREDISCOVERYCANARY841",
+    outcome: "Read with CAPTUREDISCOVERYCANARY841",
+    ready: false,
+  } as never);
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  const stored = () =>
+    JSON.stringify([
+      db.prepare("SELECT * FROM task_review_sources").all(),
+      db.prepare("SELECT * FROM task_review_search").all(),
+    ]);
+  assert.equal(stored().includes("CAPTUREDISCOVERYCANARY841"), false);
+  for (const next of ["env:OTHER_DISCOVERY", null]) {
+    await api.execute(configure(next));
+    const reads = JSON.stringify([
+      // Captured review sources and search; the task row itself is operator input.
+      (await api.readReview(taskId)).data,
+      await api.readSearch(
+        new URLSearchParams({ query: "CAPTUREDISCOVERYCANARY841" }),
+      ),
+    ]);
+    assert.equal(
+      reads.includes("CAPTUREDISCOVERYCANARY841"),
+      false,
+      String(next),
+    );
+    assert.equal(stored().includes("CAPTUREDISCOVERYCANARY841"), false);
+  }
 });

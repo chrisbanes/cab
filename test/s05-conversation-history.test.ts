@@ -854,3 +854,49 @@ test("current exclusions are computed only for completed items", () => {
     db.close();
   }
 });
+
+test("the installation discovery credential is redacted when history is captured", async () => {
+  const runtime = new HistoryRuntime();
+  const previous = process.env.FIXTURE_HISTORY_DISCOVERY;
+  // The name deliberately avoids the generic TOKEN/SECRET environment pattern.
+  process.env.FIXTURE_HISTORY_DISCOVERY = "DISCOVERYVALUECANARY841";
+  const f = await fixture(runtime);
+  command(f.service, {
+    type: "discovery.configure",
+    actor: "operator",
+    credentialRef: "env:FIXTURE_HISTORY_DISCOVERY",
+  });
+  runtime.plan({
+    id: "discovery-turn",
+    beforeReturn: (active, threadId, turnId) => {
+      active.emit({ threadId, turnId, itemId: "d-1", kind: "started" });
+      active.emit({
+        threadId,
+        turnId,
+        itemId: "d-1",
+        kind: "completed",
+        text: "Found DISCOVERYVALUECANARY841 via env:FIXTURE_HISTORY_DISCOVERY.",
+      });
+    },
+  });
+  try {
+    f.activate();
+    const bound = await runtime.waitForTurnStart();
+    runtime.complete(bound.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+    const stored = JSON.stringify(
+      query(
+        f.root,
+        "SELECT text FROM conversation_history_items WHERE workId = ?",
+        f.workId,
+      ),
+    );
+    assert.equal(stored.includes("DISCOVERYVALUECANARY841"), false);
+    assert.equal(stored.includes("FIXTURE_HISTORY_DISCOVERY"), false);
+  } finally {
+    if (previous === undefined) delete process.env.FIXTURE_HISTORY_DISCOVERY;
+    else process.env.FIXTURE_HISTORY_DISCOVERY = previous;
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
