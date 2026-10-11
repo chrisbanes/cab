@@ -431,3 +431,23 @@ test("Setup creates a repository-free project in WebKit", async (_t, journey) =>
   await page.getByText("Recorded WebKit as a paused project.").waitFor();
   assert.equal(f.service.domain().projects().length, 1);
 });
+
+test("Setup resets a Project choice when its repository row changes", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  const repositories = page.getByLabel("Repository", { exact: true });
+  const project = page.getByLabel("GitHub Project", { exact: true });
+  await chooseRepository(page, "acme/relay");
+  await page
+    .getByRole("button", { name: "Add another repository", exact: true })
+    .click();
+  await repositories.nth(1).selectOption({ label: "acme/atlas" });
+  // Row 1 becomes the Project repository once row 0 has none.
+  await repositories
+    .nth(0)
+    .selectOption({ label: "No repository · repository-free" });
+  await page.getByText("Found automatically: 1 GitHub Project").waitFor();
+  assert.equal(await project.inputValue(), "PVT_atlas");
+  await repositories.nth(1).selectOption({ label: "acme/docs" });
+  await page.getByText("0 GitHub Projects linked to acme/docs").waitFor();
+  assert.equal(await project.inputValue(), "");
+});
