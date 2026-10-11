@@ -318,6 +318,16 @@ export class DomainConflictError extends Error {
   }
 }
 
+export class DomainStaleDispositionError extends Error {
+  constructor(
+    message: string,
+    readonly reason: "external-admission" | "stale",
+  ) {
+    super(message);
+    this.name = "DomainStaleDispositionError";
+  }
+}
+
 export class DomainPolicyError extends Error {
   constructor(
     readonly code: "forbidden" | "invalid-input",
@@ -1472,7 +1482,10 @@ export class DomainStore {
         return false;
       }
       if (externallyAdmitted && !externallyAdmitted())
-        throw new Error("External admission rejected routing disposition");
+        throw new DomainStaleDispositionError(
+          "External admission rejected routing disposition",
+          "external-admission",
+        );
       const task = this.task(data.taskId);
       if (task.projectId !== data.projectId)
         throw new DomainPolicyError(
@@ -1486,7 +1499,10 @@ export class DomainStore {
         !routing.enabled ||
         !this.admission(data.taskId).eligible
       )
-        throw new Error("Routing decision is stale or task is held");
+        throw new DomainStaleDispositionError(
+          "Routing decision is stale or task is held",
+          "stale",
+        );
       const candidateIds = this.routingCandidates(data.projectId).map(
         (candidate) => String(candidate.profileId),
       );
@@ -1494,14 +1510,23 @@ export class DomainStore {
         canonical(candidateIds) !==
         canonical(Object.keys(data.candidateRevisions).sort())
       )
-        throw new Error("Routing candidate set changed");
+        throw new DomainStaleDispositionError(
+          "Routing candidate set changed",
+          "stale",
+        );
       for (const profileId of candidateIds)
         if (
           this.profile(profileId).version !== data.candidateRevisions[profileId]
         )
-          throw new Error("Candidate profile revision changed");
+          throw new DomainStaleDispositionError(
+            "Candidate profile revision changed",
+            "stale",
+          );
       if (this.assignments(data.taskId).length > 0)
-        throw new Error("Routing decision became stale: task already assigned");
+        throw new DomainStaleDispositionError(
+          "Routing decision became stale: task already assigned",
+          "stale",
+        );
       if (data.disposition === "assigned") {
         if (!data.assignmentId || !data.assignment)
           throw new Error("Assigned routing requires an assignment");

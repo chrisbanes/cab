@@ -8,6 +8,7 @@ import {
   DomainCommands,
   DomainConflictError,
   DomainPolicyError,
+  DomainStaleDispositionError,
   DomainStore,
   type DomainCommand,
 } from "../src/core/domain.js";
@@ -55,6 +56,24 @@ function fixture() {
       rmSync(directory, { recursive: true, force: true });
     },
   };
+}
+
+function assertStale(
+  fn: () => unknown,
+  message: RegExp,
+  reason: "external-admission" | "stale",
+  label = "stale disposition",
+) {
+  assert.throws(
+    fn,
+    (error) => {
+      assert.ok(error instanceof DomainStaleDispositionError, label);
+      assert.match(error.message, message, label);
+      assert.equal(error.reason, reason, label);
+      return true;
+    },
+    label,
+  );
 }
 
 type WithoutKey<T> = T extends unknown ? Omit<T, "key"> : never;
@@ -481,7 +500,7 @@ test("routing assignment and operation commit together after revision and admiss
         requesterAssignmentId: null,
       },
     };
-    assert.throws(() => f.domain.recordRouting(input), /held/);
+    assertStale(() => f.domain.recordRouting(input), /held/, "stale");
     assert.throws(() => f.domain.assignment(assignment), /Unknown/);
     run(f.domain, {
       type: "project.configure",
@@ -570,9 +589,10 @@ test("routing checks a committed standalone hold before writing any disposition"
       },
     };
 
-    assert.throws(
+    assertStale(
       () => f.domain.recordRouting(input, () => !state.taskHold(a)),
       /external admission/i,
+      "external-admission",
     );
     assert.deepEqual(f.domain.routingOperations(a), []);
     assert.throws(() => f.domain.assignment(input.assignmentId), /Unknown/);
@@ -724,9 +744,10 @@ test("delayed fallback cannot become actionable after routing or admission chang
           });
           break;
       }
-      assert.throws(
+      assertStale(
         () => f.domain.recordRouting(input),
         /stale|changed|revision/,
+        "stale",
         change,
       );
       assert.throws(() => f.domain.routingOperation(input.id), /Unknown/);
@@ -747,6 +768,166 @@ test("delayed fallback cannot become actionable after routing or admission chang
     } finally {
       f.close();
     }
+  }
+});
+
+function routedSetup(f: ReturnType<typeof fixture>) {
+  run(f.domain, {
+    type: "profile.create",
+    actor: "operator",
+    profileId: profile,
+    name: "Builder",
+    instructions: "Code",
+    capabilities: "code",
+  });
+  run(f.domain, {
+    type: "project.create",
+    actor: "operator",
+    projectId: p,
+    name: "Alpha",
+    leadProfileId: profile,
+  });
+  run(f.domain, {
+    type: "project.configure",
+    actor: "operator",
+    projectId: p,
+    expectedVersion: 1,
+    paused: false,
+  });
+  run(f.domain, {
+    type: "task.create",
+    actor: "operator",
+    projectId: p,
+    taskId: a,
+    title: "Task",
+    outcome: "Ship",
+    ready: true,
+  });
+  run(f.domain, {
+    type: "routing.configure",
+    actor: "operator",
+    projectId: p,
+    expectedVersion: 1,
+    enabled: true,
+    guidance: "Fit",
+    credentialRef: "env:TYPESAFE_KEY",
+    candidateProfileIds: [profile],
+  });
+  return {
+    id: key(),
+    projectId: p,
+    taskId: a,
+    taskVersion: 1,
+    assignmentId: assignment,
+    candidateRevisions: { [profile]: 1 },
+    guidanceRevision: 2,
+    model: "deterministic",
+    question: "Choose",
+    judgment: "Builder",
+    disposition: "assigned",
+    resultDestination: "lead:task",
+    assignment: {
+      profileId: profile,
+      brief: "Ship",
+      requesterAssignmentId: null,
+    },
+  };
+}
+
+test("routing rejects an already-assigned task with the typed stale error", () => {
+  const f = fixture();
+  try {
+    const input = routedSetup(f);
+    run(f.domain, {
+      type: "assignment.create",
+      actor: "agent",
+      projectId: p,
+      taskId: a,
+      assignmentId: nested,
+      profileId: profile,
+      brief: "Explicit",
+      resultDestination: "lead:task",
+      requesterAssignmentId: null,
+    });
+    assertStale(
+      () => f.domain.recordRouting(input),
+      /task already assigned/,
+      "stale",
+    );
+    assert.deepEqual(f.domain.routingOperations(a), []);
+  } finally {
+    f.close();
+  }
+});
+
+test("routing failures other than stale dispositions are not typed stale", () => {
+  const f = fixture();
+  try {
+    const input = routedSetup(f);
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: q,
+      name: "Outsider",
+      instructions: "Code",
+      capabilities: "code",
+    });
+    const notStale = (error: unknown, message: RegExp) => {
+      assert.ok(!(error instanceof DomainStaleDispositionError));
+      assert.match((error as Error).message, message);
+      return true;
+    };
+    assert.throws(
+      () =>
+        f.domain.recordRouting({
+          ...input,
+          assignment: { ...input.assignment, profileId: q },
+        }),
+      (error) => notStale(error, /not a candidate/),
+    );
+    assert.deepEqual(f.domain.routingOperations(a), []);
+    assert.throws(() => f.domain.assignment(assignment), /Unknown/);
+
+    const { assignment: _assignment, ...fallback } = input;
+    const first = f.domain.recordRouting({
+      ...fallback,
+      id: key(),
+      assignmentId: null,
+      disposition: "lead-fallback",
+    });
+    assert.throws(
+      () => f.domain.recordRouting({ ...input, id: String(first.id) }),
+      (error) => notStale(error, /Routing operation conflict/),
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("routing without credentials fails without the typed stale error", () => {
+  const f = fixture();
+  try {
+    const input = routedSetup(f);
+    run(f.domain, {
+      type: "routing.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 2,
+      enabled: true,
+      guidance: "No credentials",
+      credentialRef: null,
+      candidateProfileIds: [profile],
+    });
+    assert.throws(
+      () => f.domain.recordRouting({ ...input, guidanceRevision: 3 }),
+      (error) => {
+        assert.ok(!(error instanceof DomainStaleDispositionError));
+        assert.match((error as Error).message, /credentials unavailable/);
+        return true;
+      },
+    );
+  } finally {
+    f.close();
   }
 });
 
