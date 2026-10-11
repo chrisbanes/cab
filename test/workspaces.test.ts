@@ -20,6 +20,11 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../src/core/store.js";
 import {
+  gitEnvironmentProbe,
+  hardenedGitEnvironment,
+  withHostileGitEnvironment,
+} from "./fixtures/git-environment.js";
+import {
   SqliteWorkspaceBindingStore,
   WorkspaceManager,
   type TaskWorkspaceBinding,
@@ -478,6 +483,43 @@ test("cleanup retains delivered workspaces with uncommitted files and removes cl
   } finally {
     f.close();
   }
+});
+
+test("workspace Git runs with the hardened environment", async (t) => {
+  const probe = gitEnvironmentProbe();
+  t.after(() => probe.close());
+  const f = fixture({ gitExecutable: probe.executable });
+  t.after(() => f.close());
+  const repositoryA = repository(f.root, "hardened-a");
+  const repositoryB = repository(f.root, "hardened-b");
+
+  const result = await withHostileGitEnvironment(async () => {
+    const binding = await f.manager.provision("hardened-task", [
+      { repositoryId: "alpha", path: repositoryA },
+      { repositoryId: "beta", path: repositoryB },
+    ]);
+    const revalidated = await f
+      .reopen({ gitExecutable: probe.executable })
+      .forExecution("hardened-task");
+    const cleanup = await f.manager.archiveAndCleanup(
+      "hardened-task",
+      approvedCleanup,
+    );
+    return { binding, revalidated, cleanup };
+  });
+
+  assert.equal(result.binding.state, "ready");
+  assert.equal(result.binding.repositories.length, 2);
+  assert.equal(result.revalidated.state, "ready");
+  assert.equal(result.cleanup.outcome, "cleaned");
+  assert.equal(result.cleanup.binding.state, "archived");
+  const invocations = probe.invocations();
+  const seen = (command: string) =>
+    invocations.some((item) => item.args.split(" ").includes(command));
+  for (const command of ["rev-parse", "status", "add", "remove"])
+    assert.ok(seen(command), `${command} was recorded`);
+  for (const invocation of invocations)
+    assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
 });
 
 test("a completed worktree add followed by a bounded stall is retained without retry after reopen", async (t) => {
