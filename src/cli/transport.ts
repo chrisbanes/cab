@@ -57,7 +57,8 @@ export class ServiceClient {
     private readonly fetcher: typeof fetch = fetch,
   ) {}
 
-  async get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
+  /** One GET with redirects refused; the caller reads the body of a 2xx response. */
+  private async request(path: string, accept: string) {
     const requestId = randomUUID();
     let response: Response;
     try {
@@ -65,7 +66,7 @@ export class ServiceClient {
         // Never follow a redirect: it would forward the bearer credential.
         redirect: "manual",
         headers: {
-          accept: "application/json",
+          accept,
           authorization: `Bearer ${this.token}`,
           "x-ensemble-request-id": requestId,
         },
@@ -82,13 +83,13 @@ export class ServiceClient {
         "The service redirected the request; credentials are never forwarded.",
         { requestId, retryable: false },
       );
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch {
-      body = undefined;
-    }
     if (!response.ok) {
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        body = undefined;
+      }
       const parsed = apiErrorSchema.safeParse(body);
       const code = parsed.success ? parsed.data.error.code : undefined;
       if (response.status >= 500 || !code)
@@ -102,6 +103,20 @@ export class ServiceClient {
         status: response.status,
       });
     }
+    return { response, requestId };
+  }
+
+  async get<T>(path: string, schema: z.ZodType<T>): Promise<T> {
+    const { response, requestId } = await this.request(
+      path,
+      "application/json",
+    );
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      body = undefined;
+    }
     const parsed = schema.safeParse(body);
     if (!parsed.success)
       throw new CliError(
@@ -110,6 +125,18 @@ export class ServiceClient {
         { requestId },
       );
     return parsed.data;
+  }
+
+  /** A successful response body as bytes, with its content type and headers. */
+  async getBytes(
+    path: string,
+  ): Promise<{ body: Buffer; type: string; headers: Headers }> {
+    const { response } = await this.request(path, "*/*");
+    return {
+      body: Buffer.from(await response.arrayBuffer()),
+      type: response.headers.get("content-type") ?? "application/octet-stream",
+      headers: response.headers,
+    };
   }
 
   /** Negotiates API version and capabilities before any other read. */
