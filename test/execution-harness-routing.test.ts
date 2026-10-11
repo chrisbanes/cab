@@ -7,8 +7,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   FailureEvidence,
   Runtime,
+  RuntimeToolCall,
+  RuntimeToolResult,
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
+import type { RuntimeSafetyPort } from "../src/standalone/runtime-retention.js";
 import type { ExecutionHarness } from "../src/standalone/execution-harness.js";
 import type {
   ExactExecutionIdentity,
@@ -32,7 +35,17 @@ class HarnessRuntime implements Runtime {
   private readonly failing = new Set<string>();
   private unexpected: ((request: UnexpectedRequest) => void) | undefined;
   private failure: ((error: Error) => void) | undefined;
-  private anomaly: ((anomaly: { reason: string }) => void) | undefined;
+  private anomaly:
+    | ((anomaly: {
+        threadId?: string;
+        turnId?: string;
+        reason: string;
+      }) => void)
+    | undefined;
+  private tools:
+    | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
+    | undefined;
+  safety: RuntimeSafetyPort | undefined;
 
   constructor(private readonly name: ExecutionHarness) {}
 
@@ -113,8 +126,33 @@ class HarnessRuntime implements Runtime {
   onFailure(listener: (error: Error) => void) {
     this.failure = listener;
   }
-  onTerminalAnomaly(listener: (anomaly: { reason: string }) => void) {
+  onTerminalAnomaly(
+    listener: (anomaly: {
+      threadId?: string;
+      turnId?: string;
+      reason: string;
+    }) => void,
+  ) {
     this.anomaly = listener;
+  }
+  onToolCall(listener: (call: RuntimeToolCall) => Promise<RuntimeToolResult>) {
+    this.tools = listener;
+  }
+  callTool(threadId: string, turnId: string) {
+    if (!this.tools) throw new Error("No tool listener");
+    return this.tools({
+      threadId,
+      turnId,
+      callId: randomUUID(),
+      tool: "ensemble_ask_question",
+      arguments: { question: "Which harness owns this turn?" },
+    });
+  }
+  reportAnomaly(threadId: string, turnId: string) {
+    this.anomaly?.({ threadId, turnId, reason: "Terminal report conflicted" });
+  }
+  denyUnexpectedFor(threadId: string, turnId: string) {
+    this.unexpected?.({ method: "item/tool/call", threadId, turnId });
   }
   reportUnidentifiedAnomaly() {
     this.anomaly?.({ reason: "Terminal report without identity" });
@@ -147,8 +185,9 @@ function open(
 ) {
   return new StandaloneService(
     dataDir,
-    (_context, harness) => {
+    (context, harness) => {
       if (harness === broken) throw new Error("Runtime cannot be constructed");
+      runtimes[harness].safety = context.safety;
       return runtimes[harness];
     },
     undefined,
@@ -695,6 +734,86 @@ test("a default runtime start failure still aborts start-up", async () => {
       /must include the default harness/,
     );
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a runtime cannot act through another harness's execution or evidence", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-foreign-"));
+  const runtimes = fakes();
+  runtimes.codex.holdTurns = true;
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "codex");
+    const projectId = project(service, lead, [lead]);
+    const { taskId, assignmentIds } = await task(service, projectId, [lead]);
+    const workId = initial(assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, workId)?.state === "running",
+      describe,
+    );
+    const pair = ["codex-thread-1", "codex-turn-1"] as const;
+    assert.deepEqual(
+      [intent(service, workId)?.threadId, intent(service, workId)?.turnId],
+      pair,
+    );
+
+    // Claude presents Codex's exact pair: no authority, no holds on Codex work.
+    assert.deepEqual(await runtimes.claude.callTool(...pair), {
+      text: "Coordination call is not bound to current task work",
+      success: false,
+    });
+    runtimes.claude.denyUnexpectedFor(...pair);
+    runtimes.claude.reportAnomaly(...pair);
+    assert.equal(intent(service, workId)?.state, "running");
+    assert.equal(
+      service.coordinationView().readTask(taskId).questions.length,
+      0,
+    );
+    // The owning runtime's identical call is accepted.
+    assert.equal((await runtimes.codex.callTool(...pair)).success, true);
+
+    // Retained evidence is readable only by the harness that recorded it.
+    const codex = runtimes.codex.safety;
+    const claude = runtimes.claude.safety;
+    assert.ok(codex && claude);
+    codex.recordTerminal({
+      threadId: "shared-thread",
+      turnId: "shared-turn",
+      status: "completed",
+      runtimeGeneration: "codex-generation",
+    });
+    assert.equal(
+      codex.terminal("shared-thread", "shared-turn", "codex-generation")
+        ?.harness,
+      "codex",
+    );
+    assert.throws(
+      () =>
+        claude.terminal("shared-thread", "shared-turn", "claude-generation"),
+      /another harness/,
+    );
+    assert.throws(() =>
+      claude.recordTerminal({
+        threadId: "shared-thread",
+        turnId: "shared-turn",
+        status: "completed",
+        runtimeGeneration: "claude-generation",
+      }),
+    );
+    codex.registerThreadTools("shared-thread", "e".repeat(64));
+    assert.throws(
+      () => claude.threadQualification("shared-thread"),
+      /another harness/,
+    );
+    assert.throws(() =>
+      claude.registerThreadTools("shared-thread", "e".repeat(64)),
+    );
+  } finally {
+    runtimes.codex.releaseAll();
+    await service.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });

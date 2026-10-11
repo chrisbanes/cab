@@ -471,18 +471,35 @@ export class StandaloneService {
         "Service restarted; native endpoints cannot be reconstructed",
       );
       this.coordination = coordination;
+      // A runtime never reads or extends another harness's retained evidence.
+      const own = <T extends { harness: ExecutionHarness } | null>(
+        harness: ExecutionHarness,
+        evidence: T,
+      ): T => {
+        if (evidence && evidence.harness !== harness)
+          throw new Error("Runtime evidence belongs to another harness");
+        return evidence;
+      };
       const runtimeSafety = (harness: ExecutionHarness): RuntimeSafetyPort => ({
         recordTerminal: (input) => state.recordRuntimeTerminal(input, harness),
         terminal: (threadId, turnId, runtimeGeneration) =>
-          state.runtimeTerminal(threadId, turnId, runtimeGeneration),
+          own(
+            harness,
+            state.runtimeTerminal(threadId, turnId, runtimeGeneration),
+          ),
         terminalForWait: (threadId, turnId, runtimeGeneration) =>
-          state.runtimeTerminalForWait(threadId, turnId, runtimeGeneration),
+          own(
+            harness,
+            state.runtimeTerminalForWait(threadId, turnId, runtimeGeneration),
+          ),
         registerThreadTools: (threadId, toolDigest) =>
           state.registerRuntimeThreadTools(threadId, toolDigest, harness),
         threadQualification: (threadId) =>
-          state.runtimeThreadQualification(threadId),
-        recordThreadQualification: (input) =>
-          state.recordRuntimeThreadQualification(input),
+          own(harness, state.runtimeThreadQualification(threadId)),
+        recordThreadQualification: (input) => {
+          own(harness, state.runtimeThreadQualification(input.threadId));
+          state.recordRuntimeThreadQualification(input);
+        },
         nativeEndpointHistory: (identity) =>
           coordination.runtimeNativeEndpointHistory(identity),
       });
@@ -762,6 +779,16 @@ export class StandaloneService {
     const ownWork = (workId: string) =>
       (state.taskBinding(workId)?.harness ?? defaultExecutionHarness) ===
       harness;
+    /** A callback naming another harness's execution is rejected, not acted on. */
+    const foreign = (threadId: string, turnId: string) => {
+      try {
+        return state
+          .executionsForRuntimeIdentity(threadId, turnId)
+          .some((item) => !ownWork(item.workId));
+      } catch {
+        return true;
+      }
+    };
     runtime.onFailure?.(() => {
       if (
         this.runtimes.get(harness) === runtime &&
@@ -777,10 +804,12 @@ export class StandaloneService {
         request.threadId && request.turnId
           ? state
               .executionsForTerminalIdentity(request.threadId, request.turnId)
-              .filter((item) =>
-                ["completed", "held", "submitting", "running"].includes(
-                  item.state,
-                ),
+              .filter(
+                (item) =>
+                  ownWork(item.workId) &&
+                  ["completed", "held", "submitting", "running"].includes(
+                    item.state,
+                  ),
               )
           : [];
       if (bound.length === 0 && request.threadId && request.turnId) {
@@ -789,6 +818,7 @@ export class StandaloneService {
           .filter(
             (item) =>
               item.turnId === null &&
+              ownWork(item.workId) &&
               ["completed", "held", "submitting", "running"].includes(
                 item.state,
               ),
@@ -827,23 +857,36 @@ export class StandaloneService {
         this.supervisor?.noteAnomaly(item.workId);
       }
     });
-    runtime.onUserInputRequest?.((request) =>
-      this.handleUserInputRequest(request, runtime),
+    runtime.onUserInputRequest?.((request) => {
+      if (foreign(request.identity.threadId, request.identity.turnId))
+        runtime.cancelUserInput?.(
+          request.identity,
+          "Native callback binding failed",
+        );
+      else this.handleUserInputRequest(request, runtime);
+    });
+    runtime.onUserInputOutcome?.((outcome) => {
+      if (!foreign(outcome.threadId, outcome.turnId))
+        this.handleUserInputOutcome(outcome);
+    });
+    runtime.onToolCall?.((call) =>
+      foreign(call.threadId, call.turnId)
+        ? Promise.resolve({
+            text: "Coordination call is not bound to current task work",
+            success: false,
+          })
+        : this.handleToolCall(call),
     );
-    runtime.onUserInputOutcome?.((outcome) =>
-      this.handleUserInputOutcome(outcome),
-    );
-    runtime.onToolCall?.((call) => this.handleToolCall(call));
-    runtime.onConversationEvent?.((event) =>
-      this.receiveConversationEvent(event),
-    );
+    runtime.onConversationEvent?.((event) => {
+      if (!foreign(event.threadId, event.turnId))
+        this.receiveConversationEvent(event);
+    });
     runtime.onTerminalAnomaly?.((anomaly) => {
       const matched =
         anomaly.threadId && anomaly.turnId
-          ? state.executionsForTerminalIdentity(
-              anomaly.threadId,
-              anomaly.turnId,
-            )
+          ? state
+              .executionsForTerminalIdentity(anomaly.threadId, anomaly.turnId)
+              .filter((item) => ownWork(item.workId))
           : state
               .activeOrLastCompleted(this.lastCompletedWorkId.get(harness))
               .filter((item) => ownWork(item.workId));
