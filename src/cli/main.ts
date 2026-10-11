@@ -19,16 +19,18 @@ import {
   readTokenFile,
 } from "./connections.js";
 import { coverage } from "./browse.js";
-import { browseCommands } from "./commands.js";
+import { browseCommands, writeCommands } from "./commands.js";
+import { RequestJournal } from "./request-journal.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
+import { rejectUnusedFlags } from "./write.js";
 
 export type { CliDeps } from "./types.js";
 
 const SCHEMA = "ensemble.cli/v1";
 const TASK_CAPABILITIES = ["cli.identity", "task.read"] as const;
 
-const EXIT: Record<string, [number, string]> = {
+export const EXIT: Record<string, [number, string]> = {
   usage: [2, "usage"],
   "invalid-input": [2, "usage"],
   "invalid-url": [2, "usage"],
@@ -48,6 +50,10 @@ const EXIT: Record<string, [number, string]> = {
   "output-exists": [2, "usage"],
   "output-failed": [2, "usage"],
   conflict: [4, "conflict"],
+  "policy-denied": [4, "conflict"],
+  "change-document-invalid": [2, "usage"],
+  "wrong-service": [2, "usage"],
+  "journal-unavailable": [5, "unavailable"],
   "cursor-stale": [4, "conflict"],
   unavailable: [5, "unavailable"],
   "integrity-mismatch": [5, "unavailable"],
@@ -67,7 +73,7 @@ Commands:
   connection use NAME
   connection remove NAME
   task get TASK_ID [--connection NAME]
-${[...browseCommands.values()].map((c) => `  ${c.usage}`).join("\n")}
+${[...browseCommands.values(), ...writeCommands.values()].map((c) => `  ${c.usage}`).join("\n")}
 
 Options:
   --output human|json   Result format (default human)
@@ -113,6 +119,25 @@ export async function main(
         historical: { type: "boolean" },
         revision: { type: "string" },
         out: { type: "string" },
+        file: { type: "string" },
+        "request-id": { type: "string" },
+        "expected-version": { type: "string" },
+        name: { type: "string" },
+        summary: { type: "string" },
+        "instructions-file": { type: "string" },
+        "capabilities-file": { type: "string" },
+        "restore-revision": { type: "string" },
+        revoked: { type: "string" },
+        paused: { type: "string" },
+        "lead-profile": { type: "string" },
+        id: { type: "string" },
+        enabled: { type: "string" },
+        "guidance-file": { type: "string" },
+        "credential-ref": { type: "string" },
+        candidates: { type: "string" },
+        "global-limit": { type: "string" },
+        "project-limit": { type: "string", multiple: true },
+        scope: { type: "string" },
       },
     });
     if (
@@ -136,6 +161,7 @@ export async function main(
           data: result.data,
           ...(result.pagination ? { pagination: result.pagination } : {}),
           ...(result.coverage ? { coverage: result.coverage } : {}),
+          ...(result.request ? { request: result.request } : {}),
         })}\n`,
       );
     else deps.stdout.write(`${terminalSafe(result.human)}\n`);
@@ -170,6 +196,7 @@ export async function main(
               error.code === "command-outcome-unknown"
                 ? "unknown"
                 : "not-applied",
+            ...(error.extra.request ? { request: error.extra.request } : {}),
           },
         })}\n`,
       );
@@ -336,6 +363,22 @@ async function run(
         ...(task.outcome ? ["", task.outcome] : []),
       ].join("\n"),
     };
+  }
+  const write = writeCommands.get(key);
+  if (write) {
+    expectArgs(positionals, 2 + write.positionals);
+    rejectUnusedFlags(values, write.flags);
+    rejectManaged(deps.env);
+    let session: Awaited<ReturnType<typeof connect>> | undefined;
+    const output = await write.run({
+      positionals,
+      values,
+      deps,
+      journal: new RequestJournal(config.directory, deps.now),
+      connect: async (capabilities) =>
+        (session = await connect(config, requested, deps, capabilities)),
+    });
+    return { ...session?.result, ...output };
   }
   const command = browseCommands.get(key);
   if (!command) throw new CliError("usage", `Unknown command.\n\n${USAGE}`);

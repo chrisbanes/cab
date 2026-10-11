@@ -139,6 +139,79 @@ export class ServiceClient {
     };
   }
 
+  /**
+   * POSTs one operator command. Definite not-applied failures (refused connection, DNS,
+   * TLS verification, a redirect, any 4xx) keep their codes; anything after the request
+   * may have been sent (other transport failures, timeout, 5xx, unreadable 2xx) is
+   * `command-outcome-unknown`. Returns the parsed 2xx body.
+   */
+  async command(body: string, timeoutMs: number): Promise<unknown> {
+    const requestId = randomUUID();
+    const unknown = () =>
+      new CliError(
+        "command-outcome-unknown",
+        "The service may or may not have applied the command.",
+        { requestId, retryable: true },
+      );
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.origin}/api/operator/commands`, {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+          authorization: `Bearer ${this.token}`,
+          "x-ensemble-request-id": requestId,
+        },
+        body,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (error) {
+      const code = String(
+        (error as { cause?: { code?: unknown } })?.cause?.code ?? "",
+      );
+      // Only failures before any byte was sent prove the command was not applied.
+      if (/^(?:ECONNREFUSED|ENOTFOUND|EAI_AGAIN)$/.test(code))
+        throw new CliError("unavailable", "The service is unavailable.", {
+          requestId,
+          retryable: true,
+        });
+      if (/CERT|TLS|SSL|SELF_SIGNED|VERIFY/.test(code))
+        throw transportFailure(error, requestId);
+      throw unknown();
+    }
+    if (
+      response.type === "opaqueredirect" ||
+      (response.status >= 300 && response.status < 400)
+    )
+      throw new CliError(
+        "redirect-rejected",
+        "The service redirected the request; credentials are never forwarded.",
+        { requestId, retryable: false },
+      );
+    let parsed: unknown;
+    try {
+      parsed = await response.json();
+    } catch {
+      parsed = undefined;
+    }
+    if (response.status >= 500) throw unknown();
+    if (!response.ok) {
+      const error = apiErrorSchema.safeParse(parsed);
+      const code = error.success ? error.data.error.code : "rejected";
+      const paths = error.success ? (error.data.error.fieldPaths ?? []) : [];
+      throw new CliError(
+        // On the command route `forbidden` is a domain policy denial, not authentication.
+        code === "forbidden" ? "policy-denied" : code,
+        `${error.success ? error.data.error.message : `The service rejected the command (${response.status}).`}${paths.length ? ` Fields: ${paths.join(", ")}` : ""}`,
+        { requestId, retryable: false, status: response.status },
+      );
+    }
+    if (parsed === undefined) throw unknown();
+    return parsed;
+  }
+
   /** Negotiates API version and capabilities before any other read. */
   async identity(required: readonly string[]): Promise<CliIdentity> {
     const identity = await this.get("/api/operator/cli", cliIdentitySchema);
