@@ -189,6 +189,9 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
       "codex",
     );
     assert.equal(f.state.bindTask("work-child-a", context).harness, "codex");
+    assert.throws(() =>
+      f.state.bindTask("work-child-a", context, "gemini" as ExecutionHarness),
+    );
 
     const recorded = f.state.recordRuntimeTerminal({
       threadId: "fresh-thread",

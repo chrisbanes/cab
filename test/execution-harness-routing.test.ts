@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
@@ -22,6 +22,7 @@ class HarnessRuntime implements Runtime {
   readonly calls: string[] = [];
   holdTurns = false;
   failNextTurn = false;
+  failStart = false;
   private threads = 0;
   private turns = 0;
   private readonly open = new Map<
@@ -31,10 +32,13 @@ class HarnessRuntime implements Runtime {
   private readonly failing = new Set<string>();
   private unexpected: ((request: UnexpectedRequest) => void) | undefined;
   private failure: ((error: Error) => void) | undefined;
+  private anomaly: ((anomaly: { reason: string }) => void) | undefined;
 
   constructor(private readonly name: ExecutionHarness) {}
 
-  async start() {}
+  async start() {
+    if (this.failStart) throw new Error("Runtime failed to start");
+  }
   /** Like a lost App Server: pending waits reject without a terminal status. */
   async stop() {
     for (const turn of this.open.values())
@@ -109,6 +113,12 @@ class HarnessRuntime implements Runtime {
   onFailure(listener: (error: Error) => void) {
     this.failure = listener;
   }
+  onTerminalAnomaly(listener: (anomaly: { reason: string }) => void) {
+    this.anomaly = listener;
+  }
+  reportUnidentifiedAnomaly() {
+    this.anomaly?.({ reason: "Terminal report without identity" });
+  }
   denyUnexpected(method: string) {
     this.unexpected?.({ method });
   }
@@ -133,10 +143,14 @@ function open(
   dataDir: string,
   runtimes: Fakes,
   harnesses: ExecutionHarness[] = ["codex", "claude"],
+  broken?: ExecutionHarness,
 ) {
   return new StandaloneService(
     dataDir,
-    (_context, harness) => runtimes[harness],
+    (_context, harness) => {
+      if (harness === broken) throw new Error("Runtime cannot be constructed");
+      return runtimes[harness];
+    },
     undefined,
     {
       runtimeHarnesses: harnesses,
@@ -587,6 +601,100 @@ test("restart recovery inspects admitted work only through its own harness", asy
     );
   } finally {
     await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unidentified anomaly retracts only its own harness's last completed work", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-anomaly-"));
+  const workspace = join(root, "workspace");
+  mkdirSync(workspace);
+  const runtimes = fakes();
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    assert.equal(
+      (await service.submit("direct", "Codex", workspace)).state,
+      "completed",
+    );
+    const worker = profile(service, "claude");
+    const projectId = project(service, worker, [worker]);
+    const { assignmentIds } = await task(service, projectId, [worker]);
+    const claudeWork = initial(assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, claudeWork)?.state === "completed",
+      describe,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(runtimes.codex.calls.every((call) => !call.includes("claude")));
+
+    runtimes.codex.reportUnidentifiedAnomaly();
+    assert.equal(intent(service, "direct")?.state, "held");
+    assert.equal(intent(service, claudeWork)?.state, "completed");
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+for (const failure of ["construction", "start"] as const)
+  test(`a Claude runtime ${failure} failure leaves Codex running and Claude work waiting`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "ensemble-harness-startup-"));
+    const runtimes = fakes();
+    runtimes.claude.failStart = failure === "start";
+    const service = open(
+      join(root, "data"),
+      runtimes,
+      ["codex", "claude"],
+      failure === "construction" ? "claude" : undefined,
+    );
+    const describe = diagnostics(service, runtimes);
+    try {
+      await service.start();
+      assert.deepEqual(service.runtimeStatus(), { state: "available" });
+      const lead = profile(service, "codex");
+      const worker = profile(service, "claude");
+      const projectId = project(service, lead, [worker, lead]);
+      const claudeTask = await task(service, projectId, [worker]);
+      const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+      await waitUntil(
+        () =>
+          intent(service, claudeWork)?.reason ===
+          "Claude runtime unavailable; restart the service",
+        describe,
+      );
+      const codexTask = await task(service, projectId, [lead]);
+      await waitUntil(
+        () =>
+          intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+          "completed",
+        describe,
+      );
+      assert.deepEqual(runtimes.claude.calls, []);
+      assert.ok(runtimes.codex.calls.every((call) => !call.includes("claude")));
+    } finally {
+      await service.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+test("a default runtime start failure still aborts start-up", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-default-"));
+  const runtimes = fakes();
+  runtimes.codex.failStart = true;
+  const service = open(join(root, "data"), runtimes);
+  try {
+    await assert.rejects(service.start(), /Runtime failed to start/);
+    assert.throws(
+      () => open(join(root, "other"), runtimes, ["claude"]),
+      /must include the default harness/,
+    );
+    assert.throws(
+      () => open(join(root, "other"), runtimes, ["codex", "codex"]),
+      /must include the default harness/,
+    );
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

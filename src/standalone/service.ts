@@ -317,7 +317,8 @@ export class StandaloneService {
     string,
     ConversationHistoryCapture
   >();
-  private lastCompletedWorkId: string | undefined;
+  /** Per harness, so an unidentified anomaly can only retract its own work. */
+  private readonly lastCompletedWorkId = new Map<ExecutionHarness, string>();
   private readonly active = new Set<Promise<ExecutionIntent>>();
   private readonly activeByWorkId = new Map<string, Promise<ExecutionIntent>>();
   private readonly nativeWaiters = new Map<
@@ -380,7 +381,7 @@ export class StandaloneService {
   async start(): Promise<void> {
     if (this.db || this.owner)
       throw new Error("Service already started or shutdown is incomplete");
-    this.lastCompletedWorkId = undefined;
+    this.lastCompletedWorkId.clear();
     const dataDirectory = StandaloneDataDirectory.openExclusive(this.dataDir, {
       markerWriter: this.markerWriter,
     });
@@ -844,7 +845,7 @@ export class StandaloneService {
               anomaly.turnId,
             )
           : state
-              .activeOrLastCompleted(this.lastCompletedWorkId)
+              .activeOrLastCompleted(this.lastCompletedWorkId.get(harness))
               .filter((item) => ownWork(item.workId));
       for (const item of matched) {
         this.retractWriterAndSuccessors(item, anomaly.reason);
@@ -3594,13 +3595,13 @@ export class StandaloneService {
         return;
       // Never falls back to another harness's runtime.
       const unavailable = this.runtimeWaitReason(harness);
-      if (unavailable || !runtime) {
-        if (!unavailable) return;
+      if (unavailable) {
         // Queued work stays queued: nothing is admitted or held until restart.
         state.wait(intent.id, unavailable);
         store.wait(request.workId, unavailable);
         return;
       }
+      if (!runtime) return;
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
       const power = this.power;
@@ -3973,7 +3974,7 @@ export class StandaloneService {
       } else if (outcome === "completed") {
         state.complete(intent.id, threadId, turnId);
         if (turnCapture?.comparison) this.finishTurnCapture(turnCapture);
-        this.lastCompletedWorkId = request.workId;
+        this.lastCompletedWorkId.set(harness, request.workId);
         const coordination = this.coordination;
         const binding = state.taskBinding(request.workId);
         if (coordination) {
