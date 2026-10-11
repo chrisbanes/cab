@@ -101,14 +101,17 @@ owns delivery scope and status.
   retained PR feedback and operator settlement controls.
 - **Operations.** Offline database backup, verification and restore commands, and a
   generated per-user macOS LaunchAgent.
-- **Operator CLI (authentication, browsing and configuration).** A packaged `ensemble`
+- **Operator CLI (authentication, browsing, configuration and diagnostics).** A packaged `ensemble`
   executable logs in to the running service with a revocable read-only or read/write
   credential issued from Settings, manages named connections and browses projects,
   profiles, tasks, assignments, instruction revisions, conversation history, results
   and retained evidence with paged, coverage-reporting reads. It prepares reviewable
   change documents for profile, project, routing and capacity configuration, applies
   their exact command once with a journalled request key, adopts current instructions
-  for an assignment's next turn and reads receipts back. The remaining
+  for an assignment's next turn and reads receipts back. It lists task-bound
+  executions, shows their captured supplied inputs, observed settings and bounded,
+  redacted runtime, tool and service diagnostics, and follows them with resumable
+  cursors. The remaining
   [operator CLI](docs/design/operator-cli.md) command areas are planned under
   [epic #893](https://github.com/chrisbanes/ensemble/issues/893); see
   [development](docs/development.md#operator-cli).
