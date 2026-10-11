@@ -14,10 +14,7 @@
     "turnBound": true
   },
   "surfaces": {
-    "listed": [
-      "captured",
-      "captured"
-    ],
+    "listed": ["captured", "captured"],
     "identity": {
       "taskMatches": true,
       "assignmentPresent": true,
@@ -119,16 +116,8 @@
     },
     "events": {
       "count": 15,
-      "kinds": [
-        "service",
-        "setting",
-        "input",
-        "runtime"
-      ],
-      "runtimeItemTypes": [
-        "commandExecution",
-        "turn"
-      ],
+      "kinds": ["service", "setting", "input", "runtime"],
+      "runtimeItemTypes": ["commandExecution", "turn"],
       "commandExecutionObserved": true,
       "commandOutputRedacted": true,
       "toolCalls": 0,
@@ -150,10 +139,7 @@
       }
     },
     "follow": {
-      "records": [
-        "item",
-        "end"
-      ],
+      "records": ["item", "end"],
       "end": "execution-finished"
     },
     "storeHealth": {
