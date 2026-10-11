@@ -243,3 +243,33 @@ test("receipts record a resumed lead only as a literal true", () => {
     false,
   );
 });
+
+test("capacity commands accept an optional strict expectedCurrent", () => {
+  const capacity = {
+    type: "capacity.configure",
+    key,
+    globalLimit: 3,
+    projectOverrides: { [key]: null },
+  };
+  const parsed = operatorCommandSchema.parse(capacity);
+  assert.ok(!("expectedCurrent" in parsed));
+  assert.deepEqual(
+    operatorCommandSchema.parse({
+      ...capacity,
+      expectedCurrent: { globalLimit: 4 },
+    }),
+    { ...capacity, expectedCurrent: { globalLimit: 4, projectOverrides: {} } },
+  );
+  for (const expectedCurrent of [
+    { globalLimit: 0 },
+    { globalLimit: 4, projectOverrides: { nope: 1 } },
+    { globalLimit: 4, projectOverrides: { [key]: 0 } },
+    { globalLimit: 4, version: 1 },
+    {},
+  ])
+    assert.equal(
+      operatorCommandSchema.safeParse({ ...capacity, expectedCurrent }).success,
+      false,
+      JSON.stringify(expectedCurrent),
+    );
+});

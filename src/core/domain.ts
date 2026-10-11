@@ -264,6 +264,16 @@ const commandSchema = z.discriminatedUnion("type", [
       projectOverrides: z
         .record(id, z.number().int().positive().nullable())
         .default({}),
+      // Optional compare-and-swap: omitted, the command hashes and behaves as before.
+      expectedCurrent: z
+        .object({
+          globalLimit: z.number().int().positive(),
+          projectOverrides: z
+            .record(id, z.number().int().positive().nullable())
+            .default({}),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -726,6 +736,16 @@ export class DomainStore {
     return this.replayed(scopeOf(command), command.key, commandHash(command));
   }
 
+  /** The stored result for a receipt scope and key, or undefined when unused. */
+  recordedResult(scope: string, key: string): unknown {
+    const row = this.one(
+      "SELECT result FROM command_receipts WHERE scope = ? AND key = ?",
+      scope,
+      id.parse(key),
+    );
+    return row ? JSON.parse(String(row.result)) : undefined;
+  }
+
   /** The recorded result for a command key, or undefined when the key is unused. */
   private replayed(scope: string, key: string, hash: string): unknown {
     const receipt = this.one(
@@ -965,6 +985,31 @@ export class DomainStore {
         WHERE t.ready = 1 AND t.state = 'open' AND p.leadProfileId IS NOT NULL
         ORDER BY t.rowid`)
       .all() as Row[];
+  }
+
+  /** Assignments bound to a project or profile, oldest first, with current revisions. */
+  assignmentsBoundTo(
+    target: "projectId" | "profileId",
+    targetId: string,
+    limit: number,
+  ): { rows: Row[]; total: number } {
+    const where = `a.${target === "projectId" ? "projectId" : "profileId"} = ?`;
+    const rows = this.db
+      .prepare(`SELECT a.id, a.taskId, a.projectId, a.profileId, a.state,
+        a.profileRevision, a.instructionsRevision,
+        pr.version AS currentProfileRevision,
+        p.instructionsRevision AS currentInstructionsRevision,
+        EXISTS(SELECT 1 FROM task_lead_bindings b WHERE b.assignmentId = a.id) AS lead
+        FROM domain_assignments a
+        JOIN profiles pr ON pr.id = a.profileId
+        JOIN domain_projects p ON p.id = a.projectId
+        WHERE ${where} ORDER BY a.rowid LIMIT ?`)
+      .all(id.parse(targetId), limit) as Row[];
+    const count = this.required(
+      `SELECT COUNT(*) AS total FROM domain_assignments a WHERE ${where}`,
+      targetId,
+    );
+    return { rows, total: Number(count.total) };
   }
 
   leadBindings(): Row[] {
@@ -2140,6 +2185,18 @@ export class DomainStore {
       }
       case "capacity.configure": {
         this.operator(command);
+        if (command.expectedCurrent) {
+          const current = this.capacityLimits();
+          const expected = command.expectedCurrent;
+          if (
+            current.globalLimit !== expected.globalLimit ||
+            Object.entries(expected.projectOverrides).some(
+              ([projectId, limit]) =>
+                (current.projectOverrides[projectId] ?? null) !== limit,
+            )
+          )
+            throw new DomainConflictError("Capacity limits changed");
+        }
         this.db
           .prepare(
             "UPDATE scheduler_capacity_limits SET globalLimit = ? WHERE singleton = 1",

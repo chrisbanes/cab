@@ -1910,6 +1910,14 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("capacity.configure"),
       globalLimit: revision,
       projectOverrides: z.record(uuid, revision.nullable()),
+      /** Optional compare-and-swap: the limits this change was prepared against. */
+      expectedCurrent: z
+        .object({
+          globalLimit: revision,
+          projectOverrides: z.record(uuid, revision.nullable()).default({}),
+        })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -2732,7 +2740,77 @@ export const cliCapabilities = [
   "instructions.read",
   "result.read",
   "artifact.read",
+  "configuration.write",
+  "operation.read",
+  "capacity.read",
+  "configuration.impact",
 ] as const;
+/** Assignments a profile or project change would affect, observed at read time. */
+export const configurationImpactSchema = envelope(
+  z
+    .object({
+      target: z
+        .object({ kind: z.enum(["project", "profile"]), id: uuid })
+        .strict(),
+      assignments: z
+        .array(
+          z
+            .object({
+              assignmentId: uuid,
+              taskId: uuid,
+              projectId: uuid,
+              profileId: uuid,
+              state: z.enum(["pending", "running", "completed", "held"]),
+              lead: z.boolean(),
+              bound: z
+                .object({
+                  profileRevision: revision,
+                  instructionsRevision: revision,
+                })
+                .strict(),
+              current: z
+                .object({
+                  profileRevision: revision,
+                  instructionsRevision: revision,
+                })
+                .strict(),
+              stale: z
+                .object({ profile: z.boolean(), instructions: z.boolean() })
+                .strict(),
+            })
+            .strict(),
+        )
+        .max(200),
+      total: z.number().int().nonnegative().safe(),
+      truncated: z.boolean(),
+      limit: z.number().int().min(1).max(200),
+    })
+    .strict(),
+);
+/** Commands whose receipts `GET /api/operator/operations` reads back. */
+export const operationTypeSchema = z.enum([
+  "profile.create",
+  "profile.configure",
+  "project.create",
+  "project.configure",
+  "routing.configure",
+  "capacity.configure",
+  "assignment.apply",
+]);
+/** `project:<id>`, `profile:<id>` or `system:capacity`; nothing else is a readable scope. */
+export const operationScopeSchema = z
+  .string()
+  .regex(
+    /^(?:(?:project|profile):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity)$/i,
+  );
+export const operationReadSchema = envelope(
+  z.discriminatedUnion("state", [
+    z
+      .object({ state: z.literal("recorded"), receipt: commandReceiptSchema })
+      .strict(),
+    z.object({ state: z.literal("not-recorded") }).strict(),
+  ]),
+);
 /** Instruction views are reconstructed from retained revisions, never a captured prompt. */
 const instructionProvenanceSchema = z
   .object({

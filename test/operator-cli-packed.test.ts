@@ -174,11 +174,63 @@ test("the packed CLI installs offline and works against a real service over loop
     list.data.tasks.map((x: { id: string }) => x.id),
     [s.taskId],
   );
+  // One reviewed write through the installed binary.
+  const write = await s.issue("read-write", "packed-rw");
+  r = await cli([
+    "auth",
+    "login",
+    "--connection",
+    "rw",
+    "--url",
+    s.origin,
+    "--token-file",
+    tokenFile(write.token, "loopback-rw.token"),
+  ]);
+  assert.equal(r.code, 0, r.err);
+  const change = join(dir, "capacity.json");
+  r = await cli([
+    "capacity",
+    "prepare",
+    "--global-limit",
+    "6",
+    "--out",
+    change,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  r = await cli([
+    "capacity",
+    "apply",
+    "--file",
+    change,
+    "--connection",
+    "rw",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  const applied = JSON.parse(r.out);
+  assert.equal(applied.data.receipt.result.globalLimit, 6);
+  r = await cli([
+    "operation",
+    "get",
+    applied.request.key,
+    "--scope",
+    "system:capacity",
+    "--type",
+    "capacity.configure",
+    "--connection",
+    "rw",
+    "--output",
+    "json",
+  ]);
+  assert.deepEqual(JSON.parse(r.out).data.receipt, applied.data.receipt);
   r = await cli(["task", "get", s.taskId], {
     ENSEMBLE_MANAGED_ASSIGNMENT: "1",
   });
   assert.equal(r.code, 3);
-  r = await cli(["auth", "logout"]);
+  r = await cli(["auth", "logout", "--connection", "local"]);
   assert.equal(r.code, 0, r.err);
   assert.equal((await s.bearer(read.token, "/api/operator/cli")).status, 200);
 

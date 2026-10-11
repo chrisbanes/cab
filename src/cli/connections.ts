@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { constants } from "node:fs";
 import { z } from "zod";
 import { operatorCredentialTokenSchema } from "../operator/contracts.js";
+import type { RequestIdentity } from "./types.js";
 
 export class CliError extends Error {
   constructor(
@@ -15,6 +16,8 @@ export class CliError extends Error {
       requestId?: string;
       retryable?: boolean;
       status?: number;
+      /** Set on write failures so the envelope carries the receipt identity. */
+      request?: RequestIdentity;
     } = {},
   ) {
     super(message);

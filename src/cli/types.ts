@@ -10,6 +10,8 @@ export type CliDeps = {
   platform: NodeJS.Platform;
   keychain: () => CredentialStore;
   now: () => number;
+  /** Command request timeout; expiry is an unknown outcome (default 60 s). */
+  commandTimeoutMs?: number;
 };
 
 export type Result = {
@@ -19,6 +21,15 @@ export type Result = {
   service?: { installationId: string; origin: string; apiVersion: number };
   pagination?: Pagination;
   coverage?: Coverage;
+  /** The receipt identity of a write: service installation, scope, type and key. */
+  request?: RequestIdentity;
+};
+
+export type RequestIdentity = {
+  service: string;
+  scope: string;
+  type: string;
+  key: string;
 };
 
 /** Every flag the CLI accepts; a command reads only the ones it documents. */
@@ -36,4 +47,23 @@ export type Values = {
   historical?: boolean | undefined;
   revision?: string | undefined;
   out?: string | undefined;
+  file?: string | undefined;
+  "request-id"?: string | undefined;
+  "expected-version"?: string | undefined;
+  name?: string | undefined;
+  summary?: string | undefined;
+  "instructions-file"?: string | undefined;
+  "capabilities-file"?: string | undefined;
+  "restore-revision"?: string | undefined;
+  revoked?: string | undefined;
+  paused?: string | undefined;
+  "lead-profile"?: string | undefined;
+  id?: string | undefined;
+  enabled?: string | undefined;
+  "guidance-file"?: string | undefined;
+  "credential-ref"?: string | undefined;
+  candidates?: string | undefined;
+  "global-limit"?: string | undefined;
+  "project-limit"?: string[] | undefined;
+  scope?: string | undefined;
 };

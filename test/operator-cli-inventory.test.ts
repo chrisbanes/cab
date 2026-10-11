@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test } from "node:test";
 import { COVERAGE_GAPS } from "../src/cli/browse.js";
-import { browseCommands } from "../src/cli/commands.js";
+import { browseCommands, writeCommands } from "../src/cli/commands.js";
 import { harness } from "./fixtures/cli-harness.js";
 import { databaseDigest } from "./fixtures/database-digest.js";
 import { startCliService } from "./fixtures/operator-cli.js";
@@ -28,16 +28,36 @@ const documented = [
   "result get",
   "result evidence",
   "artifact get",
+  "capacity get",
+];
+
+/** The documented CLI3 configuration, adoption and receipt commands. */
+const documentedWrites = [
+  "profile prepare",
+  "profile prepare-create",
+  "profile apply",
+  "project prepare",
+  "project prepare-create",
+  "project prepare-routing",
+  "project apply",
+  "capacity prepare",
+  "capacity apply",
+  "assignment apply-current",
+  "operation get",
 ];
 
 test("every documented browse command runs read-only with a coverage envelope", async (t) => {
   assert.deepEqual([...browseCommands.keys()].sort(), [...documented].sort());
+  assert.deepEqual(
+    [...writeCommands.keys()].sort(),
+    [...documentedWrites].sort(),
+  );
   const s = await startCliService(t);
   const native = await captureNativeResult(s.f, { withArtifact: true });
   const h = harness(t);
   const help = await h.run(["--help"]);
   assert.equal(help.code, 0);
-  for (const command of browseCommands.values())
+  for (const command of [...browseCommands.values(), ...writeCommands.values()])
     assert.ok(help.out.includes(command.usage), command.usage);
 
   const read = await s.issue("read", "inventory");
@@ -66,6 +86,10 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "instructions.read",
     "result.read",
     "artifact.read",
+    "configuration.write",
+    "operation.read",
+    "capacity.read",
+    "configuration.impact",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;
@@ -87,6 +111,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "result list": [taskId],
     "result get": [taskId, native.resultId],
     "result evidence": [taskId, native.resultId, native.textItem.itemId],
+    "capacity get": [],
     "artifact get": [
       taskId,
       native.artifactId!,

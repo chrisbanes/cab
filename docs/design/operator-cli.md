@@ -146,6 +146,23 @@ assignments retain their bound revisions and may become stale under existing
 admission rules. Adoption is a separate, version-checked assignment action using
 the current instructions for the next turn. An active turn is not rewritten.
 
+A change document (`ensemble.cli.change/v1`) holds exactly one typed command
+without its request key: `profile.create`, `profile.configure`, `project.create`,
+`project.configure`, `routing.configure` or `capacity.configure`. The design's
+`create` verbs are `prepare-create` followed by `apply`. Its SHA-256 digest covers
+every other field and detects accidental or in-transit modification; it is not a
+MAC against a same-user writer, so the service's revision checks and the
+installation check still decide. Restore takes only instruction text, and only when
+the retained revision is neither redacted nor omitted; other fields have their own
+flags. A diff against redacted or withheld current text says so with the
+`content-redacted`, `redaction-unavailable` or `content-unavailable` gap; routing
+guidance is never read back, so its diff shows only the proposed text.
+`capacity.configure` accepts an optional `expectedCurrent` (global limit and the
+listed project overrides, `null` meaning none), compared inside the command
+transaction; a mismatch is a `409 conflict`. Commands without it hash and behave as
+before, so the web UI keeps its last-writer-wins capacity form. Creation and
+adoption are deliberately irreversible; revoke, pause or restore instead.
+
 ## Authentication and authority
 
 Use a dedicated bearer-token authentication path over the same service command
@@ -314,9 +331,25 @@ fields; unsupported operations or incompatible contracts fail explicitly.
 Read-only credentials must receive a server denial even if a caller bypasses the
 CLI and submits a write directly. Capability names are `cli.identity`,
 `task.read`, `workspace.read`, `task.list`, `task.search`, `task.records`,
-`assignment.read`, `instructions.read`, `result.read` and `artifact.read`; a
-command whose capabilities the service does not advertise fails with
-`unsupported-service` before any other read.
+`assignment.read`, `instructions.read`, `result.read`, `artifact.read`,
+`configuration.write`, `operation.read`, `capacity.read` and
+`configuration.impact`; a command whose capabilities the service does not
+advertise fails with `unsupported-service` before any other read.
+
+`GET /api/operator/operations?scope=&type=&key=` returns `recorded` with the
+receipt `POST /api/operator/commands` returned, or `not-recorded`. It accepts only
+the scopes `project:<id>`, `profile:<id>` and `system:capacity` with the seven
+configuration and adoption types, rebuilds the receipt from the stored result with
+the same projection as `POST`, and reports a stored result of another shape as
+`409 conflict`. `GET /api/operator/projects/:id/impact` and
+`/profiles/:id/impact` list at most 200 bound assignments (default 200, `limit`
+1–200) with their bound and current revisions, `total` and `truncated`. All three
+are `read` routes. On the command route a `403 forbidden` is a policy denial, which
+the CLI reports as `policy-denied` (exit 4). A refused connection, DNS or TLS
+failure, a redirect or any 4xx did not apply the command; any other transport
+failure, timeout, 5xx or unexpected receipt is `command-outcome-unknown` (exit 6).
+The CLI exits 2 with `change-document-invalid` or `wrong-service` and 5 with
+`journal-unavailable` before sending anything.
 
 ## Acceptance scenarios
 

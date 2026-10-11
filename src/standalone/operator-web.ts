@@ -190,6 +190,17 @@ export class OperatorWebBoundary {
     reviewSession?: OperatorReviewSessionContext,
   ) {
     if (path === "/api/operator/search") return this.api.readSearch(query);
+    if (path === "/api/operator/operations")
+      return this.api.readOperation(query);
+    const impact = path.match(
+      /^\/api\/operator\/(projects|profiles)\/([^/]+)\/impact$/,
+    );
+    if (impact)
+      return this.api.readConfigurationImpact(
+        impact[1] === "projects" ? "project" : "profile",
+        impact[2] ?? "",
+        query,
+      );
     if (path === "/api/operator/inbox") return this.api.readInbox(query);
     if (path === "/api/operator/discovery/branches")
       return this.api.readDiscoveryBranches(query);
@@ -413,6 +424,7 @@ export class OperatorWebBoundary {
         "/api/operator/setup/verify-checkout",
         "/api/operator/cli",
         "/api/operator/credentials",
+        "/api/operator/operations",
       ].includes(path) ||
       /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
       /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
@@ -438,7 +450,9 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
         path,
       ) ||
-      /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
+      /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/(?:instructions|impact)$/.test(
+        path,
+      )
     );
   }
 }

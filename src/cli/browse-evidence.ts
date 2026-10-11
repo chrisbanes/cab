@@ -26,7 +26,7 @@ const sha256 = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 
 /** Writes verified bytes to a new owner-only file; any failure leaves no file. */
-async function writeOut(path: string, body: Buffer) {
+export async function writeOut(path: string, body: Buffer) {
   const target = resolve(path);
   let handle: FileHandle;
   try {
@@ -38,6 +38,7 @@ async function writeOut(path: string, body: Buffer) {
   }
   try {
     await handle.writeFile(body);
+    await handle.sync();
     await handle.close();
   } catch {
     await handle.close().catch(() => undefined);

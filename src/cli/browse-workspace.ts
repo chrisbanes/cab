@@ -1,6 +1,7 @@
 import {
   profileConfigurationSchema,
   projectConfigurationSchema,
+  runtimeSettingsSchema,
   searchReadSchema,
   taskListPageSchema,
   taskMessagePageSchema,
@@ -397,7 +398,57 @@ const taskMessages: BrowseCommand = {
   },
 };
 
+/** Reads capacity through the runtime settings read; per-task rows are dropped. */
+const capacityGet: BrowseCommand = {
+  usage: "capacity get",
+  positionals: 0,
+  capabilities: ["cli.identity", "capacity.read"],
+  async run(ctx) {
+    const client = await ctx.connect();
+    const read = await client.get(`${API}/runtime`, runtimeSettingsSchema);
+    const r = read.data;
+    const projects = r.projects.map((p) => ({
+      projectId: p.project.id,
+      name: p.project.name,
+      limit: p.limit,
+      override: p.override,
+      usage: p.usage,
+    }));
+    return browseOutput(ctx, {
+      data: {
+        globalLimit: r.globalLimit,
+        defaultProjectLimit: r.defaultProjectLimit,
+        globalUsage: r.globalUsage,
+        projects,
+      },
+      observedAt: read.observedAt,
+      gaps: anyNull(...projects.map((p) => p.name))
+        ? ["content-unavailable"]
+        : [],
+      human: [
+        keyValues([
+          ["Global limit", String(r.globalLimit)],
+          ["Global usage", String(r.globalUsage)],
+          ["Default project limit", String(r.defaultProjectLimit)],
+        ]),
+        "",
+        table(
+          ["PROJECT", "NAME", "LIMIT", "OVERRIDE", "USAGE"],
+          projects.map((p) => [
+            p.projectId,
+            oneLine(p.name, 40),
+            String(p.limit),
+            p.override === null ? "default" : String(p.override),
+            String(p.usage),
+          ]),
+        ),
+      ].join("\n"),
+    });
+  },
+};
+
 export const workspaceCommands: [string, BrowseCommand][] = [
+  ["capacity get", capacityGet],
   ["project list", projectList],
   ["profile list", profileList],
   ["project get", projectGet],

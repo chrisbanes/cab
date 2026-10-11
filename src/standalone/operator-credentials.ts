@@ -238,6 +238,7 @@ export function operatorRouteAuthority(
       "/api/operator/discovery/repositories",
       "/api/operator/discovery/branches",
       "/api/operator/discovery/projects",
+      "/api/operator/operations",
     ].includes(path) ||
     /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
       path,
@@ -256,7 +257,9 @@ export function operatorRouteAuthority(
     /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
       path,
     ) ||
-    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
+    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/(?:instructions|impact)$/.test(
+      path,
+    )
     ? "read"
     : undefined;
 }
