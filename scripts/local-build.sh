@@ -17,6 +17,7 @@ done
 
 dirs=("$root" "$root"/{builds,data,auth,snapshots})
 # The service rejects symlinked state paths, and chmod would follow one.
+mkdir -p "$(dirname "$root")"
 if [[ "$(cd "$(dirname "$root")" && pwd -P)" != "$(dirname "$root")" ]]; then
   echo "$(dirname "$root") must not contain symlinks" >&2
   exit 1
