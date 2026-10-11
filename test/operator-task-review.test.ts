@@ -660,3 +660,83 @@ test("runtime settings uses the exact task rows captured before its initial awai
     [a.taskId, newId].sort(),
   );
 });
+
+test("workspace-backed reads retry instruction changes and redact newly private prose", async (t) => {
+  for (const kind of [
+    "project",
+    "list",
+    "composer",
+    "runtime",
+    "recovery",
+  ] as const) {
+    for (const scope of ["project", "profile"] as const) {
+      await t.test(`${kind}: ${scope}`, async (t) => {
+        const f = await createOperatorFixture();
+        t.after(() => f.close());
+        const canary = `New private ${kind} ${scope} material`,
+          task = await seedReviewTask(f, "Race project", canary),
+          api = new OperatorApi(f.service, [f.directory]),
+          d = f.service.domain(),
+          original = f.service.taskWorkspace.bind(f.service);
+        let calls = 0;
+        f.service.taskWorkspace = async (...args) => {
+          const workspace = await original(...args);
+          if (++calls === 1) {
+            if (scope === "project")
+              d.execute({
+                type: "project.configure",
+                actor: "operator",
+                key: randomUUID(),
+                projectId: task.projectId,
+                expectedVersion: Number(d.project(task.projectId).version),
+                instructions: canary,
+              });
+            else
+              d.execute({
+                type: "profile.configure",
+                actor: "operator",
+                key: randomUUID(),
+                profileId: task.profileId,
+                expectedVersion: Number(d.profile(task.profileId).version),
+                instructions: canary,
+              });
+          }
+          return workspace;
+        };
+        const response = await {
+          project: () => api.readProject(task.projectId),
+          list: () => api.readTaskListPage(),
+          composer: () => api.readComposerOptions(task.projectId),
+          runtime: () => api.readRuntimeSettings(),
+          recovery: () => api.readAssignmentRecovery(task.assignmentId),
+        }[kind]();
+        assert.ok(calls >= 2, "read must rebuild its instruction exclusions");
+        assert.equal(JSON.stringify(response).includes(canary), false);
+      });
+    }
+  }
+});
+
+test("instruction read retries are bounded and fail closed under repeated changes", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f),
+    api = new OperatorApi(f.service, [f.directory]),
+    original = f.service.taskWorkspace.bind(f.service),
+    d = f.service.domain();
+  let changes = 0;
+  f.service.taskWorkspace = async (...args) => {
+    const workspace = await original(...args);
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: task.projectId,
+      expectedVersion: Number(d.project(task.projectId).version),
+      instructions: `Private instruction revision ${++changes}`,
+    });
+    return workspace;
+  };
+  await assert.rejects(api.readTaskListPage(), { status: 503 });
+  assert.equal(changes, 2);
+});

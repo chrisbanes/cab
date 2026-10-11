@@ -347,3 +347,95 @@ test("actual source snapshot change during delayed preflight retains its hold an
   assert.ok(f.service.githubSources().hold("I1")?.active);
   assert.equal(f.service.taskReview().sources(f.taskId).length, 2);
 });
+
+test("comment send receipt fences visibility, task and workspace changes during awaited exclusions", async (t) => {
+  for (const race of [
+    "reference",
+    "value",
+    "instructions",
+    "task",
+    "workspace",
+  ] as const) {
+    await t.test(race, async (t) => {
+      const f = await deliveryFixture("reviewable-pr", true);
+      t.after(() => f.close());
+      const envKey = "FIXTURE_COMMENT_ACCESS",
+        previous = process.env[envKey];
+      t.after(() => {
+        if (previous === undefined) delete process.env[envKey];
+        else process.env[envKey] = previous;
+      });
+      process.env[envKey] = "OriginalCommentAccessValue";
+      if (race === "value")
+        f.domain.execute({
+          type: "discovery.configure",
+          actor: "operator",
+          key: randomUUID(),
+          credentialRef: `env:${envKey}`,
+        });
+      const api = new OperatorApi(f.service, [f.root]),
+        original = f.service.taskWorkspace.bind(f.service),
+        fingerprint = f.service.taskWorkspaceVisibility.bind(f.service);
+      let posted = false,
+        changed = false;
+      const post = f.service.postOperatorComment.bind(f.service);
+      f.service.postOperatorComment = async (...args) => {
+        const saved = await post(...args);
+        posted = true;
+        return {
+          ...saved,
+          observation: {
+            ...saved.observation!,
+            reason: "NewCommentAccessValue",
+          },
+        };
+      };
+      f.service.taskWorkspace = async (...args) => {
+        const workspace = await original(...args);
+        if (posted && !changed) {
+          changed = true;
+          if (race === "reference") {
+            process.env[envKey] = "NewCommentAccessValue";
+            f.domain.execute({
+              type: "discovery.configure",
+              actor: "operator",
+              key: randomUUID(),
+              credentialRef: `env:${envKey}`,
+            });
+          } else if (race === "value")
+            process.env[envKey] = "NewCommentAccessValue";
+          else if (race === "instructions")
+            f.domain.execute({
+              type: "project.configure",
+              actor: "operator",
+              key: randomUUID(),
+              projectId: f.projectId,
+              expectedVersion: Number(f.domain.project(f.projectId).version),
+              instructions: "NewCommentAccessValue",
+            });
+          else if (race === "task")
+            f.domain.execute({
+              type: "task.configure",
+              projectId: f.projectId,
+              actor: "operator",
+              key: randomUUID(),
+              taskId: f.taskId,
+              expectedVersion: Number(f.domain.task(f.taskId).version),
+              state: "cancelled",
+            });
+          else
+            f.service.taskWorkspaceVisibility = (id) =>
+              `${fingerprint(id)}-changed`;
+        }
+        return workspace;
+      };
+      await assert.rejects(api.execute(send(f)), { status: 409 });
+      assert.equal(changed, true);
+      assert.equal(
+        f.effects.length,
+        1,
+        "receipt rejection must not resend the provider effect",
+      );
+    });
+  }
+});
