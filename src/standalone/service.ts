@@ -194,6 +194,10 @@ export function powerSupervisionEnabled(
   );
 }
 
+/** A synchronous throw from stop() becomes a rejection like any other. */
+const stopRuntime = (runtime: Runtime) =>
+  new Promise<void>((resolve) => resolve(runtime.stop()));
+
 const runtimeFailedError = (): never => {
   throw new Error("Runtime failed");
 };
@@ -692,7 +696,7 @@ export class StandaloneService {
           this.runtimes.delete(harness);
           this.runtimeUnavailableSince.set(harness, Date.now());
           // Healthy start-up never waits on a failed secondary's cleanup.
-          const cleanup = runtime.stop();
+          const cleanup = stopRuntime(runtime);
           cleanup.catch(() => {});
           this.detachedRuntimeStops.add(cleanup);
         }
@@ -785,7 +789,7 @@ export class StandaloneService {
           await this.deliveryCoordinator?.stop().catch(() => {});
           await Promise.all([
             ...[...this.runtimes.values()].map((runtime) =>
-              runtime.stop().catch(() => {}),
+              stopRuntime(runtime).catch(() => {}),
             ),
             ...[...this.detachedRuntimeStops].map((cleanup) =>
               cleanup.catch(() => {}),

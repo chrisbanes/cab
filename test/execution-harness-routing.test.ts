@@ -1138,3 +1138,31 @@ test("an unexpected request naming another harness's turn holds only the emitter
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a failed secondary runtime whose stop throws synchronously is still tracked", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-sync-stop-"));
+  const runtimes = fakes();
+  runtimes.claude.failStart = true;
+  runtimes.claude.stop = () => {
+    throw new Error("Claude stop threw synchronously");
+  };
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "codex");
+    const projectId = project(service, lead, [lead]);
+    const codexTask = await task(service, projectId, [lead]);
+    await waitUntil(
+      () =>
+        intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+        "completed",
+      describe,
+    );
+    // Shutdown reports the tracked cleanup failure like any runtime stop.
+    await assert.rejects(service.stop(), /Claude stop threw synchronously/);
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
