@@ -217,6 +217,8 @@ const harnessLabel: Record<ExecutionHarness, string> = {
 export interface StandaloneServiceOptions {
   /** Harnesses whose runtime this service starts; must include the default. */
   runtimeHarnesses?: readonly ExecutionHarness[];
+  /** Secondary startup cannot block healthy default work; defaults to 10 seconds. */
+  secondaryRuntimeStartTimeoutMs?: number;
   delivery?: {
     fetcher?: typeof fetch;
     providerFactory?: (
@@ -396,6 +398,15 @@ export class StandaloneService {
         "Runtime harnesses must include the default harness once each",
       );
     this.runtimeHarnesses = harnesses;
+    const startupTimeout = options.secondaryRuntimeStartTimeoutMs ?? 10_000;
+    if (
+      !Number.isSafeInteger(startupTimeout) ||
+      startupTimeout <= 0 ||
+      startupTimeout > 30_000
+    )
+      throw new Error(
+        "Secondary runtime startup timeout must be between 1 and 30000 ms",
+      );
   }
 
   async start(): Promise<void> {
@@ -695,7 +706,7 @@ export class StandaloneService {
       );
       for (const [harness, runtime] of this.runtimes)
         try {
-          await this.untilFailure(runtime, runtime.start(), runtimeFailedError);
+          await this.startRuntime(harness, runtime);
         } catch (error) {
           if (harness === defaultExecutionHarness) throw error;
           this.runtimes.delete(harness);
@@ -840,6 +851,27 @@ export class StandaloneService {
         }
       }
       throw error;
+    }
+  }
+
+  private async startRuntime(
+    harness: ExecutionHarness,
+    runtime: Runtime,
+  ): Promise<void> {
+    if (harness === defaultExecutionHarness) return runtime.start();
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.untilFailure(runtime, runtime.start(), runtimeFailedError),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("Secondary runtime startup timed out")),
+            this.options.secondaryRuntimeStartTimeoutMs ?? 10_000,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 

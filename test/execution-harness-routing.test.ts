@@ -1247,3 +1247,91 @@ for (const failure of ["callback", "start"] as const)
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+test("a secondary runtime with pending startup does not block healthy work", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-hung-start-"));
+  const runtimes = fakes();
+  let release!: () => void;
+  runtimes.claude.start = () =>
+    new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  const service = new StandaloneService(
+    join(root, "data"),
+    (context, harness) => {
+      runtimes[harness].safety = context.safety;
+      return runtimes[harness];
+    },
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      secondaryRuntimeStartTimeoutMs: 50,
+      power: { enabled: false },
+      routingClient: null,
+    },
+  );
+  const describe = diagnostics(service, runtimes);
+  const started = service.start();
+  let deadline: NodeJS.Timeout | undefined;
+  try {
+    assert.equal(
+      await Promise.race([
+        started.then(() => "started"),
+        new Promise((resolve) => {
+          deadline = setTimeout(() => resolve("stalled"), 1000);
+        }),
+      ]),
+      "started",
+    );
+    assert.equal(runtimes.claude.stops, 1);
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    const claudeTask = await task(service, projectId, [worker]);
+    const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, claudeWork)?.reason ===
+        "Claude runtime unavailable; restart the service",
+      describe,
+    );
+    // A late resolution never returns the detached runtime to admission.
+    release();
+    const codexTask = await task(service, projectId, [lead]);
+    await waitUntil(
+      () =>
+        intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+        "completed",
+      describe,
+    );
+    assert.deepEqual(runtimes.claude.calls, []);
+    assert.equal(
+      intent(service, claudeWork)?.reason,
+      "Claude runtime unavailable; restart the service",
+    );
+  } finally {
+    if (deadline) clearTimeout(deadline);
+    release();
+    await started;
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("secondary runtime startup deadlines reject invalid bounds", () => {
+  for (const value of [
+    0,
+    -1,
+    30_001,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+  ])
+    assert.throws(
+      () =>
+        new StandaloneService("unused", undefined, undefined, {
+          secondaryRuntimeStartTimeoutMs: value,
+        }),
+      /Secondary runtime startup timeout/,
+    );
+});
