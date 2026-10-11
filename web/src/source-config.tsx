@@ -554,8 +554,9 @@ export function SourceTab(p: TabProps) {
               </>
             )}
             <p className="metadata muted">
-              Saving imports no tasks and activates nothing. Preview a new
-              source in Sync & placement to activate it.
+              Saving imports no tasks and activates nothing. Afterwards every
+              source, kept or new, reads inactive until it is previewed in Sync
+              & placement.
             </p>
           </ChangeList>
           <Aside

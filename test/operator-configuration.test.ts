@@ -823,7 +823,18 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
       .map((row) => row.selectionId),
     ["S-1"],
   );
-  const read = JSON.stringify(await api.readProjectConfiguration(projectId));
+  // The kept row survives, but activation counts only at the version it was previewed,
+  // so the read and sync treat S-1 as inactive until it is previewed again.
+  assert.deepEqual(d.githubActiveSelectionIds(projectId), []);
+  const configuration = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(
+    configuration.data.source.selections.map((s) => [s.id, s.active]),
+    [
+      ["S-1", false],
+      ["S-4", false],
+    ],
+  );
+  const read = JSON.stringify(configuration);
   for (const secret of ["PRIVATE QUERY", "PRIVATE NEW", String(savedPath)])
     assert.equal(read.includes(secret), false);
   assert.equal(JSON.stringify(receipt).includes("PRIVATE"), false);

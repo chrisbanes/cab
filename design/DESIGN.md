@@ -1367,7 +1367,10 @@ frames 114 and 118–128 as follows:
   inactive. Search queries and Project filters stay private: a row reads "Private
   query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
   Readiness Project-field conditions keep node-ID inputs (a name picker needs a
-  discovery read). Any GitHub source save leaves every selection inactive until it
+  discovery read). A GitHub source save deletes the stored activation of each
+  removed selection and keeps the stored activation of each kept one. The save
+  raises the source version, and activation counts only at the version it was
+  previewed, so every kept selection reads "Inactive" and is not synced until it
   is previewed again in Sync & placement.
 - Removing every linked repository shows a warning and a required "Remove all
   repository access" checkbox inside "Changes to save" (no frame draws it).
