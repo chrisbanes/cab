@@ -34,9 +34,17 @@ Ensemble coordination tools are served through an in-process SDK MCP server.
 
 ## Authentication
 
-Use the operator's own Claude subscription through a `claude setup-token` token
-held with Ensemble's other secrets, mirroring the Codex operator login. API-key
-billing stays deferred.
+Use the operator's own Claude subscription through a `claude setup-token` token,
+mirroring the Codex operator login. API-key billing stays deferred.
+
+The token is configured as an `env:NAME` reference, like Ensemble's other provider
+credentials: the value stays in the service environment and is never stored or
+rendered back. The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
+resolves the reference at turn start and passes the token only into the Claude
+subprocess environment, never into Codex or other spawn environments, and never
+logs it. An invalid token is detected at turn start. Operator setup, clearing and
+configured/available status belong to the harness UI
+([#826](https://github.com/chrisbanes/ensemble/issues/826)).
 
 Anthropic's terms bar third-party products from offering subscription login to
 others, and say advertised Pro/Max limits assume ordinary, individual use of
@@ -54,8 +62,17 @@ Match the Codex default policy and disclose where enforcement differs:
 - A `PreToolUse` hook sees every tool call, records it, and denies calls outside
   policy, because allow rules bypass `canUseTool`.
 - Shell commands run in Claude Code's sandbox (Seatbelt on macOS): writes to the
-  task workspace and explicit writable roots only, an empty network allowlist, no
-  unsandboxed retry, and failure if the sandbox is unavailable.
+  task workspace and explicit writable roots only, an empty network allowlist and
+  no unsandboxed retry. Commands never run unsandboxed.
+- Before each turn, Ensemble runs a sandbox self-test in the turn's spawn context
+  and fails the turn as runtime-unavailable if the sandbox cannot run. Claude Code
+  reports a sandbox that breaks mid-turn only as failed commands (exit 126), not a
+  failed query; this is a disclosed limit.
+- Claude Code points the sandbox `TMPDIR` at a per-OS-user directory
+  (`/tmp/claude-<uid>`) that is shared across tasks and writable from the sandbox.
+  The runtime redirects it to a per-task root or denies it where Claude Code
+  supports that; otherwise it is a disclosed shared write root in the effective
+  policy, and task-root-only writes are not claimed.
 - The hook confines file-editing tools to the same roots. This is hook enforcement,
   not OS confinement, and must be disclosed with the effective policy.
 - Reads keep full access subject to host permissions, as with Codex.
