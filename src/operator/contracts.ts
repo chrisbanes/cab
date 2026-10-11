@@ -1018,6 +1018,14 @@ const generation = z
     instructionsRevision: revision,
     profileRevision: revision,
     harness: executionHarnessSchema.nullable(),
+    /** The latest failed turn's bounded classification; null when none failed. */
+    failure: z
+      .object({
+        classification: z.enum(["transient", "permanent", "unknown"]),
+        reasonCode: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/),
+      })
+      .strict()
+      .nullable(),
   })
   .strict();
 export const assignmentSchema = z
@@ -1037,6 +1045,8 @@ export const assignmentSchema = z
     instructionsRevision: revision,
     currentProfileRevision: revision,
     currentInstructionsRevision: revision,
+    /** The execution runtime of the captured profile revision. */
+    runtime: profileRuntimeSchema,
     executionGeneration: generation.nullable(),
   })
   .strict();

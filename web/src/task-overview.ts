@@ -1,4 +1,5 @@
 import type { TaskRead } from "../../src/operator/contracts.js";
+import { executionSummary } from "./execution-runtime.js";
 import { reasonLabels } from "./tasks.js";
 
 type Data = TaskRead["data"];
@@ -157,6 +158,7 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
         : (a.resultDestination ?? "Destination unknown")
     }`,
     wait: a.waitReason ?? "Waiting reason unknown",
+    runtime: executionSummary(a).line,
   };
 }
 

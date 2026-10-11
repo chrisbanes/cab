@@ -1558,6 +1558,65 @@ test("task reads report the persisted binding harness of each execution generati
     /Claude runtime is not configured/,
   );
   assert.equal(f.runtime.turns, 1);
+  assert.deepEqual(assignment?.runtime, {
+    harness: "claude",
+    model: null,
+    reasoningEffort: null,
+  });
+  assert.equal(assignment?.executionGeneration?.failure, null);
+
+  // A failed Claude turn reports its bounded classification; malformed codes read unknown.
+  const workId = String(assignment?.executionGeneration?.workId);
+  const failed = (reasonCode: string) =>
+    f.seedPersistedState((db) => {
+      db.prepare("DELETE FROM runtime_terminal_evidence WHERE workId = ?").run(
+        workId,
+      );
+      db.prepare(
+        "INSERT INTO runtime_terminal_evidence (threadId,turnId,firstStatus,workId,firstRuntimeGeneration,lastRuntimeGeneration,firstObservedAt,lastObservedAt,failureEvidence,harness) VALUES ('t','u','failed',?,'g','g',1,1,?,'claude')",
+      ).run(
+        workId,
+        JSON.stringify({
+          classification: "permanent",
+          reasonCode,
+          source: "harness",
+          harnessRetries: null,
+        }),
+      );
+    });
+  const failure = async () =>
+    (await api.readTask(taskId)).data.assignments.find(
+      (a) => a.assignmentId === assignmentId,
+    )?.executionGeneration?.failure;
+  failed("unauthorized");
+  assert.deepEqual(await failure(), {
+    classification: "permanent",
+    reasonCode: "unauthorized",
+  });
+  failed("bad code <script>");
+  assert.deepEqual(await failure(), {
+    classification: "permanent",
+    reasonCode: "unknown",
+  });
+
+  // The Codex assignment keeps its captured revision's runtime after the profile moves to Claude.
+  const codex = (await api.readTask(ids.taskId)).data.assignments[0];
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: String(codex?.profileId),
+    expectedVersion: Number(d.profile(String(codex?.profileId)).version),
+    runtime: { harness: "claude", model: "sonnet", reasoningEffort: "high" },
+  });
+  const after = (await api.readTask(ids.taskId)).data.assignments[0];
+  assert.deepEqual(after?.runtime, { harness: "codex" });
+  assert.equal(
+    after?.currentProfileRevision,
+    Number(codex?.profileRevision) + 1,
+  );
+  assert.equal(after?.executionGeneration?.harness, "codex");
+  assert.equal(after?.executionGeneration?.failure, null);
 });
 
 test("workspace reads report every harness's status", async (t) => {

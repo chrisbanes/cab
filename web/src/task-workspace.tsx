@@ -1,4 +1,6 @@
 import { QuestionResponse } from "./question-response.js";
+import { ExecutionNotices } from "./execution-notice.js";
+import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
   useCallback,
@@ -1512,9 +1514,20 @@ export function TaskWorkspace({
                   {a.resultRecipientDisposition ?? "Unknown disposition"}).
                 </p>
                 <p>
+                  Execution: {executionSummary(a).line}
+                  {a.executionGeneration
+                    ? ` · work ${a.executionGeneration.workId} · request sequence ${a.executionGeneration.requestSequence} · assignment version ${a.executionGeneration.assignmentVersion} · profile revision ${a.executionGeneration.profileRevision} · instructions revision ${a.executionGeneration.instructionsRevision}`
+                    : " · not yet admitted"}
+                  .
+                </p>
+                {executionSummary(a).note && (
+                  <p className="metadata muted">{executionSummary(a).note}</p>
+                )}
+                <p>
                   Recorded wait / execution reason:{" "}
                   {a.waitReason ?? "No recorded wait reason; unknown"}.
                 </p>
+                <ExecutionNotices assignment={a} />
                 {data.results
                   .filter((r) => r.assignmentId === a.assignmentId)
                   .map((r) => (

@@ -439,6 +439,10 @@ test("runtime details distinguish selected, queued, and running assignments acro
     assert.match(runningPage.body, /Execution status: Running\./);
     assert.match(runningPage.body, /Accountable project lead: Lead A/);
     assert.match(runningPage.body, /Lead A \(project lead\)/);
+    assert.match(
+      runningPage.body,
+      /Running\. Execution runtime: Codex\. Captured instruction revision/,
+    );
     assert.doesNotMatch(
       runningPage.body,
       /PRIVATE_(?:TASK_OUTCOME|ASSIGNMENT_BRIEF|LEAD_A_INSTRUCTIONS)/,
@@ -485,6 +489,10 @@ test("runtime details distinguish selected, queued, and running assignments acro
     assert.match(
       selectedAssignmentPage.body,
       /Execution status: Selected; blocked from admission/,
+    );
+    assert.match(
+      selectedAssignmentPage.body,
+      /<p>Execution runtime: Codex\.<\/p>/,
     );
     assert.match(
       selectedAssignmentPage.body,

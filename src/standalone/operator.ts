@@ -320,7 +320,7 @@ export class LocalOperatorUi {
     const assignment = this.store.assignment(assignmentId);
     const task = this.store.task(String(assignment.taskId));
     const profile = this.store.profile(String(assignment.profileId));
-    return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="/app/tasks/${escapeHtml(task.id)}?assignment=${escapeHtml(assignment.id)}">${escapeHtml(task.title)}</a>. Assignment lifecycle state: ${escapeHtml(assignment.state)}; this does not confirm runtime admission or execution.</p><p><a href="/runtime/assignment/${escapeHtml(assignment.id)}">Runtime status, controls and recovery evidence</a> · <a href="/coordination/assignment/${escapeHtml(assignment.id)}">Conversation and coordination history</a></p></main>`;
+    return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="/app/tasks/${escapeHtml(task.id)}?assignment=${escapeHtml(assignment.id)}">${escapeHtml(task.title)}</a>. Assignment lifecycle state: ${escapeHtml(assignment.state)}; this does not confirm runtime admission or execution.</p><p>Captured profile revision runtime: ${escapeHtml(runtimeSummary(this.store.profileRuntime(String(assignment.profileId), Number(assignment.profileRevision))))}.</p><p><a href="/runtime/assignment/${escapeHtml(assignment.id)}">Runtime status, controls and recovery evidence</a> · <a href="/coordination/assignment/${escapeHtml(assignment.id)}">Conversation and coordination history</a></p></main>`;
   }
 
   runtime(): string {

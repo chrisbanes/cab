@@ -13,7 +13,11 @@ import type { ExecutionIntent } from "./state.js";
 import type { StandaloneService } from "./service.js";
 import type { StopObservation } from "./supervisor.js";
 import { escapeHtml, hidden } from "./operator-html.js";
-import { executionHarnessLabels } from "./execution-harness.js";
+import {
+  type ExecutionHarness,
+  executionHarnessLabels,
+} from "./execution-harness.js";
+import { runtimeSummary } from "../core/execution-runtime.js";
 
 const positiveIntegerString = z
   .string()
@@ -61,6 +65,7 @@ type RuntimeDomain = Pick<
   | "dependencies"
   | "execute"
   | "profile"
+  | "profileRuntime"
   | "project"
   | "projects"
   | "task"
@@ -78,6 +83,7 @@ export interface RuntimeOperatorApi {
   recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[];
   powerStatus(): ReturnType<StandaloneService["powerStatus"]>;
   harnessStatuses(): ReturnType<StandaloneService["harnessStatuses"]>;
+  bindingHarness(workId: string): ExecutionHarness | null;
   currentTurnRequest(
     assignmentId: string,
     version: number,
@@ -407,7 +413,7 @@ function taskPage(
             "Apply current instructions for the next turn",
           )
         : "<p>Current instruction and profile revisions are applied.</p>";
-      return `<li><a href="${assignmentHref(assignmentId)}">${escapeHtml(profile.name)}${lead ? " (project lead)" : ""}</a>: ${escapeHtml(status)}. Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.${apply}</li>`;
+      return `<li><a href="${assignmentHref(assignmentId)}">${escapeHtml(profile.name)}${lead ? " (project lead)" : ""}</a>: ${escapeHtml(status)}. ${runtimeLine(assignment, api)} Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.${apply}</li>`;
     })
     .join("");
   const dependencyRows = dependencies.length
@@ -501,6 +507,34 @@ function taskPage(
   return `<main><h1>${escapeHtml(task.title)}</h1><p>Project: ${escapeHtml(project.name)}. Project state: ${project.paused ? "Paused" : "Active"}. Task state: ${escapeHtml(task.state)}; ${task.ready ? "Ready" : "Not ready"}.</p><p>${admissionStatus}.</p>${lead}<p>Execution status: ${escapeHtml(status)}.</p><p>Local dependencies gate new execution independently of readiness.</p><section><h2>Task-scoped assignments</h2>${assignments.length ? `<ul>${rows}</ul>` : "<p>No assignments have been selected.</p>"}</section><section><h2>Task dependencies</h2><ul>${dependencyRows}</ul>${dependencyForm(task, candidates, dependencyIds, csrfToken)}</section>${executionHoldSection(taskId, api)}<section><h2>Task controls</h2><p>Stop requests cancellation and observes for a bounded period. Effects may continue. Resume clears only the operator Stop and never releases an unresolved execution hold.</p>${stopForm}${resumeForm}</section></main>`;
 }
 
+/** The persisted binding harness when bound, else the captured revision's runtime. */
+function runtimeLine(
+  assignment: {
+    id?: unknown;
+    version?: unknown;
+    profileId?: unknown;
+    profileRevision?: unknown;
+  },
+  api: RuntimeOperatorApi,
+): string {
+  const runtime = api
+    .domain()
+    .profileRuntime(
+      String(assignment.profileId),
+      Number(assignment.profileRevision),
+    );
+  const request = api.currentTurnRequest(
+    String(assignment.id),
+    Number(assignment.version),
+  );
+  const bound = request ? api.bindingHarness(request.workId) : null;
+  return `Execution runtime: ${escapeHtml(
+    bound && bound !== runtime.harness
+      ? executionHarnessLabels[bound]
+      : runtimeSummary(runtime),
+  )}.`;
+}
+
 function assignmentPage(
   assignmentId: string,
   api: RuntimeOperatorApi,
@@ -532,7 +566,7 @@ function assignmentPage(
         "Apply current instructions for the next turn",
       )
     : "<p>Current instruction and profile revisions are applied.</p>";
-  return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="${taskHref(String(task.id))}">${escapeHtml(task.title)}</a> in ${escapeHtml(project.name)}.</p><p>Execution status: ${escapeHtml(status)}.</p><p>Accountable project lead: ${leadProfile ? escapeHtml(leadProfile.name) : "No project lead is configured"}; lead accountability remains with the project.</p><p>Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.</p><p>Result destination: ${escapeHtml(assignment.resultDestination)}.</p><p><a href="/coordination/assignment/${encodeURIComponent(assignmentId)}">Conversation and coordination history</a></p>${executionHoldSection(String(task.id), api)}<section><h2>Instruction revisions</h2><p>Changing configuration does not change this assignment until explicitly applied for its next turn.</p>${apply}</section></main>`;
+  return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="${taskHref(String(task.id))}">${escapeHtml(task.title)}</a> in ${escapeHtml(project.name)}.</p><p>Execution status: ${escapeHtml(status)}.</p><p>${runtimeLine(assignment, api)}</p><p>Accountable project lead: ${leadProfile ? escapeHtml(leadProfile.name) : "No project lead is configured"}; lead accountability remains with the project.</p><p>Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.</p><p>Result destination: ${escapeHtml(assignment.resultDestination)}.</p><p><a href="/coordination/assignment/${encodeURIComponent(assignmentId)}">Conversation and coordination history</a></p>${executionHoldSection(String(task.id), api)}<section><h2>Instruction revisions</h2><p>Changing configuration does not change this assignment until explicitly applied for its next turn.</p>${apply}</section></main>`;
 }
 
 export class RuntimeOperatorRoutes {

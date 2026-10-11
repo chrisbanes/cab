@@ -4,7 +4,8 @@ import {
   runtimeSettingsSchema,
   assignmentRecoverySchema,
 } from "../../src/operator/contracts.js";
-import { harnessStateLabel } from "./execution-runtime.js";
+import { executionSummary, harnessStateLabel } from "./execution-runtime.js";
+import { ExecutionNotices } from "./execution-notice.js";
 import { useOperatorResource } from "./resource.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
@@ -351,6 +352,10 @@ export function AssignmentRecovery(
                     execution ended.
                   </p>
                 )}
+                <p className="body">
+                  Execution runtime: {executionSummary(data.assignment).line}.
+                </p>
+                <ExecutionNotices assignment={data.assignment} />
               </Panel>
               <Panel
                 title="Recorded evidence"

@@ -1771,6 +1771,28 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
+  /** Only Claude failures are reported; Codex presentation is unchanged. */
+  private generation(request: {
+    workId: string;
+    assignmentVersion: number;
+    sequence: number;
+    instructionsRevision: number;
+    profileRevision: number;
+  }) {
+    const harness = this.service.bindingHarness(request.workId);
+    return {
+      workId: request.workId,
+      assignmentVersion: request.assignmentVersion,
+      requestSequence: request.sequence,
+      instructionsRevision: request.instructionsRevision,
+      profileRevision: request.profileRevision,
+      harness,
+      failure:
+        harness === "claude"
+          ? this.service.terminalFailure(request.workId)
+          : null,
+    };
+  }
   private selection(a: Row) {
     return selectAssignmentExecution(a, this.service);
   }
@@ -2674,18 +2696,21 @@ export class OperatorApi {
             d.profile(String(a.profileId)).version,
           ),
           currentInstructionsRevision: Number(p.instructionsRevision),
+          runtime: d.profileRuntime(
+            String(a.profileId),
+            Number(a.profileRevision),
+          ),
           executionGeneration:
             request?.assignmentVersion &&
             request.instructionsRevision &&
             request.profileRevision
-              ? {
+              ? this.generation({
                   workId: request.workId,
+                  sequence: request.sequence,
                   assignmentVersion: request.assignmentVersion,
-                  requestSequence: request.sequence,
                   instructionsRevision: request.instructionsRevision,
                   profileRevision: request.profileRevision,
-                  harness: this.service.bindingHarness(request.workId),
-                }
+                })
               : null,
         };
       }),

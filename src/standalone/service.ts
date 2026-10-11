@@ -1624,6 +1624,10 @@ export class StandaloneService {
     return this.requireState().taskBinding(workId)?.harness ?? null;
   }
 
+  terminalFailure(workId: string) {
+    return this.requireState().terminalFailure(workId);
+  }
+
   /** In-memory only: a manual service restart is the recovery path. */
   runtimeStatus():
     | { state: "available" }
