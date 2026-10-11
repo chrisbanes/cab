@@ -40,13 +40,13 @@ mirroring the Codex operator login. API-key billing stays deferred.
 The token is configured as an `env:NAME` reference, like Ensemble's other provider
 credentials: the value stays in the service environment and is never stored or
 rendered back. The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
-resolves the reference at turn start and passes the token only into the Claude
-subprocess environment, never into Codex or other spawn environments, and never
-logs it. As with delivery credentials, the token is excluded from those
-environments including nonempty exact-value aliases, and configuring a token
-reference already inherited by a running runtime holds activation until restart.
-An invalid token is detected at turn start. Operator setup, clearing and
-configured/available status belong to the harness UI
+resolves the reference at turn start and sets it only as the Claude subprocess's
+token variable; it never logs it. Every other spawn environment, including Codex,
+omits the token and any nonempty exact-value alias of it, and a newly configured
+reference already inherited by a running runtime holds activation until restart,
+as for delivery credentials. Delivery credentials are likewise excluded from the
+Claude spawn environment. An invalid token fails the turn visibly. Operator setup,
+clearing and configured/available status belong to the harness UI
 ([#826](https://github.com/chrisbanes/ensemble/issues/826)).
 
 Anthropic's terms bar third-party products from offering subscription login to
@@ -65,12 +65,15 @@ Match the Codex default policy and disclose where enforcement differs:
 - A `PreToolUse` hook sees every tool call, records it, and denies calls outside
   policy, because allow rules bypass `canUseTool`.
 - Shell commands run in Claude Code's sandbox (Seatbelt on macOS): writes to the
-  task workspace and explicit writable roots only, an empty network allowlist and
-  no unsandboxed retry. Commands never run unsandboxed.
-- Before each turn, Ensemble runs a sandbox self-test in the turn's spawn context
-  and fails the turn as runtime-unavailable if the sandbox cannot run. Claude Code
-  reports a sandbox that breaks mid-turn only as failed commands (exit 126), not a
-  failed query; this is a disclosed limit.
+  task workspace and explicit writable roots only (except the sandbox temporary
+  directory below), an empty network allowlist and no unsandboxed retry. Commands
+  never run unsandboxed.
+- Before each turn, Ensemble runs a sandbox self-test in the turn's spawn context.
+  If the sandbox cannot run, the turn does not start: the work waits visibly as an
+  unavailable runtime, never falls back to another harness, and leaves no
+  uncertainty hold because no agent command ran. Claude Code reports a sandbox
+  that breaks mid-turn only as failed commands (exit 126), not a failed query;
+  this is a disclosed limit.
 - Claude Code points the sandbox `TMPDIR` at a per-OS-user directory
   (`/tmp/claude-<uid>`) that is shared across tasks and writable from the sandbox.
   The runtime redirects it to a per-task root or denies it where Claude Code
