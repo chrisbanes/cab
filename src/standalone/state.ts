@@ -3,10 +3,6 @@ import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import { DomainConflictError } from "../core/domain.js";
 import type { CommandReceipt } from "../operator/contracts.js";
 
-export type TaskControlReceipt = Extract<
-  CommandReceipt,
-  { kind: "task-stop" | "task-resume" }
->;
 import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
@@ -41,6 +37,11 @@ import type {
   RuntimeThreadQualification,
   RuntimeThreadQualificationEvidence,
 } from "./runtime-retention.js";
+
+export type TaskControlReceipt = Extract<
+  CommandReceipt,
+  { kind: "task-stop" | "task-resume" }
+>;
 
 const recoveryReceiptColumns = `(
       id TEXT PRIMARY KEY,
