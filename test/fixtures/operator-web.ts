@@ -419,6 +419,7 @@ export async function createOperatorFixture<
           auth,
           {
             routes,
+            credentials: service.operatorCredentials(),
             web: new OperatorWebBoundary(
               bundle,
               new OperatorApi(
