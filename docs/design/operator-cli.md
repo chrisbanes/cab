@@ -1,0 +1,286 @@
+# Operator CLI
+
+Status: accepted. This describes intended behaviour, not implemented capabilities
+or a delivery plan. Design confirmation does not itself dispatch implementation.
+
+## Purpose
+
+Give the operator and external agents a command-line interface for inspecting
+and managing Ensemble, including diagnosing agent-profile instructions and
+task execution. Use the domain vocabulary in [CONTEXT.md](../../CONTEXT.md).
+
+## Scope
+
+The first release covers everyday operator work and debugging: project and
+agent-profile configuration, tasks, questions, approvals, execution history and
+existing recovery actions. Ancillary UI features such as composing line-by-line
+code reviews are deferred; this release does not require complete web UI parity.
+
+Support clients on the service host and on another trusted machine over the
+existing private network. Both use the running service API.
+
+External clients use dedicated, revocable operator credentials with selectable
+read-only or read/write access. Writes retain the service's existing policy and
+admission checks. The authenticated web UI creates and revokes these credentials,
+revealing a newly created token once. CLI login accepts the token through secure
+input rather than requiring it in command-line arguments. The CLI cannot mint
+stronger credentials. Tokens expire after 90 days by default, support shorter
+selected lifetimes and can be revoked immediately. Authentication status exposes
+expiry. Credential and transport details are specified below.
+
+Reuse existing configuration controls. Expose runtime/model settings read-only
+where Ensemble has no supported edit operation. Adding profile-level model or
+effort controls is outside this release.
+
+Service process management and offline backup/restore remain host-local.
+Remote clients use the running service for task controls and diagnostics;
+they cannot restart, upgrade or restore the service itself.
+
+The CLI is an operator interface, separate from assignment-bound coordination
+tools. This work does not reopen the deferred ChatGPT plugin, public MCP endpoint
+or native Codex handover in [ADR-1006](../adr/1006-chatgpt-and-native-codex.md).
+
+## Existing foundations and gaps
+
+The operator API already provides task, configuration, assignment history and
+recovery reads and revision-aware, receipted commands. Its authentication uses
+browser sessions and CSRF checks; a CLI authentication contract is needed.
+
+Project and profile instruction revisions are retained and execution bindings
+identify their revisions. JSON configuration reads expose revision numbers and
+instruction presence, but not instruction bodies. Captured conversation history
+contains bounded, sanitized assistant text and omission records; it is not a
+complete transcript or general runtime log feed.
+
+## Diagnostic evidence
+
+Add richer bounded capture for future executions: Ensemble-supplied instructions
+and settings, runtime events and available tool calls/results. Apply redaction
+and size limits. Preserve explicit gaps for unavailable, omitted or historical
+material; do not imply that older executions have newly captured evidence.
+Richer capture is on by default for new executions, with a project setting to
+reduce capture to the existing baseline history. Changing this setting affects
+future capture; it does not erase existing records.
+
+Expose historical instruction/configuration revisions alongside current values
+so an external agent can compare the execution's inputs with current settings.
+Do not describe Ensemble's captured inputs as the runtime's complete effective
+prompt or claim visibility into provider-internal context.
+
+Use separate records for supplied execution inputs, observed runtime settings,
+runtime events, tool calls/results and service diagnostic events. Bind records
+to the task, assignment, work, conversation and runtime turn where known. Keep
+the underlying stable identifiers visible instead of inventing a second run
+identity. Record an instruction snapshot before submitting the turn; a failed
+capture is an explicit gap and cannot change execution admission or recovery.
+
+Instruction views deliberately disclose authorized project/profile instructions
+to both credential scopes. They still redact credentials and excluded private
+paths. General history/log views retain instruction redaction. Neither surface
+offers an unredacted switch, exports credential files, or promises detection of
+every arbitrary secret. Apply known-value and pattern redaction before storage,
+and current exclusions at read time; omit content when safe projection fails.
+
+Historical instruction revisions can be displayed when retained, labelled as
+reconstructed from revision records. Only an actual captured submission may be
+labelled as the supplied prompt. Missing tool events, unknown effective settings
+and unavailable old prompts are explicit gaps. Tool activity is diagnostic;
+absence is not evidence that no tool ran. Do not collect provider-private reasoning.
+
+### Retention and limits
+
+New diagnostic payloads expire after 30 days by default, with configurable age
+and installation-wide storage limits. Initial defaults are 1 GiB of
+diagnostic payload per installation, 16 MiB per work execution and 64 KiB per
+payload item. These limits include captured prompt content; an oversized item is
+marked truncated or omitted, never presented as a complete snapshot.
+
+Expire payloads by age, then evict oldest payloads to enforce the disk cap.
+If storage cannot accept a new record, continue execution and report the capture
+gap. Report capture health and coverage on diagnostic reads. Coalesce omission
+notices so a full disk does not create an unbounded stream of omission records.
+Page and buffer limits also apply to polling/following active work.
+
+Preserve compact expiry/omission metadata and references. New pruning applies
+only to diagnostic payloads: it does not delete durable safety evidence,
+instruction revisions, decisions, receipts, existing baseline history or retained
+result/review evidence. Those retain their existing contracts. The payload quota
+does not claim to bound the whole database, WAL or filesystem. Document that older
+backups can retain payloads removed from the live database.
+
+## Configuration changes
+
+Support preparing a reviewable diff and explicitly applying its exact material
+against the inspected revision. Interactive confirmation is not mandatory.
+A conflicting revision requires a fresh read and review; applying must not
+silently substitute newer material or overwrite concurrent edits.
+
+Configuration preparation produces a local, inspectable change document containing
+the service identity, target IDs, expected revisions, exact proposed fields and
+a digest. The diff identifies affected assignments and the potential for work to
+become stale. Applying revalidates identity, digest, revision and service policy;
+it does not re-read a changed instructions file and substitute its contents.
+Change documents may contain private instructions and use owner-only file access.
+
+Edits preserve immutable prior revisions. Restoring previous content prepares
+another change and produces a new revision; it does not rewind history. Existing
+assignments retain their bound revisions and may become stale under existing
+admission rules. Adoption is a separate, version-checked assignment action using
+the current instructions for the next turn. An active turn is not rewritten.
+
+## Authentication and authority
+
+Use a dedicated bearer-token authentication path over the same service command
+and read layer. Preserve browser cookie, Origin and CSRF protections; adding CLI
+authentication must not make browser-session writes exempt from those checks.
+The server enforces read-only versus read/write authority on every endpoint,
+including legacy routes and reads with side effects. A command name or HTTP verb
+is not the authorization boundary.
+
+Both scopes cover the trusted operator's projects and permitted diagnostic
+content; project-scoped credentials and action-by-action permissions are deferred.
+Read/write includes explicit question answers, approval decisions and supported
+recovery submissions. It never bypasses version checks, exact approval material,
+execution holds or existing requirements for independent evidence.
+
+The web UI lists named credentials with scope, creation, expiry and last-use
+metadata and supports revocation. Persist only token verification material on
+the server. Revocation is irreversible; replacement means issuing a new token.
+Rotation permits issuing a replacement before revoking the old token. Check
+expiry/revocation on requests and on each bounded follow poll. The CLI can inspect
+its auth status or forget its local token, but cannot create credentials, extend
+expiry or broaden authority. Logout is local removal, not server revocation.
+
+Use named **connections** for service URL and credential references, avoiding
+confusion with agent profiles. Require explicit connection selection when the
+target is ambiguous and expose the resolved service/project in write previews.
+Use the macOS credential store by default. Support protected token-file input
+for unattended callers; do not accept literal token flags or fall back silently
+to plaintext storage. Mask interactive token input and never print stored tokens.
+
+Remote connections require HTTPS with certificate verification. Existing loopback
+HTTP remains available on the host. Do not send credentials across redirects to
+another origin or add automatic insecure/public connectivity. Reads and writes
+use the live service rather than opening its database from the client.
+
+Managed assignment execution must not receive operator credentials through
+service-provided environment variables, prompts or tool configuration. CLI use
+from an Ensemble-managed assignment rejects operator authentication. This is a
+guard against accidental privilege crossing, not an OS isolation claim: runtime
+and deployment controls still govern same-user file/process access and alternate
+HTTP clients. Do not claim the CLI prevents a same-user agent from accessing an
+explicitly available host credential.
+
+## Command surface
+
+Command names follow Ensemble's domain: task, assignment, agent profile and
+execution. There is no workflow graph or new assignment-stage system.
+Provide a packaged `ensemble` executable usable outside this repository, keeping
+the existing local operations CLI compatible. Reuse the repository's supported
+Node.js version and package tooling; publish/distribution is a delivery decision.
+
+| Area | First-release operations |
+| --- | --- |
+| `auth`, `connection` | Login, status, logout; select/list/remove local connections |
+| `project` | List/get/create; inspect and prepare/apply supported configuration, instructions, routing and source settings |
+| `profile` | List/get/create; inspect revisions; prepare/apply supported fields and restore earlier content as a new revision |
+| `task` | List/search/get/create/configure; dependencies; existing task controls, messages and follow-up |
+| `assignment` | Get/history; compare bound/current instructions; explicit current-revision adoption |
+| `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material |
+| `execution`, `logs` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow |
+| `recovery` | Inspect eligibility/holds; prepare and submit the existing evidence-bearing operations |
+| `result`, `artifact`, `delivery` | Inspect results/retained evidence and existing delivery state; existing refresh and staged comment operations |
+| `operation` | Read an existing mutation receipt and reconcile an uncertain command outcome |
+
+Service administration remains the separate host-local surface. Full setup
+discovery, line-comment review composition, MCP packaging, remote process control
+and new runtime/model-setting mutations are outside the first release. Existing
+configuration operations such as source activation retain their staged previews.
+No generic command bypasses the typed operation contracts.
+
+Representative syntax (IDs are placeholders):
+
+```sh
+ensemble --connection home profile get PROFILE --output json
+ensemble --connection home task get TASK --output json
+ensemble --connection home execution list --task TASK --output json
+ensemble --connection home execution inputs EXECUTION --compare-current --output json
+ensemble --connection home logs --execution EXECUTION --after CURSOR --output json
+ensemble --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
+ensemble --connection home profile apply --file change.json --request-id REQUEST
+ensemble --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST
+ensemble --connection home operation get REQUEST --output json
+```
+
+### Writes and execution effects
+
+Every command reports whether it only saved configuration, queued work, requested
+cancellation or completed a synchronous operation. A successful CLI invocation
+does not mean asynchronous work completed. Make state-changing verbs explicit;
+reads, comparison, authentication and configuration preparation cannot dispatch
+work. Existing create/readiness/message operations that can dispatch work describe
+that effect in help and their responses. Do not invent a general rerun or
+force-unlock operation where the domain has no such action.
+
+Task Stop persists Stop and requests cancellation under existing guarantees;
+Resume clears only the operator Stop. Recovery accepts all existing required
+evidence and attestations as structured, version-bound input. An external agent
+may prepare it, but cannot infer attestations, manufacture independent review or
+replace missing evidence with a confirmation flag. Preserve existing staged
+review/confirm/send semantics for external comments.
+
+## Machine interface and retries
+
+Human-readable output is the terminal default. `--output json` emits a versioned
+envelope containing data, observation time, resolved identity, pagination and
+coverage/omission information. Structured errors include a stable code, request
+identity, retryability and any known outcome. Send diagnostics to stderr; never
+mix progress messages into JSON stdout. Following uses explicitly selected JSONL
+or readable output, bounded polling and resumable cursors.
+
+List reads default to 50 items and cap pages at 200. Filters are server-side.
+Do not fetch every page implicitly. Cursors have stable ordering; stale/expired
+cursors return an explicit gap or restart instruction, never silent completeness.
+Expose whether the service is unavailable, history is unsupported, or requested
+payloads were redacted, truncated or expired.
+
+Use UUID request keys and existing service receipt semantics for mutations.
+Persist the selected key locally before sending when the caller does not supply
+`--request-id`. An uncertain network result returns that identity and an unknown
+outcome. Reconcile or retry using the same key and exact content; never resubmit
+with a fresh identity automatically. Same key/different content conflicts.
+Do not store secret request material in a convenience retry log. Nonzero exit
+statuses distinguish invalid input, authentication/authorization, revision/policy
+conflict, unavailability and uncertain outcomes.
+
+Advertise service API version and capabilities. Older clients ignore additive
+fields; unsupported operations or incompatible contracts fail explicitly.
+Read-only credentials must receive a server denial even if a caller bypasses the
+CLI and submits a write directly.
+
+## Acceptance scenarios
+
+1. An external agent on the host and on another privately connected machine can
+   authenticate, find a failed task, inspect its bound instructions and available
+   runtime evidence, compare current settings and produce a configuration diff.
+2. A read-only credential can perform that investigation but every write route
+   rejects it. Expired/revoked credentials fail, including following active work;
+   browser-session protections remain enforced.
+3. A reviewed change applies exactly once. Concurrent editing produces a conflict;
+   an uncertain response is reconciled without duplicate effects. Applying old
+   content creates a new revision. Assignment adoption remains explicit.
+4. Questions, approvals, Stop/Resume and supported recovery work through both CLI
+   and existing UI entry points with the same material checks and hold behaviour.
+   Recovery does not accept fabricated or omitted required assertions.
+5. Seeded sensitive values are redacted; required instruction text remains
+   inspectable through its dedicated view. Oversized payloads, unsupported runtime
+   events, storage failures, pruning and old executions produce explicit gaps.
+   Diagnostics never establish success or release ownership.
+6. Real-runtime bounded validation demonstrates captured submitted inputs and
+   available tool activity, plus an authenticated external-agent investigation.
+   Deterministic tests cover absent events, token controls, redaction, quotas,
+   expiry, pagination, version conflicts and ambiguous responses.
+
+These scenarios complement existing acceptance requirements. Delivery scope and
+sequencing belong to [epic #893](https://github.com/chrisbanes/ensemble/issues/893)
+and its native sub-issues; this document is not a parallel implementation plan.

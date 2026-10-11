@@ -5,6 +5,12 @@ how work proceeds; Ensemble owns durable coordination.
 
 ## Language
 
+**Operator CLI**:
+A command-line interface through which the operator or an external agent acting
+on their behalf inspects and manages Ensemble. It is distinct from the tools
+used by an assignee to carry out its assignment.
+_Avoid_: Agent callback interface
+
 **Attention inbox**:
 A cross-project collection of unresolved questions, approvals and problems requiring operator action.
 Routine progress and completed work that needs no decision belong outside this inbox.

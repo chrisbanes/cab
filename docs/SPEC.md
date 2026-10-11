@@ -49,6 +49,29 @@ items; readiness is separate. Jira, Linear, GitHub Enterprise, a plugin marketpl
 multiple execution machines, team/RBAC administration and migration of old live
 runs are outside the first release. Source interfaces follow concrete integrations.
 
+## Operator CLI
+
+The accepted [operator CLI design](design/operator-cli.md) and
+[ADR-1010](adr/1010-operator-cli.md) specify an additional operator interface for
+external agents and terminal users. This interface is not implemented. Its
+delivery sequencing belongs in GitHub; design acceptance does not dispatch it.
+
+The CLI uses the running service locally or over the existing private network,
+with revocable read-only or read/write credentials. It covers everyday task
+operations, supported configuration, diagnostics and existing evidence-bearing
+recovery, retaining the service's policy, revision and receipt checks. Service
+process management and offline backup/restore remain host-local.
+
+Dedicated authenticated instruction views and richer bounded diagnostic capture
+are planned for this interface. General conversation history retains its current
+instruction redaction; historical gaps remain explicit. The diagnostic payload
+retention policy does not delete durable safety records or change existing
+result/review evidence contracts. The design defines capture limits, credential
+lifecycle, command semantics and required acceptance evidence.
+
+This does not reopen the deferred ChatGPT integration or change its narrower
+content-access rules.
+
 ## Deferred ChatGPT and native Codex integration
 
 Optional ChatGPT daily operations/events and native Codex task visibility/handover
