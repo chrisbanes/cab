@@ -17,6 +17,7 @@ import {
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
@@ -120,7 +121,10 @@ export interface OperatorFixture<R extends Runtime> {
   lifecycle: FixtureLifecycle;
   seedPersistedState(seed: (db: DatabaseSync) => void): void;
   advanceClock(ms: number): void;
-  startWeb(controlPaths?: readonly string[]): Promise<{
+  startWeb(
+    controlPaths?: readonly string[],
+    setup?: OperatorSetupSeams,
+  ): Promise<{
     origin: string;
     password: string;
     auth: OperatorAuth;
@@ -327,7 +331,10 @@ export async function createOperatorFixture<
     advanceClock(ms: number) {
       now += ms;
     },
-    async startWeb(controlPaths: readonly string[] = [directory]) {
+    async startWeb(
+      controlPaths: readonly string[] = [directory],
+      setup?: OperatorSetupSeams,
+    ) {
       const id = ++listenerSequence;
       const owned: OwnedWeb = {
         id,
@@ -414,7 +421,13 @@ export async function createOperatorFixture<
             routes,
             web: new OperatorWebBoundary(
               bundle,
-              new OperatorApi(service, controlPaths, undefined, readerFactory),
+              new OperatorApi(
+                service,
+                controlPaths,
+                undefined,
+                readerFactory,
+                setup,
+              ),
             ),
           },
         );

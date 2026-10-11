@@ -22,6 +22,11 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
         : result.projectOverrides[id] === limit,
     );
   }
+  if (c.type === "discovery.configure")
+    return (
+      result.commandType === "discovery.configure" &&
+      result.configured === (c.credentialRef !== null)
+    );
   const resource =
     "profileId" in c
       ? c.profileId
@@ -79,6 +84,14 @@ export class ConfigurationDraft {
   ) {}
   bind(changed: () => void) {
     this.changed = changed;
+  }
+  /** Drop field errors under a path prefix once the input they named has changed. */
+  clearErrors(prefix: string) {
+    this.errors = Object.fromEntries(
+      Object.entries(this.errors).filter(
+        ([field]) => !field.startsWith(prefix),
+      ),
+    );
   }
   set(field: string, value: string | boolean | string[]) {
     if (

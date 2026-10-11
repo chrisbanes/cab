@@ -40,7 +40,18 @@ export function settingsHeader(
 ): SettingsHeader | null {
   if (pathname === "/app/settings") return { title: "Settings", trail: [] };
   if (pathname === "/app/settings/projects/new")
-    return { title: "Settings", trail: [] };
+    return workspace?.data.projects.length === 0
+      ? {
+          title: "Set up your first project",
+          trail: [
+            { label: "Overview", href: "/app" },
+            { label: "New project" },
+          ],
+        }
+      : {
+          title: "Create project",
+          trail: [settings, { label: "Projects" }, { label: "Create project" }],
+        };
   if (pathname === "/app/settings/runtime")
     return {
       title: "Runtime capacity and recovery",

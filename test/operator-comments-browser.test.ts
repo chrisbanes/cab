@@ -463,7 +463,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     operation.operationId,
   );
   assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
-  assert.ok(await page.getByText(/source unchanged/).count());
+  await page
+    .getByText(/source unchanged/)
+    .first()
+    .waitFor();
   const settleRender = () =>
     page.evaluate(
       () =>
@@ -738,7 +741,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     );
     try {
       await viewEntry;
-      assert.ok(await page.getByText(/source unchanged/).count());
+      await page
+        .getByText(/source unchanged/)
+        .first()
+        .waitFor();
       assert.equal(
         milestones.filter(
           (event) =>

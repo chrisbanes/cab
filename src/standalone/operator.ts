@@ -1312,6 +1312,8 @@ export class LocalOperatorHttp {
         "/api/operator/logout",
         "/api/operator/commands",
         "/api/operator/source-refresh",
+        "/api/operator/setup/folders",
+        "/api/operator/setup/verify-checkout",
       ].includes(path)
         ? "POST"
         : "GET";
@@ -1400,7 +1402,12 @@ export class LocalOperatorHttp {
           json(200, data);
           return true;
         }
-        const data = await web.api.execute(body, this.reviewSession(session));
+        const data =
+          path === "/api/operator/setup/folders"
+            ? await web.api.listFolders(body)
+            : path === "/api/operator/setup/verify-checkout"
+              ? await web.api.verifyCheckout(body)
+              : await web.api.execute(body, this.reviewSession(session));
         if (!this.currentSession(session)) {
           deny(401, "unauthenticated");
           return true;

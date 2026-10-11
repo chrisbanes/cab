@@ -91,8 +91,10 @@ owns delivery scope and status.
   storage, with current exclusions reapplied when history is read. This is a bounded
   diagnostic view, not a complete transcript or ownership-release proof, and missing
   history does not change admission or completion gates.
-- **Settings.** Paused project and profile setup, explicit private replacements,
-  source observations, installation capacity and curated recovery.
+- **Settings.** Guided paused-project setup (GitHub discovery of repositories, refs
+  and Projects with a typed fallback, a service folder picker and checkout
+  verification, one create command) and profile setup, explicit private
+  replacements, source observations, installation capacity and curated recovery.
 - **GitHub.** Local discovery of selected repository issues, searches and Projects,
   with provider-owned readiness and dependency holds; operators can inspect and
   refresh source state. Scoped delivery records durable intents, confirmed readback,

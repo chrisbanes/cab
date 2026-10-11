@@ -10,9 +10,11 @@ import {
   linkedRepositorySchema,
   readinessSchema,
   selectionSchema,
+  RepositoryVerificationError,
   verifiedRepository,
   type LinkedRepository,
 } from "./github-source.js";
+import { setupRepositorySchema } from "./github-source-contracts.js";
 
 const id = z.string().uuid();
 const label = z.string().trim().min(1).max(512);
@@ -39,6 +41,28 @@ const commandSchema = z.discriminatedUnion("type", [
       projectId: id,
       name: label,
       leadProfileId: id.nullable(),
+      // Guided setup: recorded with the project in one transaction, after verification.
+      instructions: prose.optional(),
+      repositories: z
+        .array(setupRepositorySchema)
+        .max(20)
+        .refine(
+          (values) =>
+            new Set(values.map((value) => value.repositoryId)).size ===
+            values.length,
+          "Repository IDs must be unique",
+        )
+        .refine(
+          (values) =>
+            new Set(
+              values.map((value) =>
+                `${value.owner}/${value.name}`.toLowerCase(),
+              ),
+            ).size === values.length,
+          "Repositories must be unique",
+        )
+        .optional(),
+      githubProject: z.object({ projectNodeId: label }).strict().optional(),
     })
     .strict(),
   z
@@ -235,6 +259,16 @@ const commandSchema = z.discriminatedUnion("type", [
         .default({}),
     })
     .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("discovery.configure"),
+      credentialRef: z
+        .string()
+        .regex(/^env:[A-Z][A-Z0-9_]*$/)
+        .nullable(),
+    })
+    .strict(),
 ]);
 
 function parseCommand(input: unknown) {
@@ -259,6 +293,7 @@ export class DomainPolicyError extends Error {
   constructor(
     readonly code: "forbidden" | "invalid-input",
     message: string,
+    readonly fieldPaths?: string[],
   ) {
     super(message);
     this.name = "DomainPolicyError";
@@ -283,6 +318,17 @@ function present(row: Row, key: string): string | number | null {
   const value = row[key];
   if (value === undefined) throw new Error(`Missing persisted column ${key}`);
   return value;
+}
+
+/** Receipt scope: the project, the profile, or an installation-level singleton. */
+function scopeOf(command: ParsedCommand): string {
+  return "projectId" in command
+    ? command.projectId
+    : "profileId" in command
+      ? `profile:${command.profileId}`
+      : command.type === "discovery.configure"
+        ? "system:discovery"
+        : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -389,6 +435,10 @@ export class DomainStore {
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           globalLimit INTEGER NOT NULL CHECK(globalLimit > 0)
         );
+        CREATE TABLE IF NOT EXISTS installation_discovery (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          credentialRef TEXT
+        );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           projectLimit INTEGER NOT NULL CHECK(projectLimit > 0)
@@ -489,6 +539,11 @@ export class DomainStore {
         .run();
       this.db
         .prepare(
+          "INSERT OR IGNORE INTO installation_discovery (singleton, credentialRef) VALUES (1, NULL)",
+        )
+        .run();
+      this.db
+        .prepare(
           "INSERT OR IGNORE INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) SELECT id, 1, NULL, '[]', ?, '[]' FROM domain_projects",
         )
         .run(
@@ -503,8 +558,9 @@ export class DomainStore {
   execute(input: DomainCommand): unknown {
     const command = parseCommand(input);
     if (
-      command.type === "github.configure" &&
-      command.repositories.length > 0
+      (command.type === "github.configure" ||
+        command.type === "project.create") &&
+      (command.repositories?.length ?? 0) > 0
     ) {
       const hash = createHash("sha256")
         .update(canonical(command))
@@ -576,15 +632,68 @@ export class DomainStore {
     return this.executeParsed(command, verified);
   }
 
+  /** Guided setup: verify every repository, then record the whole project in one transaction. */
+  async createProject(
+    input: Extract<DomainCommand, { type: "project.create" }>,
+  ): Promise<unknown> {
+    const command = parseCommand(input);
+    if (command.type !== "project.create")
+      throw new Error("Expected project creation");
+    const hash = createHash("sha256").update(canonical(command)).digest("hex");
+    const prior = this.one(
+      "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+      command.projectId,
+      command.key,
+    );
+    if (prior) {
+      if (prior.payloadHash !== hash)
+        throw new DomainConflictError(
+          "Command key already used with different payload",
+        );
+      return JSON.parse(String(prior.result));
+    }
+    this.operator(command);
+    const verified: LinkedRepository[] = [];
+    // In order, so the first failing row is the one reported; nothing is recorded on failure.
+    for (const [index, link] of (command.repositories ?? []).entries()) {
+      try {
+        const repository = await this.verifyRepository(
+          { repositoryId: link.repositoryId, path: link.path, ref: link.ref },
+          { owner: link.owner, name: link.name },
+        );
+        verified.push({
+          repositoryId: repository.repositoryId,
+          path: repository.path,
+          ref: repository.ref,
+          gitCommonDirectory: repository.gitCommonDirectory,
+        });
+      } catch (error) {
+        const field =
+          error instanceof RepositoryVerificationError &&
+          error.reason === "ref-unavailable"
+            ? "ref"
+            : "path";
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Repository verification failed",
+          [`repositories.${index}.${field}`],
+        );
+      }
+    }
+    return this.executeParsed(command, verified);
+  }
+
+  discoveryCredentialReference(): string | null {
+    const row = this.one(
+      "SELECT credentialRef FROM installation_discovery WHERE singleton = 1",
+    );
+    return row?.credentialRef ? String(row.credentialRef) : null;
+  }
+
   recordedCommand(input: DomainCommand): unknown | undefined {
     const command = parseCommand(input);
     this.operator(command);
-    const scope =
-      "projectId" in command
-        ? command.projectId
-        : "profileId" in command
-          ? `profile:${command.profileId}`
-          : "system:capacity";
+    const scope = scopeOf(command);
     const hash = createHash("sha256").update(canonical(command)).digest("hex");
     const receipt = this.one(
       "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
@@ -603,12 +712,7 @@ export class DomainStore {
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
-    const scope =
-      "projectId" in command
-        ? command.projectId
-        : "profileId" in command
-          ? `profile:${command.profileId}`
-          : "system:capacity";
+    const scope = scopeOf(command);
     const hash = createHash("sha256").update(canonical(command)).digest("hex");
     this.db.exec("BEGIN IMMEDIATE");
     let committed = false;
@@ -1373,6 +1477,11 @@ export class DomainStore {
       case "project.create": {
         this.operator(command);
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
+        const repositories = verifiedRepositories ?? [];
+        if ((command.repositories?.length ?? 0) !== repositories.length)
+          throw new Error(
+            "Repository setup requires asynchronous verification",
+          );
         this.db
           .prepare("INSERT INTO projects (id, instructions) VALUES (?, '')")
           .run(command.projectId);
@@ -1383,9 +1492,9 @@ export class DomainStore {
           .run(command.projectId, command.name, command.leadProfileId);
         this.db
           .prepare(
-            "INSERT INTO project_instruction_revisions (projectId, revision, instructions) VALUES (?, 1, '')",
+            "INSERT INTO project_instruction_revisions (projectId, revision, instructions) VALUES (?, 1, ?)",
           )
-          .run(command.projectId);
+          .run(command.projectId, command.instructions ?? "");
         this.db
           .prepare(
             "INSERT INTO project_routing (projectId, version, enabled, guidance, credentialRef, candidateProfileIds) VALUES (?, 1, 0, '', NULL, '[]')",
@@ -1393,14 +1502,28 @@ export class DomainStore {
           .run(command.projectId);
         this.db
           .prepare(
-            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, NULL, '[]', ?, '[]')",
+            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, NULL, ?, ?, ?)",
           )
           .run(
             command.projectId,
+            // A linked GitHub Project is an inactive source: nothing is active until preview.
+            JSON.stringify(
+              command.githubProject
+                ? [
+                    {
+                      id: "S-1",
+                      kind: "project",
+                      projectNodeId: command.githubProject.projectNodeId,
+                      filter: "",
+                    },
+                  ]
+                : [],
+            ),
             JSON.stringify({
               mode: "all",
               conditions: [{ kind: "label", name: "ready" }],
             }),
+            JSON.stringify(repositories),
           );
         return this.project(command.projectId);
       }
@@ -1962,6 +2085,16 @@ export class DomainStore {
           .run(command.state, command.taskId);
         return this.task(command.taskId);
       }
+      case "discovery.configure": {
+        this.operator(command);
+        this.db
+          .prepare(
+            "UPDATE installation_discovery SET credentialRef = ? WHERE singleton = 1",
+          )
+          .run(command.credentialRef);
+        // The receipt never carries the reference name.
+        return { configured: command.credentialRef !== null };
+      }
       case "capacity.configure": {
         this.operator(command);
         this.db
@@ -2127,12 +2260,7 @@ export class DomainCommands {
 
   execute(input: DomainCommand): Promise<unknown> {
     const command = parseCommand(input);
-    const scope =
-      "projectId" in command
-        ? command.projectId
-        : "profileId" in command
-          ? `profile:${command.profileId}`
-          : "system:capacity";
+    const scope = scopeOf(command);
     const key = `${scope}:${command.key}`;
     const hash = createHash("sha256").update(canonical(command)).digest("hex");
     const existing = this.inFlight.get(key);
@@ -2148,7 +2276,10 @@ export class DomainCommands {
     const promise = Promise.resolve().then(() =>
       command.type === "github.configure" && command.repositories.length > 0
         ? this.store.configureGitHub(command)
-        : this.store.execute(command),
+        : command.type === "project.create" &&
+            (command.repositories?.length ?? 0) > 0
+          ? this.store.createProject(command)
+          : this.store.execute(command),
     );
     this.inFlight.set(key, { hash, promise });
     void promise.finally(() => this.inFlight.delete(key)).catch(() => {});

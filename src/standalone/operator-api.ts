@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
@@ -22,7 +23,15 @@ import {
   admissionSchema,
   assignmentHistorySchema,
   assignmentRecoverySchema,
+  checkoutVerificationSchema,
+  checkoutVerifyRequestSchema,
   commandReceiptSchema,
+  discoveryBranchesSchema,
+  discoveryProjectsSchema,
+  discoveryRepositoriesSchema,
+  discoveryStatusSchema,
+  folderListingSchema,
+  folderListRequestSchema,
   composerOptionsSchema,
   deliveryReadSchema,
   type Execution,
@@ -62,6 +71,18 @@ import {
   GitHubHttpSourceReader,
   type GitHubSourceReader,
 } from "./github-source.js";
+import {
+  DiscoveryFailure,
+  type DiscoveryReader,
+  GitHubDiscoveryReader,
+} from "./github-discovery.js";
+import {
+  FolderAccessError,
+  listHomeFolders,
+  type OperatorSetupSeams,
+  resolveHomePath,
+  verifyCheckout,
+} from "./operator-setup.js";
 import type { StandaloneService } from "./service.js";
 import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
 import { materialDigest } from "../core/delivery.js";
@@ -307,6 +328,7 @@ export class OperatorApi {
       credentialRef: string,
     ) => Pick<GitHubSourceReader, "readSelection"> = (ref) =>
       new GitHubHttpSourceReader(process.env[ref.slice(4)]),
+    private readonly setup: OperatorSetupSeams = {},
   ) {
     this.commands = new DomainCommands(service.domain());
   }
@@ -329,9 +351,38 @@ export class OperatorApi {
           credentials: Object.entries(process.env).filter(([key]) =>
             /TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key),
           ),
+          references: this.referenceFence(),
         }),
       )
       .digest("hex");
+  }
+  /**
+   * Every credential reference the exclusions read, with a digest of its resolved value, so
+   * a read fences when a reference or its value changes whatever the variable is named.
+   */
+  private referenceFence() {
+    const d = this.domain();
+    return JSON.stringify(
+      [
+        d.discoveryCredentialReference(),
+        ...d
+          .projects()
+          .flatMap((p) => [
+            d.routingCredentialReference(String(p.id)),
+            d.githubConfiguration(String(p.id)).credentialRef,
+            d.deliveryCredentialReference(String(p.id)),
+          ]),
+      ].map((ref) =>
+        ref
+          ? [
+              ref,
+              createHash("sha256")
+                .update(process.env[ref.slice(4)] ?? "")
+                .digest("hex"),
+            ]
+          : null,
+      ),
+    );
   }
   private domain() {
     return this.service.domain();
@@ -368,6 +419,13 @@ export class OperatorApi {
         projects = d.projects();
       const values = [...this.controlPaths],
         covered = new Set<string>();
+      const discovery = d.discoveryCredentialReference();
+      if (discovery) {
+        const envKey = discovery.slice(4);
+        values.push(discovery, envKey);
+        const value = process.env[envKey];
+        if (value) values.push(value);
+      }
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining = 128;
       if (profiles.length + projects.length > remaining) return undefined;
@@ -1765,13 +1823,22 @@ export class OperatorApi {
         }
       : null;
   }
+  /** Workspace fences per task plus the credential reference fence, checked before a read returns. */
   private workspaceSnapshot(taskIds: readonly string[]) {
-    return new Map(
-      taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
-    );
+    return {
+      // Credential references and values only; version races keep their existing handling.
+      references: this.referenceFence(),
+      workspaces: new Map(
+        taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
+      ),
+    };
   }
-  private requireWorkspaceSnapshot(snapshot: ReadonlyMap<string, string>) {
-    for (const [id, fingerprint] of snapshot)
+  private requireWorkspaceSnapshot(
+    snapshot: ReturnType<OperatorApi["workspaceSnapshot"]>,
+  ) {
+    if (snapshot.references !== this.referenceFence())
+      throw new OperatorApiError(503, "unavailable");
+    for (const [id, fingerprint] of snapshot.workspaces)
       if (this.service.taskWorkspaceVisibility(id) !== fingerprint)
         throw new OperatorApiError(503, "unavailable");
   }
@@ -3597,6 +3664,130 @@ export class OperatorApi {
       },
     });
   }
+  private home() {
+    return this.setup.home ?? homedir();
+  }
+  readDiscoveryStatus() {
+    const ref = this.domain().discoveryCredentialReference();
+    return discoveryStatusSchema.parse({
+      data: {
+        configured: ref !== null,
+        available: ref !== null && Boolean(process.env[ref.slice(4)]),
+      },
+      observedAt: Date.now(),
+    });
+  }
+  /** The discovery reference and a digest of its value: what a discovery result was read with. */
+  private discoveryFence() {
+    const ref = this.domain().discoveryCredentialReference();
+    return JSON.stringify([
+      ref,
+      createHash("sha256")
+        .update(ref ? (process.env[ref.slice(4)] ?? "") : "")
+        .digest("hex"),
+    ]);
+  }
+  /** Run one discovery read; every failure is an `unavailable` reason, never a message. */
+  private async discoveryRead<T extends z.ZodType>(
+    schema: T,
+    read: (reader: DiscoveryReader) => Promise<object>,
+  ): Promise<z.infer<T>> {
+    let data: object = { state: "unavailable", reason: "unreadable" };
+    // A result read with a credential that changed meanwhile is discarded and read once more
+    // with the current one; a second change in flight leaves it unavailable.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const fence = this.discoveryFence();
+      const ref = this.domain().discoveryCredentialReference();
+      let current: object;
+      if (!ref) current = { state: "unavailable", reason: "unconfigured" };
+      else
+        try {
+          const reader = (
+            this.setup.discovery ??
+            ((r: string) =>
+              new GitHubDiscoveryReader(process.env[r.slice(4)] || undefined))
+          )(ref);
+          current = { state: "ready", ...(await read(reader)) };
+        } catch (error) {
+          current = {
+            state: "unavailable",
+            reason:
+              error instanceof DiscoveryFailure ? error.reason : "unreadable",
+          };
+        }
+      if (fence === this.discoveryFence()) {
+        data = current;
+        break;
+      }
+    }
+    const parsed = schema.safeParse({ data, observedAt: Date.now() });
+    return parsed.success
+      ? parsed.data
+      : schema.parse({
+          data: { state: "unavailable", reason: "unreadable" },
+          observedAt: Date.now(),
+        });
+  }
+  private discoveryRepository(query: URLSearchParams) {
+    const value = query.get("repository") ?? "";
+    const match = /^([A-Za-z0-9_.-]{1,100})\/([A-Za-z0-9_.-]{1,100})$/.exec(
+      value,
+    );
+    if (
+      [...query.keys()].some((k) => k !== "repository") ||
+      query.getAll("repository").length !== 1 ||
+      !match?.[1] ||
+      !match[2] ||
+      [match[1], match[2]].some((part) => /^\.{1,2}$/.test(part))
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    return [match[1], match[2]] as const;
+  }
+  readDiscoveryRepositories() {
+    return this.discoveryRead(discoveryRepositoriesSchema, (r) =>
+      r.repositories(),
+    );
+  }
+  readDiscoveryBranches(query: URLSearchParams) {
+    const [owner, name] = this.discoveryRepository(query);
+    return this.discoveryRead(discoveryBranchesSchema, (r) =>
+      r.branches(owner, name),
+    );
+  }
+  readDiscoveryProjects(query: URLSearchParams) {
+    const [owner, name] = this.discoveryRepository(query);
+    return this.discoveryRead(discoveryProjectsSchema, (r) =>
+      r.projects(owner, name),
+    );
+  }
+  /** Folder names and Git status under the operator's home folder (authenticated POST only). */
+  async listFolders(body: unknown) {
+    const input = folderListRequestSchema.parse(body);
+    try {
+      return folderListingSchema.parse({
+        data: await listHomeFolders(this.home(), input),
+        observedAt: Date.now(),
+      });
+    } catch (error) {
+      if (error instanceof FolderAccessError)
+        throw new OperatorApiError(
+          error.status,
+          error.status === 400
+            ? "invalid-input"
+            : error.status === 403
+              ? "forbidden"
+              : "not-found",
+        );
+      throw new OperatorApiError(503, "unavailable");
+    }
+  }
+  async verifyCheckout(body: unknown) {
+    const input = checkoutVerifyRequestSchema.parse(body);
+    return checkoutVerificationSchema.parse({
+      data: await verifyCheckout(this.home(), input),
+      observedAt: Date.now(),
+    });
+  }
   private async executeDomain(c: Parameters<typeof this.commands.execute>[0]) {
     try {
       return await this.commands.execute(c);
@@ -3612,11 +3803,12 @@ export class OperatorApi {
         throw new OperatorApiError(
           error.code === "forbidden" ? 403 : 400,
           error.code,
-          c.type === "github.configure" &&
+          error.fieldPaths ??
+            (c.type === "github.configure" &&
             error.code === "invalid-input" &&
             error.message === "Repository verification failed"
-            ? ["repositories"]
-            : undefined,
+              ? ["repositories"]
+              : undefined),
         );
       throw error;
     }
@@ -4354,6 +4546,21 @@ export class OperatorApi {
           },
         });
       }
+      if (c.type === "discovery.configure") {
+        const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
+          configured: boolean;
+        };
+        return commandReceiptSchema.parse({
+          kind: "configuration",
+          key: c.key,
+          recorded: true,
+          result: {
+            commandType: c.type,
+            resourceId: "system:discovery",
+            configured: raw.configured,
+          },
+        });
+      }
       if (c.type === "github.preview")
         return await this.previewGitHubSelection(c);
       if (
@@ -4365,7 +4572,18 @@ export class OperatorApi {
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
-        const raw = await this.executeDomain({ ...c, actor: "operator" });
+        // Setup paths may be home-relative; the domain verifies and records absolute ones.
+        const command =
+          c.type === "project.create" && c.repositories
+            ? {
+                ...c,
+                repositories: c.repositories.map((r) => ({
+                  ...r,
+                  path: resolveHomePath(r.path, this.home()),
+                })),
+              }
+            : c;
+        const raw = await this.executeDomain({ ...command, actor: "operator" });
         const r = raw as Row;
         const result =
           c.type === "project.create" || c.type === "project.configure"

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import {
+  checkoutVerificationSchema,
+  folderListingSchema,
   sourceObservationSchema,
   apiErrorSchema,
   commandReceiptSchema,
@@ -124,18 +126,51 @@ export class OperatorClient {
       },
     );
   }
+  private post<T>(
+    path: string,
+    schema: z.ZodType<T>,
+    body: unknown,
+    csrfToken: string,
+  ) {
+    return this.request(path, schema, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-csrf-token": csrfToken,
+      },
+      body: JSON.stringify(body),
+    });
+  }
   refreshSources(csrfToken: string) {
-    return this.request(
+    return this.post(
       "/api/operator/source-refresh",
       sourceObservationSchema,
-      {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-csrf-token": csrfToken,
-        },
-        body: "{}",
-      },
+      {},
+      csrfToken,
+    );
+  }
+  /** Subfolders of a home-relative path; the path travels only in the POST body. */
+  folders(path: string, csrfToken: string) {
+    return this.post(
+      "/api/operator/setup/folders",
+      folderListingSchema,
+      { path },
+      csrfToken,
+    );
+  }
+  verifyCheckout(
+    input: {
+      path: string;
+      repository: { owner: string; name: string };
+      ref: string;
+    },
+    csrfToken: string,
+  ) {
+    return this.post(
+      "/api/operator/setup/verify-checkout",
+      checkoutVerificationSchema,
+      input,
+      csrfToken,
     );
   }
   async command(

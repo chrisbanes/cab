@@ -283,6 +283,19 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   [foundation](design/ui02-foundation.md), [task views](design/ui03-tasks.md),
   [configuration](design/ui06-configuration.md),
   [presentation](design/ui08-foundation.md).
+- **Guided project setup** (#841, ADR-1009) — **Passed** for deterministic
+  coverage: real SQLite and temporary Git checkouts for the atomic create, origin
+  matrix and folder boundaries (`project-setup`, `operator-setup-api`), a fake
+  `fetch` for the discovery reader (`github-discovery`), and Chromium journeys for
+  setup, picker and the credential row with WebKit smokes for setup and the picker
+  (`operator-setup-browser`, `operator-setup-picker-browser`,
+  `operator-discovery-credential-browser`). Live
+  evidence is bounded to one read-only discovery probe against api.github.com and
+  one real home-folder listing, recorded as counts in
+  [project setup evidence](evidence/ui07-project-setup.md). Limits: typed repositories carry
+  a provisional identity; the discovery token is ambient to the runtime environment;
+  no project delete or archive exists, so creation is recovered by editing in
+  project configuration.
 - **Structured questions and Inbox** (A12, UI01, UI02) — **Bounded.** The full
   Ensemble form (grouped text, single and multiple choice, constraints, custom text),
   durable validation and replay, shared task and Inbox entry points and desktop/phone

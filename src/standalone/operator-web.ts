@@ -191,6 +191,10 @@ export class OperatorWebBoundary {
   ) {
     if (path === "/api/operator/search") return this.api.readSearch(query);
     if (path === "/api/operator/inbox") return this.api.readInbox(query);
+    if (path === "/api/operator/discovery/branches")
+      return this.api.readDiscoveryBranches(query);
+    if (path === "/api/operator/discovery/projects")
+      return this.api.readDiscoveryProjects(query);
     const reviewDraft = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/review-draft$/,
     );
@@ -328,6 +332,10 @@ export class OperatorWebBoundary {
     }
     if ([...query].length) throw new OperatorApiError(400, "invalid-input");
     if (path === "/api/operator/runtime") return this.api.readRuntimeSettings();
+    if (path === "/api/operator/discovery")
+      return this.api.readDiscoveryStatus();
+    if (path === "/api/operator/discovery/repositories")
+      return this.api.readDiscoveryRepositories();
     const recovery = path.match(
       /^\/api\/operator\/assignments\/([^/]+)\/recovery$/,
     );
@@ -363,6 +371,12 @@ export class OperatorWebBoundary {
         "/api/operator/commands",
         "/api/operator/source-refresh",
         "/api/operator/source-observations",
+        "/api/operator/discovery",
+        "/api/operator/discovery/repositories",
+        "/api/operator/discovery/branches",
+        "/api/operator/discovery/projects",
+        "/api/operator/setup/folders",
+        "/api/operator/setup/verify-checkout",
       ].includes(path) ||
       /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
         path,

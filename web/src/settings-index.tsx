@@ -6,6 +6,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
+import { DiscoveryCredentialRow } from "./discovery-credential.js";
 import { useOperatorResource } from "./resource.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
@@ -138,6 +139,7 @@ export function SettingsWorkspace(p: SettingsProps) {
               </ActionLink>
             }
           >
+            <DiscoveryCredentialRow {...p} />
             {projects.map((r) => {
               const name = r.name ?? "Name unavailable",
                 c = configs[r.id],

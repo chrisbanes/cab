@@ -79,28 +79,150 @@ export type LinkedRepository = z.output<typeof linkedRepositorySchema>;
 
 const execFileAsync = promisify(execFile);
 
+export type RepositoryVerificationReason =
+  | "path-invalid"
+  | "not-checkout"
+  | "origin-missing"
+  | "origin-provider"
+  | "origin-mismatch"
+  | "ref-unavailable";
+/** A failed checkout check; `actual` is the origin's `owner/name` on `origin-mismatch`. */
+export class RepositoryVerificationError extends Error {
+  constructor(
+    readonly reason: RepositoryVerificationReason,
+    readonly actual: string | null = null,
+  ) {
+    super(`Repository verification failed: ${reason}`);
+    this.name = "RepositoryVerificationError";
+  }
+}
+const githubSegment = /^[A-Za-z0-9_.-]{1,100}$/;
+/**
+ * `owner/name` of a `github.com` remote URL, or null for any other host or shape.
+ * Userinfo, a trailing `/` and a `.git` suffix are ignored; the URL itself is never returned.
+ */
+export function parseGitHubOrigin(
+  url: string,
+): { owner: string; name: string } | null {
+  let host: string, path: string;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+    if (!["https:", "ssh:", "git:"].includes(parsed.protocol) || parsed.port)
+      return null;
+    host = parsed.hostname;
+    path = decodeURIComponent(parsed.pathname);
+  } else {
+    const scp = /^(?:[^@/:]+@)?([^/:]+):(.+)$/.exec(url);
+    if (!scp?.[1] || !scp[2]) return null;
+    host = scp[1];
+    path = scp[2];
+  }
+  if (host.toLowerCase() !== "github.com") return null;
+  const parts = path
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "")
+    .split("/");
+  const [owner, name] = parts;
+  if (
+    parts.length !== 2 ||
+    !owner ||
+    !name ||
+    !githubSegment.test(owner) ||
+    !githubSegment.test(name) ||
+    [owner, name].some((segment) => segment === "." || segment === "..")
+  )
+    return null;
+  return { owner, name };
+}
+/** The `owner/name` of a checkout's origin, or the verification reason it fails with. */
+export async function checkoutOrigin(
+  path: string,
+  env?: NodeJS.ProcessEnv,
+  timeout = 5000,
+): Promise<{ owner: string; name: string }> {
+  let url: string;
+  try {
+    url = (
+      await execFileAsync("git", ["-C", path, "remote", "get-url", "origin"], {
+        encoding: "utf8",
+        timeout,
+        ...(env ? { env } : {}),
+      })
+    ).stdout.trim();
+  } catch {
+    throw new RepositoryVerificationError("origin-missing");
+  }
+  const origin = parseGitHubOrigin(url);
+  if (!origin) throw new RepositoryVerificationError("origin-provider");
+  return origin;
+}
+
+/**
+ * Verify a local checkout. With `expectedOrigin`, its `origin` remote must be that
+ * `github.com` repository (case-insensitive). Failures are `RepositoryVerificationError`s.
+ */
 export async function verifiedRepository(
   input: z.output<typeof repositoryLinkSchema>,
+  expectedOrigin?: { owner: string; name: string },
 ): Promise<LinkedRepository> {
   if (!isAbsolute(input.path))
-    throw new Error("Linked repository path must be absolute");
-  const path = await realpath(input.path);
-  const common = (
-    await execFileAsync(
-      "git",
-      ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-      { encoding: "utf8", timeout: 5000 },
+    throw new RepositoryVerificationError("path-invalid");
+  let path: string;
+  try {
+    path = await realpath(input.path);
+  } catch {
+    throw new RepositoryVerificationError("path-invalid");
+  }
+  let common: string;
+  try {
+    common = (
+      await execFileAsync(
+        "git",
+        ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        { encoding: "utf8", timeout: 5000 },
+      )
+    ).stdout.trim();
+  } catch {
+    throw new RepositoryVerificationError("not-checkout");
+  }
+  if (expectedOrigin) {
+    const actual = await checkoutOrigin(path);
+    if (
+      actual.owner.toLowerCase() !== expectedOrigin.owner.toLowerCase() ||
+      actual.name.toLowerCase() !== expectedOrigin.name.toLowerCase()
     )
-  ).stdout.trim();
-  const ref = (
-    await execFileAsync(
-      "git",
-      ["-C", path, "rev-parse", "--verify", input.ref],
-      { encoding: "utf8", timeout: 5000 },
-    )
-  ).stdout.trim();
+      throw new RepositoryVerificationError(
+        "origin-mismatch",
+        `${actual.owner}/${actual.name}`,
+      );
+  }
+  let ref: string;
+  try {
+    ref = (
+      await execFileAsync(
+        "git",
+        // Setup requires the ref to name a commit; configured links keep their check.
+        [
+          "-C",
+          path,
+          "rev-parse",
+          "--verify",
+          expectedOrigin ? `${input.ref}^{commit}` : input.ref,
+        ],
+        { encoding: "utf8", timeout: 5000 },
+      )
+    ).stdout.trim();
+  } catch {
+    throw new RepositoryVerificationError("ref-unavailable");
+  }
   if (!/^[0-9a-f]{40,64}$/.test(ref))
-    throw new Error("Linked repository ref is invalid");
+    throw new RepositoryVerificationError("ref-unavailable");
   return { ...input, path, gitCommonDirectory: await realpath(common) };
 }
 

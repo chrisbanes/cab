@@ -198,6 +198,21 @@ export class TaskReviewStore {
       )
       .all() as Row[];
     if (refs.length > 256) return undefined;
+    // The installation discovery credential (#841) is excluded at capture time too.
+    if (
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE name='installation_discovery'",
+        )
+        .get()
+    )
+      refs.push(
+        ...(this.db
+          .prepare(
+            "SELECT credentialRef FROM installation_discovery WHERE credentialRef IS NOT NULL",
+          )
+          .all() as Row[]),
+      );
     for (const ref of refs) {
       if (ref.credentialRef) {
         const name = String(ref.credentialRef).slice(4);

@@ -237,6 +237,13 @@ export function DraftOutcome({
 function ReceiptText({ receipt }: { receipt: CommandReceipt }) {
   if (receipt.kind !== "configuration") return null;
   const r = receipt.result;
+  if (r.commandType === "discovery.configure")
+    return (
+      <>
+        Recorded discovery credential reference:{" "}
+        {r.configured ? "configured" : "cleared"}.
+      </>
+    );
   return r.commandType === "capacity.configure" ? (
     <>
       Recorded capacity limits: global {r.globalLimit}; default project{" "}
@@ -359,90 +366,6 @@ export async function submitDraft(
     );
 }
 export const key = () => crypto.randomUUID();
-export function ProjectSetup(p: SettingsProps) {
-  const d = useDraft(p.drafts, "project.create");
-  useEffect(
-    () =>
-      d.initialize({
-        name: "",
-        leadProfileId: "",
-        projectId: key(),
-        key: key(),
-      }),
-    [d],
-  );
-  const recorded =
-    d.receipt?.kind === "configuration" ? d.receipt.result : null;
-  return (
-    <section className="settings-stack">
-      <a href="/app/settings">Settings home</a>
-      <h2 className="section-heading">Create project</h2>
-      <p className="body muted">
-        First choose a lead, or leave it unconfigured. A new project starts
-        paused. Creating it starts no execution. Instructions and optional
-        repository access are separately saved steps.
-      </p>
-      <a href="/app/settings/profiles/new">Create a lead profile</a>
-      <form
-        onSubmit={(e) =>
-          void submitDraft(
-            e,
-            d,
-            p.client,
-            p.session,
-            {
-              type: "project.create",
-              key: d.values.key,
-              projectId: d.values.projectId,
-              name: d.values.name,
-              leadProfileId: d.values.leadProfileId || null,
-            },
-            p.refresh,
-          )
-        }
-      >
-        <DraftField draft={d} field="name" label="Project name" />
-        <DraftField draft={d} field="leadProfileId" label="Lead profile">
-          <option value="">Unconfigured</option>
-          {p.workspace?.data.profiles
-            .filter((r) => !r.revoked)
-            .map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name ?? "Name unavailable"}
-              </option>
-            ))}
-        </DraftField>
-        <DraftOutcome
-          draft={d}
-          client={p.client}
-          session={p.session}
-          label="Create paused project"
-        />
-      </form>
-      {recorded && (
-        <a href={`/app/projects/${recorded.resourceId}/settings`}>
-          Set instructions and optional source access
-        </a>
-      )}
-      {recorded && (
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() =>
-            d.startOperation({
-              name: "",
-              leadProfileId: "",
-              projectId: key(),
-              key: key(),
-            })
-          }
-        >
-          Create another project
-        </Button>
-      )}
-    </section>
-  );
-}
 export function ReferenceInput({ draft }: { draft: ConfigurationDraft }) {
   return (
     <>
