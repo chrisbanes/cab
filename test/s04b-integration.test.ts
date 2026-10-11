@@ -1203,7 +1203,7 @@ test("a selected profile outside the unchanged candidate set fails loudly withou
   }
 });
 
-test("a real record-time stale race is classified through the typed error", async () => {
+test("a real record-time stale race throws the typed error and stays stale", async () => {
   let thrown: unknown;
   let service: StandaloneService | undefined;
   let projectId = "";
