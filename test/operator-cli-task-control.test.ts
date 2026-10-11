@@ -70,6 +70,11 @@ test("task resume clears only the operator Stop and reports what remains", async
   assert.match(r.out, /No work started: still held by/);
   assert.equal(stopped(o, s.taskId), false);
   assert.equal(s.f.service.taskHold(s.taskId), "Fixture ambiguity");
+  // A fresh Stop alongside another hold is reported as in effect.
+  r = await cli("rw", ["task", "stop", s.taskId]);
+  assert.equal(r.json().data.stopInEffect, true);
+  assert.equal(stopped(o, s.taskId), true);
+  assert.equal((await cli("rw", ["task", "resume", s.taskId])).code, 0);
   s.f.seedPersistedState((db) =>
     db
       .prepare("DELETE FROM task_writer_ambiguity_holds WHERE taskId = ?")

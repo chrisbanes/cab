@@ -45,15 +45,18 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
         resource: taskId,
         command: exactCommand(command, key),
         match: (r) =>
-          (r.kind === "task-stop" || r.kind === "task-resume") &&
-          r.kind === `task-${verb}` &&
-          r.taskId === taskId,
+          r.kind === `task-${verb}` && "taskId" in r && r.taskId === taskId,
       });
       const after = await readAfter(session, taskId);
       const stopInEffect = after ? after.execution.holds.stop : null;
       let effect: Effect = "saved";
       const notes: string[] = [];
+      const lines: [string, string][] = [];
       if (receipt.kind === "task-stop") {
+        lines.push([
+          "Cancellation requested",
+          String(receipt.cancellationRequested),
+        ]);
         if (receipt.cancellationRequested > 0)
           effect = "cancellation-requested";
         notes.push(
@@ -61,6 +64,7 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
           "Reverse with 'task resume'.",
         );
       } else if (receipt.kind === "task-resume") {
+        lines.push(["Requeued", String(receipt.requeued)]);
         if (!receipt.stopCleared) effect = "none";
         else if (receipt.requeued > 0) effect = "queued";
         const remaining = after
@@ -88,19 +92,7 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
         reused,
         effect,
         summary: `${verb === "stop" ? "Stopped" : "Resumed"} task ${taskId}`,
-        lines: [
-          ...(receipt.kind === "task-stop"
-            ? [
-                [
-                  "Cancellation requested",
-                  String(receipt.cancellationRequested),
-                ] as [string, string],
-              ]
-            : receipt.kind === "task-resume"
-              ? [["Requeued", String(receipt.requeued)] as [string, string]]
-              : []),
-          ...(after ? taskStatusLines(after) : []),
-        ],
+        lines: [...lines, ...(after ? taskStatusLines(after) : [])],
         notes,
         data: { stopInEffect },
       });

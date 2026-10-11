@@ -2,7 +2,6 @@ import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import { DomainConflictError } from "../core/domain.js";
 import type { CommandReceipt } from "../operator/contracts.js";
-
 import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
@@ -1059,6 +1058,17 @@ export class ExecutionState {
             AND reason = 'Task stopped'`)
         .run(id);
     return { cleared: cleared.changes > 0, requeued: Number(requeued.changes) };
+  }
+
+  /** The operator Stop, independent of any other hold that `taskHold` reports first. */
+  isTaskStopped(taskId: string): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 FROM task_writer_holds WHERE taskId = ? AND reason = 'Task stopped'",
+        )
+        .get(taskId) !== undefined
+    );
   }
 
   taskHold(taskId: string): string | undefined {

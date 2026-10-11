@@ -2599,7 +2599,7 @@ export class StandaloneService {
   }
 
   isTaskStopped(taskId: string): boolean {
-    return this.taskHold(taskId) === "Task stopped";
+    return this.requireState().isTaskStopped(taskId);
   }
 
   /** A known survivor or unfinished tool callback keeps ownership held. */

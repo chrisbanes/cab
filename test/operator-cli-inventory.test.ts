@@ -75,6 +75,11 @@ test("every documented browse command runs read-only with a coverage envelope", 
   const h = harness(t);
   const help = await h.run(["--help"]);
   assert.equal(help.code, 0);
+  assert.match(
+    help.out,
+    /task create, task message, task follow-up, question answer and\napproval decide cannot be undone/,
+  );
+  assert.match(help.out, /Reverse pairs: task stop\/resume/);
   for (const command of [...browseCommands.values(), ...writeCommands.values()])
     assert.ok(help.out.includes(command.usage), command.usage);
 
