@@ -14,7 +14,11 @@ export async function until(condition: () => boolean, timeoutMs = 5000) {
 }
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 /** A configured task whose lead has a running turn; the caller decides how that turn ends. */
-async function startOwnWork(f: Fixture, title: string, projectName: string) {
+export async function startOwnWork(
+  f: Fixture,
+  title: string,
+  projectName: string,
+) {
   const a = await seedReviewTask(f, projectName, title),
     d = f.service.domain();
   const priorTurns = f.runtime.turns;

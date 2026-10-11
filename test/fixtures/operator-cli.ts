@@ -3,6 +3,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
+import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
@@ -18,9 +21,20 @@ type After = { after(fn: () => unknown): void };
 /** A real operator service with the bearer path, a signed-in browser session and one task. */
 export async function startCliService(
   t: After,
-  options: { authOrigin?: string; controlPaths?: string[] } = {},
+  options: {
+    authOrigin?: string;
+    controlPaths?: string[];
+    service?: StandaloneServiceOptions;
+  } = {},
 ) {
-  const f = await createOperatorFixture();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.service,
+  );
   t.after(() => f.close());
   const bundlePath = join(f.directory, "bundle");
   await mkdir(join(bundlePath, "assets"), { recursive: true });
@@ -35,14 +49,23 @@ export async function startCliService(
   const auth = await OperatorAuth.open({ authFile, origin: authOrigin });
   t.after(() => auth.close());
   const bundle = await OperatorWebBundle.open(bundlePath);
-  const build = () =>
-    new LocalOperatorHttp(new LocalOperatorUi(f.service.domain()), auth, {
-      credentials: f.service.operatorCredentials(),
-      web: new OperatorWebBoundary(
-        bundle,
-        new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
-      ),
-    });
+  const build = () => {
+    // The retained keyless Stop and Resume forms, for entry-point parity.
+    const routes = new OperatorRouteRegistry();
+    routes.registerSlot("runtime", runtimeOperatorRoutes(f.service));
+    return new LocalOperatorHttp(
+      new LocalOperatorUi(f.service.domain()),
+      auth,
+      {
+        routes,
+        credentials: f.service.operatorCredentials(),
+        web: new OperatorWebBoundary(
+          bundle,
+          new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
+        ),
+      },
+    );
+  };
   let http = build();
   const port = await http.start();
   t.after(() => http.stop());
@@ -79,6 +102,18 @@ export async function startCliService(
   if (r.status !== 200) throw Error(`login failed ${r.status}`);
   cookie = r.headers.get("set-cookie")?.split(";")[0] ?? "";
   csrf = ((await r.json()) as { csrfToken: string }).csrfToken;
+  /** A retained HTML form post (urlencoded, session and CSRF). */
+  const sessionForm = (path: string, fields: Record<string, string>) =>
+    fetch(`${origin}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        cookie,
+        origin: authOrigin,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ ...fields, csrfToken: csrf }).toString(),
+    });
   const sessionGet = (path: string) =>
     fetch(`${origin}${path}`, { headers: { cookie } });
   const projectId = randomUUID(),
@@ -152,6 +187,7 @@ export async function startCliService(
       return cookie;
     },
     sessionPost,
+    sessionForm,
     sessionGet,
     issue,
     bearer,

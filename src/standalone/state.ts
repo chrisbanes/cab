@@ -1,5 +1,12 @@
 import { TaskReviewStore } from "../core/task-review.js";
-import { canonicalMaterial } from "../core/delivery.js";
+import { canonicalMaterial, materialDigest } from "../core/delivery.js";
+import { DomainConflictError } from "../core/domain.js";
+import type { CommandReceipt } from "../operator/contracts.js";
+
+export type TaskControlReceipt = Extract<
+  CommandReceipt,
+  { kind: "task-stop" | "task-resume" }
+>;
 import {
   archivedResumeRejectionSchema,
   historicalPreTurnAdoptionSchema,
@@ -435,6 +442,11 @@ export class ExecutionState {
     CREATE TABLE IF NOT EXISTS task_writer_holds (
       taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS task_control_receipts (
+      taskId TEXT NOT NULL, key TEXT NOT NULL, payloadHash TEXT NOT NULL,
+      receiptJson TEXT NOT NULL, createdAt INTEGER NOT NULL,
+      PRIMARY KEY (taskId, key)
+    );
     CREATE TABLE IF NOT EXISTS execution_stop_targets (
       taskId TEXT NOT NULL,
       workId TEXT NOT NULL REFERENCES execution_intents(workId),
@@ -787,14 +799,86 @@ export class ExecutionState {
 
   stopTask(taskId: string): StopTarget[] {
     const id = z.string().uuid().parse(taskId);
-    transaction(this.db, () => {
+    transaction(this.db, () => this.holdTask(id));
+    return this.stopTargets(id);
+  }
+
+  /**
+   * Records a receipted Stop or Resume atomically with its hold change. The receipt is
+   * scoped to the task: a same-content retry replays it with no effect, other content
+   * under the same key conflicts, and a supplied version must match the task's.
+   */
+  controlTask(command: {
+    type: "task.stop" | "task.resume";
+    key: string;
+    taskId: string;
+    expectedVersion?: number | undefined;
+  }): { receipt: TaskControlReceipt; replayed: boolean } {
+    const id = z.string().uuid().parse(command.taskId);
+    const key = z.string().uuid().parse(command.key);
+    const payloadHash = materialDigest({
+      type: command.type,
+      taskId: id,
+      expectedVersion: command.expectedVersion ?? null,
+    });
+    return transaction(this.db, () => {
+      const stored = this.db
+        .prepare(
+          "SELECT payloadHash, receiptJson FROM task_control_receipts WHERE taskId = ? AND key = ?",
+        )
+        .get(id, key) as
+        | { payloadHash: string; receiptJson: string }
+        | undefined;
+      if (stored) {
+        if (stored.payloadHash !== payloadHash)
+          throw new DomainConflictError("Request key reused for other content");
+        return {
+          receipt: JSON.parse(stored.receiptJson) as TaskControlReceipt,
+          replayed: true,
+        };
+      }
+      if (command.expectedVersion !== undefined) {
+        const row = this.db
+          .prepare("SELECT version FROM domain_tasks WHERE id = ?")
+          .get(id) as { version: number } | undefined;
+        if (row?.version !== command.expectedVersion)
+          throw new DomainConflictError("Task version conflict");
+      }
+      const base = { key, recorded: true as const, taskId: id };
+      let receipt: TaskControlReceipt;
+      if (command.type === "task.stop") {
+        receipt = {
+          ...base,
+          kind: "task-stop",
+          cancellationRequested: this.holdTask(id).active,
+        };
+      } else {
+        const { cleared, requeued } = this.releaseStop(id);
+        receipt = {
+          ...base,
+          kind: "task-resume",
+          stopCleared: cleared,
+          requeued,
+        };
+      }
       this.db
         .prepare(
-          "INSERT OR IGNORE INTO task_writer_holds (taskId, reason) VALUES (?, 'Task stopped')",
+          "INSERT INTO task_control_receipts (taskId, key, payloadHash, receiptJson, createdAt) VALUES (?, ?, ?, ?, ?)",
         )
-        .run(id);
-      const active = this.db
-        .prepare(`SELECT e.workId, e.threadId, e.turnId FROM execution_intents e
+        .run(id, key, payloadHash, JSON.stringify(receipt), Date.now());
+      return { receipt, replayed: false };
+    });
+  }
+
+  /** Must run inside a transaction. */
+  private holdTask(id: string): { active: number } {
+    this.db
+      .prepare(
+        "INSERT OR IGNORE INTO task_writer_holds (taskId, reason) VALUES (?, 'Task stopped')",
+      )
+      .run(id);
+    const active = this.db
+      .prepare(`SELECT e.workId, e.threadId, e.turnId FROM execution_intents e
           JOIN task_execution_bindings b ON b.workId = e.workId
           WHERE b.taskId = ? AND (
             e.state IN ('submitting','running') OR (
@@ -804,48 +888,47 @@ export class ExecutionState {
               )
             )
           )`)
-        .all(id) as Array<{
-        workId: string;
-        threadId: string | null;
-        turnId: string | null;
-      }>;
-      const insertTarget =
-        this.db.prepare(`INSERT OR IGNORE INTO execution_stop_targets
+      .all(id) as Array<{
+      workId: string;
+      threadId: string | null;
+      turnId: string | null;
+    }>;
+    const insertTarget =
+      this.db.prepare(`INSERT OR IGNORE INTO execution_stop_targets
         (taskId, workId, threadId, turnId, interruptState, terminalState, reason, requestedAt)
         VALUES (?, ?, ?, ?, ?, 'unknown', NULL, ?)`);
-      for (const item of active)
-        insertTarget.run(
-          id,
-          item.workId,
-          item.threadId,
-          item.turnId,
-          item.threadId && item.turnId ? "pending" : "unbound",
-          Date.now(),
-        );
-      this.db
-        .prepare(`UPDATE execution_intents SET state = 'held', reason = 'Task stopped'
+    for (const item of active)
+      insertTarget.run(
+        id,
+        item.workId,
+        item.threadId,
+        item.turnId,
+        item.threadId && item.turnId ? "pending" : "unbound",
+        Date.now(),
+      );
+    this.db
+      .prepare(`UPDATE execution_intents SET state = 'held', reason = 'Task stopped'
           WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
           AND state IN ('submitting','running')`)
-        .run(id);
-      this.db
-        .prepare(`UPDATE execution_intents SET reason = 'Task stopped'
+      .run(id);
+    this.db
+      .prepare(`UPDATE execution_intents SET reason = 'Task stopped'
           WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
           AND state IN ('ready','capacity-waiting')`)
-        .run(id);
-      if (this.hasTurnRequests) {
-        this.db
-          .prepare(`UPDATE turn_requests SET state = 'held', reason = 'Task stopped'
+      .run(id);
+    if (this.hasTurnRequests) {
+      this.db
+        .prepare(`UPDATE turn_requests SET state = 'held', reason = 'Task stopped'
             WHERE workId IN (SELECT workId FROM execution_stop_targets WHERE taskId = ?)
             AND state = 'active'`)
-          .run(id);
-        this.db
-          .prepare(`UPDATE turn_requests SET reason = 'Task stopped'
+        .run(id);
+      this.db
+        .prepare(`UPDATE turn_requests SET reason = 'Task stopped'
             WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
             AND state = 'queued'`)
-          .run(id);
-      }
-    });
-    return this.stopTargets(id);
+        .run(id);
+    }
+    return { active: active.length };
   }
 
   stopTargets(taskId: string): StopTarget[] {
@@ -953,24 +1036,28 @@ export class ExecutionState {
 
   resumeTask(taskId: string): void {
     const id = z.string().uuid().parse(taskId);
-    transaction(this.db, () => {
-      this.db
-        .prepare(
-          "DELETE FROM task_writer_holds WHERE taskId = ? AND reason = 'Task stopped'",
-        )
-        .run(id);
-      this.db
-        .prepare(`UPDATE execution_intents SET state = 'ready', reason = NULL
+    transaction(this.db, () => this.releaseStop(id));
+  }
+
+  /** Clears only the operator Stop; must run inside a transaction. */
+  private releaseStop(id: string): { cleared: boolean; requeued: number } {
+    const cleared = this.db
+      .prepare(
+        "DELETE FROM task_writer_holds WHERE taskId = ? AND reason = 'Task stopped'",
+      )
+      .run(id) as { changes: number };
+    const requeued = this.db
+      .prepare(`UPDATE execution_intents SET state = 'ready', reason = NULL
           WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
           AND state IN ('ready','capacity-waiting') AND reason = 'Task stopped'`)
-        .run(id);
-      if (this.hasTurnRequests)
-        this.db
-          .prepare(`UPDATE turn_requests SET reason = NULL WHERE state = 'queued'
+      .run(id) as { changes: number };
+    if (this.hasTurnRequests)
+      this.db
+        .prepare(`UPDATE turn_requests SET reason = NULL WHERE state = 'queued'
             AND workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
             AND reason = 'Task stopped'`)
-          .run(id);
-    });
+        .run(id);
+    return { cleared: cleared.changes > 0, requeued: Number(requeued.changes) };
   }
 
   taskHold(taskId: string): string | undefined {

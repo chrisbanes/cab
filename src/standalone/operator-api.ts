@@ -5521,6 +5521,10 @@ export class OperatorApi {
           result,
         });
       }
+      if (c.type === "task.stop" || c.type === "task.resume") {
+        this.requireTask(c.taskId);
+        return commandReceiptSchema.parse(await this.service.controlTask(c));
+      }
       if ("projectId" in c) {
         this.requireProject(c.projectId);
         if (c.type !== "task.create") {

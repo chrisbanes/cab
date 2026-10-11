@@ -143,6 +143,8 @@ import {
   ExecutionState,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
+  type StopTarget,
+  type TaskControlReceipt,
   type TaskExecutionContext,
   harnessRetrySupported,
 } from "./state.js";
@@ -2543,8 +2545,32 @@ export class StandaloneService {
 
   stopTask(taskId: string): Promise<StopObservation> {
     this.domain().task(taskId);
+    return this.afterStop(taskId, this.requireState().stopTask(taskId));
+  }
+
+  /** Receipted Stop or Resume; a replayed receipt repeats no post-commit work. */
+  async controlTask(command: {
+    type: "task.stop" | "task.resume";
+    key: string;
+    taskId: string;
+    expectedVersion?: number | undefined;
+  }): Promise<TaskControlReceipt> {
+    this.domain().task(command.taskId);
     const state = this.requireState();
-    const targets = state.stopTask(taskId);
+    const { receipt, replayed } = state.controlTask(command);
+    if (!replayed) {
+      if (command.type === "task.stop")
+        await this.afterStop(command.taskId, state.stopTargets(command.taskId));
+      else await this.wakeScheduler();
+    }
+    return receipt;
+  }
+
+  /** Cancels pending native questions and observes the stop for a bounded window. */
+  private afterStop(
+    taskId: string,
+    targets: StopTarget[],
+  ): Promise<StopObservation> {
     for (const target of targets) {
       const runtime = this.runtimeForWork(target.workId);
       const runtimeGeneration = runtime?.currentUserInputGeneration?.();
