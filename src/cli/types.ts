@@ -82,4 +82,15 @@ export type Values = {
   interval?: string | undefined;
   "max-duration"?: string | undefined;
   "compare-current"?: boolean | undefined;
+  title?: string | undefined;
+  "outcome-file"?: string | undefined;
+  ready?: string | undefined;
+  blocker?: string[] | undefined;
+  assignee?: string | undefined;
+  to?: string | undefined;
+  "message-file"?: string | undefined;
+  "answers-file"?: string | undefined;
+  decision?: string | undefined;
+  "expected-revision"?: string | undefined;
+  "material-hash"?: string | undefined;
 };

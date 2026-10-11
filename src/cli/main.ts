@@ -84,6 +84,11 @@ Options:
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
 
+Task operations: task create, task message, task follow-up, question answer and
+approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
+best-effort cancellation; Resume clears only the operator Stop),
+add-dependency/remove-dependency and task configure --ready true/false.
+
 ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.
 `;
 
@@ -153,6 +158,17 @@ export async function main(
         interval: { type: "string" },
         "max-duration": { type: "string" },
         "compare-current": { type: "boolean" },
+        title: { type: "string" },
+        "outcome-file": { type: "string" },
+        ready: { type: "string" },
+        blocker: { type: "string", multiple: true },
+        assignee: { type: "string" },
+        to: { type: "string" },
+        "message-file": { type: "string" },
+        "answers-file": { type: "string" },
+        decision: { type: "string" },
+        "expected-revision": { type: "string" },
+        "material-hash": { type: "string" },
       },
     });
     jsonl = values.output === "jsonl" && positionals[0] === "logs";

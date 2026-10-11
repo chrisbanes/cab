@@ -6,6 +6,7 @@ import { browseCommands, writeCommands } from "../src/cli/commands.js";
 import { harness } from "./fixtures/cli-harness.js";
 import { databaseDigest } from "./fixtures/database-digest.js";
 import { startCliService } from "./fixtures/operator-cli.js";
+import { seedOwnApproval, seedOwnQuestion } from "./fixtures/questions.js";
 import { captureNativeResult } from "./fixtures/retained-evidence.js";
 
 /** The documented CLI2 browse inventory (docs/development.md#operator-cli). */
@@ -33,6 +34,9 @@ const documented = [
   "execution get",
   "execution inputs",
   "logs",
+  "inbox list",
+  "question get",
+  "approval get",
 ];
 
 /** The documented CLI3 configuration, adoption and receipt commands. */
@@ -48,6 +52,16 @@ const documentedWrites = [
   "capacity apply",
   "assignment apply-current",
   "operation get",
+  "task create",
+  "task configure",
+  "task add-dependency",
+  "task remove-dependency",
+  "task message",
+  "task follow-up",
+  "question answer",
+  "approval decide",
+  "task stop",
+  "task resume",
 ];
 
 test("every documented browse command runs read-only with a coverage envelope", async (t) => {
@@ -61,6 +75,11 @@ test("every documented browse command runs read-only with a coverage envelope", 
   const h = harness(t);
   const help = await h.run(["--help"]);
   assert.equal(help.code, 0);
+  assert.match(
+    help.out,
+    /task create, task message, task follow-up, question answer and\napproval decide cannot be undone/,
+  );
+  assert.match(help.out, /Reverse pairs: task stop\/resume/);
   for (const command of [...browseCommands.values(), ...writeCommands.values()])
     assert.ok(help.out.includes(command.usage), command.usage);
 
@@ -96,6 +115,9 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "configuration.impact",
     "execution.read",
     "diagnostics.read",
+    "task.write",
+    "attention.read",
+    "attention.write",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;
@@ -138,6 +160,11 @@ test("every documented browse command runs read-only with a coverage envelope", 
   args["execution get"] = [workId];
   args["execution inputs"] = [workId, "--compare-current"];
   args.logs = ["--execution", workId];
+  const question = await seedOwnQuestion(s.f);
+  const approval = await seedOwnApproval(s.f);
+  args["inbox list"] = [];
+  args["question get"] = [question.taskId, question.interactionId];
+  args["approval get"] = [approval.taskId, approval.interactionId];
   const before = databaseDigest(s.f);
   for (const key of documented) {
     const r = await h.run([

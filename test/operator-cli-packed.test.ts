@@ -234,6 +234,22 @@ test("the packed CLI installs offline and works against a real service over loop
     "json",
   ]);
   assert.deepEqual(JSON.parse(r.out).data.receipt, applied.data.receipt);
+  // CLI5: the inbox read and a receipted Stop through the installed binary.
+  r = await cli(["inbox", "list", "--connection", "local", "--output", "json"]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out).data.items, []);
+  r = await cli([
+    "task",
+    "stop",
+    s.taskId,
+    "--connection",
+    "rw",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(JSON.parse(r.out).data.receipt.kind, "task-stop");
+  assert.equal(s.f.service.isTaskStopped(s.taskId), true);
   r = await cli(["task", "get", s.taskId], {
     ENSEMBLE_MANAGED_ASSIGNMENT: "1",
   });

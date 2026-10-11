@@ -1991,6 +1991,23 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       reviewId: uuid.optional(),
     })
     .strict(),
+  // Optional fence: Stop and Resume act on a hold, so an unrelated edit must not block them.
+  z
+    .object({
+      ...base,
+      type: z.literal("task.stop"),
+      taskId: uuid,
+      expectedVersion: revision.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("task.resume"),
+      taskId: uuid,
+      expectedVersion: revision.optional(),
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -2507,6 +2524,27 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       reason: safeText,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("task-stop"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      /** Active executions asked to stop; cancellation itself is best-effort. */
+      cancellationRequested: z.number().int().nonnegative().safe(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("task-resume"),
+      key: uuid,
+      recorded: z.literal(true),
+      taskId: uuid,
+      /** False when no operator Stop was in effect (a recorded no-op). */
+      stopCleared: z.boolean(),
+      requeued: z.number().int().nonnegative().safe(),
+    })
+    .strict(),
 ]);
 export const apiErrorSchema = z
   .object({
@@ -2749,6 +2787,9 @@ export const cliCapabilities = [
   "configuration.impact",
   "execution.read",
   "diagnostics.read",
+  "task.write",
+  "attention.read",
+  "attention.write",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(

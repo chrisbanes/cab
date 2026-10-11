@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { cliCapabilities } from "../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../src/standalone/operator-credentials.js";
 import { OperatorWebBoundary } from "../src/standalone/operator-web.js";
+import { databaseDigest } from "./fixtures/database-digest.js";
 import { startCliService } from "./fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -406,4 +407,74 @@ test("every known API route has an explicit authority", () => {
     operatorRouteAuthority("POST", `/api/operator/tasks/${id}`),
     undefined,
   );
+});
+
+test("Stop and Resume are receipted commands under bearer scope; retained forms stay session-only", async (t) => {
+  const s = await startCliService(t, {
+    service: { supervisor: { observationMs: 50 } },
+  });
+  const read = await s.issue("read", "control-ro");
+  const write = await s.issue("read-write", "control-rw");
+  const command = (type: string, key = randomUUID()) => ({
+    type,
+    key,
+    taskId: s.taskId,
+  });
+  const before = databaseDigest(s.f);
+  for (const type of ["task.stop", "task.resume"]) {
+    const r = await s.bearer(read.token, "/api/operator/commands", {
+      method: "POST",
+      body: command(type),
+    });
+    assert.equal(r.status, 403, type);
+    assert.equal(
+      ((await r.json()) as { error: { code: string } }).error.code,
+      "insufficient-scope",
+    );
+  }
+  for (const token of [read.token, write.token])
+    for (const path of ["/runtime/control/stop", "/runtime/control/resume"]) {
+      const r = await fetch(`${s.origin}${path}`, {
+        method: "POST",
+        redirect: "manual",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({ taskId: s.taskId }).toString(),
+      });
+      assert.equal(r.status, 403, path);
+    }
+  assert.equal(databaseDigest(s.f), before);
+  assert.equal(s.f.service.isTaskStopped(s.taskId), false);
+
+  const stop = command("task.stop");
+  let r = await s.bearer(write.token, "/api/operator/commands", {
+    method: "POST",
+    body: stop,
+  });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), {
+    kind: "task-stop",
+    key: stop.key,
+    recorded: true,
+    taskId: s.taskId,
+    cancellationRequested: 0,
+  });
+  assert.equal(s.f.service.isTaskStopped(s.taskId), true);
+  r = await s.sessionPost("/api/operator/commands", command("task.resume"));
+  assert.equal(r.status, 200);
+  const resumed = (await r.json()) as Record<string, unknown>;
+  assert.equal(resumed.kind, "task-resume");
+  assert.equal(resumed.stopCleared, true);
+  assert.equal(s.f.service.isTaskStopped(s.taskId), false);
+  // The retained session form still works and shares the hold.
+  r = await s.sessionForm("/runtime/control/stop", { taskId: s.taskId });
+  assert.equal(r.status, 303);
+  assert.equal(s.f.service.isTaskStopped(s.taskId), true);
+  r = await s.bearer(write.token, "/api/operator/commands", {
+    method: "POST",
+    body: { ...stop, expectedVersion: 1 },
+  });
+  assert.equal(r.status, 409, "same key, other content");
 });

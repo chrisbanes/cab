@@ -64,8 +64,12 @@ applied once by request key; `assignment apply-current` adopts current instructi
 for the next turn, and `operation get` reads configuration and adoption receipts
 back by scope, type and key. `execution list|get|inputs` and `logs` read bounded,
 redacted execution diagnostics captured for task-bound executions, with resumable
-cursors, JSONL output and bounded following. Task writes, GitHub and repository
-links, questions, approvals and recovery are planned;
+cursors, JSONL output and bounded following. `task create|configure|add-dependency|
+remove-dependency|message|follow-up`, `inbox list`, `question get|answer`,
+`approval get|decide` and `task stop|resume` operate tasks and attention through the
+service's existing commands, plus receipted `task.stop` and `task.resume` commands
+that share the web UI's Stop hold; Resume clears only the operator Stop. GitHub and
+repository links, delivery operations and recovery are planned;
 their delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 

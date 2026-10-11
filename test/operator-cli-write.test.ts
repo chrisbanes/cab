@@ -11,16 +11,19 @@ import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { z } from "zod";
 import { CliError } from "../src/cli/connections.js";
 import { EXIT } from "../src/cli/main.js";
 import { RequestJournal } from "../src/cli/request-journal.js";
 import { ServiceClient } from "../src/cli/transport.js";
 import type { CliDeps } from "../src/cli/types.js";
 import {
+  derivedUuid,
   type Session,
   sendCommand,
   type WriteContext,
 } from "../src/cli/write.js";
+import type { CommandReceipt } from "../src/operator/contracts.js";
 import { fakeServer, harness } from "./fixtures/cli-harness.js";
 import { startCliService } from "./fixtures/operator-cli.js";
 
@@ -566,4 +569,155 @@ test("operation get requires the operation.read capability before any read", asy
     fake.hits.map((hit) => hit.split(" ")[1]),
     ["/api/operator/cli", "/api/operator/cli"],
   );
+});
+
+test("unresolved journal reuse never offers a recorded or definitely rejected key", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "ensemble-journal-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const j = new RequestJournal(dir);
+  const id = (k: string) => ({
+    service,
+    scope: "task:x",
+    type: "task.stop",
+    key: k,
+  });
+  const find = (d: string) => j.find(service, d, { unresolved: true });
+  const [sending, unknown, recorded, rejected, reached] = Array.from(
+    { length: 5 },
+    () => randomUUID(),
+  ) as [string, string, string, string, string];
+  await j.append(id(sending), "a", "sending");
+  assert.equal(await find("a"), sending);
+  await j.append(id(unknown), "b", "sending");
+  await j.append(id(unknown), "b", "unknown");
+  assert.equal(await find("b"), unknown);
+  await j.append(id(recorded), "c", "sending");
+  await j.append(id(recorded), "c", "recorded");
+  assert.equal(await find("c"), undefined);
+  // The default (CLI3) rule still reuses a recorded key.
+  assert.equal(await j.find(service, "c"), recorded);
+  // Recorded once, later unknown on retry: never reused for a repeatable intent.
+  await j.append(id(recorded), "c", "unknown");
+  assert.equal(await find("c"), undefined);
+  await j.append(id(rejected), "d", "sending");
+  await j.append(id(rejected), "d", "rejected");
+  assert.equal(await find("d"), undefined);
+  await j.append(id(reached), "e", "sending");
+  await j.append(id(reached), "e", "unknown");
+  await j.append(id(reached), "e", "rejected");
+  assert.equal(await find("e"), reached);
+});
+
+test("derived ids are stable, distinct per input and valid UUIDs", () => {
+  const a = derivedUuid("s", "p", "k", "task");
+  assert.equal(a, derivedUuid("s", "p", "k", "task"));
+  for (const other of [
+    derivedUuid("s2", "p", "k", "task"),
+    derivedUuid("s", "p2", "k", "task"),
+    derivedUuid("s", "p", "k2", "task"),
+    derivedUuid("s", "p", "k", "assignment"),
+  ])
+    assert.notEqual(other, a);
+  for (let i = 0; i < 50; i++)
+    assert.ok(
+      z
+        .string()
+        .uuid()
+        .safeParse(derivedUuid("s", "p", String(i), "t")).success,
+    );
+  assert.match(a, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-/);
+});
+
+test("per-command matcher, retry hint and question size exception", async (t) => {
+  const taskId = randomUUID();
+  const run = async (
+    type: string,
+    body: Record<string, unknown>,
+    fetcher: typeof fetch,
+    match?: (r: CommandReceipt) => boolean,
+  ) => {
+    const d = drive(t, "http://127.0.0.1:9", fetcher);
+    const ctx = {
+      journal: d.journal,
+      deps: { commandTimeoutMs: 200 } as CliDeps,
+    } as unknown as WriteContext;
+    const session = {
+      name: "home",
+      client: new ServiceClient("http://127.0.0.1:9", token, fetcher),
+      identity: { service: { installationId: service } },
+    } as unknown as Session;
+    const result = sendCommand(ctx, session, {
+      scope: `task:${taskId}`,
+      type,
+      key,
+      digest: "d",
+      resource: taskId,
+      command: { type, key, ...body },
+      ...(match ? { match } : {}),
+    });
+    return { result, d };
+  };
+  const stopReceipt = {
+    kind: "task-stop",
+    key,
+    recorded: true,
+    taskId,
+    cancellationRequested: 0,
+  };
+  // A matcher that rejects the 2xx body settles unknown.
+  const rejected = await run(
+    "task.stop",
+    { taskId },
+    respond(200, stopReceipt),
+    () => false,
+  );
+  await assert.rejects(rejected.result, (error: CliError) => {
+    assert.equal(error.code, "command-outcome-unknown");
+    assert.equal(EXIT[error.code]?.[0], 6);
+    assert.match(error.message, new RegExp(`--request-id ${key}`));
+    assert.doesNotMatch(error.message, /operation get/);
+    return true;
+  });
+  assert.deepEqual(
+    rejected.d.lines().map((l) => l.state),
+    ["sending", "unknown"],
+  );
+  const accepted = await run(
+    "task.stop",
+    { taskId },
+    respond(200, stopReceipt),
+    (r) => r.kind === "task-stop" && r.taskId === taskId,
+  );
+  assert.equal((await accepted.result).receipt.kind, "task-stop");
+  const profile = await run("profile.configure", {}, thrown("ECONNRESET"));
+  await assert.rejects(profile.result, (error: CliError) => {
+    assert.match(error.message, /operation get/);
+    assert.match(error.message, /--request-id/);
+    return true;
+  });
+  // Question forms may exceed 64 KiB; other commands may not.
+  let sent = 0;
+  const counting: typeof fetch = async () => {
+    sent++;
+    return respond(400, apiError("invalid-input"))();
+  };
+  const form = await run(
+    "question.form.answer",
+    { pad: "x".repeat(100 * 1024) },
+    counting,
+  );
+  await assert.rejects(form.result, { code: "invalid-input" });
+  assert.equal(sent, 1);
+  const big = await run(
+    "message",
+    { message: "x".repeat(64 * 1024) },
+    counting,
+  );
+  await assert.rejects(big.result, (error: CliError) => {
+    assert.equal(error.code, "invalid-input");
+    assert.match(error.message, /64 KiB/);
+    return true;
+  });
+  assert.equal(sent, 1);
+  assert.deepEqual(big.d.lines(), []);
 });

@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
+import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import type { StandaloneServiceOptions } from "../../src/standalone/service.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
@@ -11,6 +15,7 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
+import { harness } from "./cli-harness.js";
 import { createOperatorFixture } from "./operator-web.js";
 
 type After = { after(fn: () => unknown): void };
@@ -18,9 +23,20 @@ type After = { after(fn: () => unknown): void };
 /** A real operator service with the bearer path, a signed-in browser session and one task. */
 export async function startCliService(
   t: After,
-  options: { authOrigin?: string; controlPaths?: string[] } = {},
+  options: {
+    authOrigin?: string;
+    controlPaths?: string[];
+    service?: StandaloneServiceOptions;
+  } = {},
 ) {
-  const f = await createOperatorFixture();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    options.service,
+  );
   t.after(() => f.close());
   const bundlePath = join(f.directory, "bundle");
   await mkdir(join(bundlePath, "assets"), { recursive: true });
@@ -35,14 +51,23 @@ export async function startCliService(
   const auth = await OperatorAuth.open({ authFile, origin: authOrigin });
   t.after(() => auth.close());
   const bundle = await OperatorWebBundle.open(bundlePath);
-  const build = () =>
-    new LocalOperatorHttp(new LocalOperatorUi(f.service.domain()), auth, {
-      credentials: f.service.operatorCredentials(),
-      web: new OperatorWebBoundary(
-        bundle,
-        new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
-      ),
-    });
+  const build = () => {
+    // The retained keyless Stop and Resume forms, for entry-point parity.
+    const routes = new OperatorRouteRegistry();
+    routes.registerSlot("runtime", runtimeOperatorRoutes(f.service));
+    return new LocalOperatorHttp(
+      new LocalOperatorUi(f.service.domain()),
+      auth,
+      {
+        routes,
+        credentials: f.service.operatorCredentials(),
+        web: new OperatorWebBoundary(
+          bundle,
+          new OperatorApi(f.service, options.controlPaths ?? [f.directory]),
+        ),
+      },
+    );
+  };
   let http = build();
   const port = await http.start();
   t.after(() => http.stop());
@@ -79,6 +104,18 @@ export async function startCliService(
   if (r.status !== 200) throw Error(`login failed ${r.status}`);
   cookie = r.headers.get("set-cookie")?.split(";")[0] ?? "";
   csrf = ((await r.json()) as { csrfToken: string }).csrfToken;
+  /** A retained HTML form post (urlencoded, session and CSRF). */
+  const sessionForm = (path: string, fields: Record<string, string>) =>
+    fetch(`${origin}${path}`, {
+      method: "POST",
+      redirect: "manual",
+      headers: {
+        cookie,
+        origin: authOrigin,
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ ...fields, csrfToken: csrf }).toString(),
+    });
   const sessionGet = (path: string) =>
     fetch(`${origin}${path}`, { headers: { cookie } });
   const projectId = randomUUID(),
@@ -152,8 +189,57 @@ export async function startCliService(
       return cookie;
     },
     sessionPost,
+    sessionForm,
     sessionGet,
     issue,
     bearer,
   };
+}
+
+/** A real service plus a CLI harness logged in as `ro` (read) and `rw` (read-write). */
+export async function startCliOperator(
+  t: After,
+  options: Parameters<typeof startCliService>[1] = {},
+) {
+  const s = await startCliService(t, {
+    service: { supervisor: { observationMs: 50 } },
+    ...options,
+  });
+  const h = harness(t);
+  for (const [name, scope] of [
+    ["ro", "read"],
+    ["rw", "read-write"],
+  ] as const) {
+    const issued = await s.issue(scope, `operate-${name}`);
+    const login = await h.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(issued.token),
+    ]);
+    if (login.code !== 0) throw Error(`login ${name}: ${login.err}`);
+  }
+  /** Runs one command as JSON with the given connection. */
+  const cli = (
+    connection: "ro" | "rw",
+    args: string[],
+    extra: Parameters<typeof h.run>[1] = {},
+  ) => h.run([...args, "--connection", connection, "--output", "json"], extra);
+  /** A fetch that performs the command POST, then loses its reply. */
+  const lostReply: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (String(input).endsWith("/api/operator/commands"))
+      throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    return response;
+  };
+  const file = (name: string, text: string) => {
+    const path = join(h.dir, name);
+    writeFileSync(path, text);
+    return path;
+  };
+  return { s, h, cli, lostReply, file, d: s.f.service.domain() };
 }

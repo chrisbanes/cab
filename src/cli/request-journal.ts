@@ -103,18 +103,28 @@ export class RequestJournal {
   /**
    * The most recent reusable key for this service and digest. A key is skipped only when
    * its latest state is rejected and no attempt with it may have reached the service.
+   * With `unresolved`, a key that was ever recorded is skipped too, so a repeatable
+   * intent (Stop, a message) reuses only a key whose outcome is still unknown.
    */
-  async find(service: string, digest: string) {
+  async find(
+    service: string,
+    digest: string,
+    options: { unresolved?: boolean } = {},
+  ) {
     const lines = await this.lines();
     const latest = new Map(lines.map((l) => [l.key, l.state]));
     const reached = new Set(
       lines.filter((l) => reachedStates.has(l.state)).map((l) => l.key),
     );
+    const recorded = new Set(
+      lines.filter((l) => l.state === "recorded").map((l) => l.key),
+    );
     return lines.findLast(
       (l) =>
         l.service === service &&
         l.digest === digest &&
-        (latest.get(l.key) !== "rejected" || reached.has(l.key)),
+        (latest.get(l.key) !== "rejected" || reached.has(l.key)) &&
+        !(options.unresolved && recorded.has(l.key)),
     )?.key;
   }
 
