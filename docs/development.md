@@ -97,6 +97,29 @@ or run `node dist/src/cli/main.js` directly.
    `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
    Logout and removal delete only local state; the server credential stays active
    until revoked or expired.
+4. Read-only browsing, with either credential scope:
+   - `project list|get ID|instructions ID [--revision N]|revisions ID` and the same
+     for `profile`;
+   - `task list [--project ID] [--state open|done|cancelled]`,
+     `task search QUERY [--project ID] [--type task|decision|result] [--after T]
+     [--before T] [--historical]` (times are ISO-8601 or epoch milliseconds) and
+     `task messages TASK_ID`;
+   - `assignment get|history|instructions ASSIGNMENT_ID`;
+   - `result list TASK_ID`, `result get TASK_ID RESULT_ID`,
+     `result evidence TASK_ID RESULT_ID ITEM_ID [--out PATH]` and
+     `artifact get TASK_ID ARTIFACT_ID --out PATH`.
+
+   Lists take `--limit N` (default 50, at most 200; task list caps at 100 and search
+   at 50, reported as `limit-capped`) and `--cursor TOKEN`. One invocation reads one
+   page: human output ends with a `More:` line giving the next command, and
+   `--output json` adds `pagination` and `coverage` (completeness, gap codes and the
+   service observation time). A cursor tied to another command or other filters is
+   rejected; one the service no longer recognises fails as `cursor-stale` (exit 4),
+   so restart without `--cursor`. Instruction views are reconstructed from retained
+   revision records, not the submitted prompt, and still redact credentials and
+   private paths. `--out` creates a new file with mode `0600` only after the bytes
+   match their digest; an existing path is refused (`output-exists`) and a mismatch
+   (`integrity-mismatch`, exit 5) leaves no file.
 
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are

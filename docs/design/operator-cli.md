@@ -81,6 +81,20 @@ offers an unredacted switch, exports credential files, or promises detection of
 every arbitrary secret. Apply known-value and pattern redaction before storage,
 and current exclusions at read time; omit content when safe projection fails.
 
+The dedicated views are `GET /api/operator/profiles/ID/instructions` and
+`GET /api/operator/projects/ID/instructions`, each listing retained revisions and
+selecting the current one or `?revision=N`, and
+`GET /api/operator/assignments/ID/instructions`, which shows the assignment's bound
+profile/project revisions beside the current ones, whether revision numbers and
+stored content match, and the revisions of the latest execution request when one
+exists. Only these views leave the disclosed profile's or project's instruction text
+unredacted; other instruction revisions, credential references and values, control,
+workspace and repository paths and credential patterns stay redacted. Each body is
+`available` (with `redacted` when sanitization changed it) or `omitted` with reason
+`redaction-unavailable` when exclusions cannot be computed or the projection exceeds
+16000 characters. Every view carries provenance
+`{source: "retained-revision-records", reconstructed: true, submittedPrompt: "not-captured"}`.
+
 Historical instruction revisions can be displayed when retained, labelled as
 reconstructed from revision records. Only an actual captured submission may be
 labelled as the supplied prompt. Missing tool events, unknown effective settings
@@ -276,10 +290,33 @@ revision/policy conflict (4), unavailability including TLS and redirect rejectio
 (5), uncertain outcomes (6) and an unsupported service version or capability (7).
 The JSON envelope schema is `ensemble.cli/v1`.
 
+List reads add `pagination: {limit, maxLimit, returned, nextCursor}` to the
+envelope, and every browse read adds `coverage: {observedAt, complete, gaps, notes}`
+where `observedAt` is the service's read time and `complete` is true only when no
+gap is present. Gap codes are a closed set: `more-pages`, `limit-capped`,
+`catalog-changed`, `older-history-omitted`, `item-omitted`, `content-redacted`,
+`content-unavailable`, `redaction-unavailable`, `evidence-gap`,
+`evidence-unavailable` and `review-unavailable`. Routes with lower page caps (task
+list 100, search 50) report `limit-capped` and their `maxLimit`. CLI cursors are
+opaque tokens bound to the command and its filters; a token from another command or
+with different filters is invalid input. A server cursor that no longer resolves
+returns `409`, which the CLI reports as `cursor-stale` (exit 4) with an instruction
+to restart without `--cursor`. A task-list page whose catalog membership changed
+since the previous page reports `catalog-changed` and `continuity: "changed"`.
+Downloaded artifacts and evidence items are written only to a new `--out` file
+(mode `0600`) after the service's `x-ensemble-sha256` digest, or the item's recorded
+digest and size, verify; a mismatch is `integrity-mismatch` (exit 5) and leaves no
+file. `x-ensemble-evidence-source` distinguishes retained bytes from a pre-retention
+result's still-matching recorded workspace file.
+
 Advertise service API version and capabilities. Older clients ignore additive
 fields; unsupported operations or incompatible contracts fail explicitly.
 Read-only credentials must receive a server denial even if a caller bypasses the
-CLI and submits a write directly.
+CLI and submits a write directly. Capability names are `cli.identity`,
+`task.read`, `workspace.read`, `task.list`, `task.search`, `task.records`,
+`assignment.read`, `instructions.read`, `result.read` and `artifact.read`; a
+command whose capabilities the service does not advertise fails with
+`unsupported-service` before any other read.
 
 ## Acceptance scenarios
 
