@@ -3677,7 +3677,6 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  /** Run one discovery read; every failure is an `unavailable` reason, never a message. */
   /** The discovery reference and a digest of its value: what a discovery result was read with. */
   private discoveryFence() {
     const ref = this.domain().discoveryCredentialReference();
@@ -3688,6 +3687,7 @@ export class OperatorApi {
         .digest("hex"),
     ]);
   }
+  /** Run one discovery read; every failure is an `unavailable` reason, never a message. */
   private async discoveryRead<T extends z.ZodType>(
     schema: T,
     read: (reader: DiscoveryReader) => Promise<object>,
