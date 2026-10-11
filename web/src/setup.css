@@ -162,3 +162,18 @@
     min-height: 44px;
   }
 }
+
+/* Create and Cancel share a row; the outcome notices follow it at full width. */
+.setup-submit {
+  align-items: center;
+}
+
+.setup-submit > .settings-actions {
+  margin-block: 0;
+}
+
+.setup-submit > [role="alert"],
+.setup-submit > [role="status"] {
+  flex-basis: 100%;
+  order: 2;
+}
