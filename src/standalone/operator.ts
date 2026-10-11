@@ -1504,31 +1504,28 @@ export class LocalOperatorHttp {
             return true;
           }
           const action = CREDENTIAL_ACTION.exec(path);
-          const data = !action
-            ? operatorCredentialIssuedSchema.parse(credentials.issue(body))
-            : action[2] === "rotate"
-              ? operatorCredentialIssuedSchema.parse(
-                  credentials.rotate(
-                    decodeSegment(action[1] ?? "") ?? "",
-                    z
-                      .object({
-                        expiresInDays: z
-                          .number()
-                          .int()
-                          .min(1)
-                          .max(90)
-                          .optional(),
-                      })
-                      .strict()
-                      .parse(body).expiresInDays,
-                  ),
-                )
-              : (z.object({}).strict().parse(body),
-                {
-                  credential: credentials.revoke(
-                    decodeSegment(action[1] ?? "") ?? "",
-                  ),
-                });
+          const id = decodeSegment(action?.[1] ?? "") ?? "";
+          let data: unknown;
+          if (!action)
+            data = operatorCredentialIssuedSchema.parse(
+              credentials.issue(body),
+            );
+          else if (action[2] === "rotate")
+            data = operatorCredentialIssuedSchema.parse(
+              credentials.rotate(
+                id,
+                z
+                  .object({
+                    expiresInDays: z.number().int().min(1).max(90).optional(),
+                  })
+                  .strict()
+                  .parse(body).expiresInDays,
+              ),
+            );
+          else {
+            z.object({}).strict().parse(body);
+            data = { credential: credentials.revoke(id) };
+          }
           json(200, data);
           return true;
         }
