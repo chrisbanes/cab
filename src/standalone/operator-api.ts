@@ -132,11 +132,11 @@ import {
   previewRetainedBytes,
   previewWorkspaceFile,
   retainedPathExcluded,
+  workspaceInspectionBindingIdentity,
   type WorkspaceInspectionCurrent,
   WorkspaceInspectionInputError,
   type WorkspaceInspectionPathReference,
   type WorkspaceInspectionRequest,
-  workspaceInspectionBindingIdentity,
   workspaceInspectionPathsExcluded,
 } from "./workspace-inspection.js";
 
@@ -3073,8 +3073,15 @@ export class OperatorApi {
     item: DiagnosticItem,
     excluded: readonly string[] | undefined,
   ) {
+    // General views never show captured instruction segments; only `inputs` discloses them.
+    const instruction =
+      item.kind === "input" && item.name.endsWith("-instructions");
     const payload =
-      item.state === "available" ? boundDetail(item.payload, excluded) : null;
+      item.state !== "available"
+        ? null
+        : instruction && excluded
+          ? { ...(item.payload as object), text: "[redacted]" }
+          : boundDetail(item.payload, excluded);
     const unavailable = item.state === "available" && payload === undefined;
     return {
       sequence: item.sequence,
@@ -3263,12 +3270,11 @@ export class OperatorApi {
         if (!name) return [];
         const payload = item.payload as { text?: unknown; revision?: unknown };
         const excluded = name.endsWith("-instructions") ? disclosing : general;
-        const text =
-          item.state === "available" &&
-          typeof payload?.text === "string" &&
-          excluded
-            ? sanitizeConversationText(payload.text, excluded)
+        const bounded =
+          item.state === "available" && typeof payload?.text === "string"
+            ? boundDetail(payload.text, excluded, 64 * 1024)
             : undefined;
+        const text = typeof bounded === "string" ? bounded : undefined;
         const unavailable = item.state === "available" && text === undefined;
         return [
           {

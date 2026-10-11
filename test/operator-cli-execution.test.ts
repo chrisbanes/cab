@@ -110,6 +110,8 @@ test("execution and logs reads match the API and label their provenance", async 
     /Captured submission of Ensemble-supplied inputs; not the runtime's effective prompt/,
   );
   assert.match(human.out, new RegExp(seed.profileOne));
+  const absentJson = await ok(["execution", "inputs", seed.absent]);
+  assert.ok(absentJson.coverage.gaps.includes("evidence-unavailable"));
   const absent = await h.run(["execution", "inputs", seed.absent]);
   assert.match(absent.out, /No captured submission/);
   assert.match(absent.out, /Reconstructed from retained revision records/);
@@ -208,6 +210,7 @@ test("execution and logs reads match the API and label their provenance", async 
     ["logs", "--execution", seed.captured, "--follow", "--interval", "31"],
     ["logs", "--execution", seed.captured, "--follow", "--max-duration", "0"],
     ["execution", "get", seed.captured, "--output", "jsonl"],
+    ["logs", "--execution", seed.captured, "--follow", "--output", "json"],
   ]) {
     const result = await h.run(args);
     assert.equal(result.code, 2, args.join(" "));

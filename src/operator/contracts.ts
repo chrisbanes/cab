@@ -3033,7 +3033,8 @@ const inputSegmentSchema = z
     revision: revision.nullable(),
     state: z.enum(["available", "omitted"]),
     reason: diagnosticGapCodeSchema.nullable(),
-    text: z.string().max(70000).nullable(),
+    /** Up to 64 KiB captured; redaction markers can lengthen it. */
+    text: z.string().max(140000).nullable(),
     redacted: z.boolean(),
   })
   .strict();

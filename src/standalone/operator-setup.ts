@@ -1,8 +1,8 @@
+import { childProcessEnvironment } from "../core/child-environment.js";
 import { execFile } from "node:child_process";
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { promisify } from "node:util";
-import { childProcessEnvironment } from "../core/child-environment.js";
 import {
   checkoutOrigin,
   RepositoryVerificationError,

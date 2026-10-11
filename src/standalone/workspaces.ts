@@ -1,11 +1,11 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { childProcessEnvironment } from "../core/child-environment.js";
 import { randomUUID } from "node:crypto";
-import { realpathSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { realpathSync } from "node:fs";
 import { z } from "zod";
-import { childProcessEnvironment } from "../core/child-environment.js";
-import { type Database, transaction } from "../core/store.js";
+import { transaction, type Database } from "../core/store.js";
 
 const maxGitOutputBytes = 1024 * 1024;
 const maxTimerMs = 2_147_483_647;

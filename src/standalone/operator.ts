@@ -1,54 +1,54 @@
+import { questionCommandRawLimit } from "../operator/contracts.js";
+import type { OperatorWebBoundary } from "./operator-web.js";
+import {
+  OperatorApiError,
+  type OperatorReviewSessionContext,
+} from "./operator-api.js";
+import {
+  apiErrorSchema,
+  cliCapabilities,
+  cliIdentitySchema,
+  operatorCredentialIssueRequestSchema,
+  operatorCredentialIssuedSchema,
+  operatorCredentialListSchema,
+  sessionSchema,
+} from "../operator/contracts.js";
+import {
+  OperatorCredentialError,
+  operatorRouteAuthority,
+  type OperatorCredentialStore,
+  type VerifiedOperatorCredential,
+} from "./operator-credentials.js";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import {
   createServer,
   type IncomingMessage,
   type Server,
   type ServerResponse,
 } from "node:http";
-import { z } from "zod";
 import {
-  type DomainCommand,
   DomainCommands,
   DomainConflictError,
+  type DomainCommand,
   type DomainStore,
 } from "../core/domain.js";
-import {
-  type GitHubSourceStore,
-  selectionSchema,
-} from "../core/github-source.js";
-import {
-  apiErrorSchema,
-  cliCapabilities,
-  cliIdentitySchema,
-  operatorCredentialIssuedSchema,
-  operatorCredentialIssueRequestSchema,
-  operatorCredentialListSchema,
-  questionCommandRawLimit,
-  sessionSchema,
-} from "../operator/contracts.js";
+import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
 import {
   GitHubHttpSourceReader,
   type GitHubSourceReader,
 } from "./github-source.js";
 import {
-  OperatorApiError,
-  type OperatorReviewSessionContext,
-} from "./operator-api.js";
-import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
-import {
-  OperatorCredentialError,
-  type OperatorCredentialStore,
-  operatorRouteAuthority,
-  type VerifiedOperatorCredential,
-} from "./operator-credentials.js";
-import { escapeHtml, hidden } from "./operator-html.js";
+  selectionSchema,
+  type GitHubSourceStore,
+} from "../core/github-source.js";
 import {
   containsControlCharacters,
   decodeSegment,
   OperatorRouteRegistry,
   type OperatorRouteResult,
 } from "./operator-routes.js";
-import type { OperatorWebBoundary } from "./operator-web.js";
+import { escapeHtml, hidden } from "./operator-html.js";
 
 function field(
   name: string,

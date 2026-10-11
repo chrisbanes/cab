@@ -8,7 +8,7 @@ import {
   TypeSafeClient,
 } from "@typesafe-ai/sdk";
 import { z } from "zod";
-import { type Database, transaction } from "../core/store.js";
+import { transaction, type Database } from "../core/store.js";
 
 export const routingModel = "jev-1.13.0" as const;
 const maxAttempts = 2;

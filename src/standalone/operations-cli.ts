@@ -1,13 +1,13 @@
 import {
-  type LaunchAgentConfiguration,
-  renderLaunchAgent,
-  writeLaunchAgent,
-} from "./launchd.js";
-import {
   createSnapshot,
   restoreSnapshot,
   verifySnapshot,
 } from "./operations.js";
+import {
+  renderLaunchAgent,
+  writeLaunchAgent,
+  type LaunchAgentConfiguration,
+} from "./launchd.js";
 
 const USAGE =
   "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST>\n";

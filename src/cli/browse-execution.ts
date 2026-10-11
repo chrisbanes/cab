@@ -237,6 +237,7 @@ const executionInputs: BrowseCommand = {
       observedAt: read.observedAt,
       gaps: [
         ...captureCoverage(d.capture, [], d.segments),
+        ...(captured ? [] : (["evidence-unavailable"] as const)),
         ...(reconstructed
           ? captureCoverage(
               "captured",

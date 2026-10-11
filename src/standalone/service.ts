@@ -141,10 +141,10 @@ import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
   ExecutionState,
-  harnessRetrySupported,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
   type TaskExecutionContext,
+  harnessRetrySupported,
 } from "./state.js";
 import {
   ExecutionSupervisor,
@@ -4736,16 +4736,16 @@ export class StandaloneService {
         store.finish(request.workId);
         return undefined;
       }
-      const start = this.conversationExclusions(binding, workspace, true);
+      // Computed once per execution; every read re-sanitises with current exclusions.
+      const exclusions = unionExclusions(
+        this.conversationExclusions(binding, workspace, true),
+        this.conversationExclusions(binding, workspace, false),
+      );
       const capture = new ExecutionDiagnosticsCapture({
         store,
         workId: request.workId,
         threadId,
-        exclusions: () =>
-          unionExclusions(
-            start,
-            this.conversationExclusions(binding, workspace, false),
-          ),
+        exclusions,
       });
       const key = runtimeKey(harness, threadId);
       this.diagnosticCaptures.delete(key);
@@ -4848,10 +4848,7 @@ export class StandaloneService {
     try {
       const binding = this.requireState().taskBinding(request.workId);
       if (!binding) throw new Error("Execution binding unavailable");
-      const general = unionExclusions(
-        this.conversationExclusions(binding, workspace, true),
-        this.conversationExclusions(binding, workspace, false),
-      );
+      const general = capture.exclusions;
       const domain = this.domain();
       const assignment = domain.assignment(binding.assignmentId);
       const projectId = String(assignment.projectId),

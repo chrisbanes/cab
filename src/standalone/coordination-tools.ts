@@ -1,12 +1,12 @@
-import { z } from "zod";
-import type {
-  CoordinationCall,
-  CoordinationStore,
-  CoordinationToolResponse,
-} from "../core/coordination.js";
-import { externalActionArgumentsSchema } from "../core/delivery.js";
 import { questionToolArgumentsSchema } from "../core/question-forms.js";
 import { reviewMetadataSchema } from "../core/task-review.js";
+import { z } from "zod";
+import { externalActionArgumentsSchema } from "../core/delivery.js";
+import type {
+  CoordinationStore,
+  CoordinationCall,
+  CoordinationToolResponse,
+} from "../core/coordination.js";
 import type { RuntimeToolDefinition } from "./codex.js";
 
 const uuid = { type: "string", format: "uuid" };

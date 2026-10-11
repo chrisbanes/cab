@@ -2,13 +2,13 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { isAbsolute, join, resolve, sep } from "node:path";
 
 export const STANDALONE_MARKER_NAME = ".ensemble-standalone";
 export const STANDALONE_MARKER_CONTENTS = "ensemble-standalone-v1\n";

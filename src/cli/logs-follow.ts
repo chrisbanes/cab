@@ -97,15 +97,20 @@ export const logsCommand: BrowseCommand = {
   capabilities: ["cli.identity", "execution.read", "diagnostics.read"],
   async run(ctx) {
     const v = ctx.values;
+    const limit = pageLimit(v, { serverMax: 200 });
+    if (v.follow && v.output === "json")
+      throw new CliError(
+        "invalid-input",
+        "--follow streams; use --output jsonl or human output.",
+      );
     const query: Query = {
       workId: workIdArg(v.execution, "--execution"),
       kind: enumArg(v.kind, KINDS, "--kind"),
       severity: enumArg(v.severity, SEVERITIES, "--severity"),
       since: timeArg(v.after, "--after"),
       until: timeArg(v.before, "--before"),
-      limit: pageLimit(v, { serverMax: 200 }).limit,
+      limit: limit.limit,
     };
-    const limit = pageLimit(v, { serverMax: 200 });
     const interval = secondsArg(v.interval, "--interval", 30, 2);
     const maxDuration = secondsArg(
       v["max-duration"],

@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { Database } from "../src/core/store.js";
 import {
+  boundDetail,
   DiagnosticCursorError,
   ExecutionDiagnosticsStore,
   diagnosticLimitsFromEnv,
@@ -370,4 +371,16 @@ test("limits from the environment", () => {
     { ENSEMBLE_DIAGNOSTIC_STORAGE_MIB: "1048577" },
   ])
     assert.throws(() => diagnosticLimitsFromEnv(env));
+});
+
+test("an excluded value holding a pattern or another excluded value is still redacted whole", () => {
+  const instruction =
+    "Internal plan X. Staging token: lives-in-vault SECRET_VALUE end";
+  assert.deepEqual(
+    boundDetail({ echo: `before ${instruction} after` }, [
+      instruction,
+      "SECRET_VALUE",
+    ]),
+    JSON.parse(JSON.stringify({ echo: "before [redacted] after" })),
+  );
 });

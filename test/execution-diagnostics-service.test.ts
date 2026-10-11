@@ -13,6 +13,7 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
+import { OperatorApi } from "../src/standalone/operator-api.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import { tmpdir } from "./temp.js";
 
@@ -288,6 +289,19 @@ test("inputs are recorded before submission and equal the submitted bytes", asyn
     assert.match(request, /Echo: \[redacted\]/);
     await finishTurn(f, runtime, "turn-1");
     assert.deepEqual(f.intent(), { state: "completed", reason: null });
+    // An instruction holding a credential pattern stays redacted outside the inputs view.
+    const api = new OperatorApi(f.service, []);
+    const events = JSON.stringify(
+      await api.readExecutionEvents(f.workId, new URLSearchParams()),
+    );
+    assert.doesNotMatch(
+      events,
+      /PROJECT_INSTRUCTION_TEXT|PROFILE_INSTRUCTION_TEXT/,
+    );
+    const view = JSON.stringify(
+      await api.readExecutionInputs(f.workId, new URLSearchParams()),
+    );
+    assert.match(view, /PROJECT_INSTRUCTION_TEXT token=\[redacted\]/);
   } finally {
     await f.close();
   }

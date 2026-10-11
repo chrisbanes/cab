@@ -201,6 +201,25 @@ function boundLeaf(
 }
 
 /**
+ * Patterns and shorter values are redacted before a long value is matched, so an
+ * instruction holding `token=…` or another excluded value would no longer match
+ * itself; its already-redacted form is excluded too.
+ */
+function withPatternForms(exclusions: readonly string[]): readonly string[] {
+  // Longer values are matched first, so the pattern-only form is needed as well.
+  const forms = exclusions.flatMap((value) =>
+    [
+      sanitizeConversationText(value, []),
+      sanitizeConversationText(
+        value,
+        exclusions.filter((other) => other.length < value.length),
+      ),
+    ].filter((form): form is string => form !== undefined && form !== value),
+  );
+  return forms.length ? [...new Set([...exclusions, ...forms])] : exclusions;
+}
+
+/**
  * Sanitises every string leaf (never the serialised JSON, whose escaping defeats
  * exact-value matching) and replaces oversized leaves whole. Returns undefined when
  * redaction is unavailable.
@@ -212,7 +231,10 @@ export function boundDetail(
 ): unknown {
   if (exclusions === undefined) return undefined;
   try {
-    return boundLeaf(value, exclusions, leafBytes, undefined, 0) ?? null;
+    return (
+      boundLeaf(value, withPatternForms(exclusions), leafBytes, undefined, 0) ??
+      null
+    );
   } catch (error) {
     if (error === unavailable) return undefined;
     throw error;
@@ -703,8 +725,6 @@ export class ExecutionDiagnosticsStore {
   }
 }
 
-type Exclusions = () => readonly string[] | undefined;
-
 interface PendingItem {
   turnId: string | undefined;
   kind: DiagnosticKind;
@@ -745,12 +765,16 @@ export class ExecutionDiagnosticsCapture {
       workId: string;
       threadId: string;
       /** The general set: every instruction text stays redacted. */
-      exclusions: Exclusions;
+      exclusions: readonly string[] | undefined;
     },
   ) {}
 
   get workId() {
     return this.options.workId;
+  }
+
+  get exclusions() {
+    return this.options.exclusions;
   }
 
   receive(event: RuntimeDiagnosticEvent): void {
@@ -841,12 +865,7 @@ export class ExecutionDiagnosticsCapture {
   }
 
   private persist(item: PendingItem) {
-    let exclusions: readonly string[] | undefined;
-    try {
-      exclusions = this.options.exclusions();
-    } catch {
-      exclusions = undefined;
-    }
+    const exclusions = this.options.exclusions;
     this.options.store.record(
       this.options.workId,
       item.kind,

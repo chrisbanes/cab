@@ -47,6 +47,11 @@ export class SchedulerStore {
       reason TEXT,
       nextEligibleAt INTEGER
     )`);
+    // Execution list reads page by scope without scanning history.
+    for (const column of ["taskId", "assignmentId", "projectId"])
+      this.db.exec(
+        `CREATE INDEX IF NOT EXISTS turn_requests_${column}_sequence ON turn_requests(${column}, sequence)`,
+      );
     const columns = this.db
       .prepare("PRAGMA table_info(turn_requests)")
       .all() as Array<{ name: string }>;

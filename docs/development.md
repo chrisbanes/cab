@@ -174,7 +174,8 @@ or run `node dist/src/cli/main.js` directly.
      profile instructions) with the submitted byte count and SHA-256. It is not
      the runtime's effective prompt. It is the only diagnostic view that leaves the
      execution's own instruction text readable; credentials, patterns and private
-     paths stay redacted. An execution without a captured submission shows a
+     paths stay redacted, and `logs` shows instruction segments only as
+     `[redacted]`. An execution without a captured submission shows a
      labelled reconstruction from retained revisions instead.
      `--compare-current` compares bound and current instruction revisions and
      profile runtime settings.
