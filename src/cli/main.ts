@@ -153,6 +153,17 @@ export async function main(
         interval: { type: "string" },
         "max-duration": { type: "string" },
         "compare-current": { type: "boolean" },
+        title: { type: "string" },
+        "outcome-file": { type: "string" },
+        ready: { type: "string" },
+        blocker: { type: "string", multiple: true },
+        assignee: { type: "string" },
+        to: { type: "string" },
+        "message-file": { type: "string" },
+        "answers-file": { type: "string" },
+        decision: { type: "string" },
+        "expected-revision": { type: "string" },
+        "material-hash": { type: "string" },
       },
     });
     jsonl = values.output === "jsonl" && positionals[0] === "logs";

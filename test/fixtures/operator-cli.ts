@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -14,6 +15,7 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
+import { harness } from "./cli-harness.js";
 import { createOperatorFixture } from "./operator-web.js";
 
 type After = { after(fn: () => unknown): void };
@@ -192,4 +194,52 @@ export async function startCliService(
     issue,
     bearer,
   };
+}
+
+/** A real service plus a CLI harness logged in as `ro` (read) and `rw` (read-write). */
+export async function startCliOperator(
+  t: After,
+  options: Parameters<typeof startCliService>[1] = {},
+) {
+  const s = await startCliService(t, {
+    service: { supervisor: { observationMs: 50 } },
+    ...options,
+  });
+  const h = harness(t);
+  for (const [name, scope] of [
+    ["ro", "read"],
+    ["rw", "read-write"],
+  ] as const) {
+    const issued = await s.issue(scope, `operate-${name}`);
+    const login = await h.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(issued.token),
+    ]);
+    if (login.code !== 0) throw Error(`login ${name}: ${login.err}`);
+  }
+  /** Runs one command as JSON with the given connection. */
+  const cli = (
+    connection: "ro" | "rw",
+    args: string[],
+    extra: Parameters<typeof h.run>[1] = {},
+  ) => h.run([...args, "--connection", connection, "--output", "json"], extra);
+  /** A fetch that performs the command POST, then loses its reply. */
+  const lostReply: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (String(input).endsWith("/api/operator/commands"))
+      throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    return response;
+  };
+  const file = (name: string, text: string) => {
+    const path = join(h.dir, name);
+    writeFileSync(path, text);
+    return path;
+  };
+  return { s, h, cli, lostReply, file, d: s.f.service.domain() };
 }

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   type CliIdentity,
   type CommandReceipt,
@@ -89,6 +89,34 @@ export const optionalRequestId = (values: Values) =>
   values["request-id"] === undefined
     ? undefined
     : uuidArg(values["request-id"], "--request-id");
+
+/**
+ * The key for a repeatable intent (Stop, a message, an answer): an explicit --request-id,
+ * else a journal key whose outcome is still unresolved, else a new one. `reused` means an
+ * earlier attempt with this key may have applied, so pre-read gates must not block it.
+ */
+export async function chooseKey(
+  ctx: WriteContext,
+  session: Session,
+  identity: { scope: string; type: string },
+  material: unknown,
+) {
+  const service = session.identity.service.installationId;
+  const digest = createHash("sha256")
+    .update(JSON.stringify([service, identity.scope, identity.type, material]))
+    .digest("hex");
+  const requested = optionalRequestId(ctx.values);
+  const found =
+    requested ??
+    (await ctx.journal.find(service, digest, { unresolved: true }));
+  const key = found ?? randomUUID();
+  const reused =
+    found !== undefined &&
+    (requested === undefined ||
+      (await ctx.journal.state({ service, ...identity, key }))?.reached ===
+        true);
+  return { key, digest, reused };
+}
 
 export function reconcileHint(identity: RequestIdentity): string {
   return `ensemble operation get ${identity.key} --scope ${identity.scope} --type ${identity.type}`;

@@ -8,7 +8,7 @@ import {
 } from "../src/operator/contracts.js";
 import {
   OperatorApi,
-  OperatorApiError,
+  type OperatorApiError,
 } from "../src/standalone/operator-api.js";
 import { ExecutionState } from "../src/standalone/state.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
