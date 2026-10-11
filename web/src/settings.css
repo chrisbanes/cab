@@ -350,6 +350,20 @@
   gap: var(--space-12);
 }
 
+/* CLI credentials: no design frame yet (#904); built from the discovery row patterns. */
+.settings-credentials-form,
+.settings-credentials-list {
+  display: grid;
+  gap: var(--space-12);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-token {
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1120px) {
   .page-header-trail {
     display: none;
@@ -377,6 +391,8 @@
   .settings-page a[data-slot="button"],
   .settings-page button,
   .settings-discovery input,
+  .settings-credentials-form input,
+  .settings-credentials-form select,
   .settings-tabs a {
     min-height: 44px;
   }

@@ -2,6 +2,9 @@ import { z } from "zod";
 import {
   checkoutVerificationSchema,
   folderListingSchema,
+  operatorCredentialIssuedSchema,
+  operatorCredentialListSchema,
+  operatorCredentialSchema,
   sourceObservationSchema,
   apiErrorSchema,
   commandReceiptSchema,
@@ -170,6 +173,44 @@ export class OperatorClient {
       "/api/operator/setup/verify-checkout",
       checkoutVerificationSchema,
       input,
+      csrfToken,
+    );
+  }
+  credentials(signal?: AbortSignal) {
+    return this.read(
+      "/api/operator/credentials",
+      operatorCredentialListSchema,
+      signal,
+    );
+  }
+  issueCredential(
+    input: {
+      name: string;
+      scope: "read" | "read-write";
+      expiresInDays?: number;
+    },
+    csrfToken: string,
+  ) {
+    return this.post(
+      "/api/operator/credentials",
+      operatorCredentialIssuedSchema,
+      input,
+      csrfToken,
+    );
+  }
+  rotateCredential(id: string, csrfToken: string) {
+    return this.post(
+      `/api/operator/credentials/${encodeURIComponent(id)}/rotate`,
+      operatorCredentialIssuedSchema,
+      {},
+      csrfToken,
+    );
+  }
+  revokeCredential(id: string, csrfToken: string) {
+    return this.post(
+      `/api/operator/credentials/${encodeURIComponent(id)}/revoke`,
+      z.object({ credential: operatorCredentialSchema }).strict(),
+      {},
       csrfToken,
     );
   }
