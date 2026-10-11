@@ -19,10 +19,7 @@ const mismatch =
 
 test("Setup creates a paused project from discovered repositories and Projects", async (_t, journey) => {
   const { f, home, page } = await setupJourney(journey, { projects: true });
-  assert.equal(
-    await page.locator("main.page h1").textContent(),
-    "Create project",
-  );
+  await page.locator("main.page h1", { hasText: "Create project" }).waitFor();
   for (const heading of [
     "1 · Project and lead",
     "2 · Instructions",
@@ -259,10 +256,10 @@ test("Setup falls back to typed entry without discovery and on first run", async
     profiles: false,
     discovery: false,
   });
-  assert.equal(
-    await page.locator("main.page h1").textContent(),
-    "Set up your first project",
-  );
+  // The first-run title depends on the workspace read, which may land after the shell.
+  await page
+    .locator("main.page h1", { hasText: "Set up your first project" })
+    .waitFor();
   const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
   await crumbs.getByRole("link", { name: "Overview" }).waitFor();
   await crumbs.getByText("New project").waitFor();
@@ -520,4 +517,35 @@ test("Setup submitted with Enter records a typed listed repository by node ID", 
   };
   assert.equal(body.repositories[0]?.repositoryId, "R_atlas");
   assert.equal(body.repositories[0]?.ref, "main");
+});
+
+test("Setup clears a row's folder and ref when its repository is removed", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  await page.getByLabel("Project name", { exact: true }).fill("Cleared");
+  await chooseRepository(page, "acme/atlas");
+  await page.getByLabel("Local repository path").fill("~/src/atlas");
+  // Changing the repository keeps the folder and takes the new default branch.
+  await chooseRepository(page, "acme/relay");
+  assert.equal(
+    await page.getByLabel("Local repository path").inputValue(),
+    "~/src/atlas",
+  );
+  // No repository clears the row: nothing hidden reaches the command.
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "No repository · repository-free" });
+  await page.getByLabel("Local repository path").waitFor({ state: "detached" });
+  // Choosing a repository again starts from an empty folder.
+  await chooseRepository(page, "acme/atlas");
+  assert.equal(await page.getByLabel("Local repository path").inputValue(), "");
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "No repository · repository-free" });
+  const sent = commandRequest(page);
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  assert.equal("repositories" in body, false);
+  await page.getByText("Recorded Cleared as a paused project.").waitFor();
 });

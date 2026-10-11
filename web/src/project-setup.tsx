@@ -489,21 +489,37 @@ export function ProjectSetup(p: SettingsProps) {
                           disabled={disabled || discovery.state === "loading"}
                           value={row.repositoryId}
                           onChange={(e) => {
-                            if (e.target.value === typeOption) {
-                              update(i, { ...emptyRow("typed"), id: row.id });
+                            const value = e.target.value;
+                            if (value === row.repositoryId) return;
+                            // Typed entry keeps the chosen folder; the ref belonged to the old repository.
+                            if (value === typeOption) {
+                              update(i, {
+                                ...emptyRow("typed"),
+                                id: row.id,
+                                path: row.path,
+                              });
                               return;
                             }
                             const r = ready?.repositories.find(
-                              (x) => x.repositoryId === e.target.value,
+                              (x) => x.repositoryId === value,
                             );
+                            // No repository clears the whole row, so no hidden path or ref remains.
+                            if (!r) {
+                              update(i, {
+                                ...emptyRow("discovered"),
+                                id: row.id,
+                              });
+                              return;
+                            }
+                            // Another repository keeps the folder (frame 116: "change the repository").
                             update(i, {
                               ...row,
                               source: "discovered",
                               text: "",
-                              repositoryId: r?.repositoryId ?? "",
-                              owner: r?.owner ?? "",
-                              name: r?.name ?? "",
-                              ref: r?.defaultBranch ?? "",
+                              repositoryId: r.repositoryId,
+                              owner: r.owner,
+                              name: r.name,
+                              ref: r.defaultBranch,
                             });
                           }}
                         >
