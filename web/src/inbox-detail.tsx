@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type ComponentProps } from "react";
 import {
   taskSchema,
   type InboxItem,
@@ -7,8 +7,69 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button } from "./components.js";
 import { holdNotices } from "./inbox-presentation.js";
+import { QuestionResponse } from "./question-response.js";
 import { useOperatorResource } from "./resource.js";
 import { Alert } from "./ui/alert.js";
+
+/**
+ * The task read behind an Inbox detail's independent holds. Each change of `observedAt` (the
+ * Inbox's last successful read: a poll or Refresh) rereads it, unless a read is already pending.
+ */
+function useInboxTask(
+  client: OperatorClient,
+  session: Session,
+  taskId: string,
+  observedAt: number | null,
+  scope: "approval" | "question",
+) {
+  const loader = useCallback(
+      (signal: AbortSignal) =>
+        client.read(`/api/operator/tasks/${taskId}`, taskSchema, signal),
+      [client, taskId],
+    ),
+    resource = useOperatorResource(
+      `${session.csrfToken}:inbox-${scope}:${taskId}`,
+      loader,
+    ),
+    current = useRef(resource),
+    seen = useRef(observedAt);
+  current.current = resource;
+  useEffect(() => {
+    if (seen.current === observedAt) return;
+    seen.current = observedAt;
+    // A slow hold read settles before the next poll replaces it.
+    if (!current.current.state.pending) void current.current.refresh();
+  }, [observedAt]);
+  return resource;
+}
+
+/**
+ * An Inbox question with the independent holds that answering does not clear. The read lives here,
+ * above QuestionResponse, so the holds survive its switch to the recorded confirmation. The first
+ * read still loading, or a failed read, shows no hold and never gates answering.
+ */
+export function InboxQuestion({
+  observedAt,
+  ...props
+}: Omit<ComponentProps<typeof QuestionResponse>, "holds"> & {
+  observedAt: number | null;
+}) {
+  const { state } = useInboxTask(
+    props.client,
+    props.session,
+    props.taskId,
+    observedAt,
+    "question",
+  );
+  return (
+    <QuestionResponse
+      {...props}
+      holds={
+        state.data && !state.error ? holdNotices(state.data.data, "answer") : []
+      }
+    />
+  );
+}
 
 /**
  * An approval in the Inbox: the exact action, target and revision, and the independent holds an
@@ -26,14 +87,12 @@ export function ApprovalDetail({
   /** The Inbox's last successful read; each poll or Refresh rereads the holds. */
   observedAt: number | null;
 }) {
-  const loader = useCallback(
-      (signal: AbortSignal) =>
-        client.read(`/api/operator/tasks/${item.taskId}`, taskSchema, signal),
-      [client, item.taskId],
-    ),
-    resource = useOperatorResource(
-      `${session.csrfToken}:inbox-approval:${item.taskId}`,
-      loader,
+  const resource = useInboxTask(
+      client,
+      session,
+      item.taskId,
+      observedAt,
+      "approval",
     ),
     task = resource.state.data?.data,
     approval = task?.approvals.find(
@@ -41,15 +100,6 @@ export function ApprovalDetail({
     ),
     holds = task ? holdNotices(task) : [],
     unavailable = Boolean(task && (!approval || approval.materialUnavailable));
-  const current = useRef(resource),
-    seen = useRef(observedAt);
-  current.current = resource;
-  useEffect(() => {
-    if (seen.current === observedAt) return;
-    seen.current = observedAt;
-    // A slow hold read settles before the next poll replaces it.
-    if (!current.current.state.pending) void current.current.refresh();
-  }, [observedAt]);
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">

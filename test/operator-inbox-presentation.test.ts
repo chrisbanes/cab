@@ -166,3 +166,109 @@ test("every other admission reason still produces a hold notice", () => {
   assert.equal(unexplained.length, 1);
   assert.equal(unexplained[0]?.title, "Execution held");
 });
+
+test("answering a question words each hold notice for answers, with the same titles and items", () => {
+  const source = {
+    nativeBlockers: [
+      {
+        nodeId: "n1",
+        repositoryId: "r1",
+        repositoryName: "acme/design-system",
+        number: 87,
+        state: "open",
+      },
+    ],
+  } as unknown as TaskRead["data"]["source"];
+  const answer = (...args: Parameters<typeof task>) =>
+    holdNotices(task(...args), "answer");
+  const shape = (notices: ReturnType<typeof holdNotices>) =>
+    notices.map(({ id, title, items }) => ({ id, title, items }));
+  const cases: [
+    TaskRead["data"]["admission"]["reasons"],
+    Partial<TaskRead["data"]>,
+    string,
+    string,
+    string[],
+    string,
+  ][] = [
+    [
+      ["imported-blockers-blocked"],
+      { source },
+      "blocked",
+      "Execution blocked by dependency",
+      ["acme/design-system#87"],
+      "Source-owned hold. Answering does not clear it; execution still waits for the GitHub blocker.",
+    ],
+    [
+      ["imported-blockers-unknown"],
+      {},
+      "blockers-unknown",
+      "Execution held: dependencies unconfirmed",
+      [],
+      "GitHub blockers could not be confirmed. Answering does not clear this hold.",
+    ],
+    [
+      ["source-held"],
+      {},
+      "source-held",
+      "Execution held by the source",
+      [],
+      "Source review or hold is unresolved. Answering does not clear it.",
+    ],
+    [
+      ["local-dependency"],
+      {
+        localDependencies: [
+          { id: randomUUID(), title: "Build the base", state: "open" },
+        ],
+      },
+      "dependency",
+      "Execution blocked by dependency",
+      ["Build the base"],
+      "Dependency hold. Answering does not clear it.",
+    ],
+    [
+      ["project-paused"],
+      {},
+      "paused",
+      "Project paused",
+      [],
+      "Task paused. Recording answers does not resume execution.",
+    ],
+  ];
+  for (const [reason, label] of [
+    ["task-unready", "task not ready"],
+    ["task-not-open", "task not open"],
+    ["project-lead-unconfigured", "project lead not configured"],
+    ["project-lead-revoked", "project lead revoked"],
+    ["admission-blocked", "admission blocked"],
+  ] as const) {
+    cases.push([
+      [reason],
+      {},
+      reason,
+      `Execution held (${label})`,
+      [],
+      "Answering does not clear it.",
+    ]);
+  }
+  for (const [reasons, extra, id, title, items, detail] of cases) {
+    const notices = answer(reasons, extra);
+    // Wording is the only difference from the approval notices.
+    assert.deepEqual(
+      shape(notices),
+      shape(holdNotices(task(reasons, extra))),
+      id,
+    );
+    assert.deepEqual(shape(notices), [{ id, title, items }], id);
+    assert.equal(notices[0]?.detail, detail, id);
+    assert.ok(!notices[0]?.detail.includes("Approv"), id);
+  }
+  const unexplained = holdNotices(
+    task([], { admission: { eligible: false, reasons: [] } }),
+    "answer",
+  );
+  assert.equal(unexplained[0]?.id, "held");
+  assert.equal(unexplained[0]?.detail, "Answering does not clear it.");
+  assert.deepEqual(answer([]), []);
+});
