@@ -170,9 +170,15 @@ export function diagnosticLimitsFromEnv(
 
 const unavailable = Symbol("redaction-unavailable");
 
+interface Redaction {
+  exclusions: readonly string[];
+  /** Already-redacted forms of excluded values, longest first; see `redactedForms`. */
+  forms: readonly string[];
+}
+
 function boundLeaf(
   value: unknown,
-  exclusions: readonly string[],
+  redaction: Redaction,
   cap: number,
   key: string | undefined,
   depth: number,
@@ -181,42 +187,49 @@ function boundLeaf(
     const bytes = Buffer.byteLength(value, "utf8");
     if (bytes > (key === "command" ? Math.min(cap, commandLeafBytes) : cap))
       return { omitted: "size-limit", bytes };
-    const text = sanitizeConversationText(value, exclusions);
+    let text = sanitizeConversationText(value, redaction.exclusions);
     if (text === undefined) throw unavailable;
+    for (const form of redaction.forms)
+      text = text.split(form).join("[redacted]");
     return text;
   }
   if (value === null || typeof value !== "object")
     return typeof value === "bigint" ? String(value) : value;
   if (depth >= maxDepth) return { omitted: "size-limit", bytes: 0 };
   if (Array.isArray(value))
-    return value.map((v) =>
-      boundLeaf(v, exclusions, cap, undefined, depth + 1),
-    );
+    return value.map((v) => boundLeaf(v, redaction, cap, undefined, depth + 1));
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => [
       k,
-      boundLeaf(v, exclusions, cap, k, depth + 1),
+      boundLeaf(v, redaction, cap, k, depth + 1),
     ]),
   );
 }
 
+const formsByExclusions = new WeakMap<readonly string[], readonly string[]>();
 /**
- * Patterns and shorter values are redacted before a long value is matched, so an
- * instruction holding `token=…` or another excluded value would no longer match
- * itself; its already-redacted form is excluded too.
+ * Patterns and longer values are replaced before a value is matched, so an
+ * instruction holding `token=…` or another excluded value no longer matches
+ * itself. Its pattern-redacted and shorter-value-redacted forms are replaced in a
+ * post-pass. Computed once per exclusion list, outside the sanitiser's limits.
  */
-function withPatternForms(exclusions: readonly string[]): readonly string[] {
-  // Longer values are matched first, so the pattern-only form is needed as well.
-  const forms = exclusions.flatMap((value) =>
-    [
-      sanitizeConversationText(value, []),
-      sanitizeConversationText(
-        value,
-        exclusions.filter((other) => other.length < value.length),
-      ),
-    ].filter((form): form is string => form !== undefined && form !== value),
-  );
-  return forms.length ? [...new Set([...exclusions, ...forms])] : exclusions;
+function redactedForms(exclusions: readonly string[]): readonly string[] {
+  let forms = formsByExclusions.get(exclusions);
+  if (!forms) {
+    const found = new Set<string>();
+    for (const value of exclusions)
+      for (const form of [
+        sanitizeConversationText(value, []),
+        sanitizeConversationText(
+          value,
+          exclusions.filter((other) => other.length < value.length),
+        ),
+      ])
+        if (form !== undefined && form !== value) found.add(form);
+    forms = [...found].sort((a, b) => b.length - a.length);
+    formsByExclusions.set(exclusions, forms);
+  }
+  return forms;
 }
 
 /**
@@ -232,8 +245,13 @@ export function boundDetail(
   if (exclusions === undefined) return undefined;
   try {
     return (
-      boundLeaf(value, withPatternForms(exclusions), leafBytes, undefined, 0) ??
-      null
+      boundLeaf(
+        value,
+        { exclusions, forms: redactedForms(exclusions) },
+        leafBytes,
+        undefined,
+        0,
+      ) ?? null
     );
   } catch (error) {
     if (error === unavailable) return undefined;

@@ -1208,7 +1208,6 @@ export class DomainStore {
     };
   }
 
-  /** Internal credential reference for the TypeSafe adapter; never part of routing(). */
   /** Diagnostic capture for new executions; no row means the default, enhanced. */
   diagnosticCaptureMode(projectId: string): "enhanced" | "baseline" {
     const row = this.one(
@@ -1218,6 +1217,7 @@ export class DomainStore {
     return row?.mode === "baseline" ? "baseline" : "enhanced";
   }
 
+  /** Internal credential reference for the TypeSafe adapter; never part of routing(). */
   routingCredentialReference(projectId: string): string | null {
     const row = this.required(
       "SELECT credentialRef FROM project_routing WHERE projectId = ?",

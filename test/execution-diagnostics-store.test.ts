@@ -384,3 +384,14 @@ test("an excluded value holding a pattern or another excluded value is still red
     JSON.parse(JSON.stringify({ echo: "before [redacted] after" })),
   );
 });
+
+test("large excluded texts with patterns do not exhaust the redaction limits", () => {
+  const large = (n: number) =>
+    `${"Instruction body. ".repeat(3300)}token=abc /data/dir ${n}`;
+  const exclusions = [large(1), large(2), "/data/dir"];
+  assert.equal(boundDetail("hello", exclusions), "hello");
+  assert.equal(
+    boundDetail(`x ${large(1)} y`, exclusions, 64 * 1024),
+    "x [redacted] y",
+  );
+});

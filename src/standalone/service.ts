@@ -4,17 +4,14 @@ import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
-  credentialFreeEnvironment,
-  setChildCredentialExclusions,
-} from "../core/child-environment.js";
-import {
   type CoordinationCall,
   type CoordinationReceipt,
-  CoordinationStore,
   type CoordinationToolResponse,
+  CoordinationStore,
   type InboxDelivery,
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
+import { reviewMetadataSchema } from "../core/task-review.js";
 import {
   canonicalMaterial,
   type DeliveryActionRecord,
@@ -37,8 +34,7 @@ import {
   verifiedRepository,
 } from "../core/github-source.js";
 import { Store } from "../core/store.js";
-import { reviewMetadataSchema } from "../core/task-review.js";
-import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import { OperatorApi } from "./operator-api.js";
 import {
   CodexRuntime,
   parseFailureEvidence,
@@ -49,7 +45,12 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnSettings,
 } from "./codex.js";
+import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
+import {
+  managedAssignmentEnvironment,
+  OperatorCredentialStore,
+} from "./operator-credentials.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
   ConversationHistoryCapture,
@@ -60,6 +61,14 @@ import {
   dispatchCoordinationTool,
   isCoordinationTool,
 } from "./coordination-tools.js";
+import {
+  captureRetainedReviewAnchor,
+  captureRetainedResultEvidence,
+  failedRetainedResultEvidenceCandidate,
+  retainedReviewAnchorMaterialHash,
+  retainedReviewAnchorStageRequestSchema,
+  type RetainedReviewAnchorStageRequest,
+} from "./retained-evidence.js";
 import { CoordinationView } from "./coordination-view.js";
 import {
   STANDALONE_MARKER_CONTENTS,
@@ -73,10 +82,9 @@ import {
   ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
-  defaultExecutionHarness,
-  type ExecutionHarness,
-  executionHarnessSchema,
-} from "./execution-harness.js";
+  credentialFreeEnvironment,
+  setChildCredentialExclusions,
+} from "../core/child-environment.js";
 import type { GitHubDeliveryProvider } from "./github-delivery.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
@@ -86,11 +94,6 @@ import {
   type RuntimeUserInputOutcome,
   type RuntimeUserInputRequest,
 } from "./native-input.js";
-import { OperatorApi } from "./operator-api.js";
-import {
-  managedAssignmentEnvironment,
-  OperatorCredentialStore,
-} from "./operator-credentials.js";
 import {
   CaffeinateAssertion,
   ExecutionPower,
@@ -113,14 +116,6 @@ import type {
   TerminationVerifier,
 } from "./recovery-types.js";
 import {
-  captureRetainedResultEvidence,
-  captureRetainedReviewAnchor,
-  failedRetainedResultEvidenceCandidate,
-  type RetainedReviewAnchorStageRequest,
-  retainedReviewAnchorMaterialHash,
-  retainedReviewAnchorStageRequestSchema,
-} from "./retained-evidence.js";
-import {
   RoutingAttemptStore,
   type RoutingChoiceClient,
   RoutingCoordinator,
@@ -132,6 +127,11 @@ import {
   routingModel,
 } from "./routing.js";
 import type { RuntimeSafetyPort } from "./runtime-retention.js";
+import {
+  defaultExecutionHarness,
+  type ExecutionHarness,
+  executionHarnessSchema,
+} from "./execution-harness.js";
 import {
   SchedulerStore,
   type TurnRequest,

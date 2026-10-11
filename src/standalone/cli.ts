@@ -1,16 +1,16 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
-import { LocalOperatorHttp, LocalOperatorUi } from "./operator.js";
 import { OperatorApi } from "./operator-api.js";
+import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
+import {
+  StandaloneService,
+  type BackgroundFailureDiagnostic,
+} from "./service.js";
+import { LocalOperatorHttp, LocalOperatorUi } from "./operator.js";
 import { OperatorAuth } from "./operator-auth.js";
 import { coordinationOperatorRoutes } from "./operator-coordination.js";
 import { OperatorRouteRegistry } from "./operator-routes.js";
 import { runtimeOperatorRoutes } from "./operator-runtime.js";
-import { OperatorWebBoundary, OperatorWebBundle } from "./operator-web.js";
-import {
-  type BackgroundFailureDiagnostic,
-  StandaloneService,
-} from "./service.js";
 
 export type ServiceExitReason = "signal" | "background-failure";
 

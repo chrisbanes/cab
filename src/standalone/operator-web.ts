@@ -1,14 +1,13 @@
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { workspaceComparisonReadRequestSchema } from "../operator/contracts.js";
 import {
-  type OperatorApi,
   OperatorApiError,
+  type OperatorApi,
   type OperatorReviewSessionContext,
 } from "./operator-api.js";
 import type { WorkspaceInspectionRequest } from "./workspace-inspection.js";
-
+import { workspaceComparisonReadRequestSchema } from "../operator/contracts.js";
 const mime: Record<string, string> = {
   js: "text/javascript; charset=utf-8",
   mjs: "text/javascript; charset=utf-8",
