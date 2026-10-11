@@ -239,7 +239,9 @@ export function operatorRouteAuthority(
       "/api/operator/discovery/branches",
       "/api/operator/discovery/projects",
       "/api/operator/operations",
+      "/api/operator/executions",
     ].includes(path) ||
+    /^\/api\/operator\/executions\/[^/]+(?:\/(?:inputs|events))?$/.test(path) ||
     /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
       path,
     ) ||

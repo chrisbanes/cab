@@ -1661,6 +1661,22 @@ export class StandaloneService {
     return this.requireState().replaceConversationCommand(command);
   }
 
+  /** Bounded execution list reads; see SchedulerStore.assignmentPage. */
+  turnRequestPage(
+    scope: "taskId" | "assignmentId" | "projectId",
+    id: string,
+    before: number | undefined,
+    limit: number,
+  ): TurnRequest[] {
+    if (!this.schedulerStore) throw new Error("Service is not started");
+    return this.schedulerStore.assignmentPage(scope, id, before, limit);
+  }
+
+  turnRequest(workId: string): TurnRequest | undefined {
+    if (!this.schedulerStore) throw new Error("Service is not started");
+    return this.schedulerStore.find(workId);
+  }
+
   turnRequests(): TurnRequest[] {
     if (!this.schedulerStore) throw new Error("Service is not started");
     return this.schedulerStore.list();

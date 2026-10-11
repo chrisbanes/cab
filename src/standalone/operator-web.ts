@@ -202,6 +202,25 @@ export class OperatorWebBoundary {
         impact[2] ?? "",
         query,
       );
+    if (path === "/api/operator/executions")
+      return this.api.readExecutionList(query);
+    const execution = path.match(
+      /^\/api\/operator\/executions\/([^/]+)(?:\/(inputs|events))?$/,
+    );
+    if (execution) {
+      let workId: string;
+      try {
+        workId = decodeURIComponent(execution[1] ?? "");
+      } catch {
+        throw new OperatorApiError(400, "invalid-input");
+      }
+      if (execution[2] === "inputs")
+        return this.api.readExecutionInputs(workId, query);
+      if (execution[2] === "events")
+        return this.api.readExecutionEvents(workId, query);
+      if ([...query].length) throw new OperatorApiError(400, "invalid-input");
+      return this.api.readExecution(workId);
+    }
     if (path === "/api/operator/inbox") return this.api.readInbox(query);
     if (path === "/api/operator/discovery/branches")
       return this.api.readDiscoveryBranches(query);
@@ -426,7 +445,11 @@ export class OperatorWebBoundary {
         "/api/operator/cli",
         "/api/operator/credentials",
         "/api/operator/operations",
+        "/api/operator/executions",
       ].includes(path) ||
+      /^\/api\/operator\/executions\/[^/]+(?:\/(?:inputs|events))?$/.test(
+        path,
+      ) ||
       /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
       /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
         path,

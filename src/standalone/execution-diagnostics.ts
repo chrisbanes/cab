@@ -551,6 +551,14 @@ export class ExecutionDiagnosticsStore {
     };
   }
 
+  itemCount(workId: string): number {
+    return (
+      this.db
+        .prepare("SELECT COUNT(*) AS c FROM diagnostic_items WHERE workId = ?")
+        .get(workId) as { c: number }
+    ).c;
+  }
+
   /** The captured input segments in order. */
   inputs(workId: string): DiagnosticItem[] {
     return (

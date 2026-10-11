@@ -90,6 +90,8 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "operation.read",
     "capacity.read",
     "configuration.impact",
+    "execution.read",
+    "diagnostics.read",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;
