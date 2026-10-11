@@ -68,7 +68,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page.getByText("Shared command R2 original", { exact: true }).waitFor();
   assert.ok(page.url().includes(`result=${r.resultId}`));
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   await page.locator(`[data-search-record="${r.resultId}"]`).waitFor();
   assert.equal(page.url(), searchURL);

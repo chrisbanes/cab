@@ -9,6 +9,7 @@ import {
   until,
 } from "./fixtures/s07b-delivery.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
+import { taskStatusLine } from "../web/src/task-overview.js";
 const test = browserSuite("s07b-delivery");
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
@@ -39,13 +40,9 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
       const data = (
         await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
       ).data;
-      assert.match(
-        await page.locator("main .task-workspace header").innerText(),
-        new RegExp(data.task.state),
-      );
-      assert.match(
-        await page.locator("main .task-workspace header").innerText(),
-        new RegExp(`execution ${data.execution.state}`),
+      assert.equal(
+        await page.locator("main .page-header-title p").innerText(),
+        taskStatusLine(data),
       );
     };
     await page.goto(web.origin + taskPath);
@@ -243,8 +240,8 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
       .getByRole("heading", { name: "Release delivery", exact: true })
       .waitFor();
     assert.match(
-      await reopened.locator("main .task-workspace header").innerText(),
-      /done/,
+      await reopened.locator("main .page-header-title p").innerText(),
+      /^Done \//,
     );
     assert.equal(f.scripted.state.writes, writes);
     assert.equal(f.runtime.turns, 0);

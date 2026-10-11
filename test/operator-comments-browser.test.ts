@@ -327,9 +327,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByRole("button", { name: "Reconcile original operation", exact: true })
     .click();
   await replayEntry;
-  await page
-    .getByRole("link", { name: "Back to project", exact: true })
-    .click();
+  await page.locator(".page-header-back").click();
   await page.locator(`a[href="/app/tasks/${taskId}"]`).first().click();
   await page
     .getByRole("button", { name: "Reconcile original operation", exact: true })

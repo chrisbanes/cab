@@ -648,3 +648,75 @@ test("typed post-commit notification failure remains unknown through creation co
   );
   assert.equal(f.runtime.turns, 0);
 });
+test("savedOnDevice is claimed only after a successful on-device write", () => {
+  let fail = false;
+  const saved = new Map<string, string>();
+  const state = new ComposerState({
+    getItem: (k) => saved.get(k) ?? null,
+    setItem: (k, v) => {
+      if (fail) throw Error("quota");
+      saved.set(k, v);
+    },
+    removeItem: (k) => saved.delete(k),
+  });
+  assert.equal(state.savedOnDevice, false);
+  state.edit({ title: "Saved" });
+  assert.equal(state.savedOnDevice, true);
+  fail = true;
+  state.edit({ title: "Not saved" });
+  assert.equal(state.savedOnDevice, false);
+  fail = false;
+  state.edit({ title: "Saved again" });
+  state.discard();
+  assert.equal(state.savedOnDevice, false);
+});
+test("savedOnDevice follows every recovery write around a submission", async () => {
+  const saved = new Map<string, string>();
+  let failUnfinished = false,
+    failUnknown = false;
+  const storage = {
+    getItem: (k: string) => saved.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      const status = JSON.parse(v).status;
+      if (
+        (failUnfinished && status === "unfinished") ||
+        (failUnknown && status === "unknown")
+      )
+        throw Error("quota");
+      saved.set(k, v);
+    },
+    removeItem: (k: string) => saved.delete(k),
+  };
+  const rejecting = new OperatorClient(
+    async () =>
+      new Response(
+        JSON.stringify({
+          error: { code: "invalid-input", message: "Safe failure" },
+        }),
+        { status: 400 },
+      ),
+  );
+  const state = new ComposerState(storage);
+  state.edit({
+    projectId: randomUUID(),
+    title: "Saved",
+    outcome: "A useful outcome",
+  });
+  assert.equal(state.savedOnDevice, true);
+  // A rejected submission whose recovery write fails clears the claim.
+  failUnfinished = true;
+  await state.submit(rejecting, "csrf", true);
+  assert.equal(state.phase, "editable");
+  assert.match(state.notice, /Recovery unavailable\.$/);
+  assert.equal(state.savedOnDevice, false);
+  // A rejected submission whose recovery write succeeds restores it.
+  failUnfinished = false;
+  await state.submit(rejecting, "csrf", true);
+  assert.equal(state.phase, "editable");
+  assert.equal(state.savedOnDevice, true);
+  // A failed frozen write sends nothing and claims nothing.
+  failUnknown = true;
+  await state.submit(rejecting, "csrf", true);
+  assert.match(state.notice, /^Submission not sent/);
+  assert.equal(state.savedOnDevice, false);
+});

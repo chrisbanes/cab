@@ -217,8 +217,16 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByText("R2 original scope", { exact: true }).waitFor();
-  assert.ok(await page.getByText(/supported.*stale source revision/).count());
-  assert.ok(await page.getByText(/failed.*stale source revision/).count());
+  assert.ok(
+    await page
+      .getByText(/Supported by recorded evidence · stale source revision/)
+      .count(),
+  );
+  assert.ok(
+    await page
+      .getByText(/Failed recorded check · stale source revision/)
+      .count(),
+  );
   assert.equal(
     await page
       .getByText(
@@ -643,7 +651,8 @@ for (const [limitCase, sourceBody] of [
       0,
     );
     assert.equal(
-      await brief
+      await page
+        .locator(".task-source-line")
         .getByRole("link", { name: "Open GitHub to edit source", exact: true })
         .count(),
       1,

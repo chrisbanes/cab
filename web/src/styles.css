@@ -1631,11 +1631,6 @@ nav {
   }
 }
 
-.task-workspace nav.task-actions {
-  flex-direction: row;
-  justify-content: flex-start;
-}
-
 .search-workspace .search-history {
   flex-direction: row;
   align-items: center;

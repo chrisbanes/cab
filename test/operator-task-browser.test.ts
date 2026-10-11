@@ -137,10 +137,10 @@ test("List and Board preserve identical filtered task IDs and never submit comma
     .evaluate((el) => el.scrollLeft);
   await page.locator(`[data-task-id="${ids[0]}"] .task-title`).click();
   await page
-    .getByRole("heading", { name: "Evidence review", exact: true })
+    .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   assert.equal(
@@ -414,10 +414,7 @@ test("composer disclosures keep supplied values and open the section of each val
     );
   await page.getByLabel("Disclosure blocker").waitFor({ state: "attached" });
   assert.deepEqual(await summaries(), [
-    { open: false, summary: "Optional contextNone" },
-    { open: false, summary: "Reference linksNone" },
-    { open: false, summary: "AssigneeDefault project lead allocation" },
-    { open: false, summary: "DependenciesNone" },
+    { open: false, summary: "Optional settings · none supplied" },
   ]);
   await page.getByLabel("Task title").fill("Disclosed outcome");
   await page.getByLabel("Desired outcome").fill("Ship a useful result");
@@ -433,12 +430,7 @@ test("composer disclosures keep supplied values and open the section of each val
     while ((await open.count()) > 0) await open.first().click();
   };
   await collapse();
-  const supplied = [
-    { open: false, summary: "Optional context24 characters" },
-    { open: false, summary: "Reference links2 links" },
-    { open: false, summary: "AssigneeDisclosure lead" },
-    { open: false, summary: "Dependencies1 selected" },
-  ];
+  const supplied = [{ open: false, summary: "Optional settings · 4 supplied" }];
   assert.deepEqual(await summaries(), supplied);
   assert.equal(
     await page.getByLabel("Optional context").inputValue(),
@@ -461,7 +453,9 @@ test("composer disclosures keep supplied values and open the section of each val
   await page.waitForFunction(
     () => document.activeElement?.id === "composer-links",
   );
-  assert.equal((await summaries())[1]?.open, true);
+  assert.deepEqual(await summaries(), [
+    { open: true, summary: "Optional settings · 1 error" },
+  ]);
   assert.equal(commandWrites, 0);
   await screenshot(page, "390-composer-link-error-expanded");
   await page
@@ -483,15 +477,14 @@ test("composer disclosures keep supplied values and open the section of each val
     .getByRole("button", { name: "Resume unfinished input", exact: true })
     .click();
   await page.getByLabel("Disclosure blocker").waitFor({ state: "attached" });
-  assert.equal(
-    (await summaries())[2]?.summary,
-    "AssigneeSelected assignee unavailable",
-  );
+  await page
+    .getByText("Optional settings · 1 error", { exact: true })
+    .waitFor();
   // Fresh options reveal the problem before submission; both actions stay enabled.
   await page
     .getByText("Choose a currently permitted assignee.", { exact: true })
     .waitFor();
-  assert.equal((await summaries())[2]?.open, true);
+  assert.equal((await summaries())[0]?.open, true);
   for (const name of ["Create and start", "Save draft"])
     assert.equal(
       await page.getByRole("button", { name, exact: true }).isEnabled(),
@@ -504,7 +497,7 @@ test("composer disclosures keep supplied values and open the section of each val
   await page.waitForFunction(
     () => document.activeElement?.id === "composer-profileId",
   );
-  assert.equal((await summaries())[2]?.open, true);
+  assert.equal((await summaries())[0]?.open, true);
   await page
     .getByText("Choose a currently permitted assignee.", { exact: true })
     .waitFor();
@@ -990,10 +983,10 @@ test("populated task List and Board keep the approved hierarchy at responsive wi
     .locator(`.task-list [data-task-id="${ids.importedId}"] .task-title`)
     .click();
   await page
-    .getByRole("heading", { name: "Evidence review", exact: true })
+    .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
   await page
-    .getByRole("button", { name: "Back to originating view", exact: true })
+    .getByRole("link", { name: "Back to originating view", exact: true })
     .click();
   assert.equal(new URL(page.url()).searchParams.get("project"), ids.projectId);
   assert.deepEqual(
@@ -1346,9 +1339,7 @@ for (const viewport of [
       .getByRole("link", { name: ids.importedTitle, exact: true })
       .click();
     assert.ok(page.url().endsWith(`/app/tasks/${ids.importedId}`));
-    await page
-      .getByRole("link", { name: "Runtime / Stop / Resume", exact: true })
-      .waitFor();
+    await page.getByRole("link", { name: "Execution", exact: true }).waitFor();
     assert.equal(
       await page
         .locator('input[name="title"],textarea[name="outcome"]')
@@ -1358,7 +1349,7 @@ for (const viewport of [
     assert.equal(
       await page
         .getByRole("link", {
-          name: "Runtime / Stop / Resume",
+          name: "Execution",
           exact: true,
         })
         .count(),
@@ -1378,6 +1369,15 @@ for (const viewport of [
       .getByRole("heading", { name: "Service integration", exact: true })
       .waitFor();
     assert.ok(page.url().includes("source=github"));
+    // An unavailable retained source revision keeps the imported task's provenance.
+    await page.goto(
+      `${web.origin}/app/tasks/${ids.importedId}?source=${randomUUID()}`,
+    );
+    await page.getByText(/^Selected source revision is unavailable/).waitFor();
+    assert.equal(
+      await page.locator("#brief .task-provenance").textContent(),
+      "Requirements · GitHub",
+    );
     await page.goto(`${web.origin}/app/tasks`);
     await page
       .getByRole("link", { name: "Normal Stop observation", exact: true })

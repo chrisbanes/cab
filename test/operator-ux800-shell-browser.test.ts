@@ -105,8 +105,8 @@ test("production shell keeps direct task links usable and the navigation drawer 
     );
     assert.equal(
       geometry.back,
-      width <= 1120 ? "flex" : "none",
-      `${width}px nested-route Back mode`,
+      "flex",
+      `${width}px task detail keeps its header Back at every width`,
     );
     assert.equal(
       geometry.menu,
@@ -122,15 +122,18 @@ test("production shell keeps direct task links usable and the navigation drawer 
   }
   await captureBrowserEvidence(page, "1121-shell-sidebar-threshold");
 
-  // Nested screens use the detail header: Back to the static parent, no menu.
+  // A directly loaded task's Back returns to its project; the header has no menu.
   await page.setViewportSize({ width: 390, height: 844 });
-  const back = page.getByRole("link", { name: "Back to Tasks", exact: true });
+  const back = page.getByRole("link", {
+    name: `Back to ${longProjectName}`,
+    exact: true,
+  });
   assert.ok(
     (await back.evaluate((e) => e.getBoundingClientRect().height)) >= 44,
   );
   assert.equal(await page.locator("main h1").count(), 1);
   await back.click();
-  await page.waitForURL("**/app/tasks");
+  await page.waitForURL(`**/app/projects/${projectId}`);
   await page.locator("main.page h1").waitFor();
 
   const trigger = page.getByRole("button", {
@@ -188,8 +191,10 @@ test("production shell keeps direct task links usable and the navigation drawer 
   await dialog.getByRole("link", { name: "Search", exact: true }).click();
   await page.waitForURL("**/app/search");
   await page.goBack();
-  await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
-  assert.equal(new URL(page.url()).pathname, "/app/tasks");
+  await page
+    .getByRole("heading", { name: longProjectName, exact: true, level: 1 })
+    .waitFor();
+  assert.equal(new URL(page.url()).pathname, `/app/projects/${projectId}`);
 
   await trigger.click();
   await dialog.waitFor({ state: "visible" });
@@ -215,13 +220,15 @@ test("production shell keeps direct task links usable and the navigation drawer 
     true,
     "closing the drawer restores focus to its trigger",
   );
-  assert.equal(new URL(page.url()).pathname, "/app/tasks");
+  assert.equal(new URL(page.url()).pathname, `/app/projects/${projectId}`);
 
   // Browser Back from an open drawer to a nested screen closes it; Forward does not reopen it.
   await trigger.click();
   await dialog.waitFor({ state: "visible" });
   await page.goBack();
-  await page.getByRole("link", { name: "Back to Tasks" }).waitFor();
+  await page
+    .getByRole("link", { name: `Back to ${longProjectName}`, exact: true })
+    .waitFor();
   assert.equal(await dialog.count(), 0);
   await page.goForward();
   await trigger.waitFor();

@@ -1,0 +1,195 @@
+/* Task detail (frames 46a, 57, 47) and the Stop confirmation (132). */
+
+/* Header: Back above the title on every width; Execution and Stop… beside the Back. */
+.page-header[data-desktop-back] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "back actions"
+    "title title";
+  align-items: center;
+  row-gap: var(--space-8);
+}
+
+.page-header[data-desktop-back] .page-header-back {
+  display: inline-flex;
+  grid-area: back;
+  justify-self: start;
+  color: var(--muted-foreground);
+}
+
+.page-header[data-desktop-back] .page-header-title {
+  grid-area: title;
+}
+
+.page-header[data-desktop-back] .page-header-title p {
+  display: block;
+}
+
+.task-header-actions {
+  grid-area: actions;
+  display: flex;
+  gap: var(--space-8);
+}
+
+@media (max-width: 759px) {
+  .page-header[data-desktop-back] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "back" "title" "actions";
+  }
+
+  .task-header-actions [data-slot="button"] {
+    flex: 1;
+    min-height: 44px;
+  }
+}
+
+.stop-dialog ul {
+  margin: 0;
+  padding-left: var(--space-16);
+}
+
+.stop-dialog p,
+.stop-dialog li {
+  margin: 0 0 var(--space-4);
+}
+
+.stop-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+
+@media (max-width: 759px) {
+  .stop-dialog-actions {
+    flex-direction: column;
+  }
+
+  .stop-dialog-actions [data-slot="button"] {
+    min-height: 44px;
+  }
+}
+
+/* Body: source line, decision card, then two columns from the shell breakpoint. */
+.task-source-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8) var(--space-12);
+}
+
+.task-source-line p {
+  margin: 0;
+}
+
+.task-source-line .task-actions {
+  margin: 0;
+}
+
+.task-workspace section.decision-card {
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-12) var(--space-16);
+}
+
+.decision-card .decision + .decision {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-12);
+}
+
+.task-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-20);
+}
+
+@media (min-width: 1121px) {
+  .task-columns {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+    align-items: start;
+  }
+}
+
+.task-columns > section {
+  min-width: 0;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.task-provenance {
+  text-transform: uppercase;
+}
+
+.brief-prose {
+  white-space: pre-wrap;
+}
+
+.brief-criteria {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-8) 0;
+  display: grid;
+  gap: var(--space-8);
+}
+
+.brief-criteria li {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.criterion-label {
+  flex: none;
+  font-weight: var(--weight-medium);
+}
+
+.criterion-row,
+.assignment-row {
+  border-bottom: 1px solid var(--color-border);
+  padding-block: var(--space-8);
+}
+
+.task-workspace .criterion-row p,
+.task-workspace .assignment-row p {
+  margin: var(--space-4) 0;
+}
+
+.entry-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-block: var(--space-12);
+}
+
+.assignment-rows {
+  margin-block: var(--space-12);
+}
+
+.assignment-row button {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+@media (max-width: 1120px) {
+  .entry-links [data-slot="button"],
+  .task-source-line [data-slot="button"],
+  .decision-card [data-slot="button"],
+  .assignment-row button {
+    min-height: 44px;
+  }
+
+  .assignment-row button {
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+.task-workspace section.reply-card {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: var(--space-16);
+  background: var(--color-card);
+}

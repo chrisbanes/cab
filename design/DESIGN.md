@@ -1239,7 +1239,7 @@ Production Inbox and shared question response
 - A single question's choice cards stay in the reading flow (frame 06 pins them); only the submit area is sticky, inside the one scroll owner `.inbox-detail`, so a pinned option list cannot trap scrolling or cover a field.
 - Queue rows use read-model facts only: "PROJECT / KIND", the task title, the reason, the action ("Answer question", "Review material & decide", "Inspect execution") and "Requester · HH:MM · age". There are no short identifiers (Q-204, A-201: U3 #837), no "Execution uncertain" versus "Intervention problems" subtype (one "Interventions" option), and no grouped-question title on a phone.
 - Kept or omitted on purpose: the shell Refresh stays on the Inbox; the frame's "Today · 11:00" clock and the phone "Search" header action are not built; the header title is 18/600, not the older large title of frames 07 and 08.
-- "Recommended by <requester>" appears in the Inbox. The task page (`/app/tasks/:id?request=`) uses the same component but does not pass the requester yet, so it reads "Recommended" until U5 (#839) does.
+- "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
 - Entry points that apply: Inbox desktop and phone; the shared `QuestionResponse` at `/app/tasks/:id?request=`; the Overview and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
 - Hold copy in the approval pane, from the task read's `admission.reasons`; each reads "Approval does not clear it" or "Approving does not clear it":
@@ -1285,6 +1285,67 @@ Production Overview, List and Board
   capabilities the frames do not draw.
 - There is no phone Overview or phone List frame; both phone layouts are
   composed from the shell and desktop frames.
+
+### Task detail, composer and Stop
+
+Production task detail, composer and Stop confirmation
+([#839](https://github.com/chrisbanes/ensemble/issues/839)) differ from the frames
+as follows:
+
+- The 3 October task overview (46/46a `MRbe2`/`TG3LC`, 57 `gAT6T`, 47 `YFLwX`)
+  governs every task, local or imported, over the earlier 03a `RyH7J`, 12 `biA7p`
+  and 36/37/45 generation. There is no "Pause task" (no task-level pause command)
+  and no "Current holds" side panel; holds and admission reasons are lines in the
+  decision card. Imported tasks keep source/execution separation through the
+  "Requirements · GitHub" label, the source line ("Open GitHub to edit source",
+  "Refresh source observation") and the hold lines, not separate panes or tabs.
+- The header shows Back, the title, a status line ("Ready · waiting on
+  acme/design-system#87 / Accountable project lead: Mira") and two actions,
+  Execution and Stop…, at every width. Back is the only back control: with an
+  in-session origin it reads the origin view ("Board", "Overview", "Inbox",
+  "Search", "Tasks"; named "Back to originating view") and returns to that entry;
+  otherwise it is "Back to <project>". The breadcrumb ("Atlas / List · Waiting ·
+  AT-142") is not built.
+- Stop task submits the retained `/runtime/control/stop` form and lands on the
+  Execution page, where the Stop observation and Resume live. Unsent reply text on
+  the task page is not carried across that navigation; Keep running, Escape and
+  the overlay keep it. While Stop is recorded the header shows a disabled "Stop
+  requested" and the status line "Stopping; effects may continue". There is no
+  in-app Resume (a new write path).
+- No short identifiers (AT-142, A-104, R2, V-22, C-104): no read carries them.
+  Assignment rows show the profile name, a brief excerpt and the first eight
+  characters of the assignment id; results keep their recorded ids. There is no
+  "Approach" block (no recorded approach field), no "Compare screenshots" control
+  (recorded pairs render under the latest result), no clock times, and no
+  "Earlier results (2)" button (the Result revision select keeps earlier results).
+- The section-button row is gone. Frame 57's entries under the latest result link
+  in place to Files, Changes, Review, "Assignment context & identifiers",
+  "Assignment history" and "Message lead". "Review" has no count.
+- Criteria read C1, C2… in the brief and in the result's rows with the recorded
+  outcome ("Supported by recorded evidence", "Failed recorded check",
+  "Unverified"); no overall pass is derived. The literal brief, checklist syntax
+  included, stays in the "read supplied text" disclosure. "Ask lead about
+  criterion" keeps its exact-reference draft, which names the criterion by its
+  line in the brief ("criterion 3 in source revision 1"), not by its C label.
+- The phone keeps one reading column with the same in-place sections; the drill-in
+  screens of frames 47, 48, 51 and 55 are not built, so reading position,
+  expansions and unsent replies are not split across history entries.
+- The composer's h1 is "Create a task" with the drawn subtitle; the phone header
+  of frame 34 ("New task" plus an in-body "Create a task") is not duplicated. The
+  "Inherited from" panel shows the lead, the lead profile's public summary,
+  routing, pause, capacity and a "View project instructions" link. Instruction
+  text and repository access are not shown: no read exposes them. On a phone the
+  panel sits under Project.
+
+Entry points: Overview, List, Board, Inbox "Open task", Search results and the
+composer receipt open the same `/app/tasks/:id` with this header and Back; the
+composer is reached from Overview, List and a project's New task. The retained
+`/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
+and linked (Advanced task controls, Execution, Requests and coordination). No
+context menu, extension or notification surface applies. Counterparts: Stop →
+Execution → Resume (retained); Keep running and Escape send nothing; Optional
+settings collapse ↔ expand keeps values; a failed create keeps values and the
+existing receipt reconciliation.
 
 ## Using this snapshot
 

@@ -360,8 +360,8 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
   await page.getByLabel("Password", { exact: true }).fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator('[data-slot="card"]').first().waitFor();
-  // No route renders a destructive control until Stop (U5), so measure the classes the
-  // primitives' own destructive variants declare.
+  // Measure the classes the primitives' own destructive variants declare; the rendered
+  // Stop… tint is measured in operator-task-detail-browser.
   const destructiveClasses = (primitive: string) =>
     /destructive:\s*"([^"]+)"/.exec(
       readFileSync(

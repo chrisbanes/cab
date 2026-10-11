@@ -494,8 +494,8 @@ test("phone local review comments and sends to a receipt using the keyboard", as
   );
 
   // Move to the complete review with the section navigation, then send.
-  const nav = page.getByRole("navigation", { name: "Task sections" });
-  await nav.getByRole("link", { name: "Local review" }).focus();
+  const nav = page.getByRole("navigation", { name: "Task material" });
+  await nav.getByRole("link", { name: "Review", exact: true }).focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(
     () => document.activeElement?.id === "local-review-heading",
@@ -652,8 +652,8 @@ test("phone keyboard review to a completed lead shows the status line and resume
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Phone follow-up comment");
-  const nav = page.getByRole("navigation", { name: "Task sections" });
-  await nav.getByRole("link", { name: "Local review" }).focus();
+  const nav = page.getByRole("navigation", { name: "Task material" });
+  await nav.getByRole("link", { name: "Review", exact: true }).focus();
   await page.keyboard.press("Enter");
   await page.waitForFunction(
     () => document.activeElement?.id === "local-review-heading",

@@ -626,8 +626,8 @@ records deterministic qualification and its visual and runtime limits.
 The task workspace provides **Files**, **Changes**, **Retained result evidence**
 and **Local review** sections of the authenticated task route, so every entry
 point that opens a task reaches them. This is post-MVP capability; it adds no
-release or cutover gate. Section links scroll in place and keep the entry's origin
-for "Back to originating view". Exact links accept `path` with optional
+release or cutover gate. The Files, Changes and Review entries under the latest
+result scroll in place and keep the entry's origin for "Back to originating view". Exact links accept `path` with optional
 `repository`, comparison `target`/`repository`/`base`, `result` with `evidence`,
 and a sent `review` operation; missing or unauthorised targets explain their
 state and never substitute other bytes.

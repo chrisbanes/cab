@@ -162,6 +162,8 @@ export class ComposerState {
   phase: "editable" | "pending" | "unknown" | "recorded" = "editable";
   notice = "";
   errors: Record<string, string> = {};
+  /** The latest edit is stored in this tab; never true after a failed write. */
+  savedOnDevice = false;
   private readonly lifecycle = new CommandLifecycle<CreationCommand>();
   private generation = 0;
   private active = true;
@@ -199,6 +201,7 @@ export class ComposerState {
     if (saved) {
       this.input = saved.input;
       this.recovered = true;
+      this.savedOnDevice = true;
       if (saved.status === "unknown") {
         this.phase = "unknown";
         this.lifecycle.restoreUnknown(saved.command);
@@ -223,7 +226,9 @@ export class ComposerState {
         status: "unfinished",
         input: this.input,
       });
+      this.savedOnDevice = true;
     } catch {
+      this.savedOnDevice = false;
       this.notice =
         "Recovery unavailable for current edits. Reload may restore only the last successfully saved input.";
     }
@@ -236,6 +241,7 @@ export class ComposerState {
     } catch {}
     this.input = emptyInput();
     this.recovered = false;
+    this.savedOnDevice = false;
     this.notice = "";
     this.publish();
   }
@@ -298,7 +304,9 @@ export class ComposerState {
         input: this.input,
         command,
       });
+      this.savedOnDevice = true;
     } catch {
+      this.savedOnDevice = false;
       if (!wasUnknown) {
         this.lifecycle.reset();
         this.phase = "editable";
@@ -326,6 +334,7 @@ export class ComposerState {
         this.storage.removeItem(storageKey);
       } catch {}
       this.recovered = false;
+      this.savedOnDevice = false;
     } else if (disposition === "unknown") {
       this.phase = "unknown";
       this.notice =
@@ -340,7 +349,9 @@ export class ComposerState {
           status: "unfinished",
           input: this.input,
         });
+        this.savedOnDevice = true;
       } catch {
+        this.savedOnDevice = false;
         this.notice += " Recovery unavailable.";
       }
     }

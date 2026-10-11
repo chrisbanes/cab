@@ -4,6 +4,7 @@ import {
   type AnchorHTMLAttributes,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import type { ResourceState } from "./resource.js";
@@ -24,16 +25,30 @@ import {
   SheetTrigger,
 } from "./ui/sheet.js";
 
+/** An unmodified primary click; other clicks keep the browser's own link behaviour. */
+export const isPlainClick = (event: MouseEvent) =>
+  event.button === 0 &&
+  !event.ctrlKey &&
+  !event.metaKey &&
+  !event.shiftKey &&
+  !event.altKey;
+
 export const Button = forwardRef<
   HTMLButtonElement,
   ButtonHTMLAttributes<HTMLButtonElement> & {
-    variant?: "primary" | "secondary";
+    variant?: "primary" | "secondary" | "destructive";
   }
 >(function Button({ children, variant = "primary", className, ...props }, ref) {
   return (
     <PrimitiveButton
       ref={ref}
-      variant={variant === "primary" ? "default" : "outline"}
+      variant={
+        variant === "primary"
+          ? "default"
+          : variant === "destructive"
+            ? "destructive"
+            : "outline"
+      }
       className={cn("control", className)}
       {...props}
     >
@@ -229,6 +244,7 @@ export function PageHeader({
   badge,
   menu,
   back,
+  desktopBack,
   plain,
 }: {
   title: string;
@@ -236,7 +252,10 @@ export function PageHeader({
   action?: ReactNode;
   badge?: string | undefined;
   menu?: ReactNode;
-  back?: { href: string; label: string };
+  /** `history` returns to the in-session origin entry instead of opening `href`. */
+  back?: { href: string; label: string; ariaLabel?: string; history?: boolean };
+  /** Keep the Back link visible on desktop too (the task header draws it there). */
+  desktopBack?: boolean;
   /** Omit the desktop divider under the header (the Not found frame has none). */
   plain?: boolean;
 }) {
@@ -245,6 +264,7 @@ export function PageHeader({
       className="page-header"
       data-variant={back ? "detail" : "top-level"}
       data-plain={plain || undefined}
+      data-desktop-back={desktopBack || undefined}
     >
       {menu && <div className="phone-nav">{menu}</div>}
       {back && (
@@ -253,7 +273,20 @@ export function PageHeader({
           variant="ghost"
           className="control page-header-back"
         >
-          <a href={back.href} aria-label={`Back to ${back.label}`}>
+          <a
+            href={back.href}
+            aria-label={back.ariaLabel ?? `Back to ${back.label}`}
+            onClick={
+              back.history
+                ? (event) => {
+                    if (!isPlainClick(event)) return;
+                    // Return to the origin entry rather than letting the shell push a new one.
+                    event.preventDefault();
+                    history.back();
+                  }
+                : undefined
+            }
+          >
             <ChevronLeft aria-hidden="true" />
             <span>{back.label}</span>
           </a>

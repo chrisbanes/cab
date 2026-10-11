@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   composerOptionsSchema,
@@ -21,6 +21,8 @@ import { Textarea } from "./ui/textarea.js";
 import { ComposerState, type ComposerInput } from "./composer-state.js";
 import { useOperatorResource } from "./resource.js";
 import { reasonLabels } from "./tasks.js";
+import { optionalFields, optionalSummary } from "./composer-summary.js";
+import "./composer.css";
 export function TaskComposer({
   client,
   session,
@@ -57,7 +59,7 @@ export function TaskComposer({
     ),
     [linkText, setLinkText] = useState(state.input.links.join("\n")),
     [dependencyQuery, setDependencyQuery] = useState(""),
-    [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
+    [optionalOpen, setOptionalOpen] = useState(false);
   const input = state.input,
     locked = state.phase !== "editable";
   const optionsLoader = useCallback(
@@ -106,19 +108,11 @@ export function TaskComposer({
       "Choose existing dependencies in this project.";
   const unavailableFields = Object.keys(unavailable).join();
   useEffect(() => {
-    if (!unavailableFields) return;
-    setExpanded((open) => {
-      const next = new Set(open);
-      for (const field of unavailableFields.split(","))
-        next.add(sectionOf[field] ?? field);
-      return next;
-    });
+    if (unavailableFields) setOptionalOpen(true);
   }, [unavailableFields]);
-  // Collapsed sections stay mounted, so an error target only needs its section opened.
+  // The collapsed section stays mounted, so an error target only needs it opened.
   const reveal = (field: string) => {
-    flushSync(() =>
-      setExpanded((open) => new Set(open).add(sectionOf[field] ?? field)),
-    );
+    if (field in optionalFields) flushSync(() => setOptionalOpen(true));
     document.getElementById(`composer-${field}`)?.focus();
   };
   async function submit(ready: boolean) {
@@ -237,48 +231,20 @@ export function TaskComposer({
     );
   };
   const o = options.state.data?.data;
-  const disclosure = (
-    section: string,
-    label: string,
-    summary: string,
-    children: ReactNode,
-  ) => (
-    <details
-      className="composer-disclosure"
-      open={expanded.has(section)}
-      onToggle={(e) => {
-        const open = e.currentTarget.open;
-        setExpanded((current) => {
-          const next = new Set(current);
-          if (open) next.add(section);
-          else next.delete(section);
-          return next;
-        });
-      }}
-    >
-      <summary>
-        <span className="small-heading">{label}</span>
-        <span className="metadata muted">{summary}</span>
-      </summary>
-      {children}
-    </details>
+  const lead = o?.lead
+    ? workspace?.data.profiles.find((p) => p.id === o.lead?.profileId)
+    : undefined;
+  const optional = optionalSummary(input, o, unavailable, state.errors);
+  const optionalError = Object.keys(optionalFields).some(
+    (f) => state.errors[f],
   );
-  const assigneeName = input.profileId
-    ? !o
-      ? "Loading assignee options"
-      : (o.profiles.find((p) => p.id === input.profileId)?.name ??
-        "Selected assignee unavailable")
-    : o?.routingEnabled
-      ? "Automatic allocation via project routing"
-      : "Default project lead allocation";
-  const count = (n: number, one: string, many: string) =>
-    n === 0 ? "None" : `${n} ${n === 1 ? one : many}`;
   return (
     <section className="composer" aria-label="Task composer">
-      <p className="introduction muted">
-        Describe the outcome you want. Ensemble records a draft or Ready task;
-        execution remains subject to project policy and existing holds.
-      </p>
+      {state.savedOnDevice && state.phase === "editable" && (
+        <p className="metadata muted composer-saved">
+          Unfinished input saved on this device
+        </p>
+      )}
       {state.notice && (
         <Alert
           className="resource-status"
@@ -333,7 +299,13 @@ export function TaskComposer({
             {error("projectId")}
           </label>
           {input.projectId && (
-            <>
+            <aside
+              className="composer-inherited"
+              aria-label={`Inherited from ${o?.project.name ?? "project"}`}
+            >
+              <p className="metadata muted composer-inherited-title">
+                Inherited from {o?.project.name ?? "project"}
+              </p>
               <ResourceStatus
                 state={options.state}
                 retry={options.refresh}
@@ -341,10 +313,18 @@ export function TaskComposer({
               />
               {o && (
                 <div className="composer-policy">
+                  <p className="metadata muted">Accountable lead</p>
                   <p className="body">
-                    Configured project lead:{" "}
                     {o.lead?.name ??
                       (o.lead ? "Name unavailable" : "Unconfigured")}
+                  </p>
+                  {lead?.summary && (
+                    <p className="body muted">{lead.summary}</p>
+                  )}
+                  <p className="body muted">
+                    {o.routingEnabled
+                      ? "Routing chooses an assignee unless you pick one."
+                      : "The project lead is assigned unless you pick one."}
                   </p>
                   {o.project.paused && (
                     <p className="body">
@@ -363,9 +343,20 @@ export function TaskComposer({
                     /{o.capacity.globalLimit} global. Dependencies, Stop and
                     ownership are rechecked at admission.
                   </p>
+                  <a
+                    className="body"
+                    href={`/app/projects/${encodeURIComponent(input.projectId)}/settings`}
+                  >
+                    View project instructions
+                  </a>
+                  <h3 className="small-heading">Created ≠ running</h3>
+                  <p className="body muted">
+                    Execution may wait for project state, dependencies, capacity
+                    or holds. You'll see the reason on the task.
+                  </p>
                 </div>
               )}
-            </>
+            </aside>
           )}
           <label className="field body" htmlFor="composer-title">
             Task title
@@ -398,12 +389,12 @@ export function TaskComposer({
             </span>
             {error("outcome")}
           </label>
-          {disclosure(
-            "context",
-            "Optional context",
-            input.context.trim()
-              ? `${input.context.trim().length.toLocaleString()} characters`
-              : "None",
+          <details
+            className="composer-disclosure"
+            open={optionalOpen}
+            onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
+          >
+            <summary className="small-heading">{optional.summary}</summary>
             <label className="field body" htmlFor="composer-context">
               Optional context
               <Textarea
@@ -416,16 +407,7 @@ export function TaskComposer({
                 onChange={(e) => edit({ context: e.target.value })}
               />
               {error("context")}
-            </label>,
-          )}
-          {disclosure(
-            "links",
-            "Reference links",
-            count(
-              input.links.filter((link) => link.trim()).length,
-              "link",
-              "links",
-            ),
+            </label>
             <label className="field body" htmlFor="composer-links">
               Reference links
               <Textarea
@@ -444,12 +426,7 @@ export function TaskComposer({
                 and grant no repository access.
               </span>
               {error("links")}
-            </label>,
-          )}
-          {disclosure(
-            "assignee",
-            "Assignee",
-            assigneeName,
+            </label>
             <label className="field body" htmlFor="composer-profileId">
               Assignee
               <NativeSelect
@@ -476,18 +453,7 @@ export function TaskComposer({
                 accountable.
               </span>
               {error("profileId")}
-            </label>,
-          )}
-          {disclosure(
-            "dependencies",
-            "Dependencies",
-            [
-              count(input.blockerTaskIds.length, "selected", "selected"),
-              unavailable.blockerTaskIds &&
-                `${input.blockerTaskIds.filter((id) => !fresh?.dependencies.some((d) => d.id === id)).length} unavailable`,
-            ]
-              .filter(Boolean)
-              .join(" · "),
+            </label>
             <fieldset
               className="dependency-options"
               disabled={!o || options.state.status !== "fresh"}
@@ -547,7 +513,15 @@ export function TaskComposer({
                 <p className="body muted">No existing tasks in this project.</p>
               )}
               {error("blockerTaskIds")}
-            </fieldset>,
+            </fieldset>
+          </details>
+          {!optionalOpen && (
+            <div className="composer-optional-values metadata muted">
+              {optional.lines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              {optional.fix && <p>{optional.fix}</p>}
+            </div>
           )}
         </fieldset>
         {!locked && (
@@ -561,8 +535,9 @@ export function TaskComposer({
               Save draft
             </Button>
             <p className="metadata muted">
-              Saved drafts are not Ready. Create and start records Ready without
-              bypassing holds.
+              {optionalError
+                ? "Not created. Values retained. Review optional settings to continue."
+                : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
             </p>
           </div>
         )}
@@ -575,10 +550,3 @@ export function TaskComposer({
     </section>
   );
 }
-
-const sectionOf: Record<string, string> = {
-  context: "context",
-  links: "links",
-  profileId: "assignee",
-  blockerTaskIds: "dependencies",
-};
