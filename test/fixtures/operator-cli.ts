@@ -301,7 +301,14 @@ export async function deliveryWorld(
       requiredChecks: [{ name: "build", appId: 17 }],
     });
   grant(mode);
-  const s = await serveCli(t, f);
+  // Activation reads a complete, empty selection; nothing reaches GitHub.
+  const s = await serveCli(t, f, {
+    previewReader: () => ({
+      async readSelection() {
+        return { complete: true, issues: [], reason: null };
+      },
+    }),
+  });
   const o = await loginCli(t, s);
   const ok = async (connection: "ro" | "rw", args: string[], extra = {}) => {
     const r = await o.cli(connection, args, extra);
