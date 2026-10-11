@@ -290,6 +290,12 @@ test("the journal finds earlier keys, keeps concurrent lines and fails closed", 
   assert.equal(text.trim().split("\n").length, 40);
   assert.equal(await a.find(service, "digest-7"), keys[7]);
   assert.equal(await a.find(randomUUID(), "digest-7"), undefined);
+  // A key whose latest state is rejected is not offered for reuse.
+  await a.append(identity(keys[3] ?? ""), "digest-3", "rejected");
+  assert.equal(await a.find(service, "digest-3"), undefined);
+  const retry = randomUUID();
+  await a.append(identity(retry), "digest-3", "sending");
+  assert.equal(await a.find(service, "digest-3"), retry);
   await b.append(identity(keys[7] ?? ""), "digest-7", "unknown");
   assert.deepEqual(await a.state(identity(keys[7] ?? "")), {
     state: "unknown",

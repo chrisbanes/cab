@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { chmod, mkdir, open, readFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { CliError } from "./connections.js";
@@ -50,6 +50,7 @@ export class RequestJournal {
     try {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });
       await chmod(this.directory, 0o700);
+      const created = !(await stat(this.file).catch(() => undefined));
       const handle = await open(
         this.file,
         constants.O_WRONLY |
@@ -64,6 +65,15 @@ export class RequestJournal {
         await handle.sync();
       } finally {
         await handle.close();
+      }
+      if (created) {
+        // Make the new directory entry durable as well as its first line.
+        const directory = await open(this.directory, constants.O_RDONLY);
+        try {
+          await directory.sync();
+        } finally {
+          await directory.close();
+        }
       }
     } catch {
       throw unavailable();
@@ -89,10 +99,15 @@ export class RequestJournal {
     });
   }
 
-  /** The most recent key recorded for this service and material digest. */
+  /** The most recent reusable key for this service and digest; rejected keys are skipped. */
   async find(service: string, digest: string) {
-    return (await this.lines()).findLast(
-      (l) => l.service === service && l.digest === digest,
+    const lines = await this.lines();
+    const latest = new Map(lines.map((l) => [l.key, l.state]));
+    return lines.findLast(
+      (l) =>
+        l.service === service &&
+        l.digest === digest &&
+        latest.get(l.key) !== "rejected",
     )?.key;
   }
 

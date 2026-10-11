@@ -12,8 +12,9 @@ import {
   consistentRead,
   readImpact,
   readTextFile,
+  requireOut,
   uuidOrNone,
-  versionFlag,
+  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import {
@@ -55,9 +56,8 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
-        if (!ctx.values.out)
-          throw new CliError("usage", "--out FILE is required.");
-        const expected = versionFlag(
+        requireOut(ctx);
+        const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
         );
@@ -100,10 +100,12 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           projectId: id,
           expectedVersion: p.version,
         };
-        if (ctx.values.name !== undefined && ctx.values.name !== p.name) {
+        // The contract trims names; compare what the service will store.
+        const name = ctx.values.name?.trim();
+        if (name !== undefined && name !== p.name) {
           if (p.name === null) gaps.push("content-unavailable");
-          command.name = ctx.values.name;
-          changes.push({ field: "name", from: p.name, to: ctx.values.name });
+          command.name = name;
+          changes.push({ field: "name", from: p.name, to: name });
         }
         if (paused !== undefined && paused !== p.paused) {
           command.paused = paused;
@@ -148,8 +150,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
       positionals: 0,
       flags: ["out", "name", "lead-profile", "instructions-file", "id"],
       async run(ctx) {
-        if (!ctx.values.out)
-          throw new CliError("usage", "--out FILE is required.");
+        requireOut(ctx);
         if (ctx.values.name === undefined)
           throw new CliError("usage", "--name is required.");
         const id =
@@ -168,13 +169,13 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           command: {
             type: "project.create",
             projectId: id,
-            name: ctx.values.name,
+            name: ctx.values.name?.trim(),
             leadProfileId: lead,
             ...(instructions === undefined ? {} : { instructions }),
           },
           changes: [
             { field: "project", from: null, to: id },
-            { field: "name", from: null, to: ctx.values.name },
+            { field: "name", from: null, to: ctx.values.name?.trim() },
             { field: "leadProfileId", from: null, to: lead ?? "none" },
             ...(instructions === undefined
               ? []

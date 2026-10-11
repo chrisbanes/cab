@@ -111,6 +111,32 @@ test("operation readback returns the POST receipt for every configuration type",
     `scope=project:${projectId}&type=project.configure&key=${routingCase?.key}`,
   );
   assert.equal(mismatch.status, 409);
+  // The command type is bound: creation and change receipts never cross-read.
+  const assignmentKey = randomUUID();
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: assignmentKey,
+    projectId: seed.projectA,
+    taskId: seed.taskA,
+    assignmentId: randomUUID(),
+    profileId: seed.profileId,
+    brief: "Helper",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  for (const [scope, type, key] of [
+    [`profile:${profileId}`, "profile.configure", cases[0]?.[1].key],
+    [`profile:${profileId}`, "profile.create", cases[1]?.[1].key],
+    [`project:${projectId}`, "project.configure", cases[2]?.[1].key],
+    [`project:${projectId}`, "project.create", cases[3]?.[1].key],
+    [`project:${seed.projectA}`, "assignment.apply", assignmentKey],
+  ])
+    assert.equal(
+      (await operation(read, `scope=${scope}&type=${type}&key=${key}`)).status,
+      409,
+      `${type} ${key}`,
+    );
 
   // One UUID used as a key in two scopes reads back each scope's own receipt.
   const shared = randomUUID();

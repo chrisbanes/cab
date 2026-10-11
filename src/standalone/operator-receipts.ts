@@ -81,5 +81,12 @@ export function commandReceipt(
     result,
   });
   if (!parsed.success) throw new ReceiptShapeError();
+  // Creation always records version 1; configure and apply always bump past it.
+  if (
+    type !== "capacity.configure" &&
+    type !== "routing.configure" &&
+    type.endsWith(".create") !== (Number(r.version) === 1)
+  )
+    throw new ReceiptShapeError();
   return parsed.data;
 }

@@ -90,7 +90,7 @@ export function boolFlag(value: string | undefined, flag: string) {
   return value === "true";
 }
 
-export function versionFlag(value: string | undefined, flag: string) {
+export function positiveIntFlag(value: string | undefined, flag: string) {
   if (value === undefined) return undefined;
   if (!/^[1-9][0-9]{0,8}$/.test(value))
     throw new CliError(
@@ -329,7 +329,9 @@ export async function applyFile(
     type: document.kind,
     key,
   };
-  if (creation && !(await ctx.journal.state(identity))) {
+  const earlier = (await ctx.journal.state(identity))?.state;
+  // Only an attempt that may have reached the service can make an existing ID ours.
+  if (creation && !["sending", "unknown", "recorded"].includes(earlier ?? "")) {
     // A duplicate ID with a fresh key is not yet a typed service error.
     const path = `/api/operator/${AREA[document.kind]}s/${document.target.id}/configuration`;
     const exists = await session.client
@@ -353,6 +355,14 @@ export async function applyFile(
     digest: document.digest,
     resource: document.target.id,
     command: { ...command, key },
+  }).catch((error: unknown) => {
+    if (error instanceof CliError && error.code === "conflict")
+      throw new CliError(
+        "conflict",
+        `${document.target.scope} changed since this document was prepared, or request ${key} was used with other material. Nothing was applied; review the current state and prepare again.`,
+        error.extra,
+      );
+    throw error;
   });
   return {
     request,

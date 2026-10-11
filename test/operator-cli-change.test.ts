@@ -187,6 +187,8 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
     ["--instructions-file", file("same.md", seed.text.profile[0] ?? "")],
     ["--restore-revision", "1", "--instructions-file", file("x.md", "x")],
     ["--paused", "true"],
+    // Trimmed like the service, so this is no change.
+    ["--name", "Shared lead "],
   ]) {
     const target = out();
     const denied = await cli("ro", [
@@ -284,9 +286,27 @@ test("project changes and creation apply exactly once", async (t) => {
     create,
   ]);
   assert.equal(r.code, 0, r.err + r.out);
+  // A read-only attempt is journalled as rejected; its key is not reused.
+  r = await cli("ro", ["project", "apply", "--file", create]);
+  assert.equal(r.code, 3, r.out);
+  const rejectedKey = r.json().error.request.key;
   r = await cli("rw", ["project", "apply", "--file", create]);
   assert.equal(r.code, 0, r.err + r.out);
   const first = r.json().data.receipt;
+  assert.notEqual(first.key, rejectedKey);
+  // A rejected key still gets the existence pre-check instead of being sent.
+  const posts = h.fetches.filter((f) => f.endsWith("/commands")).length;
+  r = await cli("rw", [
+    "project",
+    "apply",
+    "--file",
+    create,
+    "--request-id",
+    rejectedKey,
+  ]);
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.json().error.message, /already exists/);
+  assert.equal(h.fetches.filter((f) => f.endsWith("/commands")).length, posts);
   assert.equal(first.result.paused, true);
   assert.equal(first.result.leadProfileId, seed.profileId);
   assert.equal(d.instructionRevision(id, 1), "Delta one");
@@ -377,6 +397,11 @@ test("stale revisions, tampering, wrong services and denials send nothing", asyn
   assert.equal(r.code, 4, r.out);
   assert.equal(r.json().error.code, "conflict");
   assert.equal(r.json().error.outcome, "not-applied");
+  assert.match(
+    r.json().error.message,
+    /changed since this document was prepared.*prepare again/,
+  );
+  assert.equal(r.json().error.request.scope, `profile:${seed.profileId}`);
   assert.equal(databaseDigest(s.f), before);
   r = await cli("ro", [
     "profile",

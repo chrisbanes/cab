@@ -2,8 +2,9 @@ import { runtimeSettingsSchema } from "../operator/contracts.js";
 import { uuidArg } from "./browse.js";
 import {
   applyFile,
+  requireOut,
   type Change,
-  versionFlag,
+  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import { CliError } from "./connections.js";
@@ -18,9 +19,11 @@ export const capacityWriteCommands = new Map<string, WriteCommand>([
       positionals: 0,
       flags: ["out", "global-limit", "project-limit"],
       async run(ctx) {
-        if (!ctx.values.out)
-          throw new CliError("usage", "--out FILE is required.");
-        const global = versionFlag(ctx.values["global-limit"], "global-limit");
+        requireOut(ctx);
+        const global = positiveIntFlag(
+          ctx.values["global-limit"],
+          "global-limit",
+        );
         const limits = new Map<string, number | null>();
         for (const entry of ctx.values["project-limit"] ?? []) {
           const [project = "", value = ""] = entry.split("=");
@@ -34,7 +37,7 @@ export const capacityWriteCommands = new Map<string, WriteCommand>([
             id,
             value === "default"
               ? null
-              : (versionFlag(value, "project-limit") ?? null),
+              : (positiveIntFlag(value, "project-limit") ?? null),
           );
         }
         const session = await ctx.connect(["cli.identity", "capacity.read"]);

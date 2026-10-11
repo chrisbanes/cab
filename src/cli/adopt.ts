@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { assignmentDetailSchema } from "../operator/contracts.js";
 import { uuidArg } from "./browse.js";
-import { versionFlag } from "./configure.js";
+import { positiveIntFlag } from "./configure.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
 import { keyValues } from "./render.js";
@@ -17,7 +17,7 @@ export const adoptCommands = new Map<string, WriteCommand>([
       flags: ["expected-version", "request-id"],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");
-        const expected = versionFlag(
+        const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
         );

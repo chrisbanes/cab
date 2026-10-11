@@ -12,7 +12,8 @@ import {
   consistentRead,
   readImpact,
   readTextFile,
-  versionFlag,
+  requireOut,
+  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import { CliError } from "./connections.js";
@@ -73,7 +74,10 @@ export async function proposedInstructions(
       "usage",
       "Use either --instructions-file or --restore-revision, not both.",
     );
-  const revision = versionFlag(values["restore-revision"], "restore-revision");
+  const revision = positiveIntFlag(
+    values["restore-revision"],
+    "restore-revision",
+  );
   if (revision !== undefined)
     return restorable(await restore(revision), revision);
   return readTextFile(values["instructions-file"], "instructions-file");
@@ -142,9 +146,8 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROFILE_ID");
-        if (!ctx.values.out)
-          throw new CliError("usage", "--out FILE is required.");
-        const expected = versionFlag(
+        requireOut(ctx);
+        const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
         );
@@ -196,8 +199,8 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
           command[name] = next;
           changes.push({ field: name, from: show(now), to: show(next) });
         };
-        field("name", p.profile.name, ctx.values.name);
-        field("summary", p.profile.summary, ctx.values.summary);
+        field("name", p.profile.name, ctx.values.name?.trim());
+        field("summary", p.profile.summary, ctx.values.summary?.trim());
         field("capabilities", p.capabilities, capabilities, (v) =>
           v === null ? null : `${v.length} characters`,
         );
@@ -249,8 +252,7 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
         "id",
       ],
       async run(ctx) {
-        if (!ctx.values.out)
-          throw new CliError("usage", "--out FILE is required.");
+        requireOut(ctx);
         if (
           ctx.values.name === undefined ||
           ctx.values["instructions-file"] === undefined
@@ -278,16 +280,16 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
           command: {
             type: "profile.create",
             profileId: id,
-            name: ctx.values.name,
+            name: ctx.values.name?.trim(),
             ...(ctx.values.summary === undefined
               ? {}
-              : { summary: ctx.values.summary }),
+              : { summary: ctx.values.summary?.trim() }),
             instructions,
             capabilities,
           },
           changes: [
             { field: "profile", from: null, to: id },
-            { field: "name", from: null, to: ctx.values.name },
+            { field: "name", from: null, to: ctx.values.name?.trim() },
             {
               field: "instructions",
               from: null,

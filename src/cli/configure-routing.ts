@@ -3,9 +3,9 @@ import {
   boolFlag,
   type Change,
   checkExpected,
-  consistentRead,
   readTextFile,
-  versionFlag,
+  requireOut,
+  positiveIntFlag,
   writePrepared,
 } from "./configure.js";
 import { readProject } from "./configure-project.js";
@@ -32,9 +32,8 @@ export const routingWriteCommands = new Map<string, WriteCommand>([
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
-        if (!ctx.values.out)
-          throw new CliError("usage", "--out FILE is required.");
-        const expected = versionFlag(
+        requireOut(ctx);
+        const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
         );
@@ -61,11 +60,7 @@ export const routingWriteCommands = new Map<string, WriteCommand>([
           "guidance-file",
         );
         const session = await ctx.connect(["cli.identity", "workspace.read"]);
-        const config = await consistentRead(
-          () => readProject(session.client, id),
-          (r) => r.data.routing.version,
-          async () => undefined,
-        );
+        const config = await readProject(session.client, id);
         const { routing, profiles } = config.data;
         checkExpected(routing.version, expected);
         const active = new Set(

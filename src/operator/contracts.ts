@@ -2781,7 +2781,7 @@ export const configurationImpactSchema = envelope(
             .strict(),
         )
         .max(200),
-      total: time,
+      total: z.number().int().nonnegative().safe(),
       truncated: z.boolean(),
       limit: z.number().int().min(1).max(200),
     })
