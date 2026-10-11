@@ -92,11 +92,32 @@ export class ConfigurationDraft {
     this.changed();
     return true;
   }
+  /** The loaded values the current input started from; adoption compares against it. */
+  private base: Record<string, string | boolean | string[]> = {};
   initialize(values: Record<string, string | boolean | string[]>) {
     if (!this.dirty && !this.frozen) {
       this.values = { ...values };
+      this.base = { ...values };
       this.changed();
     }
+  }
+  /**
+   * Adopt a newer loaded revision: fields the operator has not changed since loading take
+   * the latest values, edited fields keep the input, and the version moves forward.
+   */
+  adoptLatest(
+    version: number,
+    latest: Record<string, string | boolean | string[]>,
+  ) {
+    if (this.phase === "pending" || this.lifecycle.uncertain) return;
+    const same = (a: unknown, b: unknown) =>
+      JSON.stringify(a) === JSON.stringify(b);
+    const values = { ...this.values };
+    for (const [field, value] of Object.entries(latest))
+      if (same(values[field], this.base[field])) values[field] = value;
+    this.values = values;
+    this.base = { ...latest };
+    this.adoptVersion(version);
   }
   adoptVersion(version: number) {
     if (this.phase === "pending" || this.lifecycle.uncertain) return;
@@ -119,6 +140,7 @@ export class ConfigurationDraft {
   purge() {
     this.generation++;
     this.values = {};
+    this.base = {};
     this.lifecycle.reset();
     this.errors = {};
     this.phase = "editing";

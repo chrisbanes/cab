@@ -147,9 +147,11 @@ export function sourceRowsFrom(source: Source) {
       active: s.active,
       keep: true,
     })),
+    // `savedRef` remembers the loaded ref, so adoption can tell an edited ref from a stale one.
     repositories: source.repositories.map((r) => ({
       repositoryId: r.repositoryId ?? "",
       ref: r.ref ?? "",
+      savedRef: r.ref ?? "",
       keep: true,
     })),
     conditions: (
@@ -273,44 +275,79 @@ export function staleSourceRows(source: Source, v: Values) {
   ].map((r) => String(r.id ?? r.repositoryId));
 }
 
-/** Rows for a newly adopted revision: draft edits kept, rows saved since added, gone rows dropped. */
+/**
+ * Rows for a newly adopted revision. Kept rows take the latest saved definition (and the
+ * latest ref unless the operator edited it); rows saved elsewhere join as kept rows; kept
+ * rows removed elsewhere are dropped; a new selection whose id was saved elsewhere takes the
+ * next free id. A new repository link whose id was saved elsewhere stays beside the saved
+ * link, and `duplicateSourceIds` blocks Save until the operator removes one of them.
+ */
 export function adoptSourceRows(source: Source, v: Values) {
   const loaded = sourceRowsFrom(source);
   const merge = (
     draft: SourceRow[],
     saved: SourceRow[],
     id: (r: SourceRow) => unknown,
+    refresh: (draft: SourceRow, saved: SourceRow) => SourceRow,
   ) => [
-    ...draft.filter((r) => !r.keep || saved.some((s) => id(s) === id(r))),
+    ...draft.flatMap((r) => {
+      if (!r.keep) return [r];
+      const latest = saved.find((s) => id(s) === id(r));
+      return latest ? [refresh(r, latest)] : [];
+    }),
     ...saved
-      .filter((s) => !draft.some((r) => id(r) === id(s)))
+      .filter((s) => !draft.some((r) => r.keep && id(r) === id(s)))
       .map((s) => ({ ...s, rowKey: crypto.randomUUID() })),
   ];
-  // A new row whose id was saved elsewhere meanwhile takes the next free id, so a save never
-  // replaces that source under the same id.
   const saved = source.selections.flatMap((x) => (x.id ? [x.id] : []));
-  const drafted = parseRows(v.selections);
-  const selections = drafted.map((r) => {
+  const taken = parseRows(v.selections).map((x) => String(x.id));
+  const selections = parseRows(v.selections).map((r) => {
     if (r.keep || !saved.includes(String(r.id))) return r;
-    const id = nextSelectionId(
-      saved,
-      drafted.map((x) => String(x.id)),
-    );
-    drafted.push({ id });
+    const id = nextSelectionId(saved, taken);
+    taken.push(id);
     return { ...r, id };
   });
   return {
     selections: JSON.stringify(
-      merge(selections, loaded.selections, (r) => r.id),
+      merge(
+        selections,
+        loaded.selections,
+        (r) => r.id,
+        (r, latest) => ({
+          ...latest,
+          rowKey: r.rowKey ?? crypto.randomUUID(),
+          ...(r.removed ? { removed: true } : {}),
+        }),
+      ),
     ),
     repositories: JSON.stringify(
       merge(
         parseRows(v.repositories),
         loaded.repositories,
         (r) => r.repositoryId,
+        (r, latest) => ({
+          ...r,
+          ref: String(r.ref === r.savedRef ? latest.ref : r.ref),
+          savedRef: String(latest.ref),
+        }),
       ),
     ),
   };
+}
+
+/** Selection or repository ids held by more than one live row; Save is blocked until one goes. */
+export function duplicateSourceIds(v: Values) {
+  const ids = (rows: SourceRow[], id: (r: SourceRow) => unknown) =>
+    rows
+      .filter((r) => !r.removed)
+      .map((r) => String(id(r)))
+      .filter((x, i, all) => x !== "" && all.indexOf(x) !== i);
+  return [
+    ...new Set([
+      ...ids(parseRows(v.selections), (r) => r.id),
+      ...ids(parseRows(v.repositories), (r) => r.repositoryId),
+    ]),
+  ];
 }
 
 export const kindLabel = (kind: unknown) =>

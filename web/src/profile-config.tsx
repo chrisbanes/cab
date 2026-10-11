@@ -304,7 +304,9 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     <Button
                       type="button"
                       variant="secondary"
-                      onClick={() => d.adoptVersion(data.profile.version)}
+                      onClick={() =>
+                        initial && d.adoptLatest(data.profile.version, initial)
+                      }
                     >
                       Review latest profile revision
                     </Button>

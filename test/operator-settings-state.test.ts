@@ -626,3 +626,22 @@ test("the store remembers a recorded save until purge, and never an unknown outc
   unknown.startOperation({ name: "y" });
   assert.equal(unknown.phase, "unknown");
 });
+test("adopting a newer revision keeps edited fields and takes the latest for untouched ones", () => {
+  const draft = new ConfigurationDraft();
+  draft.initialize({
+    name: "Atlas",
+    paused: false,
+    expectedVersion: "2",
+    key: "k",
+  });
+  draft.set("name", "Atlas II");
+  draft.adoptLatest(3, { name: "Atlas", paused: true, expectedVersion: "3" });
+  assert.equal(draft.values.name, "Atlas II");
+  assert.equal(draft.values.paused, true);
+  assert.equal(draft.values.expectedVersion, "3");
+  assert.notEqual(draft.values.key, "k");
+  // A later adoption compares against the revision adopted last.
+  draft.adoptLatest(4, { name: "Atlas", paused: false, expectedVersion: "4" });
+  assert.equal(draft.values.paused, false);
+  assert.equal(draft.values.name, "Atlas II");
+});

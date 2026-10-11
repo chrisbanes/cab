@@ -304,7 +304,7 @@ function GeneralTab(p: TabProps) {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => d.adoptVersion(data.project.version)}
+                onClick={() => d.adoptLatest(data.project.version, initial)}
               >
                 Review latest project revision
               </Button>

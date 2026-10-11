@@ -3,6 +3,7 @@ import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
   adoptSourceRows,
+  duplicateSourceIds,
   kindLabel,
   nextSelectionId,
   parseRows,
@@ -62,9 +63,11 @@ export function SourceTab(p: TabProps) {
   const lines = sourceChanges(data.source, v),
     removesAll = removesAllAccess(data.source, v),
     stale = staleSourceRows(data.source, v),
+    duplicates = duplicateSourceIds(v),
     blocked =
       loaded.incomplete ||
       stale.length > 0 ||
+      duplicates.length > 0 ||
       lines.length === 0 ||
       (removesAll && !v.removeAll);
   const setRows = (field: string, rows: SourceRow[]) => {
@@ -132,6 +135,14 @@ export function SourceTab(p: TabProps) {
           {stale.join(", ")} {stale.length === 1 ? "is" : "are"} no longer
           saved. Review the latest source revision, or discard changes, before
           saving.
+        </Alert>
+      )}
+      {duplicates.length > 0 && (
+        <Alert variant="destructive" role="alert">
+          {duplicates.join(", ")} {duplicates.length === 1 ? "is" : "are"}{" "}
+          listed twice, because it was also saved elsewhere. Remove one of the
+          rows before saving: remove the new row to keep the saved one, or
+          remove the saved one to replace it.
         </Alert>
       )}
       {loaded.incomplete && (
@@ -338,7 +349,7 @@ export function SourceTab(p: TabProps) {
                           variant="secondary"
                           onClick={() => drop("repositories", i)}
                         >
-                          Remove repository {name}
+                          Remove new repository {name}
                         </Button>
                       </div>
                     )}
@@ -586,7 +597,7 @@ export function SourceTab(p: TabProps) {
           type="button"
           variant="secondary"
           onClick={() => {
-            d.adoptVersion(data.source.version);
+            d.adoptLatest(data.source.version, initial);
             const rows = adoptSourceRows(data.source, d.values);
             d.set("selections", rows.selections);
             d.set("repositories", rows.repositories);

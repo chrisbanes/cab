@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import type { Page } from "playwright";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import {
@@ -163,6 +164,15 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
     .getByRole("button", { name: "Review latest project revision" })
     .click();
   assert.equal(await name.inputValue(), "Atlas typed");
+  // The untouched pause takes the newer revision instead of undoing it.
+  assert.equal(
+    await page.getByRole("switch", { name: "Pause project" }).isChecked(),
+    true,
+  );
+  assert.equal(
+    (await changes(page).innerText()).includes("Unpause project"),
+    false,
+  );
   const d = f.service.domain();
   d.execute({
     type: "profile.configure",
@@ -608,4 +618,60 @@ test("Sync & placement shows preview, observations and the placement status line
     })
     .waitFor();
   await captureBrowserEvidence(page, "1366-sync");
+});
+
+test("a repository link saved elsewhere under the same id needs an explicit choice", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const mine = await createCheckout(f.directory, "mine-checkout"),
+    theirs = await createCheckout(f.directory, "theirs-checkout");
+  await page.getByRole("button", { name: "Add repository" }).click();
+  await page
+    .getByLabel("Linked repository ID", { exact: true })
+    .fill("acme/new");
+  await page
+    .getByLabel("New local repository path", { exact: true })
+    .fill(mine);
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [
+      { repositoryId: "acme/atlas", ref: "main" },
+      { repositoryId: "acme/new", path: theirs, ref: "main" },
+    ],
+  });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await save.click();
+  await page.getByText("Configuration changed.", { exact: false }).waitFor();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page
+    .locator(".settings-status")
+    .getByText("GitHub source version 3", { exact: false })
+    .waitFor();
+  await page
+    .getByRole("button", { name: "Review latest source revision" })
+    .click();
+  await page.getByText("listed twice", { exact: false }).waitFor();
+  assert.equal(await save.isDisabled(), true);
+  await page
+    .getByRole("button", { name: "Remove new repository acme/new" })
+    .click();
+  assert.equal(await save.isDisabled(), true, "nothing left to save");
+  const saved = d.githubConfiguration(ids.atlas).repositories;
+  assert.equal(
+    saved.find((r) => r.repositoryId === "acme/new")?.path,
+    await realpath(theirs),
+  );
+  assert.equal((await page.content()).includes("theirs-checkout"), false);
 });

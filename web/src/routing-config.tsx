@@ -140,7 +140,7 @@ export function RoutingTab(p: TabProps) {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => d.adoptVersion(data.routing.version)}
+                onClick={() => d.adoptLatest(data.routing.version, initial)}
               >
                 Review latest routing revision
               </Button>

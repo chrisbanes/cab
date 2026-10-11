@@ -14,6 +14,7 @@ import {
   sourceCommand,
   sourceRowsFrom,
   staleSourceRows,
+  duplicateSourceIds,
   type ProfileConfigurationData,
   type ProjectConfigurationData,
   type RuntimeSettingsData,
@@ -175,7 +176,7 @@ test("source rows, change lines and command use keep markers and never paths", (
   const rows = sourceRowsFrom(c.source);
   assert.equal(rows.incomplete, false);
   assert.deepEqual(rows.repositories, [
-    { repositoryId: "acme/atlas", ref: "main", keep: true },
+    { repositoryId: "acme/atlas", ref: "main", savedRef: "main", keep: true },
   ]);
   const values = {
     key: "k",
@@ -428,4 +429,96 @@ test("adoption renumbers a new source whose id was saved elsewhere", () => {
     ),
     ["S-1", "S-3", "S-5 new", "S-4"],
   );
+});
+
+test("adoption resolves every identity collision explicitly", () => {
+  const c = config();
+  const rows = sourceRowsFrom(c.source);
+  const repo = (id: string, ref: string) => ({ repositoryId: id, ref });
+  const parse = (v: string) => JSON.parse(v) as Record<string, unknown>[];
+  // Draft: ref of acme/atlas edited, acme/two kept untouched, a new link acme/new and S-3
+  // marked removed. Elsewhere: acme/two ref moved, acme/new saved with its own private path,
+  // S-1 redefined under the same id, S-3 kept, acme/gone removed.
+  const draft = {
+    selections: JSON.stringify([
+      rows.selections[0],
+      { ...rows.selections[1], removed: true },
+    ]),
+    repositories: JSON.stringify([
+      { ...rows.repositories[0], ref: "dev" },
+      { repositoryId: "acme/two", ref: "main", savedRef: "main", keep: true },
+      { repositoryId: "acme/gone", ref: "main", savedRef: "main", keep: true },
+      {
+        repositoryId: "acme/new",
+        ref: "main",
+        path: "/PRIVATE/MINE",
+        rowKey: "n",
+      },
+    ]),
+  };
+  const latest = {
+    ...c.source,
+    selections: [
+      { id: "S-1", kind: "search", descriptor: null, active: false },
+      c.source.selections[1],
+    ],
+    repositories: [
+      repo("acme/atlas", "release"),
+      repo("acme/two", "next"),
+      repo("acme/new", "main"),
+    ],
+  } as ProjectConfigurationData["source"];
+  const adopted = adoptSourceRows(latest, draft);
+  const selections = parse(adopted.selections);
+  // Kept selections take the latest definition; the operator's removal survives.
+  assert.deepEqual(
+    selections.map((r) => [r.id, r.kind, Boolean(r.removed)]),
+    [
+      ["S-1", "search", false],
+      ["S-3", "project", true],
+    ],
+  );
+  const repositories = parse(adopted.repositories);
+  assert.deepEqual(
+    repositories.map((r) => [r.repositoryId, r.ref, Boolean(r.keep)]),
+    [
+      ["acme/atlas", "dev", true],
+      ["acme/two", "next", true],
+      ["acme/new", "main", false],
+      ["acme/new", "main", true],
+    ],
+  );
+  const values = {
+    ...adopted,
+    conditions: JSON.stringify(rows.conditions),
+    mode: "all",
+  };
+  // The colliding new link blocks Save until one row is removed; nothing is replaced silently.
+  assert.deepEqual(duplicateSourceIds(values), ["acme/new"]);
+  const lines = sourceChanges(latest, values);
+  assert.ok(
+    lines.includes("Ref for acme/atlas: release → dev"),
+    lines.join("\n"),
+  );
+  assert.equal(
+    lines.some((l) => l.includes("acme/two")),
+    false,
+  );
+  const keepTheirs = {
+    ...values,
+    repositories: JSON.stringify(repositories.filter((r) => r.keep)),
+  };
+  assert.deepEqual(duplicateSourceIds(keepTheirs), []);
+  const replaceTheirs = {
+    ...values,
+    repositories: JSON.stringify(
+      repositories.map((r) =>
+        r.keep && r.repositoryId === "acme/new" ? { ...r, removed: true } : r,
+      ),
+    ),
+  };
+  assert.deepEqual(duplicateSourceIds(replaceTheirs), []);
+  const replaced = sourceChanges(latest, replaceTheirs);
+  assert.ok(replaced.includes("− Repository access: acme/new"));
+  assert.ok(replaced.includes("+ Repository access: acme/new · main"));
 });
