@@ -2652,7 +2652,9 @@ export const operatorCredentialSchema = z
   .strict();
 export type OperatorCredential = z.infer<typeof operatorCredentialSchema>;
 export const operatorCredentialListSchema = envelope(
-  z.object({ credentials: z.array(operatorCredentialSchema).max(1000) }).strict(),
+  z
+    .object({ credentials: z.array(operatorCredentialSchema).max(1000) })
+    .strict(),
 );
 export const operatorCredentialIssueRequestSchema = z
   .object({
@@ -2674,7 +2676,9 @@ export const cliIdentitySchema = z
   .object({
     apiVersion: z.number().int().positive().safe(),
     capabilities: z.array(z.string().max(64)).max(64),
-    service: z.object({ installationId: uuid, origin: z.string().max(2048) }).strict(),
+    service: z
+      .object({ installationId: uuid, origin: z.string().max(2048) })
+      .strict(),
     credential: z
       .object({
         id: uuid,

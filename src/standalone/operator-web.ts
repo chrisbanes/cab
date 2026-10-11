@@ -377,7 +377,10 @@ export class OperatorWebBoundary {
         "/api/operator/discovery/projects",
         "/api/operator/setup/folders",
         "/api/operator/setup/verify-checkout",
+        "/api/operator/cli",
+        "/api/operator/credentials",
       ].includes(path) ||
+      /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
       /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
         path,
       ) ||

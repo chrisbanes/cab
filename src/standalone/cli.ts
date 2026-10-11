@@ -140,6 +140,7 @@ export async function main(
         operatorAuth,
         {
           routes,
+          credentials: service.operatorCredentials(),
           web: new OperatorWebBoundary(
             bundle,
             new OperatorApi(service, [

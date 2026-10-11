@@ -4,7 +4,19 @@ import {
   OperatorApiError,
   type OperatorReviewSessionContext,
 } from "./operator-api.js";
-import { apiErrorSchema, sessionSchema } from "../operator/contracts.js";
+import {
+  apiErrorSchema,
+  cliIdentitySchema,
+  operatorCredentialIssuedSchema,
+  operatorCredentialListSchema,
+  sessionSchema,
+} from "../operator/contracts.js";
+import {
+  OperatorCredentialError,
+  operatorRouteAuthority,
+  type OperatorCredentialStore,
+  type VerifiedOperatorCredential,
+} from "./operator-credentials.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
@@ -581,9 +593,12 @@ export class LocalOperatorUi {
 type OperatorHttpOptions = {
   routes?: OperatorRouteRegistry;
   web?: OperatorWebBoundary;
+  credentials?: OperatorCredentialStore;
 };
 
 const SESSION_COOKIE = "ensemble_operator_session";
+const CREDENTIAL_ACTION =
+  /^\/api\/operator\/credentials\/([^/]+)\/(rotate|revoke)$/;
 const MAX_FORM_BYTES = 64 * 1024;
 const MAX_FORM_FIELDS = 128;
 const MAX_FORM_VALUE_LENGTH = 8 * 1024;
@@ -657,9 +672,103 @@ function publicMessage(code: string): string {
       "The project lead cannot receive reviews now.",
     "local-review-comment-anchor-required":
       "Every review comment needs exact line context. Remove unanchored comments.",
+    "credential-invalid": "Operator credential is invalid.",
+    "insufficient-scope":
+      "Operator credential scope does not allow this request.",
   };
   return messages[code] ?? "Request unavailable.";
 }
+const API_HEADERS = {
+  ...RESPONSE_HEADERS,
+  "content-security-policy":
+    "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
+};
+
+function writeJson(
+  response: ServerResponse,
+  status: number,
+  value: unknown,
+  extra: Record<string, string> = {},
+): void {
+  response.writeHead(status, {
+    ...API_HEADERS,
+    "content-type": "application/json; charset=utf-8",
+    ...extra,
+  });
+  response.end(JSON.stringify(value));
+}
+
+function apiError(code: string) {
+  return apiErrorSchema.parse({
+    error: { code, message: publicMessage(code) },
+  });
+}
+
+/** Maps an API handler failure to its public JSON error response. */
+function apiFailure(
+  error: unknown,
+  method: string | undefined,
+): { status: number; body: unknown } {
+  if (error instanceof OperatorCredentialError)
+    error = new OperatorApiError(
+      error.code === "not-found" ? 404 : 409,
+      error.code,
+    );
+  const status =
+    error instanceof OperatorApiError
+      ? error.status
+      : error instanceof OperatorHttpError
+        ? error.status
+        : error instanceof z.ZodError
+          ? 400
+          : 503;
+  const code =
+    error instanceof OperatorApiError
+      ? error.code
+      : error instanceof OperatorHttpError
+        ? ({
+            400: "invalid-input",
+            413: "body-too-large",
+            415: "unsupported-media",
+          }[error.status] ?? "invalid-input")
+        : error instanceof z.ZodError
+          ? "invalid-input"
+          : method === "POST"
+            ? "command-outcome-unknown"
+            : "unavailable";
+  return {
+    status,
+    body: apiErrorSchema.parse({
+      error: {
+        code,
+        ...(error instanceof OperatorApiError && error.fieldPaths
+          ? { fieldPaths: error.fieldPaths }
+          : {}),
+        message: publicMessage(code),
+        ...(error instanceof z.ZodError
+          ? {
+              fieldPaths: [
+                ...new Set(
+                  error.issues
+                    .map((i) =>
+                      i.path
+                        .filter(
+                          (p) =>
+                            typeof p === "string" &&
+                            /^[A-Za-z][A-Za-z0-9]*$/.test(p),
+                        )
+                        .join("."),
+                    )
+                    .filter(Boolean),
+                ),
+              ],
+            }
+          : {}),
+      },
+    }),
+  };
+}
+
 async function readJson(
   request: IncomingMessage,
   commands = false,
@@ -849,6 +958,7 @@ export class LocalOperatorHttp {
   private readonly routes: OperatorRouteRegistry;
   private readonly secureCookie: boolean;
   private readonly web: OperatorWebBoundary | undefined;
+  private readonly credentials: OperatorCredentialStore | undefined;
 
   constructor(
     private readonly ui: LocalOperatorUi,
@@ -856,6 +966,7 @@ export class LocalOperatorHttp {
     options: OperatorHttpOptions = {},
   ) {
     this.web = options.web;
+    this.credentials = options.credentials;
     this.routes = options.routes ?? new OperatorRouteRegistry();
     this.secureCookie = new URL(auth.origin).protocol === "https:";
   }
@@ -901,6 +1012,11 @@ export class LocalOperatorHttp {
             .some((part) => part && decodeSegment(part) === undefined)
         ) {
           writeHtml(response, 404, "<main><h1>Not found</h1></main>");
+          return;
+        }
+        // Bearer requests never read or upgrade a cookie session.
+        if (request.headers.authorization !== undefined) {
+          await this.handleBearer(request, response, url);
           return;
         }
         const id = cookieId(request);
@@ -1256,29 +1372,15 @@ export class LocalOperatorHttp {
     if (!web?.owns(url.pathname)) return false;
     const path = url.pathname,
       method = request.method;
-    const headers = {
-      ...RESPONSE_HEADERS,
-      "content-security-policy":
-        "default-src 'none'; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'",
-    };
+    const headers = API_HEADERS;
     const json = (
       status: number,
       value: unknown,
       extra: Record<string, string> = {},
-    ) => {
-      response.writeHead(status, {
-        ...headers,
-        "content-type": "application/json; charset=utf-8",
-        ...extra,
-      });
-      response.end(JSON.stringify(value));
-    };
+    ) => writeJson(response, status, value, extra);
     const deny = (status: number, code: string) => {
       request.resume();
-      json(
-        status,
-        apiErrorSchema.parse({ error: { code, message: publicMessage(code) } }),
-      );
+      json(status, apiError(code));
     };
     if (!path.startsWith("/api")) {
       if (path === "/login" && method !== "GET") return false;
@@ -1307,17 +1409,20 @@ export class LocalOperatorHttp {
         deny(404, "not-found");
         return true;
       }
-      const expected = [
-        "/api/operator/login",
-        "/api/operator/logout",
-        "/api/operator/commands",
-        "/api/operator/source-refresh",
-        "/api/operator/setup/folders",
-        "/api/operator/setup/verify-checkout",
-      ].includes(path)
-        ? "POST"
-        : "GET";
-      if (method !== expected) {
+      const expected =
+        path === "/api/operator/credentials"
+          ? ["GET", "POST"]
+          : [
+                "/api/operator/login",
+                "/api/operator/logout",
+                "/api/operator/commands",
+                "/api/operator/source-refresh",
+                "/api/operator/setup/folders",
+                "/api/operator/setup/verify-checkout",
+              ].includes(path) || CREDENTIAL_ACTION.test(path)
+            ? ["POST"]
+            : ["GET"];
+      if (!expected.includes(method ?? "")) {
         deny(405, "method-not-allowed");
         return true;
       }
@@ -1392,6 +1497,41 @@ export class LocalOperatorHttp {
           );
           return true;
         }
+        if (path.startsWith("/api/operator/credentials")) {
+          const credentials = this.credentials;
+          if (!credentials) {
+            deny(404, "not-found");
+            return true;
+          }
+          const action = CREDENTIAL_ACTION.exec(path);
+          const data = !action
+            ? operatorCredentialIssuedSchema.parse(credentials.issue(body))
+            : action[2] === "rotate"
+              ? operatorCredentialIssuedSchema.parse(
+                  credentials.rotate(
+                    decodeSegment(action[1] ?? "") ?? "",
+                    z
+                      .object({
+                        expiresInDays: z
+                          .number()
+                          .int()
+                          .min(1)
+                          .max(90)
+                          .optional(),
+                      })
+                      .strict()
+                      .parse(body).expiresInDays,
+                  ),
+                )
+              : (z.object({}).strict().parse(body),
+                {
+                  credential: credentials.revoke(
+                    decodeSegment(action[1] ?? "") ?? "",
+                  ),
+                });
+          json(200, data);
+          return true;
+        }
         if (path === "/api/operator/source-refresh") {
           z.object({}).strict().parse(body);
           const data = await web.api.refreshSources();
@@ -1413,6 +1553,21 @@ export class LocalOperatorHttp {
           return true;
         }
         json(200, data);
+        return true;
+      }
+      if (path === "/api/operator/credentials") {
+        if ([...url.searchParams].length || !this.credentials)
+          throw new OperatorApiError(
+            this.credentials ? 400 : 404,
+            this.credentials ? "invalid-input" : "not-found",
+          );
+        json(
+          200,
+          operatorCredentialListSchema.parse({
+            data: { credentials: this.credentials.list() },
+            observedAt: Date.now(),
+          }),
+        );
         return true;
       }
       const artifact = path.match(
@@ -1454,61 +1609,118 @@ export class LocalOperatorHttp {
         deny(401, "unauthenticated");
         return true;
       }
-      const status =
-        error instanceof OperatorApiError
-          ? error.status
-          : error instanceof OperatorHttpError
-            ? error.status
-            : error instanceof z.ZodError
-              ? 400
-              : 503;
-      const code =
-        error instanceof OperatorApiError
-          ? error.code
-          : error instanceof OperatorHttpError
-            ? ({
-                400: "invalid-input",
-                413: "body-too-large",
-                415: "unsupported-media",
-              }[error.status] ?? "invalid-input")
-            : error instanceof z.ZodError
-              ? "invalid-input"
-              : method === "POST"
-                ? "command-outcome-unknown"
-                : "unavailable";
-      json(
-        status,
-        apiErrorSchema.parse({
-          error: {
-            code,
-            ...(error instanceof OperatorApiError && error.fieldPaths
-              ? { fieldPaths: error.fieldPaths }
-              : {}),
-            message: publicMessage(code),
-            ...(error instanceof z.ZodError
-              ? {
-                  fieldPaths: [
-                    ...new Set(
-                      error.issues
-                        .map((i) =>
-                          i.path
-                            .filter(
-                              (p) =>
-                                typeof p === "string" &&
-                                /^[A-Za-z][A-Za-z0-9]*$/.test(p),
-                            )
-                            .join("."),
-                        )
-                        .filter(Boolean),
-                    ),
-                  ],
-                }
-              : {}),
-          },
-        }),
-      );
+      const failure = apiFailure(error, method);
+      json(failure.status, failure.body);
     }
     return true;
+  }
+
+  /** CLI bearer path: route authority decides; no cookie, Origin or CSRF state applies. */
+  private async handleBearer(
+    request: IncomingMessage,
+    response: ServerResponse,
+    url: URL,
+  ): Promise<void> {
+    const path = url.pathname,
+      method = request.method;
+    const deny = (status: number, code: string) => {
+      request.resume();
+      writeJson(response, status, apiError(code));
+    };
+    const web = this.web,
+      credentials = this.credentials;
+    if (!web || !credentials || !path.startsWith("/api/")) {
+      deny(403, "forbidden");
+      return;
+    }
+    const token = /^Bearer ([^\s]+)$/.exec(
+      String(request.headers.authorization),
+    )?.[1];
+    const verify = (): VerifiedOperatorCredential | undefined =>
+      token === undefined ? undefined : credentials.verify(token);
+    const credential = verify();
+    if (!credential) {
+      deny(401, "credential-invalid");
+      return;
+    }
+    const authority = operatorRouteAuthority(method, path);
+    if (authority === undefined) {
+      deny(
+        web.knownApi(path) || path === "/api/operator/cli" ? 405 : 404,
+        web.knownApi(path) || path === "/api/operator/cli"
+          ? "method-not-allowed"
+          : "not-found",
+      );
+      return;
+    }
+    if (authority === "session-only") {
+      deny(403, "forbidden");
+      return;
+    }
+    if (authority === "write" && credential.scope !== "read-write") {
+      deny(403, "insufficient-scope");
+      return;
+    }
+    try {
+      let data: unknown;
+      if (path === "/api/operator/cli") {
+        if ([...url.searchParams].length)
+          throw new OperatorApiError(400, "invalid-input");
+        data = cliIdentitySchema.parse({
+          apiVersion: 1,
+          capabilities: ["cli.identity", "task.read"],
+          service: {
+            installationId: credentials.installationId(),
+            origin: this.auth.origin,
+          },
+          credential,
+        });
+      } else if (method === "POST") {
+        const body = await readJson(request, path === "/api/operator/commands");
+        if (path === "/api/operator/source-refresh") {
+          z.object({}).strict().parse(body);
+          data = await web.api.refreshSources();
+        } else data = await web.api.execute(body);
+      } else {
+        const artifact = path.match(
+          /^\/api\/operator\/tasks\/([^/]+)\/artifacts\/([^/]+)$/,
+        );
+        if (artifact) {
+          if ([...url.searchParams].length)
+            throw new OperatorApiError(400, "invalid-input");
+          const file = await web.api.readArtifact(
+            artifact[1] ?? "",
+            artifact[2] ?? "",
+          );
+          if (!verify()) {
+            deny(401, "credential-invalid");
+            return;
+          }
+          response.writeHead(200, {
+            ...API_HEADERS,
+            "content-type": file.type,
+            "x-content-type-options": "nosniff",
+          });
+          response.end(file.body);
+          return;
+        }
+        data = await web.read(path, url.searchParams, url.search);
+      }
+      // A credential revoked or expired during the call returns no data.
+      if (!verify()) {
+        deny(401, "credential-invalid");
+        return;
+      }
+      if (data === undefined) deny(404, "not-found");
+      else writeJson(response, 200, data);
+    } catch (error) {
+      if (!verify()) {
+        deny(401, "credential-invalid");
+        return;
+      }
+      const failure = apiFailure(error, method);
+      writeJson(response, failure.status, failure.body);
+    }
   }
 
   private async authorizeRead(
