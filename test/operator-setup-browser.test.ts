@@ -644,3 +644,23 @@ test("Setup keeps a folder chosen while discovery was unavailable visible after 
   );
   await page.getByLabel("Repository (owner/name)").waitFor();
 });
+
+test("Setup validates a typed row holding only a ref instead of dropping it", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, { discovery: false });
+  await page.getByLabel("Project name", { exact: true }).fill("Ref only");
+  await page.getByLabel("Ref", { exact: true }).fill("main");
+  let sent = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sent++;
+  });
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByText("Check the highlighted fields.").waitFor();
+  assert.equal(sent, 0);
+  assert.equal(f.service.domain().projects().length, 0);
+  assert.equal(
+    await page.getByLabel("Ref", { exact: true }).inputValue(),
+    "main",
+  );
+});

@@ -3678,28 +3678,48 @@ export class OperatorApi {
     });
   }
   /** Run one discovery read; every failure is an `unavailable` reason, never a message. */
+  /** The discovery reference and a digest of its value: what a discovery result was read with. */
+  private discoveryFence() {
+    const ref = this.domain().discoveryCredentialReference();
+    return JSON.stringify([
+      ref,
+      createHash("sha256")
+        .update(ref ? (process.env[ref.slice(4)] ?? "") : "")
+        .digest("hex"),
+    ]);
+  }
   private async discoveryRead<T extends z.ZodType>(
     schema: T,
     read: (reader: DiscoveryReader) => Promise<object>,
   ): Promise<z.infer<T>> {
-    const ref = this.domain().discoveryCredentialReference();
-    let data: object;
-    if (!ref) data = { state: "unavailable", reason: "unconfigured" };
-    else
-      try {
-        const reader = (
-          this.setup.discovery ??
-          ((r: string) =>
-            new GitHubDiscoveryReader(process.env[r.slice(4)] || undefined))
-        )(ref);
-        data = { state: "ready", ...(await read(reader)) };
-      } catch (error) {
-        data = {
-          state: "unavailable",
-          reason:
-            error instanceof DiscoveryFailure ? error.reason : "unreadable",
-        };
+    let data: object = { state: "unavailable", reason: "unreadable" };
+    // A result read with a credential that changed meanwhile is discarded and read once more
+    // with the current one; a second change in flight leaves it unavailable.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const fence = this.discoveryFence();
+      const ref = this.domain().discoveryCredentialReference();
+      let current: object;
+      if (!ref) current = { state: "unavailable", reason: "unconfigured" };
+      else
+        try {
+          const reader = (
+            this.setup.discovery ??
+            ((r: string) =>
+              new GitHubDiscoveryReader(process.env[r.slice(4)] || undefined))
+          )(ref);
+          current = { state: "ready", ...(await read(reader)) };
+        } catch (error) {
+          current = {
+            state: "unavailable",
+            reason:
+              error instanceof DiscoveryFailure ? error.reason : "unreadable",
+          };
+        }
+      if (fence === this.discoveryFence()) {
+        data = current;
+        break;
       }
+    }
     const parsed = schema.safeParse({ data, observedAt: Date.now() });
     return parsed.success
       ? parsed.data

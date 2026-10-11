@@ -68,9 +68,16 @@ export function rowsFromDraft(value: unknown): SetupRow[] {
     return [];
   }
 }
-/** A row with nothing entered is repository-free and left out of the command. */
+/**
+ * A row with nothing entered is repository-free and left out of the command. Any value the
+ * form shows counts: a ref is visible in typed entry; a discovered row without a repository
+ * hides its Ref field, so a ref left there does not count.
+ */
 export const blankRow = (r: SetupRow) =>
-  !r.repositoryId && !r.text.trim() && !r.path.trim();
+  !r.repositoryId &&
+  !r.text.trim() &&
+  !r.path.trim() &&
+  !(r.source === "typed" && r.ref.trim());
 /** Ids of rows repeating an earlier row's repository, by node ID or by `owner/name`. */
 export function duplicateRows(rows: SetupRow[]) {
   const seen = new Set<string>(),

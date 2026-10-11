@@ -542,3 +542,63 @@ test("a task read fences when the discovery reference or its value changes mid-r
     false,
   );
 });
+
+test("a discovery result read with a credential that changed meanwhile is read again", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const used: string[] = [];
+  let configureDuringRead: (() => void) | undefined;
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    discovery: (ref) => ({
+      async repositories() {
+        used.push(ref);
+        const change = configureDuringRead;
+        configureDuringRead = undefined;
+        change?.();
+        return {
+          repositories: [
+            {
+              repositoryId: `R_${ref.slice(4)}`,
+              owner: "acme",
+              name: "atlas",
+              defaultBranch: "main",
+            },
+          ],
+          truncated: false,
+        };
+      },
+      branches: async () => ({ branches: [], truncated: false }),
+      projects: async () => ({
+        ownerLogin: "acme",
+        linked: [],
+        owned: [],
+        truncated: false,
+      }),
+    }),
+  });
+  await api.execute(configure("env:FIRST_DISCOVERY"));
+  // The reference switches while the first read is in flight: its result is discarded.
+  configureDuringRead = () =>
+    f.service.domain().execute({
+      ...configure("env:SECOND_DISCOVERY"),
+      actor: "operator",
+    } as never);
+  const switched = (await api.readDiscoveryRepositories()).data;
+  assert.deepEqual(used, ["env:FIRST_DISCOVERY", "env:SECOND_DISCOVERY"]);
+  assert.equal(
+    switched.state === "ready" && switched.repositories[0]?.repositoryId,
+    "R_SECOND_DISCOVERY",
+  );
+  // Cleared in flight: nothing read with the old credential is returned.
+  used.length = 0;
+  configureDuringRead = () =>
+    f.service.domain().execute({
+      ...configure(null),
+      actor: "operator",
+    } as never);
+  assert.deepEqual((await api.readDiscoveryRepositories()).data, {
+    state: "unavailable",
+    reason: "unconfigured",
+  });
+  assert.deepEqual(used, ["env:SECOND_DISCOVERY"]);
+});

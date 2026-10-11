@@ -6,6 +6,7 @@ import { ClientError, OperatorClient } from "../web/src/api.js";
 import { ConfigurationDraft } from "../web/src/settings-state.js";
 import { settingsHeader } from "../web/src/settings-view.js";
 import {
+  blankRow,
   buildProjectCreate,
   duplicateRows,
   emptyRow,
@@ -245,4 +246,18 @@ test("a Project is sent only while the current list shows it", () => {
   assert.equal(listedProject("PVT_atlas", null), "");
   assert.equal(listedProject("PVT_gone", list), "");
   assert.equal(listedProject("", list), "");
+});
+
+test("a visible ref alone makes a row count", () => {
+  // Typed entry shows the Ref field, so a ref there is operator input that must be validated.
+  assert.equal(blankRow({ ...emptyRow("typed"), ref: "main" }), false);
+  // A discovered row without a repository hides its Ref field.
+  assert.equal(blankRow({ ...emptyRow("discovered"), ref: "main" }), true);
+  assert.equal(blankRow(emptyRow("typed")), true);
+  const { rowIndex } = buildProjectCreate(
+    values,
+    [{ ...emptyRow("typed"), ref: "main" }],
+    "",
+  );
+  assert.deepEqual(rowIndex, [0]);
 });
