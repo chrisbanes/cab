@@ -11,7 +11,13 @@ import {
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { seedRetainedReviewWindow } from "./fixtures/task-review.js";
 import { ConversationHistoryStore } from "../src/standalone/conversation-history.js";
-const retentionJourneyLimits = { executionMs: 60000, overallMs: 100000 };
+// Retained-history seeding shares the startup deadline with web/browser launch.
+// Allow seeding-heavy setup headroom on CI while retaining a finite ceiling.
+const retentionJourneyLimits = {
+  startupMs: 40000,
+  executionMs: 60000,
+  overallMs: 100000,
+};
 const test = browserSuite("ui04-retention-access", retentionJourneyLimits);
 async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   const f = await j.start("fixture.create", () =>

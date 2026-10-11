@@ -217,16 +217,14 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByText("R2 original scope", { exact: true }).waitFor();
-  assert.ok(
-    await page
-      .getByText(/Supported by recorded evidence · stale source revision/)
-      .count(),
-  );
-  assert.ok(
-    await page
-      .getByText(/Failed recorded check · stale source revision/)
-      .count(),
-  );
+  await page
+    .getByText(/Supported by recorded evidence · stale source revision/)
+    .first()
+    .waitFor({ state: "attached" });
+  await page
+    .getByText(/Failed recorded check · stale source revision/)
+    .first()
+    .waitFor({ state: "attached" });
   assert.equal(
     await page
       .getByText(
@@ -236,8 +234,14 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
       .count(),
     1,
   );
-  assert.ok(await page.getByText(/Newer source revision 2/).count());
-  assert.ok(await page.getByText(/No bound PR/).count());
+  await page
+    .getByText(/Newer source revision 2/)
+    .first()
+    .waitFor({ state: "attached" });
+  await page
+    .getByText(/No bound PR/)
+    .first()
+    .waitFor({ state: "attached" });
   await page
     .getByRole("button", { name: "Set viewing reference", exact: true })
     .click();
@@ -256,12 +260,14 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
       exact: true,
     })
     .waitFor();
-  assert.ok(
-    await page.getByText(/supported · Legacy supporting scope/).count(),
-  );
-  assert.ok(
-    await page.getByText(/failed · Legacy contradictory failed scope/).count(),
-  );
+  await page
+    .getByText(/supported · Legacy supporting scope/)
+    .first()
+    .waitFor({ state: "attached" });
+  await page
+    .getByText(/failed · Legacy contradictory failed scope/)
+    .first()
+    .waitFor({ state: "attached" });
 
   await page.getByLabel("Result revision").selectOption(r2.resultId);
   await page.getByText("R2 original scope", { exact: true }).waitFor();

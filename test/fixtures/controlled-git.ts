@@ -5,6 +5,7 @@ import {
   chmodSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -150,7 +151,9 @@ setInterval(() => {}, 1000);
     root: fixtureRoot,
     executable,
     setRule(rule: ControlledGitRule | undefined) {
-      writeFileSync(controlPath, JSON.stringify(rule ?? {}));
+      const temporary = `${controlPath}.tmp`;
+      writeFileSync(temporary, JSON.stringify(rule ?? {}));
+      renameSync(temporary, controlPath);
     },
     events(): ControlledGitEvent[] {
       try {

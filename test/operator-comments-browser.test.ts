@@ -892,9 +892,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       .count(),
     0,
   );
-  assert.ok(
-    await page.getByText("Supplied GitHub brief", { exact: true }).count(),
-  );
+  await page
+    .getByText("Supplied GitHub brief", { exact: true })
+    .first()
+    .waitFor({ state: "attached" });
   await page
     .getByRole("link", { name: "Search", exact: true })
     .evaluate((el) => (el as HTMLElement).click());

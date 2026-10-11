@@ -1456,7 +1456,9 @@ exec sleep 10
 });
 
 test("late events from a stopped child cannot fail a restarted runtime", {
-  timeout: 7000,
+  // Two 3s starts, a 3s stop, a 3s thread RPC and a 1s rejection wait,
+  // plus shutdown/fixture cleanup, must fit inside the enclosing deadline.
+  timeout: 20000,
 }, async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-codex-restart-"));
   const executable = join(root, "fake-codex.mjs");
@@ -1464,6 +1466,10 @@ test("late events from a stopped child cannot fail a restarted runtime", {
     executable,
     String.raw`#!/usr/bin/env node
 import { createInterface } from "node:readline";
+if (process.argv.includes("--version")) {
+  console.log("restart-test-fixture");
+  process.exit(0);
+}
 process.on("SIGTERM", () => {});
 for await (const line of createInterface({input: process.stdin})) {
   const message = JSON.parse(line);
