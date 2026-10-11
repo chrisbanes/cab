@@ -395,6 +395,14 @@ workspaces. Retain until operator archival by default; automatic cleanup require
 confirmed delivery and preservation checks for uncommitted work, handoffs and
 reconciliation evidence. Missing workspaces hold affected execution visibly.
 
+Every Git subprocess the service starts (workspace provisioning, cleanup and
+identity checks, file and comparison reads, setup probes and repository
+verification) clears inherited `GIT_*` variables, never prompts on a terminal,
+lazily fetches objects or allows transport protocols, and uses bounded time and
+output. A repository that needs the network to supply objects therefore fails
+closed. This governs Ensemble's own Git; agent processes run their own Git with
+their runtime environment.
+
 New projects default to Codex `workspaceWrite` with explicit task writable roots,
 command network access disabled and approval policy `never`. Broader command
 sandbox escalation is denied; expanding that policy requires separate operator
@@ -782,10 +790,10 @@ actual workspace-capable turn, while Git comparisons remain unavailable.
 Comparison IDs stay stable until an explicit refresh; an old ID is never
 silently redirected to newer workspace contents. Current exclusion, binding,
 task-access and session checks apply again before stored comparison projections
-are returned. Local Git reads clear inherited `GIT_*` environment overrides,
-disable fsmonitor and replacement refs, and disallow transport so these reads do
-not fetch. Before a working-tree diff, the service discovers only configured
-clean/process filter names, applies empty command-line overrides with
+are returned. Local Git reads follow the Git subprocess rule under
+[Workspaces and execution access](#workspaces-and-execution-access) and also
+disable fsmonitor and replacement refs. Before a working-tree diff, the service
+discovers only configured clean/process filter names, applies empty command-line overrides with
 `required=false`, and checks the names again afterward. Discovery accepts at
 most 64 ASCII driver names of at most 64 bytes and 16 KiB of key-name output;
 malformed, oversized or changed names produce a gap. This recheck reports

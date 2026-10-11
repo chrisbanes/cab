@@ -19,6 +19,11 @@ import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { Store } from "../src/core/store.js";
 import {
+  gitEnvironmentProbe,
+  hardenedGitEnvironment,
+  withHostileGitEnvironment,
+} from "./fixtures/git-environment.js";
+import {
   SqliteWorkspaceBindingStore,
   WorkspaceManager,
   type TaskWorkspaceBinding,
@@ -533,6 +538,44 @@ test("Git ignore failure and timeout return an incomplete listing with no uncert
   assert.equal(timedOut.state, "unavailable");
   assert.equal(timedOut.ignoreStatus, "incomplete");
   assert.deepEqual(timedOut.entries, []);
+});
+
+test("Git ignore checks run with the hardened environment", async (t) => {
+  const f = fixture();
+  const probe = gitEnvironmentProbe();
+  t.after(() => {
+    f.close();
+    probe.close();
+  });
+  const source = sourceRepository(f.directory, "source");
+  const binding = await f.manager.provision("git-ignore-hardened", [
+    { repositoryId: "repo", path: source },
+  ]);
+  assert.equal(binding.state, "ready");
+  await writeFile(
+    join(binding.repositories[0]!.workspacePath, "ignored.log"),
+    "ignored",
+  );
+  const listing = await withHostileGitEnvironment(() =>
+    listWorkspaceDirectory(
+      request(binding, {
+        scope: { kind: "repository", repositoryId: "repo" },
+        showIgnored: true,
+      }),
+      currentFor(binding),
+      { gitExecutable: probe.executable },
+    ),
+  );
+  assert.equal(listing.state, "ready");
+  assert.equal(listing.ignoreStatus, "known");
+  const ignored = listing.entries.find(
+    (entry) => entry.kind !== "repository" && entry.name === "ignored.log",
+  );
+  assert.equal(ignored?.ignored, true);
+  const invocations = probe.invocations();
+  assert.ok(invocations.some((item) => item.args.includes("check-ignore")));
+  for (const invocation of invocations)
+    assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
 });
 
 test("directory and parent replacement during enumeration discard the observation", async (t) => {

@@ -1,11 +1,10 @@
-import { childProcessEnvironment } from "../core/child-environment.js";
 import { randomUUID } from "node:crypto";
-import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { realpathSync } from "node:fs";
 import { z } from "zod";
 import { transaction, type Database } from "../core/store.js";
+import { runGit } from "./git-process.js";
 
 const maxGitOutputBytes = 1024 * 1024;
 const maxTimerMs = 2_147_483_647;
@@ -765,27 +764,53 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
     return { root: resolve(root), gitCommonDir };
   }
 
-  private git(
+  private async git(
     cwd: string,
     operation: GitOperation,
     ...args: string[]
   ): Promise<string> {
     this.assertNotCancelled();
+    const signal = this.gitCancellation.signal;
+    // Cancelled before starting: no child, so no failure observation.
+    if (signal.aborted)
+      throw new WorkspaceGitError(operation, "cancelled", false, null, false);
     const defaultTimeoutMs =
       operation === "checkout-validation" && args[0] === "status"
         ? 120_000
         : gitOperationTimeouts[operation];
-    return runGit({
+    const result = await runGit({
       executable: this.gitExecutable,
       cwd,
       args: ["-C", cwd, ...args],
-      operation,
       timeoutMs: this.gitTimeouts[operation] ?? defaultTimeoutMs,
       terminationGraceMs: this.gitTerminationGraceMs,
       observationMs: this.gitTerminationObservationMs,
-      signal: this.gitCancellation.signal,
-      failureObserver: this.options.gitFailureObserver,
+      maxOutputBytes: maxGitOutputBytes,
+      signal,
     });
+    if (result.status === "ok") return result.stdout.toString("utf8").trim();
+    const failure =
+      result.status === "exit"
+        ? {
+            kind: "failed" as const,
+            childExitObserved: result.childExitObserved,
+            childExitSignal: result.signal,
+            started: true,
+          }
+        : {
+            kind: result.kind,
+            childExitObserved: result.childExitObserved,
+            childExitSignal: result.childExitSignal,
+            started: result.spawned,
+          };
+    throw reportGitFailure(
+      this.options.gitFailureObserver,
+      operation,
+      failure.kind,
+      failure.childExitObserved,
+      failure.childExitSignal,
+      failure.started,
+    );
   }
 
   /** @internal Allows service startup to honor the same sticky cancellation latch. */
@@ -966,224 +991,27 @@ export class WorkspaceManager implements TaskWorkspaceLifecycle {
   }
 }
 
-interface GitRunOptions {
-  executable: string;
-  cwd: string;
-  args: string[];
-  operation: GitOperation;
-  timeoutMs: number;
-  terminationGraceMs: number;
-  observationMs: number;
-  signal: AbortSignal;
-  failureObserver?: WorkspaceManagerOptions["gitFailureObserver"];
-}
-
-function runGit(options: GitRunOptions): Promise<string> {
-  if (options.signal.aborted)
-    return Promise.reject(
-      new WorkspaceGitError(options.operation, "cancelled", false, null, false),
-    );
-
-  return new Promise((resolvePromise, rejectPromise) => {
-    let child: ChildProcess;
-    try {
-      child = spawn(options.executable, options.args, {
-        cwd: options.cwd,
-        env: childProcessEnvironment(),
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-      });
-    } catch {
-      rejectPromise(reportGitFailure(options, "failed", false, null, false));
-      return;
-    }
-
-    let settled = false;
-    let spawned = false;
-    let closeObserved = false;
-    let childExitObserved = false;
-    let childExitSignal: NodeJS.Signals | null = null;
-    let outputBytes = 0;
-    let failureKind: GitFailureKind | undefined;
-    const stdout: Buffer[] = [];
-    let deadlineTimer: NodeJS.Timeout | undefined;
-    let graceTimer: NodeJS.Timeout | undefined;
-    let observationTimer: NodeJS.Timeout | undefined;
-    let termSent = false;
-
-    const clearTimer = (timer: NodeJS.Timeout | undefined) => {
-      if (timer) clearTimeout(timer);
-    };
-
-    const cleanup = (detach: boolean) => {
-      clearTimer(deadlineTimer);
-      clearTimer(graceTimer);
-      clearTimer(observationTimer);
-      options.signal.removeEventListener("abort", onAbort);
-      child.removeListener("spawn", onSpawn);
-      child.removeListener("error", onError);
-      child.removeListener("exit", onExit);
-      child.removeListener("close", onClose);
-      child.stdout?.removeListener("data", onStdout);
-      child.stderr?.removeListener("data", onStderr);
-      if (detach) {
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        child.unref();
-      }
-    };
-
-    const finishFailure = () => {
-      if (settled || failureKind === undefined) return;
-      settled = true;
-      cleanup(!closeObserved);
-      rejectPromise(
-        reportGitFailure(
-          options,
-          failureKind,
-          childExitObserved,
-          childExitSignal,
-          spawned,
-        ),
-      );
-    };
-
-    const finishNormally = (
-      code: number | null,
-      signal: NodeJS.Signals | null,
-    ) => {
-      if (settled) return;
-      settled = true;
-      cleanup(false);
-      if (code !== 0 || signal !== null) {
-        rejectPromise(
-          reportGitFailure(
-            options,
-            "failed",
-            childExitObserved,
-            childExitSignal ?? signal,
-            spawned,
-          ),
-        );
-        return;
-      }
-      resolvePromise(Buffer.concat(stdout).toString("utf8").trim());
-    };
-
-    const beginObservation = () => {
-      if (observationTimer || settled) return;
-      observationTimer = setTimeout(finishFailure, options.observationMs);
-    };
-
-    const sendTerm = () => {
-      if (termSent || childExitObserved || settled) return;
-      try {
-        termSent = child.kill("SIGTERM");
-      } catch {
-        termSent = false;
-      }
-    };
-
-    const beginFailure = (kind: GitFailureKind) => {
-      if (settled || failureKind !== undefined) return;
-      failureKind = kind;
-      sendTerm();
-      graceTimer = setTimeout(() => {
-        if (!childExitObserved) {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            // The exact owned child is still observed for only the bounded window.
-          }
-        }
-        beginObservation();
-      }, options.terminationGraceMs);
-      if (childExitObserved) {
-        clearTimer(graceTimer);
-        graceTimer = undefined;
-        beginObservation();
-      }
-    };
-
-    const onSpawn = () => {
-      spawned = true;
-      if (failureKind !== undefined && !termSent) sendTerm();
-    };
-    const onError = () => {
-      if (!spawned) {
-        failureKind = "failed";
-        finishFailure();
-        return;
-      }
-      beginFailure("failed");
-    };
-    const onExit = (_code: number | null, signal: NodeJS.Signals | null) => {
-      childExitObserved = true;
-      childExitSignal = signal;
-      if (failureKind !== undefined) {
-        clearTimer(graceTimer);
-        graceTimer = undefined;
-        beginObservation();
-      }
-    };
-    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
-      closeObserved = true;
-      if (failureKind !== undefined) finishFailure();
-      else finishNormally(code, signal);
-    };
-    const appendOutput = (chunk: Buffer | string) => {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-      if (outputBytes + buffer.length > maxGitOutputBytes) {
-        beginFailure("output-limit");
-        return;
-      }
-      outputBytes += buffer.length;
-      return buffer;
-    };
-    const onStdout = (chunk: Buffer | string) => {
-      const buffer = appendOutput(chunk);
-      if (buffer) stdout.push(buffer);
-    };
-    const onStderr = (chunk: Buffer | string) => {
-      appendOutput(chunk);
-    };
-    const onAbort = () => beginFailure("cancelled");
-
-    child.once("spawn", onSpawn);
-    child.once("error", onError);
-    child.once("exit", onExit);
-    child.once("close", onClose);
-    child.stdout?.on("data", onStdout);
-    child.stderr?.on("data", onStderr);
-    options.signal.addEventListener("abort", onAbort, { once: true });
-    deadlineTimer = setTimeout(
-      () => beginFailure("timed-out"),
-      options.timeoutMs,
-    );
-    if (options.signal.aborted) onAbort();
-  });
-}
-
 function isUncertainGitError(error: unknown): error is WorkspaceGitError {
   return error instanceof WorkspaceGitError && error.uncertain;
 }
 
 function reportGitFailure(
-  options: GitRunOptions,
+  observer: WorkspaceManagerOptions["gitFailureObserver"],
+  operation: GitOperation,
   kind: GitFailureKind,
   childExitObserved: boolean,
   childExitSignal: NodeJS.Signals | null,
   childStarted: boolean,
 ): WorkspaceGitError {
   const error = new WorkspaceGitError(
-    options.operation,
+    operation,
     kind,
     childExitObserved,
     childExitSignal,
     childStarted,
   );
   try {
-    options.failureObserver?.({
+    observer?.({
       operation: error.operation,
       kind: error.kind,
       childExitObserved: error.childExitObserved,

@@ -17,6 +17,11 @@ import { delimiter, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { Store } from "../src/core/store.js";
+import {
+  gitEnvironmentProbe,
+  hardenedGitEnvironment,
+  withHostileGitEnvironment,
+} from "./fixtures/git-environment.js";
 import { SqliteWorkspaceComparisonStore } from "../src/standalone/comparison-store.js";
 import {
   compareRepository,
@@ -317,6 +322,58 @@ test("comparison ignores an inherited alternate index and reads the bound index"
     readFileSync(alternateIndexPath).equals(alternateIndexBefore),
     true,
   );
+});
+
+test("comparison Git reads run with the hardened environment", async (t) => {
+  const f = await fixture();
+  const probe = gitEnvironmentProbe();
+  t.after(() => {
+    f.close();
+    probe.close();
+  });
+  const repo = f.repository.workspacePath;
+  writeFileSync(join(repo, "staged.md"), "staged after\n");
+  git(repo, "add", "staged.md");
+  writeFileSync(join(repo, "untracked.md"), "untracked after\n");
+  const compare = (target: "branch" | "uncommitted", gitExecutable?: string) =>
+    compareRepository(
+      target === "branch"
+        ? {
+            taskId: f.binding.taskId,
+            repositoryId: f.repository.repositoryId,
+            target,
+            baseBranch: "main",
+          }
+        : {
+            taskId: f.binding.taskId,
+            repositoryId: f.repository.repositoryId,
+            target,
+            changeSet: "all",
+          },
+      f.current,
+      gitExecutable === undefined ? {} : { gitExecutable },
+    );
+  const summary = (comparison: WorkspaceComparisonSnapshot) =>
+    comparison.entries.map((item) => [item.path, item.changeSet, item.state]);
+
+  const expected = {
+    branch: summary(await compare("branch")),
+    uncommitted: summary(await compare("uncommitted")),
+  };
+  const [branch, uncommitted] = await withHostileGitEnvironment(async () => [
+    await compare("branch", probe.executable),
+    await compare("uncommitted", probe.executable),
+  ]);
+
+  assert.equal(branch?.state, "available");
+  assert.equal(uncommitted?.state, "available");
+  assert.deepEqual(summary(branch!), expected.branch);
+  assert.deepEqual(summary(uncommitted!), expected.uncommitted);
+  assert.ok(entry(uncommitted!, "untracked.md", "unstaged"));
+  const invocations = probe.invocations();
+  assert.ok(invocations.length > 0);
+  for (const invocation of invocations)
+    assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
 });
 
 test("comparison refuses a missing promisor object without invoking a remote helper", async (t) => {
