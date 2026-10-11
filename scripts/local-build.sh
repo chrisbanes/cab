@@ -15,8 +15,9 @@ for path in "$build" "$partial"; do
   fi
 done
 
-mkdir -p "$root/builds" "$root/data" "$root/auth" "$root/snapshots"
-chmod 700 "$root" "$root/builds" "$root/data" "$root/auth" "$root/snapshots"
+dirs=("$root" "$root"/{builds,data,auth,snapshots})
+mkdir -p "${dirs[@]}"
+chmod 700 "${dirs[@]}"
 
 mkdir "$partial"
 git archive "$sha" | tar -x -C "$partial"
@@ -33,10 +34,10 @@ set -u
 (
   cd "$partial"
   npm_pin=$(node -p 'require("./package.json").packageManager')
-  # Match CI: npm 12 rejects user-level allow-scripts in project installs.
+  # Ignore ~/.npmrc like CI, which has none: npm 12 rejects a user-level
+  # allow-scripts in project installs, even when cleared through the environment.
   export NPM_CONFIG_USERCONFIG=/dev/null
-  npx --yes "$npm_pin" ci
-  npx --yes "$npm_pin" run build
+  npx --yes --package "$npm_pin" -c 'npm --version && npm ci && npm run build'
 )
 mv "$partial" "$build"
 
