@@ -592,6 +592,9 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           type: "comment.send",
           key,
         };
+        // A key this CLI used for other material may name someone else's operation.
+        const prior = await ctx.journal.state(request);
+        const ours = !prior || prior.digest === digest;
         const sent = await sendCommand(ctx, session, {
           scope: request.scope,
           type: request.type,
@@ -615,7 +618,7 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               r.data.delivery?.actions.find((a) => a.operationId === key),
             )
             .catch(() => undefined);
-          if (recorded) {
+          if (recorded && ours) {
             await ctx.journal
               .append(request, digest, "unknown")
               .catch(() => undefined);
