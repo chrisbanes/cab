@@ -70,6 +70,9 @@ revisions and routing guidance revision. Retain model/question identity, returne
 judgments and disposition with enough provenance to diagnose the choice. Check
 freshness when consuming responses: changed briefs, revoked permissions, opt-out,
 obsolete candidates or superseded revisions cannot silently dispatch stale work.
+Record-time stale classification uses a typed domain error, not message text; a
+selected profile outside an unchanged candidate set is an invalid disposition that
+fails loudly instead of retrying.
 
 Persist the logical routing operation and chosen disposition so retries, duplicate
 requests, delayed responses and restart cannot create competing assignments or
