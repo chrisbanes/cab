@@ -580,3 +580,82 @@ test("complete configuration receipt predicates keep schema-valid mismatches unk
     }
   }
 });
+test("the store remembers a recorded save until purge, and never an unknown outcome", async () => {
+  const profileId = randomUUID();
+  let lose = false;
+  const client = new OperatorClient(async (_url, init) => {
+    if (lose) throw Error("lost");
+    const c = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "configuration",
+      key: c.key,
+      recorded: true,
+      result: {
+        commandType: "profile.configure",
+        resourceId: profileId,
+        version: c.expectedVersion + 1,
+        revoked: false,
+      },
+    });
+  });
+  const command = () => ({
+    type: "profile.configure" as const,
+    key: randomUUID(),
+    profileId,
+    expectedVersion: 2,
+    name: "Renamed",
+  });
+  const drafts = new ConfigurationDrafts();
+  const draft = drafts.get("profile.configure:a", () => {});
+  await draft.submit(client, command(), "csrf");
+  assert.equal(draft.phase, "recorded");
+  const saved = drafts.saved("profile.configure:a");
+  assert.equal(typeof saved?.at, "number");
+  assert.equal(saved?.receipt.key, draft.receipt?.key);
+  draft.startOperation({ name: "Renamed" });
+  assert.equal(draft.phase, "editing");
+  assert.equal(drafts.saved("profile.configure:a"), saved);
+  drafts.purge();
+  assert.equal(drafts.saved("profile.configure:a"), undefined);
+  lose = true;
+  const unknown = drafts.get("profile.configure:b", () => {});
+  await unknown.submit(client, command(), "csrf");
+  assert.equal(unknown.phase, "unknown");
+  assert.equal(drafts.saved("profile.configure:b"), undefined);
+  assert.equal(unknown.set("name", "x"), false);
+  unknown.startOperation({ name: "y" });
+  assert.equal(unknown.phase, "unknown");
+});
+test("adopting a newer revision keeps edited fields and takes the latest for untouched ones", () => {
+  const draft = new ConfigurationDraft();
+  draft.initialize({
+    name: "Atlas",
+    paused: false,
+    expectedVersion: "2",
+    key: "k",
+  });
+  draft.set("name", "Atlas II");
+  draft.adoptLatest(3, { name: "Atlas", paused: true, expectedVersion: "3" });
+  assert.equal(draft.values.name, "Atlas II");
+  assert.equal(draft.values.paused, true);
+  assert.equal(draft.values.expectedVersion, "3");
+  assert.notEqual(draft.values.key, "k");
+  // A later adoption compares against the revision adopted last.
+  draft.adoptLatest(4, { name: "Atlas", paused: false, expectedVersion: "4" });
+  assert.equal(draft.values.paused, false);
+  assert.equal(draft.values.name, "Atlas II");
+  // Grouped fields move together: an edited mode keeps the operator's conditions too.
+  const readiness = new ConfigurationDraft();
+  readiness.initialize({ mode: "all", conditions: "[1]", ids: ["a", "b"] });
+  readiness.set("mode", "any");
+  readiness.set("ids", ["b", "a"]);
+  readiness.adoptLatest(
+    2,
+    { mode: "all", conditions: "[1,2]", ids: ["a", "b", "c"] },
+    [["mode", "conditions"]],
+  );
+  assert.equal(readiness.values.mode, "any");
+  assert.equal(readiness.values.conditions, "[1]");
+  // Reordering a set is not an edit, so the latest list is taken.
+  assert.deepEqual(readiness.values.ids, ["a", "b", "c"]);
+});

@@ -213,7 +213,7 @@ nav {
   background: var(--sidebar-accent);
 }
 
-.nav-link[aria-current="page"] {
+.nav-link[aria-current] {
   background: var(--sidebar-accent);
   color: var(--sidebar-accent-foreground);
 }
@@ -589,10 +589,6 @@ nav {
   flex-wrap: wrap;
   gap: var(--space-12);
   margin-block: var(--space-16);
-}
-
-.settings-card {
-  min-width: 0;
 }
 
 .settings-stack form {

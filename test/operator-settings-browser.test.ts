@@ -49,14 +49,17 @@ test("Settings guides empty workspace through profile and paused project creatio
   await capture(page, "1366-first-profile-setup");
   await page.getByLabel("Profile name", { exact: true }).fill("Setup lead");
   await page
-    .getByLabel("New instructions", { exact: true })
+    .getByLabel("Instructions", { exact: true })
     .fill("PRIVATE SETUP INPUT");
   await page.getByLabel("Capabilities", { exact: true }).fill("Coordinate");
   await page
     .getByRole("button", { name: "Create profile", exact: true })
     .click();
   await page.getByText("Recorded.", { exact: false }).waitFor();
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
   await page.getByRole("link", { name: "Create project", exact: true }).click();
   await page.getByLabel("Project name", { exact: true }).fill("Setup project");
   await page
@@ -70,6 +73,21 @@ test("Settings guides empty workspace through profile and paused project creatio
   assert.equal(f.service.domain().projects()[0]?.paused, 1);
   assert.equal(f.runtime.turns, 0);
 });
+/** From any settings page, open a project's Sync & placement tab through the index. */
+async function openSync(page: Page, project: string) {
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("link", { name: `Configure ${project}`, exact: true })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Sync & placement" })
+    .click();
+  await page.getByRole("heading", { name: "Preview and activation" }).waitFor();
+}
 async function capture(page: Page, name: string) {
   return captureBrowserEvidence(page, name);
 }
@@ -177,10 +195,10 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, "/app/settings");
+  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
 
   const ordinary = page.getByRole("link", {
-    name: "Paused configuration project",
+    name: "Project tasks",
     exact: true,
   });
   const ordinaryStyle = await ordinary.evaluate((element) => {
@@ -190,6 +208,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   assert.equal(ordinaryStyle.decoration, "underline");
   assert.equal(ordinaryStyle.color, "rgb(250, 250, 250)");
 
+  await page.goto(`${web.origin}/app/settings`);
   const navigation = page.locator(".sidebar .nav-link").first();
   assert.equal(
     await navigation.evaluate(
@@ -216,13 +235,20 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
   assert.equal(actionStyle.decoration, "none");
   assert.ok(contrast(actionStyle.foreground, actionStyle.background) >= 4.5);
 
-  await page.goto(`${web.origin}/app/projects/${ids.projectId}/settings`);
-  const editorLink = page.getByRole("link", { name: "exact source editor" });
+  await page.goto(
+    `${web.origin}/app/projects/${ids.projectId}/settings?tab=github`,
+  );
+  const editorLink = page.getByRole("link", {
+    name: "Open advanced source editor",
+  });
   assert.equal(
     await editorLink.evaluate(
       (element) => getComputedStyle(element).textDecorationLine,
     ),
     "underline",
+  );
+  await page.goto(
+    `${web.origin}/app/projects/${ids.projectId}/settings?tab=sync`,
   );
   const observationButton = page.getByRole("button", {
     name: "Request installation-wide source observations",
@@ -317,9 +343,15 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   await page
     .getByRole("button", { name: "Reconcile exact submission", exact: true })
     .waitFor();
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
   await page
-    .getByRole("link", { name: "Paused configuration project", exact: true })
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("link", {
+      name: "Configure Paused configuration project",
+      exact: true,
+    })
     .click();
   await page
     .getByRole("button", { name: "Reconcile exact submission", exact: true })
@@ -367,8 +399,10 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   await page
     .getByRole("button", { name: "Reconcile exact submission", exact: true })
     .click();
+  // A reconciled save re-reads the configuration and reloads the form.
   await page
-    .getByText("Recorded. Latest observations", { exact: false })
+    .locator(".settings-saved")
+    .getByText("Recorded project.configure", { exact: false })
     .waitFor();
   assert.deepEqual(posts, [posts[0], posts[0], posts[0]]);
   assert.equal(f.service.domain().project(ids.projectId).version, 3);
@@ -386,12 +420,7 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     ),
     false,
   );
-  await page
-    .getByRole("button", {
-      name: "Review latest project revision",
-      exact: true,
-    })
-    .click();
+  await page.getByLabel("Replace instructions", { exact: true }).check();
   await page
     .getByLabel("New instructions", { exact: true })
     .fill("PRIVATE EXPIRES");
@@ -401,7 +430,7 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   await page.getByLabel("Password", { exact: true }).fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
-    .getByRole("heading", { name: "Project configuration", exact: true })
+    .getByRole("navigation", { name: "Project configuration sections" })
     .waitFor();
   assert.equal(
     await page.getByLabel("Replace instructions", { exact: true }).isChecked(),
@@ -432,11 +461,9 @@ test("configuration inline validation stale revision and revoked lead failures r
   await page.getByLabel("Project name", { exact: true }).fill("");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await page.getByText("Check this field.", { exact: true }).waitFor();
-  assert.equal(
-    await page
-      .getByLabel("Project name", { exact: true })
-      .evaluate((e) => e === document.activeElement),
-    true,
+  // submitDraft focuses the invalid field in the next animation frame.
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("aria-label") === "Project name",
   );
   await capture(page, "1366-inline-error");
   await page
@@ -471,7 +498,7 @@ test("configuration inline validation stale revision and revoked lead failures r
   });
   await page.reload();
   await page
-    .getByRole("heading", { name: "Project configuration", exact: true })
+    .getByRole("navigation", { name: "Project configuration sections" })
     .waitFor();
   await page.getByLabel("Lead profile", { exact: true }).selectOption(other);
   await page
@@ -503,8 +530,11 @@ test("configuration inline validation stale revision and revoked lead failures r
   );
   assert.equal(f.service.domain().project(ids.projectId).version, 3);
   await capture(page, "1366-revoked-lead-rejection");
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
-  await page.getByRole("link", { name: "Candidate", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page.getByRole("link", { name: "Edit Candidate", exact: true }).click();
   await page
     .getByText("Revoked: subsequent actions are denied.", { exact: false })
     .waitFor();
@@ -578,26 +608,18 @@ test("source replacement verifies repositories without diagnostic echo and obser
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=github`);
   await page
-    .getByRole("button", { name: "Add linked repository", exact: true })
+    .getByRole("button", { name: "Add repository", exact: true })
     .click();
   await page.getByLabel("Linked repository ID", { exact: true }).fill("repo");
   await page
     .getByLabel("New local repository path", { exact: true })
     .fill("relative-private-path");
-  await page
-    .getByLabel(
-      "Replace all selections, readiness and repositories, including explicit empty lists",
-      { exact: true },
-    )
-    .check();
   const bad = page.waitForResponse((r) =>
     r.url().endsWith("/api/operator/commands"),
   );
-  await page
-    .getByRole("button", { name: "Replace source configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
   assert.equal((await bad).status(), 400);
   await page
     .getByText("Check linked repository IDs, paths and refs.", { exact: true })
@@ -654,6 +676,10 @@ test("source replacement verifies repositories without diagnostic echo and obser
   assert.equal(invalidStyle.foreground, "rgb(250, 250, 250)");
   assert.equal(invalidStyle.background, "rgb(10, 10, 10)");
   await capture(page, "1366-repository-error");
+  const sections = page.getByRole("navigation", {
+    name: "Project configuration sections",
+  });
+  await sections.getByRole("link", { name: "Sync & placement" }).click();
   await page
     .getByRole("button", {
       name: "Request installation-wide source observations",
@@ -689,14 +715,15 @@ test("source replacement verifies repositories without diagnostic echo and obser
     "-m",
     "Fixture",
   ]);
+  await sections.getByRole("link", { name: "GitHub source" }).click();
+  // The unsaved repository row survives the tab change.
   await page
     .getByLabel("New local repository path", { exact: true })
     .fill(repositoryPath);
   await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
-    .getByRole("button", { name: "Replace source configuration", exact: true })
-    .click();
-  await page
+    .locator(".settings-saved")
     .getByText("Recorded github.configure:", { exact: false })
     .waitFor();
   assert.equal(
@@ -716,16 +743,13 @@ test("source replacement verifies repositories without diagnostic echo and obser
   );
   assert.equal((await configResponse.text()).includes(repositoryPath), false);
   await page
-    .getByRole("button", { name: "Review latest source revision", exact: true })
+    .getByRole("button", { name: "Remove repository repo", exact: true })
     .click();
+  await page.getByLabel("Remove all repository access").check();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
-    .getByRole("button", { name: "Remove repository 1", exact: true })
-    .click();
-  await page
-    .getByRole("button", { name: "Replace source configuration", exact: true })
-    .click();
-  await page
-    .getByText("Recorded github.configure:", { exact: false })
+    .locator(".settings-saved")
+    .getByText("version 4", { exact: false })
     .waitFor();
   assert.equal(
     f.service.domain().githubConfiguration(ids.projectId).repositories.length,
@@ -771,26 +795,17 @@ for (const layout of [
     await signIn(page, web, "/app/settings");
     await capture(page, `${layout.name}-populated-settings`);
     await page
-      .getByRole("link", { name: "Paused configuration project", exact: true })
+      .getByRole("link", {
+        name: "Configure Paused configuration project",
+        exact: true,
+      })
       .click();
     await page
-      .getByRole("heading", { name: "Project configuration", exact: true })
+      .getByRole("navigation", { name: "Project configuration sections" })
       .waitFor();
-    await page
-      .getByText("Readiness: All conditions: label ready", { exact: true })
-      .waitFor();
-    assert.equal(
-      (await page.locator("[data-current-readiness]").innerText()).includes(
-        "{",
-      ),
-      false,
-    );
     assert.equal(
       await page
-        .getByRole("link", {
-          name: "Open delivery policy and authority editor",
-          exact: true,
-        })
+        .getByRole("link", { name: "Open advanced editor", exact: true })
         .getAttribute("href"),
       `/project/${ids.projectId}`,
     );
@@ -842,16 +857,13 @@ for (const layout of [
       `${web.origin}/app/assignments/${ids.assignmentId}/recovery`,
     );
     await page
-      .getByText("1 older recovery records omitted", { exact: false })
+      .getByText("1 older recovery record omitted", { exact: false })
       .waitFor();
-    assert.ok(
-      (await page.locator("body").innerText()).includes(
-        "Writer ownership: held",
-      ),
+    assert.match(
+      await page.locator("body").innerText(),
+      /Writer ownership:?\s*held/i,
     );
-    assert.ok(
-      (await page.locator("body").innerText()).includes("Capacity: held"),
-    );
+    assert.match(await page.locator("body").innerText(), /Capacity:?\s*held/i);
     assert.equal(
       await page
         .getByRole("button", { name: /Force|unlock|release|proof/i })
@@ -921,7 +933,9 @@ test("Runtime Settings records lowered capacity separately from usage and retain
   page.setDefaultTimeout(5000);
   await signIn(page, web, "/app/settings/runtime");
   await page
-    .getByText("Global usage 2 / 4; default project limit 2.", { exact: true })
+    .getByText("2 of 4 active turns in use; projects default to 2.", {
+      exact: false,
+    })
     .waitFor();
   await page.getByText("Execution hold recorded", { exact: true }).waitFor();
   const capacityControl = await page
@@ -953,19 +967,17 @@ test("Runtime Settings records lowered capacity separately from usage and retain
     .getByRole("button", { name: "Save capacity", exact: true })
     .click();
   await page
-    .getByText("Recorded. Latest observations", { exact: false })
+    .getByText("2 of 1 active turns in use; projects default to 2.", {
+      exact: false,
+    })
     .waitFor();
-  await page
-    .getByText("Global usage 2 / 1; default project limit 2.", { exact: true })
+  const recordedCapacity = page.locator(".settings-saved");
+  await recordedCapacity
+    .getByText(
+      "Recorded capacity limits: global 1; default project 2; project overrides none.",
+      { exact: false },
+    )
     .waitFor();
-  const recordedCapacity = page.getByText("Recorded capacity limits:", {
-    exact: false,
-  });
-  await recordedCapacity.waitFor();
-  assert.equal(
-    await recordedCapacity.innerText(),
-    "Recorded capacity limits: global 1; default project 2; project overrides none.",
-  );
   assert.equal((await recordedCapacity.innerText()).includes("version"), false);
   assert.equal(
     f.service.capacityLimits([ids.projectId]).currentUsage.global,
@@ -974,9 +986,11 @@ test("Runtime Settings records lowered capacity separately from usage and retain
   assert.equal(f.service.list().filter((r) => r.state === "held").length, 1);
   await capture(page, "1366-capacity-below-usage");
   await page.getByRole("link", { name: /recovery evidence$/ }).click();
-  await page.getByRole("heading", { name: "Recovery", exact: true }).waitFor();
   await page
-    .getByText("1 older recovery records omitted", { exact: false })
+    .getByRole("heading", { name: "Assignment recovery evidence", exact: true })
+    .waitFor();
+  await page
+    .getByText("1 older recovery record omitted", { exact: false })
     .waitFor();
 });
 
@@ -1042,7 +1056,7 @@ test("actual source placement retains its original receipt after transfer remove
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption({ label: "Actual membership target" });
@@ -1102,7 +1116,7 @@ test("unknown committed placement stays reachable after conflict disappearance a
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption(target);
@@ -1122,9 +1136,19 @@ test("unknown committed placement stays reachable after conflict disappearance a
   assert.equal(d.task(taskId).projectId, target);
   assert.equal(d.task(taskId).version, 2);
   assert.equal(f.service.githubSources().conflicts().length, 0);
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
   await page
-    .getByRole("link", { name: "Paused configuration project", exact: true })
+    .getByRole("navigation", { name: "Breadcrumb" })
+    .getByRole("link", { name: "Settings", exact: true })
+    .click();
+  await page
+    .getByRole("link", {
+      name: "Configure Paused configuration project",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("navigation", { name: "Project configuration sections" })
+    .getByRole("link", { name: "Sync & placement" })
     .click();
   await page
     .getByRole("button", { name: "Reconcile exact submission", exact: true })
@@ -1217,9 +1241,7 @@ test("mounted reference and placement fields have unique associated controls", a
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  const references = page.getByLabel("Credential reference change", {
-    exact: true,
-  });
+  const placements = page.getByLabel("Placement project", { exact: true });
   let releaseConfiguration!: () => void, configurationEntered!: () => void;
   const configurationBarrier = new Promise<void>(
     (resolve) => (releaseConfiguration = resolve),
@@ -1239,37 +1261,58 @@ test("mounted reference and placement fields have unique associated controls", a
     await route.fulfill({ response });
   });
   try {
-    await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+    await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=sync`);
     await configurationEntry;
     // Authentication shell readiness precedes this independently loaded resource.
-    assert.equal(await references.count(), 0);
+    assert.equal(await placements.count(), 0);
   } finally {
     releaseConfiguration();
   }
-  await references.nth(1).waitFor({ state: "visible" });
+  await placements.nth(1).waitFor({ state: "visible" });
   await page.unroute(configurationRoute);
-  assert.equal(await references.count(), 2);
-  for (const reference of await references.all())
-    await reference.selectOption("set");
-  const duplicated = await page
-    .locator("[id]")
-    .evaluateAll((elements) =>
-      elements.map((e) => e.id).filter((id, i, ids) => ids.indexOf(id) !== i),
+  const unique = async () => {
+    const duplicated = await page
+      .locator("[id]")
+      .evaluateAll((elements) =>
+        elements.map((e) => e.id).filter((id, i, ids) => ids.indexOf(id) !== i),
+      );
+    assert.deepEqual(duplicated, []);
+    const associated = await page.locator("label[for]").evaluateAll((labels) =>
+      labels.every((label) => {
+        const html = label as HTMLLabelElement;
+        return html.control !== null && html.contains(html.control);
+      }),
     );
-  assert.deepEqual(duplicated, []);
-  const associated = await page.locator("label[for]").evaluateAll((labels) =>
-    labels.every((label) => {
-      const html = label as HTMLLabelElement;
-      return html.control !== null && html.contains(html.control);
-    }),
+    assert.equal(associated, true);
+  };
+  await unique();
+  // Each tab mounts its own reference control; routing and source never share one.
+  const sections = page.getByRole("navigation", {
+    name: "Project configuration sections",
+  });
+  for (const [tab, value] of [
+    ["Routing", "env:ROUTING_NEW"],
+    ["GitHub source", "env:SOURCE_NEW"],
+  ] as const) {
+    await sections.getByRole("link", { name: tab, exact: true }).click();
+    const reference = page.getByLabel("Credential reference change", {
+      exact: true,
+    });
+    assert.equal(await reference.count(), 1);
+    await reference.selectOption("set");
+    await page
+      .getByLabel("New environment reference", { exact: true })
+      .fill(value);
+    await unique();
+  }
+  await sections.getByRole("link", { name: "Routing", exact: true }).click();
+  assert.equal(
+    await page
+      .getByLabel("New environment reference", { exact: true })
+      .inputValue(),
+    "env:ROUTING_NEW",
   );
-  assert.equal(associated, true);
-  const inputs = page.getByLabel("New environment reference", { exact: true });
-  assert.equal(await inputs.count(), 2);
-  await inputs.nth(0).fill("env:ROUTING_NEW");
-  await inputs.nth(1).fill("env:SOURCE_NEW");
-  assert.equal(await inputs.nth(0).inputValue(), "env:ROUTING_NEW");
-  const placements = page.getByLabel("Placement project", { exact: true });
+  await sections.getByRole("link", { name: "Sync & placement" }).click();
   assert.equal(await placements.count(), 2);
   await placements.nth(0).selectOption(target);
   assert.equal(await placements.nth(1).inputValue(), "");
@@ -1297,22 +1340,14 @@ test("readiness validation focuses the exact invalid row with a real description
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
+  await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=github`);
   const labels = page.getByLabel("Ready label", { exact: true });
   await labels.nth(0).fill("");
-  await page
-    .getByLabel(
-      "Replace all selections, readiness and repositories, including explicit empty lists",
-      { exact: true },
-    )
-    .check();
   let posts = 0;
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) posts++;
   });
-  await page
-    .getByRole("button", { name: "Replace source configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
   const verify = async (index: number) => {
     const input = labels.nth(index);
     await page.waitForFunction(
@@ -1338,9 +1373,7 @@ test("readiness validation focuses the exact invalid row with a real description
   await page
     .getByRole("button", { name: "Add readiness condition", exact: true })
     .click();
-  await page
-    .getByRole("button", { name: "Replace source configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await verify(1);
   assert.equal(await labels.nth(0).getAttribute("aria-invalid"), "false");
   assert.equal(posts, 0);
@@ -1361,9 +1394,7 @@ test("readiness validation focuses the exact invalid row with a real description
       }),
     });
   });
-  await page
-    .getByRole("button", { name: "Replace source configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
   const mode = page.getByLabel("Readiness matching", { exact: true });
   await page.waitForFunction(
     () =>
@@ -1461,10 +1492,7 @@ test("Settings retains exact delivery authority and bound-PR detail without prov
   page.on("pageerror", (e) => errors.push(e.message));
   await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
   await page
-    .getByRole("link", {
-      name: "Open delivery policy and authority editor",
-      exact: true,
-    })
+    .getByRole("link", { name: "Open advanced editor", exact: true })
     .click();
   const policy = page.locator('form[data-command="delivery.configure"]');
   assert.equal(
@@ -1597,7 +1625,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${target}/settings`);
+  await signIn(page, web, `/app/projects/${target}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption(destination);
@@ -1635,13 +1663,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
   assert.equal(d.task(taskId).projectId, destination);
   assert.equal(d.task(taskId).version, 2);
   assert.equal(f.service.githubSources().conflicts().length, 0);
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
-  await page
-    .getByRole("link", { name: "Paused configuration project", exact: true })
-    .click();
-  await page
-    .getByRole("heading", { name: "Project configuration", exact: true })
-    .waitFor();
+  await openSync(page, "Paused configuration project");
   assert.equal(
     await page
       .getByRole("button", { name: "Record placement", exact: true })
@@ -1654,10 +1676,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
       .count(),
     0,
   );
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
-  await page
-    .getByRole("link", { name: "Actual membership target", exact: true })
-    .click();
+  await openSync(page, "Actual membership target");
   await page
     .getByRole("button", { name: "Reconcile exact submission", exact: true })
     .waitFor();
@@ -1704,9 +1723,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
       response.request().method() === "GET" &&
       response.url().endsWith(`/projects/${target}/configuration`),
   );
-  await page
-    .getByRole("button", { name: "Reload project configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   const observed = await (await read).json();
   assert.equal(observed.data.placements.length, 0);
   await page
@@ -1780,10 +1797,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
   assert.equal(original?.result.projectId, destination);
   assert.equal(original?.result.version, 2);
   assert.equal(d.task(taskId).version, 2);
-  await page.getByRole("link", { name: "Settings home", exact: true }).click();
-  await page
-    .getByRole("link", { name: "Actual membership target", exact: true })
-    .click();
+  await openSync(page, "Actual membership target");
   await page
     .getByText("Recorded placement outcome", { exact: false })
     .waitFor();
@@ -1824,7 +1838,7 @@ test("initial placement conflict requires explicit loaded revision adoption whil
   });
   journey.observe(page);
   page.setDefaultTimeout(5000);
-  await signIn(page, web, `/app/projects/${target}/settings`);
+  await signIn(page, web, `/app/projects/${target}/settings?tab=sync`);
   await page
     .getByLabel("Placement project", { exact: true })
     .selectOption(target);
@@ -1858,9 +1872,7 @@ test("initial placement conflict requires explicit loaded revision adoption whil
   assert.equal(first.projectId, ids.projectId);
   assert.equal(first.chosenProjectId, target);
   assert.equal(d.recordedCommand({ ...first, actor: "operator" }), undefined);
-  await page
-    .getByRole("button", { name: "Reload project configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page
     .getByText("Conflicting imported task; task version 2.", { exact: true })
     .waitFor();
@@ -1970,9 +1982,7 @@ test("profile configuration reload observes its current revision without replaci
     if (request.url().endsWith("/api/operator/commands"))
       posts.push(request.postData() ?? "");
   });
-  await page
-    .getByRole("button", { name: "Reload profile configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page.getByText("Current revision 2.", { exact: false }).waitFor();
   assert.equal(
     await page.getByLabel("Profile name", { exact: true }).inputValue(),
@@ -2108,7 +2118,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
         .locator(`a[href="/app/projects/${ids.projectId}/settings"]`)
         .click();
     await page
-      .getByRole("heading", { name: "Project configuration", exact: true })
+      .getByRole("navigation", { name: "Project configuration sections" })
       .waitFor();
     assert.equal(
       await page
@@ -2183,7 +2193,7 @@ test("new private input survives a detached receipt and old-session 401 after sa
     await page.getByLabel("Password", { exact: true }).fill(web.password);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page
-      .getByRole("heading", { name: "Project configuration", exact: true })
+      .getByRole("navigation", { name: "Project configuration sections" })
       .waitFor();
     assert.equal(
       await page
@@ -2260,9 +2270,7 @@ test("aborted old configuration read preserves new input and a current logout 40
       completed();
     }
   });
-  await page
-    .getByRole("button", { name: "Reload project configuration", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await held;
   await page.route("**/api/operator/logout", async (route) => {
     await route.fetch();
@@ -2283,7 +2291,7 @@ test("aborted old configuration read preserves new input and a current logout 40
   await page.unroute(configurationPath);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
-    .getByRole("heading", { name: "Project configuration", exact: true })
+    .getByRole("navigation", { name: "Project configuration sections" })
     .waitFor();
   assert.equal(
     await (await openAccountMenu(page))

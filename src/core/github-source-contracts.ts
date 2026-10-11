@@ -61,6 +61,16 @@ export const repositoryLinkSchema = z
   })
   .strict();
 
+/** Command-only: keep a saved selection by id without re-sending its private definition. */
+export const selectionKeepSchema = z
+  .object({ id: nonempty, keep: z.literal(true) })
+  .strict();
+
+/** Command-only: a link without `path` keeps the saved path for that repository. */
+export const repositoryLinkInputSchema = repositoryLinkSchema.extend({
+  path: repositoryLinkSchema.shape.path.optional(),
+});
+
 export const githubConfigurationSchema = z
   .object({
     credentialRef: envReference.nullable(),
@@ -84,6 +94,27 @@ export const githubConfigurationSchema = z
       ),
   })
   .strict();
+
+export const githubConfigurationCommandSchema =
+  githubConfigurationSchema.extend({
+    selections: z
+      .array(z.union([selectionSchema, selectionKeepSchema]))
+      .max(30)
+      .refine(
+        (values) =>
+          new Set(values.map((value) => value.id)).size === values.length,
+        "Selection IDs must be unique",
+      ),
+    repositories: z
+      .array(repositoryLinkInputSchema)
+      .max(20)
+      .refine(
+        (values) =>
+          new Set(values.map((value) => value.repositoryId)).size ===
+          values.length,
+        "Repository IDs must be unique",
+      ),
+  });
 
 export type GitHubConfigurationInput = z.input<
   typeof githubConfigurationSchema

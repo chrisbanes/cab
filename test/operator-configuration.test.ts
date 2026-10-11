@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { promisify } from "node:util";
+import { githubConfigurationCommandSchema } from "../src/core/github-source-contracts.js";
 import { DomainStore, DomainPolicyError } from "../src/core/domain.js";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -663,4 +667,288 @@ test("typed post-commit failure remains unknown through private configuration co
     (error) => error instanceof OperatorApiError && error.status === 409,
   );
   assert.equal(f.runtime.turns, 0);
+});
+
+test("routing guidance is kept when omitted and cleared only by an explicit empty string", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]),
+    d = f.service.domain(),
+    projectId = randomUUID(),
+    profileId = randomUUID();
+  await api.execute({
+    type: "profile.create",
+    key: randomUUID(),
+    profileId,
+    name: "Worker",
+    instructions: "Work",
+    capabilities: "Build",
+  });
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Routing",
+    leadProfileId: null,
+  });
+  const routing = {
+    type: "routing.configure" as const,
+    projectId,
+    enabled: false,
+    candidateProfileIds: [],
+  };
+  await api.execute({
+    ...routing,
+    key: randomUUID(),
+    expectedVersion: 1,
+    guidance: "PRIVATE ROUTING SENTINEL",
+  });
+  const before = d.routing(projectId);
+  const omitted = {
+    ...routing,
+    key: randomUUID(),
+    expectedVersion: Number(before.version),
+    enabled: true,
+    candidateProfileIds: [profileId],
+  };
+  const receipt = await api.execute(omitted);
+  const after = d.routing(projectId);
+  assert.equal(after.guidance, "PRIVATE ROUTING SENTINEL");
+  assert.equal(after.enabled, 1);
+  assert.equal(Number(after.version), Number(before.version) + 1);
+  assert.equal(JSON.stringify(receipt).includes("PRIVATE"), false);
+  await api.execute({
+    ...routing,
+    key: randomUUID(),
+    expectedVersion: Number(after.version),
+    guidance: "",
+  });
+  assert.equal(d.routing(projectId).guidance, "");
+});
+
+test("GitHub keep markers and pathless links resolve from the saved configuration and replay across restart", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]),
+    d = f.service.domain(),
+    projectId = randomUUID(),
+    repositoryPath = join(f.directory, "kept-repository"),
+    run = promisify(execFile);
+  await mkdir(repositoryPath);
+  await run("git", ["init", repositoryPath]);
+  await writeFile(join(repositoryPath, "README.md"), "Fixture\n");
+  await run("git", ["-C", repositoryPath, "add", "README.md"]);
+  await run("git", [
+    "-C",
+    repositoryPath,
+    "-c",
+    "user.name=Fixture",
+    "-c",
+    "user.email=fixture@example.invalid",
+    "commit",
+    "-m",
+    "Fixture",
+  ]);
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Source",
+    leadProfileId: null,
+  });
+  const readiness = {
+    mode: "all" as const,
+    conditions: [{ kind: "label" as const, name: "ready" }],
+  };
+  const s1 = {
+    id: "S-1",
+    kind: "repository" as const,
+    repositoryId: "repo-1",
+    owner: "acme",
+    name: "atlas",
+  };
+  const s2 = { id: "S-2", kind: "search" as const, query: "PRIVATE QUERY" };
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:FIXTURE_REF",
+    selections: [s1, s2],
+    readiness,
+    repositories: [
+      { repositoryId: "repo-1", path: repositoryPath, ref: "HEAD" },
+    ],
+  });
+  const savedPath = d.githubConfiguration(projectId).repositories[0]?.path;
+  assert.equal(savedPath, await realpath(repositoryPath));
+  const version = d.githubConfiguration(projectId).version;
+  for (const selectionId of ["S-1", "S-2"])
+    d.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId,
+      expectedVersion: version,
+    });
+  const edit = {
+    type: "github.configure" as const,
+    key: randomUUID(),
+    projectId,
+    expectedVersion: version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-4", kind: "search", query: "PRIVATE NEW" },
+    ],
+    readiness,
+    repositories: [{ repositoryId: "repo-1", ref: "HEAD" }],
+  };
+  const receipt = await api.execute(edit);
+  const saved = d.githubConfiguration(projectId);
+  assert.deepEqual(saved.selections, [
+    s1,
+    { id: "S-4", kind: "search", query: "PRIVATE NEW" },
+  ]);
+  assert.equal(saved.repositories[0]?.path, savedPath);
+  assert.equal(saved.credentialRef, "env:FIXTURE_REF");
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  assert.deepEqual(
+    db
+      .prepare(
+        "SELECT selectionId FROM project_github_active WHERE projectId = ? ORDER BY selectionId",
+      )
+      .all(projectId)
+      .map((row) => row.selectionId),
+    ["S-1"],
+  );
+  // The kept row survives, but activation counts only at the version it was previewed,
+  // so the read and sync treat S-1 as inactive until it is previewed again.
+  assert.deepEqual(d.githubActiveSelectionIds(projectId), []);
+  const configuration = await api.readProjectConfiguration(projectId);
+  assert.deepEqual(
+    configuration.data.source.selections.map((s) => [s.id, s.active]),
+    [
+      ["S-1", false],
+      ["S-4", false],
+    ],
+  );
+  const read = JSON.stringify(configuration);
+  for (const secret of ["PRIVATE QUERY", "PRIVATE NEW", String(savedPath)])
+    assert.equal(read.includes(secret), false);
+  assert.equal(JSON.stringify(receipt).includes("PRIVATE"), false);
+
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: saved.version,
+    selections: [{ id: "S-1", keep: true }],
+    readiness,
+    repositories: [],
+  });
+  await f.service.stop();
+  await f.service.start();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(await reopened.execute(edit), receipt);
+  await assert.rejects(
+    reopened.execute({ ...edit, selections: [{ id: "S-1", keep: true }] }),
+    { status: 409 },
+  );
+
+  const current = f.service.domain().githubConfiguration(projectId);
+  await assert.rejects(
+    reopened.execute({
+      ...edit,
+      key: randomUUID(),
+      expectedVersion: current.version,
+      selections: [{ id: "S-9", keep: true }],
+      repositories: [],
+    }),
+    { status: 409 },
+  );
+  const failure = await reopened
+    .execute({
+      ...edit,
+      key: randomUUID(),
+      expectedVersion: current.version,
+      selections: [{ id: "S-1", keep: true }],
+      repositories: [{ repositoryId: "repo-1", ref: "HEAD" }],
+    })
+    .then(
+      () => assert.fail("expected rejection"),
+      (error: unknown) => error as OperatorApiError,
+    );
+  assert.equal(failure.status, 400);
+  assert.deepEqual(failure.fieldPaths, ["repositories"]);
+  assert.equal(
+    JSON.stringify({ ...failure, message: failure.message }).includes(
+      String(savedPath),
+    ),
+    false,
+  );
+  assert.equal(
+    f.service.domain().githubConfiguration(projectId).version,
+    current.version,
+  );
+  // A failing new link followed by an unsaved pathless link rejects as one 400; the
+  // earlier verification's rejection is handled, so the service keeps running.
+  const unhandled: unknown[] = [];
+  const record = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", record);
+  try {
+    await assert.rejects(
+      reopened.execute({
+        ...edit,
+        key: randomUUID(),
+        expectedVersion: current.version,
+        selections: [{ id: "S-1", keep: true }],
+        repositories: [
+          { repositoryId: "new", path: "relative-path", ref: "main" },
+          { repositoryId: "unsaved", ref: "main" },
+        ],
+      }),
+      { status: 400 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+  assert.deepEqual(unhandled, []);
+  assert.equal(
+    f.service.domain().githubConfiguration(projectId).version,
+    current.version,
+  );
+});
+
+test("GitHub configuration command contract accepts only exact keep markers and unique ids", () => {
+  const base = {
+    credentialRef: null,
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  };
+  const parse = (selections: unknown[]) =>
+    githubConfigurationCommandSchema.safeParse({ ...base, selections }).success;
+  assert.equal(parse([{ id: "S-1", keep: true }]), true);
+  assert.equal(parse([{ id: "S-1", keep: false }]), false);
+  assert.equal(parse([{ id: "S-1", keep: true, query: "x" }]), false);
+  assert.equal(
+    parse([
+      { id: "S-1", keep: true },
+      { id: "S-1", kind: "search", query: "x" },
+    ]),
+    false,
+  );
+  assert.equal(
+    githubConfigurationCommandSchema.safeParse({
+      ...base,
+      selections: [],
+      repositories: [
+        { repositoryId: "r", ref: "main" },
+        { repositoryId: "r", path: "/x", ref: "main" },
+      ],
+    }).success,
+    false,
+  );
 });

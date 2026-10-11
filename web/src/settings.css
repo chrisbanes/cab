@@ -1,0 +1,368 @@
+/* Settings, profiles, routing, runtime and recovery (U6). Frames 114 and 118–128. */
+
+.settings-page {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.settings-page > .introduction {
+  margin: 0;
+}
+
+.settings-index,
+.settings-split {
+  display: grid;
+  gap: var(--space-12);
+  align-items: start;
+}
+
+.settings-column {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+@media (min-width: 1121px) {
+  .settings-index,
+  .settings-split-even {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  /* 700px form column beside a 386px aside (frames 118, 119, 122–124). */
+  .settings-split {
+    grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+  }
+
+  .settings-split.settings-split-even {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.settings-panel {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+  padding: var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+}
+
+.settings-panel form {
+  display: grid;
+  gap: var(--space-12);
+}
+
+.settings-panel .field {
+  margin-bottom: 0;
+}
+
+.settings-panel-header,
+.settings-row-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-12);
+}
+
+.settings-panel-header > div:first-child,
+.settings-row-heading > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-panel-title {
+  margin: 0;
+  font-size: var(--type-md);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-1-25);
+}
+
+.settings-panel-header p,
+.settings-row p,
+.settings-aside p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-row {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+  padding-top: var(--space-12);
+  border-top: 1px solid var(--border);
+}
+
+.settings-row h3 {
+  margin: 0;
+}
+
+.settings-row-heading > a:last-child,
+.settings-row-heading > button:last-child {
+  margin-left: auto;
+}
+
+.settings-facts {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.settings-facts > div {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.settings-facts dt {
+  flex: none;
+  font-weight: var(--weight-medium);
+}
+
+.settings-facts dd {
+  flex: 1;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-facts ul {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-facts li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.settings-aside,
+.settings-changes {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+  padding: var(--space-16);
+  border-radius: var(--radius-xl);
+  background: var(--secondary);
+}
+
+.settings-changes {
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.settings-aside h2,
+.settings-changes h3 {
+  margin: 0;
+}
+
+.settings-aside ul,
+.settings-changes ul,
+.settings-links {
+  display: grid;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.settings-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.settings-tabs {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 2px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  border-radius: var(--radius-lg);
+  background: var(--muted);
+}
+
+.settings-tabs a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding-inline: var(--space-8);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.settings-tabs a[aria-current="page"] {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.settings-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-12);
+}
+
+.settings-rows {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-candidates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-16);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-candidates legend {
+  margin-bottom: var(--space-4);
+}
+
+.settings-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.settings-wide {
+  width: 100%;
+}
+
+.settings-saved strong {
+  font-weight: var(--weight-medium);
+}
+
+/* Native checkbox drawn as a switch; it stays a checkbox for forms and `check()`. */
+.native-check.settings-switch {
+  appearance: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--input);
+  transition: background-color 120ms;
+}
+
+.native-check.settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--foreground);
+  transition: transform 120ms;
+}
+
+.native-check.settings-switch:checked {
+  background: var(--primary);
+}
+
+.native-check.settings-switch:checked::after {
+  background: var(--primary-foreground);
+  transform: translateX(16px);
+}
+
+/* Breadcrumb and the phone title, shared by the page header. */
+.page-header-trail {
+  flex-direction: row;
+}
+
+.page-header-trail ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-12);
+  padding: 0;
+  list-style: none;
+  color: var(--muted-foreground);
+}
+
+.page-header-trail li + li::before {
+  content: "/";
+  margin-right: var(--space-4);
+}
+
+.page-header-trail a {
+  color: inherit;
+}
+
+.page-title-short {
+  display: none;
+}
+
+.settings-phone-cards {
+  display: none;
+}
+
+@media (max-width: 1120px) {
+  .page-header-trail {
+    display: none;
+  }
+}
+
+@media (max-width: 759px) {
+  .page-title-full {
+    display: none;
+  }
+
+  .page-title-short {
+    display: inline;
+  }
+
+  .settings-phone-cards {
+    display: grid;
+    gap: var(--space-12);
+  }
+
+  .settings-desktop {
+    display: none;
+  }
+
+  .settings-page a[data-slot="button"],
+  .settings-page button,
+  .settings-tabs a {
+    min-height: 44px;
+  }
+}
+
+@media (forced-colors: active) {
+  .native-check.settings-switch {
+    appearance: auto;
+    width: auto;
+    height: auto;
+  }
+
+  .native-check.settings-switch::after {
+    content: none;
+  }
+}
