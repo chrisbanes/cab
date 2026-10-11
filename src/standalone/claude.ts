@@ -1,7 +1,15 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, open, readdir } from "node:fs/promises";
-import { join } from "node:path";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rm,
+} from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import type {
   CanUseTool,
   HookCallback,
@@ -39,13 +47,14 @@ import {
   captureProcessIdentity,
   MacProcessTerminationVerifier,
 } from "./termination.js";
+import { isWithin } from "./workspace-inspection.js";
 
 /** The SDK surface the runtime uses; tests inject a fake. */
 export interface ClaudeSdk {
   query(params: {
     prompt: AsyncIterable<SDKUserMessage>;
     options: Options;
-  }): AsyncIterable<unknown>;
+  }): AsyncIterable<unknown> & { supportedModels(): Promise<unknown> };
   createSdkMcpServer: typeof createSdkMcpServer;
   tool: typeof tool;
 }
@@ -63,13 +72,28 @@ export interface ClaudeRuntimeOptions {
   terminationVerifier?: TerminationVerifier;
   /** How long a settled query's CLI may take to exit before SIGTERM. */
   exitTimeoutMs?: number;
+  /** Model-free check that Seatbelt can start in the turn's spawn context. */
+  sandboxSelfTest?: (input: {
+    workspace: string;
+    env: Record<string, string>;
+  }) => Promise<boolean>;
 }
 
-/** The C0-qualified SDK; its bundled CLI reported these values (F7.6). */
+/** The C0-qualified SDK. */
 export const claudeSdkVersion = "0.3.296";
-// ponytail: static until the model-free supportedModels() read is qualified (#825 T1 F9.0).
-const supportedModels = ["default", "sonnet", "opus", "haiku", "fable"];
 const effortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+const supportedModelsSchema = z
+  .array(
+    z.object({
+      value: z.string().min(1).max(128),
+      supportsEffort: z.boolean().optional(),
+      supportedEffortLevels: z.array(effortSchema).optional(),
+    }),
+  )
+  .max(64);
+const settingsReadTimeoutMs = 30_000;
+/** The CLI falls back to the shared `/tmp/claude-<uid>` above this (AF_UNIX, #825 T1). */
+const maxSandboxTemporaryBytes = 44;
 
 const mcpServerName = "ensemble";
 const mcpToolPrefix = `mcp__${mcpServerName}__`;
@@ -84,6 +108,7 @@ const disallowedTools = [
   "ExitPlanMode",
 ];
 const maxPendingToolUses = 256;
+const maxLedgerEntries = 256;
 const maxRetainedSettledTurns = 64;
 const instructionFiles = ["AGENTS.md", "CLAUDE.md"];
 const maxInstructionFileBytes = 32 * 1024;
@@ -164,6 +189,7 @@ export function claudeTurnEnvironment(
   base: NodeJS.ProcessEnv,
   token: string,
   configDirectory: string,
+  temporaryBase: string,
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(base))
@@ -174,8 +200,92 @@ export function claudeTurnEnvironment(
   env.CLAUDE_CODE_OAUTH_TOKEN = token;
   env.CLAUDE_CONFIG_DIR = configDirectory;
   env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB = "1";
+  // Moves the sandbox $TMPDIR to <base>/claude-<uid> (#825 T1 F9.1).
+  env.CLAUDE_CODE_TMPDIR = temporaryBase;
   return env;
 }
+
+/** A short per-task base, so `<base>/claude-<uid>` fits an AF_UNIX socket path. */
+export function claudeTemporaryBase(workspace: string): string {
+  return `/tmp/ens-${createHash("sha256").update(workspace).digest("hex").slice(0, 16)}`;
+}
+
+/** Creates or accepts only a private directory owned by this user; otherwise a reason. */
+async function ensureTemporaryBase(base: string): Promise<string | undefined> {
+  const uid = process.getuid?.();
+  if (uid === undefined)
+    return "per-task sandbox temporary directory is unsupported on this host";
+  if (Buffer.byteLength(`${base}/claude-${uid}`) > maxSandboxTemporaryBytes)
+    return "per-task sandbox temporary directory path is too long";
+  try {
+    await mkdir(base, { mode: 0o700 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST")
+      return "per-task sandbox temporary directory could not be created";
+  }
+  try {
+    const stat = await lstat(base);
+    if (
+      !stat.isDirectory() ||
+      stat.uid !== uid ||
+      (stat.mode & 0o777) !== 0o700
+    )
+      return "per-task sandbox temporary directory is not private";
+  } catch {
+    return "per-task sandbox temporary directory could not be read";
+  }
+  return undefined;
+}
+
+function defaultSandboxSelfTest(input: {
+  workspace: string;
+  env: Record<string, string>;
+}): Promise<boolean> {
+  if (process.platform !== "darwin") return Promise.resolve(false);
+  return new Promise((done) =>
+    execFile(
+      "/usr/bin/sandbox-exec",
+      ["-p", "(version 1)(allow default)", "/usr/bin/true"],
+      { cwd: input.workspace, env: input.env, timeout: 5000 },
+      (error) => done(!error),
+    ),
+  );
+}
+
+/** Resolves through the nearest existing ancestor, so symlinked parents are followed. */
+async function resolvedPath(path: string): Promise<string> {
+  let existing = path;
+  const rest: string[] = [];
+  for (;;)
+    try {
+      return join(await realpath(existing), ...rest.reverse());
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) return path;
+      rest.push(basename(existing));
+      existing = parent;
+    }
+}
+
+async function withinRoots(
+  path: string,
+  roots: readonly string[],
+): Promise<boolean> {
+  const candidate = await resolvedPath(path);
+  for (const root of roots)
+    if (isWithin(await resolvedPath(root), candidate)) return true;
+  return false;
+}
+
+/** Disclosed with the effective policy; see ADR-1008 and the C0/T1 evidence. */
+export const claudePolicyLimits: readonly string[] = [
+  "File-editing tools are confined by Ensemble's PreToolUse hook, not by the OS sandbox.",
+  "A sandbox that stops working mid-turn shows only as failed commands (exit 126), not a failed turn.",
+  "The sandbox self-test proves Seatbelt can start, not the exact profile Claude Code applies.",
+  "Untested: inertness of model-written Claude configuration (C0 F5.5), whether Claude Code honours dangerouslyDisableSandbox (F6.3; Ensemble's hook denies it), and a missing sandbox-exec binary (F6.4).",
+  "The subprocess environment scrub is not yet qualified; Bash, hooks and stdio MCP children may still see the token until it is.",
+  "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
+];
 
 async function readBounded(path: string, limit: number): Promise<string> {
   const file = await open(path, "r");
@@ -299,6 +409,12 @@ interface ClaudeTurn {
   result?: ClaudeResult;
   pendingToolUses: Map<string, string[]>;
   pendingCount: number;
+  roots: readonly string[];
+  ledger: Array<{
+    toolUseId: string;
+    toolName: string;
+    decision: "allow" | "deny";
+  }>;
   release: (released: boolean) => void;
   started: ReturnType<typeof deferred<void>>;
   settled: ReturnType<typeof deferred<TurnOutcome>>;
@@ -319,6 +435,8 @@ export class ClaudeRuntime implements Runtime {
     readonly RuntimeToolDefinition[]
   >();
   private readonly turns = new Map<string, ClaudeTurn>();
+  /** Model to supported efforts, read model-free from the installed CLI. */
+  private supported: Map<string, readonly string[]> | undefined;
   private unexpected?: (request: UnexpectedRequest) => void;
   private toolCall?: (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
   private anomaly?: (anomaly: {
@@ -358,8 +476,145 @@ export class ClaudeRuntime implements Runtime {
     return this.generation;
   }
 
-  supportedSettings(): { models: string[]; efforts: string[] } {
-    return { models: [...supportedModels], efforts: [...effortSchema.options] };
+  /** Undefined until a preflight has read them from the installed CLI. */
+  supportedSettings(): Record<string, readonly string[]> | undefined {
+    return this.supported && Object.fromEntries(this.supported);
+  }
+
+  effectivePolicy(workspace: string) {
+    return {
+      writableRoots: [workspace, claudeTemporaryBase(workspace)],
+      sharedWriteRoots: [] as string[],
+      network: "denied" as const,
+      fileToolConfinement: "hook" as const,
+      limits: [...claudePolicyLimits],
+    };
+  }
+
+  /** Bounded per-turn record of tool names and decisions; never inputs. */
+  toolLedger(threadId: string, turnId: string) {
+    const turn = this.turns.get(turnId);
+    return turn?.threadId === threadId ? [...turn.ledger] : [];
+  }
+
+  /** Removes a released task's sandbox temporary base. */
+  async releaseWorkspace(workspace: string): Promise<void> {
+    const base = claudeTemporaryBase(workspace);
+    if ((await ensureTemporaryBase(base)) === undefined)
+      await rm(base, { recursive: true, force: true });
+  }
+
+  async preflightTurn(input: {
+    workspace: string;
+    settings?: RuntimeTurnSettings;
+  }): Promise<string | undefined> {
+    const unavailable = (reason: string) =>
+      `Claude runtime unavailable: ${reason}`;
+    if (!this.generation || !this.sdk) return unavailable("runtime stopped");
+    const environment = this.options.claude.turnEnvironment();
+    if ("unavailable" in environment) return environment.unavailable;
+    const base = claudeTemporaryBase(input.workspace);
+    const temporary = await ensureTemporaryBase(base);
+    if (temporary) return unavailable(temporary);
+    const env = claudeTurnEnvironment(
+      environment.env,
+      environment.token,
+      this.options.claude.configDirectory,
+      base,
+    );
+    const { CLAUDE_CODE_OAUTH_TOKEN: _token, ...withoutToken } = env;
+    const passed = await (
+      this.options.sandboxSelfTest ?? defaultSandboxSelfTest
+    )({ workspace: input.workspace, env: withoutToken }).catch(() => false);
+    if (!passed) return unavailable("sandbox self-test failed");
+    this.supported ??= await this.readSettings(env, input.workspace).catch(
+      () => undefined,
+    );
+    if (!this.supported)
+      return unavailable("supported models could not be read");
+    const problem = this.settingsProblem(input.settings);
+    return problem ? unavailable(problem) : undefined;
+  }
+
+  private settingsProblem(
+    settings: RuntimeTurnSettings | undefined,
+  ): string | undefined {
+    if (!this.supported) return "supported models are unknown";
+    const model = settings?.model ?? "default";
+    const efforts = this.supported.get(model);
+    if (!efforts) return `model ${model} is not supported`;
+    const effort = settings?.reasoningEffort;
+    if (effort != null && !efforts.includes(effort))
+      return `effort ${effort} is not supported for ${model}`;
+    return undefined;
+  }
+
+  /** A model-free query whose prompt never releases (#825 T1 F9.0). */
+  private async readSettings(
+    env: Record<string, string>,
+    workspace: string,
+  ): Promise<Map<string, readonly string[]>> {
+    const sdk = this.sdk;
+    if (!sdk) throw new Error("Runtime stopped");
+    const abort = new AbortController();
+    let child: ChildProcess | undefined;
+    let exited: Promise<void> | undefined;
+    async function* never(): AsyncGenerator<SDKUserMessage> {
+      await new Promise((done) =>
+        abort.signal.addEventListener("abort", done, { once: true }),
+      );
+    }
+    const query = sdk.query({
+      prompt: never(),
+      options: {
+        cwd: workspace,
+        env,
+        settingSources: [],
+        strictMcpConfig: true,
+        permissionMode: "dontAsk",
+        tools: [],
+        abortController: abort,
+        stderr: () => {},
+        spawnClaudeCodeProcess: (options) => {
+          const spawned = this.spawnChild(options);
+          child = spawned.child;
+          exited = spawned.exited;
+          return spawned.child as never;
+        },
+      },
+    });
+    const drained = (async () => {
+      try {
+        for await (const _ of query);
+      } catch {
+        // Abort ends the model-free query.
+      }
+    })();
+    try {
+      let timer: NodeJS.Timeout | undefined;
+      const models = await Promise.race([
+        query.supportedModels(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("timed out")),
+            settingsReadTimeoutMs,
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
+      return new Map(
+        supportedModelsSchema
+          .parse(models)
+          .map((model) => [
+            model.value,
+            model.supportsEffort ? (model.supportedEffortLevels ?? []) : [],
+          ]),
+      );
+    } finally {
+      abort.abort();
+      await drained;
+      if (child && !(await this.awaitExit(child, exited)))
+        child.kill("SIGKILL");
+    }
   }
 
   async start(): Promise<void> {
@@ -424,13 +679,16 @@ export class ClaudeRuntime implements Runtime {
     if (!sdk || !generation) throw new Error("Runtime stopped");
     const environment = this.options.claude.turnEnvironment();
     if ("unavailable" in environment) throw new Error(environment.unavailable);
+    const problem = this.settingsProblem(settings);
+    if (problem) throw new Error(`Claude runtime unavailable: ${problem}`);
     const model = settings?.model ?? undefined;
-    if (model !== undefined && !supportedModels.includes(model))
-      throw new Error("Claude model is not supported");
     const effort =
       settings?.reasoningEffort == null
         ? undefined
         : effortSchema.parse(settings.reasoningEffort);
+    const base = claudeTemporaryBase(workspace);
+    const temporary = await ensureTemporaryBase(base);
+    if (temporary) throw new Error(`Claude runtime unavailable: ${temporary}`);
     const fresh = this.freshThreads.delete(threadId);
     const tools = this.threadTools.get(threadId) ?? [];
     this.threadTools.delete(threadId);
@@ -450,6 +708,8 @@ export class ClaudeRuntime implements Runtime {
       malformed: false,
       pendingToolUses: new Map(),
       pendingCount: 0,
+      roots: [workspace, base],
+      ledger: [],
       release: (released) => {
         turn.released = released;
         release(released);
@@ -482,6 +742,7 @@ export class ClaudeRuntime implements Runtime {
         environment.env,
         environment.token,
         this.options.claude.configDirectory,
+        base,
       ),
       ...(fresh ? { sessionId: threadId } : { resume: threadId }),
       ...(model !== undefined ? { model } : {}),
@@ -492,6 +753,14 @@ export class ClaudeRuntime implements Runtime {
       tools: [...builtInTools],
       allowedTools: [...builtInTools, `${mcpToolPrefix}*`],
       disallowedTools: [...disallowedTools],
+      sandbox: {
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        autoAllowBashIfSandboxed: true,
+        network: { allowedDomains: [] },
+        filesystem: { allowWrite: [workspace, base] },
+      },
       mcpServers: {
         [mcpServerName]: sdk.createSdkMcpServer({
           name: mcpServerName,
@@ -553,8 +822,8 @@ export class ClaudeRuntime implements Runtime {
     const turn = this.turns.get(turnId);
     if (!turn || turn.threadId !== threadId)
       throw new Error("Runtime terminal evidence unavailable");
+    // Settled turns stay readable (ledger) until retain() evicts them.
     const outcome = await turn.settled.promise;
-    this.turns.delete(turnId);
     try {
       // Binds evidence recorded before the service bound this turn.
       this.options.safety.recordTerminal({
@@ -639,7 +908,7 @@ export class ClaudeRuntime implements Runtime {
       this.turns.delete(oldest.turnId);
   }
 
-  private spawnTurnProcess(turn: ClaudeTurn, options: SpawnOptions) {
+  private spawnChild(options: SpawnOptions) {
     const child = spawn(options.command, options.args, {
       ...(options.cwd ? { cwd: options.cwd } : {}),
       env: options.env,
@@ -647,13 +916,35 @@ export class ClaudeRuntime implements Runtime {
       signal: options.signal,
       stdio: ["pipe", "pipe", "ignore"],
     });
-    turn.child = child;
-    turn.exited = new Promise<void>((resolve) => {
+    const exited = new Promise<void>((resolve) => {
       child.once("exit", () => resolve());
       child.once("error", () => {
         if (child.pid === undefined) resolve();
       });
     });
+    return { child, exited };
+  }
+
+  /** True once the child has exited, after waiting and then SIGTERM. */
+  private async awaitExit(
+    child: ChildProcess,
+    exitedEvent: Promise<void> | undefined,
+  ): Promise<boolean> {
+    const exited = () => child.exitCode !== null || child.signalCode !== null;
+    const wait = (ms: number) =>
+      Promise.race([exitedEvent ?? Promise.resolve(), sleep(ms)]);
+    if (!exited()) await wait(this.options.exitTimeoutMs ?? 10_000);
+    if (!exited()) {
+      child.kill("SIGTERM");
+      await wait(3000);
+    }
+    return exited() || child.pid === undefined;
+  }
+
+  private spawnTurnProcess(turn: ClaudeTurn, options: SpawnOptions) {
+    const { child, exited } = this.spawnChild(options);
+    turn.child = child;
+    turn.exited = exited;
     const capture =
       this.options.captureProcessIdentity ?? captureProcessIdentity;
     void capture(child.pid)
@@ -795,15 +1086,7 @@ export class ClaudeRuntime implements Runtime {
   private async verifyExit(turn: ClaudeTurn): Promise<boolean> {
     const child = turn.child;
     if (!child) return true;
-    const exited = () => child.exitCode !== null || child.signalCode !== null;
-    const wait = (ms: number) =>
-      Promise.race([turn.exited ?? Promise.resolve(), sleep(ms)]);
-    if (!exited()) await wait(this.options.exitTimeoutMs ?? 10_000);
-    if (!exited()) {
-      child.kill("SIGTERM");
-      await wait(3000);
-    }
-    if (!exited()) return child.pid === undefined;
+    if (!(await this.awaitExit(child, turn.exited))) return false;
     if (!turn.identity) return true;
     try {
       const verification = await (
@@ -815,17 +1098,45 @@ export class ClaudeRuntime implements Runtime {
     }
   }
 
+  /** Records every call and denies those outside Ensemble's policy. */
   private async preToolUse(turn: ClaudeTurn, raw: unknown) {
-    const deny = (reason: string) => ({
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse" as const,
-        permissionDecision: "deny" as const,
-        permissionDecisionReason: reason,
-      },
-    });
     const input = hookInputSchema.safeParse(raw);
+    const record = (decision: "allow" | "deny") => {
+      if (input.success && turn.ledger.length < maxLedgerEntries)
+        turn.ledger.push({
+          toolUseId: input.data.tool_use_id,
+          toolName: input.data.tool_name.slice(0, 128),
+          decision,
+        });
+    };
+    const deny = (reason: string) => {
+      record("deny");
+      return {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse" as const,
+          permissionDecision: "deny" as const,
+          permissionDecisionReason: reason,
+        },
+      };
+    };
     if (!input.success) return deny("Ensemble could not read this tool call");
     const { tool_name: name, tool_input: toolInput } = input.data;
+    const fields = z.record(z.string(), z.unknown()).safeParse(toolInput);
+    if (!builtInTools.includes(name) && !name.startsWith(mcpToolPrefix))
+      return deny(`${name} is outside Ensemble's tool policy`);
+    if (name === "Write" || name === "Edit") {
+      const path = fields.success ? fields.data.file_path : undefined;
+      if (
+        typeof path !== "string" ||
+        !(await withinRoots(resolve(turn.roots[0] ?? "/", path), turn.roots))
+      )
+        return deny("File edits are confined to the task's writable roots");
+    }
+    if (
+      name === "Bash" &&
+      (!fields.success || fields.data.dangerouslyDisableSandbox === true)
+    )
+      return deny("Commands never run outside the sandbox");
     if (name.startsWith(mcpToolPrefix)) {
       if (turn.pendingCount >= maxPendingToolUses)
         return deny("Too many pending Ensemble tool calls");
@@ -835,6 +1146,7 @@ export class ClaudeRuntime implements Runtime {
       turn.pendingToolUses.set(key, queue);
       turn.pendingCount++;
     }
+    record("allow");
     return {};
   }
 

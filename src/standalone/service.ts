@@ -2376,11 +2376,21 @@ export class StandaloneService {
       });
     let releaseArchiveHold = false;
     try {
+      const path = this.workspaceBindings?.get(taskId)?.path;
+      const workspace = path && existsSync(path) ? realpathSync(path) : path;
       const result = await this.requireWorkspaces().archiveAndCleanup(
         taskId,
         evidence,
         () => state.confirmArchive(taskId),
       );
+      const claude = this.runtimes.get("claude");
+      // The sandbox temporary base lives exactly as long as the workspace.
+      if (
+        result.outcome === "cleaned" &&
+        workspace &&
+        claude instanceof ClaudeRuntime
+      )
+        await claude.releaseWorkspace(workspace).catch(() => {});
       releaseArchiveHold =
         result.outcome === "cleaned" ||
         (result.outcome === "retained" &&

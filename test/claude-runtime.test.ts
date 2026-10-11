@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import type { ChildProcess } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -21,6 +22,7 @@ import {
   type ClaudeSdk,
   ClaudeRuntime,
   claudeSdkVersion,
+  claudeTemporaryBase,
   claudeToolShape,
 } from "../src/standalone/claude.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
@@ -61,102 +63,140 @@ interface Session {
 
 type Script = (session: Session) => AsyncGenerator<unknown>;
 
+const models = [
+  {
+    value: "default",
+    displayName: "Default",
+    description: "",
+    supportsEffort: true,
+    supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+  },
+  {
+    value: "haiku",
+    displayName: "Haiku",
+    description: "",
+    supportsEffort: true,
+    supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"],
+  },
+];
+
 function fakeSdk(scripts: Script[], log: string[]) {
   const sessions: Session[] = [];
+  const queries: string[] = [];
   const sdk: ClaudeSdk = {
-    query: ({ prompt, options }) =>
-      (async function* () {
-        const script = scripts.shift();
-        assert.ok(script, "unexpected query");
-        const forwarded = new AbortController();
-        const abort = options.abortController;
-        const aborted = () =>
-          new Promise<void>((resolve) => {
-            if (abort?.signal.aborted) resolve();
-            abort?.signal.addEventListener("abort", () => resolve());
-          });
-        void aborted().then(() => forwarded.abort());
-        const child = options.spawnClaudeCodeProcess?.({
-          command: process.execPath,
-          args: [
-            "-e",
-            "process.stdin.resume();process.stdin.on('end',()=>process.exit(0))",
-          ],
-          ...(options.cwd ? { cwd: options.cwd } : {}),
-          env: options.env ?? {},
-          signal: forwarded.signal,
-        }) as unknown as ChildProcess;
-        const exit = new Promise<void>((resolve) => {
-          if (child.exitCode !== null || child.signalCode !== null) resolve();
-          child.once("exit", () => resolve());
-        });
-        const iterator = prompt[Symbol.asyncIterator]();
-        const first = await Promise.race([
-          iterator.next(),
-          aborted().then(() => "aborted" as const),
-        ]);
-        if (first === "aborted")
-          throw new Error("Claude Code process aborted by user");
-        if (first.done) {
-          child.stdin?.end();
-          await exit;
-          return;
-        }
-        log.push("prompt");
-        const tools =
-          (
-            options.mcpServers?.ensemble as unknown as
-              | undefined
-              | {
-                  instance: { tools: FakeTool[] };
-                }
-          )?.instance.tools ?? [];
-        const session: Session = {
-          options,
-          child,
-          prompt: first.value,
-          hook: (toolName, toolInput, toolUseId) => {
-            const hook = options.hooks?.PreToolUse?.[0]
-              ?.hooks[0] as HookCallback;
-            return hook(
-              {
-                hook_event_name: "PreToolUse",
-                tool_name: toolName,
-                tool_input: toolInput,
-                tool_use_id: toolUseId,
-              } as never,
-              toolUseId,
-              { signal: forwarded.signal },
+    query: ({ prompt, options }) => {
+      if (!options.mcpServers) {
+        // The model-free settings read: no prompt is ever released.
+        queries.push("settings");
+        return Object.assign(
+          (async function* () {
+            const signal = options.abortController?.signal;
+            await new Promise((done) =>
+              signal?.aborted
+                ? done(undefined)
+                : signal?.addEventListener("abort", done),
             );
-          },
-          callTool: (name, args) => {
-            const definition = tools.find((tool) => tool.name === name);
-            assert.ok(definition);
-            return definition.handler(args, {});
-          },
-          waitForExit: () => exit,
-        };
-        sessions.push(session);
-        const messages = script(session);
-        try {
-          for (;;) {
-            const next = await Promise.race([
-              messages.next(),
-              aborted().then(() => "aborted" as const),
-            ]);
-            if (next === "aborted") {
-              await exit;
-              throw new Error("Claude Code process aborted by user");
-            }
-            if (next.done) break;
-            yield next.value;
+          })(),
+          { supportedModels: async () => models },
+        );
+      }
+      queries.push("turn");
+      return Object.assign(
+        (async function* () {
+          const script = scripts.shift();
+          assert.ok(script, "unexpected query");
+          const forwarded = new AbortController();
+          const abort = options.abortController;
+          const aborted = () =>
+            new Promise<void>((resolve) => {
+              if (abort?.signal.aborted) resolve();
+              abort?.signal.addEventListener("abort", () => resolve());
+            });
+          void aborted().then(() => forwarded.abort());
+          const child = options.spawnClaudeCodeProcess?.({
+            command: process.execPath,
+            args: [
+              "-e",
+              "process.stdin.resume();process.stdin.on('end',()=>process.exit(0))",
+            ],
+            ...(options.cwd ? { cwd: options.cwd } : {}),
+            env: options.env ?? {},
+            signal: forwarded.signal,
+          }) as unknown as ChildProcess;
+          const exit = new Promise<void>((resolve) => {
+            if (child.exitCode !== null || child.signalCode !== null) resolve();
+            child.once("exit", () => resolve());
+          });
+          const iterator = prompt[Symbol.asyncIterator]();
+          const first = await Promise.race([
+            iterator.next(),
+            aborted().then(() => "aborted" as const),
+          ]);
+          if (first === "aborted")
+            throw new Error("Claude Code process aborted by user");
+          if (first.done) {
+            child.stdin?.end();
+            await exit;
+            return;
           }
-        } finally {
-          // Like the CLI, the child exits once its stream is finished.
-          child.stdin?.end();
-          await exit;
-        }
-      })(),
+          log.push("prompt");
+          const tools =
+            (
+              options.mcpServers?.ensemble as unknown as
+                | undefined
+                | {
+                    instance: { tools: FakeTool[] };
+                  }
+            )?.instance.tools ?? [];
+          const session: Session = {
+            options,
+            child,
+            prompt: first.value,
+            hook: (toolName, toolInput, toolUseId) => {
+              const hook = options.hooks?.PreToolUse?.[0]
+                ?.hooks[0] as HookCallback;
+              return hook(
+                {
+                  hook_event_name: "PreToolUse",
+                  tool_name: toolName,
+                  tool_input: toolInput,
+                  tool_use_id: toolUseId,
+                } as never,
+                toolUseId,
+                { signal: forwarded.signal },
+              );
+            },
+            callTool: (name, args) => {
+              const definition = tools.find((tool) => tool.name === name);
+              assert.ok(definition);
+              return definition.handler(args, {});
+            },
+            waitForExit: () => exit,
+          };
+          sessions.push(session);
+          const messages = script(session);
+          try {
+            for (;;) {
+              const next = await Promise.race([
+                messages.next(),
+                aborted().then(() => "aborted" as const),
+              ]);
+              if (next === "aborted") {
+                await exit;
+                throw new Error("Claude Code process aborted by user");
+              }
+              if (next.done) break;
+              yield next.value;
+            }
+          } finally {
+            // Like the CLI, the child exits once its stream is finished.
+            child.stdin?.end();
+            await exit;
+          }
+        })(),
+        { supportedModels: async () => models },
+      );
+    },
     createSdkMcpServer: ((options: { tools: FakeTool[] }) => ({
       type: "sdk",
       name: "ensemble",
@@ -169,7 +209,7 @@ function fakeSdk(scripts: Script[], log: string[]) {
       handler: FakeTool["handler"],
     ) => ({ name, handler })) as never,
   };
-  return { sdk, sessions };
+  return { sdk, sessions, queries };
 }
 
 const init = (sessionId: string) => ({
@@ -195,6 +235,7 @@ function fixture(
     record?: () => boolean;
     environment?: () => ClaudeTurnEnvironment;
     verified?: boolean;
+    selfTest?: () => boolean;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-claude-runtime-"));
@@ -203,7 +244,7 @@ function fixture(
   const safetyFixture = runtimeSafetyFixture();
   const log: string[] = [];
   const recorded: unknown[] = [];
-  const { sdk, sessions } = fakeSdk(options.scripts ?? [], log);
+  const { sdk, sessions, queries } = fakeSdk(options.scripts ?? [], log);
   const runtime = new ClaudeRuntime({
     safety: {
       ...safetyFixture.safety,
@@ -243,6 +284,7 @@ function fixture(
             },
     },
     exitTimeoutMs: 2000,
+    sandboxSelfTest: async () => (options.selfTest ? options.selfTest() : true),
   });
   const emitted: unknown[] = [];
   const anomalies: Array<{
@@ -262,11 +304,18 @@ function fixture(
     return { text: `ok:${call.tool}`, success: true };
   });
   /** Starts a turn and binds it the way the service does. */
+  const settings = { model: "haiku", reasoningEffort: "low" };
   const turn = async (threadId: string) => {
-    const turnId = await runtime.startTurn(threadId, workspace, "Do the work", {
-      model: "haiku",
-      reasoningEffort: "low",
-    });
+    assert.equal(
+      await runtime.preflightTurn({ workspace, settings }),
+      undefined,
+    );
+    const turnId = await runtime.startTurn(
+      threadId,
+      workspace,
+      "Do the work",
+      settings,
+    );
     const generation = runtime.currentUserInputGeneration();
     assert.ok(generation);
     safetyFixture.bindTurn(threadId, turnId, generation);
@@ -284,7 +333,9 @@ function fixture(
     unexpected,
     toolCalls,
     turn,
+    queries,
     cleanup: async () => {
+      await runtime.releaseWorkspace(workspace);
       await runtime.stop();
       rmSync(root, { recursive: true, force: true });
     },
@@ -385,6 +436,43 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
       join(f.root, "data", "claude", "config"),
     );
     assert.equal(options.env?.ANTHROPIC_API_KEY, undefined);
+    const base = claudeTemporaryBase(f.workspace);
+    assert.equal(options.env?.CLAUDE_CODE_TMPDIR, base);
+    assert.ok(Buffer.byteLength(`${base}/claude-4294967294`) <= 44);
+    assert.deepEqual(options.tools, [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash",
+    ]);
+    assert.deepEqual(options.allowedTools, [
+      "Read",
+      "Glob",
+      "Grep",
+      "Write",
+      "Edit",
+      "Bash",
+      "mcp__ensemble__*",
+    ]);
+    assert.deepEqual(options.disallowedTools, [
+      "AskUserQuestion",
+      "WebFetch",
+      "WebSearch",
+      "Agent",
+      "Task",
+      "EnterPlanMode",
+      "ExitPlanMode",
+    ]);
+    assert.deepEqual(options.sandbox, {
+      enabled: true,
+      failIfUnavailable: true,
+      allowUnsandboxedCommands: false,
+      autoAllowBashIfSandboxed: true,
+      network: { allowedDomains: [] },
+      filesystem: { allowWrite: [f.workspace, base] },
+    });
     const prompt = options.systemPrompt as { append: string };
     assert.match(prompt.append, /ROOT-AGENTS-NONCE/);
     assert.match(prompt.append, /REPO-CLAUDE-NONCE/);
@@ -620,6 +708,10 @@ test("a Claude turn whose process cannot be recorded never receives its prompt",
   try {
     await f.runtime.start();
     const threadId = await f.runtime.startThread(f.workspace, []);
+    assert.equal(
+      await f.runtime.preflightTurn({ workspace: f.workspace }),
+      undefined,
+    );
     await assert.rejects(
       f.runtime.startTurn(threadId, f.workspace, "Do the work"),
       /Claude turn could not start/,
@@ -759,4 +851,164 @@ test("the Claude token never appears in anything the runtime emits", async () =>
   } finally {
     await f.cleanup();
   }
+});
+
+test("the PreToolUse hook records every call and denies calls outside policy", async () => {
+  const decisions: unknown[] = [];
+  let outside = "";
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        const workspace = String(session.options.cwd);
+        const calls: Array<[string, unknown]> = [
+          ["Write", { file_path: join(workspace, "inside.txt"), content: "x" }],
+          ["Write", { file_path: join(outside, "x.txt"), content: "x" }],
+          ["Edit", { file_path: join(workspace, "..", "escape.txt") }],
+          ["Write", { file_path: join(workspace, "link", "x.txt") }],
+          ["WebFetch", { url: "https://example.com" }],
+          ["Bash", { command: "ls", dangerouslyDisableSandbox: true }],
+          ["Bash", { command: "ls" }],
+          ["mcp__other__x", {}],
+        ];
+        for (const [index, [name, input]] of calls.entries())
+          decisions.push(await session.hook(name, input, `toolu_${index}`));
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    outside = join(f.root, "outside");
+    mkdirSync(outside);
+    symlinkSync(outside, join(f.workspace, "link"));
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const turnId = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    const denied = (index: number) =>
+      (
+        decisions[index] as {
+          hookSpecificOutput?: {
+            permissionDecision: string;
+            permissionDecisionReason: string;
+          };
+        }
+      ).hookSpecificOutput;
+    assert.deepEqual(decisions[0], {});
+    assert.deepEqual(decisions[6], {});
+    for (const index of [1, 2, 3, 4, 5, 7]) {
+      assert.equal(denied(index)?.permissionDecision, "deny");
+      assert.ok(denied(index)?.permissionDecisionReason);
+    }
+    assert.deepEqual(
+      f.runtime.toolLedger(threadId, turnId).map((entry) => entry.decision),
+      ["allow", "deny", "deny", "deny", "deny", "deny", "allow", "deny"],
+    );
+    assert.equal(
+      f.runtime.toolLedger(threadId, turnId)[4]?.toolName,
+      "WebFetch",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("preflight waits for a failed sandbox self-test, unsupported settings or a missing token before any query", async () => {
+  let selfTest = false;
+  let environment: ClaudeTurnEnvironment = { env: {}, token: TOKEN };
+  const f = fixture({
+    selfTest: () => selfTest,
+    environment: () => environment,
+  });
+  try {
+    await f.runtime.start();
+    assert.equal(f.runtime.supportedSettings(), undefined);
+    const preflight = (settings?: {
+      model: string | null;
+      reasoningEffort: string | null;
+    }) =>
+      f.runtime.preflightTurn({
+        workspace: f.workspace,
+        ...(settings ? { settings } : {}),
+      });
+    assert.match(
+      String(await preflight()),
+      /^Claude runtime unavailable: sandbox/,
+    );
+    assert.deepEqual(f.queries, []);
+    selfTest = true;
+    assert.equal(await preflight(), undefined);
+    assert.deepEqual(f.queries, ["settings"]);
+    assert.deepEqual(f.runtime.supportedSettings()?.haiku, [
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+      "max",
+    ]);
+    assert.equal(
+      await preflight({ model: "opus", reasoningEffort: null }),
+      "Claude runtime unavailable: model opus is not supported",
+    );
+    assert.equal(
+      await preflight({ model: "haiku", reasoningEffort: "extreme" }),
+      "Claude runtime unavailable: effort extreme is not supported for haiku",
+    );
+    assert.deepEqual(f.queries, ["settings"]);
+    environment = {
+      unavailable:
+        "Claude runtime unavailable: subscription token is not configured",
+    };
+    assert.equal(
+      await preflight(),
+      "Claude runtime unavailable: subscription token is not configured",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("preflight refuses a sandbox temporary base that is not private", async () => {
+  const f = fixture();
+  const base = claudeTemporaryBase(f.workspace);
+  try {
+    mkdirSync(base, { mode: 0o755 });
+    chmodSync(base, 0o755);
+    await f.runtime.start();
+    assert.equal(
+      await f.runtime.preflightTurn({ workspace: f.workspace }),
+      "Claude runtime unavailable: per-task sandbox temporary directory is not private",
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+    await f.cleanup();
+  }
+});
+
+test("the effective policy discloses hook confinement, the redirected temporary root and untested surfaces", () => {
+  const runtime = new ClaudeRuntime({
+    safety: runtimeSafetyFixture().safety,
+    claude: {
+      configDirectory: "/unused",
+      turnEnvironment: () => ({ unavailable: "unused" }),
+    },
+  });
+  const policy = runtime.effectivePolicy("/work/task");
+  assert.deepEqual(policy.writableRoots, [
+    "/work/task",
+    claudeTemporaryBase("/work/task"),
+  ]);
+  assert.deepEqual(policy.sharedWriteRoots, []);
+  assert.equal(policy.network, "denied");
+  assert.equal(policy.fileToolConfinement, "hook");
+  const limits = policy.limits.join("\n");
+  for (const pattern of [
+    /PreToolUse hook/,
+    /exit 126/,
+    /F5\.5/,
+    /F6\.3/,
+    /F6\.4/,
+    /scrub/,
+  ])
+    assert.match(limits, pattern);
 });
