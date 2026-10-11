@@ -328,9 +328,15 @@ export interface FailedGenerationResolution {
 }
 
 /** Stored retry rows keep their original Codex-named column values. */
-const retryFailureSource: Record<ExecutionHarness, "codexErrorInfo"> = {
+const retryFailureSource: Record<ExecutionHarness, "codexErrorInfo" | null> = {
   codex: "codexErrorInfo",
+  // ponytail: Claude failures are held without retry until C3 maps them.
+  claude: null,
 };
+
+export function harnessRetrySupported(harness: ExecutionHarness): boolean {
+  return retryFailureSource[harness] !== null;
+}
 
 const failureResolutionSchema = z
   .object({
@@ -1032,7 +1038,7 @@ export class ExecutionState {
     context: TaskExecutionContext,
     harness: ExecutionHarness = defaultExecutionHarness,
   ): TaskExecutionBindingRecord {
-    const executionHarness = executionHarnessSchema.parse(harness);
+    const requestedHarness = executionHarnessSchema.parse(harness);
     const input = z
       .object({
         taskId: z.string().uuid(),
@@ -1056,6 +1062,20 @@ export class ExecutionState {
           .get(input.assignmentId) as { revision: number }
       ).revision,
     );
+    // A conversation keeps the harness that started it; never fall back.
+    const inherited = (this.db
+      .prepare("SELECT harness FROM task_execution_bindings WHERE workId = ?")
+      .get(workId) ??
+      this.db
+        .prepare(`SELECT harness FROM task_execution_bindings
+        WHERE assignmentId = ? AND conversationRevision = ?
+        ORDER BY rowid LIMIT 1`)
+        .get(input.assignmentId, revision)) as
+      | { harness: unknown }
+      | undefined;
+    const executionHarness = inherited
+      ? executionHarnessSchema.parse(inherited.harness)
+      : requestedHarness;
     this.db
       .prepare(`INSERT OR IGNORE INTO task_execution_bindings
       (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision, harness)
@@ -4193,6 +4213,8 @@ export class ExecutionState {
     input: FailureResolutionEvidence,
   ): FailedGenerationResolution | undefined {
     const value = failureResolutionSchema.parse(input);
+    if (!harnessRetrySupported(value.harness))
+      throw new Error(`Retry is not supported for harness: ${value.harness}`);
     if (!this.hasTurnRequests)
       throw new Error("Retry resolution requires durable turn requests");
     return transaction(this.db, () => {

@@ -2568,6 +2568,7 @@ export class OperatorApi {
                   requestSequence: request.sequence,
                   instructionsRevision: request.instructionsRevision,
                   profileRevision: request.profileRevision,
+                  harness: this.service.bindingHarness(request.workId),
                 }
               : null,
         };
@@ -3307,6 +3308,7 @@ export class OperatorApi {
         instructionPresent: Boolean(row.instructions),
         instructionRevision: Number(row.version),
         capabilities: this.safe(row.capabilities, excluded),
+        runtime: this.domain().profileRuntime(profileId),
       },
       observedAt: Date.now(),
     });

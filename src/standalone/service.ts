@@ -125,7 +125,9 @@ import {
   type ExecutionIntent,
   ExecutionState,
   type TaskExecutionBinding,
+  type TaskExecutionBindingRecord,
   type TaskExecutionContext,
+  harnessRetrySupported,
 } from "./state.js";
 import {
   ExecutionSupervisor,
@@ -176,6 +178,8 @@ export function createRuntime(
   switch (parsed.data) {
     case "codex":
       return new CodexRuntime("codex", context);
+    case "claude":
+      throw new Error("Unsupported execution harness: claude");
   }
 }
 
@@ -190,7 +194,14 @@ export function powerSupervisionEnabled(
   );
 }
 
+const harnessLabel: Record<ExecutionHarness, string> = {
+  codex: "Codex",
+  claude: "Claude",
+};
+
 export interface StandaloneServiceOptions {
+  /** Harnesses whose runtime this service starts; must include the default. */
+  runtimeHarnesses?: readonly ExecutionHarness[];
   delivery?: {
     fetcher?: typeof fetch;
     providerFactory?: (
@@ -295,8 +306,9 @@ export class StandaloneService {
   private supervisor: ExecutionSupervisor | undefined;
   private power: ExecutionPower | undefined;
   private powerPollTimer: NodeJS.Timeout | undefined;
-  private runtime: Runtime | undefined;
-  private runtimeUnavailableSince: number | undefined;
+  private readonly runtimes = new Map<ExecutionHarness, Runtime>();
+  private readonly runtimeUnavailableSince = new Map<ExecutionHarness, number>();
+  private readonly runtimeHarnesses: readonly ExecutionHarness[];
   private conversationHistory: ConversationHistoryStore | undefined;
   private readonly conversationCaptures = new Map<
     string,
@@ -313,7 +325,6 @@ export class StandaloneService {
   private readonly routingCoordinators = new Map<string, RoutingCoordinator>();
   private readonly retryNow: () => number;
   private readonly fallbackBackoffMs: number;
-  private readonly runtimeHarness: ExecutionHarness = defaultExecutionHarness;
   private readonly maxFallbackBackoffMs: number;
   private generation: ServiceGeneration | undefined;
   private stopPromise: Promise<void> | undefined;
@@ -350,6 +361,17 @@ export class StandaloneService {
       );
     this.maxFallbackBackoffMs = maximum;
     this.fallbackBackoffMs = Math.min(fallback, maximum);
+    const harnesses = z
+      .array(executionHarnessSchema)
+      .parse(options.runtimeHarnesses ?? [defaultExecutionHarness]);
+    if (
+      !harnesses.includes(defaultExecutionHarness) ||
+      new Set(harnesses).size !== harnesses.length
+    )
+      throw new Error(
+        "Runtime harnesses must include the default harness once each",
+      );
+    this.runtimeHarnesses = harnesses;
   }
 
   async start(): Promise<void> {
@@ -445,26 +467,21 @@ export class StandaloneService {
         "Service restarted; native endpoints cannot be reconstructed",
       );
       this.coordination = coordination;
-      const runtimeSafety: RuntimeSafetyPort = {
-        recordTerminal: (input) =>
-          state.recordRuntimeTerminal(input, this.runtimeHarness),
+      const runtimeSafety = (harness: ExecutionHarness): RuntimeSafetyPort => ({
+        recordTerminal: (input) => state.recordRuntimeTerminal(input, harness),
         terminal: (threadId, turnId, runtimeGeneration) =>
           state.runtimeTerminal(threadId, turnId, runtimeGeneration),
         terminalForWait: (threadId, turnId, runtimeGeneration) =>
           state.runtimeTerminalForWait(threadId, turnId, runtimeGeneration),
         registerThreadTools: (threadId, toolDigest) =>
-          state.registerRuntimeThreadTools(
-            threadId,
-            toolDigest,
-            this.runtimeHarness,
-          ),
+          state.registerRuntimeThreadTools(threadId, toolDigest, harness),
         threadQualification: (threadId) =>
           state.runtimeThreadQualification(threadId),
         recordThreadQualification: (input) =>
           state.recordRuntimeThreadQualification(input),
         nativeEndpointHistory: (identity) =>
           coordination.runtimeNativeEndpointHistory(identity),
-      };
+      });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
       this.deliveryStore = deliveryStore;
@@ -557,8 +574,7 @@ export class StandaloneService {
               process.env[policy.credentialRef.slice(4)] ?? "",
             )),
       });
-      const context: RuntimeSpawnContext = {
-        safety: runtimeSafety,
+      const spawnEnvironment = {
         spawnEnvironment: () => {
           const policies = domain
             .projects()
@@ -569,100 +585,39 @@ export class StandaloneService {
         },
       };
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
-      context.spawnEnvironment();
-      const runtime = this.runtimeFactory(context, this.runtimeHarness);
-      this.runtime = runtime;
-      this.runtimeUnavailableSince = undefined;
-      runtime.onFailure?.(() => {
-        if (this.runtime === runtime)
-          this.runtimeUnavailableSince ??= Date.now();
-      });
+      spawnEnvironment.spawnEnvironment();
+      this.runtimeUnavailableSince.clear();
+      for (const harness of this.runtimeHarnesses) {
+        let runtime: Runtime;
+        try {
+          // Keyed by the requested harness: test fakes do not declare one.
+          runtime = this.runtimeFactory(
+            { ...spawnEnvironment, safety: runtimeSafety(harness) },
+            harness,
+          );
+        } catch (error) {
+          if (harness === defaultExecutionHarness) throw error;
+          this.runtimeUnavailableSince.set(harness, Date.now());
+          continue;
+        }
+        this.runtimes.set(harness, runtime);
+        this.attachRuntime(harness, runtime, state);
+      }
       this.supervisor = new ExecutionSupervisor(
         state,
-        runtime,
+        (workId) => this.runtimeForWork(workId),
         this.options.supervisor,
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
-      runtime.onUnexpectedRequest((request) => {
-        const active = state.activeExecutions();
-        const bound =
-          request.threadId && request.turnId
-            ? state
-                .executionsForTerminalIdentity(request.threadId, request.turnId)
-                .filter((item) =>
-                  ["completed", "held", "submitting", "running"].includes(
-                    item.state,
-                  ),
-                )
-            : [];
-        if (bound.length === 0 && request.threadId && request.turnId) {
-          const awaiting = state
-            .executionsForRuntimeIdentity(request.threadId, request.turnId)
-            .filter(
-              (item) =>
-                item.turnId === null &&
-                ["completed", "held", "submitting", "running"].includes(
-                  item.state,
-                ),
-            );
-          const pending = awaiting.length === 1 ? awaiting[0] : undefined;
-          if (
-            pending &&
-            state.holdPendingTurn(
-              pending.id,
-              request.threadId,
-              request.turnId,
-              `Unexpected App Server request denied: ${request.method}`,
-            )
-          ) {
-            this.supervisor?.turnBound(
-              pending.workId,
-              request.threadId,
-              request.turnId,
-            );
-            return;
-          }
+      for (const [harness, runtime] of this.runtimes)
+        try {
+          await runtime.start();
+        } catch (error) {
+          if (harness === defaultExecutionHarness) throw error;
+          this.runtimes.delete(harness);
+          this.runtimeUnavailableSince.set(harness, Date.now());
+          await runtime.stop().catch(() => {});
         }
-        if (bound.length === 1 && bound[0]?.state === "completed") {
-          this.retractWriterAndSuccessors(
-            bound[0],
-            `Unexpected App Server request denied: ${request.method}`,
-          );
-          return;
-        }
-        const affected = bound.length === 1 ? bound : active;
-        for (const item of affected) {
-          state.hold(
-            item.id,
-            `Unexpected App Server request denied: ${request.method}`,
-          );
-          this.supervisor?.noteAnomaly(item.workId);
-        }
-      });
-      runtime.onUserInputRequest?.((request) =>
-        this.handleUserInputRequest(request),
-      );
-      runtime.onUserInputOutcome?.((outcome) =>
-        this.handleUserInputOutcome(outcome),
-      );
-      runtime.onToolCall?.((call) => this.handleToolCall(call));
-      runtime.onConversationEvent?.((event) =>
-        this.receiveConversationEvent(event),
-      );
-      runtime.onTerminalAnomaly?.((anomaly) => {
-        const matched =
-          anomaly.threadId && anomaly.turnId
-            ? state.executionsForTerminalIdentity(
-                anomaly.threadId,
-                anomaly.turnId,
-              )
-            : state.activeOrLastCompleted(this.lastCompletedWorkId);
-        for (const item of matched) {
-          this.retractWriterAndSuccessors(item, anomaly.reason);
-          this.supervisor?.noteAnomaly(item.workId);
-        }
-      });
-      await runtime.start();
       await this.supervisor.reconcileOnStart();
       await this.deliveryCoordinator.refresh();
       await this.reconcileOwnDeliveryClosures();
@@ -672,7 +627,11 @@ export class StandaloneService {
       // queued-inbox supersession finish; domain notifications cannot admit work.
       this.inboxStartup.reconcile();
       const powerOptions = this.options.power;
-      if (powerSupervisionEnabled(powerOptions, runtime)) {
+      if (
+        [...this.runtimes.values()].some((runtime) =>
+          powerSupervisionEnabled(powerOptions, runtime),
+        )
+      ) {
         const pollIntervalMs = powerOptions?.pollIntervalMs ?? 60_000;
         if (
           !Number.isSafeInteger(pollIntervalMs) ||
@@ -746,7 +705,8 @@ export class StandaloneService {
           this.supervisor?.cancelObservations();
           await this.githubSynchronizer?.stop().catch(() => {});
           await this.deliveryCoordinator?.stop().catch(() => {});
-          await this.runtime?.stop().catch(() => {});
+          for (const runtime of this.runtimes.values())
+            await runtime.stop().catch(() => {});
           await workspaces?.settle();
           try {
             await scheduler?.settle();
@@ -756,7 +716,7 @@ export class StandaloneService {
           }
           await this.supervisor?.settle();
         } finally {
-          this.runtime = undefined;
+          this.runtimes.clear();
           this.supervisor = undefined;
           this.domainState = undefined;
           this.githubSourceStore = undefined;
@@ -787,6 +747,124 @@ export class StandaloneService {
       }
       throw error;
     }
+  }
+
+  /** Listeners act only on work bound to the emitting runtime's harness. */
+  private attachRuntime(
+    harness: ExecutionHarness,
+    runtime: Runtime,
+    state: ExecutionState,
+  ): void {
+    runtime.onFailure?.(() => {
+      if (
+        this.runtimes.get(harness) === runtime &&
+        !this.runtimeUnavailableSince.has(harness)
+      )
+        this.runtimeUnavailableSince.set(harness, Date.now());
+    });
+    runtime.onUnexpectedRequest((request) => {
+      const active = state
+        .activeExecutions()
+        .filter((item) => this.harnessForWork(item.workId) === harness);
+      const bound =
+        request.threadId && request.turnId
+          ? state
+              .executionsForTerminalIdentity(request.threadId, request.turnId)
+              .filter((item) =>
+                ["completed", "held", "submitting", "running"].includes(
+                  item.state,
+                ),
+              )
+          : [];
+      if (bound.length === 0 && request.threadId && request.turnId) {
+        const awaiting = state
+          .executionsForRuntimeIdentity(request.threadId, request.turnId)
+          .filter(
+            (item) =>
+              item.turnId === null &&
+              ["completed", "held", "submitting", "running"].includes(
+                item.state,
+              ),
+          );
+        const pending = awaiting.length === 1 ? awaiting[0] : undefined;
+        if (
+          pending &&
+          state.holdPendingTurn(
+            pending.id,
+            request.threadId,
+            request.turnId,
+            `Unexpected App Server request denied: ${request.method}`,
+          )
+        ) {
+          this.supervisor?.turnBound(
+            pending.workId,
+            request.threadId,
+            request.turnId,
+          );
+          return;
+        }
+      }
+      if (bound.length === 1 && bound[0]?.state === "completed") {
+        this.retractWriterAndSuccessors(
+          bound[0],
+          `Unexpected App Server request denied: ${request.method}`,
+        );
+        return;
+      }
+      const affected = bound.length === 1 ? bound : active;
+      for (const item of affected) {
+        state.hold(
+          item.id,
+          `Unexpected App Server request denied: ${request.method}`,
+        );
+        this.supervisor?.noteAnomaly(item.workId);
+      }
+    });
+    runtime.onUserInputRequest?.((request) =>
+      this.handleUserInputRequest(request, runtime),
+    );
+    runtime.onUserInputOutcome?.((outcome) =>
+      this.handleUserInputOutcome(outcome),
+    );
+    runtime.onToolCall?.((call) => this.handleToolCall(call));
+    runtime.onConversationEvent?.((event) =>
+      this.receiveConversationEvent(event),
+    );
+    runtime.onTerminalAnomaly?.((anomaly) => {
+      const matched =
+        anomaly.threadId && anomaly.turnId
+          ? state.executionsForTerminalIdentity(
+              anomaly.threadId,
+              anomaly.turnId,
+            )
+          : state
+              .activeOrLastCompleted(this.lastCompletedWorkId)
+              .filter((item) => this.harnessForWork(item.workId) === harness);
+      for (const item of matched) {
+        this.retractWriterAndSuccessors(item, anomaly.reason);
+        this.supervisor?.noteAnomaly(item.workId);
+      }
+    });
+  }
+
+  private harnessForWork(workId: string): ExecutionHarness {
+    return (
+      this.requireState().taskBinding(workId)?.harness ??
+      defaultExecutionHarness
+    );
+  }
+
+  private runtimeForWork(workId: string): Runtime | undefined {
+    return this.runtimes.get(this.harnessForWork(workId));
+  }
+
+  /** Why work bound to this harness cannot be admitted now, if anything. */
+  private runtimeWaitReason(harness: ExecutionHarness): string | undefined {
+    if (!this.runtimeHarnesses.includes(harness))
+      return `${harnessLabel[harness]} runtime is not configured`;
+    if (this.runtimeUnavailableSince.has(harness))
+      return `${harnessLabel[harness]} runtime unavailable; restart the service`;
+    return undefined;
   }
 
   waitForBackgroundFailure(): Promise<BackgroundFailureDiagnostic> {
@@ -861,7 +939,7 @@ export class StandaloneService {
     const supervisor = this.supervisor;
     const synchronizer = this.githubSynchronizer;
     const delivery = this.deliveryCoordinator;
-    const runtime = this.runtime;
+    const runtimes = new Map(this.runtimes);
     const power = this.power;
     const workspaces = this.workspaces;
     const db = this.db;
@@ -908,8 +986,9 @@ export class StandaloneService {
     await attempt("conversation-capture cleanup", () =>
       this.clearConversationCaptures(),
     );
-    this.runtime = undefined;
-    await attempt("runtime stop", () => runtime?.stop());
+    this.runtimes.clear();
+    for (const runtime of runtimes.values())
+      await attempt("runtime stop", () => runtime.stop());
     await attempt("workspace settlement", () => workspaces?.settle());
     await attempt("scheduler settlement", () => scheduler?.settle());
     await attempt("active-work settlement", async () => {
@@ -944,7 +1023,7 @@ export class StandaloneService {
       this.coordination = undefined;
       this.deliveryCoordinator = undefined;
       this.deliveryStore = undefined;
-      this.runtime = undefined;
+      this.runtimes.clear();
       this.runtimeSpawnSnapshot = undefined;
       this.routingAttempts = undefined;
       this.routingCoordinators.clear();
@@ -960,9 +1039,10 @@ export class StandaloneService {
       this.nativeWaiters.clear();
       this.callbacks.clear();
     } else {
-      // Keep the runtime available for another stop attempt while the database
+      // Keep the runtimes available for another stop attempt while the database
       // and its data-directory owner remain held.
-      this.runtime = runtime;
+      for (const [harness, runtime] of runtimes)
+        this.runtimes.set(harness, runtime);
     }
 
     if (failures.length === 1) {
@@ -1107,13 +1187,20 @@ export class StandaloneService {
     return this.power?.status() ?? null;
   }
 
+  /** The persisted harness of a bound work, or null before binding. */
+  bindingHarness(workId: string): ExecutionHarness | null {
+    return this.requireState().taskBinding(workId)?.harness ?? null;
+  }
+
   /** In-memory only: a manual service restart is the recovery path. */
   runtimeStatus():
     | { state: "available" }
     | { state: "unavailable"; since: number } {
-    return this.runtimeUnavailableSince === undefined
+    // ponytail: reports the default harness only; per-harness status is C4.
+    const since = this.runtimeUnavailableSince.get(defaultExecutionHarness);
+    return since === undefined
       ? { state: "available" }
-      : { state: "unavailable", since: this.runtimeUnavailableSince };
+      : { state: "unavailable", since };
   }
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
@@ -2020,18 +2107,19 @@ export class StandaloneService {
     this.domain().task(taskId);
     const state = this.requireState();
     const targets = state.stopTask(taskId);
-    const runtimeGeneration = this.runtime?.currentUserInputGeneration?.();
-    if (runtimeGeneration) {
-      for (const target of targets)
-        for (const question of this.coordination?.runtimeQuestionsForWork(
-          target.workId,
-          true,
-          runtimeGeneration,
-        ) ?? [])
-          this.runtime?.cancelUserInput?.(
-            question.identity,
-            "Task stopped before native receipt",
-          );
+    for (const target of targets) {
+      const runtime = this.runtimeForWork(target.workId);
+      const runtimeGeneration = runtime?.currentUserInputGeneration?.();
+      if (!runtimeGeneration) continue;
+      for (const question of this.coordination?.runtimeQuestionsForWork(
+        target.workId,
+        true,
+        runtimeGeneration,
+      ) ?? [])
+        runtime?.cancelUserInput?.(
+          question.identity,
+          "Task stopped before native receipt",
+        );
     }
     return this.requireSupervisor().observeStop(taskId, targets);
   }
@@ -2098,9 +2186,11 @@ export class StandaloneService {
       .catch(() => {});
   }
 
-  private handleUserInputRequest(call: RuntimeUserInputRequest): void {
+  private handleUserInputRequest(
+    call: RuntimeUserInputRequest,
+    runtime: Runtime,
+  ): void {
     const state = this.requireState();
-    const runtime = this.requireRuntime();
     const coordination = this.coordination;
     if (!coordination) return;
     try {
@@ -2234,7 +2324,7 @@ export class StandaloneService {
   }
   private runtimeAnswerEligibility(question: RuntimeQuestionRecord): string[] {
     const state = this.requireState(),
-      runtime = this.requireRuntime(),
+      runtime = this.runtimeForWork(question.requestingWorkId),
       domain = this.domain();
     const reasons: string[] = [
       ...domain.admission(question.taskId, false).reasons,
@@ -2253,11 +2343,11 @@ export class StandaloneService {
     )
       reasons.push("requesting-generation-not-running");
     if (
-      runtime.currentUserInputGeneration?.() !==
+      runtime?.currentUserInputGeneration?.() !==
       question.identity.runtimeGeneration
     )
       reasons.push("native-process-generation-changed");
-    const process = runtime.processIdentity?.();
+    const process = runtime?.processIdentity?.();
     if (
       !process ||
       process instanceof Promise ||
@@ -2294,9 +2384,13 @@ export class StandaloneService {
     return reasons;
   }
   private flushRuntimeAnswers(): void {
+    for (const runtime of this.runtimes.values())
+      this.flushRuntimeAnswersFor(runtime);
+  }
+  private flushRuntimeAnswersFor(runtime: Runtime): void {
     const coordination = this.coordination;
-    const runtimeGeneration = this.runtime?.currentUserInputGeneration?.();
-    if (!coordination || !runtimeGeneration || !this.runtime?.replyUserInput)
+    const runtimeGeneration = runtime.currentUserInputGeneration?.();
+    if (!coordination || !runtimeGeneration || !runtime.replyUserInput)
       return;
     let cursor = "";
     for (;;) {
@@ -2321,7 +2415,7 @@ export class StandaloneService {
           );
           continue;
         }
-        void this.runtime
+        void runtime
           .replyUserInput(
             question.identity,
             encodeNativeInputReply(question.request, question.answers),
@@ -2345,8 +2439,11 @@ export class StandaloneService {
               question.interactionId,
               question.taskId,
             );
-            if (current?.replyIntentId) {
-              this.runtime?.cancelUserInput?.(
+            if (
+              current?.replyIntentId &&
+              [...this.runtimes.values()].includes(runtime)
+            ) {
+              runtime.cancelUserInput?.(
                 question.identity,
                 "Native reply failed",
               );
@@ -3444,7 +3541,7 @@ export class StandaloneService {
       }
     }
     let intent: ExecutionIntent;
-    let binding: TaskExecutionBinding | undefined;
+    let binding: TaskExecutionBindingRecord | undefined;
     try {
       intent = state.create(
         request.workId,
@@ -3453,7 +3550,14 @@ export class StandaloneService {
         request.previousWorkId ?? undefined,
       );
       binding = context
-        ? state.bindTask(request.workId, context, this.runtimeHarness)
+        ? state.bindTask(
+            request.workId,
+            context,
+            this.domain().profileRuntime(
+              String(this.domain().assignment(context.assignmentId).profileId),
+              context.profileRevision,
+            ).harness,
+          )
         : undefined;
     } catch (error) {
       store.hold(request.workId, `Request binding refused: ${String(error)}`);
@@ -3471,23 +3575,25 @@ export class StandaloneService {
       previous = undefined;
     // Shutdown may finish while workspace or process admission is awaiting.
     // A request with no admitted effect remains queued for ordinary restart.
-    const runtime = this.runtime;
-    if (!runtime) return;
+    const harness = binding?.harness ?? defaultExecutionHarness;
+    const runtime = this.runtimes.get(harness);
     try {
       const processIdentity = await Promise.resolve(
-        runtime.processIdentity?.() ?? null,
+        runtime?.processIdentity?.() ?? null,
       ).catch(() => null);
       if (
-        this.runtime !== runtime ||
+        this.runtimes.get(harness) !== runtime ||
         this.generation !== generation ||
         !generation.accepting
       )
         return;
-      if (this.runtimeUnavailableSince !== undefined) {
+      // Never falls back to another harness's runtime.
+      const unavailable = this.runtimeWaitReason(harness);
+      if (unavailable || !runtime) {
+        if (!unavailable) return;
         // Queued work stays queued: nothing is admitted or held until restart.
-        const reason = "Codex runtime unavailable; restart the service";
-        state.wait(intent.id, reason);
-        store.wait(request.workId, reason);
+        state.wait(intent.id, unavailable);
+        store.wait(request.workId, unavailable);
         return;
       }
       // A sleep/wake during a turn that ended before now must be observed
@@ -3587,7 +3693,9 @@ export class StandaloneService {
     generation?: ServiceGeneration,
   ): Promise<ExecutionIntent> {
     const state = this.requireState();
-    const runtime = this.requireRuntime();
+    const harness = this.harnessForWork(request.workId);
+    const runtime = this.runtimes.get(harness);
+    if (!runtime) throw new Error("Runtime unavailable");
     let submissionStage: "resume" | "thread" | "bound" | "turn" = "thread";
     let captureThreadId: string | undefined;
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
@@ -3643,7 +3751,7 @@ export class StandaloneService {
         !generation ||
         this.generation !== generation ||
         !generation.accepting ||
-        this.runtime !== runtime
+        this.runtimes.get(harness) !== runtime
       )
         throw new Error(
           "Runtime generation changed before task turn submission",
@@ -3902,6 +4010,7 @@ export class StandaloneService {
             evidence.reasonCode === "rateLimitExceeded") &&
           evidence.source === "harness" &&
           evidence.harnessRetries !== null &&
+          harnessRetrySupported(harness) &&
           callbacksEnded &&
           !this.requireSupervisor().hasKnownRisk(request.workId) &&
           !state.stopTarget(request.workId) &&
@@ -3921,7 +4030,7 @@ export class StandaloneService {
             terminalStatus: "failed",
             classification: "transient",
             reasonCode: evidence.reasonCode,
-            harness: this.runtimeHarness,
+            harness,
             source: "harness",
             harnessRetries: evidence.harnessRetries,
             callbacksEnded: true,
@@ -4193,11 +4302,6 @@ export class StandaloneService {
   private requireState(): ExecutionState {
     if (!this.state) throw new Error("Service is not started");
     return this.state;
-  }
-
-  private requireRuntime(): Runtime {
-    if (!this.runtime) throw new Error("Runtime unavailable");
-    return this.runtime;
   }
 
   private requireWorkspaces(): WorkspaceManager {

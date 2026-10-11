@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { DomainStore } from "../src/core/domain.js";
 import { Store } from "../src/core/store.js";
@@ -20,6 +21,9 @@ import {
 import { tmpdir } from "./temp.js";
 
 test.after(closeRuntimeSafetyFixtures);
+
+const profileId = "60000000-0000-4000-8000-000000000001";
+const childB = "40000000-0000-4000-8000-000000000003";
 
 test("runtime factory constructs the requested harness and rejects unknown ones", () => {
   const context = {
@@ -179,8 +183,10 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
       instructionsRevision: binding.instructionsRevision,
       profileRevision: binding.profileRevision,
     };
-    assert.throws(() =>
-      f.state.bindTask("work-child-a", context, "claude" as ExecutionHarness),
+    // A bound work keeps its harness rather than adopting the requested one.
+    assert.equal(
+      f.state.bindTask("work-child-a", context, "claude").harness,
+      "codex",
     );
     assert.equal(f.state.bindTask("work-child-a", context).harness, "codex");
 
@@ -221,6 +227,97 @@ test("new bindings and runtime evidence persist harness-neutral Codex facts", ()
       f.state.runtimeThreadQualification("fresh-thread")?.harness,
       "codex",
     );
+  } finally {
+    f.close();
+  }
+});
+
+test("existing profiles read as Codex after migration and unknown runtimes fail closed", () => {
+  const directory = mkdtempSync(join(tmpdir(), "ensemble-profile-runtime-"));
+  const db = new DatabaseSync(join(directory, "standalone.sqlite"));
+  try {
+    new Store(db).ensureHost("profile-runtime-migration-test");
+    // Exact pre-runtime DDL for the two tables that gain the column.
+    db.exec(`CREATE TABLE profiles (
+      id TEXT PRIMARY KEY, version INTEGER NOT NULL, name TEXT NOT NULL,
+      instructions TEXT NOT NULL, capabilities TEXT NOT NULL,
+      revoked INTEGER NOT NULL CHECK(revoked IN (0,1)),
+      summary TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE profile_revisions (
+      profileId TEXT NOT NULL REFERENCES profiles(id), revision INTEGER NOT NULL,
+      name TEXT NOT NULL, instructions TEXT NOT NULL, capabilities TEXT NOT NULL,
+      revoked INTEGER NOT NULL, PRIMARY KEY(profileId, revision)
+    );
+    INSERT INTO profiles VALUES ('${profileId}', 1, 'Legacy', 'Build', 'code', 0, '');
+    INSERT INTO profile_revisions VALUES ('${profileId}', 1, 'Legacy', 'Build', 'code', 0);`);
+    new DomainStore(db).migrate();
+    const domain = new DomainStore(db);
+    domain.migrate();
+    assert.deepEqual(domain.profileRuntime(profileId), { harness: "codex" });
+    assert.deepEqual(domain.profileRuntime(profileId, 1), { harness: "codex" });
+
+    db.prepare("UPDATE profiles SET runtime = ? WHERE id = ?").run(
+      '{"harness":"unknown"}',
+      profileId,
+    );
+    assert.throws(() => domain.profileRuntime(profileId));
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("an assignment conversation keeps the harness that started it", () => {
+  const f = coordinationFixture();
+  try {
+    const assignment = f.domain.assignment(childB);
+    const created = (assignmentId: string) => {
+      f.domain.execute({
+        type: "assignment.create",
+        key: randomUUID(),
+        actor: "agent",
+        projectId: String(assignment.projectId),
+        taskId: String(assignment.taskId),
+        assignmentId,
+        profileId: String(assignment.profileId),
+        brief: "Harness",
+        resultDestination: "lead",
+        requesterAssignmentId: null,
+      });
+      const row = f.domain.assignment(assignmentId);
+      return {
+        taskId: String(row.taskId),
+        assignmentId,
+        assignmentVersion: Number(row.version),
+        instructionsRevision: Number(row.instructionsRevision),
+        profileRevision: Number(row.profileRevision),
+      };
+    };
+    const bind = (
+      workId: string,
+      context: ReturnType<typeof created>,
+      harness: ExecutionHarness,
+    ) => {
+      f.db
+        .prepare(
+          "INSERT INTO execution_intents (id, workId, prompt, workspace, state, reason, threadId, turnId, accountType, sandbox, approval) " +
+            "VALUES (?, ?, 'work', '/tmp/work', 'completed', NULL, NULL, NULL, 'chatgpt', 'workspaceWrite', 'never')",
+        )
+        .run(randomUUID(), workId);
+      return f.state.bindTask(workId, context, harness).harness;
+    };
+    const a = created(randomUUID());
+    assert.equal(bind("harness-a-1", a, "claude"), "claude");
+    assert.equal(bind("harness-a-2", a, "codex"), "claude");
+    assert.equal(f.state.bindTask("harness-a-1", a, "codex").harness, "claude");
+    assert.equal(f.state.taskBinding("harness-a-2")?.harness, "claude");
+
+    f.state.replaceConversation(a.assignmentId);
+    assert.equal(bind("harness-a-3", a, "codex"), "codex");
+
+    const b = created(randomUUID());
+    assert.equal(bind("harness-b-1", b, "codex"), "codex");
   } finally {
     f.close();
   }
