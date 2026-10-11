@@ -12,6 +12,10 @@ export type CliDeps = {
   now: () => number;
   /** Command request timeout; expiry is an unknown outcome (default 60 s). */
   commandTimeoutMs?: number;
+  /** Following waits with this; tests inject it. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** Aborted on SIGINT by the CLI entry point. */
+  signal?: AbortSignal;
 };
 
 export type Result = {
@@ -23,6 +27,8 @@ export type Result = {
   coverage?: Coverage;
   /** The receipt identity of a write: service installation, scope, type and key. */
   request?: RequestIdentity;
+  /** Already written to stdout (follow or JSONL); nothing more is printed. */
+  streamed?: boolean;
 };
 
 export type RequestIdentity = {
@@ -66,4 +72,14 @@ export type Values = {
   "global-limit"?: string | undefined;
   "project-limit"?: string[] | undefined;
   scope?: string | undefined;
+  output?: string | undefined;
+  task?: string | undefined;
+  assignment?: string | undefined;
+  execution?: string | undefined;
+  kind?: string | undefined;
+  severity?: string | undefined;
+  follow?: boolean | undefined;
+  interval?: string | undefined;
+  "max-duration"?: string | undefined;
+  "compare-current"?: boolean | undefined;
 };

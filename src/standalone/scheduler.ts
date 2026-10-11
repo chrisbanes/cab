@@ -47,6 +47,11 @@ export class SchedulerStore {
       reason TEXT,
       nextEligibleAt INTEGER
     )`);
+    // Execution list reads page by scope without scanning history.
+    for (const column of ["taskId", "assignmentId", "projectId"])
+      this.db.exec(
+        `CREATE INDEX IF NOT EXISTS turn_requests_${column}_sequence ON turn_requests(${column}, sequence)`,
+      );
     const columns = this.db
       .prepare("PRAGMA table_info(turn_requests)")
       .all() as Array<{ name: string }>;
@@ -179,6 +184,33 @@ export class SchedulerStore {
       .prepare("SELECT * FROM turn_requests ORDER BY sequence")
       .all()
       .map((row) => this.parse(row as Record<string, unknown>));
+  }
+
+  /** Newest-first keyset page of assignment work for one task, assignment or project. */
+  assignmentPage(
+    scope: "taskId" | "assignmentId" | "projectId",
+    id: string,
+    before: number | undefined,
+    limit: number,
+  ): TurnRequest[] {
+    const column = {
+      taskId: "taskId",
+      assignmentId: "assignmentId",
+      projectId: "projectId",
+    }[scope];
+    return this.db
+      .prepare(`SELECT * FROM turn_requests WHERE kind = 'assignment'
+        AND ${column} = ? AND sequence < ? ORDER BY sequence DESC LIMIT ?`)
+      .all(id, before ?? Number.MAX_SAFE_INTEGER, limit)
+      .map((row) => this.parse(row as Record<string, unknown>));
+  }
+
+  /** One request by work id, or undefined; never throws for an unknown id. */
+  find(workId: string): TurnRequest | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM turn_requests WHERE workId = ?")
+      .get(workId);
+    return row ? this.parse(row as Record<string, unknown>) : undefined;
   }
 
   /** Work IDs only: admission checks must not load every request's prompt. */

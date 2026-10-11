@@ -15,6 +15,7 @@ import { mock, test } from "node:test";
 import {
   CodexRuntime,
   type RuntimeConversationEvent,
+  type RuntimeDiagnosticEvent,
 } from "../src/standalone/codex.js";
 import {
   closeRuntimeSafetyFixtures,
@@ -3016,4 +3017,165 @@ test("archived RPC text cannot qualify wrong methods, identities or malformed re
         rmSync(root, { recursive: true, force: true });
       }
     });
+});
+
+test("diagnostic events carry tool metadata and observed settings only", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-diagnostic-"));
+  const executable = join(root, "fake-codex.mjs");
+  const item = (method: string, it: unknown) => ({
+    method,
+    params: { threadId: "thread-1", turnId: "turn-1", item: it },
+  });
+  const events = [
+    item("item/started", {
+      id: "c1",
+      type: "commandExecution",
+      status: "inProgress",
+      command: "ls",
+      cwd: "/w",
+    }),
+    item("item/completed", {
+      id: "c1",
+      type: "commandExecution",
+      status: "completed",
+      command: "ls",
+      cwd: "/w",
+      exitCode: 0,
+      aggregatedOutput: "out",
+    }),
+    item("item/completed", {
+      id: "c2",
+      type: "commandExecution",
+      status: "completed",
+      command: "x".repeat(4097),
+      exitCode: 1,
+      aggregatedOutput: "y".repeat(48 * 1024 + 1),
+    }),
+    item("item/completed", {
+      id: "r1",
+      type: "reasoning",
+      status: "completed",
+      summary: ["SECRET-SUMMARY"],
+      content: ["SECRET-CONTENT"],
+    }),
+    item("item/completed", { id: "m1", type: "mcpToolCall", command: "no" }),
+    item("item/completed", { id: "f1", type: "fileChange" }),
+    item("item/completed", { id: "u1", type: "somethingNew" }),
+    item("item/completed", { id: "a1", type: "agentMessage", text: "hi" }),
+    item("item/completed", { id: "p1", type: "userMessage", text: "hi" }),
+    { method: "item/completed", params: { threadId: "thread-1" } },
+    {
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      },
+    },
+  ];
+  writeFileSync(
+    executable,
+    [
+      `#!${process.execPath}`,
+      "import { createInterface } from 'node:readline';",
+      `const events = ${JSON.stringify(events)};`,
+      "const write = (message) => process.stdout.write(JSON.stringify(message) + '\\n');",
+      "for await (const line of createInterface({ input: process.stdin })) {",
+      "  const message = JSON.parse(line);",
+      "  if (message.method === 'initialize') write({ id: message.id, result: {} });",
+      "  else if (message.method === 'account/read') write({ id: message.id, result: { account: { type: 'chatgpt' } } });",
+      "  else if (message.method === 'config/read') write({ id: message.id, result: { config: { approval_policy: 'never', sandbox_mode: 'workspace-write' } } });",
+      "  else if (message.method === 'thread/start') write({ id: message.id, result: { thread: { id: 'thread-' + (++globalThis.n || (globalThis.n = 1)) }, model: 'm', modelProvider: 'p', reasoningEffort: null, serviceTier: 'fast', approvalPolicy: 'never', sandbox: { type: 'workspaceWrite' } } });",
+      "  else if (message.method === 'turn/start') {",
+      "    for (const event of events) write(event);",
+      "    write({ id: message.id, result: { turn: { id: 'turn-1' } } });",
+      "  }",
+      "}",
+    ].join("\n"),
+  );
+  chmodSync(executable, 0o700);
+  const runtime = newTestRuntime(executable);
+  const captured: RuntimeDiagnosticEvent[] = [];
+  let throwing = true;
+  runtime.onDiagnosticEvent?.((event) => {
+    captured.push(event);
+    if (throwing) throw new Error("listener failure");
+  });
+  try {
+    await bounded(runtime.start(), 3000);
+    assert.equal(runtime.observedSettings?.("thread-1"), undefined);
+    assert.equal(await bounded(runtime.startThread(root), 3000), "thread-1");
+    assert.deepEqual(runtime.observedSettings?.("thread-1"), {
+      model: "m",
+      modelProvider: "p",
+      reasoningEffort: null,
+      serviceTier: "fast",
+    });
+    await bounded(runtime.startTurn("thread-1", root, "go"), 3000);
+    assert.equal(
+      await bounded(runtime.waitForTurn("thread-1", "turn-1"), 3000),
+      "completed",
+    );
+    throwing = false;
+    assert.deepEqual(
+      captured.map((e) =>
+        e.kind === "turn" ? "turn" : `${e.phase}:${e.itemType}`,
+      ),
+      [
+        "started:commandExecution",
+        "completed:commandExecution",
+        "completed:commandExecution",
+        "completed:reasoning",
+        "completed:mcpToolCall",
+        "completed:fileChange",
+        "completed:somethingNew",
+        "turn",
+      ],
+    );
+    assert.deepEqual(captured[1], {
+      kind: "item",
+      phase: "completed",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "c1",
+      itemType: "commandExecution",
+      status: "completed",
+      command: "ls",
+      cwd: "/w",
+      exitCode: 0,
+      aggregatedOutput: "out",
+    });
+    const big = captured[2];
+    assert.ok(big?.kind === "item");
+    assert.deepEqual(big.command, { omitted: "size-limit", bytes: 4097 });
+    assert.deepEqual(big.aggregatedOutput, {
+      omitted: "size-limit",
+      bytes: 48 * 1024 + 1,
+    });
+    assert.deepEqual(captured[3], {
+      kind: "item",
+      phase: "completed",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      itemId: "r1",
+      itemType: "reasoning",
+      status: "completed",
+    });
+    assert.ok(!JSON.stringify(captured).includes("SECRET"));
+    assert.ok(!("command" in (captured[4] ?? {})));
+    assert.deepEqual(captured[7], {
+      kind: "turn",
+      threadId: "thread-1",
+      turnId: "turn-1",
+      status: "completed",
+    });
+    for (let index = 2; index <= 130; index += 1)
+      await bounded(runtime.startThread(root), 3000);
+    assert.equal(runtime.observedSettings?.("thread-1"), undefined);
+    assert.equal(runtime.observedSettings?.("thread-3")?.model, "m");
+    assert.equal(runtime.observedSettings?.("thread-130")?.model, "m");
+    assert.equal(runtime.observedSettings?.("thread-131"), undefined);
+  } finally {
+    await runtime.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

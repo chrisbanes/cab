@@ -225,6 +225,34 @@ export interface RuntimeToolResult {
   success: boolean;
 }
 
+/** A field over its cap is replaced whole, never cut. */
+export type RuntimeOmittedField = { omitted: "size-limit"; bytes: number };
+
+/** Metadata only: never message text, deltas or reasoning content. */
+export type RuntimeDiagnosticEvent =
+  | {
+      kind: "item";
+      phase: "started" | "completed";
+      threadId: string;
+      turnId: string;
+      itemId: string;
+      itemType: string;
+      status?: string;
+      /** Present only for `commandExecution` items. */
+      command?: string | RuntimeOmittedField;
+      cwd?: string;
+      exitCode?: number | null;
+      aggregatedOutput?: string | RuntimeOmittedField | null;
+    }
+  | { kind: "turn"; threadId: string; turnId: string; status: string };
+
+export interface RuntimeObservedSettings {
+  model: string;
+  modelProvider: string;
+  reasoningEffort: string | null;
+  serviceTier: string | null;
+}
+
 export type RuntimeConversationEvent =
   | {
       threadId: string;
@@ -314,6 +342,22 @@ const threadSettingsSchema = z.object({
   reasoningEffort: z.string().nullable(),
   serviceTier: z.string().nullable(),
 });
+const diagnosticItemSchema = z.object({
+  threadId: z.string().min(1),
+  turnId: z.string().min(1),
+  item: z.object({
+    id: z.string().min(1),
+    type: z.string().min(1).max(64),
+    status: z.string().max(64).optional().catch(undefined),
+    command: z.string().optional().catch(undefined),
+    cwd: z.string().optional().catch(undefined),
+    exitCode: z.number().nullable().optional().catch(undefined),
+    aggregatedOutput: z.string().nullable().optional().catch(undefined),
+  }),
+});
+const maxDiagnosticCommandBytes = 4 * 1024;
+const maxDiagnosticOutputBytes = 48 * 1024;
+const maxObservedThreads = 128;
 const conversationItemStartedSchema = z.object({
   threadId: conversationIdentity,
   turnId: conversationIdentity,
@@ -548,6 +592,10 @@ export interface Runtime {
   onConversationEvent?(
     listener: (event: RuntimeConversationEvent) => void,
   ): void;
+  /** Best-effort tool and turn metadata; listener failures never affect the runtime. */
+  onDiagnosticEvent?(listener: (event: RuntimeDiagnosticEvent) => void): void;
+  /** Settings the runtime reported when it started the thread, if known. */
+  observedSettings?(threadId: string): RuntimeObservedSettings | undefined;
   processIdentity?():
     | RuntimeProcessIdentity
     | null
@@ -1281,6 +1329,11 @@ export class CodexRuntime implements Runtime {
     reason: string;
   }) => void;
   private conversationEvent?: (event: RuntimeConversationEvent) => void;
+  private diagnosticEvent?: (event: RuntimeDiagnosticEvent) => void;
+  private readonly observedThreadSettings = new Map<
+    string,
+    RuntimeObservedSettings
+  >();
   private readonly conversationTurns = new Map<
     string,
     PendingConversationTurn
@@ -1476,6 +1529,14 @@ export class CodexRuntime implements Runtime {
     this.conversationEvent = listener;
   }
 
+  onDiagnosticEvent(listener: (event: RuntimeDiagnosticEvent) => void): void {
+    this.diagnosticEvent = listener;
+  }
+
+  observedSettings(threadId: string): RuntimeObservedSettings | undefined {
+    return this.observedThreadSettings.get(threadId);
+  }
+
   async start(): Promise<void> {
     if (this.child) throw new Error("Runtime already started");
     this.failure = undefined;
@@ -1619,6 +1680,15 @@ export class CodexRuntime implements Runtime {
             throw new Error("Runtime thread safety baseline unavailable");
           }
           const settings = threadSettingsSchema.safeParse(raw);
+          if (settings.success) {
+            this.observedThreadSettings.delete(started.thread.id);
+            this.observedThreadSettings.set(started.thread.id, settings.data);
+            if (this.observedThreadSettings.size > maxObservedThreads) {
+              const oldest = this.observedThreadSettings.keys().next();
+              if (!oldest.done)
+                this.observedThreadSettings.delete(oldest.value);
+            }
+          }
           this.threadSnapshots.set(started.thread.id, {
             tools: definitions,
             ...(settings.success && this.nativeExecutable
@@ -2024,11 +2094,71 @@ export class CodexRuntime implements Runtime {
     }
     if (message.method)
       this.projectConversationEvent(message.method, message.params);
+    if (message.method) {
+      try {
+        this.projectDiagnosticEvent(message.method, message.params);
+      } catch {
+        // Diagnostics are best-effort and never alter runtime control.
+      }
+    }
     // EventEmitter throws when an unhandled `error` event is emitted. Codex
     // uses this notification for progress such as reconnect retries; turn
     // completion remains the only terminal signal.
     if (message.method && message.method !== "error")
       this.events.emit(message.method, message.params);
+  }
+
+  private projectDiagnosticEvent(method: string, params: unknown): void {
+    const listener = this.diagnosticEvent;
+    if (!listener) return;
+    if (method === "turn/completed") {
+      const parsed = turnCompletedSchema.safeParse(params);
+      if (!parsed.success) return;
+      listener({
+        kind: "turn",
+        threadId: parsed.data.threadId,
+        turnId: parsed.data.turn.id,
+        status: parsed.data.turn.status,
+      });
+      return;
+    }
+    if (method !== "item/started" && method !== "item/completed") return;
+    const parsed = diagnosticItemSchema.safeParse(params);
+    if (!parsed.success) return;
+    const { threadId, turnId, item } = parsed.data;
+    if (item.type === "agentMessage" || item.type === "userMessage") return;
+    const cap = (
+      value: string,
+      limit: number,
+    ): string | RuntimeOmittedField => {
+      const bytes = Buffer.byteLength(value, "utf8");
+      return bytes > limit ? { omitted: "size-limit", bytes } : value;
+    };
+    const command = item.type === "commandExecution";
+    listener({
+      kind: "item",
+      phase: method === "item/started" ? "started" : "completed",
+      threadId,
+      turnId,
+      itemId: item.id,
+      itemType: item.type,
+      ...(item.status !== undefined ? { status: item.status } : {}),
+      ...(command && item.command !== undefined
+        ? { command: cap(item.command, maxDiagnosticCommandBytes) }
+        : {}),
+      ...(command && item.cwd !== undefined ? { cwd: item.cwd } : {}),
+      ...(command && item.exitCode !== undefined
+        ? { exitCode: item.exitCode }
+        : {}),
+      ...(command && item.aggregatedOutput !== undefined
+        ? {
+            aggregatedOutput:
+              item.aggregatedOutput === null
+                ? null
+                : cap(item.aggregatedOutput, maxDiagnosticOutputBytes),
+          }
+        : {}),
+    });
   }
 
   private projectConversationEvent(method: string, params: unknown): void {

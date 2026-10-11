@@ -1513,3 +1513,75 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
     f.close();
   }
 });
+
+test("project diagnostic capture defaults to enhanced and is reversible", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "project.create",
+      actor: "operator",
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    assert.equal(f.domain.diagnosticCaptureMode(p), "enhanced");
+    const command = {
+      type: "project.configure",
+      actor: "operator",
+      key: key(),
+      projectId: p,
+      expectedVersion: 1,
+      diagnosticCapture: "baseline",
+    } as const;
+    const first = f.domain.execute(command);
+    assert.equal(f.domain.diagnosticCaptureMode(p), "baseline");
+    assert.equal(Number(f.domain.project(p).version), 2);
+    assert.deepEqual(f.domain.execute(command), first);
+    assert.equal(Number(f.domain.project(p).version), 2);
+    assert.throws(
+      () => f.domain.execute({ ...command, diagnosticCapture: "enhanced" }),
+      /different payload/,
+    );
+    assert.throws(
+      () =>
+        run(f.domain, {
+          type: "project.configure",
+          actor: "operator",
+          projectId: p,
+          expectedVersion: 1,
+          diagnosticCapture: "enhanced",
+        }),
+      /Version conflict/,
+    );
+    // An absent field leaves the mode unchanged.
+    run(f.domain, {
+      type: "project.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 2,
+      name: "Renamed",
+    });
+    assert.equal(f.domain.diagnosticCaptureMode(p), "baseline");
+    f.reopen();
+    assert.equal(f.domain.diagnosticCaptureMode(p), "baseline");
+    run(f.domain, {
+      type: "project.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 3,
+      diagnosticCapture: "enhanced",
+    });
+    assert.equal(f.domain.diagnosticCaptureMode(p), "enhanced");
+    assert.throws(() =>
+      run(f.domain, {
+        type: "project.configure",
+        actor: "operator",
+        projectId: p,
+        expectedVersion: 4,
+        diagnosticCapture: "verbose" as "baseline",
+      }),
+    );
+  } finally {
+    f.close();
+  }
+});

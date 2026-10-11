@@ -122,6 +122,18 @@ admitted; turns already running are held for recovery. Nothing restarts the
 App Server automatically, so recover with `launchctl kickstart -k` on the exact
 label; startup reconciliation and the usual admission checks then apply.
 
+## Execution diagnostic retention
+
+Execution diagnostics expire after `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` days
+(1–365, default 30), checked hourly; past `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB` (16–1048576,
+default 1024) the oldest items are evicted. An invalid value stops the service
+at startup. The rendered LaunchAgent sets neither variable, so a LaunchAgent
+service uses the defaults; changing them there needs a reviewed renderer change.
+The quota counts stored diagnostic payload text only, not the database, WAL or
+filesystem. Pruning deletes payload items only and keeps per-execution gap
+counts. There is no manual purge, and older snapshots keep any payloads they
+held until those snapshots are deleted.
+
 ## Offline snapshot and restore
 
 Stop the exact per-user job with `launchctl bootout`, wait for its process to

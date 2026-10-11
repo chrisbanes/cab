@@ -79,25 +79,31 @@ Options:
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
   --cursor TOKEN        Continue from the More: line of the previous page
+  --output jsonl        logs only: one ensemble.cli/v1 record per line
+  --follow              logs only: poll every --interval S (1-30, default 2)
+                        for at most --max-duration S (default 900, max 86400)
   --help                Show this help
 
 ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.
 `;
 
+const defaultDeps = (): CliDeps => ({
+  env: process.env,
+  stdin: process.stdin,
+  stdout: process.stdout,
+  stderr: process.stderr,
+  fetch,
+  platform: process.platform,
+  keychain: () => new KeychainCredentialStore(),
+  now: Date.now,
+});
+
 export async function main(
   argv: string[],
-  deps: CliDeps = {
-    env: process.env,
-    stdin: process.stdin,
-    stdout: process.stdout,
-    stderr: process.stderr,
-    fetch,
-    platform: process.platform,
-    keychain: () => new KeychainCredentialStore(),
-    now: Date.now,
-  },
+  deps: CliDeps = defaultDeps(),
 ): Promise<number> {
   let json = false;
+  let jsonl = false;
   try {
     const { values, positionals } = parseArgs({
       args: argv,
@@ -138,19 +144,34 @@ export async function main(
         "global-limit": { type: "string" },
         "project-limit": { type: "string", multiple: true },
         scope: { type: "string" },
+        task: { type: "string" },
+        assignment: { type: "string" },
+        execution: { type: "string" },
+        kind: { type: "string" },
+        severity: { type: "string" },
+        follow: { type: "boolean" },
+        interval: { type: "string" },
+        "max-duration": { type: "string" },
+        "compare-current": { type: "boolean" },
       },
     });
+    jsonl = values.output === "jsonl" && positionals[0] === "logs";
     if (
       values.output !== undefined &&
-      !["human", "json"].includes(values.output)
+      !["human", "json"].includes(values.output) &&
+      !jsonl
     )
-      throw new CliError("usage", "--output must be human or json.");
+      throw new CliError(
+        "usage",
+        "--output must be human or json (jsonl only for logs).",
+      );
     json = values.output === "json";
     if (values.help || positionals.length === 0) {
       deps.stdout.write(USAGE);
       return values.help ? 0 : 2;
     }
     const result = await run(positionals, values, deps);
+    if (result.streamed) return 0;
     if (json)
       deps.stdout.write(
         `${JSON.stringify({
@@ -182,10 +203,11 @@ export async function main(
         : error.extra.status && error.extra.status < 500
           ? [2, "usage"]
           : [5, "unavailable"]);
-    if (json)
+    if (json || jsonl)
       deps.stdout.write(
         `${JSON.stringify({
           schema: SCHEMA,
+          ...(jsonl ? { type: "error" } : {}),
           error: {
             code: error.code,
             category,
@@ -235,7 +257,8 @@ async function run(
   const config = new ConnectionConfig(configDirectory(deps.env));
   const [area, action, argument] = positionals;
   const requested = values.connection ?? deps.env.ENSEMBLE_CONNECTION;
-  const key = `${area} ${action}`;
+  // `logs` is the only single-word command.
+  const key = area === "logs" ? "logs" : `${area} ${action}`;
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
@@ -382,12 +405,13 @@ async function run(
   }
   const command = browseCommands.get(key);
   if (!command) throw new CliError("usage", `Unknown command.\n\n${USAGE}`);
-  expectArgs(positionals, 2 + command.positionals);
+  expectArgs(positionals, (key === "logs" ? 1 : 2) + command.positionals);
   rejectManaged(deps.env);
   let session: Awaited<ReturnType<typeof connect>> | undefined;
   const output = await command.run({
     positionals,
     values,
+    deps,
     connect: async () => {
       session = await connect(config, requested, deps, command.capabilities);
       return session.client;
@@ -509,5 +533,11 @@ async function login(
 if (
   process.argv[1] &&
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  process.exitCode = await main(process.argv.slice(2));
+) {
+  const interrupt = new AbortController();
+  process.once("SIGINT", () => interrupt.abort());
+  process.exitCode = await main(process.argv.slice(2), {
+    ...defaultDeps(),
+    signal: interrupt.signal,
+  });
+}

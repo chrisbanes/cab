@@ -101,6 +101,44 @@ labelled as the supplied prompt. Missing tool events, unknown effective settings
 and unavailable old prompts are explicit gaps. Tool activity is diagnostic;
 absence is not evidence that no tool ran. Do not collect provider-private reasoning.
 
+The capture is a fourth dedicated instruction projection:
+`GET /api/operator/executions/WORK_ID/inputs[?compare=current]` returns each
+captured supplied segment (request, role, review references, project and profile
+instructions with their revisions) and the submitted byte count and SHA-256, with
+provenance `{source: "captured-submission" | "not-captured", effectivePrompt:
+"not-captured"}`. Only it leaves the execution's own profile and project
+instruction text readable; when no instruction segment was captured it adds a
+labelled `reconstructed` block from retained revisions. `GET
+/api/operator/executions?task|assignment|project=ID`, `GET
+/api/operator/executions/WORK_ID` and `GET
+/api/operator/executions/WORK_ID/events?after&limit&kind&severity&since&until`
+redact all instruction text. All four are read routes for both credential scopes
+and sessions, gated by the capabilities `execution.read` and, for `logs`,
+`diagnostics.read`. A work id identifies an execution; direct runs and unknown or
+invisible work read as not found. Every read reports capture health:
+`toolObservation: "incomplete"` and `reasoning: "not-collected"`.
+
+Capture records are `input`, `setting`, `runtime`, `tool` and `service` items.
+Settings carry a source: `service-admitted`, `runtime-reported` or `unknown`.
+Service events are the closed set `thread-bound`, `input-captured`, `turn-bound`,
+`terminal-observed`, `execution-settled`, `unexpected-request` and
+`terminal-anomaly`. Capture gaps (`capture-baseline`, `capture-failed`,
+`capture-interrupted`, `input-failed`, `size-limit`, `redaction-unavailable`,
+`execution-limit`, `item-limit`, `expired`, `evicted`, `late-event`,
+`early-buffer-limit`, `unsupported-event`) are coalesced per execution and map onto
+the existing coverage codes without new ones: omitted or size-limited items
+`item-omitted`, redacted text `content-redacted`, failed redaction
+`redaction-unavailable`, expired, evicted, failed, interrupted, late and limit
+gaps `evidence-gap`, and baseline or uncaptured executions `evidence-unavailable`.
+
+Event cursors are the global item sequence. A cursor beyond any issued sequence
+is a conflict (`cursor-stale`); one below a pruned range returns that range as an
+`expired` or `evicted` gap with counts. Pages stop at 200 items or 1 MiB of
+payload. The CLI's `logs --cursor` realises the representative `--after CURSOR`,
+because `--after` and `--before` already filter by time. `--follow` polls with a
+fresh authenticated request each interval, and `--output jsonl` writes `item`,
+`gap`, `end` and `error` records.
+
 ### Retention and limits
 
 New diagnostic payloads expire after 30 days by default, with configurable age
@@ -253,7 +291,7 @@ ensemble --connection home profile get PROFILE --output json
 ensemble --connection home task get TASK --output json
 ensemble --connection home execution list --task TASK --output json
 ensemble --connection home execution inputs EXECUTION --compare-current --output json
-ensemble --connection home logs --execution EXECUTION --after CURSOR --output json
+ensemble --connection home logs --execution EXECUTION --cursor CURSOR --output json
 ensemble --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
 ensemble --connection home profile apply --file change.json --request-id REQUEST
 ensemble --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST

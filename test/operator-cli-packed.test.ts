@@ -174,6 +174,14 @@ test("the packed CLI installs offline and works against a real service over loop
     list.data.tasks.map((x: { id: string }) => x.id),
     [s.taskId],
   );
+  r = await cli(["execution", "list", "--task", s.taskId, "--output", "json"]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(JSON.parse(r.out).data.executions, []);
+  r = await cli(["logs", "--execution", "unknown-work", "--output", "jsonl"]);
+  assert.equal(r.code, 2, r.err);
+  const record = JSON.parse(r.out);
+  assert.equal(record.type, "error");
+  assert.equal(record.error.code, "not-found");
   // One reviewed write through the installed binary.
   const write = await s.issue("read-write", "packed-rw");
   r = await cli([

@@ -80,6 +80,8 @@ const commandSchema = z.discriminatedUnion("type", [
       paused: z.boolean().optional(),
       instructions: prose.optional(),
       leadProfileId: id.nullable().optional(),
+      // Applies to executions admitted afterwards; absent leaves it unchanged.
+      diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
     })
     .strict(),
   z
@@ -478,6 +480,10 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS claude_runtime_credentials (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
+        );
+        CREATE TABLE IF NOT EXISTS project_diagnostic_capture (
+          projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
+          mode TEXT NOT NULL CHECK(mode IN ('enhanced', 'baseline'))
         );
         CREATE TABLE IF NOT EXISTS scheduler_project_capacity_limits (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
@@ -1202,6 +1208,15 @@ export class DomainStore {
     };
   }
 
+  /** Diagnostic capture for new executions; no row means the default, enhanced. */
+  diagnosticCaptureMode(projectId: string): "enhanced" | "baseline" {
+    const row = this.one(
+      "SELECT mode FROM project_diagnostic_capture WHERE projectId = ?",
+      id.parse(projectId),
+    );
+    return row?.mode === "baseline" ? "baseline" : "enhanced";
+  }
+
   /** Internal credential reference for the TypeSafe adapter; never part of routing(). */
   routingCredentialReference(projectId: string): string | null {
     const row = this.required(
@@ -1630,6 +1645,12 @@ export class DomainStore {
             revision,
             command.projectId,
           );
+        if (command.diagnosticCapture !== undefined)
+          this.db
+            .prepare(
+              "INSERT INTO project_diagnostic_capture (projectId, mode) VALUES (?, ?) ON CONFLICT(projectId) DO UPDATE SET mode = excluded.mode",
+            )
+            .run(command.projectId, command.diagnosticCapture);
         return this.project(command.projectId);
       }
       case "task.create": {

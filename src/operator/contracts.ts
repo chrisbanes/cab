@@ -1849,6 +1849,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       paused: z.boolean().optional(),
       leadProfileId: uuid.nullable().optional(),
       instructions: text.optional(),
+      diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
     })
     .strict(),
   z
@@ -2243,6 +2244,8 @@ export const projectConfigurationSchema = envelope(
       profiles: z.array(profileSummarySchema),
       instructionsRevision: revision,
       instructionPresent: z.boolean(),
+      /** Optional so older services still parse; absent means not reported. */
+      diagnosticCapture: z.enum(["enhanced", "baseline"]).optional(),
       routing: z
         .object({
           version: revision,
@@ -2744,6 +2747,8 @@ export const cliCapabilities = [
   "operation.read",
   "capacity.read",
   "configuration.impact",
+  "execution.read",
+  "diagnostics.read",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(
@@ -2917,6 +2922,208 @@ export const assignmentDetailSchema = envelope(
       taskVersion: revision,
       lead: z.boolean(),
       execution: executionSchema,
+    })
+    .strict(),
+);
+/** Work ids are opaque service identifiers, never paths. */
+export const workIdSchema = z.string().regex(/^[A-Za-z0-9._:-]{1,256}$/);
+const diagnosticGapCodeSchema = z.enum([
+  "capture-baseline",
+  "capture-failed",
+  "capture-interrupted",
+  "input-failed",
+  "size-limit",
+  "redaction-unavailable",
+  "execution-limit",
+  "item-limit",
+  "expired",
+  "evicted",
+  "late-event",
+  "early-buffer-limit",
+  "unsupported-event",
+]);
+const diagnosticGapSchema = z
+  .object({
+    code: diagnosticGapCodeSchema,
+    count: z.number().int().nonnegative().safe(),
+    bytes: z.number().int().nonnegative().safe(),
+    firstAt: time,
+    lastAt: time,
+  })
+  .strict();
+/** `captured` (enhanced), `baseline`, or `not-captured` (no capture row). */
+const captureStateSchema = z.enum(["captured", "baseline", "not-captured"]);
+const executionSummarySchema = z
+  .object({
+    workId: workIdSchema,
+    requestSequence: z.number().int().positive().safe(),
+    taskId: uuid,
+    projectId: uuid,
+    assignmentId: uuid,
+    state: z.enum(["queued", "active", "completed", "held"]),
+    reason: safeText,
+    capture: captureStateSchema,
+    threadId: safeText,
+    turnId: safeText,
+    startedAt: time.nullable(),
+    finishedAt: time.nullable(),
+  })
+  .strict();
+export const executionListSchema = envelope(
+  z
+    .object({
+      executions: z.array(executionSummarySchema).max(200),
+      /** Pass as `before` for the next older page; null on the last page. */
+      nextBefore: z.number().int().positive().safe().nullable(),
+    })
+    .strict(),
+);
+const settingEntrySchema = z
+  .object({
+    name: z.string().max(64),
+    value: z.union([z.string().max(1024), z.null()]),
+    source: z.enum(["service-admitted", "runtime-reported", "unknown"]),
+  })
+  .strict();
+/** Capture coverage facts; observation is never claimed complete. */
+const captureHealthSchema = z
+  .object({
+    mode: z.enum(["enhanced", "baseline"]).nullable(),
+    eventSource: z.enum(["supported", "unsupported"]).nullable(),
+    toolObservation: z.literal("incomplete"),
+    reasoning: z.literal("not-collected"),
+    gaps: z.array(diagnosticGapSchema),
+    unrecorded: z.number().int().nonnegative().safe(),
+  })
+  .strict();
+export const executionDetailSchema = envelope(
+  z
+    .object({
+      execution: executionSummarySchema,
+      identity: z
+        .object({
+          assignmentVersion: revision,
+          instructionsRevision: revision,
+          profileRevision: revision,
+          conversationRevision: z.number().int().nonnegative().safe(),
+          harness: executionHarnessSchema,
+        })
+        .strict()
+        .nullable(),
+      settings: z.array(settingEntrySchema).nullable(),
+      counts: z
+        .object({
+          items: z.number().int().nonnegative().safe(),
+          payloadBytes: z.number().int().nonnegative().safe(),
+        })
+        .strict(),
+      health: captureHealthSchema,
+    })
+    .strict(),
+);
+const inputSegmentSchema = z
+  .object({
+    name: z.enum([
+      "request",
+      "role",
+      "review-references",
+      "project-instructions",
+      "profile-instructions",
+    ]),
+    revision: revision.nullable(),
+    state: z.enum(["available", "omitted"]),
+    reason: diagnosticGapCodeSchema.nullable(),
+    /** Up to 64 KiB captured; redaction markers can lengthen it. */
+    text: z.string().max(140000).nullable(),
+    redacted: z.boolean(),
+  })
+  .strict();
+export const executionInputsSchema = envelope(
+  z
+    .object({
+      workId: workIdSchema,
+      capture: captureStateSchema,
+      /** Ensemble-supplied inputs as submitted; never the runtime's effective prompt. */
+      provenance: z
+        .object({
+          source: z.enum(["captured-submission", "not-captured"]),
+          effectivePrompt: z.literal("not-captured"),
+        })
+        .strict(),
+      segments: z.array(inputSegmentSchema).max(8),
+      submitted: z
+        .object({ bytes: z.number().int().nonnegative().safe(), sha256: hash })
+        .strict()
+        .nullable(),
+      /** Only when no instruction segment was captured: retained revisions instead. */
+      reconstructed: z
+        .object({
+          provenance: instructionProvenanceSchema,
+          profile: instructionBodySchema,
+          project: instructionBodySchema,
+        })
+        .strict()
+        .nullable(),
+      comparison: z
+        .object({
+          instructions: z.array(
+            z
+              .object({
+                name: z.enum(["project-instructions", "profile-instructions"]),
+                boundRevision: revision,
+                currentRevision: revision,
+                sameRevision: z.boolean(),
+                sameContent: z.boolean().nullable(),
+              })
+              .strict(),
+          ),
+          settings: z.array(
+            z
+              .object({
+                name: z.string().max(64),
+                captured: z.union([z.string().max(1024), z.null()]),
+                current: z.union([z.string().max(1024), z.null()]),
+                same: z.boolean().nullable(),
+              })
+              .strict(),
+          ),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict(),
+);
+const diagnosticItemSchema = z
+  .object({
+    sequence: z.number().int().positive().safe(),
+    kind: z.enum(["input", "setting", "runtime", "tool", "service"]),
+    name: z.string().max(256),
+    severity: z.enum(["info", "warn", "error"]),
+    itemId: z.string().max(256).nullable(),
+    state: z.enum(["available", "omitted"]),
+    reason: diagnosticGapCodeSchema.nullable(),
+    payload: z.unknown(),
+    redacted: z.boolean(),
+    createdAt: time,
+  })
+  .strict();
+export const executionEventsSchema = envelope(
+  z
+    .object({
+      workId: workIdSchema,
+      capture: captureStateSchema,
+      items: z.array(diagnosticItemSchema).max(200),
+      /** Expired or evicted ranges after the cursor, plus other capture gaps. */
+      gaps: z.array(
+        diagnosticGapSchema.extend({
+          maxPrunedSequence: z.number().int().nonnegative().safe(),
+        }),
+      ),
+      /** The last returned sequence, or the request cursor when nothing was returned. */
+      resumeAfter: z.number().int().nonnegative().safe(),
+      more: z.boolean(),
+      finished: z.boolean(),
+      health: captureHealthSchema,
     })
     .strict(),
 );

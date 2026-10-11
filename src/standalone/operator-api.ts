@@ -30,6 +30,10 @@ import {
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
   discoveryStatusSchema,
+  executionDetailSchema,
+  executionEventsSchema,
+  executionInputsSchema,
+  executionListSchema,
   folderListingSchema,
   folderListRequestSchema,
   composerOptionsSchema,
@@ -73,7 +77,15 @@ import {
   workspaceDirectoryReadSchema,
   workspacePreviewReadSchema,
   workspaceSchema,
+  workIdSchema,
 } from "../operator/contracts.js";
+import {
+  boundDetail,
+  DiagnosticCursorError,
+  type DiagnosticExecution,
+  type DiagnosticItem,
+  type ExecutionDiagnosticsStore,
+} from "./execution-diagnostics.js";
 import {
   type ConversationHistoryBinding,
   isDisclosable,
@@ -2995,6 +3007,460 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
+  /** Task-bound work the caller can see; direct runs and unknown ids are 404. */
+  private requireExecution(workId: string) {
+    if (!workIdSchema.safeParse(workId).success)
+      throw new OperatorApiError(400, "invalid-input");
+    const request = this.service.turnRequest(workId);
+    if (
+      request?.kind !== "assignment" ||
+      !request.taskId ||
+      !request.assignmentId
+    )
+      throw new OperatorApiError(404, "not-found");
+    const task = this.requireTask(request.taskId);
+    return {
+      request,
+      taskId: request.taskId,
+      assignmentId: request.assignmentId,
+      projectId: String(task.projectId),
+      record: this.service.executionDiagnostics()?.execution(workId),
+    };
+  }
+  private executionSummary(
+    request: ReturnType<StandaloneService["turnRequests"]>[number],
+    projectId: string,
+    record: DiagnosticExecution | undefined,
+    excluded: readonly string[] | undefined,
+  ) {
+    return {
+      workId: request.workId,
+      requestSequence: request.sequence,
+      taskId: String(request.taskId),
+      projectId,
+      assignmentId: String(request.assignmentId),
+      state: request.state,
+      reason: this.safe(request.reason, excluded),
+      capture: !record
+        ? ("not-captured" as const)
+        : record.mode === "baseline"
+          ? ("baseline" as const)
+          : ("captured" as const),
+      threadId: this.safe(record?.threadId, excluded),
+      turnId: this.safe(record?.turnId, excluded),
+      startedAt: record?.startedAt ?? null,
+      finishedAt: record?.finishedAt ?? null,
+    };
+  }
+  private captureHealth(record: DiagnosticExecution | undefined) {
+    return {
+      mode: record?.mode ?? null,
+      eventSource: record?.eventSource ?? null,
+      toolObservation: "incomplete" as const,
+      reasoning: "not-collected" as const,
+      gaps: (record?.gaps ?? []).map((g) => ({
+        code: g.code,
+        count: g.count,
+        bytes: g.bytes,
+        firstAt: g.firstAt,
+        lastAt: g.lastAt,
+      })),
+      unrecorded: this.service.executionDiagnostics()?.health().unrecorded ?? 0,
+    };
+  }
+  /** Stored payloads are sanitised again with current exclusions; unavailable fails closed. */
+  private diagnosticItem(
+    item: DiagnosticItem,
+    excluded: readonly string[] | undefined,
+  ) {
+    // General views never show captured instruction segments; only `inputs` discloses them.
+    const instruction =
+      item.kind === "input" && item.name.endsWith("-instructions");
+    const payload =
+      item.state !== "available"
+        ? null
+        : instruction && excluded
+          ? { ...(item.payload as object), text: "[redacted]" }
+          : boundDetail(item.payload, excluded);
+    const unavailable = item.state === "available" && payload === undefined;
+    return {
+      sequence: item.sequence,
+      kind: item.kind,
+      name: this.safe(item.name, excluded) ?? "[redacted]",
+      severity: (["info", "warn", "error"].includes(item.severity)
+        ? item.severity
+        : "info") as "info" | "warn" | "error",
+      itemId: this.safe(item.itemId, excluded),
+      state: unavailable ? ("omitted" as const) : item.state,
+      reason: unavailable ? ("redaction-unavailable" as const) : item.reason,
+      payload: unavailable ? null : payload,
+      redacted: JSON.stringify(payload ?? null).includes("[redacted]"),
+      createdAt: item.createdAt,
+    };
+  }
+  private exactQuery(query: URLSearchParams, allowed: readonly string[]) {
+    for (const key of query.keys())
+      if (!allowed.includes(key) || query.getAll(key).length !== 1)
+        throw new OperatorApiError(400, "invalid-input");
+  }
+  private boundedInt(
+    raw: string | null,
+    min: number,
+    max: number,
+  ): number | undefined {
+    if (raw === null) return undefined;
+    if (!/^[0-9]{1,16}$/.test(raw))
+      throw new OperatorApiError(400, "invalid-input");
+    const value = Number(raw);
+    if (!Number.isSafeInteger(value) || value < min || value > max)
+      throw new OperatorApiError(400, "invalid-input");
+    return value;
+  }
+  /** Newest first, one task, assignment or project; primary-key lookups only. */
+  readExecutionList(query: URLSearchParams) {
+    this.exactQuery(query, [
+      "task",
+      "assignment",
+      "project",
+      "limit",
+      "before",
+    ]);
+    const scopes = (["task", "assignment", "project"] as const).filter((k) =>
+      query.has(k),
+    );
+    const scope = scopes[0];
+    const id = scope ? query.get(scope) : null;
+    if (scopes.length !== 1 || !scope || !id || !uuid.safeParse(id).success)
+      throw new OperatorApiError(400, "invalid-input");
+    const limit = this.boundedInt(query.get("limit"), 1, 200) ?? 50;
+    const before = this.boundedInt(
+      query.get("before"),
+      1,
+      Number.MAX_SAFE_INTEGER,
+    );
+    return this.readWithInstructionFence(async () => {
+      if (scope === "task") this.requireTask(id);
+      else if (scope === "assignment") this.requireAssignment(id);
+      else this.requireProject(id);
+      const rows = this.service.turnRequestPage(
+        scope === "task"
+          ? "taskId"
+          : scope === "assignment"
+            ? "assignmentId"
+            : "projectId",
+        id,
+        before,
+        limit + 1,
+      );
+      const page = rows.slice(0, limit);
+      const store = this.service.executionDiagnostics();
+      const excludedByTask = new Map<string, readonly string[] | undefined>();
+      const executions = [];
+      for (const request of page) {
+        const taskId = String(request.taskId);
+        const projectId = String(this.requireTask(taskId).projectId);
+        if (!excludedByTask.has(taskId))
+          excludedByTask.set(taskId, await this.exclusions(projectId, taskId));
+        executions.push(
+          this.executionSummary(
+            request,
+            projectId,
+            store?.execution(request.workId),
+            excludedByTask.get(taskId),
+          ),
+        );
+      }
+      return executionListSchema.parse({
+        data: {
+          executions,
+          nextBefore:
+            rows.length > limit ? (page.at(-1)?.sequence ?? null) : null,
+        },
+        observedAt: Date.now(),
+      });
+    });
+  }
+  async readExecution(workId: string) {
+    return this.readWithInstructionFence(async () => {
+      const { request, taskId, projectId, record } =
+        this.requireExecution(workId);
+      const excluded = await this.exclusions(projectId, taskId);
+      const store = this.service.executionDiagnostics();
+      const setting = record
+        ? store?.events(workId, { kind: "setting" }).items[0]
+        : undefined;
+      const entries = setting
+        ? (
+            this.diagnosticItem(setting, excluded).payload as {
+              entries?: { name: unknown; value: unknown; source: unknown }[];
+            } | null
+          )?.entries
+        : undefined;
+      const settings = Array.isArray(entries)
+        ? entries.map((e) => ({
+            name: String(e.name).slice(0, 64),
+            value: settingValue(e.value),
+            source: ["service-admitted", "runtime-reported"].includes(
+              String(e.source),
+            )
+              ? (e.source as "service-admitted" | "runtime-reported")
+              : ("unknown" as const),
+          }))
+        : null;
+      return executionDetailSchema.parse({
+        data: {
+          execution: this.executionSummary(
+            request,
+            projectId,
+            record,
+            excluded,
+          ),
+          identity: record
+            ? {
+                assignmentVersion: record.assignmentVersion,
+                instructionsRevision: record.instructionsRevision,
+                profileRevision: record.profileRevision,
+                conversationRevision: record.conversationRevision,
+                harness: record.harness,
+              }
+            : null,
+          settings,
+          counts: {
+            items: record ? (store?.itemCount(workId) ?? 0) : 0,
+            payloadBytes: record?.payloadBytes ?? 0,
+          },
+          health: this.captureHealth(record),
+        },
+        observedAt: Date.now(),
+      });
+    });
+  }
+  /**
+   * The dedicated projection of supplied inputs: only here do the execution's own
+   * profile and project instruction texts stay readable.
+   */
+  async readExecutionInputs(workId: string, query: URLSearchParams) {
+    this.exactQuery(query, ["compare"]);
+    const compare = query.get("compare");
+    if (compare !== null && compare !== "current")
+      throw new OperatorApiError(400, "invalid-input");
+    return this.readWithInstructionFence(async () => {
+      const { request, taskId, projectId, assignmentId, record } =
+        this.requireExecution(workId);
+      const d = this.domain(),
+        profileId = String(d.assignment(assignmentId).profileId);
+      const general = await this.exclusions(projectId, taskId);
+      const disclosing = await this.instructionExclusions(
+        [`profile:${profileId}`, `project:${projectId}`],
+        projectId,
+        taskId,
+      );
+      const items = record
+        ? (this.service.executionDiagnostics()?.inputs(workId) ?? [])
+        : [];
+      const segmentNames = [
+        "request",
+        "role",
+        "review-references",
+        "project-instructions",
+        "profile-instructions",
+      ] as const;
+      const segments = items.flatMap((item) => {
+        const name = segmentNames.find((n) => n === item.name);
+        if (!name) return [];
+        const payload = item.payload as { text?: unknown; revision?: unknown };
+        const excluded = name.endsWith("-instructions") ? disclosing : general;
+        const bounded =
+          item.state === "available" && typeof payload?.text === "string"
+            ? boundDetail(payload.text, excluded, 64 * 1024)
+            : undefined;
+        const text = typeof bounded === "string" ? bounded : undefined;
+        const unavailable = item.state === "available" && text === undefined;
+        return [
+          {
+            name,
+            revision:
+              typeof payload?.revision === "number" ? payload.revision : null,
+            state: unavailable ? ("omitted" as const) : item.state,
+            reason: unavailable
+              ? ("redaction-unavailable" as const)
+              : item.reason,
+            text: text ?? null,
+            redacted: Boolean(text?.includes("[redacted]")),
+          },
+        ];
+      });
+      const submitted = items.find((i) => i.name === "submitted")?.payload as
+        | { bytes?: unknown; sha256?: unknown }
+        | undefined;
+      const instructionCaptured = segments.some((x) =>
+        x.name.endsWith("-instructions"),
+      );
+      const bound = {
+        profile: request.profileRevision,
+        project: request.instructionsRevision,
+      };
+      const reconstructed =
+        !instructionCaptured && bound.profile && bound.project
+          ? {
+              provenance: instructionProvenance,
+              profile: this.instructionBody(
+                bound.profile,
+                String(
+                  d.profileRevision(profileId, bound.profile).instructions,
+                ),
+                disclosing,
+              ),
+              project: this.instructionBody(
+                bound.project,
+                d.instructionRevision(projectId, bound.project),
+                disclosing,
+              ),
+            }
+          : null;
+      let comparison = null;
+      if (compare === "current" && bound.profile && bound.project) {
+        const current = {
+          profile: Number(d.profile(profileId).version),
+          project: Number(d.project(projectId).instructionsRevision),
+        };
+        const omitted = (name: string) =>
+          segments.find((x) => x.name === name)?.state !== "available" &&
+          instructionCaptured;
+        const runtime = (revision: number) =>
+          d.profileRuntime(profileId, revision) as Record<string, unknown>;
+        const captured = runtime(bound.profile),
+          now = runtime(current.profile);
+        comparison = {
+          instructions: [
+            {
+              name: "project-instructions" as const,
+              boundRevision: bound.project,
+              currentRevision: current.project,
+              sameRevision: bound.project === current.project,
+              sameContent: omitted("project-instructions")
+                ? null
+                : d.instructionRevision(projectId, bound.project) ===
+                  d.instructionRevision(projectId, current.project),
+            },
+            {
+              name: "profile-instructions" as const,
+              boundRevision: bound.profile,
+              currentRevision: current.profile,
+              sameRevision: bound.profile === current.profile,
+              sameContent: omitted("profile-instructions")
+                ? null
+                : d.profileRevision(profileId, bound.profile).instructions ===
+                  d.profileRevision(profileId, current.profile).instructions,
+            },
+          ],
+          settings: ["harness", "model", "reasoningEffort"].map((name) => {
+            const a = settingValue(captured[name]),
+              b = settingValue(now[name]);
+            return { name, captured: a, current: b, same: a === b };
+          }),
+        };
+      }
+      return executionInputsSchema.parse({
+        data: {
+          workId,
+          capture: this.executionSummary(request, projectId, record, general)
+            .capture,
+          provenance: {
+            source: segments.length ? "captured-submission" : "not-captured",
+            effectivePrompt: "not-captured",
+          },
+          segments,
+          submitted:
+            typeof submitted?.bytes === "number" &&
+            typeof submitted.sha256 === "string"
+              ? { bytes: submitted.bytes, sha256: submitted.sha256 }
+              : null,
+          reconstructed,
+          comparison,
+        },
+        observedAt: Date.now(),
+      });
+    });
+  }
+  /** Ascending, bounded and resumable by global sequence; never claims completeness. */
+  async readExecutionEvents(workId: string, query: URLSearchParams) {
+    this.exactQuery(query, [
+      "after",
+      "limit",
+      "kind",
+      "severity",
+      "since",
+      "until",
+    ]);
+    const after =
+      this.boundedInt(query.get("after"), 0, Number.MAX_SAFE_INTEGER) ?? 0;
+    const limit = this.boundedInt(query.get("limit"), 1, 200) ?? 200;
+    const since = this.boundedInt(
+      query.get("since"),
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const until = this.boundedInt(
+      query.get("until"),
+      0,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const kind = query.get("kind");
+    const severity = query.get("severity");
+    if (
+      (kind !== null &&
+        !["input", "setting", "runtime", "tool", "service"].includes(kind)) ||
+      (severity !== null && !["info", "warn", "error"].includes(severity))
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    return this.readWithInstructionFence(async () => {
+      const { taskId, projectId, record } = this.requireExecution(workId);
+      const excluded = await this.exclusions(projectId, taskId);
+      const store = this.service.executionDiagnostics();
+      let page: ReturnType<ExecutionDiagnosticsStore["events"]> | undefined;
+      try {
+        page = record
+          ? store?.events(workId, {
+              after,
+              ...(kind ? { kind: kind as DiagnosticItem["kind"] } : {}),
+              ...(severity ? { severity } : {}),
+              ...(since === undefined ? {} : { since }),
+              ...(until === undefined ? {} : { until }),
+            })
+          : undefined;
+      } catch (error) {
+        if (error instanceof DiagnosticCursorError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+      const items = (page?.items ?? []).slice(0, limit);
+      return executionEventsSchema.parse({
+        data: {
+          workId,
+          capture: !record
+            ? "not-captured"
+            : record.mode === "baseline"
+              ? "baseline"
+              : "captured",
+          items: items.map((item) => this.diagnosticItem(item, excluded)),
+          gaps: (page?.gaps ?? []).map((g) => ({
+            code: g.code,
+            count: g.count,
+            bytes: g.bytes,
+            firstAt: g.firstAt,
+            lastAt: g.lastAt,
+            maxPrunedSequence: g.maxPrunedSequence,
+          })),
+          resumeAfter: items.at(-1)?.sequence ?? after,
+          more: Boolean(page && (page.more || page.items.length > limit)),
+          finished: !record || record.finishedAt !== null,
+          health: this.captureHealth(record),
+        },
+        observedAt: Date.now(),
+      });
+    });
+  }
   private source(
     identity: NonNullable<ReturnType<OperatorApi["identity"]>>,
     issue: Row | undefined,
@@ -3764,6 +4230,7 @@ export class OperatorApi {
         profiles: this.profiles(excluded),
         instructionsRevision: Number(p.instructionsRevision),
         instructionPresent: Boolean(p.instructions),
+        diagnosticCapture: d.diagnosticCaptureMode(projectId),
         placements: this.service
           .githubSources()
           .conflicts()
@@ -5256,4 +5723,11 @@ export class OperatorApi {
       throw new OperatorApiError(503, "command-outcome-unknown");
     }
   }
+}
+
+/** A setting value as display text, or null when absent or too long. */
+function settingValue(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  const text = String(value);
+  return text.length > 1024 ? null : text;
 }

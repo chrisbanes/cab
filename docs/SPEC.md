@@ -62,8 +62,10 @@ list/get/evidence and artifact get. Supported profile, project, routing and
 capacity configuration is changed through prepared, digest-bound change documents
 applied once by request key; `assignment apply-current` adopts current instructions
 for the next turn, and `operation get` reads configuration and adoption receipts
-back by scope, type and key. Task writes, GitHub and repository links, questions,
-approvals, recovery and execution diagnostics are planned;
+back by scope, type and key. `execution list|get|inputs` and `logs` read bounded,
+redacted execution diagnostics captured for task-bound executions, with resumable
+cursors, JSONL output and bounded following. Task writes, GitHub and repository
+links, questions, approvals and recovery are planned;
 their delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 
@@ -74,8 +76,10 @@ recovery, retaining the service's policy, revision and receipt checks. Service
 process management and offline backup/restore remain host-local.
 
 Dedicated authenticated instruction views reconstruct current, historical and
-assignment-bound instructions from retained revision records; richer bounded
-diagnostic capture is planned. General conversation history retains its current
+assignment-bound instructions from retained revision records. New task-bound
+executions capture their Ensemble-supplied inputs before submission, observed
+settings and available runtime, tool and service events under bounded retention,
+unless a project reduces capture to the baseline. General conversation history retains its current
 instruction redaction; historical gaps remain explicit. The diagnostic payload
 retention policy does not delete durable safety records or change existing
 result/review evidence contracts. The design defines capture limits, credential

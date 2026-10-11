@@ -162,6 +162,61 @@ or run `node dist/src/cli/main.js` directly.
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
    outcome, 7 unsupported service. Write commands reject flags they do not use.
 
+
+6. Execution diagnostics, with either credential scope:
+   - `execution list (--task ID | --assignment ID | --project ID)` lists task-bound
+     executions newest first with their capture state (`captured`, `baseline` or
+     `not-captured`). `execution get WORK_ID` shows the bound identities and
+     revisions, observed settings with their source (`service-admitted`,
+     `runtime-reported` or `unknown`), counts and capture health.
+   - `execution inputs WORK_ID [--compare-current]` shows the captured submission
+     of Ensemble-supplied inputs (request, role, review references, project and
+     profile instructions) with the submitted byte count and SHA-256. It is not
+     the runtime's effective prompt. It is the only diagnostic view that leaves the
+     execution's own instruction text readable; credentials, patterns and private
+     paths stay redacted, and `logs` shows instruction segments only as
+     `[redacted]`. An execution without a captured submission shows a
+     labelled reconstruction from retained revisions instead.
+     `--compare-current` compares bound and current instruction revisions and
+     profile runtime settings.
+   - `logs --execution WORK_ID [--kind input|setting|runtime|tool|service]
+     [--severity info|warn|error] [--after T] [--before T] [--limit N] [--cursor
+     TOKEN]` reads one ascending page; `data.resumeCursor` always resumes after it.
+     `--follow` polls every `--interval S` (1–30, default 2) for at most
+     `--max-duration S` (default 900, maximum 86400), holding one page at a time.
+     It ends when the execution has finished and is drained, at the duration bound
+     or on Ctrl-C, and prints a `Resume:` command. Each poll is a fresh
+     authenticated request, so revocation or expiry stops it with exit 3; three
+     consecutive unavailable polls exit 5 with the resume cursor. `--output jsonl`
+     (logs only) writes one `ensemble.cli/v1` record per line: `item`, `gap`, `end`
+     or `error`.
+
+   Capture is on by default (`enhanced`) for task-bound executions; `project.configure`
+   with `diagnosticCapture: "baseline"` (shown by `project get`) reduces later
+   executions to an execution row and a `capture-baseline` gap, and `"enhanced"`
+   restores it. Neither erases anything. Runtime events are Codex tool-like items
+   (command executions with command, working directory, status, exit code and
+   bounded output; other item types by type and status only) and turn status. No
+   message text, deltas or reasoning is collected, tool observation is never
+   claimed complete, and Claude executions report runtime events `unsupported`.
+   Payloads are redacted before storage and again with current exclusions on every
+   read; when exclusions are unavailable an item reads as
+   `omitted/redaction-unavailable`. Capture, storage or pruning failures become
+   gaps and never change admission, holds, recovery or a turn's outcome. Gaps map
+   onto the coverage codes: omitted or size-limited items `item-omitted`, redacted
+   text `content-redacted`, failed redaction `redaction-unavailable`, expired,
+   evicted, failed, interrupted, late and limit gaps `evidence-gap`, and baseline or
+   uncaptured executions `evidence-unavailable`.
+
+   Retention: items older than `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` (1–365,
+   default 30) are deleted hourly; beyond `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB`
+   (16–1048576, default 1024) the oldest items are evicted. Invalid values fail
+   service startup. Each execution keeps at most 16 MiB and 8192 items and each item
+   at most 64 KiB (a 4 KiB command or 48 KiB text field over its cap is replaced
+   whole, never cut). Pruning removes items only; executions and coalesced gap counts
+   remain. The quota bounds stored payload text, not the database, WAL or backups,
+   and older backups keep what they held.
+
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are
 rejected. Certificates are always verified; for a private CA set

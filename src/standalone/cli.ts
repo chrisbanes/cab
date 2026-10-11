@@ -1,4 +1,5 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { OperatorApi } from "./operator-api.js";
 import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
 import {
@@ -54,7 +55,10 @@ export async function waitForServiceExit(
 export async function main(
   commandLine = process.argv.slice(2),
   serviceFactory: (dataDir: string) => StandaloneService = (dataDir) =>
-    new StandaloneService(dataDir),
+    // Invalid retention variables fail startup rather than using defaults.
+    new StandaloneService(dataDir, undefined, undefined, {
+      diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
+    }),
 ): Promise<void> {
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)

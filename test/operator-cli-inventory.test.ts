@@ -29,6 +29,10 @@ const documented = [
   "result evidence",
   "artifact get",
   "capacity get",
+  "execution list",
+  "execution get",
+  "execution inputs",
+  "logs",
 ];
 
 /** The documented CLI3 configuration, adoption and receipt commands. */
@@ -90,6 +94,8 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "operation.read",
     "capacity.read",
     "configuration.impact",
+    "execution.read",
+    "diagnostics.read",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;
@@ -119,6 +125,19 @@ test("every documented browse command runs read-only with a coverage envelope", 
       join(h.dir, "artifact.png"),
     ],
   };
+  const listed = await h.run([
+    "execution",
+    "list",
+    "--task",
+    taskId,
+    "--output",
+    "json",
+  ]);
+  const workId = String(listed.json().data.executions[0]?.workId);
+  args["execution list"] = ["--task", taskId];
+  args["execution get"] = [workId];
+  args["execution inputs"] = [workId, "--compare-current"];
+  args.logs = ["--execution", workId];
   const before = databaseDigest(s.f);
   for (const key of documented) {
     const r = await h.run([

@@ -190,7 +190,9 @@ Slice evidence for authentication and task inspection, with its limits, is in th
 work, instructions, history and retained evidence in the
 [CLI2 record](evidence/issue-895-cli2-2026-10-11.md), and for reviewed configuration
 changes, receipts and adoption in the
-[CLI3 record](evidence/issue-896-cli3-2026-10-11.md). None qualifies a scenario on
+[CLI3 record](evidence/issue-896-cli3-2026-10-11.md), and for bounded execution
+diagnostics capture, reads and following in the
+[CLI7 record](evidence/issue-900-cli7-2026-10-11.md). None qualifies a scenario on
 its own.
 
 The six journeys also require command-by-command coverage of the full
