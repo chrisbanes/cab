@@ -16,6 +16,17 @@ for path in "$build" "$partial"; do
 done
 
 dirs=("$root" "$root"/{builds,data,auth,snapshots})
+# The service rejects symlinked state paths, and chmod would follow one.
+if [[ "$(cd "$(dirname "$root")" && pwd -P)" != "$(dirname "$root")" ]]; then
+  echo "$(dirname "$root") must not contain symlinks" >&2
+  exit 1
+fi
+for dir in "${dirs[@]}"; do
+  if [[ -L "$dir" ]]; then
+    echo "$dir must not be a symlink" >&2
+    exit 1
+  fi
+done
 mkdir -p "${dirs[@]}"
 chmod 700 "${dirs[@]}"
 
