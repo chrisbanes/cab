@@ -487,6 +487,13 @@ export class TaskReviewStore {
         createdAt,
       );
   }
+  hasSearchRecord(recordId: string): boolean {
+    return (
+      this.db
+        .prepare("SELECT 1 FROM task_review_search WHERE recordId=?")
+        .get(recordId) !== undefined
+    );
+  }
   async search(input: {
     query: string;
     projectId?: string | undefined;

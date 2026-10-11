@@ -53,10 +53,13 @@ runs are outside the first release. Source interfaces follow concrete integratio
 
 The accepted [operator CLI design](design/operator-cli.md) and
 [ADR-1010](adr/1010-operator-cli.md) specify an additional operator interface for
-external agents and terminal users. Its authentication foundation and task inspection
-are implemented: Settings issues, lists, rotates and revokes CLI credentials, and the
-packaged `ensemble` executable supports `auth login|status|logout`,
-`connection list|use|remove` and `task get`. The remaining command areas are planned;
+external agents and terminal users. Its authentication foundation and read-only
+browsing are implemented: Settings issues, lists, rotates and revokes CLI credentials,
+and the packaged `ensemble` executable supports `auth login|status|logout`,
+`connection list|use|remove`, project and profile list/get/instructions/revisions,
+task list/search/get/messages, assignment get/history/instructions, result
+list/get/evidence and artifact get. Writes, questions, approvals, recovery,
+execution diagnostics and receipts are planned;
 their delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 
@@ -66,8 +69,9 @@ operations, supported configuration, diagnostics and existing evidence-bearing
 recovery, retaining the service's policy, revision and receipt checks. Service
 process management and offline backup/restore remain host-local.
 
-Dedicated authenticated instruction views and richer bounded diagnostic capture
-are planned for this interface. General conversation history retains its current
+Dedicated authenticated instruction views reconstruct current, historical and
+assignment-bound instructions from retained revision records; richer bounded
+diagnostic capture is planned. General conversation history retains its current
 instruction redaction; historical gaps remain explicit. The diagnostic payload
 retention policy does not delete durable safety records or change existing
 result/review evidence contracts. The design defines capture limits, credential

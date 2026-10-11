@@ -15,22 +15,15 @@ import {
   ConnectionConfig,
   configDirectory,
   connectionNameSchema,
-  type CredentialStore,
   KeychainCredentialStore,
   readTokenFile,
 } from "./connections.js";
+import { coverage } from "./browse.js";
+import { browseCommands } from "./commands.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
+import type { CliDeps, Result, Values } from "./types.js";
 
-export type CliDeps = {
-  env: NodeJS.ProcessEnv;
-  stdin: NodeJS.ReadStream;
-  stdout: NodeJS.WritableStream;
-  stderr: NodeJS.WriteStream;
-  fetch: typeof fetch;
-  platform: NodeJS.Platform;
-  keychain: () => CredentialStore;
-  now: () => number;
-};
+export type { CliDeps } from "./types.js";
 
 const SCHEMA = "ensemble.cli/v1";
 const TASK_CAPABILITIES = ["cli.identity", "task.read"] as const;
@@ -52,8 +45,12 @@ const EXIT: Record<string, [number, string]> = {
   "managed-assignment": [3, "authentication"],
   "credential-store-unavailable": [3, "authentication"],
   "service-identity-changed": [3, "authentication"],
+  "output-exists": [2, "usage"],
+  "output-failed": [2, "usage"],
   conflict: [4, "conflict"],
+  "cursor-stale": [4, "conflict"],
   unavailable: [5, "unavailable"],
+  "integrity-mismatch": [5, "unavailable"],
   "tls-verification-failed": [5, "unavailable"],
   "redirect-rejected": [5, "unavailable"],
   "command-outcome-unknown": [6, "uncertain"],
@@ -70,20 +67,16 @@ Commands:
   connection use NAME
   connection remove NAME
   task get TASK_ID [--connection NAME]
+${[...browseCommands.values()].map((c) => `  ${c.usage}`).join("\n")}
 
 Options:
   --output human|json   Result format (default human)
+  --limit N             Page size, 1-200 (default 50; some reads cap lower)
+  --cursor TOKEN        Continue from the More: line of the previous page
   --help                Show this help
 
 ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.
 `;
-
-type Result = {
-  human: string;
-  data: unknown;
-  connection?: string;
-  service?: { installationId: string; origin: string; apiVersion: number };
-};
 
 export async function main(
   argv: string[],
@@ -110,6 +103,16 @@ export async function main(
         "token-file": { type: "string" },
         output: { type: "string" },
         help: { type: "boolean" },
+        limit: { type: "string" },
+        cursor: { type: "string" },
+        project: { type: "string" },
+        state: { type: "string" },
+        type: { type: "string" },
+        after: { type: "string" },
+        before: { type: "string" },
+        historical: { type: "boolean" },
+        revision: { type: "string" },
+        out: { type: "string" },
       },
     });
     if (
@@ -131,6 +134,8 @@ export async function main(
           ...(result.connection ? { connection: result.connection } : {}),
           ...(result.service ? { service: result.service } : {}),
           data: result.data,
+          ...(result.pagination ? { pagination: result.pagination } : {}),
+          ...(result.coverage ? { coverage: result.coverage } : {}),
         })}\n`,
       );
     else deps.stdout.write(`${terminalSafe(result.human)}\n`);
@@ -180,12 +185,6 @@ export async function main(
 function terminalSafe(text: string): string {
   return text.replace(/[^\P{Cc}\n\t]/gu, "\uFFFD");
 }
-
-type Values = {
-  connection?: string | undefined;
-  url?: string | undefined;
-  "token-file"?: string | undefined;
-};
 
 function expectArgs(positionals: string[], count: number) {
   if (positionals.length !== count)
@@ -324,6 +323,10 @@ async function run(
     return {
       ...session.result,
       data: read.data,
+      coverage: coverage(
+        read.observedAt,
+        read.data.contentUnavailable ? ["content-unavailable"] : [],
+      ),
       human: [
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
@@ -334,7 +337,20 @@ async function run(
       ].join("\n"),
     };
   }
-  throw new CliError("usage", `Unknown command.\n\n${USAGE}`);
+  const command = browseCommands.get(key);
+  if (!command) throw new CliError("usage", `Unknown command.\n\n${USAGE}`);
+  expectArgs(positionals, 2 + command.positionals);
+  rejectManaged(deps.env);
+  let session: Awaited<ReturnType<typeof connect>> | undefined;
+  const output = await command.run({
+    positionals,
+    values,
+    connect: async () => {
+      session = await connect(config, requested, deps, command.capabilities);
+      return session.client;
+    },
+  });
+  return { ...session?.result, ...output };
 }
 
 async function connect(

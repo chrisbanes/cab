@@ -243,7 +243,7 @@ export function operatorRouteAuthority(
       path,
     ) ||
     /^\/api\/operator\/(?:projects|tasks)\/[^/]+$/.test(path) ||
-    /^\/api\/operator\/tasks\/[^/]+\/(?:review|files|preview|artifacts\/[^/]+)$/.test(
+    /^\/api\/operator\/tasks\/[^/]+\/(?:review|files|preview|results|messages|artifacts\/[^/]+)$/.test(
       path,
     ) ||
     /^\/api\/operator\/tasks\/[^/]+\/results\/[^/]+\/evidence(?:\/[^/]+)?$/.test(
@@ -253,7 +253,10 @@ export function operatorRouteAuthority(
       path,
     ) ||
     /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
-    /^\/api\/operator\/assignments\/[^/]+\/(?:history|recovery)$/.test(path)
+    /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
+      path,
+    ) ||
+    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
     ? "read"
     : undefined;
 }

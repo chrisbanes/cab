@@ -285,8 +285,18 @@ export class OperatorWebBoundary {
     if (history) {
       if (
         [...query.keys()].some(
-          (k) => k !== "beforeSequence" && k !== "beforeOmissionSequence",
+          (k) =>
+            !["beforeSequence", "beforeOmissionSequence", "limit"].includes(
+              k,
+            ) || query.getAll(k).length !== 1,
         )
+      )
+        throw new OperatorApiError(400, "invalid-input");
+      const limitValue = query.get("limit");
+      const limit = limitValue === null ? undefined : Number(limitValue);
+      if (
+        limit !== undefined &&
+        (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
       )
         throw new OperatorApiError(400, "invalid-input");
       const value = query.get("beforeSequence");
@@ -305,8 +315,25 @@ export class OperatorWebBoundary {
         history[1] ?? "",
         before,
         beforeOmission,
+        limit,
       );
     }
+    const instructions = path.match(
+      /^\/api\/operator\/(projects|profiles)\/([^/]+)\/instructions$/,
+    );
+    if (instructions)
+      return instructions[1] === "projects"
+        ? this.api.readProjectInstructions(instructions[2] ?? "", query)
+        : this.api.readProfileInstructions(instructions[2] ?? "", query);
+    const records = path.match(
+      /^\/api\/operator\/tasks\/([^/]+)\/(results|messages)$/,
+    );
+    if (records)
+      return this.api.readTaskRecordPage(
+        records[1] ?? "",
+        records[2] === "results" ? "results" : "messages",
+        query,
+      );
     const selectedReview = path.match(
       /^\/api\/operator\/tasks\/([^/]+)(\/review)?$/,
     );
@@ -340,6 +367,13 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/assignments\/([^/]+)\/recovery$/,
     );
     if (recovery) return this.api.readAssignmentRecovery(recovery[1] ?? "");
+    const assignment = path.match(
+      /^\/api\/operator\/assignments\/([^/]+)(\/instructions)?$/,
+    );
+    if (assignment)
+      return assignment[2]
+        ? this.api.readAssignmentInstructions(assignment[1] ?? "")
+        : this.api.readAssignment(assignment[1] ?? "");
     let config = path.match(
       /^\/api\/operator\/projects\/([^/]+)\/configuration$/,
     );
@@ -388,7 +422,9 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/tasks\/[^/]+\/(?:review|artifacts\/[^/]+)$/.test(
         path,
       ) ||
-      /^\/api\/operator\/tasks\/[^/]+\/(?:files|preview)$/.test(path) ||
+      /^\/api\/operator\/tasks\/[^/]+\/(?:files|preview|results|messages)$/.test(
+        path,
+      ) ||
       /^\/api\/operator\/tasks\/[^/]+\/results\/[^/]+\/evidence(?:\/[^/]+)?$/.test(
         path,
       ) ||
@@ -399,7 +435,10 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/tasks\/[^/]+\/comparisons$/.test(path) ||
       /^\/api\/operator\/tasks\/[^/]+\/questions\/[^/]+$/.test(path) ||
       /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
-      /^\/api\/operator\/assignments\/[^/]+\/(?:history|recovery)$/.test(path)
+      /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
+        path,
+      ) ||
+      /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/instructions$/.test(path)
     );
   }
 }

@@ -186,8 +186,10 @@ implementation and evidence remain unproved until the delivery slices qualify it
 | CLI06 | **Unproved** | Integrated bounded real-runtime local/private-remote journey and deterministic boundary evidence, reusing valid slice evidence with explicit limits. |
 
 Slice evidence for authentication and task inspection, with its limits, is in the
-[CLI1 record](evidence/issue-894-cli1-2026-10-11.md). It does not qualify CLI01 or
-CLI02 on its own.
+[CLI1 record](evidence/issue-894-cli1-2026-10-11.md), and for read-only browsing of
+work, instructions, history and retained evidence in the
+[CLI2 record](evidence/issue-895-cli2-2026-10-11.md). Neither qualifies a scenario
+on its own.
 
 The six journeys also require command-by-command coverage of the full
 [first-release command surface](design/operator-cli.md#command-surface).

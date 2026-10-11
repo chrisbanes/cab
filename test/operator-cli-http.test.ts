@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { cliCapabilities } from "../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../src/standalone/operator-credentials.js";
 import { OperatorWebBoundary } from "../src/standalone/operator-web.js";
 import { startCliService } from "./fixtures/operator-cli.js";
@@ -19,7 +20,7 @@ test("bearer credentials read through the service under server-side route author
   assert.equal(r.headers.get("set-cookie"), null);
   const identity = (await r.json()) as Record<string, unknown>;
   assert.equal(identity.apiVersion, 1);
-  assert.deepEqual(identity.capabilities, ["cli.identity", "task.read"]);
+  assert.deepEqual(identity.capabilities, [...cliCapabilities]);
   assert.deepEqual(identity.service, {
     installationId: s.f.service.operatorCredentials().installationId(),
     origin: s.authOrigin,
@@ -352,7 +353,22 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/projects/${id}/composer-options`,
     `/api/operator/assignments/${id}/history`,
     `/api/operator/assignments/${id}/recovery`,
+    `/api/operator/tasks/${id}/results`,
+    `/api/operator/tasks/${id}/messages`,
+    `/api/operator/assignments/${id}`,
+    `/api/operator/assignments/${id}/instructions`,
+    `/api/operator/projects/${id}/instructions`,
+    `/api/operator/profiles/${id}/instructions`,
   ];
+  for (const path of [
+    `/api/operator/tasks/${id}/results`,
+    `/api/operator/tasks/${id}/messages`,
+    `/api/operator/assignments/${id}`,
+    `/api/operator/assignments/${id}/instructions`,
+    `/api/operator/projects/${id}/instructions`,
+    `/api/operator/profiles/${id}/instructions`,
+  ])
+    assert.equal(operatorRouteAuthority("GET", path), "read", path);
   const known = Object.create(
     OperatorWebBoundary.prototype,
   ) as OperatorWebBoundary;

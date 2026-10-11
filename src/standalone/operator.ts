@@ -6,6 +6,7 @@ import {
 } from "./operator-api.js";
 import {
   apiErrorSchema,
+  cliCapabilities,
   cliIdentitySchema,
   operatorCredentialIssueRequestSchema,
   operatorCredentialIssuedSchema,
@@ -1587,6 +1588,8 @@ export class LocalOperatorHttp {
           ...headers,
           "content-type": data.type,
           "x-content-type-options": "nosniff",
+          "x-ensemble-evidence-source": data.source,
+          "x-ensemble-sha256": data.sha256,
         });
         response.end(data.body);
         return true;
@@ -1663,7 +1666,7 @@ export class LocalOperatorHttp {
           throw new OperatorApiError(400, "invalid-input");
         data = cliIdentitySchema.parse({
           apiVersion: 1,
-          capabilities: ["cli.identity", "task.read"],
+          capabilities: cliCapabilities,
           service: {
             installationId: credentials.installationId(),
             origin: this.auth.origin,
@@ -1695,6 +1698,8 @@ export class LocalOperatorHttp {
             ...API_HEADERS,
             "content-type": file.type,
             "x-content-type-options": "nosniff",
+            "x-ensemble-evidence-source": file.source,
+            "x-ensemble-sha256": file.sha256,
           });
           response.end(file.body);
           return;

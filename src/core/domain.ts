@@ -886,12 +886,12 @@ export class DomainStore {
   }
 
   /** Bounded catalog membership only; policy-bearing rows are projected separately. */
-  taskCatalog(): { id: string; projectId: string }[] {
+  taskCatalog(): { id: string; projectId: string; state: string }[] {
     return this.db
       .prepare(
-        "SELECT t.id, t.projectId FROM domain_tasks t JOIN tasks base ON base.id=t.id ORDER BY t.id LIMIT 10001",
+        "SELECT t.id, t.projectId, t.state FROM domain_tasks t JOIN tasks base ON base.id=t.id ORDER BY t.id LIMIT 10001",
       )
-      .all() as { id: string; projectId: string }[];
+      .all() as { id: string; projectId: string; state: string }[];
   }
 
   tasks(projectId: string): Row[] {

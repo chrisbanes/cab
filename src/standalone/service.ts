@@ -1996,12 +1996,13 @@ export class StandaloneService {
       this.state,
       this.routingAttempts,
       () => this.wakeScheduler(),
-      (taskId, assignmentId, beforeSequence, beforeOmissionSequence) =>
+      (taskId, assignmentId, beforeSequence, beforeOmissionSequence, limit) =>
         this.readConversationHistory(
           taskId,
           assignmentId,
           beforeSequence,
           beforeOmissionSequence,
+          limit,
         ),
       {
         readTask: (taskId) => this.delivery().publicTask(taskId),
@@ -4464,13 +4465,14 @@ export class StandaloneService {
     assignmentId: string,
     beforeSequence?: number,
     beforeOmissionSequence?: number,
+    limit = 200,
   ): ConversationHistoryAssignmentRead {
     const history = this.conversationHistory;
     if (!history) throw new Error("Service is not started");
     return history.readAssignment(
       taskId,
       assignmentId,
-      200,
+      limit,
       this.conversationExclusionsForAssignment(taskId, assignmentId),
       beforeSequence,
       beforeOmissionSequence,
