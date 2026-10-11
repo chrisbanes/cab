@@ -4314,13 +4314,7 @@ export class StandaloneService {
       const prompt = joinPromptParts(promptParts);
       // Synchronous and caught: recorded before submission, never delaying it.
       if (diagnostics)
-        this.recordDiagnosticInputs(
-          diagnostics,
-          request,
-          workspace,
-          promptParts,
-          prompt,
-        );
+        this.recordDiagnosticInputs(diagnostics, request, promptParts, prompt);
       const turnId = await guard(
         settings
           ? runtime.startTurn(threadId, workspace, prompt, settings)
@@ -4841,7 +4835,6 @@ export class StandaloneService {
   private recordDiagnosticInputs(
     capture: ExecutionDiagnosticsCapture,
     request: TurnRequest,
-    workspace: string,
     parts: readonly PromptPart[],
     prompt: string,
   ): void {
