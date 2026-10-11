@@ -326,6 +326,7 @@ test("every known API route has an explicit authority", () => {
     "/api/operator/source-refresh",
     "/api/operator/source-observations",
     "/api/operator/discovery",
+    "/api/operator/claude-token",
     "/api/operator/discovery/repositories",
     "/api/operator/discovery/branches",
     "/api/operator/discovery/projects",

@@ -27,6 +27,11 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.commandType === "discovery.configure" &&
       result.configured === (c.credentialRef !== null)
     );
+  if (c.type === "claude-token.configure")
+    return (
+      result.commandType === "claude-token.configure" &&
+      result.configured === (c.credentialRef !== null)
+    );
   const resource =
     "profileId" in c
       ? c.profileId

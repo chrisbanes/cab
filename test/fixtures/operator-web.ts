@@ -16,6 +16,10 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
+import {
+  claudePolicyLimits,
+  claudeTemporaryBase,
+} from "../../src/standalone/claude.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
@@ -138,6 +142,23 @@ export interface OperatorFixture<R extends Runtime> {
     primaryFailure?: unknown,
     preserveDirectory?: boolean,
   ): Promise<void>;
+}
+
+/** A Claude-shaped fake: the optional seams the operator UI reads, no SDK. */
+export class ClaudeShapedFixtureRuntime extends OperatorFixtureRuntime {
+  readonly harness = "claude" as const;
+  supportedSettings() {
+    return { default: ["low", "high"], sonnet: ["high"] };
+  }
+  effectivePolicy(workspace: string) {
+    return {
+      writableRoots: [workspace, claudeTemporaryBase(workspace)],
+      sharedWriteRoots: [] as string[],
+      network: "denied" as const,
+      fileToolConfinement: "hook" as const,
+      limits: [...claudePolicyLimits],
+    };
+  }
 }
 
 export function createOperatorFixture<R extends Runtime>(

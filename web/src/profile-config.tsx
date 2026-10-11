@@ -17,8 +17,12 @@ import {
   runtimeCommand,
   runtimeErrors,
   runtimeValues,
+  supportedEfforts,
+  supportedModels,
 } from "./execution-runtime.js";
 import { Alert } from "./ui/alert.js";
+import { PolicyDisclosure } from "./execution-notice.js";
+import { executionHarnessLabels } from "../../src/operator/contracts.js";
 import {
   Aside,
   ChangeList,
@@ -48,8 +52,54 @@ const emptyProfile = () => ({
   key: key(),
 });
 
+const claudeSettings = (workspace: SettingsProps["workspace"]) =>
+  workspace?.data.harnesses.find((h) => h.harness === "claude")?.settings;
+
 const runtimeChangeNote =
   "A runtime change saves a new profile revision and affects new conversations only; existing conversations keep their runtime.";
+
+/** The selected harness's effective execution policy, as an Aside. */
+function PolicyAside({
+  draft,
+  workspace,
+}: {
+  draft: ConfigurationDraft;
+  workspace: SettingsProps["workspace"];
+}) {
+  const harness = draft.values.runtimeHarness === "claude" ? "claude" : "codex";
+  return (
+    <aside className="settings-aside" aria-label="Execution policy">
+      <h2 className="small-heading">
+        Execution policy · {executionHarnessLabels[harness]}
+      </h2>
+      <PolicyDisclosure harness={harness} workspace={workspace} />
+    </aside>
+  );
+}
+
+/** Supported values plus a stored value that is no longer supported, so it stays visible. */
+function SettingOptions({
+  values,
+  current,
+}: {
+  values: string[];
+  current: unknown;
+}) {
+  const stored = String(current ?? "");
+  return (
+    <>
+      <option value="">Default</option>
+      {values.map((v) => (
+        <option key={v} value={v}>
+          {v}
+        </option>
+      ))}
+      {stored && !values.includes(stored) && (
+        <option value={stored}>{stored} (not supported)</option>
+      )}
+    </>
+  );
+}
 
 /** Runtime selector, plus model and effort for Claude (blank uses the harness default). */
 function RuntimeFields({
@@ -60,9 +110,9 @@ function RuntimeFields({
   workspace: SettingsProps["workspace"];
 }) {
   const harness = draft.values.runtimeHarness,
-    note = harnessNote(
-      workspace?.data.harnesses.find((h) => h.harness === harness),
-    );
+    status = workspace?.data.harnesses.find((h) => h.harness === harness),
+    note = harnessNote(status),
+    supported = status?.settings;
   return (
     <>
       <DraftField draft={draft} field="runtimeHarness" label="Runtime">
@@ -76,13 +126,27 @@ function RuntimeFields({
             field="runtimeModel"
             errorField="runtime.model"
             label="Model"
-          />
+          >
+            {supported && (
+              <SettingOptions
+                values={supportedModels(supported)}
+                current={draft.values.runtimeModel}
+              />
+            )}
+          </DraftField>
           <DraftField
             draft={draft}
             field="runtimeEffort"
             errorField="runtime.reasoningEffort"
             label="Reasoning effort"
-          />
+          >
+            {supported && (
+              <SettingOptions
+                values={supportedEfforts(supported, draft.values)}
+                current={draft.values.runtimeEffort}
+              />
+            )}
+          </DraftField>
           <p className="metadata muted">
             Leave model or effort blank to use the Claude default.
           </p>
@@ -125,7 +189,7 @@ export function ProfileCreate(p: SettingsProps) {
                   runtime: runtimeCommand(d.values),
                 },
                 p.refresh,
-                runtimeErrors(d.values),
+                runtimeErrors(d.values, claudeSettings(p.workspace)),
               )
             }
           >
@@ -171,15 +235,18 @@ export function ProfileCreate(p: SettingsProps) {
             </div>
           </form>
         </Panel>
-        <Aside
-          title="Profile boundary"
-          items={[
-            "Saving creates revision 1. Existing assignments are unaffected.",
-            "Capabilities guide suitability; project guidance still applies.",
-            "Repository access stays project-owned.",
-            runtimeChangeNote,
-          ]}
-        />
+        <div className="settings-column">
+          <Aside
+            title="Profile boundary"
+            items={[
+              "Saving creates revision 1. Existing assignments are unaffected.",
+              "Capabilities guide suitability; project guidance still applies.",
+              "Repository access stays project-owned.",
+              runtimeChangeNote,
+            ]}
+          />
+          <PolicyAside draft={d} workspace={p.workspace} />
+        </div>
       </div>
     </div>
   );
@@ -296,7 +363,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                         p.refresh();
                         resource.refresh();
                       },
-                      runtimeErrors(d.values),
+                      runtimeErrors(d.values, claudeSettings(p.workspace)),
                     )
                   }
                 >
@@ -396,6 +463,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                 ]}
               />
               <Aside title="Runtime change" items={[runtimeChangeNote]} />
+              <PolicyAside draft={d} workspace={p.workspace} />
               <Aside
                 title="Related"
                 items={[

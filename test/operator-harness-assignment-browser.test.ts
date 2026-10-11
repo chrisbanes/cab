@@ -181,6 +181,12 @@ for (const [name, viewport] of [
       await details.getByRole("link", { name: "Edit profile" }).count(),
       1,
     );
+    await details.getByText("Effective execution policy · Claude").click();
+    await details
+      .getByText(
+        "Effective policy appears once the Claude runtime is available.",
+      )
+      .waitFor();
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-task-harness`);
     assert.equal((await page.content()).includes("PRIVATE"), false);

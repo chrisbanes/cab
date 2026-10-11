@@ -45,3 +45,38 @@ export function runtimeSummary(runtime: ProfileRuntime): string {
     runtime.reasoningEffort ?? "default effort",
   ].join(" · ");
 }
+
+/** Values the installed integration supports: each model with its reasoning efforts. */
+export const supportedRuntimeSettingsSchema = z
+  .object({
+    models: z
+      .array(
+        z
+          .object({
+            model: z.string().regex(/^\S{1,128}$/),
+            efforts: z.array(z.string().regex(/^\S{1,128}$/)).max(16),
+          })
+          .strict(),
+      )
+      .max(64),
+  })
+  .strict();
+export type SupportedRuntimeSettings = z.infer<
+  typeof supportedRuntimeSettingsSchema
+>;
+
+/** The field a Claude runtime fails against supported settings; `default` is the unset model. */
+export function unsupportedRuntimeField(
+  runtime: ProfileRuntime,
+  supported: SupportedRuntimeSettings,
+): "runtime.model" | "runtime.reasoningEffort" | null {
+  if (runtime.harness !== "claude") return null;
+  const entry = supported.models.find(
+    (m) => m.model === (runtime.model ?? "default"),
+  );
+  if (!entry) return "runtime.model";
+  return runtime.reasoningEffort !== null &&
+    !entry.efforts.includes(runtime.reasoningEffort)
+    ? "runtime.reasoningEffort"
+    : null;
+}

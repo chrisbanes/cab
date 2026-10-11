@@ -9,7 +9,10 @@ import {
   phone,
   startSettings,
 } from "./fixtures/operator-settings.js";
-import { OperatorFixtureRuntime } from "./fixtures/operator-web.js";
+import {
+  ClaudeShapedFixtureRuntime,
+  OperatorFixtureRuntime,
+} from "./fixtures/operator-web.js";
 
 const test = browserSuite("ui826-harness-status");
 
@@ -53,3 +56,85 @@ for (const [name, viewport] of [
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-runtime-harnesses`);
   });
+
+const claudeEnabled = {
+  runtimeFactory: (_context: unknown, harness: string) =>
+    harness === "claude"
+      ? new ClaudeShapedFixtureRuntime()
+      : new OperatorFixtureRuntime(),
+  serviceOptions: { runtimeHarnesses: ["codex", "claude"] as const },
+};
+
+for (const [name, viewport] of [
+  ["1366", desktop],
+  ["390", phone],
+] as const)
+  test(`execution policies and supported Claude settings appear on Runtime and profile pages at ${name}`, async (_t, journey) => {
+    const { page, web } = await startSettings(
+      journey,
+      "/app/settings/runtime",
+      viewport,
+      undefined,
+      claudeEnabled,
+    );
+    const runtimes = page.locator(".settings-panel", {
+      has: page.getByRole("heading", { name: "Execution runtimes" }),
+    });
+    await runtimes
+      .getByText(
+        "Command network access is disabled. Approval policy is never.",
+      )
+      .waitFor();
+    await runtimes
+      .getByText("confined to the same roots by Ensemble's hook", {
+        exact: false,
+      })
+      .waitFor();
+    assert.equal(
+      (await runtimes.innerText()).includes("/tmp/ens-"),
+      false,
+      "no private root path",
+    );
+    assert.equal(await page.getByRole("alert").count(), 0);
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-runtime-policies`);
+
+    await page.goto(`${web.origin}/app/settings/profiles/new`);
+    const aside = page.getByRole("complementary", { name: "Execution policy" });
+    await aside.getByText("Execution policy · Codex").waitFor();
+    await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+    await aside.getByText("Execution policy · Claude").waitFor();
+    await aside
+      .getByText("Ensemble's hook, not by the operating system", {
+        exact: false,
+      })
+      .waitFor();
+    const model = page.getByLabel("Model", { exact: true });
+    assert.deepEqual(await model.locator("option").allInnerTexts(), [
+      "Default",
+      "sonnet",
+    ]);
+    await model.selectOption("sonnet");
+    assert.deepEqual(
+      await page
+        .getByLabel("Reasoning effort", { exact: true })
+        .locator("option")
+        .allInnerTexts(),
+      ["Default", "high"],
+    );
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-profile-claude-settings`);
+  });
+
+test("Claude not enabled: policy appears once available and settings stay free text", async (_t, journey) => {
+  const { page, web } = await startSettings(journey, "/app/settings/runtime");
+  await page
+    .getByText("Effective policy appears once the Claude runtime is available.")
+    .waitFor();
+  await page.goto(`${web.origin}/app/settings/profiles/new`);
+  await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
+  assert.equal(
+    await page.getByLabel("Model", { exact: true }).evaluate((e) => e.tagName),
+    "INPUT",
+  );
+});

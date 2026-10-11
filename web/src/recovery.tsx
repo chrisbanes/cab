@@ -5,7 +5,7 @@ import {
   assignmentRecoverySchema,
 } from "../../src/operator/contracts.js";
 import { executionSummary, harnessStateLabel } from "./execution-runtime.js";
-import { ExecutionNotices } from "./execution-notice.js";
+import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
 import { useOperatorResource } from "./resource.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
@@ -179,6 +179,13 @@ export function RuntimeSettings(p: SettingsProps) {
                         Restart the service to retry this runtime.
                       </p>
                     )}
+                    <h4 className="small-heading">
+                      Effective execution policy
+                    </h4>
+                    <PolicyDisclosure
+                      harness={h.harness}
+                      workspace={p.workspace}
+                    />
                   </div>
                 ))}
               </Panel>

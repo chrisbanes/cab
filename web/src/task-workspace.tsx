@@ -1,5 +1,5 @@
 import { QuestionResponse } from "./question-response.js";
-import { ExecutionNotices } from "./execution-notice.js";
+import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
 import { executionSummary } from "./execution-runtime.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import {
@@ -13,6 +13,7 @@ import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import {
   assignmentHistorySchema,
+  executionHarnessLabels,
   type CommandReceipt,
   type OperatorCommand,
   operatorCommandSchema,
@@ -1528,6 +1529,16 @@ export function TaskWorkspace({
                   {a.waitReason ?? "No recorded wait reason; unknown"}.
                 </p>
                 <ExecutionNotices assignment={a} />
+                <details>
+                  <summary>
+                    Effective execution policy ·{" "}
+                    {executionHarnessLabels[executionSummary(a).harness]}
+                  </summary>
+                  <PolicyDisclosure
+                    harness={executionSummary(a).harness}
+                    workspace={workspace}
+                  />
+                </details>
                 {data.results
                   .filter((r) => r.assignmentId === a.assignmentId)
                   .map((r) => (

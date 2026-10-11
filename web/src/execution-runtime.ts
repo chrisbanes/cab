@@ -3,7 +3,9 @@ import {
   runtimeSummary,
   type HarnessStatus,
   type ProfileRuntime,
+  type SupportedRuntimeSettings,
   type TaskRead,
+  unsupportedRuntimeField,
 } from "../../src/operator/contracts.js";
 export { runtimeSummary };
 import type { Values } from "./settings-changes.js";
@@ -42,7 +44,10 @@ const settingFields = [
 ] as const;
 
 /** Specific messages keyed to the server's field paths; empty when valid. */
-export function runtimeErrors(v: Values): Record<string, string> {
+export function runtimeErrors(
+  v: Values,
+  supported?: SupportedRuntimeSettings | null,
+): Record<string, string> {
   const errors: Record<string, string> = {};
   if (v.runtimeHarness !== "claude") return errors;
   for (const [field, path, label] of settingFields) {
@@ -51,8 +56,30 @@ export function runtimeErrors(v: Values): Record<string, string> {
     else if (value.length > 128)
       errors[path] = `${label} must be at most 128 characters.`;
   }
+  if (Object.keys(errors).length || !supported) return errors;
+  const runtime = runtimeCommand(v);
+  const field = unsupportedRuntimeField(runtime, supported);
+  if (field === "runtime.model")
+    errors[field] =
+      `Model must be one of: ${supportedModels(supported).join(", ")}.`;
+  else if (field === "runtime.reasoningEffort")
+    errors[field] =
+      `Reasoning effort must be one of: ${supportedEfforts(supported, v).join(", ")}.`;
   return errors;
 }
+
+/** Selectable model names; `default` is the blank Default option. */
+export const supportedModels = (supported: SupportedRuntimeSettings) =>
+  supported.models.map((m) => m.model).filter((m) => m !== "default");
+
+/** Efforts supported for the draft's model (or the default model). */
+export const supportedEfforts = (
+  supported: SupportedRuntimeSettings,
+  v: Values,
+) =>
+  supported.models.find(
+    (m) => m.model === (String(v.runtimeModel ?? "").trim() || "default"),
+  )?.efforts ?? [];
 
 /** The note beside the selector for a harness that cannot run work now. */
 export function harnessNote(status: HarnessStatus | undefined) {
@@ -92,6 +119,7 @@ const runtimeStatusRoute = {
   label: "Runtime status",
   href: "/app/settings/runtime",
 };
+const settingsRoute = { label: "Settings", href: "/app/settings" };
 const recoveryRoute = (a: Assignment) => ({
   label: "Recovery",
   href: `/app/assignments/${a.assignmentId}/recovery`,
@@ -129,7 +157,11 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
   if (reason.startsWith(`${label} runtime unavailable: `))
     return {
       message: `${reason}. This work waits and starts once the runtime is available; it never falls back to another runtime.`,
-      routes: [runtimeStatusRoute],
+      // The Claude token reference is set in Settings.
+      routes:
+        harness === "claude"
+          ? [runtimeStatusRoute, settingsRoute]
+          : [runtimeStatusRoute],
     };
   return null;
 }
@@ -138,6 +170,12 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
 export function failureNotice(a: Assignment): ExecutionNoticeModel | null {
   const g = a.executionGeneration;
   if (g?.harness !== "claude" || !g.failure || a.state !== "held") return null;
+  if (g.failure.reasonCode === "unauthorized")
+    return {
+      message:
+        "Claude rejected the configured token. Replace the token value in the service environment, restart the service, then recover the held execution.",
+      routes: [settingsRoute, recoveryRoute(a)],
+    };
   return {
     message: `Turn failed (${g.failure.classification} · ${g.failure.reasonCode}). Held without automatic retry.`,
     routes: [recoveryRoute(a)],

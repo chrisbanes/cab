@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { claudePolicyDisclosure } from "../src/standalone/execution-policy.js";
 import {
   executionSummary,
   failureNotice,
@@ -215,5 +216,86 @@ test("only held Claude failures render a failure notice", () => {
       assignment({ executionGeneration: generation("claude", failed) }),
     ),
     null,
+  );
+});
+
+test("Claude policy disclosure names roots by category and keeps the runtime's limits", () => {
+  const base = {
+    writableRoots: ["/w", "/tmp/ens-0123"],
+    sharedWriteRoots: [] as string[],
+    network: "denied",
+    fileToolConfinement: "hook",
+    limits: ["Hook confinement is not OS confinement."],
+  };
+  const redirected = claudePolicyDisclosure(base, "/w");
+  assert.match(
+    redirected.lines[0] ?? "",
+    /write only the task workspace and a per-task temporary directory/,
+  );
+  assert.ok(
+    redirected.lines.some((l) =>
+      /Ensemble's hook, not by the operating system/.test(l),
+    ),
+  );
+  assert.deepEqual(redirected.limits, base.limits);
+  assert.equal(JSON.stringify(redirected).includes("/tmp/ens-"), false);
+  const shared = claudePolicyDisclosure(
+    { ...base, writableRoots: ["/w"], sharedWriteRoots: ["/tmp/claude-501"] },
+    "/w",
+  );
+  assert.match(shared.lines[0] ?? "", /write only the task workspace,/);
+  assert.ok(
+    shared.lines.some((l) => /shared across tasks, not isolated/.test(l)),
+  );
+  assert.equal(JSON.stringify(shared).includes("claude-501"), false);
+  for (const malformed of [
+    { ...base, network: "allowed" },
+    { ...base, fileToolConfinement: "os" },
+    { ...base, limits: ["x".repeat(301)] },
+    { ...base, extra: true },
+  ])
+    assert.throws(() => claudePolicyDisclosure(malformed, "/w"));
+});
+
+test("supported settings narrow runtime errors to listed values", () => {
+  const supported = {
+    models: [
+      { model: "default", efforts: ["low", "high"] },
+      { model: "sonnet", efforts: ["high"] },
+    ],
+  };
+  assert.deepEqual(runtimeErrors(claude("opus", ""), supported), {
+    "runtime.model": "Model must be one of: sonnet.",
+  });
+  assert.deepEqual(runtimeErrors(claude("sonnet", "low"), supported), {
+    "runtime.reasoningEffort": "Reasoning effort must be one of: high.",
+  });
+  assert.deepEqual(runtimeErrors(claude("", "low"), supported), {});
+  assert.deepEqual(runtimeErrors(claude("sonnet", ""), supported), {});
+});
+
+test("an unauthorized Claude failure names the token and Settings", () => {
+  const notice = failureNotice(
+    assignment({
+      state: "held",
+      executionGeneration: generation("claude", {
+        classification: "permanent",
+        reasonCode: "unauthorized",
+      }),
+    }),
+  );
+  assert.match(notice?.message ?? "", /Claude rejected the configured token/);
+  assert.deepEqual(
+    notice?.routes.map((r) => r.href),
+    ["/app/settings", "/app/assignments/a1/recovery"],
+  );
+  assert.deepEqual(
+    waitRoute(
+      assignment({
+        waitReason:
+          "Claude runtime unavailable: subscription token is unavailable",
+      }),
+    )?.routes.map((r) => r.href),
+    ["/app/settings/runtime", "/app/settings"],
   );
 });

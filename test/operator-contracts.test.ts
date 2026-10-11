@@ -58,8 +58,19 @@ test("read envelopes reject row fields and invalid states", () => {
         profiles: [],
         runtime: { state: "unavailable", since: 5 },
         harnesses: [
-          { harness: "codex", state: "unavailable", since: 5 },
-          { harness: "claude", state: "not-configured" },
+          {
+            harness: "codex",
+            state: "unavailable",
+            since: 5,
+            policy: { lines: ["a"], limits: [] },
+            settings: null,
+          },
+          {
+            harness: "claude",
+            state: "not-configured",
+            policy: null,
+            settings: { models: [{ model: "default", efforts: ["high"] }] },
+          },
         ],
       },
       observedAt: 1,
@@ -81,10 +92,30 @@ test("read envelopes reject row fields and invalid states", () => {
       false,
     );
   for (const invalid of [
-    { harness: "codex", state: "unavailable" },
-    { harness: "codex", state: "not-configured", since: 5 },
-    { harness: "pi", state: "available" },
-    { harness: "claude", state: "unavailable", since: 5, error: "secret" },
+    { harness: "codex", state: "unavailable", policy: null, settings: null },
+    {
+      harness: "codex",
+      state: "not-configured",
+      since: 5,
+      policy: null,
+      settings: null,
+    },
+    { harness: "pi", state: "available", policy: null, settings: null },
+    {
+      harness: "claude",
+      state: "unavailable",
+      since: 5,
+      error: "secret",
+      policy: null,
+      settings: null,
+    },
+    { harness: "claude", state: "available", settings: null },
+    {
+      harness: "claude",
+      state: "available",
+      policy: null,
+      settings: { models: [{ model: "a b", efforts: [] }] },
+    },
   ])
     assert.equal(
       workspaceSchema.safeParse({

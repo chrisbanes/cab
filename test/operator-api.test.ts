@@ -9,8 +9,14 @@ import { ConversationHistoryStore } from "../src/standalone/conversation-history
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { OperatorApi } from "../src/standalone/operator-api.js";
 import {
+  OperatorApi,
+  OperatorApiError,
+} from "../src/standalone/operator-api.js";
+import { executionPolicy } from "../src/standalone/codex.js";
+import { codexPolicyDisclosure } from "../src/standalone/execution-policy.js";
+import {
+  ClaudeShapedFixtureRuntime,
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "./fixtures/operator-web.js";
@@ -966,6 +972,7 @@ test("global labels exclude retained private revisions without any task or proje
     profile: d.profile.bind(d),
     profileRevision: d.profileRevision.bind(d),
     profileRuntime: d.profileRuntime.bind(d),
+    claudeTokenReference: () => null,
     projects: () => [],
   };
   const isolated = new OperatorApi({
@@ -997,6 +1004,7 @@ test("global snapshot privacy fails closed before excessive revision lookup work
       return { instructions: "PRIVATE" };
     },
     profileRuntime: () => ({ harness: "codex" }),
+    claudeTokenReference: () => null,
   };
   const api = new OperatorApi({
     domain: () => domain,
@@ -1623,10 +1631,27 @@ test("workspace reads report every harness's status", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const read = await new OperatorApi(f.service, [f.directory]).readWorkspace();
-  assert.deepEqual(read.data.harnesses, [
-    { harness: "codex", state: "available" },
-    { harness: "claude", state: "not-configured" },
-  ]);
+  assert.deepEqual(
+    read.data.harnesses.map(({ harness, state, settings }) => ({
+      harness,
+      state,
+      settings,
+    })),
+    [
+      { harness: "codex", state: "available", settings: null },
+      { harness: "claude", state: "not-configured", settings: null },
+    ],
+  );
+  assert.deepEqual(read.data.harnesses[0]?.policy, codexPolicyDisclosure());
+  assert.equal(read.data.harnesses[1]?.policy, null);
+  // The disclosure describes the policy Codex is actually given.
+  assert.deepEqual(executionPolicy("/w"), {
+    type: "workspaceWrite",
+    writableRoots: ["/w"],
+    networkAccess: false,
+    excludeSlashTmp: true,
+    excludeTmpdirEnvVar: true,
+  });
   assert.deepEqual(read.data.runtime, { state: "available" });
 
   const both = await createOperatorFixture(
@@ -1643,12 +1668,92 @@ test("workspace reads report every harness's status", async (t) => {
   t.after(() => both.close());
   const api = new OperatorApi(both.service, [both.directory]);
   const [codex, claude] = (await api.readWorkspace()).data.harnesses;
-  assert.deepEqual(codex, { harness: "codex", state: "available" });
+  assert.equal(codex?.state, "available");
   assert.equal(claude?.state, "unavailable");
   assert.equal(typeof (claude as { since?: number }).since, "number");
   both.runtime.crash();
   assert.equal(
     (await api.readWorkspace()).data.harnesses[0]?.state,
     "unavailable",
+  );
+});
+
+test("profile commands reject Claude values the started runtime does not support", async (t) => {
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) =>
+      harness === "claude"
+        ? new ClaudeShapedFixtureRuntime()
+        : new OperatorFixtureRuntime(),
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const create = (model: string | null, reasoningEffort: string | null) => {
+    const profileId = randomUUID();
+    return {
+      profileId,
+      run: () =>
+        api.execute({
+          type: "profile.create",
+          key: randomUUID(),
+          profileId,
+          name: "Claude",
+          instructions: "x",
+          capabilities: "x",
+          runtime: { harness: "claude", model, reasoningEffort },
+        }),
+    };
+  };
+  for (const [model, effort, field] of [
+    ["nope", null, "runtime.model"],
+    ["sonnet", "low", "runtime.reasoningEffort"],
+  ] as const) {
+    const c = create(model, effort);
+    await assert.rejects(c.run(), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual(error.fieldPaths, [field]);
+      return true;
+    });
+    assert.equal(
+      f.service
+        .domain()
+        .profiles()
+        .some((p) => p.id === c.profileId),
+      false,
+    );
+  }
+  const ok = create("sonnet", "high");
+  await ok.run();
+  assert.deepEqual(f.service.domain().profileRuntime(ok.profileId), {
+    harness: "claude",
+    model: "sonnet",
+    reasoningEffort: "high",
+  });
+});
+
+test("unknown well-shaped Claude values save while supported settings are unknown", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const profileId = randomUUID();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "profile.create",
+    key: randomUUID(),
+    profileId,
+    name: "Claude",
+    instructions: "x",
+    capabilities: "x",
+    runtime: {
+      harness: "claude",
+      model: "future-model",
+      reasoningEffort: null,
+    },
+  });
+  assert.equal(
+    (f.service.domain().profileRuntime(profileId) as { model: string }).model,
+    "future-model",
   );
 });

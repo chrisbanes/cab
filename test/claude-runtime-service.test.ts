@@ -22,6 +22,7 @@ import {
   sessionOf,
 } from "./fixtures/claude-sdk.js";
 import { tmpdir } from "./temp.js";
+import { OperatorApi } from "../src/standalone/operator-api.js";
 
 /** Captures the spawn context; never starts a turn. */
 class ContextRuntime implements Runtime {
@@ -179,6 +180,7 @@ test("a missing or empty Claude token makes the turn environment unavailable wit
   assert.deepEqual(missing, {
     unavailable:
       "Claude runtime unavailable: subscription token is not configured",
+    code: "not-configured",
   });
   f.configure(`env:${NAME}`);
   await f.service.stop();
@@ -187,6 +189,7 @@ test("a missing or empty Claude token makes the turn environment unavailable wit
   assert.deepEqual(empty, {
     unavailable:
       "Claude runtime unavailable: subscription token is unavailable",
+    code: "empty",
   });
   assert.equal(JSON.stringify(empty).includes(NAME), false);
 });
@@ -944,4 +947,97 @@ test("a restart before the Claude process identity was recorded reports no proof
     [record?.holds.writer, record?.holds.capacity],
     [true, true],
   );
+});
+
+test("operator token status reports each state without the reference name or value", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
+  const f = harnessFixture(t);
+  await f.service.start();
+  let api = new OperatorApi(f.service, [f.dataDir]);
+  const state = async () => {
+    const read = api.readClaudeTokenStatus();
+    const text =
+      JSON.stringify(read) + JSON.stringify(await api.readWorkspace());
+    assert.equal(text.includes(NAME), false);
+    assert.equal(text.includes(TOKEN), false);
+    return read.data;
+  };
+  assert.deepEqual(await state(), {
+    configured: false,
+    available: false,
+    state: "not-configured",
+  });
+  const receipt = await api.execute({
+    type: "claude-token.configure",
+    key: randomUUID(),
+    credentialRef: `env:${NAME}`,
+  });
+  assert.equal(JSON.stringify(receipt).includes(NAME), false);
+  assert.deepEqual(await state(), {
+    configured: true,
+    available: false,
+    state: "missing-value",
+  });
+  // A value set after start is read live; it was never in the inherited snapshot.
+  process.env[NAME] = TOKEN;
+  assert.deepEqual(await state(), {
+    configured: true,
+    available: true,
+    state: "available",
+  });
+  const clear = () =>
+    api.execute({
+      type: "claude-token.configure",
+      key: randomUUID(),
+      credentialRef: null,
+    });
+  await clear();
+  assert.equal((await state()).state, "not-configured");
+  // Inherited by the running runtimes at start, then configured: restart first.
+  await f.service.stop();
+  await f.service.start();
+  api = new OperatorApi(f.service, [f.dataDir]);
+  await api.execute({
+    type: "claude-token.configure",
+    key: randomUUID(),
+    credentialRef: `env:${NAME}`,
+  });
+  assert.deepEqual(await state(), {
+    configured: true,
+    available: false,
+    state: "restart-required",
+  });
+  await f.service.stop();
+  await f.service.start();
+  api = new OperatorApi(f.service, [f.dataDir]);
+  assert.equal((await state()).state, "available");
+  await clear();
+  assert.equal((await state()).state, "not-configured");
+});
+
+test("a started Claude runtime's supported settings and effective policy parse into the harness status", async (t) => {
+  const run = await claudeServiceRun(t, [
+    async function* (session) {
+      yield init(sessionOf(session));
+      yield result(sessionOf(session));
+    },
+  ]);
+  const before = run.service.harnessStatuses()[1];
+  assert.equal(before?.harness, "claude");
+  assert.match(before?.policy?.lines.join(" ") ?? "", /Ensemble's hook/);
+  assert.ok((before?.policy?.limits.length ?? 0) > 0);
+  assert.equal(JSON.stringify(before?.policy).includes("/tmp/ens-"), false);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const settings = run.service.harnessSettings("claude");
+  assert.ok(settings && settings.models.length > 0);
+  assert.deepEqual(run.service.harnessStatuses()[1]?.settings, settings);
 });

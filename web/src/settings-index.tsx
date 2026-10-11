@@ -6,7 +6,10 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, StatusBadge } from "./components.js";
-import { DiscoveryCredentialRow } from "./discovery-credential.js";
+import {
+  ClaudeTokenRow,
+  DiscoveryCredentialRow,
+} from "./discovery-credential.js";
 import { runtimeSummary } from "./execution-runtime.js";
 import { OperatorCredentialsSection } from "./operator-credentials.js";
 import { useOperatorResource } from "./resource.js";
@@ -242,7 +245,9 @@ export function SettingsWorkspace(p: SettingsProps) {
                 Open runtime
               </ActionLink>
             }
-          />
+          >
+            <ClaudeTokenRow {...p} />
+          </Panel>
         </div>
         <div className="settings-column">
           <Panel

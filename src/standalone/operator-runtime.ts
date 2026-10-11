@@ -108,8 +108,8 @@ function overview(api: RuntimeOperatorApi, csrfToken: string): string {
   const capacity = api.capacityLimits(
     projects.map((project) => String(project.id)),
   );
-  const unavailable = api
-    .harnessStatuses()
+  const statuses = api.harnessStatuses();
+  const unavailable = statuses
     .filter((status) => status.state === "unavailable")
     .map(
       (status) =>
@@ -142,9 +142,19 @@ function overview(api: RuntimeOperatorApi, csrfToken: string): string {
         .join("");
       return `<section><h3>${escapeHtml(project.name)} — ${project.paused ? "Paused" : "Active"}</h3>${rows ? `<ul>${rows}</ul>` : "<p>No tasks.</p>"}</section>`;
     })
-    .join(
-      "",
-    )}</section><section><h2>Effective execution policy</h2><p>Default policy: workspace writes with broad host-permitted reads.</p><p>Command network access is disabled. Approval policy is never.</p><p>Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.</p><p>Codex runs with the operator's existing runtime login; Ensemble does not provide an independent execution sandbox.</p></section></main>`;
+    .join("")}</section><section><h2>Effective execution policy</h2>${statuses
+    .map(({ harness, policy }) => {
+      if (!policy) return "";
+      const text = [...policy.lines, ...policy.limits]
+        // Element content: apostrophes stay literal so Codex's text is unchanged.
+        .map((line) => `<p>${line.replace(/[&<>]/g, (c) => escapeHtml(c))}</p>`)
+        .join("");
+      // Codex keeps its retained, unheaded paragraphs.
+      return harness === "codex"
+        ? text
+        : `<h3>${executionHarnessLabels[harness]}</h3>${text}`;
+    })
+    .join("")}</section></main>`;
 }
 
 function admissionReason(reason: string): string {

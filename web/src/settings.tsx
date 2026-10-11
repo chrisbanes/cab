@@ -237,6 +237,13 @@ export function DraftOutcome({
 function ReceiptText({ receipt }: { receipt: CommandReceipt }) {
   if (receipt.kind !== "configuration") return null;
   const r = receipt.result;
+  if (r.commandType === "claude-token.configure")
+    return (
+      <>
+        Recorded Claude token reference:{" "}
+        {r.configured ? "configured" : "cleared"}.
+      </>
+    );
   if (r.commandType === "discovery.configure")
     return (
       <>
