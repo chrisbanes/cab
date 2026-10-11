@@ -71,14 +71,15 @@ export function rowsFromDraft(value: unknown): SetupRow[] {
 /** A row with nothing entered is repository-free and left out of the command. */
 export const blankRow = (r: SetupRow) =>
   !r.repositoryId && !r.text.trim() && !r.path.trim();
-/** Ids of rows repeating an earlier row's repository. */
+/** Ids of rows repeating an earlier row's repository, by node ID or by `owner/name`. */
 export function duplicateRows(rows: SetupRow[]) {
   const seen = new Set<string>(),
     duplicates = new Set<string>();
   for (const r of rows) {
     if (!r.repositoryId) continue;
-    if (seen.has(r.repositoryId)) duplicates.add(r.id);
-    seen.add(r.repositoryId);
+    const keys = [r.repositoryId, `${r.owner}/${r.name}`.toLowerCase()];
+    if (keys.some((k) => seen.has(k))) duplicates.add(r.id);
+    for (const k of keys) seen.add(k);
   }
   return duplicates;
 }

@@ -54,6 +54,22 @@ test("typed repositories and rows build the one create command", () => {
   };
   const rows = [typed, emptyRow("typed"), { ...typed, id: "dup" }];
   assert.deepEqual([...duplicateRows(rows)], ["dup"]);
+  // A typed row and a discovered row naming the same repository collide.
+  assert.deepEqual(
+    [
+      ...duplicateRows([
+        typed,
+        {
+          ...emptyRow("discovered"),
+          id: "node",
+          repositoryId: "R_atlas",
+          owner: "acme",
+          name: "atlas",
+        },
+      ]),
+    ],
+    ["node"],
+  );
   const { command, rowIndex } = buildProjectCreate(
     { ...values, instructions: "Private" },
     rows.slice(0, 2),
