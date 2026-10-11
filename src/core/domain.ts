@@ -497,9 +497,9 @@ export class DomainStore {
       // Profiles written before runtime selection all ran on Codex.
       for (const table of ["profiles", "profile_revisions"])
         if (
-          !(
-            this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[]
-          ).some((column) => column.name === "runtime")
+          !(this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[]).some(
+            (column) => column.name === "runtime",
+          )
         )
           this.db.exec(
             `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,

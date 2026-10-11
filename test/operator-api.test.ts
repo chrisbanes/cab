@@ -1432,3 +1432,123 @@ test("a task read reports source review, hold and unknown source as source-held"
   assert.ok(read.includes("source-held"), read.join());
   assert.ok(!read.includes("admission-blocked"), read.join());
 });
+test("profile configuration reads and writes a validated execution runtime", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const api = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.runtime,
+    { harness: "codex" },
+  );
+  await assert.rejects(
+    api.execute({
+      type: "profile.configure",
+      key: randomUUID(),
+      profileId: ids.profileId,
+      expectedVersion: 1,
+      runtime: { harness: "codex", model: "opus" },
+    } as never),
+    /Unrecognized key/,
+  );
+  assert.equal(f.service.domain().profile(ids.profileId).version, 1);
+  const runtime = {
+    harness: "claude" as const,
+    model: "opus",
+    reasoningEffort: "high",
+  };
+  await api.execute({
+    type: "profile.configure",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: 1,
+    runtime,
+  });
+  assert.deepEqual(
+    (await api.readProfileConfiguration(ids.profileId)).data.runtime,
+    runtime,
+  );
+});
+test("task reads report the persisted binding harness of each execution generation", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f, true);
+  const api = new OperatorApi(f.service, [f.directory]);
+  assert.equal(
+    (await api.readTask(ids.taskId)).data.assignments[0]?.executionGeneration
+      ?.harness,
+    "codex",
+  );
+
+  const d = f.service.domain();
+  const claudeProfile = randomUUID(),
+    taskId = randomUUID(),
+    assignmentId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claudeProfile,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [claudeProfile],
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    title: "Claude task",
+    outcome: "Wait for Claude",
+    ready: false,
+  });
+  await f.service.provisionTask(taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    assignmentId,
+    profileId: claudeProfile,
+    brief: "Claude work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  await until(() =>
+    f.service
+      .list()
+      .some((w) => w.reason === "Claude runtime is not configured"),
+  );
+  const read = await api.readTask(taskId);
+  const assignment = read.data.assignments.find(
+    (a) => a.assignmentId === assignmentId,
+  );
+  assert.equal(assignment?.executionGeneration?.harness, "claude");
+  assert.match(
+    assignment?.waitReason ?? "",
+    /Claude runtime is not configured/,
+  );
+  assert.equal(f.runtime.turns, 1);
+});

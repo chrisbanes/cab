@@ -307,7 +307,10 @@ export class StandaloneService {
   private power: ExecutionPower | undefined;
   private powerPollTimer: NodeJS.Timeout | undefined;
   private readonly runtimes = new Map<ExecutionHarness, Runtime>();
-  private readonly runtimeUnavailableSince = new Map<ExecutionHarness, number>();
+  private readonly runtimeUnavailableSince = new Map<
+    ExecutionHarness,
+    number
+  >();
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
   private conversationHistory: ConversationHistoryStore | undefined;
   private readonly conversationCaptures = new Map<
@@ -2390,8 +2393,7 @@ export class StandaloneService {
   private flushRuntimeAnswersFor(runtime: Runtime): void {
     const coordination = this.coordination;
     const runtimeGeneration = runtime.currentUserInputGeneration?.();
-    if (!coordination || !runtimeGeneration || !runtime.replyUserInput)
-      return;
+    if (!coordination || !runtimeGeneration || !runtime.replyUserInput) return;
     let cursor = "";
     for (;;) {
       const page = coordination.pendingRuntimeAnswersPage(

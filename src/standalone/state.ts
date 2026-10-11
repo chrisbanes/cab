@@ -1070,9 +1070,7 @@ export class ExecutionState {
         .prepare(`SELECT harness FROM task_execution_bindings
         WHERE assignmentId = ? AND conversationRevision = ?
         ORDER BY rowid LIMIT 1`)
-        .get(input.assignmentId, revision)) as
-      | { harness: unknown }
-      | undefined;
+        .get(input.assignmentId, revision)) as { harness: unknown } | undefined;
     const executionHarness = inherited
       ? executionHarnessSchema.parse(inherited.harness)
       : requestedHarness;
