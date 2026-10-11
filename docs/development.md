@@ -104,8 +104,8 @@ rejected. Certificates are always verified; for a private CA set
 `NODE_EXTRA_CA_CERTS`. Redirects are never followed, so a credential cannot reach
 another origin. Connections live in `connections.json` under
 `$ENSEMBLE_CLI_CONFIG_DIR` (default `~/.config/ensemble`, directory `0700`, file
-`0600`). With several connections, pass `--connection` or set a default with
-`connection use`.
+`0600`). With several connections, pass `--connection`, set `ENSEMBLE_CONNECTION`, or set a
+default with `connection use`.
 
 Runtime children started by the service receive `ENSEMBLE_MANAGED_ASSIGNMENT=1` and
 no `ENSEMBLE_CONNECTION` or `ENSEMBLE_CLI_*` variables, and the CLI refuses to

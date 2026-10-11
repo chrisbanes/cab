@@ -18,6 +18,10 @@ import { promisify } from "node:util";
 import { startCliService } from "./fixtures/operator-cli.js";
 
 const run = promisify(execFile);
+// Configuration exported by an enclosing `npm run` must not leak into the nested installs.
+const npmEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !/^npm_/i.test(key)),
+);
 const root = join(import.meta.dirname, "../..");
 
 type Lock = {
@@ -29,7 +33,7 @@ async function installPacked(dir: string) {
   const packed = await run(
     "npm",
     ["pack", "--ignore-scripts", "--json", "--pack-destination", dir],
-    { cwd: root },
+    { cwd: root, env: npmEnv },
   );
   const [{ filename }] = JSON.parse(packed.stdout) as [{ filename: string }];
   const tarball = join(dir, filename);
@@ -85,7 +89,7 @@ async function installPacked(dir: string) {
       "--no-fund",
       "--ignore-scripts",
     ],
-    { cwd: project },
+    { cwd: project, env: npmEnv },
   );
   return project;
 }

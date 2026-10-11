@@ -405,6 +405,8 @@ async function login(
   ]);
   const current: CliConfig = await config.read();
   if (!tokenFile) await deps.keychain().set(name, token);
+  else if (current.connections[name]?.credential?.kind === "keychain")
+    await deps.keychain().delete(name);
   current.connections[name] = {
     url: origin,
     installationId: identity.service.installationId,

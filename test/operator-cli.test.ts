@@ -303,6 +303,19 @@ test("Keychain store failures save nothing and never fall back to plaintext", as
   r = await ok.run(["auth", "status"], { keychain: () => failing });
   assert.equal(r.code, 3);
   assert.match(r.err, /credential-store-unavailable/);
+  // Switching the connection to a token file removes its Keychain item.
+  r = await ok.run([
+    "auth",
+    "login",
+    "--connection",
+    "home",
+    "--url",
+    s.origin,
+    "--token-file",
+    ok.tokenFile(token),
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(memory.items.has("home"), false);
 
   // Without macOS and without --token-file there is no credential store.
   const linux = harness(t, { platform: "linux" });
