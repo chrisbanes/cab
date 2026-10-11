@@ -41,6 +41,8 @@ type Discovery =
   | { state: "loading" };
 type Branches = Read<typeof discoveryBranchesSchema> | { state: "loading" };
 type Projects = Read<typeof discoveryProjectsSchema> | { state: "loading" };
+/** Repository select value that switches a row to typed entry. */
+const typeOption = "\u0000type";
 type Verification =
   | { state: "checking" }
   | CheckoutVerification["data"]
@@ -90,8 +92,9 @@ export function ProjectSetup(p: SettingsProps) {
   // A row with nothing chosen follows the current discovery state.
   const mode: SetupRow["source"] =
     discovery.state === "unavailable" ? "typed" : "discovered";
+  // A row the operator switched to typed entry stays typed.
   const sourceOf = (r: SetupRow): SetupRow["source"] =>
-    r.repositoryId || r.text ? r.source : mode;
+    r.source === "typed" ? "typed" : r.repositoryId ? "discovered" : mode;
 
   // Branch lists per discovered repository; nothing is stored.
   const [branches, setBranches] = useState<Record<string, Branches>>({});
@@ -450,7 +453,9 @@ export function ProjectSetup(p: SettingsProps) {
                       error={repoError}
                       caption={
                         ready
-                          ? `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential${ready.truncated ? " (first pages)" : ""}`
+                          ? ready.truncated
+                            ? `Discovered from GitHub · the first ${ready.repositories.length} repositories visible to the credential. Choose "Type a repository" for one not listed.`
+                            : `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential`
                           : "Loading repositories from GitHub…"
                       }
                     >
@@ -460,6 +465,10 @@ export function ProjectSetup(p: SettingsProps) {
                           disabled={disabled || !ready}
                           value={row.repositoryId}
                           onChange={(e) => {
+                            if (e.target.value === typeOption) {
+                              update(i, { ...emptyRow("typed"), id: row.id });
+                              return;
+                            }
                             const r = ready?.repositories.find(
                               (x) => x.repositoryId === e.target.value,
                             );
@@ -487,6 +496,11 @@ export function ProjectSetup(p: SettingsProps) {
                           {!chosen && row.repositoryId && (
                             <option value={row.repositoryId}>
                               {repoOf(row)}
+                            </option>
+                          )}
+                          {ready?.truncated && (
+                            <option value={typeOption}>
+                              Type a repository not listed…
                             </option>
                           )}
                         </NativeSelect>
@@ -526,11 +540,16 @@ export function ProjectSetup(p: SettingsProps) {
                       caption={
                         source === "typed" || !branchList
                           ? "Typed · checked in the local checkout"
-                          : "Discovered refs · default branch preselected"
+                          : branchList.truncated
+                            ? "More branches than listed · type the ref; it is checked in the local checkout"
+                            : "Discovered refs · default branch preselected"
                       }
                     >
                       {(props) =>
-                        source === "discovered" && branchList ? (
+                        // Past the listing cap a ref is typed, starting from the default branch.
+                        source === "discovered" &&
+                        branchList &&
+                        !branchList.truncated ? (
                           <NativeSelect
                             {...props}
                             disabled={disabled}
@@ -783,8 +802,12 @@ function ProjectChoice({
           : data.linked.length === 1 && value === data.linked[0]?.projectNodeId
             ? `Found automatically: 1 GitHub Project linked to ${repo}. Linking adds an inactive discovery source; preview and readiness follow in project configuration.`
             : `${data.linked.length} GitHub Project${data.linked.length === 1 ? "" : "s"} linked to ${repo}${data.linked.length ? `: ${data.linked.map((x) => x.title).join(", ")}` : ""} · ${data.owned.length} more owned by ${data.ownerLogin}. Linking one adds an inactive discovery source; preview and readiness follow in project configuration.`;
+  const shown =
+    list?.truncated && discoveryReady
+      ? `${caption} Only the first 100 Projects are listed; link another in project configuration.`
+      : caption;
   return (
-    <SetupField label="GitHub Project" error={null} caption={caption}>
+    <SetupField label="GitHub Project" error={null} caption={shown}>
       {(props) => (
         <NativeSelect
           {...props}

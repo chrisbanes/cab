@@ -451,3 +451,37 @@ test("Setup resets a Project choice when its repository row changes", async (_t,
   await page.getByText("0 GitHub Projects linked to acme/docs").waitFor();
   assert.equal(await project.inputValue(), "");
 });
+
+test("Setup surfaces truncated discovery lists and allows typed entry", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { truncated: true });
+  await page
+    .getByText(
+      'Discovered from GitHub · the first 3 repositories visible to the credential. Choose "Type a repository" for one not listed.',
+    )
+    .waitFor();
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "acme/atlas" });
+  // Past the branch cap the ref is typed, starting from the default branch.
+  await page
+    .getByText(
+      "More branches than listed · type the ref; it is checked in the local checkout",
+    )
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("Ref", { exact: true }).inputValue(),
+    "main",
+  );
+  await page
+    .getByText("Only the first 100 Projects are listed", { exact: false })
+    .waitFor();
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "Type a repository not listed…" });
+  await page.getByLabel("Repository (owner/name)").fill("acme/hidden");
+  await page.getByText("Typed · not listed from GitHub").waitFor();
+  assert.equal(
+    await page.getByLabel("Repository (owner/name)").inputValue(),
+    "acme/hidden",
+  );
+});

@@ -216,6 +216,58 @@ test("failures are reason codes without the token", async () => {
     ),
     "forbidden",
   );
+  // Rate limits are told apart from refusals on both APIs.
+  const limited: [() => Response, "repositories" | "projects", string][] = [
+    [
+      () =>
+        json({
+          errors: [{ type: "RATE_LIMITED", message: "limit" }],
+          data: null,
+        }),
+      "projects",
+      "rate-limited",
+    ],
+    [
+      () =>
+        json(
+          { errors: [{ message: "limit" }], data: null },
+          { headers: { "x-ratelimit-remaining": "0" } },
+        ),
+      "projects",
+      "rate-limited",
+    ],
+    [
+      () => json({}, { status: 403, headers: { "retry-after": "60" } }),
+      "repositories",
+      "rate-limited",
+    ],
+    [
+      () =>
+        json(
+          { message: "You have exceeded a secondary rate limit." },
+          { status: 403 },
+        ),
+      "repositories",
+      "rate-limited",
+    ],
+    [
+      () => json({ message: "Resource not accessible" }, { status: 403 }),
+      "repositories",
+      "forbidden",
+    ],
+  ];
+  for (const [respond, read, expected] of limited) {
+    const f = fake(respond);
+    const reader = new GitHubDiscoveryReader(token, f.fetcher);
+    assert.equal(
+      await reason(
+        read === "projects"
+          ? reader.projects("acme", "atlas")
+          : reader.repositories(),
+      ),
+      expected,
+    );
+  }
   const redirect = fake(
     () =>
       new Response(null, {

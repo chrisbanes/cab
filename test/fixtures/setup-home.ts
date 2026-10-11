@@ -65,7 +65,7 @@ export async function createSetupHome() {
 
 /** Fake discovery: acme/atlas, acme/relay, acme/docs; one Project linked to atlas. */
 export function fakeDiscovery(
-  state: { failure?: Error; calls?: string[] } = {},
+  state: { failure?: Error; calls?: string[]; truncated?: boolean } = {},
 ): (credentialRef: string) => DiscoveryReader {
   const fail = (call: string) => {
     state.calls?.push(call);
@@ -85,12 +85,15 @@ export function fakeDiscovery(
           name: String(name),
           defaultBranch: "main",
         })),
-        truncated: false,
+        truncated: Boolean(state.truncated),
       };
     },
     async branches() {
       fail("branches");
-      return { branches: ["develop", "main"], truncated: false };
+      return {
+        branches: ["develop", "main"],
+        truncated: Boolean(state.truncated),
+      };
     },
     async projects(_owner, name) {
       fail("projects");
@@ -121,7 +124,7 @@ export function fakeDiscovery(
           { projectNodeId: "PVT_ops", title: "Ops", number: 3 },
           { projectNodeId: "PVT_docs", title: "Docs", number: 4 },
         ],
-        truncated: false,
+        truncated: Boolean(state.truncated),
       };
     },
   });

@@ -290,7 +290,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   smokes for setup, picker and the credential row (`operator-setup-browser`,
   `operator-setup-picker-browser`, `operator-discovery-credential-browser`). Live
   evidence is bounded to one read-only discovery probe against api.github.com and
-  one real home-folder listing, recorded as counts. Limits: typed repositories carry
+  one real home-folder listing, recorded as counts in
+  [project setup evidence](evidence/ui07-project-setup.md). Limits: typed repositories carry
   a provisional identity; the discovery token is ambient to the runtime environment;
   no project delete or archive exists, so creation is recovered by editing in
   project configuration.

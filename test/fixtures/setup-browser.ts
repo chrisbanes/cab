@@ -14,6 +14,8 @@ export async function setupJourney(
     engine?: "chromium" | "webkit";
     viewport?: { width: number; height: number };
     path?: string;
+    /** Every fake discovery list reports more than it returned. */
+    truncated?: boolean;
   } = {},
 ) {
   const home = await createSetupHome();
@@ -27,7 +29,14 @@ export async function setupJourney(
     "fixture.close",
     () => f.lifecycle.steps,
   );
-  const discoveryState: { failure?: Error; calls: string[] } = { calls: [] };
+  const discoveryState: {
+    failure?: Error;
+    calls: string[];
+    truncated?: boolean;
+  } = {
+    calls: [],
+    ...(options.truncated ? { truncated: true } : {}),
+  };
   const d = f.service.domain();
   const command = (body: Record<string, unknown>) =>
     d.execute({ actor: "operator", key: randomUUID(), ...body } as never);

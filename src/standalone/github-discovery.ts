@@ -92,6 +92,9 @@ const projectsQuery = `query ($owner: String!, $name: String!) {
   }
 }`;
 
+const exhausted = (response: Response) =>
+  response.headers.get("x-ratelimit-remaining") === "0";
+
 export class GitHubDiscoveryReader implements DiscoveryReader {
   constructor(
     private readonly token: string | undefined,
@@ -122,12 +125,18 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
       throw new DiscoveryFailure("unreadable");
     }
     if (response.ok) return response;
-    await response.body?.cancel().catch(() => {});
+    // Only a 403 body is read, to tell a secondary rate limit from a refusal.
+    const text =
+      response.status === 403
+        ? await response.text().catch(() => "")
+        : await response.body?.cancel().catch(() => {});
     if (response.status === 401) throw new DiscoveryFailure("unauthorized");
     if (
       response.status === 429 ||
       (response.status === 403 &&
-        response.headers.get("x-ratelimit-remaining") === "0")
+        (exhausted(response) ||
+          response.headers.has("retry-after") ||
+          /rate limit/i.test(String(text ?? ""))))
     )
       throw new DiscoveryFailure("rate-limited");
     if (response.status === 403 || response.status === 404)
@@ -198,8 +207,22 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
       response,
       z.object({ errors: z.array(z.unknown()).optional() }).passthrough(),
     );
-    // A token without Projects access answers with GraphQL errors: degrade only this read.
-    if (raw.errors?.length) throw new DiscoveryFailure("forbidden");
+    if (raw.errors?.length) {
+      // GraphQL reports an exhausted limit as HTTP 200 with errors.
+      if (
+        exhausted(response) ||
+        raw.errors.some(
+          (e) =>
+            typeof e === "object" &&
+            e !== null &&
+            "type" in e &&
+            e.type === "RATE_LIMITED",
+        )
+      )
+        throw new DiscoveryFailure("rate-limited");
+      // A token without Projects access answers with GraphQL errors: degrade only this read.
+      throw new DiscoveryFailure("forbidden");
+    }
     const parsed = projectsResponse.safeParse(raw);
     if (!parsed.success) throw new DiscoveryFailure("unreadable");
     const { repository, repositoryOwner } = parsed.data.data;
