@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
-import { seedOwnQuestion } from "./fixtures/questions.js";
+import { seedOwnApproval, seedOwnQuestion } from "./fixtures/questions.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import { mixedAnswers, mixedForm } from "./fixtures/question-data.js";
 import {
@@ -567,6 +567,72 @@ test("own form prototype-shaped IDs survive curated command validation, SQLite r
         .messages.filter((m) => m.eventType === "question-answer").length,
       1,
     );
+  } finally {
+    await f.close();
+  }
+});
+
+test("Inbox limit, kind and project filter before paging and bind their cursors", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const a = await seedOwnQuestion(f),
+      b = await seedOwnApproval(f),
+      c = await seedOwnQuestion(f, mixedForm, "Third task", "Third project"),
+      api = new OperatorApi(f.service, [f.directory]);
+    const read = (q: Record<string, string>) =>
+      api.readInbox(new URLSearchParams(q));
+    const all = (await api.readInbox()).data.items.map((i) => i.id);
+    assert.equal(all.length, 3);
+    // limit=1 walks every item once.
+    const walked: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await read({ limit: "1", ...(cursor ? { cursor } : {}) });
+      assert.ok(page.data.items.length <= 1);
+      walked.push(...page.data.items.map((i) => i.id));
+      cursor = page.data.nextCursor;
+      assert.equal(page.data.complete, cursor === null);
+    } while (cursor);
+    assert.deepEqual(walked, all);
+    assert.deepEqual(
+      (await read({ kind: "approval" })).data.items.map((i) => i.id),
+      [b.interactionId],
+    );
+    assert.deepEqual(
+      (await read({ project: c.projectId })).data.items.map((i) => i.id),
+      [c.interactionId],
+    );
+    assert.deepEqual(
+      (await read({ kind: "question", project: a.projectId })).data.items.map(
+        (i) => i.id,
+      ),
+      [a.interactionId],
+    );
+    assert.deepEqual(
+      (await read({ kind: "intervention", project: a.projectId })).data.items,
+      [],
+    );
+    // A cursor issued under other filters does not continue this view.
+    const first = await read({ limit: "1" });
+    await assert.rejects(
+      read({ limit: "1", kind: "question", cursor: first.data.nextCursor! }),
+      /conflict/,
+    );
+    for (const bad of [
+      "limit=0",
+      "limit=101",
+      "limit=x",
+      "kind=other",
+      "project=nope",
+      "limit=1&limit=2",
+      "kind=question&kind=approval",
+      "other=1",
+    ])
+      await assert.rejects(
+        api.readInbox(new URLSearchParams(bad)),
+        /invalid-input/,
+        bad,
+      );
   } finally {
     await f.close();
   }

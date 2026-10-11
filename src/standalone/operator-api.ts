@@ -2292,11 +2292,30 @@ export class OperatorApi {
     });
   }
   async readInbox(params = new URLSearchParams()) {
+    const allowed = ["cursor", "limit", "kind", "project"];
     if (
-      [...params.keys()].some((k) => k !== "cursor") ||
-      params.getAll("cursor").length > 1
+      [...params.keys()].some((k) => !allowed.includes(k)) ||
+      allowed.some((k) => params.getAll(k).length > 1)
     )
       throw new OperatorApiError(400, "invalid-input");
+    const filter = z
+      .object({
+        limit: z
+          .string()
+          .regex(/^[1-9][0-9]{0,2}$/)
+          .transform(Number)
+          .pipe(z.number().max(100))
+          .optional(),
+        kind: z.enum(["question", "approval", "intervention"]).optional(),
+        project: uuid.optional(),
+      })
+      .safeParse({
+        limit: params.get("limit") ?? undefined,
+        kind: params.get("kind") ?? undefined,
+        project: params.get("project") ?? undefined,
+      });
+    if (!filter.success) throw new OperatorApiError(400, "invalid-input");
+    const { limit = 100, kind, project } = filter.data;
     const visibility = this.visibilityToken(),
       items: InboxItem[] = [];
     const catalog = this.domain().taskCatalog();
@@ -2402,15 +2421,28 @@ export class OperatorApi {
       )
         throw new OperatorApiError(503, "unavailable");
     }
-    items.sort(
+    const filtered = items.filter(
+      (item) =>
+        (!kind || item.kind === kind) &&
+        (!project || item.projectId === project),
+    );
+    filtered.sort(
       (a, b) =>
         a.urgency - b.urgency ||
         (a.createdAt ?? Number.MAX_SAFE_INTEGER) -
           (b.createdAt ?? Number.MAX_SAFE_INTEGER) ||
         a.id.localeCompare(b.id),
     );
+    // Filters join the fingerprint, so a cursor never continues another view.
+    const filters = { limit, kind, project };
     const fingerprint = createHash("sha256")
-      .update(JSON.stringify(items))
+      .update(
+        JSON.stringify(
+          [...params.keys()].every((k) => k === "cursor")
+            ? filtered
+            : [filters, filtered],
+        ),
+      )
       .digest("hex")
       .slice(0, 24);
     const cursor = params.get("cursor");
@@ -2420,14 +2452,20 @@ export class OperatorApi {
       if (!match || match[1] !== fingerprint)
         throw new OperatorApiError(409, "conflict");
       offset = Number(match[2]);
-      if (!Number.isSafeInteger(offset) || offset < 0 || offset > items.length)
+      if (
+        !Number.isSafeInteger(offset) ||
+        offset < 0 ||
+        offset > filtered.length
+      )
         throw new OperatorApiError(400, "invalid-input");
     }
     const next =
-      offset + 100 < items.length ? `${fingerprint}:${offset + 100}` : null;
+      offset + limit < filtered.length
+        ? `${fingerprint}:${offset + limit}`
+        : null;
     return inboxReadSchema.parse({
       data: {
-        items: items.slice(offset, offset + 100),
+        items: filtered.slice(offset, offset + limit),
         nextCursor: next,
         complete: next === null && !unavailable,
         unavailable,
