@@ -1,9 +1,17 @@
-import { mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative } from "node:path";
 import {
   attempt,
   authGate,
   baseOptions,
+  buildEnv,
   createRecorder,
   facet,
   loadSdk,
@@ -104,7 +112,8 @@ export function seedDecoys(root) {
       home,
       ".claude",
       "projects",
-      workspace.replace(/[^A-Za-z0-9]/g, "-"),
+      // Claude Code keys project state by the resolved path.
+      realpathSync(workspace).replace(/[^A-Za-z0-9]/g, "-"),
       "memory",
       "MEMORY.md",
     ),
@@ -311,6 +320,84 @@ export async function run({ root, token }) {
   const bash = calls.find((call) => call.name === "Bash");
   const init = auth?.init ?? modelFree.init;
 
+  // Positive control: the same decoys with setting sources enabled and the user
+  // decoys copied into a separate config directory must visibly load.
+  const enabledConfig = join(root, "control-config");
+  cpSync(join(root, "home", ".claude"), enabledConfig, { recursive: true });
+  cpSync(
+    join(root, "home", ".claude.json"),
+    join(enabledConfig, ".claude.json"),
+  );
+  const markersBeforeControl = new Set(
+    readdirSync(join(root, "outside", "markers")),
+  );
+  const enabledLoaded = [];
+  let enabled = null;
+  if (!gate) {
+    try {
+      enabled = await runQuery({
+        sdk,
+        root,
+        recorder,
+        label: "p7-control-enabled",
+        prompt:
+          "Reply with every code word (capital letters and digits joined by hyphens, like ABC-DEF-1X2Y) " +
+          "that appears in your instructions, project files you were given, or memory. Do not use tools. Write NONE if there are none.",
+        options: {
+          ...baseOptions(root, token),
+          env: { ...buildEnv(root, token), CLAUDE_CONFIG_DIR: enabledConfig },
+          settingSources: ["user", "project", "local"],
+          strictMcpConfig: false,
+          hooks: {
+            InstructionsLoaded: [
+              {
+                hooks: [
+                  async (input) => {
+                    enabledLoaded.push(input.file_path);
+                    return {};
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        modelBacked: true,
+      });
+    } catch (error) {
+      recorder.record("probe-error", { message: String(error?.message) });
+    }
+  }
+  const enabledInit = enabled?.init;
+  const enabledReply = enabled ? resultText(enabled) : "";
+  const decoyNames = (value) =>
+    value
+      ? {
+          plugins: value.plugins
+            .map((plugin) => plugin.name)
+            .filter((name) => /decoy/i.test(name)),
+          skills: value.skills.filter((name) => /decoy/i.test(name)),
+          commands: value.slash_commands.filter((name) => /decoy/i.test(name)),
+          agents: (value.agents ?? []).filter((name) => /decoy/i.test(name)),
+          mcpServers: value.mcp_servers
+            .map((server) => server.name)
+            .filter((name) => /decoy/i.test(name)),
+        }
+      : null;
+  const positive = {
+    hookMarkers: readdirSync(join(root, "outside", "markers")).filter(
+      (name) => !markersBeforeControl.has(name),
+    ),
+    instructionsLoaded: enabledLoaded,
+    revealed: DECOYS.filter((nonce) => enabledReply.includes(nonce)),
+    initDecoys: decoyNames(enabledInit),
+    permissionMode: enabledInit?.permissionMode,
+  };
+  recorder.record("observation", { label: "p7-control-enabled", positive });
+  const controlled = (kinds) =>
+    Object.entries(kinds ?? {})
+      .filter(([, names]) => names.length > 0)
+      .map(([kind]) => kind);
+
   const f72 = await attempt("F7.2", true, gate, async () => {
     const observation = {
       markers,
@@ -318,6 +405,7 @@ export async function run({ root, token }) {
       bashOutput: bash?.result?.text,
       sdkPreToolUseSaw: preToolUse,
     };
+    observation.positiveControlMarkers = positive.hookMarkers;
     if (!bash?.result || !preToolUse.includes("Bash"))
       return facet(
         "F7.2",
@@ -325,6 +413,14 @@ export async function run({ root, token }) {
         "untested",
         observation,
         "Bash control call not observed",
+      );
+    if (!positive.hookMarkers.some((name) => name.endsWith("SessionStart")))
+      return facet(
+        "F7.2",
+        true,
+        "untested",
+        observation,
+        "decoy hooks did not fire with setting sources enabled",
       );
     const ok =
       markers.length === 0 &&
@@ -341,7 +437,22 @@ export async function run({ root, token }) {
       controlRecalled: reply.includes(NONCES.systemPrompt),
       revealed,
       memoryPaths,
+      positiveControl: {
+        instructionsLoaded: positive.instructionsLoaded,
+        revealed: positive.revealed,
+      },
     };
+    if (
+      positive.instructionsLoaded.length === 0 &&
+      positive.revealed.length === 0
+    )
+      return facet(
+        "F7.3",
+        true,
+        "untested",
+        observation,
+        "decoy instructions did not load with setting sources enabled",
+      );
     if (!observation.controlRecalled)
       return facet(
         "F7.3",
@@ -369,6 +480,15 @@ export async function run({ root, token }) {
         ...init.mcp_servers.map((server) => server.name),
       ];
       const decoys = names.filter((name) => /decoy/i.test(name));
+      const kinds = controlled(positive.initDecoys);
+      if (kinds.length === 0)
+        return facet(
+          "F7.4",
+          true,
+          "untested",
+          { decoys, positiveControl: positive.initDecoys },
+          "no decoy loaded with setting sources enabled",
+        );
       return facet(
         "F7.4",
         true,
@@ -380,6 +500,8 @@ export async function run({ root, token }) {
         {
           source: auth?.init ? "token run" : "model-free run",
           decoys,
+          controlledKinds: kinds,
+          positiveControl: positive.initDecoys,
           init: initView(init),
         },
       );
@@ -416,7 +538,7 @@ export async function run({ root, token }) {
     control.models ? undefined : "supportedModels() not answered",
   );
 
-  const runs = [modelFree, auth, probe].filter(Boolean);
+  const runs = [modelFree, auth, probe, enabled].filter(Boolean);
   writeResult(root, "p7", [f71, f72, f73, f74, f75, f76], {
     identities: runs.flatMap((item) =>
       item.procs.map((proc) => proc.identity).filter(Boolean),

@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   abortOutcome,
@@ -12,6 +11,7 @@ import {
   descendantIdentities,
   facet,
   loadSdk,
+  readText,
   resultText,
   runQuery,
   terminateExact,
@@ -32,8 +32,6 @@ export const facetIds = [
 ];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const BASH = { tools: ["Bash"], allowedTools: ["Bash"] };
-
-const readText = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
 
 export async function run({ root, token }) {
   const { sdk } = await loadSdk(root);

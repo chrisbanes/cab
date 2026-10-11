@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -14,6 +14,7 @@ import {
   facet,
   loadSdk,
   readJson,
+  readText,
   resultText,
   runQuery,
   terminateExact,
@@ -25,7 +26,6 @@ import {
 export const facetIds = ["F3.1", "F3.2", "F3.3", "F3.4"];
 const PARENT = join(dirname(fileURLToPath(import.meta.url)), "p3-parent.mjs");
 const OBSERVE_MS = 30_000;
-const readText = (path) => (existsSync(path) ? readFileSync(path, "utf8") : "");
 
 /** Classifies the agent's account of the cut-off command by fixed substrings. */
 export function classifyReply(text) {
@@ -55,22 +55,30 @@ async function crash(root, recorder, mode, counter, nonce) {
   const child = spawn(process.execPath, [PARENT, root, mode, counter, nonce], {
     stdio: ["ignore", "ignore", "inherit"],
   });
-  const parentIdentity = await captureProcessIdentity(child.pid);
   const exited = new Promise((done) => child.once("exit", done));
-  const triggered = await waitFor(() => {
-    if (!existsSync(state)) return null;
-    const value = readJson(state);
-    if (!value.cliIdentity) return null;
-    if (mode === "tool")
-      return readText(counter).includes(`started:${nonce}`) && value;
-    return value.streaming && value;
-  }, 90_000);
+  const parentIdentity = await captureProcessIdentity(child.pid);
+  // ponytail: an unidentified parent is never signalled; its own 120 s query deadline bounds it.
+  if (!parentIdentity) throw new Error("P3 parent identity not captured");
+  let triggered = null;
+  try {
+    triggered = await waitFor(() => {
+      if (!existsSync(state)) return null;
+      const value = readJson(state);
+      if (!value.cliIdentity) return null;
+      if (mode === "tool")
+        return readText(counter).includes(`started:${nonce}`) && value;
+      return value.streaming && value;
+    }, 90_000);
+  } finally {
+    // Never leave the parent running when the trigger wait fails or times out.
+    if (!triggered)
+      await terminateExact(
+        parentIdentity,
+        recorder,
+        `p3-${mode}:parent-untriggered`,
+      );
+  }
   if (!triggered) {
-    await terminateExact(
-      parentIdentity,
-      recorder,
-      `p3-${mode}:parent-untriggered`,
-    );
     await exited;
     return { triggered: false, parentIdentity };
   }

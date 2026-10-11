@@ -31,8 +31,13 @@ export const delay = (ms) => new Promise((done) => setTimeout(done, ms));
 /** Parses `--live <step> [--root <dir>]` or `summary --root <dir>`; throws otherwise. */
 export function requireLive(args) {
   const [first, second, flag, root, ...rest] = args;
-  if (first === "summary" && second === "--root" && flag && root === undefined)
-    return { step: "summary", root: flag };
+  if (
+    (first === "summary" || first === "export") &&
+    second === "--root" &&
+    flag &&
+    root === undefined
+  )
+    return { step: first, root: flag };
   const ok =
     first === "--live" &&
     STEPS.includes(second) &&
@@ -42,7 +47,7 @@ export function requireLive(args) {
       : flag === "--root" && typeof root === "string" && root.length > 0);
   if (!ok)
     throw new Error(
-      "Refusing Claude SDK probes: use --live init, --live <p7|p8|p1|p3|p4|p5|p6|cleanup> --root <dir>, or summary --root <dir>",
+      "Refusing Claude SDK probes: use --live init, --live <p7|p8|p1|p3|p4|p5|p6|cleanup> --root <dir>, or summary|export --root <dir>",
     );
   return { step: second, root };
 }
@@ -533,7 +538,6 @@ export function transcript(root, sessionId) {
       if (block.type === "tool_result")
         results.set(block.tool_use_id, block.is_error === true);
   return {
-    file,
     records: records.map((record) => {
       const content = record.message?.content;
       return {
@@ -666,12 +670,15 @@ export function summarize(results, declared) {
 }
 
 export function writeResult(root, step, facets, extra = {}) {
-  const context = redactionContext(root, null);
+  const context = redactionContext(root, loadToken());
   writeFileSync(
     join(root, "results", `${step}.json`),
     `${JSON.stringify(redact({ step, facets, ...extra }, context), null, 2)}\n`,
   );
 }
+
+export const readText = (path) =>
+  existsSync(path) ? readFileSync(path, "utf8") : "";
 
 export function readJson(path) {
   return JSON.parse(readFileSync(path, "utf8"));

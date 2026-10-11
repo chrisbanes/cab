@@ -14,12 +14,12 @@ failed, otherwise `untested` if any facet is untested, otherwise `passed`.
 | # | Probe | Disposition | ADR-1008 guarantee | Result |
 | --- | --- | --- | --- | --- |
 | 1 | Session start, ID capture and resume | passed | Each turn is one `query()` resuming the assignment's session; the SDK session ID is the conversation identity | The init and result carry the same UUID; a new process resumes it and recalls the earlier turn; a host-minted `sessionId` works |
-| 2 | Abort mid-turn and mid-tool | passed | Interrupt uses the query's abort path | Abort settles in about 2 s; the CLI exits by itself; the tool is killed; the transcript gets an error `tool_result`; the session resumes |
+| 2 | Abort mid-turn and mid-tool | passed | Interrupt uses the query's abort path | Abort settles in about 2 s; the CLI exits on the SDK's forwarded spawn signal without a harness signal; the tool is killed; the transcript gets an error `tool_result`; the session resumes |
 | 3 | Parent kill mid-turn and mid-tool, then resume | passed | A tool call cut off by a crash is not re-run; explicit recovery may resume the session | Resume does not re-run the cut-off tool, and the agent reports it as killed. The orphaned CLI keeps running after the parent dies |
 | 4 | In-process SDK MCP server | passed | Coordination tools are served through an in-process SDK MCP server | Tools appear as `mcp__ensemble__<tool>`; invalid arguments never reach the handler; error and throw shapes reach the model as `is_error` results |
 | 5 | `dontAsk`, allowlist and `PreToolUse` policy | untested | `dontAsk`, an explicit allowlist, a hook that sees and can deny every call, no `AskUserQuestion`, inert mode and config changes | Hook IDs equal assistant tool-use IDs; denials hold; `tools` is the allowlist; `AskUserQuestion` is absent. Inert config writes untested (F5.5) |
 | 6 | Sandbox | failed | Workspace and explicit roots writable only, empty network allowlist, no unsandboxed retry, failure if unavailable | Network denied; outside writes denied except the sandbox's own `$TMPDIR` (F6.1 failed); an unusable `sandbox-exec` fails each command rather than the query (F6.4 failed); unsandboxed retry untested |
-| 7 | Isolation and subscription token | passed | No setting sources, strict MCP config, dedicated config directory; operator `setup-token` authentication | The OAuth token alone completes turns (`apiKeySource: none`); no decoy hook, instruction, memory, plugin, skill, command, agent or MCP server loads; transcripts land in the dedicated directory |
+| 7 | Isolation and subscription token | passed | No setting sources, strict MCP config, dedicated config directory; operator `setup-token` authentication | The OAuth token alone completes turns (`apiKeySource: none`). No decoy hook, instruction, memory, plugin, skill, command, agent or MCP server loads, while the same decoys load when setting sources are enabled (positive control). Transcripts land in the dedicated directory |
 | 8 | Subprocess PID and stream bounds | passed | Each turn has its own `claude` subprocess and process identity | `spawnClaudeCodeProcess` receives the CLI command; its PID and birth identity are captured, and exit is verified after every query |
 
 ## Returned to Chris
@@ -54,7 +54,7 @@ if the sandbox is unavailable." Neither ADR-1008 nor code was changed.
 
 | Input | Value |
 | --- | --- |
-| Run window | 2026-10-11 16:07Z – 16:27Z |
+| Run window | 2026-10-11 16:07Z – 16:27Z (first root, all steps); 16:41Z – 16:42Z (second root, `p7` repeated with its positive control) |
 | Checkout | `111f46d744db3d8f15b562a5014ae12945d2c4c2` plus the uncommitted `test/claude-c0/**` scripts in this change (see Reproduction) |
 | macOS | 27.0.1 |
 | Node / npm | v24.21.0 / 11.19.0 (probe processes) |
@@ -64,7 +64,7 @@ if the sandbox is unavailable." Neither ADR-1008 nor code was changed.
 | Model | `haiku` alias, resolved to `claude-haiku-5-5`; `effort: "low"` |
 | Credential | `CLAUDE_CODE_OAUTH_TOKEN` present (minted by Chris, read from `~/.env` by that name only); no API key variable passed |
 | Nested Seatbelt | `sandbox-exec -p '(version 1)(allow default)' /usr/bin/true` exits 0 from the harness context |
-| Model-backed `query()` calls | 56 of the 60 cap |
+| Model-backed `query()` calls | 59 of the 60 cap (56 in the first root, 3 in the second) |
 
 Every query ran with an allowlist environment (`PATH`, `TMPDIR=<disposable-root>/tmp`,
 `LANG`, `HOME=<disposable-root>/home`, `CLAUDE_CONFIG_DIR=<disposable-root>/config`
@@ -94,30 +94,47 @@ node test/claude-c0/run.mjs --live p4 --root "$C0_ROOT"
 node test/claude-c0/run.mjs --live p5 --root "$C0_ROOT"
 node test/claude-c0/run.mjs --live p6 --root "$C0_ROOT"
 node test/claude-c0/run.mjs summary --root "$C0_ROOT"
+node test/claude-c0/run.mjs export --root "$C0_ROOT"   # copies redacted traces here
 node test/claude-c0/run.mjs --live cleanup --root "$C0_ROOT"
 ```
 
-Each live step exited 0. The driver refuses any other argument shape (exit 2). The
-committed scripts differ from the executed ones only by Biome formatting, one
-lint-suppression comment and the redaction of Claude Code's dash-separated
-project-directory names, which was applied again when the traces were copied
-here. Harness helpers added for later probes did not change earlier probes'
-behaviour.
+Each live step exited 0. The driver refuses any other argument shape (exit 2).
+Probes 1 to 6 and 8 come from the first root. After independent review, probe 7
+was repeated in a second root with an added positive control, using the
+committed scripts. The first-root steps ran scripts that differ from the
+committed ones as follows; none of these changes alters a probe's prompts,
+options or pass conditions:
+
+- Biome formatting and one lint-suppression comment.
+- Redaction of Claude Code's dash-separated project-directory names. This was
+  applied again when the traces were copied here.
+- Review hardening that affects only failure paths:
+  - The P3 state file is written atomically, the parent is terminated if the
+    trigger wait fails, and an uncaptured parent identity fails fast.
+  - P6 uses a nonce file name in the sandbox `TMPDIR` and deletes it only inside
+    `/tmp/claude-<uid>`. Before attempt 2, the implementer deleted attempt 1's
+    file at its exact path, so attempt 2's existence check was not stale.
+  - Results are redacted with the token as well.
+  - `init` refuses a missing `npm view` version.
+- The `export` step. The first-root traces were copied with equivalent
+  one-off code before it was committed.
 
 ## Attempts and corrections
 
-Each facet had at most 3 attempts. Each correction below fixed the harness or a
-fixture; none changed a pass condition to accommodate an observation.
+A step re-runs all of its facets, and each facet had at most 3 attempts. The
+final disposition is the last attempt's. Each correction below fixed the harness,
+a fixture or a check that was weaker than the plan required. None loosened a
+pass condition to accommodate an observation.
 
-| Step | Attempts | Reason for each repeat |
+| Step | Attempts | Earlier attempts' dispositions and the reason for each repeat |
 | --- | --- | --- |
-| p7 | 2 | F7.4's first check required zero plugins; the CLI always lists three `path: "builtin"` plugins. The check now requires built-ins only, as planned |
-| p8 | 2 | Repeated to record the full large tool-result length (the first run recorded a 400-character excerpt) and per-run environment keys |
+| p7 | 3 | 1: F7.4 failed; others passed. The check required zero plugins, but the CLI always lists three `path: "builtin"` plugins; it now requires built-ins only, as planned. 2: all passed. 3 (second root): adds the positive control that review found missing, and seeds the memory decoy under the resolved workspace path that Claude Code uses (the earlier seed used the unresolved path) |
+| p8 | 2 | 1: all passed. Repeated to record the full large tool-result length (only a 400-character excerpt was recorded) and per-run environment keys |
 | p1 | 1 | — |
-| p3 | 3 | Attempt 1: the orphaned CLI finished the 20 s tool before the 30 s window ended, so nothing was cut off. The tool now sleeps 60 s. Attempt 2: a stale state file from attempt 1 made F3.2 kill the new parent before it started. The state file is now removed before each spawn |
-| p4 | 2 | A shadowed variable made F4.2 a harness error |
-| p5 | 3 | F5.5 only; see probe 5 |
-| p6 | 2 | F6.1 checked `<disposable-root>/tmp`, but the sandbox reports a different `TMPDIR`. F6.3's model retried without the flag. The retry prompt was made explicit, and a facet now needs `dangerouslyDisableSandbox: true` to have been sent |
+| p3 | 3 | 1: all passed, but F3.1's premise was not met: the orphaned CLI finished the 20 s tool before the 30 s window ended. The tool now sleeps 60 s, and F3.1 is `untested` when nothing is cut off. 2: all passed, but F3.2 was invalid: a stale state file from attempt 1 made the driver kill the new parent immediately and resume the old session. The state file is now removed before each spawn |
+| p4 | 2 | 1: F4.2 untested (a shadowed variable caused a harness error); F4.1, F4.3 and F4.4 passed |
+| p5 | 3 | 1, 2 and 3: F5.1–F5.4 passed each time; F5.5 untested each time (see probe 5) |
+| p6 | 2 | 1: F6.0 and F6.2 passed, and F6.4 failed. F6.1 passed but checked `<disposable-root>/tmp`, while the sandbox reports a different `TMPDIR` where the write had succeeded. F6.3 passed but the model never sent the flag. The F6.1 check now uses the reported directory, F6.3 now needs `dangerouslyDisableSandbox: true` to have been sent, and the retry prompt is explicit |
 
 ## Probe 1: session start, ID capture and resume
 
@@ -138,9 +155,13 @@ Options: base options with `includePartialMessages: true` (mid-turn) or
 
 | Facet | Disposition | Observation |
 | --- | --- | --- |
-| F2.1 [ADR] Abort mid-turn | passed | Aborted at the first partial message. The generator threw `Error: Claude Code process aborted by user` 2.0 s after `abort()`; no `result` message. The CLI exited with code 143 without a harness signal, and exit was verified. The transcript holds the user prompt and attachments and no assistant record |
-| F2.2 [ADR] Abort mid-tool | passed | Aborted once the tool wrote `started`. Same throw after 2.0 s; CLI exit 143, verified. The `/bin/zsh` and `sleep` tool processes were gone when the query settled, and `finished` was not written within 15 s. The transcript holds `tool_use:Bash` followed by a synthesized error `tool_result` |
+| F2.1 [ADR] Abort mid-turn | passed | Aborted at the first partial message. The generator threw `Error: Claude Code process aborted by user` 2.0 s after `abort()`; no `result` message. The CLI exited with code 143 and no harness signal; exit was verified. The 143 comes from the SDK's forwarded spawn `signal`: it fires after the SDK's stdin-EOF grace period (about 2 s), and the wrapper passes it to Node `spawn`, which sends SIGTERM (`spawn-error "The operation was aborted"` in the trace). The transcript holds the user prompt and attachments and no assistant record |
+| F2.2 [ADR] Abort mid-tool | passed | Aborted once the tool wrote `started`. Same throw after 2.0 s and the same exit path (143, verified, no harness signal). The `/bin/zsh` and `sleep` tool processes were gone when the query settled, and `finished` was not written within 15 s. The transcript holds `tool_use:Bash` followed by a synthesized error `tool_result` |
 | F2.3 [I] Resume after abort | passed | The aborted session resumed with the same ID and completed (`success`) |
+
+C3 consequence: a custom `spawnClaudeCodeProcess` must wire `SpawnOptions.signal`
+to terminate the child. This run did not observe whether the CLI exits on stdin EOF
+alone without that signal.
 
 ## Probe 3: parent crash mid-turn and mid-tool
 
@@ -213,9 +234,9 @@ The probe 5 policy plus
 | Facet | Disposition | Observation |
 | --- | --- | --- |
 | F7.1 [ADR] Subscription token authenticates | passed | With only `CLAUDE_CODE_OAUTH_TOKEN` and an empty dedicated `CLAUDE_CONFIG_DIR`, "Reply with exactly: OK" returned `success`, `is_error: false`, `apiKeySource: "none"`, model `claude-haiku-5-5`. Without the token, `init` is still emitted. The turn then fails with `subtype: "success"`, `is_error: true`, `terminal_reason: "api_error"`, `Not logged in · Please run /login`, `query()` throws, and the CLI exits 1 |
-| F7.2 [ADR] No user or project settings or hooks | passed | No decoy marker file in the model-free or live runs (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, MCP). `init.permissionMode` is `dontAsk` despite the decoy `acceptEdits`. `echo env=${DECOY_SETTINGS_ENV:-unset}` printed `env=unset`. The SDK's own `PreToolUse` hook saw the Bash call (control) |
-| F7.3 [ADR] No CLAUDE.md, AGENTS.md or auto memory | passed | The `InstructionsLoaded` hook fired for no file. The model recalled the system-prompt control nonce and none of the five decoy nonces. No memory path appeared in the dedicated directory |
-| F7.4 [ADR] No plugins, skills, commands, agents or connectors | passed | No `decoy` name in `plugins`, `skills`, `slash_commands`, `agents` or `mcp_servers`. `plugins` lists only `cc-plugin-agents-md`, `cc-plugin-telemetry` and `cc-plugin-plugin-authoring`, all `path: "builtin"`. `mcp_servers` is empty. `skills` lists the CLI's bundled skills (`deep-research`, `design`, `dataviz`, `verify`, `code-review` and others), and `agents` lists `claude`, `Explore`, `general-purpose`, `Plan` and `statusline-setup` |
+| F7.2 [ADR] No user or project settings or hooks | passed | No decoy marker file in the model-free or live runs (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, MCP). The positive control (same decoys, `settingSources: ["user", "project", "local"]`, user decoys copied into a separate config directory, `strictMcpConfig: false`) wrote `user-` and `project-` `SessionStart`, `UserPromptSubmit` and `mcp` markers. `init.permissionMode` is `dontAsk` despite the decoy `acceptEdits`. `echo env=${DECOY_SETTINGS_ENV:-unset}` printed `env=unset`. The SDK's own `PreToolUse` hook saw the Bash call (control) |
+| F7.3 [ADR] No CLAUDE.md, AGENTS.md or auto memory | passed | The model recalled the system-prompt control nonce and none of the five decoy nonces. No memory path appeared in the dedicated directory. With sources enabled, the control revealed the user, project and local `CLAUDE.md` and memory nonces, but not the `AGENTS.md` nonce. The `InstructionsLoaded` callback fired in neither run, so it is not a usable observer here |
+| F7.4 [ADR] No plugins, skills, commands, agents or connectors | passed | The positive control listed `decoy-plugin`, the user and project decoy skills, commands and agents, a plugin command, and the `decoy-user` and `decoy-project` MCP servers. Isolated runs: no `decoy` name in `plugins`, `skills`, `slash_commands`, `agents` or `mcp_servers`. `plugins` lists only `cc-plugin-agents-md`, `cc-plugin-telemetry` and `cc-plugin-plugin-authoring`, all `path: "builtin"`. `mcp_servers` is empty. `skills` lists the CLI's bundled skills (`deep-research`, `design`, `dataviz`, `verify`, `code-review` and others), and `agents` lists `claude`, `Explore`, `general-purpose`, `Plan` and `statusline-setup` |
 | F7.5 [ADR] Dedicated config directory is used | passed | Session transcripts land in `<disposable-root>/config/projects/<dash-separated workspace path>/<session>.jsonl`. The CLI also writes `.claude.json`, `backups/`, `plugins/installed_plugins.json`, `policy-limits.json` and `remote-settings.json` there. Nothing was added under the decoy home |
 | F7.6 [I] Models and effort | passed | `supportedModels()` answered at `init` without a model turn: `default` and `sonnet` (`claude-sonnet-5-5`), `fable` (`claude-fable-5-1`), `opus` (`claude-opus-5-5`) and `haiku` (`claude-haiku-5-5`), each `supportsEffort: true` with `low`, `medium`, `high`, `xhigh` and `max` |
 
@@ -236,6 +257,13 @@ The probe 5 policy plus
 - F6.3: whether the CLI honours a model-supplied `dangerouslyDisableSandbox: true`
   with `allowUnsandboxedCommands: false`.
 - F6.4 with a missing `sandbox-exec` binary or an unsupported platform.
+- `AGENTS.md`: it did not load even with sources enabled, so its absence under
+  `settingSources: []` is not a controlled observation.
+- User settings placed inside the dedicated `CLAUDE_CONFIG_DIR` under
+  `settingSources: []`. The main runs kept that directory empty, as ADR-1008
+  intends, and the user-scope decoys in the decoy `HOME` show only that `HOME` is
+  ignored once `CLAUDE_CONFIG_DIR` is set.
+- Whether the CLI exits on stdin EOF when a custom spawner ignores `signal`.
 - Behaviour under the operator's real `HOME`, real `~/.claude` and keychain login.
   Probes used a decoy home only.
 - A crash that kills the CLI together with its parent (P3 killed only the parent).
@@ -246,7 +274,7 @@ The probe 5 policy plus
 - Query options used: `cwd`, `env` (replaces the environment), `settingSources: []`,
   `strictMcpConfig: true`, `permissionMode: "dontAsk"`, `tools`, `allowedTools`,
   `disallowedTools`, `mcpServers`, `hooks.PreToolUse` and
-  `hooks.InstructionsLoaded`, `canUseTool`, `sandbox`, `resume`, `sessionId`,
+  `hooks.InstructionsLoaded` (which never fired), `canUseTool`, `sandbox`, `resume`, `sessionId`,
   `abortController`, `includePartialMessages`, `systemPrompt`, `model`, `effort`,
   `spawnClaudeCodeProcess` and `stderr`.
 - `SpawnOptions`: `{command, args, cwd, env, signal}`. `signal` is the SDK's
@@ -291,8 +319,8 @@ home appear only as placeholders.
 | `issue-822-claude-sdk-probes-p4-2026-10-11.jsonl` | `4f0ed88204e7a56e978b219ba0edeead24ac4c694a27e9163267da12f3e22437` |
 | `issue-822-claude-sdk-probes-p5-2026-10-11.jsonl` | `cccb310b60bd0339927af91ccc3174c15487c59ff3c37031d2a3a9823f067197` |
 | `issue-822-claude-sdk-probes-p6-2026-10-11.jsonl` | `3d59dc8e3f6567bfceacdbefe2f4ffcae608ede9f5e9f9d7277f46d23cc431c9` |
-| `issue-822-claude-sdk-probes-p7-2026-10-11.jsonl` | `f76fc4b03fa8c97b9d0294d9c7d122a9ee84df19b1887b1b8c2e139521288065` |
+| `issue-822-claude-sdk-probes-p7-2026-10-11.jsonl` | `b52f40b6f1ff798c80ccd71b546fa8602177d3ccfea93a5415b3864c889724fd` |
 | `issue-822-claude-sdk-probes-p8-2026-10-11.jsonl` | `8d4f4f7398a5608c83831e5593eb17e53592d192c6845b0d5b34414bc66bad38` |
 
-Cleanup verified every recorded process identity as exited and then removed only
-the disposable root.
+In both roots, cleanup verified every recorded process identity as exited and
+then removed only the disposable root.

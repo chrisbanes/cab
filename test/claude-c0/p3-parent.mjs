@@ -1,6 +1,6 @@
 // Probe-owned "parent" for P3: runs one query() and records its CLI identity
 // and session ID so the driver can kill this process mid-turn or mid-tool.
-import { writeFileSync } from "node:fs";
+import { renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   assertCleanupRoot,
@@ -16,7 +16,11 @@ assertCleanupRoot(root);
 const token = loadToken();
 const { sdk } = await loadSdk(root);
 const state = join(root, "traces", `p3-${mode}-state.json`);
-const save = (value) => writeFileSync(state, JSON.stringify(value));
+// Atomic so the driver never reads a partial file.
+const save = (value) => {
+  writeFileSync(`${state}.tmp`, JSON.stringify(value));
+  renameSync(`${state}.tmp`, state);
+};
 const current = {};
 const prompt =
   mode === "tool"

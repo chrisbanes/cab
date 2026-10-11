@@ -1,7 +1,7 @@
 // Guarded driver for the #822 Claude Agent SDK probes. See
 // docs/evidence/issue-822-claude-sdk-probes-*.md for the recorded run.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
@@ -14,6 +14,8 @@ import {
   queryCount,
   readJson,
   REPO,
+  redact,
+  redactionContext,
   requireLive,
   returnedToChris,
   summarize,
@@ -46,6 +48,7 @@ function init() {
     "@anthropic-ai/claude-agent-sdk",
     "version",
   ]);
+  if (!sdkVersion) throw new Error("npm view did not return an SDK version");
   writeFileSync(join(sdkDir, "package.json"), '{"private":true}\n');
   execFileSync(
     "npm",
@@ -153,6 +156,41 @@ async function summary(root) {
   console.log(`recorded identities not verified gone: ${live.length}`);
 }
 
+/** Copies each redacted trace, plus its step's facets, into docs/evidence. */
+function exportTraces(root) {
+  const context = redactionContext(root, loadToken());
+  const date = new Date().toISOString().slice(0, 10);
+  for (const name of readdirSync(join(root, "traces"))) {
+    if (!name.endsWith(".jsonl")) continue;
+    const step = name.slice(0, -".jsonl".length);
+    const lines = readFileSync(join(root, "traces", name), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.stringify(redact(JSON.parse(line), context)));
+    const result = join(root, "results", `${step}.json`);
+    if (existsSync(result)) {
+      const { facets, hookLog } = readJson(result);
+      lines.push(
+        JSON.stringify(
+          redact(
+            { event: "facets", step, facets, ...(hookLog ? { hookLog } : {}) },
+            context,
+          ),
+        ),
+      );
+    }
+    writeFileSync(
+      join(
+        REPO,
+        "docs",
+        "evidence",
+        `issue-822-claude-sdk-probes-${step}-${date}.jsonl`,
+      ),
+      `${lines.join("\n")}\n`,
+    );
+  }
+}
+
 async function cleanup(root) {
   assertCleanupRoot(root);
   const recorder = createRecorder(root, "cleanup", null);
@@ -182,6 +220,7 @@ async function main(args) {
   const root = parsed.root;
   assertCleanupRoot(root);
   if (parsed.step === "summary") return summary(root);
+  if (parsed.step === "export") return exportTraces(root);
   if (parsed.step === "cleanup") return cleanup(root);
   const module = await import(PROBES[parsed.step]);
   const facets = await module.run({ root, token: loadToken() });

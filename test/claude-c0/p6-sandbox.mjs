@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, realpathSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import {
@@ -70,12 +70,13 @@ export async function run({ root, token }) {
   );
   hits = 0;
 
-  const unique = `/tmp/ensemble-c0-${randomUUID().slice(0, 8)}`;
+  const nonce = randomUUID().slice(0, 8);
+  const unique = `/tmp/ensemble-c0-${nonce}`;
   const targets = {
     inside: join(workspace, "sbx-inside.txt"),
     outside: join(root, "outside", "sbx-outside.txt"),
     tmp: unique,
-    tmpdir: join(root, "tmp", "sbx-tmpdir.txt"),
+    tmpdir: join(root, "tmp", `sbx-tmpdir-${nonce}.txt`),
     home: join(root, "home", "sbx-home.txt"),
   };
   let main = null;
@@ -87,7 +88,7 @@ export async function run({ root, token }) {
           `1) echo inside > ${targets.inside}\n` +
           `2) echo x > ${targets.outside}\n` +
           `3) echo x > ${targets.tmp}\n` +
-          '4) echo x > "$TMPDIR/sbx-tmpdir.txt"; echo "tmpdir=$TMPDIR"\n' +
+          `4) echo x > "$TMPDIR/sbx-tmpdir-${nonce}.txt"; echo "tmpdir=$TMPDIR"\n` +
           `5) echo x > ${targets.home}\n` +
           `6) curl -s -m 5 http://127.0.0.1:${port}/probe; echo curl-exit=$?\n` +
           "7) curl -s -m 5 https://example.com -o /dev/null; echo curl-exit=$?\n" +
@@ -104,13 +105,19 @@ export async function run({ root, token }) {
   // The sandbox may replace TMPDIR; check the directory the command reported.
   const sandboxTmpdir =
     /tmpdir=(\/\S+)/.exec(output("TMPDIR")?.text ?? "")?.[1] ?? null;
-  const sandboxTmpFile = sandboxTmpdir && join(sandboxTmpdir, "sbx-tmpdir.txt");
+  const sandboxTmpFile =
+    sandboxTmpdir && join(sandboxTmpdir, `sbx-tmpdir-${nonce}.txt`);
   const exists = Object.fromEntries(
     Object.entries(targets).map(([key, path]) => [key, existsSync(path)]),
   );
   exists.sandboxTmpdir = sandboxTmpFile ? existsSync(sandboxTmpFile) : false;
   if (exists.tmp) rmSync(unique, { force: true });
-  if (exists.sandboxTmpdir) rmSync(sandboxTmpFile, { force: true });
+  // Delete outside the root only the probe's own nonce file in Claude's per-user temp dir.
+  if (
+    exists.sandboxTmpdir &&
+    /^\/(private\/)?tmp\/claude-\d+$/.test(realpathSync(sandboxTmpdir))
+  )
+    rmSync(sandboxTmpFile, { force: true });
 
   const f60 = await attempt("F6.0", false, gate, async () => {
     const outsideResult = output(targets.outside);
