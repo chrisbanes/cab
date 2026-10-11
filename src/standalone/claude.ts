@@ -72,6 +72,8 @@ export interface ClaudeRuntimeOptions {
   terminationVerifier?: TerminationVerifier;
   /** How long a settled query's CLI may take to exit before SIGTERM. */
   exitTimeoutMs?: number;
+  /** How soon a failed self-test or settings read is retried; defaults to 30 s. */
+  probeRetryMs?: number;
   /** Model-free check that Seatbelt can start in the turn's spawn context. */
   sandboxSelfTest?: (input: {
     workspace: string;
@@ -92,6 +94,10 @@ const supportedModelsSchema = z
   )
   .max(64);
 const settingsReadTimeoutMs = 30_000;
+/** A passed self-test admits a turn only this soon after it ran. */
+const probeFreshMs = 30_000;
+/** A failed probe or settings read is retried no sooner than this by default. */
+const defaultProbeRetryMs = 30_000;
 /** The CLI falls back to the shared `/tmp/claude-<uid>` above this (AF_UNIX, #825 T1). */
 const maxSandboxTemporaryBytes = 44;
 
@@ -234,7 +240,42 @@ async function ensureTemporaryBase(base: string): Promise<string | undefined> {
   } catch {
     return "per-task sandbox temporary directory could not be read";
   }
+  // The sandboxed agent can write here; a planted symlink must not redirect the next turn.
+  for (const name of [`claude-${uid}`, "cc-socks"]) {
+    const path = join(base, name);
+    const safe = async () => {
+      try {
+        const stat = await lstat(path);
+        return (stat.isDirectory() || stat.isSocket()) && stat.uid === uid;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === "ENOENT";
+      }
+    };
+    if (await safe()) continue;
+    await rm(path, { recursive: true, force: true }).catch(() => {});
+    if (!(await safe()))
+      return "per-task sandbox temporary directory holds an unsafe entry";
+  }
   return undefined;
+}
+
+/** Removes a task's sandbox temporary base when it is still the private directory Ensemble made. */
+export async function releaseClaudeTemporaryBase(
+  workspace: string,
+): Promise<void> {
+  const base = claudeTemporaryBase(workspace);
+  try {
+    const stat = await lstat(base);
+    if (
+      !stat.isDirectory() ||
+      stat.uid !== process.getuid?.() ||
+      (stat.mode & 0o777) !== 0o700
+    )
+      return;
+  } catch {
+    return;
+  }
+  await rm(base, { recursive: true, force: true });
 }
 
 function defaultSandboxSelfTest(input: {
@@ -285,6 +326,8 @@ export const claudePolicyLimits: readonly string[] = [
   "Untested: inertness of model-written Claude configuration (C0 F5.5), whether Claude Code honours dangerouslyDisableSandbox (F6.3; Ensemble's hook denies it), and a missing sandbox-exec binary (F6.4).",
   "The subprocess environment scrub is not yet qualified; Bash, hooks and stdio MCP children may still see the token until it is.",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
+  "The sandboxed agent can write the per-task temporary directory; Ensemble checks only its top-level entries before each turn.",
+  "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
 ];
 
 async function readBounded(path: string, limit: number): Promise<string> {
@@ -437,6 +480,16 @@ export class ClaudeRuntime implements Runtime {
   private readonly turns = new Map<string, ClaudeTurn>();
   /** Model to supported efforts, read model-free from the installed CLI. */
   private supported: Map<string, readonly string[]> | undefined;
+  private settingsReading = false;
+  private settingsFailedAt: number | undefined;
+  private readonly sandboxProbes = new Map<
+    string,
+    { pending: boolean; passed?: boolean; at: number }
+  >();
+  private admissionChanged?: () => void;
+  private get retryMs(): number {
+    return this.options.probeRetryMs ?? defaultProbeRetryMs;
+  }
   private unexpected?: (request: UnexpectedRequest) => void;
   private toolCall?: (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
   private anomaly?: (anomaly: {
@@ -498,10 +551,8 @@ export class ClaudeRuntime implements Runtime {
   }
 
   /** Removes a released task's sandbox temporary base. */
-  async releaseWorkspace(workspace: string): Promise<void> {
-    const base = claudeTemporaryBase(workspace);
-    if ((await ensureTemporaryBase(base)) === undefined)
-      await rm(base, { recursive: true, force: true });
+  onAdmissionChange(listener: () => void): void {
+    this.admissionChanged = listener;
   }
 
   async preflightTurn(input: {
@@ -522,18 +573,86 @@ export class ClaudeRuntime implements Runtime {
       this.options.claude.configDirectory,
       base,
     );
-    const { CLAUDE_CODE_OAUTH_TOKEN: _token, ...withoutToken } = env;
-    const passed = await (
-      this.options.sandboxSelfTest ?? defaultSandboxSelfTest
-    )({ workspace: input.workspace, env: withoutToken }).catch(() => false);
-    if (!passed) return unavailable("sandbox self-test failed");
-    this.supported ??= await this.readSettings(env, input.workspace).catch(
-      () => undefined,
-    );
-    if (!this.supported)
-      return unavailable("supported models could not be read");
+    // Probes run in the background so the serial scheduler never awaits them.
+    const sandbox = this.sandboxStatus(input.workspace, env);
+    if (sandbox) return unavailable(sandbox);
+    const settings = this.settingsStatus(input.workspace, env);
+    if (settings) return unavailable(settings);
     const problem = this.settingsProblem(input.settings);
-    return problem ? unavailable(problem) : undefined;
+    if (problem) return unavailable(problem);
+    // A passed self-test admits exactly one turn.
+    this.sandboxProbes.delete(input.workspace);
+    return undefined;
+  }
+
+  /** Undefined once a fresh self-test for this workspace has passed. */
+  private sandboxStatus(
+    workspace: string,
+    env: Record<string, string>,
+  ): string | undefined {
+    const now = Date.now();
+    const probe = this.sandboxProbes.get(workspace);
+    if (probe?.passed === true && now - probe.at <= probeFreshMs)
+      return undefined;
+    if (probe?.pending) return "checking the sandbox";
+    if (probe?.passed === false && now - probe.at < this.retryMs)
+      return "sandbox self-test failed";
+    const generation = this.generation;
+    const { CLAUDE_CODE_OAUTH_TOKEN: _token, ...withoutToken } = env;
+    this.sandboxProbes.set(workspace, { pending: true, at: now });
+    void (this.options.sandboxSelfTest ?? defaultSandboxSelfTest)({
+      workspace,
+      env: withoutToken,
+    })
+      .catch(() => false)
+      .then((passed) => {
+        if (this.generation !== generation) return;
+        this.sandboxProbes.set(workspace, {
+          pending: false,
+          passed,
+          at: Date.now(),
+        });
+        this.notifyAdmission(passed ? 0 : this.retryMs);
+      });
+    return "checking the sandbox";
+  }
+
+  /** Undefined once supported settings are known; reads them model-free once. */
+  private settingsStatus(
+    workspace: string,
+    env: Record<string, string>,
+  ): string | undefined {
+    if (this.supported) return undefined;
+    if (this.settingsReading) return "reading supported models";
+    if (
+      this.settingsFailedAt !== undefined &&
+      Date.now() - this.settingsFailedAt < this.retryMs
+    )
+      return "supported models could not be read";
+    const generation = this.generation;
+    this.settingsReading = true;
+    void this.readSettings(env, workspace).then(
+      (supported) => {
+        this.settingsReading = false;
+        if (this.generation !== generation) return;
+        this.supported = supported;
+        this.notifyAdmission(0);
+      },
+      () => {
+        this.settingsReading = false;
+        if (this.generation !== generation) return;
+        this.settingsFailedAt = Date.now();
+        this.notifyAdmission(this.retryMs);
+      },
+    );
+    return "reading supported models";
+  }
+
+  private notifyAdmission(afterMs: number): void {
+    const generation = this.generation;
+    setTimeout(() => {
+      if (this.generation === generation) this.admissionChanged?.();
+    }, afterMs).unref();
   }
 
   private settingsProblem(
@@ -637,6 +756,9 @@ export class ClaudeRuntime implements Runtime {
     for (const turn of pending) turn.abort.abort();
     await Promise.allSettled(pending.map((turn) => turn.settled.promise));
     this.turns.clear();
+    this.sandboxProbes.clear();
+    this.supported = undefined;
+    this.settingsFailedAt = undefined;
     this.freshThreads.clear();
     this.threadTools.clear();
   }
@@ -1128,6 +1250,7 @@ export class ClaudeRuntime implements Runtime {
       const path = fields.success ? fields.data.file_path : undefined;
       if (
         typeof path !== "string" ||
+        path.split(/[\\/]/).includes("..") ||
         !(await withinRoots(resolve(turn.roots[0] ?? "/", path), turn.roots))
       )
         return deny("File edits are confined to the task's writable roots");

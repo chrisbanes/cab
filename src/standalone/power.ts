@@ -1,3 +1,4 @@
+import { childProcessEnvironment } from "../core/child-environment.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -209,7 +210,10 @@ export async function* spawnPowerLogReader(
   args: string[],
   options: { timeoutMs: number; maxLineBytes: number },
 ): AsyncGenerator<string> {
-  const child = spawn(command, args, { stdio: ["ignore", "pipe", "ignore"] });
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+    env: childProcessEnvironment(),
+  });
   const exited = new Promise<void>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", (code, signal) =>
@@ -300,7 +304,7 @@ export class CaffeinateAssertion extends EventEmitter {
 
   constructor(
     private readonly spawnProcess: CaffeinateSpawn = (command, args) =>
-      spawn(command, args, { stdio: "ignore" }),
+      spawn(command, args, { stdio: "ignore", env: childProcessEnvironment() }),
     private readonly stopTimeoutMs = 1000,
   ) {
     super();

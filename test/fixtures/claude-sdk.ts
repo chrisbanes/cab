@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 import type { ChildProcess } from "node:child_process";
 import type {
   HookCallback,
@@ -46,7 +47,15 @@ export const fakeModels = [
   },
 ];
 
-export function fakeSdk(scripts: Script[], log: string[]) {
+export function fakeSdk(
+  scripts: Script[],
+  log: string[],
+  options: { hangModels?: boolean } = {},
+) {
+  const supportedModels = () =>
+    options.hangModels
+      ? new Promise<never>(() => {})
+      : Promise.resolve(fakeModels);
   const sessions: Session[] = [];
   const queries: string[] = [];
   const sdk: ClaudeSdk = {
@@ -63,7 +72,7 @@ export function fakeSdk(scripts: Script[], log: string[]) {
                 : signal?.addEventListener("abort", done),
             );
           })(),
-          { supportedModels: async () => fakeModels },
+          { supportedModels },
         );
       }
       queries.push("turn");
@@ -160,7 +169,7 @@ export function fakeSdk(scripts: Script[], log: string[]) {
             await exit;
           }
         })(),
-        { supportedModels: async () => fakeModels },
+        { supportedModels },
       );
     },
     createSdkMcpServer: ((options: { tools: FakeTool[] }) => ({
@@ -168,12 +177,17 @@ export function fakeSdk(scripts: Script[], log: string[]) {
       name: "ensemble",
       instance: { tools: options.tools },
     })) as never,
+    // Like the MCP layer, arguments are parsed by the advertised object shape.
     tool: ((
       name: string,
       _description: string,
-      _shape: unknown,
+      shape: z.ZodRawShape,
       handler: FakeTool["handler"],
-    ) => ({ name, handler })) as never,
+    ) => ({
+      name,
+      handler: (args: Record<string, unknown>, extra: unknown) =>
+        handler(z.object(shape).parse(args), extra),
+    })) as never,
   };
   return { sdk, sessions, queries };
 }

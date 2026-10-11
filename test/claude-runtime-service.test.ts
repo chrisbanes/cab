@@ -9,6 +9,7 @@ import {
 } from "../src/standalone/claude.js";
 import type { Runtime } from "../src/standalone/codex.js";
 import type { ExecutionHarness } from "../src/standalone/execution-harness.js";
+import { gitEnvironment } from "../src/standalone/git-process.js";
 import {
   type RuntimeSpawnContext,
   StandaloneService,
@@ -137,6 +138,11 @@ test("the Claude token reaches only the Claude turn environment, never Codex or 
   assert.equal(codex[NAME], undefined);
   assert.equal(codex[ALIAS], undefined);
   assert.equal(serialized.includes(DELIVERY_VALUE), false);
+  // Helper children such as git never inherit the token or an alias of it.
+  const git = gitEnvironment();
+  assert.equal(JSON.stringify(git).includes(TOKEN), false);
+  assert.equal(git[NAME], undefined);
+  assert.equal(git[ALIAS], undefined);
   const turn = f.claude().turnEnvironment();
   assert.ok("env" in turn);
   assert.equal(turn.token, TOKEN);
@@ -416,6 +422,8 @@ const T6_TOKEN = "claude-t6-token-canary-7731";
 interface ClaudeHarnessControls {
   selfTest: boolean;
   verified: boolean;
+  hangModels?: boolean;
+  hangIdentity?: boolean;
 }
 
 /** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
@@ -426,7 +434,9 @@ function claudeHarness(
 ) {
   const codex = new SeamRuntime("codex", false);
   const codexContexts: RuntimeSpawnContext[] = [];
-  const { sdk, sessions, queries } = fakeSdk(scripts, []);
+  const { sdk, sessions, queries } = fakeSdk(scripts, [], {
+    hangModels: controls.hangModels ?? false,
+  });
   const verifier = {
     verify: async (identity: {
       processId: string;
@@ -455,15 +465,18 @@ function claudeHarness(
         claude: context.claude,
         sdk,
         captureProcessIdentity: async (pid) =>
-          pid
-            ? {
-                processId: String(pid),
-                processStartedAt: "Sat Oct 11 10:00:00 2026",
-                bootId: "claude-t6-boot",
-              }
-            : null,
+          controls.hangIdentity
+            ? new Promise<never>(() => {})
+            : pid
+              ? {
+                  processId: String(pid),
+                  processStartedAt: "Sat Oct 11 10:00:00 2026",
+                  bootId: "claude-t6-boot",
+                }
+              : null,
         terminationVerifier: verifier,
         sandboxSelfTest: async () => controls.selfTest,
+        probeRetryMs: 50,
         exitTimeoutMs: 2000,
       });
     },
@@ -861,5 +874,74 @@ test("a restart with a running Claude execution holds it as unknown", async (t) 
   assert.deepEqual(
     [record?.holds.writer, record?.holds.capacity, record?.holds.uncertainty],
     [true, true, true],
+  );
+});
+
+test("a hanging Claude settings read never delays queued Codex work", async (t) => {
+  const run = await claudeServiceRun(t, [], {
+    selfTest: true,
+    verified: true,
+    hangModels: true,
+  });
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  const reading = "Claude runtime unavailable: reading supported models";
+  await waitUntil(() => run.intent(workId)?.reason === reading, run.describe);
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const started = Date.now();
+  const codexTask = randomUUID();
+  run.execute({
+    type: "task.create",
+    projectId,
+    taskId: codexTask,
+    title: "Codex",
+    outcome: "Codex lead",
+    ready: true,
+  });
+  await run.service.provisionTask(codexTask);
+  await waitUntil(() => run.codex.startTurnArgs.length > 0, run.describe);
+  assert.ok(Date.now() - started < 2000);
+  assert.equal(run.intent(workId)?.reason, reading);
+  assert.equal(run.intent(workId)?.state, "ready");
+});
+
+test("a restart before the Claude process identity was recorded reports no proof and keeps the hold", async (t) => {
+  const run = await claudeServiceRun(
+    t,
+    [
+      async function* (session) {
+        yield init(sessionOf(session));
+      },
+    ],
+    { selfTest: true, verified: true, hangIdentity: true },
+  );
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(workId)?.state === "submitting",
+    run.describe,
+  );
+  const workspace = run.intent(workId)?.workspace;
+  t.after(() => releaseTemporaryBase(workspace));
+  assert.equal(run.recovery(workId)?.processIdentity, null);
+  await run.service.stop();
+  const restarted = claudeHarness(join(run.root, "data"), [], {
+    selfTest: true,
+    verified: true,
+  });
+  t.after(() => restarted.service.stop().catch(() => {}));
+  await restarted.service.start();
+  const record = restarted.recovery(workId);
+  assert.equal(record?.intent.state, "held");
+  assert.deepEqual(
+    record?.observations.map((observation) => observation.kind),
+    ["no-proof"],
+  );
+  assert.deepEqual(
+    [record?.holds.writer, record?.holds.capacity],
+    [true, true],
   );
 });

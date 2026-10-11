@@ -1,3 +1,4 @@
+import { childProcessEnvironment } from "./child-environment.js";
 import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -152,7 +153,7 @@ export async function checkoutOrigin(
       await execFileAsync("git", ["-C", path, "remote", "get-url", "origin"], {
         encoding: "utf8",
         timeout,
-        ...(env ? { env } : {}),
+        env: env ?? childProcessEnvironment(),
       })
     ).stdout.trim();
   } catch {
@@ -185,7 +186,7 @@ export async function verifiedRepository(
       await execFileAsync(
         "git",
         ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        { encoding: "utf8", timeout: 5000 },
+        { encoding: "utf8", timeout: 5000, env: childProcessEnvironment() },
       )
     ).stdout.trim();
   } catch {
@@ -215,7 +216,7 @@ export async function verifiedRepository(
           "--verify",
           expectedOrigin ? `${input.ref}^{commit}` : input.ref,
         ],
-        { encoding: "utf8", timeout: 5000 },
+        { encoding: "utf8", timeout: 5000, env: childProcessEnvironment() },
       )
     ).stdout.trim();
   } catch {

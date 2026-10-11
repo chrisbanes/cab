@@ -1,3 +1,4 @@
+import { childProcessEnvironment } from "../core/child-environment.js";
 import { randomUUID } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
@@ -988,6 +989,7 @@ function runGit(options: GitRunOptions): Promise<string> {
     try {
       child = spawn(options.executable, options.args, {
         cwd: options.cwd,
+        env: childProcessEnvironment(),
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });

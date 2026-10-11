@@ -519,6 +519,8 @@ export interface Runtime {
     workspace: string;
     settings?: RuntimeTurnSettings;
   }): Promise<string | undefined>;
+  /** Called when a preflight reason may have cleared, so waiting work is retried. */
+  onAdmissionChange?(listener: () => void): void;
   startTurn(
     threadId: string,
     workspace: string,

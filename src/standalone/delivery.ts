@@ -1,3 +1,4 @@
+import { credentialFreeEnvironment } from "../core/child-environment.js";
 import { isOperatorDeliveryCaller } from "../core/delivery.js";
 import type { z } from "zod";
 import {
@@ -469,24 +470,4 @@ export function deliveryRuntimeEnvironment(
       p.credentialRef ? [p.credentialRef.slice(4)] : [],
     ),
   );
-}
-
-/** Removes the named variables and every variable holding their nonempty values in either environment. */
-export function credentialFreeEnvironment(
-  environment: NodeJS.ProcessEnv,
-  keys: readonly string[],
-  current: NodeJS.ProcessEnv = environment,
-): NodeJS.ProcessEnv {
-  const result = { ...environment };
-  const values = new Set(
-    keys
-      .flatMap((k) => [environment[k], current[k]])
-      .filter((v): v is string => Boolean(v)),
-  );
-  for (const key of Object.keys(result)) {
-    const value = result[key];
-    if (keys.includes(key) || (value !== undefined && values.has(value)))
-      delete result[key];
-  }
-  return result;
 }

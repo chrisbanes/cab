@@ -1,3 +1,4 @@
+import { childProcessEnvironment } from "../core/child-environment.js";
 import { execFile } from "node:child_process";
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
@@ -37,7 +38,7 @@ export function resolveHomePath(input: string, home: string): string {
 
 const execFileAsync = promisify(execFile);
 const probeEnv = () => ({
-  ...process.env,
+  ...childProcessEnvironment(),
   GIT_TERMINAL_PROMPT: "0",
   GIT_OPTIONAL_LOCKS: "0",
 });

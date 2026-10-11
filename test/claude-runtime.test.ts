@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,6 +19,7 @@ import {
   claudeSdkVersion,
   claudeTemporaryBase,
   claudeToolShape,
+  releaseClaudeTemporaryBase,
 } from "../src/standalone/claude.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
 import type {
@@ -40,6 +42,20 @@ import {
 import { tmpdir } from "./temp.js";
 
 test.after(closeRuntimeSafetyFixtures);
+
+/** Preflight probes run in the background; poll until a final answer. */
+async function settledPreflight(
+  runtime: ClaudeRuntime,
+  input: Parameters<ClaudeRuntime["preflightTurn"]>[0],
+): Promise<string | undefined> {
+  for (let attempt = 0; attempt < 400; attempt++) {
+    const reason = await runtime.preflightTurn(input);
+    if (!/checking the sandbox|reading supported models/.test(reason ?? ""))
+      return reason;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("Preflight did not settle");
+}
 
 const TOKEN = "claude-runtime-token-canary-3319";
 
@@ -99,6 +115,7 @@ function fixture(
     },
     exitTimeoutMs: 2000,
     sandboxSelfTest: async () => (options.selfTest ? options.selfTest() : true),
+    probeRetryMs: 20,
   });
   const emitted: unknown[] = [];
   const anomalies: Array<{
@@ -121,7 +138,7 @@ function fixture(
   const settings = { model: "haiku", reasoningEffort: "low" };
   const turn = async (threadId: string) => {
     assert.equal(
-      await runtime.preflightTurn({ workspace, settings }),
+      await settledPreflight(runtime, { workspace, settings }),
       undefined,
     );
     const turnId = await runtime.startTurn(
@@ -149,7 +166,7 @@ function fixture(
     turn,
     queries,
     cleanup: async () => {
-      await runtime.releaseWorkspace(workspace);
+      await releaseClaudeTemporaryBase(workspace);
       await runtime.stop();
       rmSync(root, { recursive: true, force: true });
     },
@@ -523,7 +540,7 @@ test("a Claude turn whose process cannot be recorded never receives its prompt",
     await f.runtime.start();
     const threadId = await f.runtime.startThread(f.workspace, []);
     assert.equal(
-      await f.runtime.preflightTurn({ workspace: f.workspace }),
+      await settledPreflight(f.runtime, { workspace: f.workspace }),
       undefined,
     );
     await assert.rejects(
@@ -679,6 +696,7 @@ test("the PreToolUse hook records every call and denies calls outside policy", a
           ["Write", { file_path: join(workspace, "inside.txt"), content: "x" }],
           ["Write", { file_path: join(outside, "x.txt"), content: "x" }],
           ["Edit", { file_path: join(workspace, "..", "escape.txt") }],
+          ["Edit", { file_path: `${workspace}/sub/../inside.txt` }],
           ["Write", { file_path: join(workspace, "link", "x.txt") }],
           ["WebFetch", { url: "https://example.com" }],
           ["Bash", { command: "ls", dangerouslyDisableSandbox: true }],
@@ -709,17 +727,27 @@ test("the PreToolUse hook records every call and denies calls outside policy", a
         }
       ).hookSpecificOutput;
     assert.deepEqual(decisions[0], {});
-    assert.deepEqual(decisions[6], {});
-    for (const index of [1, 2, 3, 4, 5, 7]) {
+    assert.deepEqual(decisions[7], {});
+    for (const index of [1, 2, 3, 4, 5, 6, 8]) {
       assert.equal(denied(index)?.permissionDecision, "deny");
       assert.ok(denied(index)?.permissionDecisionReason);
     }
     assert.deepEqual(
       f.runtime.toolLedger(threadId, turnId).map((entry) => entry.decision),
-      ["allow", "deny", "deny", "deny", "deny", "deny", "allow", "deny"],
+      [
+        "allow",
+        "deny",
+        "deny",
+        "deny",
+        "deny",
+        "deny",
+        "deny",
+        "allow",
+        "deny",
+      ],
     );
     assert.equal(
-      f.runtime.toolLedger(threadId, turnId)[4]?.toolName,
+      f.runtime.toolLedger(threadId, turnId)[5]?.toolName,
       "WebFetch",
     );
   } finally {
@@ -741,7 +769,7 @@ test("preflight waits for a failed sandbox self-test, unsupported settings or a 
       model: string | null;
       reasoningEffort: string | null;
     }) =>
-      f.runtime.preflightTurn({
+      settledPreflight(f.runtime, {
         workspace: f.workspace,
         ...(settings ? { settings } : {}),
       });
@@ -751,6 +779,7 @@ test("preflight waits for a failed sandbox self-test, unsupported settings or a 
     );
     assert.deepEqual(f.queries, []);
     selfTest = true;
+    await new Promise((resolve) => setTimeout(resolve, 30));
     assert.equal(await preflight(), undefined);
     assert.deepEqual(f.queries, ["settings"]);
     assert.deepEqual(f.runtime.supportedSettings()?.haiku, [
@@ -790,7 +819,7 @@ test("preflight refuses a sandbox temporary base that is not private", async () 
     chmodSync(base, 0o755);
     await f.runtime.start();
     assert.equal(
-      await f.runtime.preflightTurn({ workspace: f.workspace }),
+      await settledPreflight(f.runtime, { workspace: f.workspace }),
       "Claude runtime unavailable: per-task sandbox temporary directory is not private",
     );
   } finally {
@@ -825,4 +854,87 @@ test("the effective policy discloses hook confinement, the redirected temporary 
     /scrub/,
   ])
     assert.match(limits, pattern);
+});
+
+test("a planted symlink in the sandbox temporary base is removed before the turn", async () => {
+  const f = fixture();
+  const base = claudeTemporaryBase(f.workspace);
+  const uid = process.getuid?.() ?? 0;
+  try {
+    mkdirSync(base, { mode: 0o700 });
+    chmodSync(base, 0o700);
+    const target = join(f.root, "elsewhere");
+    mkdirSync(target);
+    symlinkSync(target, join(base, `claude-${uid}`));
+    symlinkSync(target, join(base, "cc-socks"));
+    await f.runtime.start();
+    assert.equal(
+      await settledPreflight(f.runtime, { workspace: f.workspace }),
+      undefined,
+    );
+    for (const name of [`claude-${uid}`, "cc-socks"])
+      assert.throws(() => lstatSync(join(base, name)), /ENOENT/);
+    assert.ok(lstatSync(target).isDirectory());
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("coordination arguments parsed by the advertised schema keep their hook correlation, and extra keys fail closed", async () => {
+  const outcomes: Array<{ isError: boolean }> = [];
+  const resultId = "70000000-0000-4000-8000-000000000001";
+  const inputs: Array<[string, Record<string, unknown>]> = [
+    ["ensemble_report_result", { summary: "Done" }],
+    ["ensemble_request_completion", { reviewedResultIds: [resultId] }],
+    ["ensemble_ask_question", { question: "Which?" }],
+    ["ensemble_request_follow_up", { resultId, instructions: "Again" }],
+  ];
+  const f = fixture({
+    scripts: [
+      async function* (session) {
+        yield init(sessionOf(session));
+        for (const [index, [name, args]] of inputs.entries()) {
+          await session.hook(
+            `mcp__ensemble__${name}`,
+            args,
+            `toolu_ok_${index}`,
+          );
+          outcomes.push(
+            (await session.callTool(name, args)) as { isError: boolean },
+          );
+        }
+        const extra = { question: "Which?", unexpected: true };
+        await session.hook(
+          "mcp__ensemble__ensemble_ask_question",
+          extra,
+          "toolu_extra",
+        );
+        outcomes.push(
+          (await session.callTool("ensemble_ask_question", extra)) as {
+            isError: boolean;
+          },
+        );
+        yield result(sessionOf(session));
+      },
+    ],
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(
+      f.workspace,
+      coordinationTools,
+    );
+    const turnId = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, turnId), "completed");
+    assert.deepEqual(
+      outcomes.map((outcome) => outcome.isError),
+      [false, false, false, false, true],
+    );
+    assert.deepEqual(
+      f.toolCalls.map((call) => [call.callId, call.tool, call.arguments]),
+      inputs.map(([name, args], index) => [`toolu_ok_${index}`, name, args]),
+    );
+  } finally {
+    await f.cleanup();
+  }
 });

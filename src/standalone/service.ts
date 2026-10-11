@@ -44,7 +44,7 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnSettings,
 } from "./codex.js";
-import { ClaudeRuntime } from "./claude.js";
+import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
   managedAssignmentEnvironment,
@@ -73,7 +73,11 @@ import {
   STANDALONE_MARKER_CONTENTS,
   StandaloneDataDirectory,
 } from "./data-directory.js";
-import { credentialFreeEnvironment, DeliveryCoordinator } from "./delivery.js";
+import { DeliveryCoordinator } from "./delivery.js";
+import {
+  credentialFreeEnvironment,
+  setChildCredentialExclusions,
+} from "../core/child-environment.js";
 import type { GitHubDeliveryProvider } from "./github-delivery.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
@@ -675,6 +679,11 @@ export class StandaloneService {
         });
       const claudeTokenName = () =>
         domain.claudeTokenReference()?.slice(4) ?? null;
+      // Helper children (git, ps, pmset, …) never inherit the Claude token either.
+      setChildCredentialExclusions(() => {
+        const name = claudeTokenName();
+        return name ? [name] : [];
+      });
       const spawnEnvironment = {
         spawnEnvironment: () => {
           const claude = claudeTokenName();
@@ -1102,6 +1111,13 @@ export class StandaloneService {
           })
         : this.handleToolCall(call),
     );
+    const generation = this.generation;
+    runtime.onAdmissionChange?.(() => {
+      if (acceptsNew() && generation)
+        this.observeBackgroundFailure(generation, "domain-wake", () =>
+          this.wakeScheduler(0, generation),
+        );
+    });
     runtime.onConversationEvent?.((event) => {
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
@@ -2383,14 +2399,9 @@ export class StandaloneService {
         evidence,
         () => state.confirmArchive(taskId),
       );
-      const claude = this.runtimes.get("claude");
-      // The sandbox temporary base lives exactly as long as the workspace.
-      if (
-        result.outcome === "cleaned" &&
-        workspace &&
-        claude instanceof ClaudeRuntime
-      )
-        await claude.releaseWorkspace(workspace).catch(() => {});
+      // The Claude sandbox temporary base lives exactly as long as the workspace.
+      if (result.outcome === "cleaned" && workspace)
+        await releaseClaudeTemporaryBase(workspace).catch(() => {});
       releaseArchiveHold =
         result.outcome === "cleaned" ||
         (result.outcome === "retained" &&
@@ -3928,14 +3939,18 @@ export class StandaloneService {
       if (waitForRuntime()) return;
       if (!runtime) return;
       if (runtime.preflightTurn) {
-        const settings = this.turnSettings(request);
+        const preflight = runtime.preflightTurn.bind(runtime);
         const failed = `${harnessLabel[harness]} runtime unavailable: preflight failed`;
+        // A settings lookup failure waits like any other preflight failure.
         const reason = await this.untilFailure(
           runtime,
-          runtime.preflightTurn({
-            workspace: workspaceKey,
-            ...(settings ? { settings } : {}),
-          }),
+          (async () => {
+            const settings = this.turnSettings(request);
+            return preflight({
+              workspace: workspaceKey,
+              ...(settings ? { settings } : {}),
+            });
+          })(),
           () => failed,
         ).catch(() => failed);
         if (
