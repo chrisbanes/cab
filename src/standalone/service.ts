@@ -858,6 +858,9 @@ export class StandaloneService {
       }
     };
     let failed = () => {};
+    // After a non-default runtime fails, new inbound callbacks from it are
+    // refused; outcomes for work it already registered may still settle.
+    let refuseNew = false;
     if (harness !== defaultExecutionHarness)
       this.runtimeFailed.set(
         runtime,
@@ -866,6 +869,7 @@ export class StandaloneService {
         }),
       );
     runtime.onFailure?.(() => {
+      refuseNew = harness !== defaultExecutionHarness;
       failed();
       if (
         this.runtimes.get(harness) === runtime &&
@@ -951,7 +955,10 @@ export class StandaloneService {
       }
     });
     runtime.onUserInputRequest?.((request) => {
-      if (foreign(request.identity.threadId, request.identity.turnId))
+      if (
+        refuseNew ||
+        foreign(request.identity.threadId, request.identity.turnId)
+      )
         runtime.cancelUserInput?.(
           request.identity,
           "Native callback binding failed",
@@ -963,7 +970,7 @@ export class StandaloneService {
         this.handleUserInputOutcome(outcome);
     });
     runtime.onToolCall?.((call) =>
-      foreign(call.threadId, call.turnId)
+      refuseNew || foreign(call.threadId, call.turnId)
         ? Promise.resolve({
             text: "Coordination call is not bound to current task work",
             success: false,
@@ -971,7 +978,7 @@ export class StandaloneService {
         : this.handleToolCall(call),
     );
     runtime.onConversationEvent?.((event) => {
-      if (!foreign(event.threadId, event.turnId))
+      if (!refuseNew && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
     });
     runtime.onTerminalAnomaly?.((anomaly) => {

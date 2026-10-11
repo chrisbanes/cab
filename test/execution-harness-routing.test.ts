@@ -1166,3 +1166,42 @@ test("a failed secondary runtime whose stop throws synchronously is still tracke
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a failed secondary runtime cannot start new tool calls", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-failed-tool-"));
+  const runtimes = fakes();
+  runtimes.claude.holdTurns = true;
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [worker]);
+    const { taskId, assignmentIds } = await task(service, projectId, [worker]);
+    const workId = initial(assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, workId)?.state === "running",
+      describe,
+    );
+
+    // Emitted in the same tick as the failure, before its work is held.
+    runtimes.claude.crash();
+    assert.equal(intent(service, workId)?.state, "running");
+    assert.deepEqual(
+      await runtimes.claude.callTool("claude-thread-1", "claude-turn-1"),
+      {
+        text: "Coordination call is not bound to current task work",
+        success: false,
+      },
+    );
+    assert.equal(
+      service.coordinationView().readTask(taskId).questions.length,
+      0,
+    );
+  } finally {
+    runtimes.claude.releaseAll();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
