@@ -400,10 +400,59 @@ and disclosure detail; do not shrink their entire height into a laptop viewport.
 | Profiles and routing | 122 `F6d3SQ`, 123 `O96oS`, 124 `Z8uZnh`, 125 `c8af5` |
 | Runtime, assignment recovery and not found | 126 `AqYk0`, 127 `iEF1o`, 128 `ur1mr`, 129 `HCNJ2` |
 | Stop confirmation | 132 `uQrNE` |
+| CLI credentials, desktop and phone | 133 `rX5TO`, 134 `b6P8Z3`, 135 `vlG3U`, 136 `LJKCn`, 137 `JEKrc`, 138 `CcimU`, 139 `PnQRM`, 140 `XTiZ6`, 141 `B3XyJr`, 142 `MaR6q` |
 | Operator refinement (section 10, renamed 800A–800H) | `qIVmm`; `h23qD`, `FsTwL`, `dUUIS`, `Z8BqXF`, `LBzlj`, `nKHGv`, `Sejey`, `g5wmIu` |
 
 Workspace inspection frames 77–106 and the task-overview, review, assignment and
 search frames have their own node tables in the sections below.
+
+### CLI credentials
+
+Frames 133–142 draw the CLI credentials panel of the Settings index: the last panel
+in the right column, after Routing. On phone the two columns stack, and 140 shows
+the panel scrolled into view under the phone header; phone states without a frame
+use the desktop copy.
+
+| State | Desktop | Phone |
+| --- | --- | --- |
+| Empty, with the create form | 133 `rX5TO` | — |
+| List: active read-only, active read-write never used with Replaces, revoked, expired | 134 `b6P8Z3` | 140 `XTiZ6` |
+| Name validation error | 135 `vlG3U` | — |
+| Unknown request outcome; list unavailable with Retry | 136 `LJKCn` | — |
+| One-time token after create (copy failed) | 137 `JEKrc` | 141 `B3XyJr` (copied) |
+| Rotation: replacement token; the old credential is still Active | 138 `CcimU` | — |
+| Revoke confirmation with a failed or unknown request | 139 `PnQRM` | 142 `MaR6q` |
+
+- The create form is always inline: Credential name, Scope (Read-only or
+  Read-write, Read-only by default) and Lifetime (7, 30, 60 or 90 days, 90 by
+  default). The service accepts any lifetime from 1 to 90 days; the form offers
+  these presets.
+- Each row shows the name, a badge, and ID (first 8 characters), Scope, Created,
+  Expires and Last used ("never" until first use), plus Replaces on a rotation
+  replacement and Revoked on a revoked credential. Names may repeat, so the short
+  ID tells credentials apart. Active uses the secondary badge; Expired and Revoked
+  use the outline badge and have no actions. Rows are listed by creation time,
+  oldest first.
+- The token is shown once in "CLI token for <name>", with Copy and Done. Copy
+  reports "Copied to the clipboard." or "Copy failed. Select the token and copy it
+  manually." Outside clicks do not close the dialog; Escape and Done discard the
+  token.
+- Rotate has no confirmation. It issues a replacement with the same name and scope
+  and a 90-day lifetime, reveals its token in the same dialog and leaves the old
+  credential Active until it is revoked. Only the replacement row says Replaces.
+- Revoke asks first ("Revoke <name>?") and is irreversible by design. A lost or
+  leaked active token is rotated (then the old credential revoked) or replaced by
+  a new credential; a revoked or expired credential can only be replaced by
+  issuing a new one.
+- A failed or unknown request re-reads the list and says "Check the list below
+  before retrying"; in the revoke dialog the message appears inside the dialog.
+- Settings (account menu → `/app/settings`) is the only entry point, and the
+  page-title Refresh re-reads the list (the phone frames draw only the top-level
+  header). No deep link, context menu, extension or notification surface
+  applies, and the legacy HTML UI has no credential controls.
+- Phone inputs, selects and buttons, dialog actions included, are 44 px tall. Token
+  values are fictional fixtures. Loading, a busy create button and an
+  expiring-soon cue are not drawn.
 
 ## Task overview
 
@@ -1382,8 +1431,7 @@ frames 114 and 118–128 as follows:
 - No short identifiers (RL-31, A-203, AT-151) are shown, and recovery omits "last
   observed" and "requested by", which the recovery read does not carry. Its
   breadcrumb is the static "Settings / Runtime / Assignment recovery".
-- The Settings index has no discovery-credential row (U7 #841 owns it). The
-  header keeps Refresh on every settings route, including Create profile, and it
+- The header keeps Refresh on every settings route, including Create profile, and it
   re-reads the open page's own resources.
 - Switches are native checkboxes drawn as switches.
 
