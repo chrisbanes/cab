@@ -472,7 +472,10 @@ test("a task read fences when the discovery reference or its value changes mid-r
     ready: false,
   } as never);
   // Interleave a change after the read has taken its exclusion snapshot.
-  const during = async (change: () => void) => {
+  const during = async (
+    change: () => void,
+    read: () => Promise<unknown> = () => api.readTask(taskId),
+  ) => {
     const target = api as unknown as {
       exclusions: (...args: unknown[]) => Promise<unknown>;
     };
@@ -487,7 +490,7 @@ test("a task read fences when the discovery reference or its value changes mid-r
       return snapshot;
     };
     try {
-      return await api.readTask(taskId).then(
+      return await read().then(
         (r) => JSON.stringify(r),
         (e: { status?: number }) => e.status,
       );
@@ -515,6 +518,22 @@ test("a task read fences when the discovery reference or its value changes mid-r
     }),
     503,
   );
+  // Reads guarded by the shared workspace snapshot fence the same way.
+  for (const read of [
+    () => api.readProject(projectId),
+    () => api.readTaskListPage(new URLSearchParams()),
+    () => api.readComposerOptions(projectId),
+    () => api.readRuntimeSettings(),
+  ]) {
+    process.env.FIXTURE_FENCE_DISCOVERY = "SOMETHING ELSE";
+    assert.equal(
+      await during(() => {
+        process.env.FIXTURE_FENCE_DISCOVERY = "FENCEDISCOVERYCANARY841";
+      }, read),
+      503,
+      String(read),
+    );
+  }
   // Settled reads exclude the current value.
   assert.equal(
     JSON.stringify(await api.readTask(taskId)).includes(

@@ -1815,13 +1815,21 @@ export class OperatorApi {
         }
       : null;
   }
+  /** Workspace fences per task plus the visibility fence, checked before a read returns. */
   private workspaceSnapshot(taskIds: readonly string[]) {
-    return new Map(
-      taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
-    );
+    return {
+      visibility: this.visibilityToken(),
+      workspaces: new Map(
+        taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
+      ),
+    };
   }
-  private requireWorkspaceSnapshot(snapshot: ReadonlyMap<string, string>) {
-    for (const [id, fingerprint] of snapshot)
+  private requireWorkspaceSnapshot(
+    snapshot: ReturnType<OperatorApi["workspaceSnapshot"]>,
+  ) {
+    if (snapshot.visibility !== this.visibilityToken())
+      throw new OperatorApiError(503, "unavailable");
+    for (const [id, fingerprint] of snapshot.workspaces)
       if (this.service.taskWorkspaceVisibility(id) !== fingerprint)
         throw new OperatorApiError(503, "unavailable");
   }
