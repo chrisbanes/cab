@@ -46,6 +46,7 @@ import { Alert } from "./ui/alert.js";
 import { loadTaskList, taskRouteSubtitle } from "./tasks.js";
 import { TaskComposer } from "./task-composer.js";
 import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
+import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
 import { ProjectSetup } from "./project-setup.js";
 import { SettingsWorkspace } from "./settings-index.js";
@@ -824,11 +825,13 @@ export function App() {
               {logoutNotice}
             </p>
           )}
-          {workspace.state.data?.data.runtime.state === "unavailable" && (
-            <Alert variant="destructive" role="alert">
-              Codex runtime unavailable — restart the service
-            </Alert>
-          )}
+          {workspace.state.data?.data.harnesses
+            .filter((h) => h.state === "unavailable")
+            .map((h) => (
+              <Alert key={h.harness} variant="destructive" role="alert">
+                {unavailableAlert(h)}
+              </Alert>
+            ))}
           {workspace.state.status !== "fresh" && (
             <ResourceStatus state={workspace.state} retry={workspace.refresh} />
           )}

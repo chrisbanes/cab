@@ -1,8 +1,10 @@
 import { useCallback } from "react";
 import {
+  executionHarnessLabels,
   runtimeSettingsSchema,
   assignmentRecoverySchema,
 } from "../../src/operator/contracts.js";
+import { harnessStateLabel } from "./execution-runtime.js";
 import { useOperatorResource } from "./resource.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
@@ -149,6 +151,36 @@ export function RuntimeSettings(p: SettingsProps) {
                 saved={p.drafts.saved("capacity.configure")}
                 label="Saved capacity"
               />
+              <Panel
+                title="Execution runtimes"
+                description="Work for a runtime that is not enabled or unavailable waits; it never falls back to another runtime."
+              >
+                {p.workspace?.data.harnesses.map((h) => (
+                  <div className="settings-row" key={h.harness}>
+                    <div className="settings-row-heading">
+                      <h3 className="small-heading">
+                        {executionHarnessLabels[h.harness]}
+                      </h3>
+                      <StatusBadge
+                        tone={
+                          h.state === "unavailable"
+                            ? "error"
+                            : h.state === "available"
+                              ? "success"
+                              : "neutral"
+                        }
+                      >
+                        {harnessStateLabel[h.state]}
+                      </StatusBadge>
+                    </div>
+                    {h.state === "unavailable" && (
+                      <p className="metadata muted">
+                        Restart the service to retry this runtime.
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </Panel>
             </div>
             <section
               className="settings-column"

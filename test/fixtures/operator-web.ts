@@ -26,6 +26,7 @@ import {
   OperatorWebBoundary,
   OperatorWebBundle,
 } from "../../src/standalone/operator-web.js";
+import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import {
   StandaloneService,
@@ -144,7 +145,10 @@ export function createOperatorFixture<R extends Runtime>(
   readerFactory: GitHubReaderFactory | undefined,
   delivery: StandaloneServiceOptions["delivery"] | undefined,
   lifecycleOptions: FixtureLifecycleOptions,
-  runtimeFactory: (context: RuntimeSpawnContext) => R,
+  runtimeFactory: (
+    context: RuntimeSpawnContext,
+    harness: ExecutionHarness,
+  ) => R,
   serviceOptions?: StandaloneServiceOptions,
 ): Promise<OperatorFixture<R>>;
 export function createOperatorFixture(
@@ -162,7 +166,10 @@ export async function createOperatorFixture<
   readerFactory?: GitHubReaderFactory,
   delivery?: StandaloneServiceOptions["delivery"],
   lifecycleOptions: FixtureLifecycleOptions = {},
-  runtimeFactory?: (context: RuntimeSpawnContext) => R,
+  runtimeFactory?: (
+    context: RuntimeSpawnContext,
+    harness: ExecutionHarness,
+  ) => R,
   serviceOptions: StandaloneServiceOptions = {},
 ): Promise<OperatorFixture<R>> {
   const lifecycle = new FixtureLifecycle(lifecycleOptions);
@@ -216,14 +223,15 @@ export async function createOperatorFixture<
   const makeService = () =>
     new StandaloneService(
       join(directory, "data"),
-      (context) => {
+      (context, harness) => {
         let currentRuntime: R;
-        if (runtimeFactory) currentRuntime = runtimeFactory(context);
+        if (runtimeFactory) currentRuntime = runtimeFactory(context, harness);
         else {
           if (!defaultRuntime) defaultRuntime = new OperatorFixtureRuntime();
           currentRuntime = defaultRuntime as unknown as R;
         }
-        runtime = currentRuntime;
+        // `fixture.runtime` stays the default (Codex) harness's runtime.
+        if (harness === "codex") runtime = currentRuntime;
         return currentRuntime;
       },
       undefined,

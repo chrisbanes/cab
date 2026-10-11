@@ -46,7 +46,7 @@ test("read envelopes reject row fields and invalid states", () => {
   const runtime = { state: "available" };
   assert.deepEqual(
     workspaceSchema.parse({
-      data: { projects: [], profiles: [], runtime },
+      data: { projects: [], profiles: [], runtime, harnesses: [] },
       observedAt: 1,
     }).data.projects,
     [],
@@ -57,6 +57,10 @@ test("read envelopes reject row fields and invalid states", () => {
         projects: [],
         profiles: [],
         runtime: { state: "unavailable", since: 5 },
+        harnesses: [
+          { harness: "codex", state: "unavailable", since: 5 },
+          { harness: "claude", state: "not-configured" },
+        ],
       },
       observedAt: 1,
     }).data.runtime,
@@ -71,14 +75,33 @@ test("read envelopes reject row fields and invalid states", () => {
   ])
     assert.equal(
       workspaceSchema.safeParse({
-        data: { projects: [], profiles: [], runtime: invalid },
+        data: { projects: [], profiles: [], runtime: invalid, harnesses: [] },
+        observedAt: 1,
+      }).success,
+      false,
+    );
+  for (const invalid of [
+    { harness: "codex", state: "unavailable" },
+    { harness: "codex", state: "not-configured", since: 5 },
+    { harness: "pi", state: "available" },
+    { harness: "claude", state: "unavailable", since: 5, error: "secret" },
+  ])
+    assert.equal(
+      workspaceSchema.safeParse({
+        data: { projects: [], profiles: [], runtime, harnesses: [invalid] },
         observedAt: 1,
       }).success,
       false,
     );
   assert.equal(
     workspaceSchema.safeParse({
-      data: { projects: [], profiles: [], runtime, credentialRef: "secret" },
+      data: {
+        projects: [],
+        profiles: [],
+        runtime,
+        harnesses: [],
+        credentialRef: "secret",
+      },
       observedAt: 1,
     }).success,
     false,

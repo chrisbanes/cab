@@ -18,6 +18,11 @@ import {
   executionHarnessSchema,
   profileRuntimeSchema,
 } from "../core/execution-runtime.js";
+export {
+  executionHarnessLabels,
+  type ExecutionHarness,
+  type ProfileRuntime,
+} from "../core/execution-runtime.js";
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
 const time = z.number().int().nonnegative().safe();
@@ -72,6 +77,22 @@ export const profileSummarySchema = z
   .strict();
 const envelope = <T extends z.ZodType>(schema: T) =>
   z.object({ data: schema, observedAt: time }).strict();
+const harnessStatusBase = { harness: executionHarnessSchema };
+/** One per harness; `not-configured` is not in the service's `runtimeHarnesses`. */
+export const harnessStatusSchema = z.discriminatedUnion("state", [
+  z.object({ ...harnessStatusBase, state: z.literal("available") }).strict(),
+  z
+    .object({ ...harnessStatusBase, state: z.literal("not-configured") })
+    .strict(),
+  z
+    .object({
+      ...harnessStatusBase,
+      state: z.literal("unavailable"),
+      since: time,
+    })
+    .strict(),
+]);
+export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
 export const workspaceSchema = envelope(
   z
     .object({
@@ -81,6 +102,7 @@ export const workspaceSchema = envelope(
         z.object({ state: z.literal("available") }).strict(),
         z.object({ state: z.literal("unavailable"), since: time }).strict(),
       ]),
+      harnesses: z.array(harnessStatusSchema),
     })
     .strict(),
 );

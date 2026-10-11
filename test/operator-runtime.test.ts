@@ -244,6 +244,48 @@ test("runtime overview shows the restart notice only after a runtime failure", a
   assert.doesNotMatch(body, /Runtime lost|<script>/);
 });
 
+test("runtime overview alerts once per unavailable harness and never for a disabled one", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-harnesses-"));
+  const options = (harnesses: ("codex" | "claude")[]) =>
+    new StandaloneService(
+      join(directory, harnesses.join("-")),
+      (_context, harness) => {
+        if (harness === "claude") throw new Error("Claude unavailable");
+        return { ...runtime };
+      },
+      undefined,
+      { runtimeHarnesses: harnesses },
+    );
+  const disabled = options(["codex"]),
+    failed = options(["codex", "claude"]);
+  t.after(async () => {
+    await disabled.stop();
+    await failed.stop();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  await disabled.start();
+  await failed.start();
+  const read = async (service: StandaloneService) => {
+    const route = runtimeOperatorRoutes(service).find(
+      (candidate) =>
+        candidate.method === "GET" && candidate.path === "/runtime",
+    );
+    const page = await route?.handler({
+      params: {},
+      fields: {},
+      csrfToken: "test-token",
+    });
+    return page?.kind === "html" ? page.body : "";
+  };
+  assert.doesNotMatch(await read(disabled), /runtime unavailable/);
+  const body = await read(failed);
+  assert.match(
+    body,
+    /<p role="alert">Claude runtime unavailable — restart the service<\/p>/,
+  );
+  assert.doesNotMatch(body, /Codex runtime unavailable/);
+});
+
 test("runtime details distinguish selected, queued, and running assignments across projects", async (t) => {
   const directory = mkdtempSync(
     join(tmpdir(), "ensemble-runtime-status-matrix-"),

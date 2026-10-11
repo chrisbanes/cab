@@ -1763,6 +1763,7 @@ export class OperatorApi {
           .map((p) => this.project(p, excluded)),
         profiles: this.profiles(excluded),
         runtime: this.service.runtimeStatus(),
+        harnesses: this.service.harnessStatuses(),
       },
       observedAt: Date.now(),
     });

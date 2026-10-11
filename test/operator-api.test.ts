@@ -10,7 +10,10 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { OperatorApi } from "../src/standalone/operator-api.js";
-import { createOperatorFixture } from "./fixtures/operator-web.js";
+import {
+  createOperatorFixture,
+  OperatorFixtureRuntime,
+} from "./fixtures/operator-web.js";
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -967,6 +970,7 @@ test("global labels exclude retained private revisions without any task or proje
   const isolated = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
+    harnessStatuses: () => [],
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   assert.doesNotMatch(
     JSON.stringify(await isolated.readWorkspace()),
@@ -995,6 +999,7 @@ test("global snapshot privacy fails closed before excessive revision lookup work
   const api = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
+    harnessStatuses: () => [],
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   const read = await api.readWorkspace();
   assert.equal(read.data.profiles[0]?.name, null);
@@ -1551,4 +1556,38 @@ test("task reads report the persisted binding harness of each execution generati
     /Claude runtime is not configured/,
   );
   assert.equal(f.runtime.turns, 1);
+});
+
+test("workspace reads report every harness's status", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const read = await new OperatorApi(f.service, [f.directory]).readWorkspace();
+  assert.deepEqual(read.data.harnesses, [
+    { harness: "codex", state: "available" },
+    { harness: "claude", state: "not-configured" },
+  ]);
+  assert.deepEqual(read.data.runtime, { state: "available" });
+
+  const both = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) => {
+      if (harness === "claude") throw Error("Claude unavailable");
+      return new OperatorFixtureRuntime();
+    },
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => both.close());
+  const api = new OperatorApi(both.service, [both.directory]);
+  const [codex, claude] = (await api.readWorkspace()).data.harnesses;
+  assert.deepEqual(codex, { harness: "codex", state: "available" });
+  assert.equal(claude?.state, "unavailable");
+  assert.equal(typeof (claude as { since?: number }).since, "number");
+  both.runtime.crash();
+  assert.equal(
+    (await api.readWorkspace()).data.harnesses[0]?.state,
+    "unavailable",
+  );
 });

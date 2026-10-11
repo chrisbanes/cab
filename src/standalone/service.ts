@@ -131,8 +131,10 @@ import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
   defaultExecutionHarness,
   type ExecutionHarness,
+  executionHarnessLabels,
   executionHarnessSchema,
 } from "./execution-harness.js";
+import type { HarnessStatus } from "../operator/contracts.js";
 import {
   SchedulerStore,
   type TurnRequest,
@@ -243,10 +245,7 @@ const runtimeFailedError = (): never => {
 const runtimeKey = (harness: ExecutionHarness, identity: string) =>
   JSON.stringify([harness, identity]);
 
-const harnessLabel: Record<ExecutionHarness, string> = {
-  codex: "Codex",
-  claude: "Claude",
-};
+const harnessLabel = executionHarnessLabels;
 
 interface PromptPart {
   name:
@@ -1629,11 +1628,22 @@ export class StandaloneService {
   runtimeStatus():
     | { state: "available" }
     | { state: "unavailable"; since: number } {
-    // ponytail: reports the default harness only; per-harness status is C4.
     const since = this.runtimeUnavailableSince.get(defaultExecutionHarness);
     return since === undefined
       ? { state: "available" }
       : { state: "unavailable", since };
+  }
+
+  /** In-memory only, one per harness in `executionHarnessSchema` order. */
+  harnessStatuses(): HarnessStatus[] {
+    return executionHarnessSchema.options.map((harness) => {
+      if (!this.runtimeHarnesses.includes(harness))
+        return { harness, state: "not-configured" };
+      const since = this.runtimeUnavailableSince.get(harness);
+      return since === undefined
+        ? { harness, state: "available" }
+        : { harness, state: "unavailable", since };
+    });
   }
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
