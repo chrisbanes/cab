@@ -45,7 +45,11 @@ token variable; it never logs it. Every other spawn environment, including Codex
 omits the token and any nonempty exact-value alias of it, and a newly configured
 reference already inherited by a running runtime holds activation until restart,
 as for delivery credentials. Delivery credentials are likewise excluded from the
-Claude spawn environment. An invalid token fails the turn visibly. Operator setup,
+Claude spawn environment. Inside the Claude process, the runtime enables Claude
+Code's subprocess environment scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`) so
+Bash, hooks and stdio MCP children do not inherit the token; its effect is
+qualified before the harness is advertised, and any residual exposure is a
+disclosed limit. An invalid token fails the turn visibly. Operator setup,
 clearing and configured/available status belong to the harness UI
 ([#826](https://github.com/chrisbanes/ensemble/issues/826)).
 
