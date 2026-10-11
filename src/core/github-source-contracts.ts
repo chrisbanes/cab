@@ -61,6 +61,19 @@ export const repositoryLinkSchema = z
   })
   .strict();
 
+/** Setup-only: a repository link with the GitHub identity its checkout's origin must match. */
+export const setupRepositorySchema = repositoryLinkSchema.extend({
+  owner: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/),
+  name: z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/),
+  path: z.string().trim().min(1).max(4096),
+  // Never an option to git, and no whitespace or control characters.
+  ref: z
+    .string()
+    .min(1)
+    .max(255)
+    .regex(/^[^-\s\p{Cc}][^\s\p{Cc}]*$/u),
+});
+
 /** Command-only: keep a saved selection by id without re-sending its private definition. */
 export const selectionKeepSchema = z
   .object({ id: nonempty, keep: z.literal(true) })

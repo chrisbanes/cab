@@ -22,6 +22,11 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
         : result.projectOverrides[id] === limit,
     );
   }
+  if (c.type === "discovery.configure")
+    return (
+      result.commandType === "discovery.configure" &&
+      result.configured === (c.credentialRef !== null)
+    );
   const resource =
     "profileId" in c
       ? c.profileId

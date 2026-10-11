@@ -3,6 +3,7 @@ import {
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
   readinessSchema,
+  setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
   questionAnswersSchema,
@@ -1777,6 +1778,21 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("project.create"),
       name: z.string().trim().min(1).max(512),
       leadProfileId: uuid.nullable(),
+      instructions: text.optional(),
+      repositories: z
+        .array(setupRepositorySchema)
+        .max(20)
+        .refine(
+          (values) =>
+            new Set(values.map((value) => value.repositoryId)).size ===
+            values.length,
+          "Repository IDs must be unique",
+        )
+        .optional(),
+      githubProject: z
+        .object({ projectNodeId: z.string().trim().min(1).max(512) })
+        .strict()
+        .optional(),
     })
     .strict(),
   z
@@ -1847,6 +1863,16 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("capacity.configure"),
       globalLimit: revision,
       projectOverrides: z.record(uuid, revision.nullable()),
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("discovery.configure"),
+      credentialRef: z
+        .string()
+        .regex(/^env:[A-Z][A-Z0-9_]*$/)
+        .nullable(),
     })
     .strict(),
   z
@@ -1960,6 +1986,13 @@ export const configurationReceiptSchema = z
           globalLimit: revision,
           defaultProjectLimit: z.literal(2),
           projectOverrides: z.record(uuid, revision),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("discovery.configure"),
+          resourceId: z.literal("system:discovery"),
+          configured: z.boolean(),
         })
         .strict(),
       z
@@ -2450,3 +2483,127 @@ export type WorkspaceComparisonRead = z.infer<
 export type TaskRead = z.infer<typeof taskSchema>;
 export type Execution = z.infer<typeof executionSchema>;
 export type Session = z.infer<typeof sessionSchema>;
+
+const githubSegment = z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/);
+/** Installation discovery credential: whether a reference is set and has a value. Never the name. */
+export const discoveryStatusSchema = envelope(
+  z.object({ configured: z.boolean(), available: z.boolean() }).strict(),
+);
+export const discoveryUnavailableReasons = [
+  "unconfigured",
+  "missing-credential",
+  "unauthorized",
+  "forbidden",
+  "rate-limited",
+  "unreadable",
+] as const;
+const discoveryUnavailable = z
+  .object({
+    state: z.literal("unavailable"),
+    reason: z.enum(discoveryUnavailableReasons),
+  })
+  .strict();
+const discoveryRead = <T extends z.ZodRawShape>(shape: T) =>
+  envelope(
+    z.discriminatedUnion("state", [
+      z
+        .object({ state: z.literal("ready"), truncated: z.boolean(), ...shape })
+        .strict(),
+      discoveryUnavailable,
+    ]),
+  );
+export const discoveredRepositorySchema = z
+  .object({
+    repositoryId: z.string().min(1).max(512),
+    owner: githubSegment,
+    name: githubSegment,
+    defaultBranch: z.string().min(1).max(255),
+  })
+  .strict();
+export const discoveryRepositoriesSchema = discoveryRead({
+  repositories: z.array(discoveredRepositorySchema).max(1000),
+});
+export const discoveryBranchesSchema = discoveryRead({
+  branches: z.array(z.string().min(1).max(255)).max(500),
+});
+const discoveredProjectSchema = z
+  .object({
+    projectNodeId: z.string().min(1).max(512),
+    title: z.string().max(512),
+    number: revision,
+  })
+  .strict();
+export const discoveryProjectsSchema = discoveryRead({
+  ownerLogin: githubSegment,
+  linked: z.array(discoveredProjectSchema).max(100),
+  owned: z.array(discoveredProjectSchema).max(100),
+});
+export const folderListRequestSchema = z
+  .object({ path: z.string().min(1).max(4096) })
+  .strict();
+export const folderListingSchema = envelope(
+  z
+    .object({
+      /** Home-relative (`~` or `~/…`); never an absolute path. */
+      path: z.string().min(1).max(4096),
+      parent: z.string().min(1).max(4096).nullable(),
+      entries: z
+        .array(
+          z
+            .object({
+              name: z.string().min(1).max(255),
+              kind: z.enum(["folder", "git"]),
+              /** `owner/name` of a `github.com` origin, else null. */
+              origin: z.string().max(201).nullable(),
+              branch: z.string().max(255).nullable(),
+            })
+            .strict(),
+        )
+        .max(200),
+      truncated: z.boolean(),
+    })
+    .strict(),
+);
+export const repositoryVerificationReasons = [
+  "path-invalid",
+  "not-checkout",
+  "origin-missing",
+  "origin-provider",
+  "origin-mismatch",
+  "ref-unavailable",
+  "unreadable",
+] as const;
+export const checkoutVerifyRequestSchema = z
+  .object({
+    path: z.string().trim().min(1).max(4096),
+    repository: z
+      .object({ owner: githubSegment, name: githubSegment })
+      .strict(),
+    ref: setupRepositorySchema.shape.ref,
+  })
+  .strict();
+export const checkoutVerificationSchema = envelope(
+  z.discriminatedUnion("state", [
+    z
+      .object({
+        state: z.literal("verified"),
+        origin: z.string().max(201),
+        branch: z.string().max(255).nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        state: z.literal("rejected"),
+        reason: z.enum(repositoryVerificationReasons),
+        origin: z.string().max(201).nullable(),
+      })
+      .strict(),
+  ]),
+);
+export type DiscoveryUnavailableReason =
+  (typeof discoveryUnavailableReasons)[number];
+export type RepositoryVerificationReason =
+  (typeof repositoryVerificationReasons)[number];
+export type DiscoveredRepository = z.infer<typeof discoveredRepositorySchema>;
+export type FolderListing = z.infer<typeof folderListingSchema>;
+export type CheckoutVerification = z.infer<typeof checkoutVerificationSchema>;
