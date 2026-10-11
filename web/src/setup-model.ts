@@ -194,3 +194,18 @@ export function pickerStart(path: string) {
     ? parts.slice(0, -1).join("/") || "~"
     : "~";
 }
+
+/** The chosen Project only when the current ready list shows it; otherwise nothing is linked. */
+export function listedProject(
+  id: string,
+  list: {
+    linked: readonly { projectNodeId: string }[];
+    owned: readonly { projectNodeId: string }[];
+  } | null,
+) {
+  return id &&
+    list &&
+    [...list.linked, ...list.owned].some((p) => p.projectNodeId === id)
+    ? id
+    : "";
+}

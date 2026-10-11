@@ -513,8 +513,26 @@ test("Setup submitted with Enter records a typed listed repository by node ID", 
   await page.getByLabel("Local repository path").fill("~/src/atlas");
   const typed = page.getByLabel("Repository (owner/name)");
   await typed.fill("Acme/Atlas");
-  const sent = commandRequest(page);
+  // A blank Ref is shown as blank, so the command never invents one: nothing is sent.
+  let sentCount = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sentCount++;
+  });
   await typed.press("Enter");
+  await page.getByText("Check the highlighted fields.").waitFor();
+  assert.equal(sentCount, 0);
+  // The rejection moves focus to the invalid Ref, so the typed field's blur adopts the
+  // listed repository and visibly fills its default branch.
+  await page.getByLabel("Repository", { exact: true }).waitFor();
+  await page.waitForFunction(
+    () =>
+      (document.activeElement as HTMLInputElement | null)?.getAttribute(
+        "aria-label",
+      ) === "Ref" &&
+      (document.activeElement as HTMLInputElement).value === "main",
+  );
+  const sent = commandRequest(page);
+  await page.getByLabel("Ref", { exact: true }).press("Enter");
   const body = (await sent).postDataJSON() as {
     repositories: { repositoryId: string; ref: string }[];
   };
@@ -581,4 +599,23 @@ test("Setup lists GitHub Projects linked to every chosen repository once", async
     JSON.stringify(options),
   );
   assert.ok(options.includes("Atlas roadmap · linked to acme/atlas"));
+});
+
+test("Setup keeps a revoked lead visible instead of sending a hidden one", async (_t, journey) => {
+  const { f, page, profiles } = await setupJourney(journey);
+  const lead = page.getByLabel("Lead profile", { exact: true });
+  await lead.selectOption({ label: "Mira" });
+  f.service.domain().execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: crypto.randomUUID(),
+    profileId: profiles.Mira,
+    expectedVersion: 1,
+    revoked: true,
+  } as never);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await lead
+    .locator("option:checked", { hasText: "Lead profile unavailable" })
+    .waitFor({ state: "attached" });
+  assert.equal(await lead.inputValue(), profiles.Mira);
 });

@@ -10,6 +10,7 @@ import {
   duplicateRows,
   emptyRow,
   folderCaption,
+  listedProject,
   parseTypedRepository,
   pickerStart,
   rowsFromDraft,
@@ -231,4 +232,17 @@ test("setup headers follow the first-run and settings frames", () => {
     ),
     ["Settings", "Projects", "Create project"],
   );
+});
+
+test("a Project is sent only while the current list shows it", () => {
+  const list = {
+    linked: [{ projectNodeId: "PVT_atlas" }],
+    owned: [{ projectNodeId: "PVT_web" }],
+  };
+  assert.equal(listedProject("PVT_atlas", list), "PVT_atlas");
+  assert.equal(listedProject("PVT_web", list), "PVT_web");
+  // Loading, unavailable or a changed list: the control shows nothing, so nothing is sent.
+  assert.equal(listedProject("PVT_atlas", null), "");
+  assert.equal(listedProject("PVT_gone", list), "");
+  assert.equal(listedProject("", list), "");
 });

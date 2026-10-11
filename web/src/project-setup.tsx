@@ -24,6 +24,7 @@ import {
   discoveryReasonCopy,
   duplicateRows,
   emptyRow,
+  listedProject,
   rowsFromDraft,
   rowsToDraft,
   type SetupRow,
@@ -225,7 +226,7 @@ export function ProjectSetup(p: SettingsProps) {
   };
 
   /** A typed row naming a listed repository takes its node ID; a blank typed row rejoins the list. */
-  const adoptListed = (r: SetupRow): SetupRow => {
+  const adoptListed = (r: SetupRow, fillRef = true): SetupRow => {
     if (!ready || r.source !== "typed") return r;
     if (blankRow(r)) return { ...r, source: "discovered" };
     const match = r.owner
@@ -243,7 +244,8 @@ export function ProjectSetup(p: SettingsProps) {
           owner: match.owner,
           name: match.name,
           // An empty typed ref takes the listed default branch the Ref list shows.
-          ref: r.ref.trim() ? r.ref : match.defaultBranch,
+          // On screen an empty ref shows the listed default branch; the command never invents one.
+          ref: r.ref.trim() || !fillRef ? r.ref : match.defaultBranch,
         }
       : r;
   };
@@ -251,7 +253,7 @@ export function ProjectSetup(p: SettingsProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: adopt only when a repository list lands.
   useEffect(() => {
     if (!ready || locked(d)) return;
-    const next = rows.map(adoptListed);
+    const next = rows.map((r) => adoptListed(r));
     if (next.every((r, i) => r === rows[i])) return;
     // Adopted rows are edits: the service's earlier row errors no longer apply.
     d.clearErrors("repositories.");
@@ -271,8 +273,9 @@ export function ProjectSetup(p: SettingsProps) {
   // Submitting with Enter skips the field's blur, so listed typed rows are adopted here too.
   const { command, rowIndex } = buildProjectCreate(
     values,
-    rows.map(adoptListed),
-    projectKey ? chosenProject : "",
+    rows.map((r) => adoptListed(r, false)),
+    // Only a Project the current list shows can be sent; the control is empty otherwise.
+    listedProject(chosenProject, projectList),
   );
   const fieldError = (i: number, ...fields: string[]) => {
     const k = rowIndex.indexOf(i);
@@ -325,6 +328,13 @@ export function ProjectSetup(p: SettingsProps) {
                       {r.name ?? "Name unavailable"}
                     </option>
                   ))}
+                  {/* A chosen lead revoked since keeps a visible option; create then rejects it. */}
+                  {values.leadProfileId &&
+                    !profiles.some((r) => r.id === values.leadProfileId) && (
+                      <option value={values.leadProfileId}>
+                        Lead profile unavailable
+                      </option>
+                    )}
                 </DraftField>
                 {profiles.length === 0 && (
                   <p className="metadata muted">
@@ -619,6 +629,7 @@ export function ProjectSetup(p: SettingsProps) {
                               update(i, { ...row, ref: e.target.value })
                             }
                           >
+                            {!row.ref && <option value="">Choose a ref</option>}
                             {[
                               ...new Set([
                                 chosen?.defaultBranch ?? row.ref,
