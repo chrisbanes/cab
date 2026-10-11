@@ -325,3 +325,42 @@ test("an assignment conversation keeps the harness that started it", () => {
     f.close();
   }
 });
+
+test("binding a turn never adopts another harness's earlier terminal evidence", () => {
+  const f = coordinationFixture();
+  try {
+    const assignment = f.domain.assignment(childB);
+    const id = randomUUID();
+    f.db
+      .prepare(
+        "INSERT INTO execution_intents (id, workId, prompt, workspace, state, reason, threadId, turnId, accountType, sandbox, approval) " +
+          "VALUES (?, 'work-late-turn', 'work', '/tmp/work', 'submitting', NULL, 'thread-late', NULL, 'chatgpt', 'workspaceWrite', 'never')",
+      )
+      .run(id);
+    f.state.bindTask("work-late-turn", {
+      taskId: String(assignment.taskId),
+      assignmentId: childB,
+      assignmentVersion: Number(assignment.version),
+      instructionsRevision: Number(assignment.instructionsRevision),
+      profileRevision: Number(assignment.profileRevision),
+    });
+    f.state.recordRuntimeTerminal(
+      {
+        threadId: "thread-late",
+        turnId: "turn-late",
+        status: "completed",
+        runtimeGeneration: "claude-generation",
+      },
+      "claude",
+    );
+    assert.equal(f.state.bindTurn(id, "turn-late"), true);
+    const evidence = f.db
+      .prepare(
+        "SELECT workId, conflicted FROM runtime_terminal_evidence WHERE threadId = 'thread-late'",
+      )
+      .get() as { workId: string | null; conflicted: number };
+    assert.deepEqual({ ...evidence }, { workId: null, conflicted: 1 });
+  } finally {
+    f.close();
+  }
+});

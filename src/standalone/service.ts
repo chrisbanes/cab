@@ -491,21 +491,17 @@ export class StandaloneService {
         return evidence;
       };
       // Checked before any write, so a foreign identity leaves no side effect.
-      const ownIdentity = (
-        harness: ExecutionHarness,
-        threadId: string,
-        turnId?: string,
-      ) => {
+      const ownIdentity = (harness: ExecutionHarness, threadId: string) => {
         if (
           state
-            .runtimeIdentityHarnesses(threadId, turnId)
+            .runtimeIdentityHarnesses(threadId)
             .some((bound) => bound !== harness)
         )
           throw new Error("Runtime evidence belongs to another harness");
       };
       const runtimeSafety = (harness: ExecutionHarness): RuntimeSafetyPort => ({
         recordTerminal: (input) => {
-          ownIdentity(harness, input.threadId, input.turnId);
+          ownIdentity(harness, input.threadId);
           return state.recordRuntimeTerminal(input, harness);
         },
         terminal: (threadId, turnId, runtimeGeneration) =>
