@@ -13,6 +13,7 @@ import { capacityWriteCommands } from "./configure-capacity.js";
 import { profileWriteCommands } from "./configure-profile.js";
 import { projectWriteCommands } from "./configure-project.js";
 import { routingWriteCommands } from "./configure-routing.js";
+import { deliveryBrowseCommands, deliveryWriteCommands } from "./delivery.js";
 import { operationCommands } from "./operation.js";
 import { sourceBrowseCommands, sourceWriteCommands } from "./source.js";
 import { taskControlCommands } from "./task-control.js";
@@ -28,6 +29,7 @@ export const browseCommands = new Map<string, BrowseCommand>([
   ["logs", logsCommand],
   ...attentionBrowseCommands,
   ...sourceBrowseCommands,
+  ...deliveryBrowseCommands,
 ]);
 
 /** Configuration, adoption and receipt commands, keyed "area action". */
@@ -42,4 +44,5 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...attentionWriteCommands,
   ...taskControlCommands,
   ...sourceWriteCommands,
+  ...deliveryWriteCommands,
 ]);

@@ -87,6 +87,8 @@ export function scriptedDeliveryProvider() {
     sourceWait: undefined as Promise<void> | undefined,
     commentWrites: 0,
     unknownComment: false,
+    /** The comment is created but its response is lost. */
+    lostComment: false,
     comments: [] as Array<{
       node_id: string;
       user: { node_id: string };
@@ -120,6 +122,7 @@ export function scriptedDeliveryProvider() {
         user: { node_id: "U1" },
         body: JSON.parse(String(init?.body)).body,
       });
+      if (state.lostComment) throw Error("scripted lost comment response");
       return Response.json({ id: state.commentWrites });
     }
     if (route === "POST /graphql") {

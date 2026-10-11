@@ -17,18 +17,21 @@ import {
 } from "../../src/standalone/operator.js";
 import { harness } from "./cli-harness.js";
 import { createOperatorFixture } from "./operator-web.js";
+import { createReleaseDeliveryFixture } from "./s07b-delivery.js";
 
 type After = { after(fn: () => unknown): void };
+
+type ServeOptions = {
+  authOrigin?: string;
+  controlPaths?: string[];
+  previewReader?: ConstructorParameters<typeof OperatorApi>[3];
+};
+type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 
 /** A real operator service with the bearer path, a signed-in browser session and one task. */
 export async function startCliService(
   t: After,
-  options: {
-    authOrigin?: string;
-    controlPaths?: string[];
-    service?: StandaloneServiceOptions;
-    previewReader?: ConstructorParameters<typeof OperatorApi>[3];
-  } = {},
+  options: ServeOptions & { service?: StandaloneServiceOptions } = {},
 ) {
   const f = await createOperatorFixture(
     null,
@@ -39,6 +42,36 @@ export async function startCliService(
     options.service,
   );
   t.after(() => f.close());
+  const served = await serveCli(t, f, options);
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "CLI project",
+    leadProfileId: null,
+  });
+  const r = await served.sessionPost("/api/operator/commands", {
+    type: "task.create",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Inspect me",
+    outcome: "Readable through the CLI",
+    ready: false,
+  });
+  if (r.status !== 200) throw Error(`task create failed ${r.status}`);
+  return Object.assign(served, { projectId, taskId });
+}
+
+/** Serves an existing operator fixture over HTTP with the bearer path and a signed-in session. */
+export async function serveCli<F extends Fixture>(
+  t: After,
+  f: F,
+  options: ServeOptions = {},
+) {
   const bundlePath = join(f.directory, "bundle");
   await mkdir(join(bundlePath, "assets"), { recursive: true });
   await writeFile(
@@ -124,26 +157,6 @@ export async function startCliService(
     });
   const sessionGet = (path: string) =>
     fetch(`${origin}${path}`, { headers: { cookie } });
-  const projectId = randomUUID(),
-    taskId = randomUUID();
-  f.service.domain().execute({
-    type: "project.create",
-    key: randomUUID(),
-    actor: "operator",
-    projectId,
-    name: "CLI project",
-    leadProfileId: null,
-  });
-  r = await sessionPost("/api/operator/commands", {
-    type: "task.create",
-    key: randomUUID(),
-    projectId,
-    taskId,
-    title: "Inspect me",
-    outcome: "Readable through the CLI",
-    ready: false,
-  });
-  if (r.status !== 200) throw Error(`task create failed ${r.status}`);
   const issue = async (
     scope: "read" | "read-write",
     name = `cli-${scope}`,
@@ -189,8 +202,6 @@ export async function startCliService(
     port,
     origin,
     authOrigin,
-    projectId,
-    taskId,
     get cookie() {
       return cookie;
     },
@@ -211,6 +222,14 @@ export async function startCliOperator(
     service: { supervisor: { observationMs: 50 } },
     ...options,
   });
+  return { ...(await loginCli(t, s)), d: s.f.service.domain() };
+}
+
+/** A CLI harness logged in to a served fixture as `ro` (read) and `rw` (read-write). */
+export async function loginCli<S extends Awaited<ReturnType<typeof serveCli>>>(
+  t: After,
+  s: S,
+) {
   const h = harness(t);
   for (const [name, scope] of [
     ["ro", "read"],
@@ -247,5 +266,57 @@ export async function startCliOperator(
     writeFileSync(path, text);
     return path;
   };
-  return { s, h, cli, lostReply, file, d: s.f.service.domain() };
+  return { s, h, cli, lostReply, file };
+}
+
+/** The release fixture served to the CLI, with an issue.comment grant in `mode`. */
+export async function deliveryWorld(
+  t: After,
+  mode: "allow" | "approval" | null = "allow",
+  localTask = false,
+) {
+  const f = await createReleaseDeliveryFixture("reviewable-pr", {}, localTask);
+  t.after(() => f.close());
+  const grant = (next: "allow" | "approval" | null) =>
+    f.service.domain().execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: f.service.delivery().configuration(f.projectId).version,
+      mode: "reviewable-pr",
+      credentialRef: null,
+      grants: [
+        { action: "pr.merge", repositoryId: "R1", mode: "allow" },
+        ...(next
+          ? [
+              {
+                action: "issue.comment" as const,
+                repositoryId: "R1",
+                mode: next,
+              },
+            ]
+          : []),
+      ],
+      requiredChecks: [{ name: "build", appId: 17 }],
+    });
+  grant(mode);
+  const s = await serveCli(t, f);
+  const o = await loginCli(t, s);
+  const ok = async (connection: "ro" | "rw", args: string[], extra = {}) => {
+    const r = await o.cli(connection, args, extra);
+    if (r.code !== 0)
+      throw Error(`${args.join(" ")}: ${r.code} ${r.err}${r.out}`);
+    // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
+    return r.json() as Record<string, any>;
+  };
+  const task = async () =>
+    (
+      (await (
+        await s.sessionGet(`/api/operator/tasks/${f.taskId}`)
+      )
+      // biome-ignore lint/suspicious/noExplicitAny: task reads are asserted structurally
+        .json()) as { data: Record<string, any> }
+    ).data;
+  return { ...o, f, scripted: f.scripted.state, grant, ok, task };
 }
