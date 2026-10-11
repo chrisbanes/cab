@@ -524,12 +524,17 @@ test("Setup clears a row's folder and ref when its repository is removed", async
   await page.getByLabel("Project name", { exact: true }).fill("Cleared");
   await chooseRepository(page, "acme/atlas");
   await page.getByLabel("Local repository path").fill("~/src/atlas");
-  // Changing the repository keeps the folder and takes the new default branch.
+  // Changing the repository keeps the folder and checks it against the new repository.
   await chooseRepository(page, "acme/relay");
   assert.equal(
     await page.getByLabel("Local repository path").inputValue(),
     "~/src/atlas",
   );
+  await page
+    .getByText(
+      "This folder is a checkout of acme/atlas, not acme/relay. Choose another folder or change the repository.",
+    )
+    .waitFor();
   // No repository clears the row: nothing hidden reaches the command.
   await page
     .getByLabel("Repository", { exact: true })

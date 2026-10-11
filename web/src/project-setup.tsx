@@ -250,6 +250,8 @@ export function ProjectSetup(p: SettingsProps) {
     if (!ready || locked(d)) return;
     const next = rows.map(adoptListed);
     if (next.every((r, i) => r === rows[i])) return;
+    // Adopted rows are edits: the service's earlier row errors no longer apply.
+    d.clearErrors("repositories.");
     setRows(next);
     next.forEach((row, i) => {
       if (row !== rows[i] && repoOf(row)) verify(row);
@@ -511,8 +513,9 @@ export function ProjectSetup(p: SettingsProps) {
                               });
                               return;
                             }
-                            // Another repository keeps the folder (frame 116: "change the repository").
-                            update(i, {
+                            // Another repository keeps the folder (frame 116: "change the repository")
+                            // and checks it again against the new repository.
+                            const next: SetupRow = {
                               ...row,
                               source: "discovered",
                               text: "",
@@ -520,7 +523,9 @@ export function ProjectSetup(p: SettingsProps) {
                               owner: r.owner,
                               name: r.name,
                               ref: r.defaultBranch,
-                            });
+                            };
+                            update(i, next);
+                            verify(next);
                           }}
                         >
                           <option value="">
