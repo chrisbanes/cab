@@ -131,6 +131,15 @@ export function ProjectSetup(p: SettingsProps) {
   });
   const chosenProject = String(d.values.githubProject ?? "");
   const projectChoiceTouched = useRef("");
+  // A Project choice belongs to the repository it was listed for: a new one starts at None.
+  const listedFor = useRef(projectKey);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the Project repository changes.
+  useEffect(() => {
+    if (listedFor.current === projectKey || locked(d)) return;
+    listedFor.current = projectKey;
+    projectChoiceTouched.current = "";
+    d.set("githubProject", "");
+  }, [projectKey]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-read when the repository or session changes.
   useEffect(() => {
     if (!projectKey) return;
@@ -255,9 +264,10 @@ export function ProjectSetup(p: SettingsProps) {
   const update = (i: number, row: SetupRow) => {
     // Editing a row retires the service's error for it; the next create checks again.
     const k = rowIndex.indexOf(i);
-    if (k >= 0)
-      for (const field of Object.keys(d.errors))
-        if (field.startsWith(`repositories.${k}.`)) delete d.errors[field];
+    // A row becoming blank or filled shifts the indices of the rows after it.
+    if (blankRow(rows[i] ?? row) !== blankRow(row))
+      d.clearErrors("repositories.");
+    else if (k >= 0) d.clearErrors(`repositories.${k}.`);
     setRows(rows.map((r, j) => (j === i ? row : r)));
   };
   const recorded = d.phase === "recorded" ? d.frozen : null;
@@ -453,10 +463,6 @@ export function ProjectSetup(p: SettingsProps) {
                             const r = ready?.repositories.find(
                               (x) => x.repositoryId === e.target.value,
                             );
-                            if (i === 0) {
-                              projectChoiceTouched.current = "";
-                              d.set("githubProject", "");
-                            }
                             update(i, {
                               ...row,
                               source: "discovered",
@@ -534,17 +540,21 @@ export function ProjectSetup(p: SettingsProps) {
                             }
                           >
                             {[
-                              chosen?.defaultBranch ?? row.ref,
-                              ...branchList.branches.filter(
-                                (n) => n !== (chosen?.defaultBranch ?? row.ref),
-                              ),
-                            ].map((n) => (
-                              <option key={n} value={n}>
-                                {n === chosen?.defaultBranch
-                                  ? `${n} · default branch`
-                                  : n}
-                              </option>
-                            ))}
+                              ...new Set([
+                                chosen?.defaultBranch ?? row.ref,
+                                // A typed or adopted ref outside the listed branches stays visible.
+                                row.ref,
+                                ...branchList.branches,
+                              ]),
+                            ]
+                              .filter(Boolean)
+                              .map((n) => (
+                                <option key={n} value={n}>
+                                  {n === chosen?.defaultBranch
+                                    ? `${n} · default branch`
+                                    : n}
+                                </option>
+                              ))}
                           </NativeSelect>
                         ) : (
                           <Input
@@ -617,7 +627,11 @@ export function ProjectSetup(p: SettingsProps) {
                       type="button"
                       variant="secondary"
                       disabled={disabled}
-                      onClick={() => setRows(rows.filter((_, j) => j !== i))}
+                      onClick={() => {
+                        // Row indices shift, so the service's row errors no longer apply.
+                        d.clearErrors("repositories.");
+                        setRows(rows.filter((_, j) => j !== i));
+                      }}
                     >
                       Remove repository {i + 1}
                     </Button>

@@ -52,6 +52,15 @@ const commandSchema = z.discriminatedUnion("type", [
             values.length,
           "Repository IDs must be unique",
         )
+        .refine(
+          (values) =>
+            new Set(
+              values.map((value) =>
+                `${value.owner}/${value.name}`.toLowerCase(),
+              ),
+            ).size === values.length,
+          "Repositories must be unique",
+        )
         .optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
     })

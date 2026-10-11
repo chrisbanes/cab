@@ -207,7 +207,14 @@ export async function verifiedRepository(
     ref = (
       await execFileAsync(
         "git",
-        ["-C", path, "rev-parse", "--verify", input.ref],
+        // Setup requires the ref to name a commit; configured links keep their check.
+        [
+          "-C",
+          path,
+          "rev-parse",
+          "--verify",
+          expectedOrigin ? `${input.ref}^{commit}` : input.ref,
+        ],
         { encoding: "utf8", timeout: 5000 },
       )
     ).stdout.trim();

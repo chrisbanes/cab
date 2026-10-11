@@ -88,6 +88,19 @@ test("Setup creates a paused project from discovered repositories and Projects",
     await page.getByLabel("GitHub Project", { exact: true }).inputValue(),
     "PVT_atlas",
   );
+  // A Project choice belongs to its repository: another repository starts at None.
+  await chooseRepository(page, "acme/relay");
+  await page.getByText("0 GitHub Projects linked to acme/relay").waitFor();
+  assert.equal(
+    await page.getByLabel("GitHub Project", { exact: true }).inputValue(),
+    "",
+  );
+  await chooseRepository(page, "acme/atlas");
+  await page.getByText("Found automatically: 1 GitHub Project").waitFor();
+  assert.equal(
+    await page.getByLabel("GitHub Project", { exact: true }).inputValue(),
+    "PVT_atlas",
+  );
   await captureBrowserEvidence(page, "1366-setup-discovered");
   const sent = commandRequest(page);
   await page

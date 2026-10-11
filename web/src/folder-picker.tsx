@@ -20,11 +20,13 @@ type Listing =
   | { state: "failed"; message: string };
 
 const failure = (error: unknown) =>
-  error instanceof ClientError && (error.status === 403 || error.status === 400)
-    ? "Folders outside your home folder can't be browsed. Type a path instead."
-    : error instanceof ClientError && error.status === 404
-      ? "This folder doesn't exist. Type a path instead."
-      : "Folders couldn't be listed. Type a path instead.";
+  error instanceof ClientError && error.status === 400
+    ? "Enter a folder as ~/… without . or .. segments."
+    : error instanceof ClientError && error.status === 403
+      ? "Folders outside your home folder can't be browsed. Type a path instead."
+      : error instanceof ClientError && error.status === 404
+        ? "This folder doesn't exist. Type a path instead."
+        : "Folders couldn't be listed. Type a path instead.";
 
 /** Frame 131: the service lists subfolders of the operator's home folder; nothing is granted. */
 export function FolderPicker({

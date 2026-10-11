@@ -190,6 +190,8 @@ test("origin and ref checks report one field, keep nothing and never echo creden
     ["src/atlas", "main", "repositories.0.path"],
     ["~/src/missing", "main", "repositories.0.path"],
     ["~/src/atlas", "nope", "repositories.0.ref"],
+    // A ref must name a commit, not a blob.
+    ["~/src/atlas", "main:README.md", "repositories.0.ref"],
   ] as const)
     await assert.rejects(
       api.execute(create({ repositories: [atlas(path, ref)] })),
@@ -200,6 +202,22 @@ test("origin and ref checks report one field, keep nothing and never echo creden
         !e.message.includes("SECRETPASS"),
       path,
     );
+  // One repository twice under a typed and a discovered identity is invalid input.
+  await assert.rejects(
+    api.execute(
+      create({
+        repositories: [
+          atlas("~/src/atlas"),
+          {
+            ...atlas("~/src/atlas"),
+            repositoryId: "github.com/acme/atlas",
+            owner: "Acme",
+          },
+        ],
+      }),
+    ),
+    (e) => String(e).includes("Repositories must be unique"),
+  );
   // All-or-nothing: the second row fails, nothing is recorded.
   await assert.rejects(
     api.execute(
