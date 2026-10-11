@@ -1,48 +1,50 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { isDeepStrictEqual } from "node:util";
+import {
+  type ChildProcessWithoutNullStreams,
+  execFile,
+  spawn,
+} from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import { readFile } from "node:fs/promises";
+import { delimiter, isAbsolute, join } from "node:path";
+import { createInterface } from "node:readline";
+import { isDeepStrictEqual, promisify } from "node:util";
+import { z } from "zod";
 import {
   boundedQuestionPayload,
   structuredAnswerDigest,
 } from "../core/structured-questions.js";
-import { createHash, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import type { ExecutionHarness } from "./execution-harness.js";
 import {
   encodeNativeInputReply,
+  type NativeInputEndpointIdentity,
+  type NativeInputProtocolQualification,
+  type NativeInputReply,
   nativeEndpointKey,
-  parseNativeInputRequest,
-  nativeInputRequestSchema,
   nativeInputEndpointIdentitySchema,
   nativeInputQualificationSchema,
-  type NativeInputEndpointIdentity,
-  type NativeInputReply,
-  type NativeInputProtocolQualification,
+  nativeInputRequestSchema,
+  parseNativeInputRequest,
   type RuntimeReplyIntent,
   type RuntimeUserInputOutcome,
   type RuntimeUserInputRequest,
 } from "./native-input.js";
-import { EventEmitter } from "node:events";
-import { createInterface } from "node:readline";
-import { z } from "zod";
-import type { ExecutionHarness } from "./execution-harness.js";
+import {
+  ArchivedResumeRejectedError,
+  archivedResumeRejectionSchema,
+} from "./pre-turn-recovery.js";
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
   RuntimeProcessIdentity,
 } from "./recovery-types.js";
-import { captureProcessIdentity } from "./termination.js";
-import {
-  ArchivedResumeRejectedError,
-  archivedResumeRejectionSchema,
-} from "./pre-turn-recovery.js";
 import type {
   RuntimeSafetyPort,
   RuntimeTerminalEvidence,
   RuntimeTerminalFailureEvidence,
   RuntimeThreadQualification,
 } from "./runtime-retention.js";
+import { captureProcessIdentity } from "./termination.js";
 
 const rpc = z.object({
   id: z.union([z.string(), z.number()]).optional(),

@@ -1,15 +1,16 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { OperatorApi } from "./operator-api.js";
-import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
-import {
-  StandaloneService,
-  type BackgroundFailureDiagnostic,
-} from "./service.js";
+import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { LocalOperatorHttp, LocalOperatorUi } from "./operator.js";
+import { OperatorApi } from "./operator-api.js";
 import { OperatorAuth } from "./operator-auth.js";
 import { coordinationOperatorRoutes } from "./operator-coordination.js";
 import { OperatorRouteRegistry } from "./operator-routes.js";
 import { runtimeOperatorRoutes } from "./operator-runtime.js";
+import { OperatorWebBoundary, OperatorWebBundle } from "./operator-web.js";
+import {
+  type BackgroundFailureDiagnostic,
+  StandaloneService,
+} from "./service.js";
 
 export type ServiceExitReason = "signal" | "background-failure";
 
@@ -54,7 +55,10 @@ export async function waitForServiceExit(
 export async function main(
   commandLine = process.argv.slice(2),
   serviceFactory: (dataDir: string) => StandaloneService = (dataDir) =>
-    new StandaloneService(dataDir),
+    // Invalid retention variables fail startup rather than using defaults.
+    new StandaloneService(dataDir, undefined, undefined, {
+      diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
+    }),
 ): Promise<void> {
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)

@@ -4,14 +4,17 @@ import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  credentialFreeEnvironment,
+  setChildCredentialExclusions,
+} from "../core/child-environment.js";
+import {
   type CoordinationCall,
   type CoordinationReceipt,
-  type CoordinationToolResponse,
   CoordinationStore,
+  type CoordinationToolResponse,
   type InboxDelivery,
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
-import { reviewMetadataSchema } from "../core/task-review.js";
 import {
   canonicalMaterial,
   type DeliveryActionRecord,
@@ -34,22 +37,19 @@ import {
   verifiedRepository,
 } from "../core/github-source.js";
 import { Store } from "../core/store.js";
-import { OperatorApi } from "./operator-api.js";
+import { reviewMetadataSchema } from "../core/task-review.js";
+import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import {
   CodexRuntime,
   parseFailureEvidence,
   type Runtime,
   type RuntimeConversationEvent,
+  type RuntimeDiagnosticEvent,
   type RuntimeToolCall,
   type RuntimeToolResult,
   type RuntimeTurnSettings,
 } from "./codex.js";
-import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
-import {
-  managedAssignmentEnvironment,
-  OperatorCredentialStore,
-} from "./operator-credentials.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
   ConversationHistoryCapture,
@@ -60,14 +60,6 @@ import {
   dispatchCoordinationTool,
   isCoordinationTool,
 } from "./coordination-tools.js";
-import {
-  captureRetainedReviewAnchor,
-  captureRetainedResultEvidence,
-  failedRetainedResultEvidenceCandidate,
-  retainedReviewAnchorMaterialHash,
-  retainedReviewAnchorStageRequestSchema,
-  type RetainedReviewAnchorStageRequest,
-} from "./retained-evidence.js";
 import { CoordinationView } from "./coordination-view.js";
 import {
   STANDALONE_MARKER_CONTENTS,
@@ -75,9 +67,16 @@ import {
 } from "./data-directory.js";
 import { DeliveryCoordinator } from "./delivery.js";
 import {
-  credentialFreeEnvironment,
-  setChildCredentialExclusions,
-} from "../core/child-environment.js";
+  type DiagnosticKind,
+  type DiagnosticLimits,
+  ExecutionDiagnosticsCapture,
+  ExecutionDiagnosticsStore,
+} from "./execution-diagnostics.js";
+import {
+  defaultExecutionHarness,
+  type ExecutionHarness,
+  executionHarnessSchema,
+} from "./execution-harness.js";
 import type { GitHubDeliveryProvider } from "./github-delivery.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
@@ -87,6 +86,11 @@ import {
   type RuntimeUserInputOutcome,
   type RuntimeUserInputRequest,
 } from "./native-input.js";
+import { OperatorApi } from "./operator-api.js";
+import {
+  managedAssignmentEnvironment,
+  OperatorCredentialStore,
+} from "./operator-credentials.js";
 import {
   CaffeinateAssertion,
   ExecutionPower,
@@ -109,6 +113,14 @@ import type {
   TerminationVerifier,
 } from "./recovery-types.js";
 import {
+  captureRetainedResultEvidence,
+  captureRetainedReviewAnchor,
+  failedRetainedResultEvidenceCandidate,
+  type RetainedReviewAnchorStageRequest,
+  retainedReviewAnchorMaterialHash,
+  retainedReviewAnchorStageRequestSchema,
+} from "./retained-evidence.js";
+import {
   RoutingAttemptStore,
   type RoutingChoiceClient,
   RoutingCoordinator,
@@ -121,11 +133,6 @@ import {
 } from "./routing.js";
 import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
-  defaultExecutionHarness,
-  type ExecutionHarness,
-  executionHarnessSchema,
-} from "./execution-harness.js";
-import {
   SchedulerStore,
   type TurnRequest,
   TurnScheduler,
@@ -134,10 +141,10 @@ import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
   ExecutionState,
+  harnessRetrySupported,
   type TaskExecutionBinding,
   type TaskExecutionBindingRecord,
   type TaskExecutionContext,
-  harnessRetrySupported,
 } from "./state.js";
 import {
   ExecutionSupervisor,
@@ -238,6 +245,40 @@ const harnessLabel: Record<ExecutionHarness, string> = {
   claude: "Claude",
 };
 
+interface PromptPart {
+  name:
+    | "request"
+    | "role"
+    | "review-references"
+    | "project-instructions"
+    | "profile-instructions";
+  text: string;
+  revision?: number;
+}
+
+const serviceItem = (
+  name: string,
+  severity: string,
+  payload: Record<string, unknown>,
+) => ({
+  turnId: undefined,
+  kind: "service" as DiagnosticKind,
+  name,
+  severity,
+  itemId: undefined,
+  payload,
+});
+
+/** Both lists or none: either missing fails closed to redaction-unavailable. */
+const unionExclusions = (
+  start: readonly string[] | undefined,
+  current: readonly string[] | undefined,
+) => (start && current ? [...new Set([...start, ...current])] : undefined);
+
+/** The exact submitted prompt; captured segments cannot drift from it. */
+const joinPromptParts = (parts: readonly PromptPart[]) =>
+  parts.map((part) => part.text).join("\n\n");
+
 export interface StandaloneServiceOptions {
   /** Harnesses whose runtime this service starts; must include the default. */
   runtimeHarnesses?: readonly ExecutionHarness[];
@@ -267,6 +308,12 @@ export interface StandaloneServiceOptions {
     now?: () => number;
     fallbackBackoffMs?: number;
     maxFallbackBackoffMs?: number;
+  };
+  /** Execution diagnostic retention; `cli.ts` passes the environment limits. */
+  diagnostics?: {
+    limits?: Partial<DiagnosticLimits>;
+    pruneIntervalMs?: number;
+    now?: () => number;
   };
   /** Controlled fixtures may replace the bounded, redacted service diagnostic sink. */
   backgroundDiagnosticSink?: (
@@ -359,6 +406,13 @@ export class StandaloneService {
   /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
   private readonly detachedRuntimeStops = new Set<Promise<void>>();
   private conversationHistory: ConversationHistoryStore | undefined;
+  private diagnosticsStore: ExecutionDiagnosticsStore | undefined;
+  private diagnosticPruneTimer: NodeJS.Timeout | undefined;
+  /** Keyed like conversation captures; finished ones stay to count late events. */
+  private readonly diagnosticCaptures = new Map<
+    string,
+    ExecutionDiagnosticsCapture
+  >();
   private readonly conversationCaptures = new Map<
     string,
     ConversationHistoryCapture
@@ -457,6 +511,22 @@ export class StandaloneService {
       this.workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
       this.operatorCredentialStore = new OperatorCredentialStore(db);
       this.conversationHistory = new ConversationHistoryStore(db);
+      try {
+        const diagnostics = new ExecutionDiagnosticsStore(db, {
+          ...(this.options.diagnostics?.limits
+            ? { limits: this.options.diagnostics.limits }
+            : {}),
+          ...(this.options.diagnostics?.now
+            ? { now: this.options.diagnostics.now }
+            : {}),
+        });
+        diagnostics.reconcile();
+        diagnostics.closeOpen();
+        this.diagnosticsStore = diagnostics;
+      } catch {
+        // Diagnostics are additive; without the store executions run uncaptured.
+        this.diagnosticsStore = undefined;
+      }
       const domain = new DomainStore(db, () =>
         this.observeBackgroundFailure(generation, "domain-wake", () =>
           this.wakeScheduler(0, generation),
@@ -870,6 +940,16 @@ export class StandaloneService {
         );
       }, githubInterval);
       this.githubPollTimer.unref();
+      const diagnostics = this.diagnosticsStore;
+      if (diagnostics) {
+        // prune() catches its own failures; it never stops or holds anything.
+        void diagnostics.prune();
+        this.diagnosticPruneTimer = setInterval(
+          () => void diagnostics.prune(),
+          this.options.diagnostics?.pruneIntervalMs ?? 3_600_000,
+        );
+        this.diagnosticPruneTimer.unref();
+      }
     } catch (error) {
       generation.accepting = false;
       const scheduler = this.scheduler;
@@ -886,6 +966,9 @@ export class StandaloneService {
           if (this.powerPollTimer) clearInterval(this.powerPollTimer);
           if (this.githubPollTimer) clearInterval(this.githubPollTimer);
           this.githubPollTimer = undefined;
+          if (this.diagnosticPruneTimer)
+            clearInterval(this.diagnosticPruneTimer);
+          this.diagnosticPruneTimer = undefined;
           this.powerPollTimer = undefined;
           await this.power?.stop().catch(() => {});
           this.power = undefined;
@@ -1086,6 +1169,9 @@ export class StandaloneService {
           `Unexpected App Server request denied: ${request.method}`,
         );
         this.supervisor?.noteAnomaly(item.workId);
+        this.diagnosticServiceEvent(item.workId, "unexpected-request", "warn", {
+          method: request.method,
+        });
       }
     });
     runtime.onUserInputRequest?.((request) => {
@@ -1109,7 +1195,7 @@ export class StandaloneService {
             text: "Coordination call is not bound to current task work",
             success: false,
           })
-        : this.handleToolCall(call),
+        : this.observeToolCall(call, harness, this.handleToolCall(call)),
     );
     const generation = this.generation;
     runtime.onAdmissionChange?.(() => {
@@ -1121,6 +1207,12 @@ export class StandaloneService {
     runtime.onConversationEvent?.((event) => {
       if (acceptsNew() && !foreign(event.threadId, event.turnId))
         this.receiveConversationEvent(event, harness);
+    });
+    runtime.onDiagnosticEvent?.((event: RuntimeDiagnosticEvent) => {
+      if (acceptsNew() && !foreign(event.threadId, event.turnId))
+        this.diagnosticCaptures
+          .get(runtimeKey(harness, event.threadId))
+          ?.receive(event);
     });
     runtime.onTerminalAnomaly?.((anomaly) => {
       if (!acceptsNew()) return;
@@ -1135,6 +1227,9 @@ export class StandaloneService {
       for (const item of matched) {
         this.retractWriterAndSuccessors(item, anomaly.reason);
         this.supervisor?.noteAnomaly(item.workId);
+        this.diagnosticServiceEvent(item.workId, "terminal-anomaly", "warn", {
+          reason: anomaly.reason,
+        });
       }
     });
   }
@@ -1272,6 +1367,8 @@ export class StandaloneService {
     }
     if (this.githubPollTimer) clearInterval(this.githubPollTimer);
     this.githubPollTimer = undefined;
+    if (this.diagnosticPruneTimer) clearInterval(this.diagnosticPruneTimer);
+    this.diagnosticPruneTimer = undefined;
     if (this.powerPollTimer) clearInterval(this.powerPollTimer);
     this.powerPollTimer = undefined;
     try {
@@ -3645,14 +3742,15 @@ export class StandaloneService {
     return `${context}${brief}\n\nDurable assignment inbox through event ${delivery.highWaterSequence}:\n${events.join("\n")}`;
   }
 
-  private executionPrompt(request: TurnRequest): string {
+  /** The submitted prompt's Ensemble-supplied segments, in submission order. */
+  private executionPromptParts(request: TurnRequest): PromptPart[] {
     if (
       request.kind !== "assignment" ||
       request.taskId === null ||
       request.projectId === null ||
       request.assignmentId === null
     )
-      return request.prompt;
+      return [{ name: "request", text: request.prompt }];
 
     const state = this.requireState();
     const domain = this.domain();
@@ -3718,13 +3816,23 @@ export class StandaloneService {
         })
       : "Unavailable: no retained source capture for this work";
     return [
-      request.prompt,
-      roleContext,
-      `Captured review references (JSON): ${reviewReferences}`,
-
-      `Captured project instructions (revision ${binding.instructionsRevision}):\n${projectInstructions || "(none)"}`,
-      `Captured profile instructions (revision ${binding.profileRevision}):\n${profileInstructions || "(none)"}`,
-    ].join("\n\n");
+      { name: "request", text: request.prompt },
+      { name: "role", text: roleContext },
+      {
+        name: "review-references",
+        text: `Captured review references (JSON): ${reviewReferences}`,
+      },
+      {
+        name: "project-instructions",
+        revision: binding.instructionsRevision,
+        text: `Captured project instructions (revision ${binding.instructionsRevision}):\n${projectInstructions || "(none)"}`,
+      },
+      {
+        name: "profile-instructions",
+        revision: binding.profileRevision,
+        text: `Captured profile instructions (revision ${binding.profileRevision}):\n${profileInstructions || "(none)"}`,
+      },
+    ];
   }
 
   private async attemptRequest(
@@ -4087,6 +4195,7 @@ export class StandaloneService {
     let captureThreadId: string | undefined;
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
     let conversationCapture: ConversationHistoryCapture | undefined;
+    let diagnostics: ExecutionDiagnosticsCapture | undefined;
     const comparisonStore = this.workspaceComparisons;
     if (
       comparisonStore &&
@@ -4174,22 +4283,32 @@ export class StandaloneService {
         runtimeKey(harness, threadId),
         threadId,
       );
+      diagnostics = this.beginDiagnosticCapture(
+        request,
+        intent,
+        workspace,
+        harness,
+        runtime,
+        threadId,
+      );
       submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
       const settings = this.turnSettings(request);
+      const promptParts = this.executionPromptParts(request);
+      const prompt = joinPromptParts(promptParts);
+      // Synchronous and caught: recorded before submission, never delaying it.
+      if (diagnostics)
+        this.recordDiagnosticInputs(
+          diagnostics,
+          request,
+          workspace,
+          promptParts,
+          prompt,
+        );
       const turnId = await guard(
         settings
-          ? runtime.startTurn(
-              threadId,
-              workspace,
-              this.executionPrompt(request),
-              settings,
-            )
-          : runtime.startTurn(
-              threadId,
-              workspace,
-              this.executionPrompt(request),
-            ),
+          ? runtime.startTurn(threadId, workspace, prompt, settings)
+          : runtime.startTurn(threadId, workspace, prompt),
       );
       const runtimeGeneration = runtime.currentUserInputGeneration?.();
       let turnBound = runtimeGeneration
@@ -4279,6 +4398,10 @@ export class StandaloneService {
       }
       if (!nativeRejected)
         this.requireSupervisor().turnBound(request.workId, threadId, turnId);
+      if (turnBound) {
+        diagnostics?.bind(turnId);
+        diagnostics?.add(serviceItem("turn-bound", "info", { turnId }));
+      }
       if (!turnBound) {
         conversationCapture?.discard();
         if (conversationCapture)
@@ -4316,6 +4439,7 @@ export class StandaloneService {
       if (exactBinding) conversationCapture?.bind(exactBinding);
       else conversationCapture?.discard();
       const outcome = await guard(runtime.waitForTurn(threadId, turnId));
+      diagnostics?.add(serviceItem("terminal-observed", "info", { outcome }));
       conversationCapture?.finish();
       if (conversationCapture)
         this.removeConversationCapture(
@@ -4502,6 +4626,21 @@ export class StandaloneService {
             conversationCapture,
           );
       }
+      if (diagnostics) {
+        try {
+          const settled = state.get(intent.id);
+          diagnostics.add(
+            serviceItem(
+              "execution-settled",
+              settled.state === "completed" ? "info" : "warn",
+              { state: settled.state, reason: settled.reason },
+            ),
+          );
+        } catch {
+          // Display only; the settled state stays authoritative in its own table.
+        }
+        diagnostics.finish();
+      }
     }
     return state.get(intent.id);
   }
@@ -4539,6 +4678,258 @@ export class StandaloneService {
     }
   }
 
+  /** Diagnostic store for operator reads; undefined until started or when unavailable. */
+  executionDiagnostics(): ExecutionDiagnosticsStore | undefined {
+    return this.diagnosticsStore;
+  }
+
+  /**
+   * Starts capture for a task-bound execution once its thread is bound. Baseline
+   * projects get an execution row and a `capture-baseline` gap only. Never throws.
+   */
+  private beginDiagnosticCapture(
+    request: TurnRequest,
+    intent: ExecutionIntent,
+    workspace: string,
+    harness: ExecutionHarness,
+    runtime: Runtime,
+    threadId: string,
+  ): ExecutionDiagnosticsCapture | undefined {
+    try {
+      const store = this.diagnosticsStore;
+      const binding = this.state?.taskBinding(request.workId);
+      if (!store || !binding || !request.projectId) return undefined;
+      const domain = this.domain();
+      const mode = domain.diagnosticCaptureMode(request.projectId);
+      store.begin({
+        workId: request.workId,
+        taskId: binding.taskId,
+        projectId: request.projectId,
+        assignmentId: binding.assignmentId,
+        assignmentVersion: binding.assignmentVersion,
+        instructionsRevision: binding.instructionsRevision,
+        profileRevision: binding.profileRevision,
+        conversationRevision: binding.conversationRevision,
+        harness,
+        mode,
+        eventSource: runtime.onDiagnosticEvent ? "supported" : "unsupported",
+      });
+      store.bindThread(request.workId, threadId);
+      if (mode === "baseline") {
+        store.gap(request.workId, "capture-baseline");
+        store.finish(request.workId);
+        return undefined;
+      }
+      const start = this.conversationExclusions(binding, workspace, true);
+      const capture = new ExecutionDiagnosticsCapture({
+        store,
+        workId: request.workId,
+        threadId,
+        exclusions: () =>
+          unionExclusions(
+            start,
+            this.conversationExclusions(binding, workspace, false),
+          ),
+      });
+      const key = runtimeKey(harness, threadId);
+      this.diagnosticCaptures.delete(key);
+      this.diagnosticCaptures.set(key, capture);
+      for (const old of this.diagnosticCaptures.keys()) {
+        if (this.diagnosticCaptures.size <= 128) break;
+        this.diagnosticCaptures.delete(old);
+      }
+      capture.add(serviceItem("thread-bound", "info", { threadId }));
+      capture.add({
+        turnId: undefined,
+        kind: "setting",
+        name: "settings",
+        severity: "info",
+        itemId: undefined,
+        payload: {
+          entries: this.diagnosticSettings(
+            request,
+            intent,
+            harness,
+            runtime,
+            threadId,
+          ),
+        },
+      });
+      return capture;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private diagnosticSettings(
+    request: TurnRequest,
+    intent: ExecutionIntent,
+    harness: ExecutionHarness,
+    runtime: Runtime,
+    threadId: string,
+  ) {
+    const admitted = (name: string, value: unknown) => ({
+      name,
+      value,
+      source: "service-admitted",
+    });
+    const entries = [
+      admitted("harness", harness),
+      admitted("sandbox", intent.sandbox),
+      admitted("approval", intent.approval),
+      admitted("accountType", intent.accountType),
+    ];
+    try {
+      const domain = this.domain();
+      if (request.assignmentId && request.profileRevision !== null) {
+        const configured = domain.profileRuntime(
+          String(domain.assignment(request.assignmentId).profileId),
+          request.profileRevision,
+        );
+        if (configured.harness === "claude")
+          entries.push(
+            admitted("profile.model", configured.model),
+            admitted("profile.reasoningEffort", configured.reasoningEffort),
+          );
+      }
+    } catch {
+      // A missing profile revision leaves only the intent's settings.
+    }
+    let observed: Record<string, unknown> | undefined;
+    try {
+      observed = runtime.observedSettings?.(threadId) as
+        | Record<string, unknown>
+        | undefined;
+    } catch {
+      observed = undefined;
+    }
+    for (const name of [
+      "model",
+      "modelProvider",
+      "reasoningEffort",
+      "serviceTier",
+    ])
+      entries.push(
+        observed && name in observed
+          ? { name, value: observed[name], source: "runtime-reported" }
+          : { name, value: null, source: "unknown" },
+      );
+    return entries;
+  }
+
+  /**
+   * Records each supplied segment and the submitted size and digest. Instruction
+   * segments keep the execution's own profile and project instruction texts
+   * readable; every other value stays redacted.
+   */
+  private recordDiagnosticInputs(
+    capture: ExecutionDiagnosticsCapture,
+    request: TurnRequest,
+    workspace: string,
+    parts: readonly PromptPart[],
+    prompt: string,
+  ): void {
+    try {
+      const binding = this.requireState().taskBinding(request.workId);
+      if (!binding) throw new Error("Execution binding unavailable");
+      const general = unionExclusions(
+        this.conversationExclusions(binding, workspace, true),
+        this.conversationExclusions(binding, workspace, false),
+      );
+      const domain = this.domain();
+      const assignment = domain.assignment(binding.assignmentId);
+      const projectId = String(assignment.projectId),
+        profileId = String(assignment.profileId);
+      const own = new Set([
+        String(
+          domain.profileRevision(profileId, binding.profileRevision)
+            .instructions ?? "",
+        ),
+        String(domain.profile(profileId).instructions ?? ""),
+        domain.instructionRevision(projectId, binding.instructionsRevision),
+        domain.instructionRevision(
+          projectId,
+          Number(domain.project(projectId).instructionsRevision),
+        ),
+      ]);
+      const disclosing = general?.filter((value) => !own.has(value));
+      for (const part of parts)
+        capture.recordNow(
+          "input",
+          part.name,
+          {
+            text: part.text,
+            ...(part.revision === undefined ? {} : { revision: part.revision }),
+          },
+          part.name.endsWith("-instructions") ? disclosing : general,
+        );
+      capture.recordNow(
+        "input",
+        "submitted",
+        {
+          bytes: Buffer.byteLength(prompt, "utf8"),
+          sha256: createHash("sha256").update(prompt).digest("hex"),
+        },
+        [],
+      );
+      capture.add(
+        serviceItem("input-captured", "info", { segments: parts.length }),
+      );
+    } catch {
+      capture.gap("input-failed");
+    }
+  }
+
+  /** Returns the listener's own result or rejection untouched. */
+  private observeToolCall(
+    call: RuntimeToolCall,
+    harness: ExecutionHarness,
+    result: Promise<RuntimeToolResult>,
+  ): Promise<RuntimeToolResult> {
+    const record = (payload: Record<string, unknown>, severity: string) => {
+      try {
+        this.diagnosticCaptures.get(runtimeKey(harness, call.threadId))?.add({
+          turnId: call.turnId,
+          kind: "tool",
+          name: call.tool,
+          severity,
+          itemId: call.callId,
+          payload: { arguments: call.arguments, ...payload },
+        });
+      } catch {
+        // Diagnostics never change the tool response.
+      }
+    };
+    return result.then(
+      (value) => {
+        record(
+          { success: value.success, result: value.text },
+          value.success ? "info" : "warn",
+        );
+        return value;
+      },
+      (error: unknown) => {
+        record({ success: false, error: "rejected" }, "error");
+        throw error;
+      },
+    );
+  }
+
+  private diagnosticServiceEvent(
+    workId: string,
+    name: string,
+    severity: string,
+    payload: Record<string, unknown>,
+  ): void {
+    try {
+      for (const capture of this.diagnosticCaptures.values())
+        if (capture.workId === workId)
+          capture.add(serviceItem(name, severity, payload));
+    } catch {
+      // Diagnostics never change anomaly handling.
+    }
+  }
+
   private safeConversationHistoryBinding(
     state: ExecutionState,
     workId: string,
@@ -4572,6 +4963,8 @@ export class StandaloneService {
   private clearConversationCaptures(): void {
     for (const capture of this.conversationCaptures.values()) capture.discard();
     this.conversationCaptures.clear();
+    // Unfinished rows are marked interrupted by closeOpen at the next start.
+    this.diagnosticCaptures.clear();
   }
 
   private conversationExclusions(

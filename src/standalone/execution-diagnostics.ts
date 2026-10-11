@@ -1,4 +1,5 @@
-import { transaction, type Database } from "../core/store.js";
+import { type Database, transaction } from "../core/store.js";
+import type { RuntimeDiagnosticEvent } from "./codex.js";
 import { sanitizeConversationText } from "./conversation-history.js";
 
 export type DiagnosticKind =
@@ -691,6 +692,162 @@ export class ExecutionDiagnosticsStore {
         // The store itself is unavailable; the counter above is the only signal.
       }
     }
+  }
+}
+
+type Exclusions = () => readonly string[] | undefined;
+
+interface PendingItem {
+  turnId: string | undefined;
+  kind: DiagnosticKind;
+  name: string;
+  severity: string;
+  itemId: string | undefined;
+  payload: unknown;
+}
+
+const maxBufferedItems = 256;
+const maxBufferedBytes = mib;
+
+/** Severity of a runtime event: failures and non-zero exits warn. */
+function runtimeSeverity(event: RuntimeDiagnosticEvent): string {
+  if (event.kind === "turn")
+    return event.status === "completed" ? "info" : "warn";
+  if (typeof event.exitCode === "number" && event.exitCode !== 0) return "warn";
+  return event.status === "failed" || event.status === "declined"
+    ? "warn"
+    : "info";
+}
+
+/**
+ * Per-thread capture for one execution, like `ConversationHistoryCapture`: turn-bound
+ * events buffer until the turn binds, wrong-turn events are dropped and events
+ * after `finish` add a coalesced `late-event` gap. Never throws.
+ */
+export class ExecutionDiagnosticsCapture {
+  private turnId: string | undefined;
+  private closed = false;
+  private buffered: PendingItem[] = [];
+  private bufferedBytes = 0;
+  private overflowed = false;
+
+  constructor(
+    private readonly options: {
+      store: ExecutionDiagnosticsStore;
+      workId: string;
+      threadId: string;
+      /** The general set: every instruction text stays redacted. */
+      exclusions: Exclusions;
+    },
+  ) {}
+
+  get workId() {
+    return this.options.workId;
+  }
+
+  receive(event: RuntimeDiagnosticEvent): void {
+    if (event.threadId !== this.options.threadId) return;
+    const { kind: _kind, threadId: _thread, turnId, ...detail } = event;
+    this.add({
+      turnId,
+      kind: "runtime",
+      name:
+        event.kind === "turn"
+          ? "turn/completed"
+          : `${event.itemType}/${event.phase}`,
+      severity: runtimeSeverity(event),
+      itemId: event.kind === "item" ? event.itemId : undefined,
+      payload: detail,
+    });
+  }
+
+  /** A coordination tool call or service event; `turnId` binds it to the turn. */
+  add(item: PendingItem): void {
+    try {
+      if (this.closed) {
+        this.options.store.gap(this.options.workId, "late-event");
+        return;
+      }
+      if (item.turnId !== undefined && this.turnId === undefined) {
+        if (this.overflowed) return;
+        const bytes = Buffer.byteLength(JSON.stringify(item.payload) ?? "");
+        if (
+          this.buffered.length >= maxBufferedItems ||
+          this.bufferedBytes + bytes > maxBufferedBytes
+        ) {
+          this.buffered = [];
+          this.bufferedBytes = 0;
+          this.overflowed = true;
+          this.options.store.gap(this.options.workId, "early-buffer-limit");
+          return;
+        }
+        this.buffered.push(item);
+        this.bufferedBytes += bytes;
+        return;
+      }
+      if (item.turnId !== undefined && item.turnId !== this.turnId) return;
+      this.persist(item);
+    } catch {
+      // Diagnostics never change execution control.
+    }
+  }
+
+  /** Records immediately with explicit exclusions; used for input segments. */
+  recordNow(
+    kind: DiagnosticKind,
+    name: string,
+    payload: unknown,
+    exclusions: readonly string[] | undefined,
+  ): void {
+    if (this.closed) return;
+    this.options.store.record(
+      this.options.workId,
+      kind,
+      name,
+      "info",
+      undefined,
+      payload,
+      exclusions,
+    );
+  }
+
+  gap(code: DiagnosticGapCode): void {
+    this.options.store.gap(this.options.workId, code);
+  }
+
+  bind(turnId: string): void {
+    if (this.closed || this.turnId !== undefined) return;
+    this.turnId = turnId;
+    this.options.store.bindTurn(this.options.workId, turnId);
+    const buffered = this.buffered;
+    this.buffered = [];
+    this.bufferedBytes = 0;
+    for (const item of buffered) if (item.turnId === turnId) this.persist(item);
+  }
+
+  finish(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.buffered = [];
+    this.options.store.finish(this.options.workId);
+  }
+
+  private persist(item: PendingItem) {
+    let exclusions: readonly string[] | undefined;
+    try {
+      exclusions = this.options.exclusions();
+    } catch {
+      exclusions = undefined;
+    }
+    this.options.store.record(
+      this.options.workId,
+      item.kind,
+      item.name,
+      item.severity,
+      item.itemId,
+      item.payload,
+      exclusions,
+    );
   }
 }
 

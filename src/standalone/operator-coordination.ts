@@ -1,17 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import type { CoordinationTaskView } from "./coordination-view.js";
-import type { CoordinationView } from "./coordination-view.js";
 import type { DomainStore } from "../core/domain.js";
-import type { OperatorRoute } from "./operator-routes.js";
-import type { RoutingAvailability } from "./service.js";
 import type {
   ConversationHistoryAssignmentRead,
   ConversationHistoryBinding,
   ConversationHistoryEntry,
   ConversationHistoryTurnOmission,
 } from "./conversation-history.js";
+import type {
+  CoordinationTaskView,
+  CoordinationView,
+} from "./coordination-view.js";
 import { escapeHtml, hidden } from "./operator-html.js";
+import type { OperatorRoute } from "./operator-routes.js";
+import type { RoutingAvailability } from "./service.js";
 
 const uuid = z.string().uuid();
 const positiveInteger = z

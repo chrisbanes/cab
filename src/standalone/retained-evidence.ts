@@ -1,17 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
+import { z } from "zod";
 import { materialDigest } from "../core/delivery.js";
-import type { ReviewMetadata } from "../core/task-review.js";
 import {
   emptyRetainedEvidenceCandidate,
-  retainedEvidenceLimits,
-  type RetainedEvidenceStore,
   type RetainedEvidenceCandidate,
   type RetainedEvidenceIdentity,
   type RetainedEvidenceItemInput,
-  type RetainedReviewAnchorCandidate,
   type RetainedEvidenceSourceObservation,
+  type RetainedEvidenceStore,
+  type RetainedReviewAnchorCandidate,
+  retainedEvidenceLimits,
 } from "../core/retained-evidence.js";
+import type { ReviewMetadata } from "../core/task-review.js";
 import { isDisclosable } from "./conversation-history.js";
 import type {
   WorkspaceComparisonEntry,
@@ -23,12 +24,11 @@ import {
   isWithin,
   previewWorkspaceFile,
   privateSegmentsExcluded,
-  workspaceInspectionPathExcluded,
   type WorkspaceInspectionCurrent,
   type WorkspaceInspectionScope,
+  workspaceInspectionPathExcluded,
 } from "./workspace-inspection.js";
 import type { TaskWorkspaceBinding } from "./workspaces.js";
-import { z } from "zod";
 
 const reviewAnchorSelectionSchema = z
   .object({

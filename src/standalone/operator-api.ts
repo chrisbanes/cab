@@ -8,11 +8,19 @@ import type {
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
+import { materialDigest } from "../core/delivery.js";
 import {
   DomainCommands,
   DomainConflictError,
   DomainPolicyError,
 } from "../core/domain.js";
+import {
+  LocalReviewAnchorRequiredError,
+  LocalReviewBatchTooLargeError,
+  LocalReviewRecipientUnavailableError,
+  type LocalReviewRequest,
+  type LocalReviewSyncIdentity,
+} from "../core/local-review.js";
 import {
   nativeQuestionForm,
   type QuestionAnswers,
@@ -21,48 +29,48 @@ import {
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
+  assignmentDetailSchema,
   assignmentHistorySchema,
+  assignmentInstructionsSchema,
   assignmentRecoverySchema,
   checkoutVerificationSchema,
   checkoutVerifyRequestSchema,
   commandReceiptSchema,
+  composerOptionsSchema,
+  configurationImpactSchema,
+  deliveryReadSchema,
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
   discoveryStatusSchema,
+  type Execution,
   folderListingSchema,
   folderListRequestSchema,
-  composerOptionsSchema,
-  deliveryReadSchema,
-  type Execution,
   type InboxItem,
   inboxReadSchema,
+  instructionProvenance,
   materialSchema,
-  operatorCommandSchema,
-  configurationImpactSchema,
   operationReadSchema,
   operationScopeSchema,
   operationTypeSchema,
+  operatorCommandSchema,
   profileConfigurationSchema,
+  profileInstructionsSchema,
   projectConfigurationSchema,
+  projectInstructionsSchema,
   projectSchema,
   questionReadSchema,
   recoveryObservationSchema,
-  reviewReadSchema,
-  runtimeSettingsSchema,
   retainedEvidenceItemContentReadSchema,
   retainedResultEvidenceReadSchema,
   retainedReviewAnchorReadSchema,
+  reviewReadSchema,
+  runtimeSettingsSchema,
   searchQuerySchema,
   searchReadSchema,
   sourceObservationSchema,
   taskListPageSchema,
   taskListQuerySchema,
-  assignmentDetailSchema,
-  assignmentInstructionsSchema,
-  instructionProvenance,
-  profileInstructionsSchema,
-  projectInstructionsSchema,
   taskMessagePageSchema,
   taskRecordQuerySchema,
   taskResultPageSchema,
@@ -81,14 +89,16 @@ import {
 } from "./conversation-history.js";
 import type { CoordinationView } from "./coordination-view.js";
 import {
-  GitHubHttpSourceReader,
-  type GitHubSourceReader,
-} from "./github-source.js";
-import {
   DiscoveryFailure,
   type DiscoveryReader,
   GitHubDiscoveryReader,
 } from "./github-discovery.js";
+import {
+  GitHubHttpSourceReader,
+  type GitHubSourceReader,
+} from "./github-source.js";
+import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
+import { selectAssignmentExecution } from "./operator-runtime.js";
 import {
   FolderAccessError,
   listHomeFolders,
@@ -96,19 +106,9 @@ import {
   resolveHomePath,
   verifyCheckout,
 } from "./operator-setup.js";
-import { selectAssignmentExecution } from "./operator-runtime.js";
-import type { StandaloneService } from "./service.js";
 import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
-import { materialDigest } from "../core/delivery.js";
-import {
-  LocalReviewAnchorRequiredError,
-  LocalReviewBatchTooLargeError,
-  LocalReviewRecipientUnavailableError,
-  type LocalReviewRequest,
-  type LocalReviewSyncIdentity,
-} from "../core/local-review.js";
+import type { StandaloneService } from "./service.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
-import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   compareRepository,
   type WorkspaceComparisonSideContent,
@@ -120,11 +120,11 @@ import {
   previewRetainedBytes,
   previewWorkspaceFile,
   retainedPathExcluded,
-  workspaceInspectionBindingIdentity,
   type WorkspaceInspectionCurrent,
   WorkspaceInspectionInputError,
   type WorkspaceInspectionPathReference,
   type WorkspaceInspectionRequest,
+  workspaceInspectionBindingIdentity,
   workspaceInspectionPathsExcluded,
 } from "./workspace-inspection.js";
 
@@ -262,12 +262,12 @@ function exactRetainedAnchorExcerpt(
   const range = retainedAnchorRange(source, anchor.startLine, anchor.endLine);
   return Boolean(
     range &&
-    range.byteStart === anchor.byteStart &&
-    range.byteEnd === anchor.byteEnd &&
-    range.bytes.equals(excerpt) &&
-    range.bytes.byteLength === anchor.size &&
-    createHash("sha256").update(range.bytes).digest("hex") ===
-      anchor.excerptSha256,
+      range.byteStart === anchor.byteStart &&
+      range.byteEnd === anchor.byteEnd &&
+      range.bytes.equals(excerpt) &&
+      range.bytes.byteLength === anchor.size &&
+      createHash("sha256").update(range.bytes).digest("hex") ===
+        anchor.excerptSha256,
   );
 }
 function retainedTextLineCount(text: string) {
@@ -636,10 +636,10 @@ export class OperatorApi {
   ) {
     return Boolean(
       current &&
-      current.taskId === initial.taskId &&
-      current.projectId === initial.projectId &&
-      current.taskVersion === initial.taskVersion &&
-      current.fingerprint === initial.fingerprint,
+        current.taskId === initial.taskId &&
+        current.projectId === initial.projectId &&
+        current.taskVersion === initial.taskVersion &&
+        current.fingerprint === initial.fingerprint,
     );
   }
   private async retainedPathUnavailable(

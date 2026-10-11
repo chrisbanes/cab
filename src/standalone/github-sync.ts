@@ -1,11 +1,11 @@
-import {
-  selectionSchema,
-  type GitHubSourceStore,
-} from "../core/github-source.js";
 import type { DomainStore } from "../core/domain.js";
 import {
-  GitHubHttpSourceReader,
+  type GitHubSourceStore,
+  selectionSchema,
+} from "../core/github-source.js";
+import {
   type BlockerSnapshot,
+  GitHubHttpSourceReader,
   type GitHubSourceReader,
   type IssueReference,
   type IssueSnapshot,

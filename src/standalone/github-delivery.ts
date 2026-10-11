@@ -1,15 +1,16 @@
-import { isOperatorDeliveryCaller } from "../core/delivery.js";
 import { z } from "zod";
-import { githubApi as api, githubFetch, nextPageLink } from "./github-http.js";
 import {
   actionObservationSchema,
-  prObservationSchema,
   type DeliveryActionRecord,
   type DeliveryPolicy,
   type ExternalAction,
+  isOperatorDeliveryCaller,
   type PrDeliveryObservation,
   type ProviderActionObservation,
+  prObservationSchema,
 } from "../core/delivery.js";
+import { githubApi as api, githubFetch, nextPageLink } from "./github-http.js";
+
 export type {
   PrDeliveryObservation,
   ProviderActionObservation,

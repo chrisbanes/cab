@@ -1,14 +1,9 @@
-import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import { EventEmitter } from "node:events";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { Runtime } from "./codex.js";
-import type {
-  ExecutionState,
-  RecoveryExecutionIdentity,
-  StopTarget,
-} from "./state.js";
+import { recoveryReceiptSchema } from "./pre-turn-recovery.js";
 import type {
   ExactExecutionIdentity,
   ExecutionInspection,
@@ -17,6 +12,11 @@ import type {
   TerminationVerification,
   TerminationVerifier,
 } from "./recovery-types.js";
+import type {
+  ExecutionState,
+  RecoveryExecutionIdentity,
+  StopTarget,
+} from "./state.js";
 import { MacProcessTerminationVerifier } from "./termination.js";
 
 export interface SupervisorClock {

@@ -6,13 +6,13 @@ import type {
   DomainCommand,
   DomainStore,
 } from "../core/domain.js";
+import { escapeHtml, hidden } from "./operator-html.js";
 import type { OperatorRoute } from "./operator-routes.js";
 import type { RecoveryRecord } from "./recovery-types.js";
 import type { TurnRequest } from "./scheduler.js";
-import type { ExecutionIntent } from "./state.js";
 import type { StandaloneService } from "./service.js";
+import type { ExecutionIntent } from "./state.js";
 import type { StopObservation } from "./supervisor.js";
-import { escapeHtml, hidden } from "./operator-html.js";
 
 const positiveIntegerString = z
   .string()
