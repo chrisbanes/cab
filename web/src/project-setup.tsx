@@ -263,9 +263,10 @@ export function ProjectSetup(p: SettingsProps) {
     instructions: String(d.values.instructions ?? ""),
   };
   // A Project can only be linked alongside a discovered repository.
+  // Submitting with Enter skips the field's blur, so listed typed rows are adopted here too.
   const { command, rowIndex } = buildProjectCreate(
     values,
-    rows,
+    rows.map(adoptListed),
     projectKey ? chosenProject : "",
   );
   const fieldError = (i: number, ...fields: string[]) => {
@@ -402,7 +403,9 @@ export function ProjectSetup(p: SettingsProps) {
             </p>
           </div>
           {(discovery.state === "unavailable" ||
-            Object.values(branches).some((b) => b.state === "unavailable") ||
+            discoveredRepos.some(
+              (repo) => branches[repo]?.state === "unavailable",
+            ) ||
             (projects.repo === projectKey &&
               projects.data.state === "unavailable")) && (
             <div className="setup-inline-actions">

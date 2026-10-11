@@ -498,3 +498,26 @@ test("Setup surfaces truncated discovery lists and allows typed entry", async (_
     "main",
   );
 });
+
+test("Setup submitted with Enter records a typed listed repository by node ID", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { truncated: true });
+  await page.getByLabel("Project name", { exact: true }).fill("Enter");
+  await page
+    .getByText("Discovered from GitHub · the first 3 repositories", {
+      exact: false,
+    })
+    .waitFor();
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption({ label: "Type a repository not listed…" });
+  await page.getByLabel("Local repository path").fill("~/src/atlas");
+  const typed = page.getByLabel("Repository (owner/name)");
+  await typed.fill("Acme/Atlas");
+  const sent = commandRequest(page);
+  await typed.press("Enter");
+  const body = (await sent).postDataJSON() as {
+    repositories: { repositoryId: string; ref: string }[];
+  };
+  assert.equal(body.repositories[0]?.repositoryId, "R_atlas");
+  assert.equal(body.repositories[0]?.ref, "main");
+});
