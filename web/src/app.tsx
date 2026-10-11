@@ -47,7 +47,7 @@ import { loadTaskList, taskRouteSubtitle } from "./tasks.js";
 import { TaskComposer } from "./task-composer.js";
 import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
 import { ConfigurationDrafts } from "./settings-state.js";
-import { ProjectSetup } from "./settings.js";
+import { ProjectSetup } from "./project-setup.js";
 import { SettingsWorkspace } from "./settings-index.js";
 import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
 import { ProjectConfiguration } from "./project-config.js";
@@ -659,7 +659,11 @@ export function App() {
         )
       : pathname === "/app/tasks/new"
         ? "Describe the result you want. The project lead stays accountable."
-        : undefined;
+        : pathname === "/app/settings/projects/new"
+          ? workspace.state.data?.data.projects.length === 0
+            ? "No projects yet. A project groups tasks with a lead, instructions and explicit repository access."
+            : "Three short steps. Saving creates a paused project; nothing runs until you resume it."
+          : undefined;
   // The Inbox route refreshes its own list (and so the count) when the workspace read changes.
   const refreshAll = () => {
     workspace.refresh();

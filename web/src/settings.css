@@ -324,6 +324,32 @@
   display: none;
 }
 
+/* Frame 114: the discovery credential row in the Projects panel. */
+.settings-discovery {
+  display: grid;
+  gap: var(--space-12);
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-lg);
+  background: var(--muted);
+}
+
+.settings-discovery-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-discovery-line p {
+  margin: 0;
+}
+
+.settings-discovery-form {
+  display: grid;
+  gap: var(--space-12);
+}
+
 @media (max-width: 1120px) {
   .page-header-trail {
     display: none;
