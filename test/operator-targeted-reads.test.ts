@@ -293,9 +293,10 @@ test("targeted selection and reads equal the retired full-history implementation
   assert.deepEqual(targeted, legacy);
   // The comparison is not vacuous: holds, recovery and the unbound record are present.
   const recovery = targeted[`recovery:${String(idle.id)}`] as {
-    data: { evidenceAvailable: boolean };
+    data: { evidenceAvailable: boolean; records: { workId: string }[] };
   };
-  assert.ok(recovery.data);
+  assert.equal(recovery.data.evidenceAvailable, true);
+  assert.ok(recovery.data.records.some((r) => r.workId === heldWork));
   const uncertain = targeted[`task:${ids.uncertain.id}`] as {
     data: { execution: { holds: Record<string, boolean> } };
   };
@@ -322,10 +323,25 @@ test("operator reads do not read unrelated history, below and above the global b
   };
   const size = () =>
     Math.max(f.service.turnRequests().length, f.service.recoveryView().length);
+  // Positive control: the counter sees a full-history read grow with orphans.
+  const legacyRows = async () => {
+    const restore = useLegacyReads(t, f.service);
+    try {
+      return (await counter.measure(() => api.readRuntimeSettings()))[1];
+    } finally {
+      restore();
+    }
+  };
+  const legacyBefore = await legacyRows();
   const zero = await measured();
   const room = 120 - size();
   assert.ok(room > 50, `room ${room}`);
   seedOrphanHistory(f, room);
+  const legacyAfter = await legacyRows();
+  assert.ok(
+    legacyAfter >= legacyBefore + room,
+    `legacy rows ${legacyBefore} -> ${legacyAfter}`,
+  );
   const regimeA = await measured();
   assert.deepEqual(regimeA.out, zero.out);
   for (const [key, rows] of Object.entries(regimeA.rows))
