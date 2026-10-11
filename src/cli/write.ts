@@ -91,6 +91,36 @@ export const optionalRequestId = (values: Values) =>
     : uuidArg(values["request-id"], "--request-id");
 
 /**
+ * The request key and the journal's view of it: `fixed`, else an explicit --request-id,
+ * else a journal key for the same material (only an unresolved one when `repeatable`),
+ * else a new one. `state` is that key's latest journal state before sending; `reached`
+ * means an earlier attempt with it may have applied, so pre-read gates must not block it.
+ */
+export async function requestKey(
+  ctx: WriteContext,
+  session: Session,
+  identity: { scope: string; type: string },
+  material: unknown[],
+  options: { repeatable?: boolean; fixed?: string } = {},
+) {
+  const service = session.identity.service.installationId;
+  const digest = createHash("sha256")
+    .update(
+      JSON.stringify([service, identity.scope, identity.type, ...material]),
+    )
+    .digest("hex");
+  const key =
+    options.fixed ??
+    optionalRequestId(ctx.values) ??
+    (await ctx.journal.find(service, digest, {
+      unresolved: options.repeatable === true,
+    })) ??
+    randomUUID();
+  const state = await ctx.journal.state({ service, ...identity, key });
+  return { key, digest, state, reached: state?.reached === true };
+}
+
+/**
  * The key for a repeatable intent (Stop, a message, an answer): an explicit --request-id,
  * else a journal key whose outcome is still unresolved, else a new one. `reused` means an
  * earlier attempt with this key may have applied, so pre-read gates must not block it.
@@ -101,21 +131,14 @@ export async function chooseKey(
   identity: { scope: string; type: string },
   material: unknown,
 ) {
-  const service = session.identity.service.installationId;
-  const digest = createHash("sha256")
-    .update(JSON.stringify([service, identity.scope, identity.type, material]))
-    .digest("hex");
-  const requested = optionalRequestId(ctx.values);
-  const found =
-    requested ??
-    (await ctx.journal.find(service, digest, { unresolved: true }));
-  const key = found ?? randomUUID();
-  const reused =
-    found !== undefined &&
-    (requested === undefined ||
-      (await ctx.journal.state({ service, ...identity, key }))?.reached ===
-        true);
-  return { key, digest, reused };
+  const { key, digest, reached } = await requestKey(
+    ctx,
+    session,
+    identity,
+    [material],
+    { repeatable: true },
+  );
+  return { key, digest, reused: reached };
 }
 
 export function reconcileHint(identity: RequestIdentity): string {

@@ -721,3 +721,111 @@ test("per-command matcher, retry hint and question size exception", async (t) =>
   assert.equal(sent, 1);
   assert.deepEqual(big.d.lines(), []);
 });
+
+test("delivery, comment-review and refresh receipts are matched exactly", async (t) => {
+  const taskId = randomUUID(),
+    other = randomUUID();
+  const send = (
+    type: string,
+    fetcher: typeof fetch,
+    match: (r: CommandReceipt) => boolean,
+  ) => {
+    const d = drive(t, "http://127.0.0.1:9", fetcher);
+    const ctx = {
+      journal: d.journal,
+      deps: { commandTimeoutMs: 200 } as CliDeps,
+    } as unknown as WriteContext;
+    const session = {
+      name: "home",
+      client: new ServiceClient("http://127.0.0.1:9", token, fetcher),
+      identity: { service: { installationId: service } },
+    } as unknown as Session;
+    return sendCommand(ctx, session, {
+      scope: `task:${taskId}`,
+      type,
+      key,
+      digest: "d",
+      resource: taskId,
+      command: { type, key, taskId },
+      match,
+    });
+  };
+  const delivery = {
+    kind: "delivery",
+    key,
+    recorded: true,
+    taskId,
+    operationId: key,
+    state: "confirmed-success",
+    reason: null,
+  };
+  const review = {
+    kind: "comment-review",
+    key,
+    recorded: true,
+    taskId,
+    reviewId: key,
+    operationId: key,
+    revision: 1,
+    materialHash: "a".repeat(64),
+    decision: "pending",
+    body: "Body",
+    target: { repositoryId: "R1", nodeId: "I1", number: 1 },
+    taskVersion: 1,
+    sourceId: randomUUID(),
+    sourceRevision: 1,
+    sourceDigest: "b".repeat(64),
+    policyVersion: 1,
+  };
+  const refresh = {
+    kind: "review",
+    key,
+    recorded: true,
+    taskId,
+    operation: "delivery.refresh",
+  };
+  const exact =
+    (kind: string) =>
+    (r: CommandReceipt): boolean =>
+      r.kind === kind &&
+      "taskId" in r &&
+      r.taskId === taskId &&
+      (!("operationId" in r) || r.operationId === key) &&
+      (!("reviewId" in r) || r.reviewId === key) &&
+      (!("operation" in r) || r.operation === "delivery.refresh");
+  for (const [type, receipt] of [
+    ["comment.send", delivery],
+    ["comment.review", review],
+    ["delivery.refresh", refresh],
+  ] as const) {
+    const ok = await send(type, respond(200, receipt), exact(receipt.kind));
+    assert.equal(ok.receipt.kind, receipt.kind);
+    for (const wrong of [
+      { ...receipt, key: randomUUID() },
+      { ...receipt, taskId: other },
+      ...("operationId" in receipt ? [{ ...receipt, operationId: other }] : []),
+      ...("reviewId" in receipt ? [{ ...receipt, reviewId: other }] : []),
+      ...("operation" in receipt
+        ? [{ ...receipt, operation: "review.view" }]
+        : []),
+    ])
+      await assert.rejects(
+        send(type, respond(200, wrong), exact(receipt.kind)),
+        (error: CliError) => {
+          assert.equal(error.code, "command-outcome-unknown", type);
+          assert.equal(error.extra.request?.key, key);
+          assert.match(error.message, new RegExp(`--request-id ${key}`));
+          assert.doesNotMatch(error.message, /operation get/);
+          return true;
+        },
+      );
+  }
+  // Source receipts are readable by operation get, so the hint names it.
+  await assert.rejects(
+    send("github.configure", thrown("ECONNRESET"), () => true),
+    (error: CliError) => {
+      assert.match(error.message, /operation get .* --type github.configure/);
+      return true;
+    },
+  );
+});

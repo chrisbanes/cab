@@ -2790,6 +2790,8 @@ export const cliCapabilities = [
   "task.write",
   "attention.read",
   "attention.write",
+  "source.write",
+  "delivery.write",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(
@@ -2842,6 +2844,8 @@ export const operationTypeSchema = z.enum([
   "routing.configure",
   "capacity.configure",
   "assignment.apply",
+  "github.configure",
+  "github.preview",
 ]);
 /** `project:<id>`, `profile:<id>` or `system:capacity`; nothing else is a readable scope. */
 export const operationScopeSchema = z

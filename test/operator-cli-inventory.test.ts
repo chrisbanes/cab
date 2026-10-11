@@ -37,6 +37,8 @@ const documented = [
   "inbox list",
   "question get",
   "approval get",
+  "project sources",
+  "delivery get",
 ];
 
 /** The documented CLI3 configuration, adoption and receipt commands. */
@@ -62,6 +64,13 @@ const documentedWrites = [
   "approval decide",
   "task stop",
   "task resume",
+  "project prepare-source",
+  "project preview-source",
+  "project place-task",
+  "delivery refresh",
+  "delivery review-comment",
+  "delivery confirm-comment",
+  "delivery send-comment",
 ];
 
 test("every documented browse command runs read-only with a coverage envelope", async (t) => {
@@ -118,6 +127,8 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "task.write",
     "attention.read",
     "attention.write",
+    "source.write",
+    "delivery.write",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;
@@ -125,6 +136,8 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "project list": [],
     "profile list": [],
     "project get": [projectId],
+    "project sources": [projectId],
+    "delivery get": [taskId],
     "profile get": [profileId],
     "task list": [],
     "task search": ["evidence", "--historical"],

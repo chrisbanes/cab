@@ -59,21 +59,38 @@ export function commandReceipt(
               version: Number(field("version")),
               revoked: Boolean(field("revoked")),
             }
-          : type === "routing.configure"
+          : type === "github.configure"
             ? {
                 commandType: type,
                 resourceId,
                 version: Number(field("version")),
-                enabled: Boolean(field("enabled")),
-                credentialConfigured: Boolean(field("credentialAvailable")),
+                credentialConfigured: field("credentialRef") !== null,
+                selectionCount: (field("selections") as unknown[]).length,
+                repositoryCount: (field("repositories") as unknown[]).length,
               }
-            : {
-                commandType: type,
-                resourceId: "system:capacity",
-                globalLimit: field("globalLimit"),
-                defaultProjectLimit: field("defaultProjectLimit"),
-                projectOverrides: field("projectOverrides"),
-              };
+            : type === "github.preview"
+              ? {
+                  commandType: type,
+                  resourceId: String(field("projectId")),
+                  selectionId: field("selectionId"),
+                  configVersion: field("configVersion"),
+                  active: field("active"),
+                }
+              : type === "routing.configure"
+                ? {
+                    commandType: type,
+                    resourceId,
+                    version: Number(field("version")),
+                    enabled: Boolean(field("enabled")),
+                    credentialConfigured: Boolean(field("credentialAvailable")),
+                  }
+                : {
+                    commandType: type,
+                    resourceId: "system:capacity",
+                    globalLimit: field("globalLimit"),
+                    defaultProjectLimit: field("defaultProjectLimit"),
+                    projectOverrides: field("projectOverrides"),
+                  };
   const parsed = commandReceiptSchema.safeParse({
     kind: type === "assignment.apply" ? "domain" : "configuration",
     key,
@@ -83,8 +100,9 @@ export function commandReceipt(
   if (!parsed.success) throw new ReceiptShapeError();
   // Creation always records version 1; configure and apply always bump past it.
   if (
-    type !== "capacity.configure" &&
-    type !== "routing.configure" &&
+    (type.startsWith("project.") ||
+      type.startsWith("profile.") ||
+      type === "assignment.apply") &&
     type.endsWith(".create") !== (Number(r.version) === 1)
   )
     throw new ReceiptShapeError();

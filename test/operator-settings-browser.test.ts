@@ -15,6 +15,7 @@ import {
   signOutFromSidebar,
 } from "./fixtures/operator-account.js";
 import { chromium, type Browser, type Page } from "playwright";
+import { seedImportedConflict } from "./fixtures/operator-settings.js";
 import {
   seedOperatorRecovery,
   seedOperatorDelivery,
@@ -1016,26 +1017,7 @@ function seedPlacement(f: Awaited<ReturnType<typeof createOperatorFixture>>) {
     name: "Third membership destination",
     leadProfileId: null,
   });
-  d.execute({
-    type: "task.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId: ids.projectId,
-    taskId,
-    title: "Conflicting imported task",
-    outcome: "Work",
-    ready: false,
-  });
-  d.markImportedTask(taskId, "I_PLACEMENT", "R_PLACEMENT");
-  f.seedPersistedState((db) => {
-    db.prepare(
-      "INSERT INTO github_external_issues VALUES ('github.com','I_PLACEMENT',?,'R_PLACEMENT','owner/repo',1,'Imported','Body','open','[]')",
-    ).run(taskId);
-    for (const projectId of [ids.projectId, target, destination])
-      db.prepare(
-        "INSERT INTO github_memberships VALUES (?,'selection','I_PLACEMENT','[]')",
-      ).run(projectId);
-  });
+  seedImportedConflict(f, taskId, [ids.projectId, target, destination]);
   return { ids, target, destination, taskId, d };
 }
 test("actual source placement retains its original receipt after transfer removes the conflict", async (_t, journey) => {

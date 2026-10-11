@@ -245,3 +245,212 @@ test("bearer capacity commands honour expectedCurrent; session commands without 
   assert.equal(session.status, 200);
   assert.equal(s.f.service.domain().capacityLimits().globalLimit, 6);
 });
+
+test("source configure and preview receipts read back exactly, without private text", async (t) => {
+  let reads = 0;
+  const s = await startCliService(t, {
+    previewReader: () => ({
+      async readSelection() {
+        reads++;
+        return { complete: true, issues: [], reason: null };
+      },
+    }),
+  });
+  const write = (await s.issue("read-write", "src-rw")).token;
+  const read = (await s.issue("read", "src-ro")).token;
+  const projectId = s.projectId;
+  const post = async (command: Json) => {
+    const r = await s.bearer(write, "/api/operator/commands", {
+      method: "POST",
+      body: command,
+    });
+    return { status: r.status, body: (await r.json()) as Json };
+  };
+  const get = async (
+    type: string,
+    key: string,
+    scope = `project:${projectId}`,
+  ) => {
+    const r = await s.bearer(
+      read,
+      `/api/operator/operations?scope=${scope}&type=${type}&key=${key}`,
+    );
+    return { status: r.status, text: await r.text() };
+  };
+  const version = () =>
+    s.f.service.domain().githubConfiguration(projectId).version;
+  const configure = (selections: Json[]) => ({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: version(),
+    credentialRef: "env:FIXTURE_SOURCE",
+    selections,
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  });
+  const configured = configure([
+    { id: "S-1", kind: "search", query: "PRIVATEQ" },
+  ]);
+  const saved = await post(configured);
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  const preview = {
+    type: "github.preview",
+    key: randomUUID(),
+    projectId,
+    selectionId: "S-1",
+    expectedVersion: version(),
+  };
+  const activated = await post(preview);
+  assert.equal(activated.status, 200, JSON.stringify(activated.body));
+  for (const [type, key, receipt] of [
+    ["github.configure", configured.key, saved.body],
+    ["github.preview", preview.key, activated.body],
+  ] as const) {
+    const r = await get(type, key);
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(r.text).data, { state: "recorded", receipt });
+    assert.ok(
+      !r.text.includes("PRIVATEQ") && !r.text.includes("FIXTURE_SOURCE"),
+    );
+  }
+  // A later configure leaves the preview receipt at its own version, read without the provider.
+  assert.equal(
+    (await post(configure([{ id: "S-1", keep: true }]))).status,
+    200,
+  );
+  const later = JSON.parse((await get("github.preview", preview.key)).text);
+  assert.equal(later.data.receipt.result.configVersion, 2);
+  assert.equal(reads, 1);
+  // Types never cross-read, and the scope and type must match.
+  const projectKey = randomUUID();
+  assert.equal(
+    (
+      await post({
+        type: "project.configure",
+        key: projectKey,
+        projectId,
+        expectedVersion: Number(
+          s.f.service.domain().project(projectId).version,
+        ),
+        name: "Renamed",
+      })
+    ).status,
+    200,
+  );
+  assert.equal((await get("github.configure", projectKey)).status, 409);
+  assert.equal((await get("github.preview", configured.key)).status, 409);
+  assert.equal((await get("github.configure", preview.key)).status, 409);
+  assert.deepEqual(
+    JSON.parse((await get("github.configure", randomUUID())).text).data,
+    {
+      state: "not-recorded",
+    },
+  );
+  assert.equal(
+    (await get("github.configure", configured.key, `profile:${projectId}`))
+      .status,
+    400,
+  );
+  assert.equal((await get("github.place", configured.key)).status, 400);
+  // A selection ID equal to excluded text is never disclosed by the readback.
+  const secret = "PRIVATESELECTIONID";
+  assert.equal(
+    (
+      await post({
+        type: "project.configure",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: Number(
+          s.f.service.domain().project(projectId).version,
+        ),
+        instructions: secret,
+      })
+    ).status,
+    200,
+  );
+  assert.equal(
+    (await post(configure([{ id: secret, kind: "search", query: "x" }])))
+      .status,
+    200,
+  );
+  const hidden = {
+    ...preview,
+    key: randomUUID(),
+    selectionId: secret,
+    expectedVersion: version(),
+  };
+  assert.equal((await post(hidden)).status, 503);
+  const r = await get("github.preview", hidden.key);
+  assert.equal(r.status, 503);
+  assert.equal(JSON.parse(r.text).error.code, "unavailable");
+  assert.ok(!r.text.includes(secret));
+});
+
+test("read-only credentials cannot send source or delivery commands", async (t) => {
+  let reads = 0;
+  const s = await startCliService(t, {
+    previewReader: () => ({
+      async readSelection() {
+        reads++;
+        return { complete: true, issues: [], reason: null };
+      },
+    }),
+  });
+  const read = (await s.issue("read", "deny-ro")).token;
+  const before = databaseDigest(s.f);
+  const base = { key: randomUUID(), projectId: s.projectId, taskId: s.taskId };
+  for (const command of [
+    {
+      type: "github.configure",
+      projectId: s.projectId,
+      expectedVersion: 1,
+      selections: [],
+      readiness: { mode: "all", conditions: [{ kind: "label", name: "x" }] },
+      repositories: [],
+    },
+    {
+      type: "github.preview",
+      projectId: s.projectId,
+      selectionId: "S-1",
+      expectedVersion: 1,
+    },
+    {
+      type: "github.place",
+      ...base,
+      chosenProjectId: s.projectId,
+      expectedVersion: 1,
+    },
+    { type: "delivery.refresh", taskId: s.taskId },
+    {
+      type: "comment.review",
+      taskId: s.taskId,
+      operationId: randomUUID(),
+      expectedTaskVersion: 1,
+      body: "x",
+    },
+    {
+      type: "comment.confirm",
+      taskId: s.taskId,
+      reviewId: randomUUID(),
+      expectedRevision: 1,
+      materialHash: "0".repeat(64),
+      decision: "approved",
+    },
+    {
+      type: "comment.send",
+      taskId: s.taskId,
+      expectedTaskVersion: 1,
+      body: "x",
+    },
+  ]) {
+    const r = await s.bearer(read, "/api/operator/commands", {
+      method: "POST",
+      body: { key: randomUUID(), ...command },
+    });
+    assert.equal(r.status, 403, command.type);
+    assert.equal(((await r.json()) as Json).error.code, "insufficient-scope");
+  }
+  assert.equal(databaseDigest(s.f), before);
+  assert.equal(reads, 0);
+});

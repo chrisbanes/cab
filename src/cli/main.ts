@@ -89,6 +89,15 @@ approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation; Resume clears only the operator Stop),
 add-dependency/remove-dependency and task configure --ready true/false.
 
+Sources and delivery: delivery send-comment posts a public GitHub comment that
+Ensemble cannot edit or retract, and a confirm-comment decision is final (deny
+is the counterpart of approve). Removing a source selection discards its saved
+definition. preview-source has no deactivate command; saving any source change
+deactivates every selection. place-task is final once the task has an
+assignment. delivery refresh is installation-wide. send-comment --review-id
+first replays that review to check it is approved; an ID that is not an existing
+review records a new pending review instead, and nothing is posted.
+
 ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.
 `;
 
@@ -169,6 +178,11 @@ export async function main(
         decision: { type: "string" },
         "expected-revision": { type: "string" },
         "material-hash": { type: "string" },
+        "edit-file": { type: "string" },
+        selection: { type: "string" },
+        "body-file": { type: "string" },
+        "expected-task-version": { type: "string" },
+        "review-id": { type: "string" },
       },
     });
     jsonl = values.output === "jsonl" && positionals[0] === "logs";

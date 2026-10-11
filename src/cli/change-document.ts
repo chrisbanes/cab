@@ -15,6 +15,7 @@ export const changeKinds = [
   "project.configure",
   "routing.configure",
   "capacity.configure",
+  "github.configure",
 ] as const;
 export type ChangeKind = (typeof changeKinds)[number];
 

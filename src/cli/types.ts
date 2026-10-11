@@ -93,4 +93,9 @@ export type Values = {
   decision?: string | undefined;
   "expected-revision"?: string | undefined;
   "material-hash"?: string | undefined;
+  "edit-file"?: string | undefined;
+  selection?: string | undefined;
+  "body-file"?: string | undefined;
+  "expected-task-version"?: string | undefined;
+  "review-id"?: string | undefined;
 };

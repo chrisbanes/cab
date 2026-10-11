@@ -266,6 +266,63 @@ or run `node dist/src/cli/main.js` directly.
    follow-ups, answers and decisions cannot be undone; Stop/Resume, dependency
    add/remove and `--ready` are each other's reverse.
 
+8. GitHub sources and delivery. `project sources` and `delivery get` work with
+   either scope; the rest need a read/write credential (a read-only one exits 3):
+   - `project sources PROJECT_ID` lists the source version, whether a credential
+     reference is configured, selections (id, kind, descriptor, active, observation
+     state and times), readiness, linked repositories and refs, and placement
+     conflicts. Queries, filters, paths and reference names are never shown. A
+     partial observation is gap `evidence-gap`, an unavailable one
+     `redaction-unavailable`, and an unreadable saved value `content-unavailable`.
+   - `project prepare-source PROJECT_ID --out FILE --edit-file FILE
+     [--expected-version N]` writes a `github.configure` change document; apply it
+     with `project apply --file FILE`. The edit file (at most 64 KiB, not a symlink)
+     is strict JSON with any of `addSelections` (selection definitions without
+     `id`: `{"kind":"repository","repositoryId","owner","name"}`,
+     `{"kind":"search","query"}` or `{"kind":"project","projectNodeId","filter"}`),
+     `removeSelections` (ids), `readiness` (replaces), `linkRepositories`
+     (`{"repositoryId","path","ref"}`), `unlinkRepositories` (ids), `setRefs`
+     (`{"REPOSITORY_ID":"REF"}`), `credentialRef` (`"env:NAME"` or `null`) and
+     `confirmUnlinkAll`. Saving makes every selection inactive until it is
+     previewed again and marks observations incomplete until the next sync
+     refresh. Removing a selection discards its saved definition; unlinking
+     discards its path. A saved value the read cannot name exits 4.
+   - `project preview-source PROJECT_ID --selection ID --expected-version N`
+     activates one selection after a complete provider read (an incomplete read
+     exits 4). It imports no tasks and proves no sync. There is no deactivate
+     command: saving any source change deactivates every selection. A rerun after a
+     later save replays the original receipt and reports that the selection is not
+     currently active.
+   - `project place-task TASK_ID --to PROJECT_ID --expected-version N` chooses
+     among the projects whose source matched an imported task (N is the task
+     version). It neither starts work nor grants repository access and is final
+     once the task has an assignment.
+   - `delivery refresh TASK_ID` runs the existing installation-wide refresh: it
+     reconciles unfinished delivery actions (it may re-attempt prepared or
+     retryable ones) and re-reads every registered PR, then reports `outcome:
+     complete|partial` for the task. A failed provider read or an unsettled action
+     is `partial` (exit 0, gap `evidence-gap`), never "refreshed".
+   - `delivery review-comment TASK_ID --body-file FILE --expected-task-version N`
+     records a pending review and posts nothing. `delivery confirm-comment TASK_ID
+     --review-id R --expected-revision N --material-hash HASH --decision
+     approved|denied` decides it; a decision is final and a pending review cannot
+     be withdrawn, only denied. `delivery send-comment TASK_ID --body-file FILE
+     --expected-task-version N [--review-id R]` posts a public comment Ensemble
+     cannot edit or retract; with `--review-id` the request ID is the review ID and
+     the CLI first checks the review is approved for exactly this body by replaying
+     it. An ID that is not an existing review is recorded as a new pending review
+     by that replay, and nothing is posted. In approval mode a send needs a review.
+
+   Comment and refresh requests are scoped `task:TASK_ID`. An identical rerun
+   reuses the journal key and replays the recorded outcome, so a comment is never
+   posted twice by a rerun; a deliberate second comment needs a new
+   `--request-id`. A `denied` send exits 4 `policy-denied` and a
+   `confirmed-failure` exits 4 `conflict`, both with nothing posted; an
+   `uncertain`, `attempting` or `prepared` send exits 6: do not resend with a new
+   key, run `delivery refresh` and then `delivery get`. `operation get` reads
+   `github.configure` and `github.preview` receipts; placements, refreshes and
+   comments are settled by rerunning with the same key.
+
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are
 rejected. Certificates are always verified; for a private CA set

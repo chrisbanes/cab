@@ -22,7 +22,7 @@ const policy = (
 const send = (
   f: Awaited<ReturnType<typeof deliveryFixture>>,
   body = "Exact operator comment",
-  key = randomUUID(),
+  key: string = randomUUID(),
 ) => ({
   type: "comment.send" as const,
   key,
@@ -438,4 +438,179 @@ test("comment send receipt fences visibility, task and workspace changes during 
       );
     });
   }
+});
+
+test("definite operator comment rejections are typed 409/403, never an unknown outcome", async (t) => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.root]);
+  const review = async (body = "Reviewed comment") => {
+    const key = randomUUID();
+    const r = await api.execute({
+      type: "comment.review",
+      key,
+      taskId: f.taskId,
+      operationId: key,
+      expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+      body,
+    });
+    if (r.kind !== "comment-review") assert.fail("review receipt absent");
+    return r;
+  };
+  const confirm = (
+    r: { reviewId: string; revision: number; materialHash: string },
+    decision: "approved" | "denied" = "approved",
+  ) => ({
+    type: "comment.confirm" as const,
+    key: randomUUID(),
+    taskId: f.taskId,
+    reviewId: r.reviewId,
+    expectedRevision: r.revision,
+    materialHash: r.materialHash,
+    decision,
+  });
+  const rejects = async (
+    name: string,
+    command: unknown,
+    status: number,
+    reviewId?: string,
+  ) => {
+    const effects = f.effects.length,
+      before = reviewId && f.service.delivery().operatorReview(reviewId);
+    await assert.rejects(
+      api.execute(command),
+      (error: { status?: number; code?: string }) => {
+        assert.equal(error.status, status, name);
+        assert.equal(
+          error.code,
+          status === 409 ? "conflict" : "forbidden",
+          name,
+        );
+        return true;
+      },
+    );
+    assert.equal(f.effects.length, effects, name);
+    if (reviewId)
+      assert.deepEqual(
+        f.service.delivery().operatorReview(reviewId),
+        before,
+        name,
+      );
+  };
+  policy(f, "approval");
+  const r = await review();
+  await rejects(
+    "wrong hash",
+    { ...confirm(r), materialHash: "0".repeat(64) },
+    409,
+    r.reviewId,
+  );
+  await rejects(
+    "wrong revision",
+    { ...confirm(r), expectedRevision: r.revision + 1 },
+    409,
+    r.reviewId,
+  );
+  const first = confirm(r);
+  const approved = await api.execute(first);
+  await rejects("second confirm", confirm(r), 409, r.reviewId);
+  const version = Number(f.domain.task(f.taskId).version);
+  await rejects(
+    "stale review",
+    {
+      type: "comment.review",
+      key: randomUUID(),
+      taskId: f.taskId,
+      operationId: randomUUID(),
+      expectedTaskVersion: version + 5,
+      body: "x",
+    },
+    409,
+  );
+  await rejects(
+    "stale send",
+    { ...send(f), expectedTaskVersion: version + 5 },
+    409,
+  );
+  await rejects(
+    "review key reuse",
+    {
+      type: "comment.review",
+      key: r.reviewId,
+      taskId: f.taskId,
+      operationId: r.reviewId,
+      expectedTaskVersion: version,
+      body: "Another body",
+    },
+    409,
+    r.reviewId,
+  );
+  const sent = await api.execute({
+    ...send(f, "Reviewed comment", r.reviewId),
+    reviewId: r.reviewId,
+  });
+  assert.equal(sent.kind === "delivery" && sent.state, "confirmed-success");
+  await rejects(
+    "send key reuse",
+    { ...send(f, "Another body", r.reviewId), reviewId: r.reviewId },
+    409,
+  );
+  // Unchanged: exact replays return their original receipts.
+  assert.deepEqual(await api.execute(first), approved);
+  assert.deepEqual(
+    await api.execute({
+      ...send(f, "Reviewed comment", r.reviewId),
+      reviewId: r.reviewId,
+    }),
+    sent,
+  );
+  // No grant when reviewed: an approval is forbidden, a denial still records.
+  policy(f, null);
+  const ungranted = await review("No grant");
+  await rejects("no grant", confirm(ungranted), 403, ungranted.reviewId);
+  assert.equal(
+    (await api.execute(confirm(ungranted, "denied"))).kind,
+    "comment-review",
+  );
+  policy(f, "approval");
+  const changed = await review("Policy changes");
+  policy(f, "approval");
+  await rejects("policy changed", confirm(changed), 409, changed.reviewId);
+  const held = await review("Held");
+  await f.service.stopTask(f.taskId);
+  await rejects("task stopped", confirm(held), 409, held.reviewId);
+  assert.equal(f.effects.length, 1);
+});
+
+test("operator comments on a local task are a definite conflict", async (t) => {
+  const f = await deliveryFixture("reviewable-pr", false);
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.root]);
+  const key = randomUUID();
+  for (const command of [
+    {
+      type: "comment.review",
+      key,
+      taskId: f.taskId,
+      operationId: key,
+      expectedTaskVersion: Number(f.domain.task(f.taskId).version),
+      body: "Local",
+    },
+    send(f, "Local"),
+  ])
+    await assert.rejects(api.execute(command), {
+      status: 409,
+      code: "conflict",
+    });
+  assert.equal(f.effects.length, 0);
+  // A delivery refresh without a running coordinator stays an unknown outcome.
+  await f.service.stop();
+  await assert.rejects(
+    api.execute({
+      type: "delivery.refresh",
+      key: randomUUID(),
+      taskId: f.taskId,
+    }),
+    { status: 503, code: "command-outcome-unknown" },
+  );
 });

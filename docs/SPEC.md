@@ -68,8 +68,12 @@ cursors, JSONL output and bounded following. `task create|configure|add-dependen
 remove-dependency|message|follow-up`, `inbox list`, `question get|answer`,
 `approval get|decide` and `task stop|resume` operate tasks and attention through the
 service's existing commands, plus receipted `task.stop` and `task.resume` commands
-that share the web UI's Stop hold; Resume clears only the operator Stop. GitHub and
-repository links, delivery operations and recovery are planned;
+that share the web UI's Stop hold; Resume clears only the operator Stop.
+`project sources|prepare-source|preview-source|place-task` inspect and change GitHub
+sources and repository links (a `github.configure` change document applied with
+`project apply`), activate a selection and place a conflicting imported task;
+`delivery get|refresh|review-comment|confirm-comment|send-comment` inspect delivery
+and drive the existing refresh and staged comment commands. Recovery is planned;
 their delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 

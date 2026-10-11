@@ -342,6 +342,17 @@ const conflicts = new Set([
   "Follow-up unavailable: latest result already has a follow-up",
   "Result destination is already reconciled",
   "Result destination revision conflict",
+  // Operator comment rejections, all thrown before any provider effect.
+  "Operator review key reused with different material",
+  "Operator review material mismatch",
+  "Operator confirmation key reused with different material",
+  "Operator confirmation revision/material mismatch",
+  "Operator task revision conflict",
+  "Operation key used with different material or caller",
+  "Operator delivery authority changed",
+  "Task admission is held",
+  "Imported task source unavailable",
+  "Imported task issue unavailable",
 ]);
 function githubIssueUrl(repositoryName: string | null, number: number | null) {
   return repositoryName && number
@@ -4190,8 +4201,8 @@ export class OperatorApi {
       });
     });
   }
-  /** Reads back one configuration or adoption receipt by scope, type and key. */
-  readOperation(query: URLSearchParams) {
+  /** Reads back one configuration, adoption or source receipt by scope, type and key. */
+  async readOperation(query: URLSearchParams) {
     const names = ["scope", "type", "key"];
     if (
       [...query.keys()].some((k) => !names.includes(k)) ||
@@ -4219,10 +4230,18 @@ export class OperatorApi {
     let data: unknown = { state: "not-recorded" };
     if (raw !== undefined)
       try {
-        data = {
-          state: "recorded",
-          receipt: commandReceipt(type.data, key.data, id, raw),
-        };
+        const receipt = commandReceipt(type.data, key.data, id, raw);
+        // A selection ID is operator text; disclose it only as the POST receipt does.
+        if (
+          receipt.kind === "configuration" &&
+          receipt.result.commandType === "github.preview" &&
+          !this.disclosable(
+            receipt.result.selectionId,
+            await this.exclusions(id),
+          )
+        )
+          throw new OperatorApiError(503, "unavailable");
+        data = { state: "recorded", receipt };
       } catch (error) {
         if (error instanceof ReceiptShapeError)
           throw new OperatorApiError(409, "conflict");
@@ -4588,27 +4607,10 @@ export class OperatorApi {
         throw new DomainConflictError("Preview incomplete");
       raw = await this.executeDomain(command);
     }
-    const r = raw as {
-      projectId: string;
-      selectionId: string;
-      configVersion: number;
-      active: true;
-    };
     const excluded = await this.exclusions(c.projectId);
-    if (!this.disclosable(r.selectionId, excluded))
+    if (!this.disclosable(c.selectionId, excluded))
       throw new Error("Receipt unavailable");
-    return commandReceiptSchema.parse({
-      kind: "configuration",
-      key: c.key,
-      recorded: true,
-      result: {
-        commandType: "github.preview",
-        resourceId: r.projectId,
-        selectionId: r.selectionId,
-        configVersion: r.configVersion,
-        active: r.active,
-      },
-    });
+    return commandReceipt(c.type, c.key, c.projectId, raw);
   }
   private home() {
     return this.setup.home ?? homedir();
@@ -5521,37 +5523,26 @@ export class OperatorApi {
               }
             : c;
         const raw = await this.executeDomain({ ...command, actor: "operator" });
-        if (c.type !== "github.configure" && c.type !== "github.place")
+        if (c.type !== "github.place")
           return commandReceipt(
             c.type,
             c.key,
-            c.type === "routing.configure" ? c.projectId : "",
+            c.type === "routing.configure" || c.type === "github.configure"
+              ? c.projectId
+              : "",
             raw,
           );
         const r = raw as Row;
-        const result =
-          c.type === "github.configure"
-            ? {
-                commandType: c.type,
-                resourceId: c.projectId,
-                version: Number(r.version),
-                credentialConfigured: r.credentialRef !== null,
-                selectionCount: (raw as { selections: unknown[] }).selections
-                  .length,
-                repositoryCount: (raw as { repositories: unknown[] })
-                  .repositories.length,
-              }
-            : {
-                commandType: c.type,
-                resourceId: String(r.id),
-                projectId: String(r.projectId),
-                version: Number(r.version),
-              };
         return commandReceiptSchema.parse({
           kind: "configuration",
           key: c.key,
           recorded: true,
-          result,
+          result: {
+            commandType: c.type,
+            resourceId: String(r.id),
+            projectId: String(r.projectId),
+            version: Number(r.version),
+          },
         });
       }
       if (c.type === "task.stop" || c.type === "task.resume") {
@@ -5754,6 +5745,7 @@ export class OperatorApi {
           "Approval is not in this task",
           "Result is not in this task",
           "Contextual feedback must target the accountable lead",
+          "External action denied by project policy",
         ].includes(error.message)
       )
         throw new OperatorApiError(403, "forbidden");

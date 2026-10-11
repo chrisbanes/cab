@@ -52,7 +52,11 @@ export const operationCommands = new Map<string, WriteCommand>([
             "invalid-input",
             `--type must be ${operationTypeSchema.options.join(", ")}.`,
           );
-        const session = await ctx.connect(["cli.identity", "operation.read"]);
+        const session = await ctx.connect([
+          "cli.identity",
+          "operation.read",
+          ...(type.data.startsWith("github.") ? ["source.write"] : []),
+        ]);
         const request = {
           service: session.identity.service.installationId,
           scope: scope.data,
