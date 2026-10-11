@@ -173,3 +173,228 @@ test("a missing or empty Claude token makes the turn environment unavailable wit
   });
   assert.equal(JSON.stringify(empty).includes(NAME), false);
 });
+
+const processIdentity = {
+  processId: "4242",
+  processStartedAt: "Sat Oct 11 10:00:00 2026",
+  bootId: "claude-seam-boot",
+};
+
+/** A harness fake exercising only the optional Claude seams. */
+class SeamRuntime implements Runtime {
+  readonly startTurnArgs: unknown[][] = [];
+  readonly preflights: unknown[] = [];
+  readonly recorded: boolean[] = [];
+  preflightReason: string | undefined;
+  safety: RuntimeSpawnContext["safety"] | undefined;
+  private turns = 0;
+  constructor(
+    private readonly name: ExecutionHarness,
+    withPreflight: boolean,
+  ) {
+    if (withPreflight)
+      this.preflightTurn = async (input) => {
+        this.preflights.push(input);
+        return this.preflightReason;
+      };
+  }
+  declare preflightTurn?: NonNullable<Runtime["preflightTurn"]>;
+  async start() {}
+  async stop() {}
+  async startThread() {
+    return `${this.name}-thread-${randomUUID()}`;
+  }
+  async resumeThread() {}
+  async startTurn(...args: unknown[]) {
+    this.startTurnArgs.push(args);
+    const threadId = String(args[0]);
+    if (this.preflightTurn) {
+      const record = this.safety?.recordTurnProcess;
+      assert.ok(record);
+      this.recorded.push(record({ threadId, processIdentity }));
+      this.recorded.push(record({ threadId, processIdentity }));
+    }
+    return `${this.name}-turn-${++this.turns}`;
+  }
+  async interruptTurn() {}
+  async waitForTurn() {
+    return "completed" as const;
+  }
+  processIdentity() {
+    return null;
+  }
+  onUnexpectedRequest() {}
+}
+
+async function waitUntil(predicate: () => boolean, describe: () => unknown) {
+  const deadline = Date.now() + 5000;
+  while (!predicate()) {
+    if (Date.now() > deadline)
+      throw new Error(`Timed out: ${JSON.stringify(describe())}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+test("a Claude preflight reason keeps work queued without admission, then the next wake starts it with the profile settings", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-seams-"));
+  const runtimes = {
+    codex: new SeamRuntime("codex", false),
+    claude: new SeamRuntime("claude", true),
+  };
+  const service = new StandaloneService(
+    join(root, "data"),
+    (context, harness) => {
+      runtimes[harness].safety = context.safety;
+      return runtimes[harness];
+    },
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      power: { enabled: false },
+      routingClient: null,
+    },
+  );
+  t.after(async () => {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  });
+  const execute = (command: Record<string, unknown>) =>
+    service
+      .domain()
+      .execute({ key: randomUUID(), actor: "operator", ...command } as never);
+  const db = () =>
+    (service as unknown as { db: import("node:sqlite").DatabaseSync }).db;
+  await service.start();
+  const lead = randomUUID();
+  const worker = randomUUID();
+  execute({
+    type: "profile.create",
+    profileId: lead,
+    name: "Codex lead",
+    instructions: "lead",
+    capabilities: "code",
+    runtime: { harness: "codex" },
+  });
+  execute({
+    type: "profile.create",
+    profileId: worker,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: "opus", reasoningEffort: "high" },
+  });
+  const projectId = randomUUID();
+  execute({
+    type: "project.create",
+    projectId,
+    name: "Seams",
+    leadProfileId: lead,
+  });
+  execute({
+    type: "project.configure",
+    projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  execute({
+    type: "routing.configure",
+    projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [worker],
+  });
+  const taskId = randomUUID();
+  execute({
+    type: "task.create",
+    projectId,
+    taskId,
+    title: "Seams",
+    outcome: "Claude seams",
+    ready: false,
+  });
+  await service.provisionTask(taskId);
+  const assignmentId = randomUUID();
+  execute({
+    type: "assignment.create",
+    actor: "agent",
+    projectId,
+    taskId,
+    assignmentId,
+    profileId: worker,
+    brief: "Build",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const reason = "Claude runtime unavailable: sandbox self-test failed";
+  runtimes.claude.preflightReason = reason;
+  execute({
+    type: "task.configure",
+    projectId,
+    taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  const workId = `assignment:${assignmentId}:initial`;
+  const describe = () => ({
+    intents: service.list().map((i) => [i.workId, i.state, i.reason]),
+    requests: service.turnRequests().map((r) => [r.workId, r.state, r.reason]),
+  });
+  const request = () => service.turnRequests().find((r) => r.workId === workId);
+  await waitUntil(() => request()?.reason === reason, describe);
+  const waiting = service.list().find((i) => i.workId === workId);
+  assert.equal(waiting?.state, "ready");
+  assert.equal(waiting?.reason, reason);
+  assert.equal(request()?.state, "queued");
+  const rows = (sql: string) =>
+    db().prepare(sql).all(workId) as Record<string, unknown>[];
+  assert.deepEqual(
+    rows("SELECT workId FROM execution_recovery_identities WHERE workId = ?"),
+    [],
+  );
+  assert.equal(runtimes.claude.startTurnArgs.length, 0);
+  assert.deepEqual(runtimes.claude.preflights.at(-1), {
+    workspace: waiting?.workspace,
+    settings: { model: "opus", reasoningEffort: "high" },
+  });
+
+  runtimes.claude.preflightReason = undefined;
+  await (
+    service as unknown as { wakeScheduler(): Promise<void> }
+  ).wakeScheduler();
+  await waitUntil(
+    () =>
+      service.list().find((i) => i.workId === workId)?.state === "completed",
+    describe,
+  );
+  assert.deepEqual(runtimes.claude.startTurnArgs[0]?.[3], {
+    model: "opus",
+    reasoningEffort: "high",
+  });
+  assert.deepEqual(runtimes.claude.recorded, [true, false]);
+  assert.deepEqual(
+    rows(
+      "SELECT processId, processStartedAt, bootId FROM execution_recovery_identities WHERE workId = ?",
+    ).map((row) => ({ ...row })),
+    [processIdentity],
+  );
+  const threadId = service.list().find((i) => i.workId === workId)?.threadId;
+  assert.ok(threadId);
+  assert.equal(
+    runtimes.claude.safety?.recordTurnProcess?.({ threadId, processIdentity }),
+    false,
+  );
+  // Codex lead work never sees the Claude seams.
+  const codexTask = randomUUID();
+  execute({
+    type: "task.create",
+    projectId,
+    taskId: codexTask,
+    title: "Codex",
+    outcome: "Codex lead",
+    ready: true,
+  });
+  await service.provisionTask(codexTask);
+  await waitUntil(() => runtimes.codex.startTurnArgs.length > 0, describe);
+  assert.ok(runtimes.codex.startTurnArgs.every((args) => args.length === 3));
+});

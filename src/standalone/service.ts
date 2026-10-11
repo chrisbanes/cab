@@ -42,6 +42,7 @@ import {
   type RuntimeConversationEvent,
   type RuntimeToolCall,
   type RuntimeToolResult,
+  type RuntimeTurnSettings,
 } from "./codex.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
@@ -564,6 +565,10 @@ export class StandaloneService {
         },
         nativeEndpointHistory: (identity) =>
           coordination.runtimeNativeEndpointHistory(identity),
+        recordTurnProcess: ({ threadId, processIdentity }) => {
+          ownIdentity(harness, threadId);
+          return state.recordTurnProcess(threadId, processIdentity);
+        },
       });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
@@ -3906,6 +3911,30 @@ export class StandaloneService {
         return;
       if (waitForRuntime()) return;
       if (!runtime) return;
+      if (runtime.preflightTurn) {
+        const settings = this.turnSettings(request);
+        const failed = `${harnessLabel[harness]} runtime unavailable: preflight failed`;
+        const reason = await this.untilFailure(
+          runtime,
+          runtime.preflightTurn({
+            workspace: workspaceKey,
+            ...(settings ? { settings } : {}),
+          }),
+          () => failed,
+        ).catch(() => failed);
+        if (
+          this.runtimes.get(harness) !== runtime ||
+          this.generation !== generation ||
+          !generation.accepting
+        )
+          return;
+        if (waitForRuntime()) return;
+        if (reason !== undefined) {
+          state.wait(intent.id, reason);
+          store.wait(request.workId, reason);
+          return;
+        }
+      }
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
       const power = this.power;
@@ -3946,6 +3975,20 @@ export class StandaloneService {
       return;
     }
     this.startExecution(request, intent, workspaceKey, previous);
+  }
+
+  /** Model settings of the bound profile revision; only Claude profiles carry them. */
+  private turnSettings(request: TurnRequest): RuntimeTurnSettings | undefined {
+    if (!request.assignmentId || request.profileRevision === null)
+      return undefined;
+    const domain = this.domain();
+    const runtime = domain.profileRuntime(
+      String(domain.assignment(request.assignmentId).profileId),
+      request.profileRevision,
+    );
+    return runtime.harness === "claude"
+      ? { model: runtime.model, reasoningEffort: runtime.reasoningEffort }
+      : undefined;
   }
 
   /** Never awaited by admission: admissionResumed wakes the scheduler drain. */
@@ -4102,8 +4145,20 @@ export class StandaloneService {
       );
       submissionStage = "turn";
       const prebindingGeneration = runtime.currentUserInputGeneration?.();
+      const settings = this.turnSettings(request);
       const turnId = await guard(
-        runtime.startTurn(threadId, workspace, this.executionPrompt(request)),
+        settings
+          ? runtime.startTurn(
+              threadId,
+              workspace,
+              this.executionPrompt(request),
+              settings,
+            )
+          : runtime.startTurn(
+              threadId,
+              workspace,
+              this.executionPrompt(request),
+            ),
       );
       const runtimeGeneration = runtime.currentUserInputGeneration?.();
       let turnBound = runtimeGeneration
