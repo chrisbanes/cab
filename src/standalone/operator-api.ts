@@ -54,6 +54,9 @@ import {
   sourceObservationSchema,
   taskListPageSchema,
   taskListQuerySchema,
+  taskMessagePageSchema,
+  taskRecordQuerySchema,
+  taskResultPageSchema,
   taskSchema,
   uuid,
   workspaceComparisonReadRequestSchema,
@@ -2060,17 +2063,23 @@ export class OperatorApi {
       if (key in values) throw new OperatorApiError(400, "invalid-input");
       values[key] = value;
     }
-    const query = taskListQuerySchema.parse(values),
-      catalog = this.domain().taskCatalog();
-    if (catalog.length > 10000) throw new OperatorApiError(503, "unavailable");
+    const query = taskListQuerySchema.parse(values);
+    if (query.projectId) this.requireProject(query.projectId);
+    const full = this.domain().taskCatalog();
+    if (full.length > 10000) throw new OperatorApiError(503, "unavailable");
+    const catalog = full.filter(
+      (t) =>
+        (!query.projectId || t.projectId === query.projectId) &&
+        (!query.state || t.state === query.state),
+    );
     const catalogFingerprint = createHash("sha256")
       .update(JSON.stringify(catalog.map((t) => [t.id, t.projectId])))
       .digest("hex");
     const index = query.cursor
       ? catalog.findIndex((t) => t.id === query.cursor)
       : -1;
-    if (query.cursor && index < 0)
-      throw new OperatorApiError(400, "invalid-input");
+    // An unknown cursor is stale, not an empty page.
+    if (query.cursor && index < 0) throw new OperatorApiError(409, "conflict");
     const page = catalog.slice(index + 1, index + 1 + query.limit),
       snapshot = this.workspaceSnapshot(page.map((t) => t.id)),
       tasks = await Promise.all(page.map((t) => this.taskSummary(t.id)));
@@ -2698,6 +2707,49 @@ export class OperatorApi {
       throw new OperatorApiError(503, "unavailable");
     return taskSchema.parse({ data, observedAt: Date.now() });
   }
+  /** Pages `readTask` results or messages, so projections and redaction match `task get`. */
+  async readTaskRecordPage(
+    taskId: string,
+    kind: "results" | "messages",
+    params: URLSearchParams,
+  ) {
+    const values: Record<string, string> = {};
+    for (const [key, value] of params) {
+      if (key in values) throw new OperatorApiError(400, "invalid-input");
+      values[key] = value;
+    }
+    const query = taskRecordQuerySchema.parse(values);
+    if (kind === "messages" && query.resultId)
+      throw new OperatorApiError(400, "invalid-input");
+    const { data, observedAt } = await this.readTask(taskId);
+    const records: { id: string; value: unknown }[] =
+      kind === "results"
+        ? data.results.map((r) => ({ id: r.resultId, value: r }))
+        : data.messages.map((m) => ({ id: m.eventId, value: m }));
+    let page = records;
+    let nextCursor: string | null = null;
+    if (query.resultId) {
+      page = records.filter((r) => r.id === query.resultId);
+      if (!page.length) throw new OperatorApiError(404, "not-found");
+    } else {
+      const index = query.cursor
+        ? records.findIndex((r) => r.id === query.cursor)
+        : -1;
+      if (query.cursor && index < 0)
+        throw new OperatorApiError(409, "conflict");
+      page = records.slice(index + 1, index + 1 + query.limit);
+      if (index + 1 + page.length < records.length)
+        nextCursor = page.at(-1)?.id ?? null;
+    }
+    const body = {
+      [kind]: page.map((r) => r.value),
+      total: records.length,
+      nextCursor,
+    };
+    return kind === "results"
+      ? taskResultPageSchema.parse({ data: body, observedAt })
+      : taskMessagePageSchema.parse({ data: body, observedAt });
+  }
   private source(
     identity: NonNullable<ReturnType<OperatorApi["identity"]>>,
     issue: Row | undefined,
@@ -2791,6 +2843,7 @@ export class OperatorApi {
     assignmentId: string,
     beforeSequence?: number,
     beforeOmissionSequence?: number,
+    limit?: number,
   ) {
     const visibility = this.visibilityToken();
     uuid.parse(assignmentId);
@@ -2808,6 +2861,7 @@ export class OperatorApi {
             assignmentId,
             beforeSequence,
             beforeOmissionSequence,
+            limit,
           );
           const excluded = await this.exclusions(
             String(p.id),
@@ -3083,6 +3137,11 @@ export class OperatorApi {
     const visibility = this.visibilityToken();
     const query = searchQuerySchema.parse(Object.fromEntries(params));
     if (query.projectId) this.requireProject(query.projectId);
+    if (
+      query.cursor &&
+      !this.service.taskReview().hasSearchRecord(query.cursor)
+    )
+      throw new OperatorApiError(409, "conflict");
     const rows = await this.service.taskReview().search(query);
     if (visibility !== this.visibilityToken())
       throw new OperatorApiError(503, "unavailable");

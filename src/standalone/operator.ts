@@ -6,6 +6,7 @@ import {
 } from "./operator-api.js";
 import {
   apiErrorSchema,
+  cliCapabilities,
   cliIdentitySchema,
   operatorCredentialIssueRequestSchema,
   operatorCredentialIssuedSchema,
@@ -1663,7 +1664,7 @@ export class LocalOperatorHttp {
           throw new OperatorApiError(400, "invalid-input");
         data = cliIdentitySchema.parse({
           apiVersion: 1,
-          capabilities: ["cli.identity", "task.read"],
+          capabilities: cliCapabilities,
           service: {
             installationId: credentials.installationId(),
             origin: this.auth.origin,

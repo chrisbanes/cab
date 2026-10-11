@@ -937,6 +937,8 @@ export const taskListQuerySchema = z
   .object({
     limit: z.coerce.number().int().min(1).max(100).default(100),
     cursor: uuid.optional(),
+    projectId: uuid.optional(),
+    state: taskState.optional(),
   })
   .strict();
 export const taskListPageSchema = envelope(
@@ -1384,6 +1386,33 @@ export const taskSchema = envelope(
         .strict()
         .optional(),
       contentUnavailable: z.boolean(),
+    })
+    .strict(),
+);
+/** Paged results or messages of one task, projected exactly as in `taskSchema`. */
+export const taskRecordQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    cursor: uuid.optional(),
+    resultId: uuid.optional(),
+  })
+  .strict()
+  .refine((q) => !(q.cursor && q.resultId));
+export const taskResultPageSchema = envelope(
+  z
+    .object({
+      results: z.array(result).max(200),
+      total: time,
+      nextCursor: uuid.nullable(),
+    })
+    .strict(),
+);
+export const taskMessagePageSchema = envelope(
+  z
+    .object({
+      messages: z.array(message).max(200),
+      total: time,
+      nextCursor: uuid.nullable(),
     })
     .strict(),
 );
@@ -2691,3 +2720,12 @@ export const cliIdentitySchema = z
   })
   .strict();
 export type CliIdentity = z.infer<typeof cliIdentitySchema>;
+/** Capability families the CLI bearer API serves, in negotiation order. */
+export const cliCapabilities = [
+  "cli.identity",
+  "task.read",
+  "workspace.read",
+  "task.list",
+  "task.search",
+  "task.records",
+] as const;

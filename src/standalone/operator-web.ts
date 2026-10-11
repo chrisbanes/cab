@@ -285,8 +285,18 @@ export class OperatorWebBoundary {
     if (history) {
       if (
         [...query.keys()].some(
-          (k) => k !== "beforeSequence" && k !== "beforeOmissionSequence",
+          (k) =>
+            !["beforeSequence", "beforeOmissionSequence", "limit"].includes(
+              k,
+            ) || query.getAll(k).length !== 1,
         )
+      )
+        throw new OperatorApiError(400, "invalid-input");
+      const limitValue = query.get("limit");
+      const limit = limitValue === null ? undefined : Number(limitValue);
+      if (
+        limit !== undefined &&
+        (!Number.isSafeInteger(limit) || limit < 1 || limit > 200)
       )
         throw new OperatorApiError(400, "invalid-input");
       const value = query.get("beforeSequence");
@@ -305,8 +315,18 @@ export class OperatorWebBoundary {
         history[1] ?? "",
         before,
         beforeOmission,
+        limit,
       );
     }
+    const records = path.match(
+      /^\/api\/operator\/tasks\/([^/]+)\/(results|messages)$/,
+    );
+    if (records)
+      return this.api.readTaskRecordPage(
+        records[1] ?? "",
+        records[2] === "results" ? "results" : "messages",
+        query,
+      );
     const selectedReview = path.match(
       /^\/api\/operator\/tasks\/([^/]+)(\/review)?$/,
     );
@@ -388,7 +408,9 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/tasks\/[^/]+\/(?:review|artifacts\/[^/]+)$/.test(
         path,
       ) ||
-      /^\/api\/operator\/tasks\/[^/]+\/(?:files|preview)$/.test(path) ||
+      /^\/api\/operator\/tasks\/[^/]+\/(?:files|preview|results|messages)$/.test(
+        path,
+      ) ||
       /^\/api\/operator\/tasks\/[^/]+\/results\/[^/]+\/evidence(?:\/[^/]+)?$/.test(
         path,
       ) ||
