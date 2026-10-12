@@ -283,6 +283,31 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
       domain.execute(originalProjectConfigure),
       originalConfigureReceipt,
     );
+    const blockerTaskId = randomUUID();
+    domain.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: first,
+      taskId: blockerTaskId,
+      title: "Local blocker",
+      outcome: "Remain in the original project",
+      ready: true,
+    });
+    const originalDependencyRemoval = {
+      type: "dependency.remove" as const,
+      actor: "operator" as const,
+      key: randomUUID(),
+      projectId: first,
+      taskId,
+      blockerTaskId,
+      expectedVersion: Number(domain.task(taskId).version),
+    };
+    const originalDependencyReceipt = domain.execute(originalDependencyRemoval);
+    assert.deepEqual(
+      domain.execute(originalDependencyRemoval),
+      originalDependencyReceipt,
+    );
     const version = Number(domain.task(taskId).version);
     assert.throws(
       () =>
@@ -312,6 +337,13 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
     });
     assert.throws(
       () => domain.execute(originalProjectConfigure),
+      (error) =>
+        error instanceof DomainPolicyError &&
+        error.code === "forbidden" &&
+        error.message === "Task belongs to another project",
+    );
+    assert.throws(
+      () => domain.execute(originalDependencyRemoval),
       (error) =>
         error instanceof DomainPolicyError &&
         error.code === "forbidden" &&

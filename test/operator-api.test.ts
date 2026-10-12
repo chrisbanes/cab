@@ -374,8 +374,8 @@ test("assignment and dependency commands preflight their target before key confl
     expectedVersion: Number(domain.project(submitted.projectId).version),
     paused: false,
   });
-  for (const command of preflightCases)
-    await assert.rejects(
+  const inFlightAssertions = preflightCases.map((command) =>
+    assert.rejects(
       api.execute({
         ...command.command,
         key: inFlightKey,
@@ -383,7 +383,9 @@ test("assignment and dependency commands preflight their target before key confl
       }),
       expectStatus(command.status),
       `${command.command.type} in-flight`,
-    );
+    ),
+  );
+  await Promise.all(inFlightAssertions);
   await pending;
 
   await assert.rejects(
@@ -576,8 +578,8 @@ test("target project visibility keeps its not-found precedence before ownership 
     expectedVersion: Number(domain.project(visible.projectId).version),
     paused: false,
   });
-  for (const command of cases)
-    await assert.rejects(
+  const inFlightAssertions = cases.map((command) =>
+    assert.rejects(
       api.execute({
         ...command,
         key: inFlightKey,
@@ -585,7 +587,9 @@ test("target project visibility keeps its not-found precedence before ownership 
       }),
       notFound,
       `${command.type} hidden target before in-flight admission`,
-    );
+    ),
+  );
+  await Promise.all(inFlightAssertions);
   await pending;
   assert.equal(domain.task(hidden.taskId).version, hiddenVersion);
 });
