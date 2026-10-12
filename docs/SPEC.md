@@ -531,6 +531,10 @@ configuration. When discovery is unavailable or a list is truncated, setup accep
 typed values and says so. The service lists folders only under the operator's home folder, and a typed
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
+Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
+CLI login (`gh:github.com`), which Settings recommends and setup offers in one step
+when the service detects it. The service never uses a login the operator did not
+choose. The discovery credential is excluded from agent and helper environments.
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
