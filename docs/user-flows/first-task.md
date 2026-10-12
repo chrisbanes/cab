@@ -27,6 +27,8 @@ one reason it waits and a link that fixes it.
    | Runtime unavailable                           | Open [readiness check](readiness-check.md)               |
    | Claude token unavailable                      | Open [Add Claude](claude-runtime.md)                     |
    | Lead profile runtime not configured           | Open the profile                                         |
+   | Project has no lead                           | Open project configuration to choose a lead              |
+   | Project lead revoked                          | Open project configuration to choose another lead        |
    | Dependency, capacity, approval or source hold | No Fix; link to the blocking task, request or source     |
 
 4. Once the first turn starts, Home drops the getting-started checklist.

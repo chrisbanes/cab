@@ -20,14 +20,15 @@ service sees rather than the operator's interactive shell.
 
 ## Checks
 
-| Check               | Pass                                                       | Fix line on failure                                      |
-| ------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
-| Codex executable    | Resolves on the service `PATH`                             | Install Codex into the fixed `PATH`                      |
-| Codex login         | App Server initializes authenticated, without a model turn | Run `codex login` as the service user                    |
-| Git                 | Resolves on the service `PATH`                             | Install git                                              |
-| GitHub discovery    | Configured and readable, or not configured                 | Run `gh auth login`, or Settings → discovery credential  |
-| Claude token        | Not configured, or the reference is readable and safe      | See [Add Claude](claude-runtime.md)                      |
-| Data and auth paths | Private, canonical, owned by the service user              | Named path rule, without the path value in shared output |
+| Check               | Pass                                                                                                                               | Fix line on failure                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Codex executable    | Resolves on the service `PATH`                                                                                                     | Install Codex into the fixed `PATH`                                  |
+| Codex login         | App Server initializes authenticated, without a model turn                                                                         | Run `codex login` as the service user                                |
+| Git                 | Resolves on the service `PATH`                                                                                                     | Install git                                                          |
+| GitHub discovery    | Configured and readable, or not configured                                                                                         | Run `gh auth login`, or Settings → discovery credential              |
+| Claude token        | Not configured, or the reference is readable and safe                                                                              | See [Add Claude](claude-runtime.md)                                  |
+| Runtime harness     | Each runtime a profile uses is available and its preflight passes (Claude: sandbox self-test, model and reasoning effort accepted) | Restart the service, or edit the profile's model or reasoning effort |
+| Data and auth paths | Private, canonical, owned by the service user                                                                                      | Named path rule, without the path value in shared output             |
 
 - A check that is not configured is reported as such, not as a failure.
 - Output never includes token values; it names references, not secrets.

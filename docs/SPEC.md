@@ -518,8 +518,8 @@ entered values and field errors accessible through disclosure. Use Create and st
 as the primary action and Save draft as the secondary action. Explain before submission that starting is subject to
 project state, dependencies, capacity and execution holds. Show the persisted
 state and reason for any wait after submission; creation does not imply running.
-Where the operator can clear a wait (paused project, unavailable runtime, unreadable
-Claude token, unconfigured profile runtime), the reason links to that one action;
+Where the operator can clear a wait (paused project, missing or revoked project
+lead, unavailable runtime, unreadable Claude token, unconfigured profile runtime), the reason links to that one action;
 it never clears holds or grants access by implication. These controls must
 preserve existing readiness and admission rules.
 
