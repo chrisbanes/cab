@@ -344,6 +344,7 @@ let root;
 let s;
 let proxy;
 let retain = false;
+let keychainAccount;
 const outputs = [];
 try {
   if (mode === "remote") await remotePhase();
@@ -352,6 +353,28 @@ try {
   evidence.failure = String(error?.message ?? error);
 } finally {
   try {
+    // A failed run still revokes what it issued and removes its Keychain item.
+    for (const [name, c] of Object.entries(evidence.credentials))
+      if (!c.revoked) await s?.revoke(name).catch(() => {});
+    if (keychainAccount) {
+      await run("security", [
+        "delete-generic-password",
+        "-s",
+        "ensemble-cli",
+        "-a",
+        keychainAccount,
+      ]).catch(() => {});
+      evidence.cleanup.keychainItemAbsent = await run("security", [
+        "find-generic-password",
+        "-s",
+        "ensemble-cli",
+        "-a",
+        keychainAccount,
+      ]).then(
+        () => false,
+        (e) => e.code === 44,
+      );
+    }
     await new Promise((r) => (proxy ? proxy.close(r) : r()));
     await s?.http.stop();
     const identity = await s?.runtime()?.processIdentity?.();
@@ -609,9 +632,10 @@ async function journey() {
     ]);
   await login("login-token-file", names.ro, ro.token);
   await login("login-token-file", names.follow, follow.token);
-  if (keychainLogin)
+  if (keychainLogin) {
+    keychainAccount = names.rw;
     await ptyLogin("login-keychain", names.rw, s.origin, rw.token);
-  else await login("login-token-file", names.rw, rw.token);
+  } else await login("login-token-file", names.rw, rw.token);
   let r = await cli("auth-status", [
     "auth",
     "status",
@@ -976,54 +1000,75 @@ async function journey() {
   await json("task-resume", ["task", "resume", taskId], names.rw);
 
   stage("revoke during follow");
+  // A live turn can settle before it is seen running; then the step is recorded as not run.
   const running = await until(
-    () => s.service.list().find((w) => w.state === "running"),
+    () =>
+      s.service.list().find((w) => w.state === "running") ??
+      (evidence.turns.startTurnCalls >= 2 &&
+        s.service
+          .list()
+          .every((w) =>
+            ["completed", "held", "resolved-failed"].includes(w.state),
+          ) &&
+        "settled"),
     turnDeadlineMs,
     "turn 2 to run",
   );
-  const follower = spawn(
-    bin,
-    [
-      "logs",
-      "--execution",
-      running.workId,
-      "--follow",
-      "--interval",
-      "1",
-      "--max-duration",
-      "60",
-      "--output",
-      "jsonl",
-      "--connection",
-      names.follow,
-    ],
-    { env: cliRunner(bin, home).env },
-  );
-  let followText = "";
-  follower.stdout.on("data", (c) => {
-    followText += c;
-  });
-  follower.stderr.on("data", (c) => {
-    followText += c;
-  });
-  const followExit = new Promise((done) => follower.on("close", done));
-  await sleep(2_500);
-  await s.revoke("cli8-follow");
-  const followCode = await Promise.race([
-    followExit,
-    sleep(30_000).then(() => "timeout"),
-  ]);
-  if (followCode === "timeout") follower.kill("SIGTERM");
-  outputs.push(followText);
-  evidence.steps.push({
-    step: "logs-follow-revoke",
-    command: "logs --execution <work> --follow --output jsonl",
-    exit: followCode,
-    expected: 3,
-    observation: real,
-  });
-  // Live, the turn may finish before the revocation; that run is recorded, not asserted.
-  if (mode === "fixture") assert.equal(followCode, 3);
+  if (running === "settled") {
+    await s.revoke("cli8-follow");
+    evidence.steps.push({
+      step: "logs-follow-revoke",
+      command: "not run: turn 2 settled before it was observed running",
+      exit: null,
+      expected: null,
+      observation: real,
+    });
+  } else {
+    const follower = spawn(
+      bin,
+      [
+        "logs",
+        "--execution",
+        running.workId,
+        "--follow",
+        "--interval",
+        "1",
+        "--max-duration",
+        "60",
+        "--output",
+        "jsonl",
+        "--connection",
+        names.follow,
+      ],
+      { env: cliRunner(bin, home).env },
+    );
+    let followText = "";
+    follower.stdout.on("data", (c) => {
+      followText += c;
+    });
+    follower.stderr.on("data", (c) => {
+      followText += c;
+    });
+    const followExit = new Promise((done) => follower.on("close", done));
+    await sleep(2_500);
+    await s.revoke("cli8-follow");
+    const followCode = await Promise.race([
+      followExit,
+      sleep(30_000).then(() => "timeout"),
+    ]);
+    if (followCode === "timeout") follower.kill("SIGTERM");
+    outputs.push(followText);
+    evidence.steps.push({
+      step: "logs-follow-revoke",
+      command: "logs --execution <work> --follow --output jsonl",
+      exit: followCode,
+      expected: 3,
+      observation: real,
+      endedBeforeRevocation: followText.includes('"execution-finished"'),
+    });
+    // Live, the turn may finish before the revocation; that run is recorded, not asserted.
+    if (mode === "fixture") assert.equal(followCode, 3);
+  }
   s.runtime().release?.();
 
   stage("turn 2");
@@ -1132,19 +1177,6 @@ async function journey() {
   evidence.cleanup.serverCredentialsRevoked = (
     await (await s.sessionGet("/api/operator/credentials")).json()
   ).data.credentials.every((c) => c.revokedAt !== null);
-  if (keychainLogin) {
-    const probe = await run("security", [
-      "find-generic-password",
-      "-s",
-      "ensemble-cli",
-      "-a",
-      names.rw,
-    ]).then(
-      () => 0,
-      (e) => e.code,
-    );
-    evidence.cleanup.keychainItemAbsent = probe === 44;
-  }
   stage("stop");
 }
 
