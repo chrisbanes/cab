@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { fork, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -228,4 +228,26 @@ test("cleanup removes only a real ensemble-c5- directory directly under the temp
     rmSync(other, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a service child whose parent disconnects exits, even before it starts a service", async () => {
+  const child = fork(resolve("test/c5/service-child.mjs"), [], {
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  const exited = new Promise<number | null>((done) =>
+    child.once("exit", (code) => done(code)),
+  );
+  await new Promise<void>((ready, failed) => {
+    child.once("error", failed);
+    child.once("message", () => ready());
+  });
+  child.disconnect();
+  const code = await Promise.race([
+    exited,
+    new Promise<"timeout">((done) =>
+      setTimeout(() => done("timeout"), 10_000).unref(),
+    ),
+  ]);
+  if (code === "timeout") child.kill("SIGKILL");
+  assert.equal(code, 0);
 });
