@@ -149,12 +149,16 @@ export function discoveryCredentialExclusions(
 
 /**
  * The service environment `gh` runs with: the Claude token and delivery credentials removed,
- * the discovery credential kept because `gh` may read `GH_TOKEN` or `GITHUB_TOKEN`.
+ * and an `env:` discovery credential too. Only a `gh:` reference keeps `GH_TOKEN` and
+ * `GITHUB_TOKEN`, which `gh` may read to resolve it.
  */
 export function ghEnvironment(
   domain: Pick<
     DomainStore,
-    "claudeTokenReference" | "projects" | "deliveryCredentialReference"
+    | "claudeTokenReference"
+    | "projects"
+    | "deliveryCredentialReference"
+    | "discoveryCredentialReference"
   >,
 ): NodeJS.ProcessEnv {
   const claudeRef = domain.claudeTokenReference();
@@ -165,10 +169,15 @@ export function ghEnvironment(
     const ref = domain.deliveryCredentialReference(String(p.id));
     return ref ? [ref.slice(4)] : [];
   });
+  const discoveryRef = domain.discoveryCredentialReference();
+  const discovery =
+    discoveryRef && !discoveryRef.startsWith("gh:")
+      ? discoveryCredentialExclusions(discoveryRef)
+      : { names: [], values: [] };
   return credentialFreeEnvironment(
     process.env,
-    [...delivery, ...claude.names],
+    [...delivery, ...claude.names, ...discovery.names],
     process.env,
-    claude.values,
+    [...claude.values, ...discovery.values],
   );
 }

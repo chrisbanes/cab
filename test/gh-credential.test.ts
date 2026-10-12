@@ -69,6 +69,7 @@ test("gh runs without the Claude token or delivery credentials but keeps GH_TOKE
     claudeTokenReference: () => "env:FIXTURE_GH_CLAUDE",
     projects: () => [{ id: "p" }] as never,
     deliveryCredentialReference: () => "env:FIXTURE_GH_DELIVERY",
+    discoveryCredentialReference: () => "gh:github.com",
   });
   assert.deepEqual(await detectGh({ executable: gh.executable, environment }), {
     state: "signed-in",
@@ -83,4 +84,34 @@ test("gh runs without the Claude token or delivery credentials but keeps GH_TOKE
   assert.equal(text.includes(values.FIXTURE_GH_DELIVERY), false);
   assert.equal(received.GH_TOKEN, values.GH_TOKEN);
   assert.equal(received.GH_PROMPT_DISABLED, "1");
+});
+
+test("gh detection never receives an env discovery credential or its aliases", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const values = {
+    FIXTURE_GH_DISCOVERY: "gh-discovery-canary-44",
+    FIXTURE_GH_DISCOVERY_ALIAS: "gh-discovery-canary-44",
+  };
+  for (const [key, value] of Object.entries(values)) {
+    const previous = process.env[key];
+    process.env[key] = value;
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+  }
+  const environment = ghEnvironment({
+    claudeTokenReference: () => null,
+    projects: () => [],
+    deliveryCredentialReference: () => null,
+    discoveryCredentialReference: () => "env:FIXTURE_GH_DISCOVERY",
+  });
+  await detectGh({ executable: gh.executable, environment });
+  const received = gh.environments().at(-1);
+  assert.ok(received);
+  assert.equal(
+    JSON.stringify(received).includes(values.FIXTURE_GH_DISCOVERY),
+    false,
+  );
 });
