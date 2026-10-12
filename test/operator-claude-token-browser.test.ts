@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
 import {
+  chmodSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import {
   browserSuite,
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
@@ -9,6 +17,7 @@ import {
   startSettings,
 } from "./fixtures/operator-settings.js";
 import { commandRequest } from "./fixtures/setup-browser.js";
+import { tmpdir } from "./temp.js";
 
 const test = browserSuite("ui826-claude-token");
 const NAME = "FIXTURE_CLAUDE_TOKEN",
@@ -51,7 +60,7 @@ test("Settings sets, shows and clears the Claude token reference without showing
   assert.equal((await request).postDataJSON().credentialRef, `env:${NAME}`);
   await row
     .getByText(
-      "Claude subscription token · reference configured · no value in the service environment",
+      "Claude subscription token · reference configured · token unavailable",
     )
     .waitFor();
   assert.equal(f.service.domain().claudeTokenReference(), `env:${NAME}`);
@@ -119,4 +128,53 @@ test("A Claude token already in the service environment needs a restart, and the
   assert.deepEqual(small, []);
   assert.equal((await page.locator("body").innerText()).includes(VALUE), false);
   await captureBrowserEvidence(page, "390-settings-claude-token");
+});
+
+test("Settings sets a file: Claude token reference and shows it unavailable when unsafe", async (t, journey) => {
+  const directory = realpathSync(
+    mkdtempSync(join(tmpdir(), "ensemble-claude-token-browser-")),
+  );
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  chmodSync(directory, 0o700);
+  const path = join(directory, "claude-token"),
+    canary = "fixture-claude-file-token-7702";
+  writeFileSync(path, `${canary}\n`, { mode: 0o600 });
+  const { f, page } = await startSettings(journey, "/app/settings");
+  const row = page.getByRole("region", { name: "Claude subscription token" });
+  await row.getByText("Claude subscription token · not configured").waitFor();
+  let sent = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sent++;
+  });
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  const input = row.getByLabel("Claude token reference");
+  await row.getByText("file:/absolute/path", { exact: false }).waitFor();
+  await input.fill("file:relative/claude-token");
+  await row.getByRole("button", { name: "Save reference" }).click();
+  await row.getByText("Check this field.").waitFor();
+  assert.equal(sent, 0);
+  await input.fill(`file:${path}`);
+  const request = commandRequest(page);
+  await row.getByRole("button", { name: "Save reference" }).click();
+  assert.equal((await request).postDataJSON().credentialRef, `file:${path}`);
+  await row
+    .getByText("Claude subscription token · reference configured · available")
+    .waitFor();
+  assert.equal(f.service.domain().claudeTokenReference(), `file:${path}`);
+  // A group- or other-readable file is never read: the row shows it unavailable.
+  chmodSync(path, 0o644);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await row
+    .getByText(
+      "Claude subscription token · reference configured · token unavailable",
+    )
+    .waitFor();
+  const status = await page.evaluate(async () =>
+    (await fetch("/api/operator/claude-token")).text(),
+  );
+  assert.match(status, /"state":"missing-value"/);
+  for (const text of [status, await page.locator("body").innerText()]) {
+    assert.equal(text.includes(directory), false);
+    assert.equal(text.includes(canary), false);
+  }
 });

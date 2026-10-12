@@ -292,9 +292,13 @@ const commandSchema = z.discriminatedUnion("type", [
     .object({
       ...commandBase,
       type: z.literal("claude-token.configure"),
+      /** `env:NAME`, or `file:` and an absolute path with no empty, `.` or `..` segment. */
       credentialRef: z
         .string()
-        .regex(/^env:[A-Z][A-Z0-9_]*$/)
+        .max(1024)
+        .regex(
+          /^(?:env:[A-Z][A-Z0-9_]*|file:(?:\/(?!\.{1,2}(?:\/|$))[^/\0\r\n]+)+)$/,
+        )
         .nullable(),
     })
     .strict(),
@@ -745,7 +749,7 @@ export class DomainStore {
     return row?.credentialRef ? String(row.credentialRef) : null;
   }
 
-  /** The Claude subscription token's `env:NAME` reference; never its value. */
+  /** The Claude subscription token's `env:NAME` or `file:/path` reference; never its value. */
   claudeTokenReference(): string | null {
     const row = this.one(
       "SELECT credentialRef FROM claude_runtime_credentials WHERE singleton = 1",

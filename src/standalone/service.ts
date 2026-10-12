@@ -47,6 +47,11 @@ import {
   type RuntimeTurnSettings,
 } from "./codex.js";
 import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import {
+  claudeTokenExclusions,
+  claudeTokenSource,
+  readClaudeToken,
+} from "./claude-token.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
   managedAssignmentEnvironment,
@@ -762,21 +767,22 @@ export class StandaloneService {
           const ref = deliveryStore.configuration(String(p.id)).credentialRef;
           return ref ? [ref.slice(4)] : [];
         });
-      const claudeTokenName = () =>
-        domain.claudeTokenReference()?.slice(4) ?? null;
+      const claudeTokenExcluded = () => {
+        const ref = domain.claudeTokenReference();
+        return ref ? claudeTokenExclusions(ref) : { names: [], values: [] };
+      };
       // Helper children (git, ps, pmset, …) never inherit the Claude token either.
-      setChildCredentialExclusions(() => {
-        const name = claudeTokenName();
-        return name ? [name] : [];
-      });
+      setChildCredentialExclusions(claudeTokenExcluded);
       const spawnEnvironment = {
         spawnEnvironment: () => {
-          const claude = claudeTokenName();
+          const claude = claudeTokenExcluded();
           const snapshot = managedAssignmentEnvironment(
-            credentialFreeEnvironment(process.env, [
-              ...deliveryCredentialNames(),
-              ...(claude ? [claude] : []),
-            ]),
+            credentialFreeEnvironment(
+              process.env,
+              [...deliveryCredentialNames(), ...claude.names],
+              process.env,
+              claude.values,
+            ),
           );
           this.runtimeSpawnSnapshot = snapshot;
           return { ...snapshot };
@@ -793,13 +799,38 @@ export class StandaloneService {
       const claude = {
         configDirectory: join(this.dataDir, "claude", "config"),
         turnEnvironment: (): ClaudeTurnEnvironment => {
-          const name = claudeTokenName();
-          if (!name)
+          const ref = domain.claudeTokenReference();
+          if (!ref)
             return unavailable(
               "subscription token is not configured",
               "not-configured",
             );
           const snapshot = this.runtimeSpawnSnapshot ?? {};
+          const source = claudeTokenSource(ref);
+          if (source.kind === "file") {
+            // Read on every call, never cached: a replaced file applies from the next turn.
+            const read = readClaudeToken(source);
+            if ("problem" in read)
+              return unavailable(
+                `subscription token file ${read.problem}`,
+                "empty",
+              );
+            if (Object.values(snapshot).includes(read.value))
+              return unavailable(
+                "Claude token is also in the service environment the running runtimes inherited; restart the service",
+                "restart-required",
+              );
+            return {
+              env: credentialFreeEnvironment(
+                snapshot,
+                deliveryCredentialNames(),
+                process.env,
+                [read.value],
+              ),
+              token: read.value,
+            };
+          }
+          const name = source.name;
           const token = process.env[name];
           if (
             snapshot[name] !== undefined ||
@@ -5231,8 +5262,15 @@ export class StandaloneService {
             ? [value]
             : [],
         ),
-        ...[discovery, domain.claudeTokenReference()].flatMap((ref) =>
-          ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
+        ...(discovery
+          ? [
+              discovery,
+              discovery.slice(4),
+              process.env[discovery.slice(4)] ?? "",
+            ]
+          : []),
+        ...((ref) => (ref ? claudeTokenExclusions(ref).redactions : []))(
+          domain.claudeTokenReference(),
         ),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {

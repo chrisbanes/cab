@@ -1,5 +1,13 @@
 import { DatabaseSync } from "node:sqlite";
+import {
+  chmodSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "./temp.js";
 import { DomainStore, DomainPolicyError } from "../src/core/domain.js";
 import { CoordinationStore } from "../src/core/coordination.js";
 import { CoordinationView } from "../src/standalone/coordination-view.js";
@@ -1806,6 +1814,39 @@ test("an exact profile replay returns its receipt after supported settings becom
       error instanceof OperatorApiError &&
       error.fieldPaths?.[0] === "runtime.model",
   );
+});
+
+test("task reads redact a file-sourced Claude token value and path", async (t) => {
+  const value = "claude-file-redaction-canary-6610",
+    root = realpathSync(mkdtempSync(join(tmpdir(), "ensemble-claude-file-")));
+  chmodSync(root, 0o700);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "claude-token");
+  writeFileSync(path, `${value}\n`, { mode: 0o600 });
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const d = f.service.domain();
+  d.execute({
+    type: "claude-token.configure",
+    actor: "operator",
+    key: randomUUID(),
+    credentialRef: `file:${path}`,
+  });
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    expectedVersion: Number(d.task(ids.taskId).version),
+    outcome: `Use ${value} from ${path}`,
+  });
+  const read = JSON.stringify(
+    await new OperatorApi(f.service, [f.directory]).readTask(ids.taskId),
+  );
+  assert.equal(read.includes(value), false);
+  assert.equal(read.includes(path), false);
 });
 
 test("task reads redact the Claude token reference and its value", async (t) => {

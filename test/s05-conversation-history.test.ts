@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -999,6 +1005,54 @@ test("the Claude token reference and value are redacted when history is captured
     else process.env.FIXTURE_HISTORY_CLAUDE = previous;
     await f.service.stop().catch(() => {});
     rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test("a file-sourced Claude token value and path are redacted when history is captured", async () => {
+  const runtime = new HistoryRuntime();
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "ensemble-history-token-")),
+  );
+  chmodSync(root, 0o700);
+  const path = join(root, "claude-token");
+  writeFileSync(path, "CLAUDEFILECANARY884\n", { mode: 0o600 });
+  const f = await fixture(runtime);
+  command(f.service, {
+    type: "claude-token.configure",
+    actor: "operator",
+    credentialRef: `file:${path}`,
+  });
+  runtime.plan({
+    id: "claude-file-token-turn",
+    beforeReturn: (active, threadId, turnId) => {
+      active.emit({ threadId, turnId, itemId: "c-1", kind: "started" });
+      active.emit({
+        threadId,
+        turnId,
+        itemId: "c-1",
+        kind: "completed",
+        text: `Found CLAUDEFILECANARY884 in ${path}.`,
+      });
+    },
+  });
+  try {
+    f.activate();
+    const bound = await runtime.waitForTurnStart();
+    runtime.complete(bound.turnId);
+    await waitForExecutionState(f.service, f.workId, "completed");
+    const stored = JSON.stringify(
+      query(
+        f.root,
+        "SELECT text FROM conversation_history_items WHERE workId = ?",
+        f.workId,
+      ),
+    );
+    assert.equal(stored.includes("CLAUDEFILECANARY884"), false);
+    assert.equal(stored.includes(path), false);
+  } finally {
+    await f.service.stop().catch(() => {});
+    rmSync(f.root, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

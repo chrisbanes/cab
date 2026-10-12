@@ -112,6 +112,11 @@ import {
   verifyCheckout,
 } from "./operator-setup.js";
 import { selectAssignmentExecution } from "./operator-runtime.js";
+import {
+  claudeTokenExclusions,
+  claudeTokenSource,
+  readClaudeToken,
+} from "./claude-token.js";
 import type { StandaloneService } from "./service.js";
 import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
 import { materialDigest } from "../core/delivery.js";
@@ -416,11 +421,25 @@ export class OperatorApi {
    * a read fences when a reference or its value changes whatever the variable is named.
    */
   private referenceFence() {
-    const d = this.domain();
-    return JSON.stringify(
-      [
+    const d = this.domain(),
+      claude = d.claudeTokenReference(),
+      digest = (text: string) =>
+        createHash("sha256").update(text).digest("hex");
+    // A file reference fences on its value, or on why there is none.
+    const claudeRead = claude && readClaudeToken(claudeTokenSource(claude));
+    return JSON.stringify([
+      claude && claudeRead
+        ? [
+            claude,
+            digest(
+              "value" in claudeRead
+                ? claudeRead.value
+                : `problem:${claudeRead.problem}`,
+            ),
+          ]
+        : null,
+      ...[
         d.discoveryCredentialReference(),
-        d.claudeTokenReference(),
         ...d
           .projects()
           .flatMap((p) => [
@@ -429,16 +448,9 @@ export class OperatorApi {
             d.deliveryCredentialReference(String(p.id)),
           ]),
       ].map((ref) =>
-        ref
-          ? [
-              ref,
-              createHash("sha256")
-                .update(process.env[ref.slice(4)] ?? "")
-                .digest("hex"),
-            ]
-          : null,
+        ref ? [ref, digest(process.env[ref.slice(4)] ?? "")] : null,
       ),
-    );
+    ]);
   }
   private domain() {
     return this.service.domain();
@@ -491,16 +503,15 @@ export class OperatorApi {
         projects = d.projects();
       const values = [...this.controlPaths],
         covered = new Set<string>();
-      for (const ref of [
-        d.discoveryCredentialReference(),
-        d.claudeTokenReference(),
-      ])
-        if (ref) {
-          const envKey = ref.slice(4);
-          values.push(ref, envKey);
-          const value = process.env[envKey];
-          if (value) values.push(value);
-        }
+      const discovery = d.discoveryCredentialReference(),
+        claude = d.claudeTokenReference();
+      if (discovery) {
+        const envKey = discovery.slice(4);
+        values.push(discovery, envKey);
+        const value = process.env[envKey];
+        if (value) values.push(value);
+      }
+      if (claude) values.push(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining = 128;
       if (profiles.length + projects.length > remaining) return undefined;

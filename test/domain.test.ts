@@ -1515,7 +1515,24 @@ test("Claude token reference configures, clears and never returns the name", () 
     );
     assert.deepEqual(configure(null), { configured: false });
     assert.equal(f.domain.claudeTokenReference(), null);
-    for (const invalid of ["CLAUDE_TOKEN", "env:lower", "file:/x", ""])
+    assert.deepEqual(configure("file:/private/claude/token"), {
+      configured: true,
+    });
+    assert.equal(f.domain.claudeTokenReference(), "file:/private/claude/token");
+    assert.deepEqual(configure(null), { configured: false });
+    for (const invalid of [
+      "CLAUDE_TOKEN",
+      "env:lower",
+      "",
+      "file:",
+      "file:relative",
+      "file:/a/../b",
+      "file:/a/./b",
+      "file:/a/",
+      "file:/a//b",
+      "file:/a\nb",
+      `file:/${"a".repeat(1019)}`,
+    ])
       assert.throws(() => configure(invalid));
     assert.throws(
       () => configure("env:CLAUDE_TOKEN", "agent"),
