@@ -562,7 +562,9 @@ grants access by implication.
 
 Project, task list, composer, runtime settings and assignment recovery reads
 rebuild once if project or profile instruction revisions change while the read is
-in flight; a second change makes the read unavailable. Credential and workspace
+in flight; a second change makes the read unavailable. A task's prose is
+withheld when its own retained turn requests or recovery identities exceed 128
+(each counted separately); other tasks' history never counts. Credential and workspace
 fences still reject changed access material. Comment send receipts recheck
 visibility, task version and workspace after loading their redaction exclusions;
 a conflict does not undo the recorded provider operation or authorize a resend.
