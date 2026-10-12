@@ -342,7 +342,18 @@ test("submit sends a document once, replays it exactly and reports what did not 
     "rw",
   ]);
   assert.match(human.out, /Not resumed; nothing was dispatched/);
+  assert.match(human.out, /needs conversation replacement/);
   assert.match(human.out, /cannot be undone/);
+  const adoptHuman = await w.h.run([
+    "recovery",
+    "submit",
+    "--file",
+    adopt.file,
+    "--connection",
+    "rw",
+  ]);
+  assert.match(adoptHuman.out, /Next: recover the generation/);
+  assert.doesNotMatch(adoptHuman.out, /needs conversation replacement/);
   assert.equal(
     w.s.f.service.turnRequests().find((x) => x.workId === w.g.workId)?.state,
     "held",
@@ -359,6 +370,17 @@ test("submit sends a document once, replays it exactly and reports what did not 
   assert.equal(r.code, 0, r.err);
   assert.equal(r.json().data.receipt.revision, 2);
   assert.equal(r.json().data.effect, "saved");
+  const replaced = await w.h.run([
+    "recovery",
+    "submit",
+    "--file",
+    replace.file,
+    "--connection",
+    "rw",
+  ]);
+  assert.match(replaced.out, /do not replace it again/);
+  assert.match(replaced.out, /new 'ensemble task message'/);
+  assert.doesNotMatch(replaced.out, /needs conversation replacement/);
 });
 
 test("refused submissions exit with a conflict and the current blockers; nothing is reused", async (t) => {

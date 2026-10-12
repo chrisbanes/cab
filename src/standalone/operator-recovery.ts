@@ -1,7 +1,8 @@
-import type { z } from "zod";
+import { z } from "zod";
 import {
   type RecoveryPath,
   recoveryCommandTypes,
+  replaceConversationBodySchema,
 } from "../core/recovery-contracts.js";
 import {
   type assignmentRecoverySchema,
@@ -262,6 +263,29 @@ export async function executeRecovery(
   return recoveryReceipt(c.type, c.key, c.assignmentId, result);
 }
 
+const adoptionResult = z
+  .object({ witnessId: z.string().uuid(), workId: z.string().min(1) })
+  .strict();
+const resolutionResult = z
+  .object({
+    id: z.string().uuid(),
+    workId: z.string().min(1),
+    state: z.literal("reconciled"),
+  })
+  .strict();
+/** The stored result shape of each recovery command type, as the service records it. */
+const storedResult: Record<
+  RecoveryCommand["type"],
+  z.ZodType<Record<string, unknown>>
+> = {
+  "recovery.pre-turn.adopt": adoptionResult,
+  "recovery.pre-turn.recover": resolutionResult,
+  "recovery.no-turn.adopt": adoptionResult,
+  "recovery.no-turn.recover": resolutionResult,
+  "recovery.conversation.replace": z
+    .object({ revision: z.number().int().positive() })
+    .strict(),
+};
 /** Stored command scope of each recovery command type. */
 const storedScope: Record<RecoveryCommand["type"], string> = {
   "recovery.pre-turn.adopt": "adopt",
@@ -275,7 +299,8 @@ export const isRecoveryType = (type: string): type is RecoveryCommand["type"] =>
 
 /**
  * Reads back one recovery receipt without any effect: recorded only under its own type and
- * for a work (or replacement) of this assignment. A stored row of another shape throws.
+ * for a work (or replacement) of this assignment. A stored row of another shape throws a
+ * ZodError (or SyntaxError), which the API reports as a conflict.
  */
 export function readRecoveryOperation(
   service: StandaloneService,
@@ -285,14 +310,17 @@ export function readRecoveryOperation(
 ): { state: "not-recorded" } | { state: "recorded"; receipt: CommandReceipt } {
   const row = service.preTurnCommandRecord(key);
   if (row?.scope !== storedScope[type]) return { state: "not-recorded" };
-  const result = JSON.parse(row.result) as Record<string, unknown>;
+  // Persisted rows are validated before use; another shape throws and reads as a conflict.
+  const result: Record<string, unknown> = storedResult[type].parse(
+    JSON.parse(row.result),
+  );
   const owner =
     type === "recovery.conversation.replace"
-      ? (JSON.parse(row.payloadMaterial) as { assignmentId?: unknown })
-          .assignmentId
-      : typeof result.workId === "string"
-        ? service.recoveryMaterial(result.workId)?.assignmentId
-        : undefined;
+      ? replaceConversationBodySchema
+          .extend({ key: z.string().uuid() })
+          .strict()
+          .parse(JSON.parse(row.payloadMaterial)).assignmentId
+      : service.recoveryMaterial(String(result.workId))?.assignmentId;
   if (owner !== assignmentId) return { state: "not-recorded" };
   return {
     state: "recorded",

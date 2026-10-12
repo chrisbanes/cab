@@ -392,6 +392,20 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
   };
 }
 
+/** What remains after each path; replacement is done once, then only a new message is needed. */
+const NEXT_STEP: Record<RecoveryPath, string> = {
+  "pre-turn-adopt":
+    "Not resumed; nothing was dispatched. Next: recover the generation with 'ensemble recovery prepare pre-turn-recover'.",
+  "no-turn-adopt":
+    "Not resumed; nothing was dispatched. Next: recover the generation with 'ensemble recovery prepare no-turn-recover'.",
+  "pre-turn-recover":
+    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('ensemble recovery prepare conversation-replace') and then a new 'ensemble task message'.",
+  "no-turn-recover":
+    "Not resumed; nothing was dispatched. Continuation needs conversation replacement ('ensemble recovery prepare conversation-replace') and then a new 'ensemble task message'.",
+  "conversation-replace":
+    "Not resumed; nothing was dispatched. The conversation is replaced; do not replace it again. Continue with a new 'ensemble task message'.",
+};
+
 const EFFECT: Record<RecoveryPath, Effect> = {
   "pre-turn-adopt": "saved",
   "no-turn-adopt": "saved",
@@ -520,7 +534,7 @@ async function submit(ctx: Parameters<WriteCommand["run"]>[0]) {
     summary: `Submitted ${document.path} for assignment ${assignmentId}`,
     lines: receiptLines(sent.receipt),
     notes: [
-      "Not resumed; nothing was dispatched. Continuation needs conversation replacement and a new 'ensemble task message'.",
+      NEXT_STEP[document.path],
       ...(await afterLines(session, assignmentId, workId)),
       IRREVERSIBLE,
     ],

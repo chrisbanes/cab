@@ -92,4 +92,40 @@ test("every recovery receipt reads back exactly, only under its own type and ass
     );
   });
   assert.equal((await read(adopt.type, adopt.key)).status, 409);
+  // Invalid persisted rows are conflicts, never 500 or a hidden `not-recorded`.
+  for (const [type, key, column, value] of [
+    [replace.type, replace.key, "payloadMaterial", "null"],
+    [replace.type, replace.key, "payloadMaterial", '{"assignmentId":1}'],
+    [replace.type, replace.key, "result", "null"],
+    [
+      recover.type,
+      recover.key,
+      "result",
+      JSON.stringify({ id: randomUUID(), workId: 5, state: "reconciled" }),
+    ],
+    [recover.type, recover.key, "result", "{"],
+  ] as const) {
+    let previous = "";
+    s.f.seedPersistedState((db) => {
+      previous = String(
+        (
+          db
+            .prepare(
+              `SELECT ${column} AS v FROM execution_pre_turn_commands WHERE commandKey = ?`,
+            )
+            .get(key) as { v: string }
+        ).v,
+      );
+      db.prepare(
+        `UPDATE execution_pre_turn_commands SET ${column} = ? WHERE commandKey = ?`,
+      ).run(value, key);
+    });
+    assert.equal((await read(type, key)).status, 409, `${column} ${value}`);
+    s.f.seedPersistedState((db) => {
+      db.prepare(
+        `UPDATE execution_pre_turn_commands SET ${column} = ? WHERE commandKey = ?`,
+      ).run(previous, key);
+    });
+    assert.equal((await read(type, key)).status, 200, "restored");
+  }
 });
