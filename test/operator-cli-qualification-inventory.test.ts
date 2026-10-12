@@ -70,7 +70,9 @@ const harnessSteps = [
   "project-apply-lost-response",
   "operation-get",
   "assignment-apply-current",
+  "task-stop",
   "task-follow-up",
+  "task-resume",
   "task-message",
   "remote-authority",
 ];
@@ -144,16 +146,14 @@ test("command rows equal the live command registry", () => {
   assert.deepEqual(extra, [], `inventory rows for unknown commands: ${extra}`);
 });
 
-test("operations without a command are explicit and never passed", () => {
+test("operations without a command are explicit", () => {
   const operations = inventory.rows.filter((r) => r.kind === "operation");
   assert.ok(operations.length > 0);
-  for (const row of operations) {
+  for (const row of operations)
     assert.ok(
-      ["unproved", "bounded"].includes(row.state),
-      `${row.id}: an operation without a command cannot be ${row.state}`,
+      row.state === "passed" || nonEmpty(row.gap),
+      `${row.id}: gap required`,
     );
-    assert.ok(nonEmpty(row.gap), `${row.id}: gap required`);
-  }
   const capture = operations.find((r) => /diagnosticCapture/.test(r.id));
   assert.ok(
     capture,
@@ -191,13 +191,33 @@ test("every row names scenarios, area, existing evidence, a closed state and its
     if (row.state !== "passed")
       assert.ok(nonEmpty(row.gap), `${at}: gap required while ${row.state}`);
     if (row.state === "passed") {
+      // Passed rows cite the dated live record, and at least one harness step that
+      // the record shows as a real run with its expected exit.
+      const live = row.evidence.find((e) =>
+        /^docs\/evidence\/issue-901-cli8-live-.+\.json$/.test(e),
+      );
+      assert.ok(live, `${at}: passed needs a CLI8 live record`);
+      const record = JSON.parse(readFileSync(join(root, live), "utf8")) as {
+        mode: string;
+        steps: {
+          step: string;
+          exit: number | null;
+          expected: number | null;
+          observation: string;
+        }[];
+      };
+      assert.equal(record.mode, "live", `${at}: ${live} is not a live run`);
       assert.ok(
-        row.evidence.some(
-          (e) =>
-            e.startsWith("harness:") ||
-            /^docs\/evidence\/issue-901-cli8-live-.+\.json$/.test(e),
+        row.evidence.some((e) =>
+          record.steps.some(
+            (step) =>
+              `harness:${step.step}` === e &&
+              step.observation === "real" &&
+              step.exit !== null &&
+              step.exit === step.expected,
+          ),
         ),
-        `${at}: passed needs a harness step or a CLI8 live record`,
+        `${at}: no cited harness step ran as expected in ${live}`,
       );
       assert.equal(
         row.observation,

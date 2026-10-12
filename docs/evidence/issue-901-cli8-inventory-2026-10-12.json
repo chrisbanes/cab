@@ -11,33 +11,29 @@
   "scenarios": {
     "CLI01": {
       "state": "unproved",
-      "basis": "In-process and packed-binary (loopback and throwaway-certificate TLS proxy) investigation of tasks, results, instructions, execution inputs and configuration diffs against a real service with fixture runtimes (CLI1-CLI3, CLI7 records) and one live Codex read at 06c12130. Missing: a live host journey at this candidate through the installed binary, a Keychain login through auth login, and any second-machine private-HTTPS run.",
-      "pending": "T3 host live journey; T4 second-machine private HTTPS (awaiting Chris's grant)"
+      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) ran the packed binary installed outside the checkout, with Keychain and token-file logins, investigated the failed task (search, result, execution inputs with the submitted digest, logs, bound instructions), compared current settings and prepared the profile diff. Missing: the second privately connected machine over verified HTTPS; the TLS-proxy and redirect checks are same-host fixtures only.",
+      "pending": "T4 second-machine private HTTPS (awaiting Chris's grant)"
     },
     "CLI02": {
-      "state": "unproved",
-      "basis": "Chromium credential lifecycle suite, verifier-only storage, read-scope denial of write and side-effect routes, session-only and legacy route denial, and expiry or revocation during follow, all against fixture services. Missing: revocation during follow and direct-API denial on the assembled live service, a CLI-level read-only capacity apply case, and UI provisioning on a real host or private origin.",
-      "pending": "T3 harness steps logs-follow-revoke, readonly-denial-cli and readonly-denial-direct"
+      "state": "passed",
+      "basis": "Renewed CLI1 Chromium suite at the candidate (UI creation, metadata listing, one-time reveal, rotation before revocation, revocation readback, verifier-only storage, Origin and CSRF), renewed route-wide scope denial fixtures, and in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): session-issued credentials, read-only CLI apply exit 3 and direct POST 403 insufficient-scope with the database digest unchanged, revocation during logs --follow exit 3, local logout leaving the server credential active until revoked (200 then 401), bearer 403 on /runtime/control and session-only credential routes. Scope: one host on loopback."
     },
     "CLI03": {
-      "state": "unproved",
-      "basis": "Exact-change, concurrent-edit, assignment-created-between-prepare-and-apply, lost-response, scope-keyed UUID, restore and adoption fixtures through the CLI and journey tests (CLI3 and CLI4 records). Missing: the same apply, replay, conflict and lost-response checks on the assembled live service, and operation get does not read task, attention, delivery, comment or placement receipts (excluded by design).",
-      "pending": "T3 harness steps profile-apply, profile-apply-replay, concurrent-conflict, project-apply-lost-response and assignment-apply-current"
+      "state": "passed",
+      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a browser edit between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration."
     },
     "CLI04": {
-      "state": "unproved",
-      "basis": "Shared CLI and UI fixtures for answers, approvals, Stop and Resume, recovery holds and staged comments (CLI4-CLI6 records) with real SQLite, a loopback service, the fixture runtime, a scripted GitHub dispatcher and copied recovery runtimes. Missing: any live runtime or provider effect, native question answering through the CLI (fake service only), real process termination, and React Resume or recovery controls (excluded).",
-      "pending": "none planned in CLI8 beyond the T3 task-follow-up and task-message steps"
+      "state": "bounded",
+      "basis": "Stop, follow-up and Resume ran through the installed binary in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns). Answers, approvals, recovery and staged comment review/confirm/send rely on the renewed CLI4-CLI6 fixtures (scripted GitHub dispatcher, seeded recovery facts, fixture runtime); they establish no real provider effect or independent recovery fact."
     },
     "CLI05": {
-      "state": "unproved",
-      "basis": "Redaction, instruction projection, historical gaps, capture and storage failure, age and quota pruning, and bounded read and follow fixtures (CLI7 record), plus one live Codex capture at 06c12130. Missing: a live capture at this candidate, Claude executions (runtime events unsupported), the deployed retention configuration, and a CLI write for diagnosticCapture.",
-      "pending": "T3 live capture at the final candidate"
+      "state": "passed",
+      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write remains unproved (no command)."
     },
     "CLI06": {
       "state": "unproved",
-      "basis": "Deterministic boundary fixtures (CLI7) and one bounded live Codex read at 06c12130 that identified submitted inputs and commandExecution activity with no coordination tool call. Missing: the assembled failed-task investigation, correction, adoption and follow-up with a real runtime at this candidate, ENSEMBLE_MANAGED_ASSIGNMENT propagation into Codex tool shells, and a private-remote journey.",
-      "pending": "T3 host live journey; T4 second-machine private HTTPS (awaiting Chris's grant)"
+      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) identified the submitted inputs (digest match), commandExecution and dynamicToolCall items with the ensemble_report_result tool record, observed ENSEMBLE_MANAGED_ASSIGNMENT=1 in the Codex tool shell, and drove correction, adoption and one follow-up turn; deterministic boundary evidence is renewed. Missing: the private-remote half of the journey.",
+      "pending": "T4 second-machine private HTTPS (awaiting Chris's grant)"
     }
   },
   "rows": [
@@ -52,15 +48,16 @@
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "harness:install",
         "harness:login-keychain",
-        "harness:login-token-file"
+        "harness:login-token-file",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Verifies service identity and capabilities, then stores a named connection credential (Keychain on macOS with a TTY, or --token-file); sends no mutation.",
       "denial": "Expired, revoked and malformed credentials fail safely; an unreachable service exits 5 (unavailable, retryable); a Keychain failure saves nothing; no plaintext fallback off macOS (credential-store-unavailable); token-file permission, symlink and FIFO rejections; redirect rejection with no credential sent to the other origin; managed-assignment refusal makes no request.",
       "revision": "Service installation identity is pinned at login; version and capability negotiation fails explicitly (exit 7).",
       "retry": "n/a: login is not a receipted mutation; re-running replaces the local connection.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Token-file login is covered in-process and in the packed binary. The Keychain path through auth login runs only against a fake security runner and a terminal double; the real macOS Keychain is exercised only by the opt-in store-level operator-cli-keychain test (not through auth login, skipped in CI), so live Keychain login is pending (T3 login-keychain); no second-machine token-file login (T4). Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "auth status",
@@ -71,15 +68,16 @@
         "test/operator-cli.test.ts",
         "test/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:auth-status"
+        "harness:auth-status",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Prints the selected connection's service identity, credential scope and expiry metadata and advertised capabilities.",
       "denial": "An expired credential exits 3 credential-invalid (decided by the service clock); managed-assignment refusal exits 3 with no request.",
       "revision": "Version, capability and identity negotiation is shared with task get (unsupported service exits 7, a changed installation id exits 3 service-identity-changed).",
       "retry": "n/a: read; no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "auth logout",
@@ -90,15 +88,16 @@
         "test/operator-cli.test.ts",
         "test/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:auth-logout"
+        "harness:auth-logout",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Removes only the local credential; output states the server credential stays active and bearer reads still return 200 afterwards.",
       "denial": "n/a: local operation that sends no request; later commands on the connection exit 3.",
       "revision": "n/a: local; no server revision.",
       "retry": "n/a: local; no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4). Server-side revocation after logout is exercised by the Settings credential lifecycle, not by this command."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "connection list",
@@ -108,15 +107,16 @@
       "evidence": [
         "test/operator-cli.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:connection-list"
+        "harness:connection-list",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Lists named local connections and marks the selected one; sends no request.",
       "denial": "n/a: local operation that sends no request; an unsupported output format exits 2.",
       "revision": "n/a: local.",
       "retry": "n/a: local; no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Covered only in-process with an in-memory keychain double and no packed-binary run; no live journey (T3). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "connection use",
@@ -126,15 +126,16 @@
       "evidence": [
         "test/operator-cli.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:connection-use"
+        "harness:connection-use",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Selects the default named connection; with several connections and none selected, commands exit 2 connection-ambiguous.",
       "denial": "n/a: local operation that sends no request; an unknown connection exits 2.",
       "revision": "n/a: local.",
       "retry": "n/a: local; no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Covered only in-process with an in-memory keychain double and no packed-binary run; no live journey (T3). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "connection remove",
@@ -144,15 +145,16 @@
       "evidence": [
         "test/operator-cli.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:connection-remove"
+        "harness:connection-remove",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Removes a named local connection; the server credential is not revoked.",
       "denial": "n/a: local operation that sends no request.",
       "revision": "n/a: local.",
       "retry": "n/a: local; no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "No existing test asserts that connection remove leaves the server credential active (only auth logout asserts it) or removes the Keychain item; those checks are pending in the T3 harness. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "project list",
@@ -274,15 +276,16 @@
         "test/operator-cli-change.test.ts",
         "test/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
-        "harness:project-prepare"
+        "harness:project-prepare",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Writes a 0600 change document (name, paused, lead, instructions or --restore-revision) with a diff and a preparation-time affected-assignment preview; sends no write and cannot dispatch work.",
       "denial": "n/a: prepare sends no write and works with a read-only credential, leaving the database and journal unchanged.",
       "revision": "Stale --expected-version exits 4 with no document; an assignment created after preparation does not fence apply and keeps the preparation observedAt; a redacted or identical-to-current restore revision exits 2.",
       "retry": "n/a: prepare is local and sends no request.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "No flag sets diagnosticCapture (see the unproved project prepare diagnosticCapture operation row). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "project prepare-create",
@@ -315,15 +318,17 @@
         "test/operator-cli-source-delivery-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "docs/evidence/issue-897-cli4-2026-10-12.md",
-        "harness:project-apply-lost-response"
+        "harness:project-apply-lost-response",
+        "harness:concurrent-conflict",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Applies the exact reviewed document (project.configure, project.create or github.configure) as saved configuration with a versioned receipt; dispatches nothing.",
       "denial": "A read-only credential exits 3 with the database digest unchanged and the key not reused; a document for another installation exits 2 wrong-service; a tampered, symlinked, group-readable or modified document exits 2 change-document-invalid with no request; policy refusal exits 4.",
       "revision": "A browser or session edit between prepare and apply exits 4 not-applied; changed material under a reused key exits 4; an assignment created between prepare and apply neither fences the apply nor loses its bound revisions.",
       "retry": "Replaying the identical document applies once; a lost reply exits 6 and operation get reads it recorded; a fresh process or service restart reuses the key with one version bump; one UUID in three scopes selects only its own receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Lost-response and restart cases use an in-test reply-dropping seam and the same database, not a response-dropping proxy in front of the assembled live service (T3 project-apply-lost-response). A read-only apply of a routing or source document is not exercised separately from project apply. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "project prepare-routing",
@@ -460,15 +465,16 @@
         "test/operator-cli-browse.test.ts",
         "test/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:profile-get"
+        "harness:profile-get",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Shows one profile's name, summary, version, revoked state, runtime, capabilities and instructions revision.",
       "denial": "n/a: read-only; an unknown id exits 2.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "profile instructions",
@@ -479,15 +485,16 @@
         "test/operator-cli-assignment.test.ts",
         "test/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:profile-instructions"
+        "harness:profile-instructions",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Reads the current or --revision N profile instruction text with credential values, control paths and credential references redacted.",
       "denial": "n/a: read-only; over-16000-character or 129-control-path projections are omitted with redaction-unavailable.",
       "revision": "Current and --revision N reads; an unknown revision exits 2; a revision change during the read returns 503.",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "profile revisions",
@@ -498,15 +505,16 @@
         "test/operator-cli-assignment.test.ts",
         "test/operator-cli-inventory.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:profile-revisions"
+        "harness:profile-revisions",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Lists profile instruction revisions with the current marker and redaction gaps.",
       "denial": "n/a: read-only; the read leaves the database digest unchanged.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "profile prepare",
@@ -517,15 +525,16 @@
         "test/operator-cli-change.test.ts",
         "test/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
-        "harness:profile-prepare"
+        "harness:profile-prepare",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Writes a 0600 change document (name, summary, instructions, capabilities, revoked, or --restore-revision N) holding only changed fields and never runtime; sends no write.",
       "denial": "n/a: prepare sends no write and works with a read-only credential, leaving the database and journal unchanged; --restore-revision combined with --instructions-file exits 2.",
       "revision": "Restore applies exact revision-N text as a new revision (revisions 1-3 stay byte-identical); a redacted or identical-to-current revision exits 2; stale --expected-version exits 4 with no document.",
       "retry": "n/a: prepare is local.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Restore was proved on fixture revisions only; the live journey diffs one instruction change (T3 profile-prepare). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "profile prepare-create",
@@ -558,15 +567,16 @@
         "harness:profile-apply-replay",
         "harness:concurrent-conflict",
         "harness:readonly-denial-cli",
-        "harness:readonly-denial-direct"
+        "harness:readonly-denial-direct",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Applies the exact reviewed document as the next profile revision with a versioned receipt; the bound lead stays stale until adopted; dispatches nothing.",
       "denial": "A read-only credential exits 3 insufficient-scope with the database digest unchanged; a document for another installation, a tampered or group-readable document exits 2 with no request; a profile document on project apply is refused.",
       "revision": "A browser edit between prepare and apply exits 4 not-applied; stale --expected-version exits 4; revoke then unrevoke apply (versions only increase).",
       "retry": "Re-applying the same document replays one receipt; a lost reply exits 6, operation get reads it and the rerun reuses the key; one UUID in distinct scopes stays distinct.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Concurrent-edit and replay are proved with a browser or session edit through test seams, not on the assembled live service (T3 concurrent-conflict, profile-apply-replay). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "task list",
@@ -577,15 +587,16 @@
         "test/operator-cli-browse.test.ts",
         "test/operator-cli-packed.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:task-list"
+        "harness:task-list",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Lists tasks with server-side --project and --state filters (default 50, clamp 100 with limit-capped), pagination and coverage.",
       "denial": "n/a: read-only; malformed, foreign or re-filtered cursor tokens exit 2; the read leaves the database digest unchanged.",
       "revision": "A cursor the service no longer resolves is cursor-stale (exit 4); a changed catalog between pages reports catalog-changed with continuity 'changed'.",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "task search",
@@ -595,15 +606,16 @@
       "evidence": [
         "test/operator-cli-browse.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:task-search"
+        "harness:task-search",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Server-side search with --type, --after, --before and --historical, paged by token, with the note 'retained records only'.",
       "denial": "n/a: read-only; the read leaves the database digest unchanged.",
       "revision": "Foreign or forged cursors exit 2 or cursor-stale (exit 4); ISO and epoch-millisecond times are accepted.",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "task get",
@@ -616,15 +628,16 @@
         "test/operator-cli-task-control.test.ts",
         "test/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:task-get"
+        "harness:task-get",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Shows one task with its unpaged coordination arrays, assignments, execution and delivery summaries; JSON equals the bearer API.",
       "denial": "Expired, revoked or malformed credentials exit 3; an unknown task exits 2; managed-assignment context exits 3 with no request; terminal control characters in service text are neutralised in human output.",
       "revision": "Unsupported service version or capability exits 7 after identity only.",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Registered in main.ts rather than the browse registry. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "task messages",
@@ -743,15 +756,16 @@
         "test/operator-cli-task.test.ts",
         "test/operator-cli-operate-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
-        "harness:task-follow-up"
+        "harness:task-follow-up",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Resumes a completed lead of an open task with a message (resumedLead true, effect queued); the lead leaves completed and a turn may be admitted.",
       "denial": "A read-only credential exits 3; a running lead exits 4 pointing to task message; a done task exits 4 and the session POST is 409 with no event.",
       "revision": "A stale assignment --expected-version exits 4 with no event.",
       "retry": "A lost reply then rerun reuses the key; operation get does not read coordination receipts.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Follow-up admission was observed with the fixture runtime only; the CLI7 live run saw an unrequested second admission after a turn that reported no result, so the admitted-turn count after follow-up is unproved live (T3 task-follow-up). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "task stop",
@@ -763,15 +777,17 @@
         "test/operator-cli-operate-journey.test.ts",
         "test/operator-cli-http.test.ts",
         "test/operator-cli-packed.test.ts",
-        "docs/evidence/issue-898-cli5-2026-10-11.md"
+        "docs/evidence/issue-898-cli5-2026-10-11.md",
+        "harness:task-stop",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Persists the operator Stop hold and requests best-effort cancellation (effect cancellation-requested for a running task, saved for an idle one).",
       "denial": "A read-only credential exits 3 (and a direct bearer post is 403) with the digest unchanged; bearer posts to the retained /runtime/control/stop route are 403 for both scopes.",
       "revision": "--expected-version is optional so an unrelated edit cannot block Stop; a mismatch exits 4; an unknown task exits 2.",
       "retry": "A lost Stop then rerun replays the receipt; the keyless retained form and the receipted command share one hold; the output reports whether Stop is in effect.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Cancellation was observed with the fixture runtime only; Stop is best-effort. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "task resume",
@@ -784,15 +800,17 @@
         "test/operator-cli-http.test.ts",
         "test/operator-cli-recovery-journey.test.ts",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
-        "docs/evidence/issue-899-cli6-2026-10-12.md"
+        "docs/evidence/issue-899-cli6-2026-10-12.md",
+        "harness:task-resume",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Clears only the operator Stop and lists independent holds that remain; with no Stop it reports effect none; it never clears recovery holds.",
       "denial": "A read-only credential exits 3 (and a direct bearer post is 403); bearer posts to /runtime/control/resume are 403 for both scopes.",
       "revision": "--expected-version mismatch exits 4 with no change; an independent hold survives Resume.",
       "retry": "A lost Resume then rerun replays the old receipt and reports Stop not in effect with new --request-id advice.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "assignment get",
@@ -803,15 +821,16 @@
         "test/operator-cli-assignment.test.ts",
         "test/operator-cli-recovery.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:assignment-get"
+        "harness:assignment-get",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Shows an assignment with task, project, lead and execution (equal to the task get entry) and a recovery pointer while held.",
       "denial": "n/a: read-only; an unknown id exits 2.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "assignment history",
@@ -841,15 +860,16 @@
         "test/operator-cli-change.test.ts",
         "test/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:assignment-instructions"
+        "harness:assignment-instructions",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Compares bound versus current instruction revisions for the lead and the latest execution request (matchesBound); provenance not-captured.",
       "denial": "n/a: read-only; the read leaves the database digest unchanged.",
       "revision": "A stale lead (bound 1/1 versus current 3/2) and an adopted binding both read correctly.",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "The comparison is a reconstruction from retained revision records, not a captured prompt (execution inputs holds the captured segments). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "assignment apply-current",
@@ -860,15 +880,16 @@
         "test/operator-cli-adopt.test.ts",
         "test/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
-        "harness:assignment-apply-current"
+        "harness:assignment-apply-current",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Rebinds an assignment to the current instruction revisions (boundIsCurrent) for the next turn; never rewrites an active turn.",
       "denial": "A read-only credential exits 3 with the digest unchanged; a revoked profile exits 4 policy-denied; an unknown assignment exits 2; a missing --expected-version exits 2 with no request.",
       "revision": "A stale --expected-version, up front or made stale between read and send, exits 4; a recorded execution request no longer matches the new binding.",
       "retry": "The journal key and --request-id replay once; operation get reads the assignment.apply receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Adoption is one-way (restore as a new revision and adopt again). The next admitted turn is bound to the adopted revisions in the fixture runtime only (T3 assignment-apply-current). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "inbox list",
@@ -970,15 +991,16 @@
         "test/operator-cli-packed.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
-        "harness:execution-list"
+        "harness:execution-list",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Lists executions newest first for --task, --assignment or --project with keyset paging and a coverage envelope.",
       "denial": "n/a: read-only; usage errors exit 2 before any request, managed-assignment context exits 3 with no request, a missing capability exits 7 after identity only.",
       "revision": "A foreign token exits 2 and a forged cursor is cursor-stale (exit 4).",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
-      "state": "bounded",
-      "gap": "The one live observation is the CLI7 run at 06c12130 with a read-only credential, before #925, #928 and #930 and with no coordination tool call observed; no live run at this candidate (T3), no second machine or private HTTPS (T4)."
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "execution get",
@@ -990,15 +1012,16 @@
         "test/operator-cli-inventory.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
-        "harness:execution-get"
+        "harness:execution-get",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Shows one execution's identity, thread and turn binding, observed settings with their sources and capture-coverage facts.",
       "denial": "n/a: read-only; an unknown work id exits 2.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
-      "state": "bounded",
-      "gap": "Claude executions record service-admitted settings only. The one live observation is the CLI7 run at 06c12130 with a read-only credential, before #925, #928 and #930 and with no coordination tool call observed; no live run at this candidate (T3), no second machine or private HTTPS (T4)."
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "execution inputs",
@@ -1010,15 +1033,16 @@
         "test/operator-cli-inventory.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
-        "harness:execution-inputs"
+        "harness:execution-inputs",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Shows the captured instruction segments and submitted SHA-256 (or a labelled reconstruction), and with --compare-current whether each segment's revision is current.",
       "denial": "n/a: read-only; inputs disclose only the execution's own instructions and keep exclusions redacted.",
       "revision": "--compare-current reports sameRevision per segment against current revisions.",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
-      "state": "bounded",
-      "gap": "Supplied inputs are not the runtime's effective prompt; executions before capture read not-captured. The one live observation is the CLI7 run at 06c12130 with a read-only credential, before #925, #928 and #930 and with no coordination tool call observed; no live run at this candidate (T3), no second machine or private HTTPS (T4)."
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "logs",
@@ -1032,15 +1056,16 @@
         "docs/evidence/issue-900-cli7-2026-10-11.md",
         "docs/evidence/issue-900-cli7-live-2026-10-11.json",
         "harness:logs",
-        "harness:logs-follow-revoke"
+        "harness:logs-follow-revoke",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Reads filtered execution events (input, setting, runtime, tool, service) with paging, and with --follow streams bounded JSONL polls with a resume cursor.",
       "denial": "Revocation or expiry mid-follow exits 3 with nothing after; three unavailable polls exit 5 with the cursor; managed-assignment context exits 3 with no request.",
       "revision": "A pruned range appears as a gap record; a cursor above the high-water mark is 409; the end record carries a resume cursor that repeats nothing.",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
-      "state": "bounded",
-      "gap": "Expiry or revocation during follow is proved against a fixture service in operator-cli-follow, not against the assembled live service (T3 logs-follow-revoke); tool activity beyond commandExecution was not observed live. The one live observation is the CLI7 run at 06c12130 with a read-only credential, before #925, #928 and #930 and with no coordination tool call observed; no live run at this candidate (T3), no second machine or private HTTPS (T4)."
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "recovery get",
@@ -1105,15 +1130,16 @@
       "evidence": [
         "test/operator-cli-evidence.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:result-list"
+        "harness:result-list",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Lists a task's results in pages (50 up to 200) equal to the task get slices, selectable by resultId.",
       "denial": "n/a: read-only; the read leaves the database digest unchanged.",
       "revision": "A cursor of another task is 409 (exit 4).",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "result get",
@@ -1123,15 +1149,16 @@
       "evidence": [
         "test/operator-cli-evidence.test.ts",
         "docs/evidence/issue-895-cli2-2026-10-11.md",
-        "harness:result-get"
+        "harness:result-get",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Shows a result with review metadata, artifact ids and evidence manifest; an older result beyond the review window is found by id.",
       "denial": "n/a: read-only; a missing review record reads review-unavailable and evidence-unavailable.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "result evidence",
@@ -1278,15 +1305,16 @@
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "docs/evidence/issue-897-cli4-2026-10-12.md",
         "docs/evidence/issue-899-cli6-2026-10-12.md",
-        "harness:operation-get"
+        "harness:operation-get",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Reads the receipt for a service, scope, type and UUID: recorded with the POST receipt shape, or not-recorded; reading settles a journal 'unknown' line.",
       "denial": "n/a: read-only route open to read credentials; scope/type mismatch, malformed or extra parameters are 400; a missing capability exits 7 after identity only.",
       "revision": "A stored result of another shape is 409 (exit 4); receipts for the seven configuration types, github.configure, github.preview and the five recovery types equal the POST receipt.",
       "retry": "The same UUID in other scopes reads each scope's own receipt or not-recorded; a lost reply is reconciled by reading, or by a same-key rerun.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "By design it does not read task, attention, delivery.refresh, comment or github.place receipts (settled by a same-key rerun). Reconciliation was proved against fixtures; not yet after a lost response through the assembled live service (T3 project-apply-lost-response). Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "project prepare diagnosticCapture",
@@ -1340,15 +1368,16 @@
         "docs/evidence/issue-898-cli5-2026-10-11.md",
         "docs/evidence/issue-899-cli6-2026-10-12.md",
         "harness:readonly-denial-cli",
-        "harness:readonly-denial-direct"
+        "harness:readonly-denial-direct",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "A read-only bearer credential posting a write directly (bypassing the CLI) receives 403 insufficient-scope with the database digest unchanged.",
       "denial": "Direct-post tables cover task, attention, Stop/Resume, recovery, source preview and placement, delivery refresh and comment command types; the route-level scope check is proved with task.configure, the side-effect read /comparisons and /source-refresh.",
       "revision": "n/a: denial precedes any revision check.",
       "retry": "n/a: a denied command leaves no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "The direct-post tables do not enumerate the configuration command types (profile, project, capacity and assignment.apply); they rely on the shared route-level scope check, with CLI exit 3 shown for profile apply, project apply and assignment apply-current but none for capacity apply. Fixtures on loopback; not yet against the assembled live service (T3 readonly-denial-direct)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "remote authority boundary",
@@ -1361,15 +1390,16 @@
         "docs/evidence/issue-894-cli1-2026-10-11.md",
         "docs/evidence/issue-898-cli5-2026-10-11.md",
         "docs/evidence/issue-899-cli6-2026-10-12.md",
-        "harness:remote-authority"
+        "harness:remote-authority",
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
       ],
       "effect": "Bearer credentials cannot reach session-only, credential-management, legacy browser or /runtime/control/* routes (403 for both scopes, no Set-Cookie); cookie sessions keep Origin and CSRF protection; remote clients get no service administration.",
       "denial": "Session-only and legacy routes, credential routes and /runtime/control/* recovery, Stop and Resume posts are 403 for read and read-write bearer tokens; a session without CSRF is 403.",
       "revision": "n/a: denial precedes any revision check.",
       "retry": "n/a: a denied route leaves no receipt.",
-      "observation": "synthetic",
-      "state": "bounded",
-      "gap": "Fixture assertions on loopback, not on the assembled live service nor over a private HTTPS route from another machine (T3 remote-authority, T4)."
+      "observation": "real",
+      "state": "passed",
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
     },
     {
       "id": "verified HTTPS transport and redirect rejection",
