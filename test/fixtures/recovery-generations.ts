@@ -485,11 +485,27 @@ export async function servedGeneration(
     runtimeFactory: () => runtime,
   });
   const g = await holdGeneration(s.f.service, runtime, mode);
-  // Let the held turn's background capture settle so digests compare only our effects.
+  // Let the held turn's background workspace capture settle, then require a stable
+  // database, so digests compare only the effects a test causes.
+  const pending = () => {
+    let count = 0;
+    s.f.seedPersistedState((db) => {
+      count = Number(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM workspace_turn_captures WHERE captureState = 'pending'",
+            )
+            .get() as { n: number }
+        ).n,
+      );
+    });
+    return count;
+  };
   let last = "";
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 200; i++) {
     const current = databaseDigest(s.f);
-    if (current === last) break;
+    if (pending() === 0 && current === last) break;
     last = current;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
