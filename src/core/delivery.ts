@@ -1,4 +1,5 @@
 import { TaskReviewStore } from "./task-review.js";
+import { DomainConflictError, DomainPolicyError } from "./domain-errors.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
@@ -515,7 +516,11 @@ export class DeliveryStore {
             g.fieldNodeId === action.fieldNodeId &&
             g.optionNodeIds?.includes(action.optionNodeId))),
     );
-    if (!grant) throw new Error("External action denied by project policy");
+    if (!grant)
+      throw new DomainPolicyError(
+        "forbidden",
+        "External action denied by project policy",
+      );
     if (
       (grant.mode === "approval" ||
         action.kind === "issue.edit" ||
@@ -593,7 +598,7 @@ export class DeliveryStore {
       source.revision !== caller.sourceRevision ||
       policy.version !== caller.policyVersion
     )
-      throw Error("Operator delivery authority changed");
+      throw new DomainConflictError("Operator delivery authority changed");
   }
   operatorReview(id: string): OperatorCommentReview | undefined {
     const row = this.db
@@ -620,7 +625,9 @@ export class DeliveryStore {
       commandHash = materialDigest(command);
     if (prior) {
       if (prior.commandHash !== commandHash)
-        throw Error("Operator review key reused with different material");
+        throw new DomainConflictError(
+          "Operator review key reused with different material",
+        );
       return prior;
     }
     this.validateOperatorCaller(caller);
@@ -642,7 +649,7 @@ export class DeliveryStore {
       caller.taskVersion !== command.expectedTaskVersion ||
       caller.taskId !== command.taskId
     )
-      throw Error("Operator review material mismatch");
+      throw new DomainConflictError("Operator review material mismatch");
     const record = operatorCommentReviewSchema.parse({
       reviewId: command.key,
       key: command.key,
@@ -696,7 +703,7 @@ export class DeliveryStore {
           | undefined;
       if (prior) {
         if (prior.material !== material)
-          throw Error(
+          throw new DomainConflictError(
             "Operator confirmation key reused with different material",
           );
         return operatorCommentReviewSchema.parse(JSON.parse(prior.recordJson));
@@ -709,7 +716,9 @@ export class DeliveryStore {
         record.materialHash !== command.materialHash ||
         record.decision !== "pending"
       )
-        throw Error("Operator confirmation revision/material mismatch");
+        throw new DomainConflictError(
+          "Operator confirmation revision/material mismatch",
+        );
       if (command.decision === "approved") {
         authorize();
         this.validateOperatorCaller(record.caller);
@@ -721,7 +730,10 @@ export class DeliveryStore {
               g.repositoryId === record.caller.sourceRepositoryId,
           )
         )
-          throw Error("External action denied by project policy");
+          throw new DomainPolicyError(
+            "forbidden",
+            "External action denied by project policy",
+          );
       }
       const saved = {
         ...record,
@@ -831,7 +843,7 @@ export class DeliveryStore {
       const hash = materialDigest({ request, binding });
       if (prior) {
         if (prior.materialHash !== hash)
-          throw new Error(
+          throw new DomainConflictError(
             "Operation key used with different material or caller",
           );
         return this.action(request.operationId);

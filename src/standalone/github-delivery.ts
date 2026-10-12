@@ -1,4 +1,5 @@
 import { isOperatorDeliveryCaller } from "../core/delivery.js";
+import { DomainPolicyError } from "../core/domain.js";
 import { z } from "zod";
 import { githubApi as api, githubFetch, nextPageLink } from "./github-http.js";
 import {
@@ -890,7 +891,10 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         record.request.action.target.repositoryId !==
           record.binding.sourceRepositoryId)
     )
-      throw Error("Operator delivery only permits the bound issue.comment");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Operator delivery only permits the bound issue.comment",
+      );
     const a = record.request.action;
     try {
       const repo = {

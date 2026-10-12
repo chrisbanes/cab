@@ -73,6 +73,38 @@ test("API preserves original durable task receipts independently of current vers
     "Real project",
   );
 });
+
+test("operator API maps the issue.comment-only policy by type, not its message", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f, true);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const commands = (
+    api as unknown as {
+      commands: { execute: (command: unknown) => Promise<unknown> };
+    }
+  ).commands;
+  commands.execute = async () => {
+    throw new DomainPolicyError(
+      "forbidden",
+      "Operator delivery only permits issue.comment",
+    );
+  };
+  await assert.rejects(
+    api.execute({
+      type: "task.configure",
+      key: randomUUID(),
+      projectId: ids.projectId,
+      taskId: ids.taskId,
+      expectedVersion: 1,
+      title: "Policy probe",
+    }),
+    (error) =>
+      error instanceof OperatorApiError &&
+      error.status === 403 &&
+      error.code === "forbidden",
+  );
+});
 test("workspace reports the Codex runtime as unavailable after a runtime failure", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

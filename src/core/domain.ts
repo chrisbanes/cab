@@ -21,6 +21,20 @@ import {
   profileRuntimeSchema,
   type ProfileRuntime,
 } from "./execution-runtime.js";
+import {
+  DomainConflictError,
+  DomainNotFoundError,
+  DomainOperationError,
+  DomainPolicyError,
+  DomainStaleDispositionError,
+} from "./domain-errors.js";
+export {
+  DomainConflictError,
+  DomainNotFoundError,
+  DomainOperationError,
+  DomainPolicyError,
+  DomainStaleDispositionError,
+} from "./domain-errors.js";
 
 const id = z.string().uuid();
 const label = z.string().trim().min(1).max(512);
@@ -313,41 +327,6 @@ function parseCommand(input: unknown) {
 }
 
 export type DomainCommand = z.input<typeof commandSchema>;
-export class DomainConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DomainConflictError";
-  }
-}
-
-export class DomainStaleDispositionError extends Error {
-  constructor(
-    message: string,
-    readonly reason: "external-admission" | "stale",
-  ) {
-    super(message);
-    this.name = "DomainStaleDispositionError";
-  }
-}
-
-export class DomainNotFoundError extends Error {
-  constructor() {
-    super("Unknown domain record");
-    this.name = "DomainNotFoundError";
-  }
-}
-
-export class DomainPolicyError extends Error {
-  constructor(
-    readonly code: "forbidden" | "invalid-input",
-    message: string,
-    readonly fieldPaths?: string[],
-  ) {
-    super(message);
-    this.name = "DomainPolicyError";
-  }
-}
-
 export type CapacityConfigureCommand = Extract<
   DomainCommand,
   { type: "capacity.configure" }
@@ -691,6 +670,7 @@ export class DomainStore {
       throw new DomainPolicyError(
         "invalid-input",
         "Repository verification failed",
+        ["repositories"],
       );
     }
     return this.executeParsed(command, verified);
@@ -827,9 +807,10 @@ export class DomainStore {
       try {
         this.onChange?.();
       } catch (error) {
-        throw new Error("Command committed but change notification failed", {
-          cause: error,
-        });
+        throw new DomainOperationError(
+          "Command committed but change notification failed",
+          { cause: error },
+        );
       }
     return outcome.result;
   }
@@ -1750,7 +1731,8 @@ export class DomainStore {
             command.outcome !== undefined ||
             command.ready !== undefined)
         )
-          throw new DomainConflictError(
+          throw new DomainPolicyError(
+            "forbidden",
             "Imported provider fields and readiness are provider-owned",
           );
         if (command.title !== undefined)
