@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { DomainStore } from "../src/core/domain.js";
+import { defaultExecutionHarness } from "../src/core/execution-runtime.js";
 import { Store } from "../src/core/store.js";
 import type { Runtime } from "../src/standalone/codex.js";
 import type { GitHubSourceReader } from "../src/standalone/github-source.js";
@@ -24,7 +25,12 @@ import {
   type BackgroundFailureDiagnostic,
   type StandaloneServiceOptions,
 } from "../src/standalone/service.js";
-import { main, waitForServiceExit } from "../src/standalone/cli.js";
+import {
+  main,
+  productionRuntimeHarnesses,
+  productionService,
+  waitForServiceExit,
+} from "../src/standalone/cli.js";
 import { tmpdir } from "./temp.js";
 
 function deferred<T = void>(): {
@@ -1834,4 +1840,23 @@ test("operator signal-first shutdown joins a later fatal failure and closes its 
       rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+test("the production service runs Claude beside Codex, with Codex still the profile default", () => {
+  assert.deepEqual(productionRuntimeHarnesses, ["codex", "claude"]);
+  assert.equal(defaultExecutionHarness, "codex");
+  const root = mkdtempSync(join(tmpdir(), "ensemble-production-harnesses-"));
+  try {
+    assert.deepEqual(
+      productionService(join(root, "data"))
+        .harnessStatuses()
+        .map(({ harness, state }) => [harness, state]),
+      [
+        ["codex", "available"],
+        ["claude", "available"],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

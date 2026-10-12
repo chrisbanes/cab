@@ -5,7 +5,8 @@ status: accepted
 # Add Claude Code as a second execution harness
 
 This amends [ADR-1004](1004-standalone-service.md), which deferred Claude for agent
-execution. These are target contracts; the Claude harness is not implemented.
+execution. The Claude harness is implemented and qualified with limits by bounded
+live journeys ([#827](https://github.com/chrisbanes/ensemble/issues/827)).
 Delivery scope and status live under
 [epic #777](https://github.com/chrisbanes/ensemble/issues/777).
 

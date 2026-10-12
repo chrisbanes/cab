@@ -547,8 +547,36 @@ reasoning effort for Claude). An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
 falls back to another. The operator UI selects and shows each profile's runtime,
 the runtime of each assignment and each runtime's effective policy, and sets the
-Claude token as an `env:NAME` reference without showing it. The Claude runtime is
-planned, not implemented.
+Claude token as an `env:NAME` reference without showing it.
+
+The production service runs both runtimes; profiles default to Codex. The Claude
+runtime is qualified, with limits, by bounded live journeys
+([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
+an available token reference waits visibly. Its execution policy differs from
+Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
+
+- `dontAsk` permissions with an explicit tool allowlist and a `PreToolUse` hook that
+  denies calls outside policy.
+- Shell commands run in Claude Code's Seatbelt sandbox with no network and no
+  unsandboxed retry.
+- A sandbox self-test runs before each turn; if it fails, the work waits visibly.
+- Each task has its own sandbox temporary directory (`CLAUDE_CODE_TMPDIR`).
+- File-editing tools are confined by the hook, not by the OS sandbox.
+- Claude loads no user, project or plugin configuration; repository instructions
+  are supplied as text.
+- Agents ask questions only through `ensemble_ask_question`.
+
+Each runtime's effective policy lists its disclosed limits. For Claude, the
+subprocess token scrub is qualified for sandboxed Bash only; hooks run in process and
+no stdio MCP servers are allowed. A Claude CLI process can outlive a crashed service,
+so the operator verifies its exit before recovering the turn; bound-turn recovery
+has no operator HTTP or CLI route yet. Recovery continues
+from the assignment's latest completed turn, so a crash during its first turn
+continues in a fresh session. Surfaces the journeys did not test remain limits.
+The token comes from the operator's own subscription through `claude setup-token`.
+Anthropic's terms do not explicitly address a single-operator service driven by its
+owner; the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
+are rechecked when self-hosting by others is considered.
 
 Configuration forms edit current values in place rather than requiring a complete
 replacement. Private values (instructions, routing guidance, search queries and

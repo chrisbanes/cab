@@ -126,6 +126,16 @@ owns delivery scope and status.
   [CLI8 record](docs/evidence/issue-901-cli8-2026-10-12.md); use from a second
   privately connected machine is unproved because none was available. See
   [development](docs/development.md#operator-cli).
+- **Claude runtime.** Profiles may select a Claude Code runtime
+  ([ADR-1008](docs/adr/1008-claude-code-execution-harness.md)); Codex stays the
+  default. Bounded live journeys qualified it with limits
+  ([evidence](docs/evidence/issue-827-claude-journeys-2026-10-12.md)): a Claude-only
+  task, a Codex lead with a Claude worker, Stop and a service crash with explicit
+  recovery. Its execution policy and disclosed limits differ from Codex's (see the
+  [specification](docs/SPEC.md)), and untested surfaces remain limits. It uses the
+  operator's own Claude subscription, and Anthropic's
+  [terms](https://code.claude.com/docs/en/legal-and-compliance) do not explicitly
+  address a self-hosted single-operator service.
 
 Automated tests with real SQLite and Chromium, plus bounded live Codex and browser
 journeys, exercise these surfaces. Dated run records and their limits are in
