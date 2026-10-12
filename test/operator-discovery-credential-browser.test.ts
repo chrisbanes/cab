@@ -3,58 +3,53 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
+import { createFakeGh, fakeGhToken } from "./fixtures/fake-gh.js";
 import { commandRequest, setupJourney } from "./fixtures/setup-browser.js";
 const test = browserSuite("ui06-discovery-credential");
 
-test("Settings sets, shows and clears the discovery credential reference", async (_t, journey) => {
+test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, web, page } = await setupJourney(journey, {
     discovery: false,
     path: "/app/settings",
+    ghExecutable: gh.executable,
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
   await row.getByText("GitHub discovery credential · not configured").waitFor();
-  // An invalid reference is a field error and sends nothing.
   let sent = 0;
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) sent++;
   });
+  // Cancel closes the form without a command.
   await row.getByRole("button", { name: "Set", exact: true }).click();
-  const input = row.getByLabel("Discovery credential reference");
-  await input.fill("env:bad");
-  await row.getByRole("button", { name: "Save reference" }).click();
-  await row.getByText("Check this field.").waitFor();
-  await page.waitForFunction(
-    () =>
-      document.activeElement?.getAttribute("aria-label") ===
-      "Discovery credential reference",
-  );
+  await row.getByText("Signed in to github.com as @octo").waitFor();
+  await row.getByRole("button", { name: "Cancel" }).click();
+  await row.getByRole("button", { name: "Set", exact: true }).waitFor();
   assert.equal(sent, 0);
-  await input.fill("env:FIXTURE_DISCOVERY");
-  const request = commandRequest(page);
-  await row.getByRole("button", { name: "Save reference" }).click();
-  assert.deepEqual(
-    (await request).postDataJSON().credentialRef,
-    "env:FIXTURE_DISCOVERY",
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  assert.equal(
+    await row.getByLabel("GitHub CLI · recommended").isChecked(),
+    true,
   );
+  const request = commandRequest(page);
+  await row.getByRole("button", { name: "Use this login" }).click();
+  assert.equal((await request).postDataJSON().credentialRef, "gh:github.com");
   await row
-    .getByText("GitHub discovery credential · reference configured")
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
     .waitFor();
-  await row.getByRole("button", { name: "Change", exact: true }).waitFor();
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
-    "env:FIXTURE_DISCOVERY",
+    "gh:github.com",
   );
-  const status = await page.evaluate(async () =>
-    (await fetch("/api/operator/discovery")).text(),
-  );
-  assert.match(status, /"configured":true/);
-  assert.equal(status.includes("FIXTURE_DISCOVERY"), false);
   assert.equal(
-    (await page.locator("body").innerText()).includes("FIXTURE_DISCOVERY"),
+    (await page.locator("body").innerText()).includes(fakeGhToken),
     false,
   );
-  await captureBrowserEvidence(page, "1366-settings-discovery");
-  // Setup reflects the configured reference.
+  await captureBrowserEvidence(page, "1366-settings-discovery-gh");
+  // Setup lists repositories read with the gh login.
   await page.goto(`${web.origin}/app/settings/projects/new`);
   await page
     .getByText(
@@ -62,28 +57,161 @@ test("Settings sets, shows and clears the discovery credential reference", async
     )
     .waitFor();
   await page.goto(`${web.origin}/app/settings`);
-  // Unknown outcome freezes the form until the exact submission is reconciled.
-  await row.getByRole("button", { name: "Change", exact: true }).click();
+  // Clear is the reverse path.
+  const clear = commandRequest(page);
+  await row.getByRole("button", { name: "Clear", exact: true }).click();
+  assert.equal((await clear).postDataJSON().credentialRef, null);
+  await row.getByText("GitHub discovery credential · not configured").waitFor();
+  assert.equal(f.service.domain().discoveryCredentialReference(), null);
+});
+
+test("Settings shows each GitHub CLI detection state without an action", async (_t, journey) => {
+  const gh = createFakeGh("not-signed-in");
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = page.getByRole("region", { name: "GitHub discovery credential" });
+  for (const [state, copy] of [
+    ["not-signed-in", "gh not signed in · run gh auth login"],
+    ["unreadable", "gh login unreadable from the service"],
+  ] as const) {
+    gh.set(state);
+    await page.reload();
+    await row.getByRole("button", { name: "Set", exact: true }).click();
+    await row.getByText(copy).waitFor();
+    assert.equal(
+      await row.getByRole("button", { name: "Use this login" }).isDisabled(),
+      true,
+    );
+  }
+});
+
+test("Settings reports a missing gh as not installed", async (_t, journey) => {
+  // The fixture's default gh path does not exist.
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+  });
+  const row = page.getByRole("region", { name: "GitHub discovery credential" });
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  await row.getByText("gh not installed").waitFor();
+  assert.equal(
+    await row.getByRole("button", { name: "Use this login" }).isDisabled(),
+    true,
+  );
+});
+
+test("Settings sets an environment variable by name and reconciles an unknown clear", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+  });
+  const row = page.getByRole("region", { name: "GitHub discovery credential" });
+  let sent = 0;
+  page.on("request", (r) => {
+    if (r.url().endsWith("/api/operator/commands")) sent++;
+  });
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  await row.getByLabel("Environment variable · advanced").check();
+  const input = row.getByLabel("Variable name");
+  // An invalid name is a field error and sends nothing.
+  await input.fill("lower");
+  await row.getByRole("button", { name: "Save reference" }).click();
+  await row
+    .getByText("Use upper-case letters, digits and underscores", {
+      exact: false,
+    })
+    .waitFor();
+  assert.equal(sent, 0);
+  await input.fill("FIXTURE_DISCOVERY");
+  const request = commandRequest(page);
+  await row.getByRole("button", { name: "Save reference" }).click();
+  assert.equal(
+    (await request).postDataJSON().credentialRef,
+    "env:FIXTURE_DISCOVERY",
+  );
+  await row
+    .getByText("GitHub discovery credential · environment variable", {
+      exact: false,
+    })
+    .waitFor();
+  const status = await page.evaluate(async () =>
+    (await fetch("/api/operator/discovery")).text(),
+  );
+  assert.match(status, /"source":"env"/);
+  assert.equal(status.includes("FIXTURE_DISCOVERY"), false);
+  assert.equal(
+    (await page.locator("body").innerText()).includes("FIXTURE_DISCOVERY"),
+    false,
+  );
+  // An unknown outcome keeps the attempt until the exact submission is reconciled.
   await page.route("**/api/operator/commands", (route) => route.abort());
   try {
-    await row.getByRole("button", { name: "Clear reference" }).click();
+    await row.getByRole("button", { name: "Clear", exact: true }).click();
     await row
       .getByRole("button", { name: "Reconcile exact submission" })
       .waitFor();
-    assert.equal(await input.isDisabled(), true);
   } finally {
     await page.unroute("**/api/operator/commands");
   }
   await row.getByRole("button", { name: "Reconcile exact submission" }).click();
   await row.getByText("GitHub discovery credential · not configured").waitFor();
   assert.equal(f.service.domain().discoveryCredentialReference(), null);
-  await page.goto(`${web.origin}/app/settings/projects/new`);
+});
+
+test("Setup offers the detected GitHub CLI login in one step", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    ghExecutable: gh.executable,
+  });
+  const use = page.getByRole("button", {
+    name: "Use GitHub CLI login (@octo)",
+  });
+  await use.waitFor();
+  await page
+    .getByText("Signed in to github.com as @octo with the GitHub CLI", {
+      exact: false,
+    })
+    .waitFor();
+  await page.getByRole("link", { name: "Set discovery credential" }).waitFor();
+  const request = commandRequest(page);
+  await use.click();
+  assert.deepEqual(
+    {
+      type: (await request).postDataJSON().type,
+      credentialRef: (await request).postDataJSON().credentialRef,
+    },
+    { type: "discovery.configure", credentialRef: "gh:github.com" },
+  );
   await page
     .getByText(
-      "GitHub discovery is unavailable: no discovery credential is configured",
-      { exact: false },
+      "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  await captureBrowserEvidence(page, "1366-setup-use-gh-login");
+});
+
+test("Setup offers no gh action when gh is not signed in", async (_t, journey) => {
+  const gh = createFakeGh("not-signed-in");
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    ghExecutable: gh.executable,
+  });
+  await page.getByRole("link", { name: "Set discovery credential" }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+    0,
+  );
 });
 
 test("The discovery credential row fits a phone", async (_t, journey) => {
@@ -94,7 +222,8 @@ test("The discovery credential row fits a phone", async (_t, journey) => {
   });
   const row = page.getByRole("region", { name: "GitHub discovery credential" });
   await row.getByRole("button", { name: "Set", exact: true }).click();
-  await row.getByLabel("Discovery credential reference").waitFor();
+  await row.getByLabel("Environment variable · advanced").check();
+  await row.getByLabel("Variable name").waitFor();
   await page.waitForFunction(
     () =>
       document.documentElement.scrollWidth <=

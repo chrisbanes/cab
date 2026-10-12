@@ -342,12 +342,31 @@
 }
 
 .settings-discovery-line p {
+  flex: 1 1 16rem;
   margin: 0;
+}
+
+.settings-discovery-actions {
+  display: flex;
+  gap: var(--space-8);
 }
 
 .settings-discovery-form {
   display: grid;
   gap: var(--space-12);
+}
+
+/* Frame 114b: the source choice; the detection line is indented under GitHub CLI. */
+.settings-discovery-source {
+  display: grid;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.settings-discovery-source p {
+  margin: 0 0 0 var(--space-24);
 }
 
 /* CLI credentials: no design frame yet (#904); built from the discovery row patterns. */

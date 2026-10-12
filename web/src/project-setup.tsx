@@ -5,6 +5,7 @@ import {
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
+  discoveryStatusSchema,
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
@@ -31,6 +32,7 @@ import {
   typeRepository,
   verificationCopy,
 } from "./setup-model.js";
+import type { GhLogin } from "./discovery-credential.js";
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -92,6 +94,30 @@ export function ProjectSetup(p: SettingsProps) {
       live = false;
     };
   }, [p.client, csrf, attempt]);
+  const retry = () => {
+    requested.current.clear();
+    setBranches({});
+    requestedProjects.current.clear();
+    setProjectReads({});
+    setAttempt((n) => n + 1);
+  };
+  // Offered only while discovery is unconfigured; Ensemble never uses a login the operator did not choose.
+  const ghDraft = useDraft(p.drafts, "discovery.configure:setup");
+  useEffect(() => ghDraft.initialize({ key: key() }), [ghDraft]);
+  const unconfigured =
+    discovery.state === "unavailable" && discovery.reason === "unconfigured";
+  const [ghLogin, setGhLogin] = useState<GhLogin | null>(null);
+  useEffect(() => {
+    if (!unconfigured) return setGhLogin(null);
+    let live = true;
+    p.client.read("/api/operator/discovery", discoveryStatusSchema).then(
+      (r) => live && setGhLogin(r.data.gh),
+      () => live && setGhLogin(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [p.client, unconfigured]);
   const ready = discovery.state === "ready" ? discovery : null;
   // A row with nothing chosen follows the current discovery state.
   const mode: SetupRow["source"] =
@@ -433,27 +459,69 @@ export function ProjectSetup(p: SettingsProps) {
             )) && (
             <div className="setup-inline-actions">
               {discovery.state === "unavailable" &&
-              (discovery.reason === "unconfigured" ||
-                discovery.reason === "missing-credential") ? (
-                <ActionLink variant="secondary" href="/app/settings">
-                  Set discovery credential
-                </ActionLink>
+              [
+                "unconfigured",
+                "missing-credential",
+                "gh-not-installed",
+                "gh-not-signed-in",
+              ].includes(discovery.reason) ? (
+                <>
+                  {ghLogin?.state === "signed-in" &&
+                    discovery.reason === "unconfigured" && (
+                      <Button
+                        type="button"
+                        disabled={ghDraft.phase === "pending"}
+                        onClick={async () => {
+                          if (ghDraft.phase === "unknown")
+                            await ghDraft.reconcile(p.client, csrf);
+                          else
+                            await ghDraft.submit(
+                              p.client,
+                              {
+                                type: "discovery.configure",
+                                key: ghDraft.values.key,
+                                credentialRef: "gh:github.com",
+                              },
+                              csrf,
+                            );
+                          if (ghDraft.phase === "recorded") {
+                            ghDraft.startOperation({ key: key() });
+                            retry();
+                          }
+                        }}
+                      >
+                        {ghDraft.phase === "unknown"
+                          ? "Reconcile exact submission"
+                          : `Use GitHub CLI login (@${ghLogin.login})`}
+                      </Button>
+                    )}
+                  <ActionLink variant="secondary" href="/app/settings">
+                    Set discovery credential
+                  </ActionLink>
+                </>
               ) : (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => {
-                    requested.current.clear();
-                    setBranches({});
-                    requestedProjects.current.clear();
-                    setProjectReads({});
-                    setAttempt((n) => n + 1);
-                  }}
-                >
+                <Button type="button" variant="secondary" onClick={retry}>
                   Retry
                 </Button>
               )}
             </div>
+          )}
+          {ghLogin?.state === "signed-in" &&
+            discovery.state === "unavailable" &&
+            discovery.reason === "unconfigured" && (
+              <p className="metadata muted">
+                Signed in to github.com as @{ghLogin.login} with the GitHub CLI
+                on this Mac. Ensemble reads GitHub with it only for discovery
+                and never passes it to agents.
+              </p>
+            )}
+          {ghDraft.notice && (
+            <Alert
+              variant={ghDraft.phase === "recorded" ? "default" : "destructive"}
+              role="alert"
+            >
+              {ghDraft.notice}
+            </Alert>
           )}
           {rows.map((row, i) => {
             const source = sourceOf(row);
