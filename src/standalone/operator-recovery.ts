@@ -32,13 +32,18 @@ export function recoveryOptions(
   const { assignment, taskId } = base.data;
   const assignmentId = assignment.assignmentId;
   let withheld = false;
-  const keep = (value: unknown) => {
+  /** The exact value, or null when redaction changes it or it exceeds what a command accepts. */
+  const keep = (value: unknown, max: number) => {
     if (value === null || value === undefined) return null;
     const kept = exact(value);
-    if (kept === null) withheld = true;
-    return kept;
+    if (kept === null || kept.length > max) withheld = true;
+    return kept !== null && kept.length <= max ? kept : null;
   };
-  const records = base.data.records.map((r) => {
+  // The base read lists every assignment of the task; only this one's generations apply.
+  const mine = base.data.records.filter(
+    (r) => r.binding === null || r.binding.assignmentId === assignmentId,
+  );
+  const records = mine.map((r) => {
     const material =
       r.workId === null ? undefined : service.recoveryMaterial(r.workId);
     const own = material?.assignmentId === assignmentId ? material : undefined;
@@ -46,9 +51,9 @@ export function recoveryOptions(
     const context = own?.preTurn ?? own?.noTurn;
     const process = context
       ? {
-          processId: keep(context.processId),
-          processStartedAt: keep(context.processStartedAt),
-          bootId: keep(context.bootId),
+          processId: keep(context.processId, 128),
+          processStartedAt: keep(context.processStartedAt, 128),
+          bootId: keep(context.bootId, 128),
         }
       : null;
     const predecessor =
@@ -56,8 +61,8 @@ export function recoveryOptions(
       own.preTurn.predecessorWorkId !== null &&
       own.preTurn.predecessorThreadId !== null
         ? {
-            workId: keep(own.preTurn.predecessorWorkId),
-            threadId: keep(own.preTurn.predecessorThreadId),
+            workId: keep(own.preTurn.predecessorWorkId, 512),
+            threadId: keep(own.preTurn.predecessorThreadId, 512),
           }
         : null;
     const exactProcess =
@@ -78,7 +83,7 @@ export function recoveryOptions(
       own &&
       own.intent.reason !== null &&
       own.intent.reason === own.request?.reason
-        ? keep(own.intent.reason)
+        ? keep(own.intent.reason, 4000)
         : null;
     const identityWithheld =
       !own ||

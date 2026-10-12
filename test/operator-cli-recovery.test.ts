@@ -36,7 +36,7 @@ test("recovery get shows identity, holds, paths and required inputs on both cred
     `Work: +${w.g.workId}`,
     `Process: +${w.g.processIdentity.processId} started`,
     "Reason: +Runtime submission or observation uncertain: Error: Runtime stopped",
-    "no-turn-adopt +yes +- +evidence: frozenSourceRevision",
+    "no-turn-adopt +yes +- +evidence: evidence.frozenSourceRevision",
     "no-turn-recover +no +witness-missing +receipt: termination, effects, workspace",
     "attestations \\(each true\\): completeSynchronousWriteAheadLedger",
     "Replacement: +blocked by unresolved-execution",

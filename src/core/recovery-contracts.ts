@@ -137,7 +137,10 @@ export const recoveryRequirements: Record<
   { evidence: string[]; attestations: string[]; receipt: string[] }
 > = {
   "pre-turn-adopt": {
-    evidence: ["rpcError", ...Object.keys(recoveryEvidenceSchema.shape)],
+    evidence: [
+      "rpcError",
+      ...Object.keys(recoveryEvidenceSchema.shape).map((k) => `evidence.${k}`),
+    ],
     attestations: Object.keys(preTurnAttestationSchema.shape),
     receipt: [],
   },
@@ -147,7 +150,9 @@ export const recoveryRequirements: Record<
     receipt: ["termination", "effects", "workspace"],
   },
   "no-turn-adopt": {
-    evidence: Object.keys(noTurnEvidenceSchema.shape),
+    evidence: Object.keys(noTurnEvidenceSchema.shape).map(
+      (k) => `evidence.${k}`,
+    ),
     attestations: Object.keys(noTurnAttestationSchema.shape),
     receipt: [],
   },

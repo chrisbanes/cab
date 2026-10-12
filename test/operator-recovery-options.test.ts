@@ -246,3 +246,48 @@ test("recovery options are bounded, validated and fail closed", async (t) => {
     405,
   );
 });
+
+test("a sibling assignment's generations are not listed or reported as redacted", async (t) => {
+  const w = await world(t, "no-turn");
+  const sibling = randomUUID();
+  w.s.f.service.domain().execute({
+    type: "assignment.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: w.g.projectId,
+    taskId: w.g.taskId,
+    assignmentId: sibling,
+    profileId: w.g.profileId,
+    brief: "Sibling work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  } as never);
+  w.s.f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,'sibling-generation','p','/w','held','r',NULL,NULL,'chatgpt','workspaceWrite','never')",
+    ).run(randomUUID());
+    db.prepare(
+      "INSERT INTO execution_recovery_identities (workId,workRevision,requestSequence,processId,processStartedAt,bootId,threadId,turnId) VALUES ('sibling-generation',1,999,'p','s','b',NULL,NULL)",
+    ).run();
+    db.prepare(
+      "INSERT INTO task_execution_bindings (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision) VALUES ('sibling-generation',?,?,1,1,1,1)",
+    ).run(w.g.taskId, sibling);
+  });
+  const data = await options(w, w.read);
+  assert.deepEqual(
+    data.records.map((r) => r.workId),
+    [w.g.workId],
+  );
+  assert.deepEqual(data.gaps, []);
+  // A command naming the sibling's work under this assignment is refused.
+  const r = await w.s.bearer(w.write, "/api/operator/commands", {
+    method: "POST",
+    body: {
+      type: "recovery.no-turn.adopt",
+      assignmentId: w.g.assignmentId,
+      ...w.g.adoption(),
+      workId: "sibling-generation",
+    },
+  });
+  assert.equal(r.status, 409);
+});
