@@ -419,6 +419,10 @@ test("a mixed task routes each assignment, Stop and anomaly to its own harness",
     // An unidentified Codex anomaly holds only Codex-bound work.
     runtimes.codex.denyUnexpected("item/commandExecution/requestApproval");
     assert.equal(intent(service, otherWork)?.state, "held");
+    assert.equal(
+      intent(service, otherWork)?.reason,
+      "Unexpected runtime request denied: item/commandExecution/requestApproval",
+    );
     assert.equal(intent(service, initial(workerId))?.state, "running");
 
     const stopped = await service.stopTask(taskId);
@@ -433,6 +437,49 @@ test("a mixed task routes each assignment, Stop and anomaly to its own harness",
     assert.deepEqual(
       runtimes.codex.calls.filter((call) => call.startsWith("interrupt")),
       [],
+    );
+  } finally {
+    runtimes.codex.releaseAll();
+    runtimes.claude.releaseAll();
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a Claude unexpected request holds only its work with neutral text", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-unexpected-"));
+  const runtimes = fakes();
+  const service = open(join(root, "data"), runtimes);
+  const describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [worker]);
+    runtimes.codex.holdTurns = true;
+    runtimes.claude.holdTurns = true;
+    const { assignmentIds } = await task(service, projectId, [worker]);
+    const workId = initial(assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, workId)?.state === "running",
+      describe,
+    );
+
+    runtimes.claude.denyUnexpected("claude/canUseTool:Bash");
+    const held = intent(service, workId);
+    assert.equal(held?.state, "held");
+    assert.equal(
+      held?.reason,
+      "Unexpected runtime request denied: claude/canUseTool:Bash",
+    );
+    assert.doesNotMatch(held?.reason ?? "", /Codex|App Server/);
+    assert.deepEqual(
+      service
+        .list()
+        .filter((item) => item.state === "held")
+        .map((item) => item.workId),
+      [workId],
     );
   } finally {
     runtimes.codex.releaseAll();

@@ -505,7 +505,7 @@ for await (const line of createInterface({input: process.stdin})) {
     });
     const held = await service.submit("approval-pipe", "test", workspace);
     assert.equal(held.state, "held");
-    assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+    assert.match(held.reason ?? "", /Unexpected runtime request denied/);
     await service.stop();
     service = new StandaloneService(data, () => new FakeRuntime());
     await service.start();
@@ -716,7 +716,7 @@ test("unbound approval callback during delayed thread start prevents turn submis
     assert.equal(held.state, "held");
     assert.equal(held.threadId, null);
     assert.equal(runtime.turnStarts, 0);
-    assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+    assert.match(held.reason ?? "", /Unexpected runtime request denied/);
     await service.stop();
     await service.start();
     assert.equal(
@@ -771,7 +771,7 @@ test("callback during turn submission preserves server turn identity and hold ac
       assert.equal(held.threadId, "thread-1");
       const expectedTurnId = request.turnId ?? "turn-1";
       assert.equal(held.turnId, expectedTurnId);
-      assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+      assert.match(held.reason ?? "", /Unexpected runtime request denied/);
       if (expectedTurnId !== "turn-1")
         assert.match(
           held.reason ?? "",
@@ -818,7 +818,7 @@ test("approval callback on a bound turn retains hold after terminal completion",
     assert.equal(held.state, "held");
     assert.equal(held.threadId, "thread-1");
     assert.equal(held.turnId, "turn-1");
-    assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+    assert.match(held.reason ?? "", /Unexpected runtime request denied/);
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
