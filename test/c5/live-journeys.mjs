@@ -20,6 +20,7 @@ import {
   attemptLimitMs,
   BudgetExhausted,
   exitCode,
+  facetOutcomeOf,
   ledgerPath,
   parseArgs,
   physicalTmpdir,
@@ -767,10 +768,7 @@ async function attemptBody(attempt) {
           );
     work.catch(() => {});
     await Promise.race([work, aborted]);
-    evidence.outcome =
-      facet === "scrub" && evidence.observations.disposition === "inconclusive"
-        ? "inconclusive"
-        : "passed";
+    evidence.outcome = facetOutcomeOf(facet, evidence.observations);
   } catch (error) {
     failureKind =
       error instanceof ComplianceError

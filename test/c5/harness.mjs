@@ -229,6 +229,15 @@ export function reserveTurnInFile(harness, file = ledgerPath()) {
   return updateLedger(file, (state) => reserveTurn(state, harness));
 }
 
+/**
+ * A completed attempt's outcome. Scrub passes only when qualified; residual
+ * exposure or an inconclusive probe is recorded as its disposition and fails.
+ */
+export const facetOutcomeOf = (facet, observations) =>
+  facet !== "scrub" || observations.disposition === "qualified"
+    ? "passed"
+    : observations.disposition;
+
 /** An attempt's wall time: 20 minutes, bounded by what remains of the session. */
 export const attemptLimitMs = (sessionStartedAt, now = Date.now()) =>
   Math.max(0, Math.min(ATTEMPT_MS, sessionStartedAt + SESSION_MS - now));

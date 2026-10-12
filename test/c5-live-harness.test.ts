@@ -510,3 +510,25 @@ test("turns and attempts stop at the session wall-time cap", async () => {
   assert.equal(attemptLimitMs(0, 0), 20 * 60_000);
   assert.equal(attemptLimitMs(0, session + 5), 0);
 });
+
+test("a scrub attempt passes only when the scrub is qualified", async () => {
+  const { exitCode, facetOutcomeOf } = await harness();
+  const clean = {
+    leaks: [],
+    failure: null,
+    cleanup: { serviceStopped: true },
+    processes: [],
+  };
+  for (const [disposition, outcome] of [
+    ["qualified", "passed"],
+    ["residual-exposure", "residual-exposure"],
+    ["inconclusive", "inconclusive"],
+  ]) {
+    assert.equal(facetOutcomeOf("scrub", { disposition }), outcome);
+    assert.equal(
+      exitCode({ ...clean, outcome: facetOutcomeOf("scrub", { disposition }) }),
+      disposition === "qualified" ? 0 : 1,
+    );
+  }
+  assert.equal(facetOutcomeOf("stop", {}), "passed");
+});
