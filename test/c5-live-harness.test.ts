@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync, fork, spawnSync } from "node:child_process";
+import { execFileSync, fork, spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -363,5 +364,116 @@ test("facet turns that follow their brief need no repair turn, and the crash fol
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only a passed attempt with a clean leak scan exits 0; inconclusive fails", async () => {
+  const { exitCode } = await harness();
+  const clean = { leaks: [], failure: null };
+  assert.equal(exitCode({ ...clean, outcome: "passed" }), 0);
+  assert.equal(exitCode({ ...clean, outcome: "inconclusive" }), 1);
+  assert.equal(exitCode({ ...clean, outcome: "failed" }), 1);
+  assert.equal(
+    exitCode({ leaks: ["home-path"], failure: null, outcome: "passed" }),
+    1,
+  );
+  assert.equal(
+    exitCode({ leaks: [], failure: { kind: "harness" }, outcome: "passed" }),
+    1,
+  );
+});
+
+/** Runs `script` in `count` concurrent Node processes; resolves their stdout. */
+function concurrently(count: number, script: string) {
+  const url = pathToFileURL(resolve("test/c5/harness.mjs")).href;
+  return Promise.all(
+    Array.from(
+      { length: count },
+      () =>
+        new Promise<string>((done, failed) => {
+          const child = spawn(
+            process.execPath,
+            [
+              "--input-type=module",
+              "-e",
+              `const h = await import(${JSON.stringify(url)});\n${script}`,
+            ],
+            { stdio: ["ignore", "pipe", "inherit"] },
+          );
+          let out = "";
+          child.stdout.on("data", (chunk) => {
+            out += chunk;
+          });
+          child.once("error", failed);
+          child.once("exit", () => done(out.trim()));
+        }),
+    ),
+  );
+}
+
+test("concurrent drivers cannot exceed a cap or open two attempts on one ledger", async () => {
+  const { beginAttempt, emptyLedger, readLedger, writeLedger } =
+    await harness();
+  const dir = mkdtempSync(join(tmpdir(), "c5-ledger-race-"));
+  const file = join(dir, "ledger.json");
+  try {
+    writeLedger(beginAttempt(emptyLedger(), "claude-only"), file);
+    const reserved = await concurrently(
+      4,
+      `let n = 0;
+for (let i = 0; i < 5; i++)
+  try { h.reserveTurnInFile("claude", ${JSON.stringify(file)}); n++; }
+  catch (error) { if (!(error instanceof h.BudgetExhausted)) throw error; }
+console.log(n);`,
+    );
+    const state = readLedger(file);
+    assert.equal(
+      reserved.reduce((sum, n) => sum + Number(n), 0),
+      8,
+    );
+    assert.equal(state.totals.claude, 8);
+    assert.equal(state.attempts["claude-only"][0].turns.claude, 8);
+
+    writeLedger(emptyLedger(), file);
+    const opened = await concurrently(
+      3,
+      `try {
+  await h.withAttempt(${JSON.stringify(file)}, "scrub", async () => {
+    await new Promise((done) => setTimeout(done, 500));
+    return { outcome: "passed", failureKind: null };
+  });
+  console.log("opened");
+} catch (error) {
+  console.log(error instanceof h.BudgetExhausted ? "refused" : String(error));
+}`,
+    );
+    assert.deepEqual(opened.sort(), ["opened", "refused", "refused"]);
+    assert.equal(readLedger(file).attempts.scrub.length, 1);
+    assert.equal(existsSync(`${file}.lock`), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a ledger lock left by an exited driver is stale and removed", async () => {
+  const {
+    beginAttempt,
+    emptyLedger,
+    readLedger,
+    reserveTurnInFile,
+    writeLedger,
+  } = await harness();
+  const dir = mkdtempSync(join(tmpdir(), "c5-ledger-stale-"));
+  const file = join(dir, "ledger.json");
+  try {
+    const exited = spawnSync(process.execPath, ["-e", "0"]);
+    assert.equal(exited.status, 0);
+    writeLedger(beginAttempt(emptyLedger(), "scrub"), file);
+    writeFileSync(`${file}.lock`, String(exited.pid));
+    reserveTurnInFile("claude", file);
+    assert.equal(readLedger(file).totals.claude, 1);
+    assert.equal(existsSync(`${file}.lock`), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

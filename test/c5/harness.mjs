@@ -1,10 +1,13 @@
 // Pure helpers for the #827 Claude live journeys: grammar, budget ledger,
 // evidence leak scan and exact-path cleanup. Nothing runs on import.
 import {
+  closeSync,
   existsSync,
   lstatSync,
+  openSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -63,7 +66,55 @@ export function readLedger(file = ledgerPath()) {
 }
 
 export function writeLedger(state, file = ledgerPath()) {
-  writeFileSync(file, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+  // Write-then-rename, so a reader never sees a partial ledger.
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, `${JSON.stringify(state, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  renameSync(temporary, file);
+}
+
+const LOCK_WAIT_MS = 10_000;
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+};
+
+/**
+ * Runs `transition` on the ledger under an exclusive lock file holding the
+ * owner's PID, so concurrent drivers cannot lose attempts or turn counts. A lock
+ * whose owner process is gone is stale and removed.
+ */
+export function updateLedger(file, transition) {
+  const lock = `${file}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      closeSync(openSync(lock, "wx", 0o600));
+      writeFileSync(lock, String(process.pid));
+      break;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      // ponytail: PID liveness only; a reused PID keeps a stale lock until it exits.
+      const owner = Number(readFileSync(lock, "utf8") || Number.NaN);
+      if (Number.isInteger(owner) && owner > 0 && !alive(owner))
+        rmSync(lock, { force: true });
+      else if (Date.now() > deadline)
+        throw new Error("Ledger lock is held by a running driver");
+      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+    }
+  }
+  try {
+    const next = transition(readLedger(file));
+    writeLedger(next, file);
+    return next;
+  } finally {
+    rmSync(lock, { force: true });
+  }
 }
 
 /** Opens the next attempt of a facet; the model escalates only after a recorded compliance failure. */
@@ -141,31 +192,32 @@ export function finishAttempt(state, outcome, failureKind = null) {
  * killed) refuses new attempts until it is closed by hand.
  */
 export async function withAttempt(file, facet, body) {
-  const state = readLedger(file);
-  if (state.current)
-    throw new BudgetExhausted(
-      `attempt ${state.current.facet}#${state.current.number} is still open; close it only after verifying no driver runs`,
-    );
-  const next = beginAttempt(state, facet);
-  writeLedger(next, file);
+  const next = updateLedger(file, (state) => {
+    if (state.current)
+      throw new BudgetExhausted(
+        `attempt ${state.current.facet}#${state.current.number} is still open; close it only after verifying no driver runs`,
+      );
+    return beginAttempt(state, facet);
+  });
   let result = { outcome: "failed", failureKind: "harness" };
   try {
     result = await body(next.attempts[facet].at(-1));
     return result;
   } finally {
-    writeLedger(
-      finishAttempt(readLedger(file), result.outcome, result.failureKind),
-      file,
+    updateLedger(file, (state) =>
+      finishAttempt(state, result.outcome, result.failureKind),
     );
   }
 }
 
 /** File-backed reservation shared by the driver and its child service. */
 export function reserveTurnInFile(harness, file = ledgerPath()) {
-  const next = reserveTurn(readLedger(file), harness);
-  writeLedger(next, file);
-  return next;
+  return updateLedger(file, (state) => reserveTurn(state, harness));
 }
+
+/** Exit 0 only for a passed attempt with a clean leak scan; inconclusive fails. */
+export const exitCode = ({ leaks, failure, outcome }) =>
+  leaks.length || failure || outcome !== "passed" ? 1 : 0;
 
 /** Labels of secret or local-path material found in evidence text; empty when clean. */
 export function scanForLeaks(text, { token, roots = [], home } = {}) {

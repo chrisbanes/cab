@@ -18,6 +18,7 @@ import { join } from "node:path";
 import {
   ATTEMPT_MS,
   BudgetExhausted,
+  exitCode,
   ledgerPath,
   parseArgs,
   physicalTmpdir,
@@ -811,8 +812,11 @@ const leaks = scanForLeaks(text, {
   roots: [join(physicalTmpdir(), ROOT_PREFIX), "/tmp/ens-"],
   home: homedir(),
 });
-const code =
-  leaks.length || evidence.failure || evidence.outcome === "failed" ? 1 : 0;
+const code = exitCode({
+  leaks,
+  failure: evidence.failure,
+  outcome: evidence.outcome,
+});
 // Exit after the write drains: orphaned work after a timeout or signal must not
 // keep the process alive, and a pipe write on macOS is asynchronous.
 process.stdout.write(
