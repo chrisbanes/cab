@@ -102,14 +102,15 @@ export function sanitizeConversationText(
     values.add(value);
   }
 
-  let result = text
+  // Exact values first: a pattern pass would rewrite part of a value holding `token=…`.
+  let result = text;
+  for (const value of [...values].sort((a, b) => b.length - a.length))
+    result = result.split(value).join("[redacted]");
+  return result
     .replace(authorizationHeader, "$1[redacted]")
     .replace(bearerToken, "Bearer [redacted]")
     .replace(sensitiveAssignment, "$1[redacted]")
     .replace(urlCredentials, "$1[redacted]@");
-  for (const value of [...values].sort((a, b) => b.length - a.length))
-    result = result.split(value).join("[redacted]");
-  return result;
 }
 
 /** True when the text survives redaction unchanged, so it may be disclosed as-is. */

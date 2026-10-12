@@ -238,6 +238,10 @@ async function createTaskAssignment(
   };
 }
 
+// The `token=` pattern must not rewrite the instruction before its exact match.
+const profileInstructions =
+  "PRIVATE_PROFILE_INSTRUCTION_CANARY token=PROFILE_TOKEN_CANARY PROFILE_INSTRUCTION_TAIL_CANARY";
+
 async function fixture(
   runtime: HistoryRuntime,
   options: { exclusions?: () => readonly string[] } = {},
@@ -258,7 +262,7 @@ async function fixture(
     actor: "operator",
     profileId,
     name: "History test profile",
-    instructions: "PRIVATE_PROFILE_INSTRUCTION_CANARY",
+    instructions: profileInstructions,
     capabilities: "test",
   });
   command(service, {
@@ -331,7 +335,7 @@ test("persists only the response-bound completed item and survives reopen", asyn
         text: [
           "A useful answer.",
           "FIXTURE_SECRET_CANARY",
-          "PRIVATE_PROFILE_INSTRUCTION_CANARY",
+          profileInstructions,
           "PRIVATE_PROJECT_INSTRUCTION_CANARY",
           workspace,
           escapedCredential,
@@ -388,6 +392,8 @@ test("persists only the response-bound completed item and survives reopen", asyn
     for (const canary of [
       "FIXTURE_SECRET_CANARY",
       "PRIVATE_PROFILE_INSTRUCTION_CANARY",
+      "PROFILE_TOKEN_CANARY",
+      "PROFILE_INSTRUCTION_TAIL_CANARY",
       "PRIVATE_PROJECT_INSTRUCTION_CANARY",
       "WRONG_THREAD_CANARY",
       "WRONG_TURN_CANARY",
