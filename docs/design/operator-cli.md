@@ -462,8 +462,10 @@ mismatched identity, unverified termination, an existing or missing witness, a
 reconciled generation, stale replacement versions, unresolved execution, a task
 hold, a key reused for other material or another type) are `409`; malformed
 commands are `400`; other failures stay `command-outcome-unknown`.
-`GET /api/operator/assignments/:id/recovery-options` (read scope) adds, to the
-existing recovery read, the exact identity each command binds and advisory per-path
+`GET /api/operator/assignments/:id/recovery-options` (read scope) lists the
+assignment's own generations (newest 20, filtered before the bound; writer, capacity
+and uncertainty holds are this assignment's, Stop and task holds task-wide) with the
+exact identity each command binds and advisory per-path
 eligibility with closed blockers (`not-held`, `ownership-released`,
 `context-unavailable`, `witness-missing`, `witness-present`, `other-witness`,
 `already-reconciled`, `reason-withheld`, `identity-withheld`, `task-held`,
