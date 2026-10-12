@@ -20,6 +20,7 @@ import type {
 import {
   ConversationHistoryCapture,
   ConversationHistoryStore,
+  sanitizeConversationText,
 } from "../src/standalone/conversation-history.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import { tmpdir } from "./temp.js";
@@ -1162,4 +1163,25 @@ test("history capture and reads exclude every project's source and routing refer
     if (index < 4) assert.equal(read.includes(key), false, key);
     assert.equal(read.includes(`RotatedAccessCanary${index}`), false);
   }
+});
+
+test("exact values and credential patterns cannot hide each other", () => {
+  for (const [text, excluded, expected] of [
+    ["x PRIV token=TOK TAIL y", "PRIV token=TOK TAIL", "x [redacted] y"],
+    ["deploy token: LEAK", "deploy token", "[redacted]: [redacted]"],
+    [
+      "Send Authorization: Basic LEAK",
+      "Send Authorization",
+      "[redacted]: [redacted]",
+    ],
+    ["use Bearer LEAK", "use Bearer", "[redacted] [redacted]"],
+    [
+      "clone https://user:LEAK@host/r",
+      "clone https:",
+      "[redacted]//[redacted]@host/r",
+    ],
+    ['password="P1 LEAK"', '"P1', "password=[redacted]"],
+    ["token=abcLEAK", "token=abc", "[redacted]"],
+  ] as const)
+    assert.equal(sanitizeConversationText(text, [excluded]), expected, text);
 });

@@ -41,8 +41,15 @@ function validDeltaBytes(bytes: number): boolean {
 const sensitiveAssignment =
   /((?:"?(?:password|token|api[_-]?key|secret)"?)\s*[:=]\s*)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|([^\s,;]+))/gi;
 const authorizationHeader = /\b(authorization\s*:\s*)[^\r\n]+/gi;
-const bearerToken = /\bbearer\s+[^\s,;]+/gi;
+const bearerToken = /\b(bearer\s+)[^\s,;]+/gi;
 const urlCredentials = /\b([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi;
+/** Patterns redact what follows their first group; `kept` trailing characters stay. */
+const patterns: readonly (readonly [RegExp, number])[] = [
+  [authorizationHeader, 0],
+  [bearerToken, 0],
+  [sensitiveAssignment, 0],
+  [urlCredentials, 1],
+];
 const bindingSchema = z.object({
   workId: z.string().min(1),
   taskId: z.string().min(1),
@@ -102,15 +109,33 @@ export function sanitizeConversationText(
     values.add(value);
   }
 
-  // Exact values first: a pattern pass would rewrite part of a value holding `token=…`.
-  let result = text;
-  for (const value of [...values].sort((a, b) => b.length - a.length))
-    result = result.split(value).join("[redacted]");
-  return result
-    .replace(authorizationHeader, "$1[redacted]")
-    .replace(bearerToken, "Bearer [redacted]")
-    .replace(sensitiveAssignment, "$1[redacted]")
-    .replace(urlCredentials, "$1[redacted]@");
+  // Spans are found on the original text and merged, so neither an exact value nor
+  // a pattern can rewrite the other's anchor (an instruction holding `token=…`).
+  const spans: [number, number][] = [];
+  for (const value of values)
+    for (
+      let at = text.indexOf(value);
+      at !== -1;
+      at = text.indexOf(value, at + 1)
+    )
+      spans.push([at, at + value.length]);
+  for (const [pattern, kept] of patterns)
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index + (match[1]?.length ?? 0);
+      spans.push([start, match.index + match[0].length - kept]);
+    }
+  spans.sort((a, b) => a[0] - b[0]);
+  let result = "";
+  let end = 0;
+  for (const [start, stop] of spans) {
+    if (start < end) {
+      if (stop > end) end = stop;
+      continue;
+    }
+    result += `${text.slice(end, start)}[redacted]`;
+    end = stop;
+  }
+  return result + text.slice(end);
 }
 
 /** True when the text survives redaction unchanged, so it may be disclosed as-is. */
