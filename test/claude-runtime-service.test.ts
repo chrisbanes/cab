@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -193,6 +200,100 @@ test("a missing or empty Claude token makes the turn environment unavailable wit
     code: "empty",
   });
   assert.equal(JSON.stringify(empty).includes(NAME), false);
+});
+
+const FILE_TOKEN = "claude-file-token-canary-3381";
+
+/** An owner-only token file in a private real directory; returns its path. */
+function tokenFile(t: { after: (fn: () => void) => void }, value = FILE_TOKEN) {
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "ensemble-claude-token-")),
+  );
+  chmodSync(root, 0o700);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const path = join(root, "claude-token");
+  writeFileSync(path, `${value}\n`, { mode: 0o600 });
+  return path;
+}
+
+test("a file-sourced Claude token reaches only the Claude turn, never Codex, helper or alias environments", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: FILE_TOKEN });
+  const path = tokenFile(t);
+  const f = harnessFixture(t);
+  await f.service.start();
+  f.configure(`file:${path}`);
+  await f.service.stop();
+  await f.service.start();
+  const codex = f.contexts.get("codex")?.spawnEnvironment();
+  assert.ok(codex);
+  assert.equal(JSON.stringify(codex).includes(FILE_TOKEN), false);
+  assert.equal(codex[ALIAS], undefined);
+  const git = gitEnvironment();
+  assert.equal(JSON.stringify(git).includes(FILE_TOKEN), false);
+  assert.equal(git[ALIAS], undefined);
+  const turn = f.claude().turnEnvironment();
+  assert.ok("env" in turn);
+  assert.equal(turn.token, FILE_TOKEN);
+  assert.equal(JSON.stringify(turn.env).includes(FILE_TOKEN), false);
+  assert.equal(turn.env.ENSEMBLE_MANAGED_ASSIGNMENT, "1");
+});
+
+test("a file token also inherited by the running runtimes waits until restart", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: FILE_TOKEN });
+  const path = tokenFile(t);
+  const f = harnessFixture(t);
+  await f.service.start();
+  f.configure(`file:${path}`);
+  const held = f.claude().turnEnvironment();
+  assert.ok("unavailable" in held);
+  assert.equal(held.code, "restart-required");
+  assert.match(held.unavailable, /restart the service$/);
+  assert.equal(held.unavailable.includes(FILE_TOKEN), false);
+  await f.service.stop();
+  await f.service.start();
+  const turn = f.claude().turnEnvironment();
+  assert.ok("token" in turn);
+  assert.equal(turn.token, FILE_TOKEN);
+});
+
+test("an unsafe token file fails closed with a reason naming neither path nor value", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
+  const path = tokenFile(t);
+  const f = harnessFixture(t);
+  await f.service.start();
+  f.configure(`file:${path}`);
+  chmodSync(path, 0o644);
+  const unsafe = f.claude().turnEnvironment();
+  assert.deepEqual(unsafe, {
+    unavailable:
+      "Claude runtime unavailable: subscription token file permits group or other access",
+    code: "empty",
+  });
+  assert.equal(f.service.claudeTokenStatus().state, "missing-value");
+  rmSync(path);
+  const missing = f.claude().turnEnvironment();
+  assert.ok("unavailable" in missing);
+  assert.equal(
+    missing.unavailable,
+    "Claude runtime unavailable: subscription token file is missing",
+  );
+});
+
+test("a replaced token file applies to the next turn without a restart", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
+  const path = tokenFile(t);
+  const f = harnessFixture(t);
+  await f.service.start();
+  f.configure(`file:${path}`);
+  const first = f.claude().turnEnvironment();
+  assert.ok("token" in first);
+  assert.equal(first.token, FILE_TOKEN);
+  const next = `${path}.next`;
+  writeFileSync(next, "claude-file-token-rotated-5120\n", { mode: 0o600 });
+  renameSync(next, path);
+  const rotated = f.claude().turnEnvironment();
+  assert.ok("token" in rotated);
+  assert.equal(rotated.token, "claude-file-token-rotated-5120");
 });
 
 const processIdentity = {
@@ -608,6 +709,7 @@ async function claudeServiceRun(
   scripts: Script[],
   controls: ClaudeHarnessControls = { selfTest: true, verified: true },
   token: string | undefined = T6_TOKEN,
+  credentialRef = `env:${T6_NAME}`,
 ) {
   withEnvironment(t, { [T6_NAME]: token });
   const root = mkdtempSync(join(tmpdir(), "ensemble-claude-t6-"));
@@ -617,10 +719,7 @@ async function claudeServiceRun(
     rmSync(root, { recursive: true, force: true });
   });
   await h.service.start();
-  h.execute({
-    type: "claude-token.configure",
-    credentialRef: `env:${T6_NAME}`,
-  });
+  h.execute({ type: "claude-token.configure", credentialRef });
   // Configured before this start, so the running runtimes never inherited it.
   await h.service.stop();
   await h.service.start();
@@ -673,6 +772,46 @@ test("a Claude assignment turn completes, its coordination call carries the hook
   const codexEnvironment = run.codexContexts.at(-1)?.spawnEnvironment();
   assert.ok(codexEnvironment);
   assert.equal(JSON.stringify(codexEnvironment).includes(T6_TOKEN), false);
+});
+
+test("an installed service runs a Claude turn from a token file with no token in its environment", async (t) => {
+  const path = tokenFile(t);
+  const run = await claudeServiceRun(
+    t,
+    [
+      async function* (session) {
+        yield init(sessionOf(session));
+        yield result(sessionOf(session));
+      },
+    ],
+    undefined,
+    undefined,
+    `file:${path}`,
+  );
+  assert.equal(Object.values(process.env).includes(FILE_TOKEN), false);
+  const { projectId, worker } = run.setup();
+  const { workId } = await run.claudeTask(projectId, worker);
+  await waitUntil(
+    () => run.intent(workId)?.state === "completed",
+    run.describe,
+  );
+  {
+    const base = run.intent(workId)?.workspace;
+    t.after(() => releaseTemporaryBase(base));
+  }
+  const env = run.sessions[0]?.options.env;
+  assert.equal(env?.CLAUDE_CODE_OAUTH_TOKEN, FILE_TOKEN);
+  assert.equal(env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, "1");
+  assert.equal(
+    Object.entries(env ?? {}).some(
+      ([key, value]) =>
+        key !== "CLAUDE_CODE_OAUTH_TOKEN" && value === FILE_TOKEN,
+    ),
+    false,
+  );
+  const codexEnvironment = run.codexContexts.at(-1)?.spawnEnvironment();
+  assert.ok(codexEnvironment);
+  assert.equal(JSON.stringify(codexEnvironment).includes(FILE_TOKEN), false);
 });
 
 test("a missing token or failed sandbox self-test keeps Claude work waiting without holds while Codex proceeds", async (t) => {
@@ -1035,6 +1174,30 @@ test("operator token status reports each state without the reference name or val
   assert.equal((await state()).state, "available");
   await clear();
   assert.equal((await state()).state, "not-configured");
+});
+
+test("operator token status for a file reference names neither its path nor its value", async (t) => {
+  withEnvironment(t, { [NAME]: undefined, [ALIAS]: undefined });
+  const path = tokenFile(t);
+  const f = harnessFixture(t);
+  await f.service.start();
+  const api = new OperatorApi(f.service, [f.dataDir]);
+  const state = async () => {
+    const read = api.readClaudeTokenStatus();
+    const text =
+      JSON.stringify(read) + JSON.stringify(await api.readWorkspace());
+    assert.equal(text.includes(path), false);
+    assert.equal(text.includes(FILE_TOKEN), false);
+    return read.data.state;
+  };
+  await api.execute({
+    type: "claude-token.configure",
+    key: randomUUID(),
+    credentialRef: `file:${path}`,
+  });
+  assert.equal(await state(), "available");
+  chmodSync(path, 0o640);
+  assert.equal(await state(), "missing-value");
 });
 
 test("a started Claude runtime's supported settings and effective policy parse into the harness status", async (t) => {

@@ -24,7 +24,7 @@ interface ReferenceStatus {
   state?: "not-configured" | "missing-value" | "restart-required" | "available";
 }
 
-/** An installation `env:NAME` reference row: status line, Set/Change, Clear and Cancel. */
+/** An installation credential reference row: status line, Set/Change, Clear and Cancel. */
 function ReferenceRow({
   p,
   endpoint,
@@ -177,13 +177,13 @@ export function ClaudeTokenRow(p: SettingsProps) {
       type="claude-token.configure"
       title="Claude subscription token"
       fieldLabel="Claude token reference"
-      note="Use env:NAME; the value stays in the service environment, is passed only to the Claude process and is never shown. Create it with claude setup-token. Validity is checked when a Claude turn starts."
+      note="Use file:/absolute/path to an owner-only (chmod 600) file, or env:NAME. The value is passed only to the Claude process and is never shown. Create it with claude setup-token. Validity is checked when a Claude turn starts."
       configuredLine={(s) =>
         s.state === "restart-required"
           ? "reference configured · restart the service to use it"
           : s.available
             ? "reference configured · available"
-            : "reference configured · no value in the service environment"
+            : "reference configured · token unavailable"
       }
     />
   );

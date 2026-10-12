@@ -87,6 +87,31 @@ read, or alter Codex credentials. The separate Ensemble auth file is not that
 login. The launchd proof starts App Server and verifies authentication/config
 initialization without requesting a model turn.
 
+### Claude subscription token
+
+Claude profiles need the operator's own subscription token from
+`claude setup-token`. The installed service reads it from an owner-only file, so
+the plist and its environment need no Claude variable. Create a private real
+directory (not a symbolic link) and an empty mode `0600` file, then put the token
+in it without shell history or argv, for example from the clipboard:
+
+```sh
+mkdir -m 700 /absolute/private/claude
+install -m 600 /dev/null /absolute/private/claude/claude-token
+pbpaste > /absolute/private/claude/claude-token
+stat -f '%Su %Lp' /absolute/private/claude/claude-token
+```
+
+`stat` must show the service user and `600`. In Settings, set the Claude token
+reference to `file:/absolute/private/claude/claude-token`. The file is checked
+whenever a Claude turn needs it: a symbolic link, a file owned by another user, any
+group or other permission bit, more than 4096 bytes, a missing or empty file, or
+content other than one token makes Claude work wait with a visible reason, and
+the row shows the token unavailable. To rotate, write the new token to a new mode
+`0600` file in the same directory and `mv` it over the old one; the next turn uses
+it without a restart. A launchd-installed Claude turn with a real token is
+untested; the bounded live journeys ran the service outside launchd.
+
 ## Start, inspect, restart and stop
 
 Run these commands in the logged-in user's GUI launchd domain, using the exact

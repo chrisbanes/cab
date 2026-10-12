@@ -1,14 +1,19 @@
-/** Removes the named variables and every variable holding their nonempty values in either environment. */
+/**
+ * Removes the named variables and every variable holding their nonempty values in either
+ * environment, or holding one of `excludedValues`.
+ */
 export function credentialFreeEnvironment(
   environment: NodeJS.ProcessEnv,
   keys: readonly string[],
   current: NodeJS.ProcessEnv = environment,
+  excludedValues: readonly string[] = [],
 ): NodeJS.ProcessEnv {
   const result = { ...environment };
   const values = new Set(
-    keys
-      .flatMap((k) => [environment[k], current[k]])
-      .filter((v): v is string => Boolean(v)),
+    [
+      ...keys.flatMap((k) => [environment[k], current[k]]),
+      ...excludedValues,
+    ].filter((v): v is string => Boolean(v)),
   );
   for (const key of Object.keys(result)) {
     const value = result[key];
@@ -18,14 +23,18 @@ export function credentialFreeEnvironment(
   return result;
 }
 
-let excludedNames: () => readonly string[] = () => [];
-let lastExcluded: readonly string[] = [];
+interface CredentialExclusions {
+  names: readonly string[];
+  values: readonly string[];
+}
+let excluded: () => CredentialExclusions = () => ({ names: [], values: [] });
+let lastExcluded: CredentialExclusions = { names: [], values: [] };
 
-/** The running service names credentials no helper child process may inherit. */
+/** The running service's credentials (by name or value) no helper child process may inherit. */
 export function setChildCredentialExclusions(
-  names: () => readonly string[],
+  exclusions: () => CredentialExclusions,
 ): void {
-  excludedNames = names;
+  excluded = exclusions;
 }
 
 /** Environment for non-runtime children (git, ps, pmset, …): the service's excluded credentials removed. */
@@ -33,11 +42,16 @@ export function childProcessEnvironment(
   base: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   try {
-    lastExcluded = excludedNames();
+    lastExcluded = excluded();
   } catch {
     // A closed store keeps the last known exclusions rather than none.
   }
-  return credentialFreeEnvironment(base, lastExcluded, process.env);
+  return credentialFreeEnvironment(
+    base,
+    lastExcluded.names,
+    process.env,
+    lastExcluded.values,
+  );
 }
 
 /** Environment for every Git child: no inherited `GIT_*`, no prompts, lazy fetches or transports. */

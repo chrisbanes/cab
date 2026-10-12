@@ -547,7 +547,8 @@ reasoning effort for Claude). An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
 falls back to another. The operator UI selects and shows each profile's runtime,
 the runtime of each assignment and each runtime's effective policy, and sets the
-Claude token as an `env:NAME` reference without showing it.
+Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
+without showing it.
 
 The production service runs both runtimes; profiles default to Codex. The Claude
 runtime is qualified, with limits, by bounded live journeys
@@ -574,6 +575,10 @@ has no operator HTTP or CLI route yet. Recovery continues
 from the assignment's latest completed turn, so a crash during its first turn
 continues in a fresh session. Surfaces the journeys did not test remain limits.
 The token comes from the operator's own subscription through `claude setup-token`.
+An unsafe token file (a symbolic link, not a regular file, not owned by the service
+user, group- or other-accessible, over 4096 bytes or missing) is never read, and an
+empty file or content other than one token is not used; Claude work waits with a
+reason that names neither the path nor the value.
 Anthropic's terms do not explicitly address a single-operator service driven by its
 owner; the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
 are rechecked when self-hosting by others is considered.

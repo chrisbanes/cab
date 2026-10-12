@@ -1995,9 +1995,13 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("claude-token.configure"),
+      /** `env:NAME`, or `file:` and an absolute path with no empty, `.` or `..` segment. */
       credentialRef: z
         .string()
-        .regex(/^env:[A-Z][A-Z0-9_]*$/)
+        .max(1024)
+        .regex(
+          /^(?:env:[A-Z][A-Z0-9_]*|file:(?:\/(?!\.{1,2}(?:\/|$))[^/\0\r\n]+)+)$/,
+        )
         .nullable(),
     })
     .strict(),
