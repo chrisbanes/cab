@@ -29,7 +29,9 @@ import {
   withAttempt,
 } from "./harness.mjs";
 import {
+  SLEEP,
   setupJourney,
+  shellOnly,
   startJourneyService,
   TOKEN_VARIABLE,
 } from "./service-child.mjs";
@@ -513,10 +515,27 @@ async function crash() {
     model: evidence.model.claude,
     repository,
   });
+  // Recovery resumes the latest completed turn's session, so one completes first.
+  const completed = await waitUntil(
+    async () => {
+      const s = await snapshot(first, ids.taskId);
+      return s.recovery.find((r) => r.intent.state === "completed");
+    },
+    TURN_MS,
+    "first Claude turn to complete",
+    true,
+  );
+  await first.call("message", {
+    key: randomUUID(),
+    taskId: ids.taskId,
+    recipientAssignmentId: completed.binding.assignmentId,
+    expectedAssignmentVersion: completed.binding.assignmentVersion,
+    message: shellOnly(SLEEP),
+  });
   const record = await waitUntil(
     async () => running((await snapshot(first, ids.taskId)).recovery),
     TURN_MS,
-    "running Claude turn with a process identity",
+    "running follow-up Claude turn with a process identity",
     true,
   );
   await delay(15_000);
@@ -624,10 +643,12 @@ async function crash() {
   const released = after.recovery.find((r) => r.workId === record.workId);
   Object.assign(evidence.observations, {
     recoveredTurns: after.turns.length,
-    sameThread: resumed.threadId === held.intent.threadId,
+    sameThread:
+      resumed.threadId === held.intent.threadId &&
+      resumed.threadId === completed.intent.threadId,
     holdsAfterRecovery: released?.holds ?? null,
   });
-  evidence.startTurn.turns = 1 + after.turns.length;
+  evidence.startTurn.turns = 2 + after.turns.length;
   if (after.turns.length !== 1 || after.refused.length !== 0)
     throw new Error("recovery started other than exactly one turn");
   if (!evidence.observations.sameThread)

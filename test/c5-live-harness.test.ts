@@ -254,16 +254,16 @@ test("a service child whose parent disconnects exits, even before it starts a se
   assert.equal(code, 0);
 });
 
-test("a shell-only facet turn that follows its brief needs no reporting-repair turn", async () => {
-  const { facetOutcome, setupJourney } = await import(
+test("facet turns that follow their brief need no repair turn, and the crash follow-up resumes the session", async () => {
+  const { SLEEP, facetOutcome, setupJourney, shellOnly } = await import(
     pathToFileURL(resolve("test/c5/service-child.mjs")).href
   );
   // The bundled CLI refuses a command whose first part is `sleep N`, N >= 25.
-  for (const facet of ["stop", "crash"])
-    assert.doesNotMatch(
-      facetOutcome(facet, { workerProfileId: "w", nonce: "n" }),
-      /verbatim: sleep\s+\d/,
-    );
+  for (const brief of [
+    facetOutcome("stop", { workerProfileId: "w", nonce: "n" }),
+    shellOnly(SLEEP),
+  ])
+    assert.doesNotMatch(brief, /verbatim: sleep\s+\d/);
   const root = mkdtempSync(join(tmpdir(), "c5-repair-"));
   const repository = join(root, "repo");
   mkdirSync(repository);
@@ -282,17 +282,19 @@ test("a shell-only facet turn that follows its brief needs no reporting-repair t
     "fixture",
   );
   const prompts: string[] = [];
+  const threads: string[] = [];
   // Completes each turn, reporting a result only when the prompt asks for one.
   let listener: Parameters<NonNullable<Runtime["onToolCall"]>>[0];
   const runtime = {
     async start() {},
     async stop() {},
     async startThread() {
-      return "thread-1";
+      return `thread-${prompts.length + 1}`;
     },
     async resumeThread() {},
-    async startTurn(_thread: string, _workspace: string, prompt: string) {
+    async startTurn(thread: string, _workspace: string, prompt: string) {
       prompts.push(prompt);
+      threads.push(thread);
       return `turn-${prompts.length}`;
     },
     async interruptTurn() {},
@@ -324,28 +326,39 @@ test("a shell-only facet turn that follows its brief needs no reporting-repair t
   );
   try {
     await service.start();
-    for (const facet of ["scrub", "stop"]) {
+    const settle = async (count: number) => {
+      for (let i = 0; i < 40 && prompts.length < count; i++)
+        await new Promise((done) => setTimeout(done, 100));
+      await new Promise((done) => setTimeout(done, 500));
+    };
+    for (const facet of ["scrub", "stop", "crash"]) {
       const before = prompts.length;
       const { taskId } = await setupJourney(service, {
         facet,
         model: "haiku",
         repository,
       });
-      for (let i = 0; i < 40; i++) {
-        await new Promise((done) => setTimeout(done, 100));
-        if (
-          prompts.length > before &&
-          service.list().every((item) => item.state === "completed")
-        )
-          break;
-      }
-      await new Promise((done) => setTimeout(done, 500));
+      await settle(before + 1);
       assert.equal(prompts.length - before, 1, facet);
       assert.equal(
         service.coordinationView().readTask(taskId).results.length,
         1,
         facet,
       );
+      if (facet !== "crash") continue;
+      // The crash facet kills a follow-up, so recovery has a session to resume.
+      const binding = service.recoveryForTask(taskId)[0]?.binding;
+      assert.ok(binding);
+      await service.coordinationView().postOperatorMessage({
+        key: crypto.randomUUID(),
+        taskId,
+        recipientAssignmentId: binding.assignmentId,
+        expectedAssignmentVersion: binding.assignmentVersion,
+        message: shellOnly(SLEEP),
+      });
+      await settle(before + 2);
+      assert.equal(prompts.length - before, 2);
+      assert.equal(threads.at(-1), threads.at(-2));
     }
   } finally {
     await service.stop();

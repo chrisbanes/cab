@@ -18,7 +18,9 @@ export const FACETS = {
   "claude-only": { claude: 8, codex: 0 },
   mixed: { claude: 3, codex: 4 },
   stop: { claude: 1, codex: 0 },
-  crash: { claude: 2, codex: 0 },
+  // A completed turn, the killed follow-up and the recovered turn: only a
+  // completed turn gives recovery a session to resume.
+  crash: { claude: 3, codex: 0 },
 };
 export const GLOBAL_CAPS = { claude: 30, codex: 10 };
 export const MAX_ATTEMPTS = 2;

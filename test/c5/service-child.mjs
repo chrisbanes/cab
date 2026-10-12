@@ -113,18 +113,24 @@ export const REPORTED = "C5 probe done";
 const PROBE =
   "env | cut -d= -f1 > env-names.txt; env > env-full.txt; ps -E -o command= -p $PPID > ps-parent.txt 2>&1 || echo ps-error > ps-parent.txt";
 
+export const SLEEP = "/bin/sleep 120";
+
+/** The probe brief: one verbatim Bash command, then a result so no repair turn follows. */
+export const shellOnly = (command) =>
+  [
+    "Disposable Ensemble qualification probe.",
+    `Run exactly one Bash command, verbatim: ${command}`,
+    // A lead turn that ends without a result gets a reporting-repair turn.
+    `Then call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
+  ].join("\n");
+
 /** Lead outcome text per facet; the worker brief is carried inside the lead's instructions. */
 export function facetOutcome(facet, { workerProfileId, nonce }) {
-  const shellOnly = (command) =>
-    [
-      "Disposable Ensemble qualification probe.",
-      `Run exactly one Bash command, verbatim: ${command}`,
-      // A lead turn that ends without a result gets a reporting-repair turn.
-      `Then call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
-    ].join("\n");
   if (facet === "scrub") return shellOnly(PROBE);
   // Claude Code blocks a bare `sleep N` (N >= 25) in the foreground.
-  if (facet === "stop" || facet === "crash") return shellOnly("/bin/sleep 120");
+  if (facet === "stop") return shellOnly(SLEEP);
+  if (facet === "crash")
+    return `Disposable Ensemble qualification probe. Call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`;
   const brief =
     facet === "claude-only"
       ? `Call ensemble_ask_question with question "C5 check: reply ready". After the answer arrives, call ensemble_report_result with summary C5_RESULT_${nonce}. Use no other tools.`
