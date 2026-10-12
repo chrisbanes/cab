@@ -189,7 +189,9 @@ function boundLeaf(
     return typeof value === "bigint" ? String(value) : value;
   if (depth >= maxDepth) return { omitted: "size-limit", bytes: 0 };
   if (Array.isArray(value))
-    return value.map((v) => boundLeaf(v, exclusions, cap, undefined, depth + 1));
+    return value.map((v) =>
+      boundLeaf(v, exclusions, cap, undefined, depth + 1),
+    );
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => [
       k,
@@ -210,15 +212,7 @@ export function boundDetail(
 ): unknown {
   if (exclusions === undefined) return undefined;
   try {
-    return (
-      boundLeaf(
-        value,
-        exclusions,
-        leafBytes,
-        undefined,
-        0,
-      ) ?? null
-    );
+    return boundLeaf(value, exclusions, leafBytes, undefined, 0) ?? null;
   } catch (error) {
     if (error === unavailable) return undefined;
     throw error;
