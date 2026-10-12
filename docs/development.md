@@ -387,14 +387,37 @@ default with `connection use`.
 Runtime children started by the service receive `ENSEMBLE_MANAGED_ASSIGNMENT=1` and
 no `ENSEMBLE_CONNECTION` or `ENSEMBLE_CLI_*` variables, and the CLI refuses to
 authenticate when the marker is set. This guards against accidental privilege
-crossing only; it is not OS isolation from same-user processes, and propagation of
-the marker into Codex tool shells is not yet proved.
+crossing only; it is not OS isolation from same-user processes. The CLI8 live run
+observed the marker in Codex tool shells (one host, one Codex version).
+
+Troubleshooting:
+
+- `service-identity-changed` (exit 3): the URL now reaches another installation.
+  Log in again only if that change is intended.
+- `credential-store-unavailable`: no Keychain (or no interactive terminal for the
+  masked prompt); use `--token-file`. The Keychain lookup uses `HOME`'s login
+  keychain.
+- `managed-assignment` (exit 3): the command runs inside an agent turn, which must
+  not use operator credentials.
+- After correcting instructions for a completed lead, `assignment apply-current`
+  followed by `task follow-up` exits 4, because adoption advances the assignment past
+  its result. Send the follow-up under `task stop`, run `assignment apply-current`,
+  then `task resume`.
+- For another machine, reach the service only through a private HTTPS route (for
+  example a tailnet-only route to the loopback port), log in there with the `https://`
+  origin and a token file, and trust a private CA with `NODE_EXTRA_CA_CERTS`.
 
 `npm run check` covers the CLI with injected fakes and a packed offline install
 against a real service over loopback and verified HTTPS. The Keychain test is
 opt-in on macOS: `npm run build && ENSEMBLE_KEYCHAIN_LIVE=1 node --test
 dist/test/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
 `ensemble-cli-test-<uuid>` item.
+
+`node test/cli8/live-journey.mjs --fixture` (run by `npm run check`) drives the
+installed binary through the assembled journey with a scripted runtime.
+`npm run cli8:live` runs it once against Codex through the ChatGPT.app launcher with
+at most two model turns, a Keychain login and verified cleanup; it prints sanitised
+evidence JSON.
 
 ## Previous implementation
 
