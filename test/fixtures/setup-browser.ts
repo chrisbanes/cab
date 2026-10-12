@@ -16,6 +16,8 @@ export async function setupJourney(
     path?: string;
     /** Every fake discovery list reports more than it returned. */
     truncated?: boolean;
+    /** A fake `gh` executable; without one the service finds no gh. */
+    ghExecutable?: string;
   } = {},
 ) {
   const home = await createSetupHome();
@@ -68,6 +70,7 @@ export async function setupJourney(
     f.startWeb([f.directory], {
       home: home.home,
       discovery: fakeDiscovery(discoveryState),
+      ...(options.ghExecutable ? { ghExecutable: options.ghExecutable } : {}),
     }),
   );
   browser = await journey.start("browser.launch", () =>

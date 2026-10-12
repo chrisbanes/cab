@@ -73,6 +73,14 @@ The agent harness or execution engine that carries out admitted agent turns and
 reports their observations to Ensemble.
 _Avoid_: Scheduler when referring to the system executing one agent turn
 
+**Credential reference**:
+Where the service reads a credential, never the credential itself. `env:NAME` names
+a service environment variable; `file:/absolute/path` an owner-only file (Claude
+token only); `gh:github.com` the GitHub CLI's login for github.com (discovery
+only), read per use without caching. Reads report whether a reference is configured
+and usable, never its value.
+_Avoid_: Token or secret when referring to the stored reference
+
 **Execution binding**:
 The association between an assignment and its runtime-specific session or process
 identity and validated execution settings.

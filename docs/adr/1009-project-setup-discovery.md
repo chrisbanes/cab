@@ -19,13 +19,40 @@ for typed identifiers:
 - **GitHub Project:** Projects linked to the chosen repositories, then other
   Projects owned by the same owner.
 
-Discovery uses an installation-level GitHub credential reference (`env:NAME`),
-held server-side like other credentials and used only for reads: repository and
-branch lists through REST GETs and Projects through one fixed GraphQL query. The
-keyed `discovery.configure` command sets or clears the reference; reads report only
-whether it is configured and has a value. The Codex runtime inherits the service
-environment, so the reference should name a dedicated read-only token. A project can
-still set its own source credential later. Discovered lists are suggestions for
+Discovery uses an installation-level GitHub credential reference, held
+server-side like other credentials and used only for reads: repository and branch
+lists through REST GETs and Projects through one fixed GraphQL query. The reference
+is `env:NAME` or `gh:github.com`, the GitHub CLI's login for github.com. The service
+resolves a `gh:` reference for each read with non-interactive `gh auth token
+--hostname github.com` under a bounded timeout, and caches nothing for reads. The
+keyed `discovery.configure` command sets or clears the reference; delivery,
+routing and project source credentials do not accept `gh:`.
+
+The discovery status read reports:
+
+- whether a reference is configured and usable, and its kind;
+- the GitHub CLI detection state (`gh auth status --json`): signed in with the
+  account login, not installed, not signed in, or unreadable from the service.
+
+It never reports the reference name or token. Detection only offers the login.
+Ensemble reads with it only after the operator chooses it in Settings or the setup
+alert, and never falls back to it implicitly.
+
+The discovery credential is removed, by name and value, from the Codex runtime
+spawn environment, from each Claude turn and from helper child processes, as
+delivery credentials and the Claude token are:
+
+- an `env:` reference by its variable and value;
+- a `gh:` reference by `GH_TOKEN`, `GITHUB_TOKEN` and every token value the
+  service has resolved. Those values are held in memory only for exclusion and
+  redaction.
+
+A Codex runtime keeps the environment it was spawned with, so a reference set
+while it runs is excluded from it after the next service restart.
+
+Ensemble does not prevent an agent from running `gh` itself if its sandbox can
+reach the operator's keychain. That is a runtime limit, not an Ensemble guarantee.
+A project can still set its own source credential later. Discovered lists are suggestions for
 the form; they are not stored as access, sources or task data.
 
 When the credential is missing or a read fails, setup shows the reason and accepts

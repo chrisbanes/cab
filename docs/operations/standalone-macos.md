@@ -87,6 +87,24 @@ read, or alter Codex credentials. The separate Ensemble auth file is not that
 login. The launchd proof starts App Server and verifies authentication/config
 initialization without requesting a model turn.
 
+### GitHub discovery credential
+
+Project setup discovers repositories with the installation discovery credential.
+On a host with an authenticated GitHub CLI (`gh auth login`), choose **GitHub CLI**
+in Settings, or **Use GitHub CLI login** in setup. The service runs `gh` by name
+from the LaunchAgent's fixed `PATH`, without prompts, for each discovery read.
+
+A launchd job in the user's GUI domain reads the keychain-backed gh login without
+prompting
+([evidence](../evidence/942-gh-discovery-credential-2026-10-12.md)). If Settings
+shows "gh login unreadable from the service", check `gh auth status` as the service
+user. Alternatively, use an environment variable reference that names a token in
+the service environment.
+
+The service removes the discovery credential from the Codex runtime, Claude turns
+and helper processes. A reference configured while the service runs is excluded
+from the Codex runtime after the next restart.
+
 ### Claude subscription token
 
 Claude profiles need the operator's own subscription token from

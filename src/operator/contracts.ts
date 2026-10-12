@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
@@ -1985,10 +1986,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     .object({
       ...base,
       type: z.literal("discovery.configure"),
-      credentialRef: z
-        .string()
-        .regex(/^env:[A-Z][A-Z0-9_]*$/)
-        .nullable(),
+      credentialRef: discoveryCredentialReference.nullable(),
     })
     .strict(),
   z
@@ -2853,9 +2851,33 @@ export const claudeTokenStatusSchema = envelope(
     })
     .strict(),
 );
-/** Installation discovery credential: whether a reference is set and has a value. Never the name. */
+/** The GitHub CLI login for github.com, detected on every status read. Never the token. */
+export const ghLoginStateSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("signed-in"),
+      login: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.enum(["not-installed", "not-signed-in", "unreadable"]),
+    })
+    .strict(),
+]);
+/**
+ * Installation discovery credential: whether a reference is set, its kind and whether it
+ * resolves, plus the detected GitHub CLI login. Never the variable name or a token.
+ */
 export const discoveryStatusSchema = envelope(
-  z.object({ configured: z.boolean(), available: z.boolean() }).strict(),
+  z
+    .object({
+      configured: z.boolean(),
+      available: z.boolean(),
+      source: z.enum(["env", "gh"]).nullable(),
+      gh: ghLoginStateSchema,
+    })
+    .strict(),
 );
 export const discoveryUnavailableReasons = [
   "unconfigured",
@@ -2864,6 +2886,9 @@ export const discoveryUnavailableReasons = [
   "forbidden",
   "rate-limited",
   "unreadable",
+  "gh-not-installed",
+  "gh-not-signed-in",
+  "gh-unreadable",
 ] as const;
 const discoveryUnavailable = z
   .object({

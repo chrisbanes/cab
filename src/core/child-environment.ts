@@ -37,15 +37,21 @@ export function setChildCredentialExclusions(
   excluded = exclusions;
 }
 
-/** Environment for non-runtime children (git, ps, pmset, …): the service's excluded credentials removed. */
-export function childProcessEnvironment(
-  base: NodeJS.ProcessEnv = process.env,
-): NodeJS.ProcessEnv {
+/** The service's current credential exclusions, also used to keep values out of captured text. */
+export function childCredentialExclusions(): CredentialExclusions {
   try {
     lastExcluded = excluded();
   } catch {
     // A closed store keeps the last known exclusions rather than none.
   }
+  return lastExcluded;
+}
+
+/** Environment for non-runtime children (git, ps, pmset, …): the service's excluded credentials removed. */
+export function childProcessEnvironment(
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  childCredentialExclusions();
   return credentialFreeEnvironment(
     base,
     lastExcluded.names,

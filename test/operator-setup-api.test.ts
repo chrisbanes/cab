@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import type { z } from "zod";
 import { DomainPolicyError } from "../src/core/domain.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
 import { DiscoveryFailure } from "../src/standalone/github-discovery.js";
@@ -26,6 +27,10 @@ import {
 } from "./fixtures/git-environment.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { createSetupHome, fakeDiscovery, git } from "./fixtures/setup-home.js";
+import { createFakeGh, fakeGhToken } from "./fixtures/fake-gh.js";
+import { deliveryPolicySchema } from "../src/core/delivery.js";
+import { githubConfigurationSchema } from "../src/core/github-source-contracts.js";
+import { operatorCommandSchema } from "../src/operator/contracts.js";
 
 const configure = (credentialRef: string | null) => ({
   type: "discovery.configure",
@@ -36,7 +41,16 @@ const configure = (credentialRef: string | null) => ({
 test("the discovery credential reference is set, shown only as configured and cleared", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
-  const api = new OperatorApi(f.service, [f.directory]);
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const setup = { ghExecutable: gh.missing };
+  const api = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    setup,
+  );
   const set = configure("env:FIXTURE_DISCOVERY");
   const receipt = await api.execute(set);
   assert.deepEqual(receipt, {
@@ -49,15 +63,22 @@ test("the discovery credential reference is set, shown only as configured and cl
       configured: true,
     },
   });
-  assert.deepEqual(api.readDiscoveryStatus().data, {
+  assert.deepEqual((await api.readDiscoveryStatus()).data, {
     configured: true,
     available: false,
+    source: "env",
+    gh: { state: "not-installed" },
   });
   const previous = process.env.FIXTURE_DISCOVERY;
   process.env.FIXTURE_DISCOVERY = "PRIVATE DISCOVERY TOKEN";
   try {
-    const status = api.readDiscoveryStatus();
-    assert.deepEqual(status.data, { configured: true, available: true });
+    const status = await api.readDiscoveryStatus();
+    assert.deepEqual(status.data, {
+      configured: true,
+      available: true,
+      source: "env",
+      gh: { state: "not-installed" },
+    });
     const text = JSON.stringify([
       status,
       receipt,
@@ -76,17 +97,34 @@ test("the discovery credential reference is set, shown only as configured and cl
   );
   await f.service.stop();
   await f.service.start();
-  const reopened = new OperatorApi(f.service, [f.directory]);
+  const reopened = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    setup,
+  );
   assert.deepEqual(await reopened.execute(set), receipt);
   const clear = configure(null);
   await reopened.execute(clear);
-  assert.deepEqual(reopened.readDiscoveryStatus().data, {
+  assert.deepEqual((await reopened.readDiscoveryStatus()).data, {
     configured: false,
     available: false,
+    source: null,
+    gh: { state: "not-installed" },
   });
   assert.deepEqual(await reopened.execute(set), receipt);
   assert.equal(f.service.domain().discoveryCredentialReference(), null);
-  for (const bad of ["env:lower", "FIXTURE", "env:"])
+  for (const bad of [
+    "env:lower",
+    "FIXTURE",
+    "env:",
+    "gh:",
+    "gh:github.example.com",
+    "gh:GITHUB.COM",
+    "gh:github.com/x",
+    "GH:github.com",
+  ])
     await assert.rejects(reopened.execute(configure(bad)));
   assert.throws(
     () =>
@@ -657,4 +695,122 @@ test("a discovery result read with a credential that changed meanwhile is read a
     reason: "unconfigured",
   });
   assert.deepEqual(used, ["env:SECOND_DISCOVERY"]);
+});
+
+test("a gh discovery reference reads with the gh login on every read and never reveals its token", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const tokens: (string | undefined)[] = [];
+  const factory = fakeDiscovery();
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    ghExecutable: gh.executable,
+    discovery: (ref, token) => {
+      tokens.push(token);
+      return factory(ref);
+    },
+  });
+  // Unconfigured status still reports the detected login, so the choice can be offered.
+  assert.deepEqual((await api.readDiscoveryStatus()).data, {
+    configured: false,
+    available: false,
+    source: null,
+    gh: { state: "signed-in", login: "octo" },
+  });
+  const receipt = await api.execute(configure("gh:github.com"));
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  const status = await api.readDiscoveryStatus();
+  assert.deepEqual(status.data, {
+    configured: true,
+    available: true,
+    source: "gh",
+    gh: { state: "signed-in", login: "octo" },
+  });
+  const repositories = await api.readDiscoveryRepositories();
+  assert.equal(repositories.data.state, "ready");
+  assert.deepEqual(tokens, [fakeGhToken]);
+  await api.readDiscoveryRepositories();
+  // Resolved again for the second read, never cached.
+  assert.deepEqual(tokens, [fakeGhToken, fakeGhToken]);
+  for (const [state, reason, detected] of [
+    ["not-signed-in", "gh-not-signed-in", { state: "not-signed-in" }],
+    ["unreadable", "gh-unreadable", { state: "unreadable" }],
+    ["invalid-token", "gh-unreadable", { state: "signed-in", login: "octo" }],
+  ] as const) {
+    gh.set(state);
+    assert.deepEqual((await api.readDiscoveryRepositories()).data, {
+      state: "unavailable",
+      reason,
+    });
+    const failed = await api.readDiscoveryStatus();
+    assert.deepEqual(failed.data, {
+      configured: true,
+      available: state === "invalid-token",
+      source: "gh",
+      gh: detected,
+    });
+  }
+  const missing = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    { ghExecutable: gh.missing, discovery: factory },
+  );
+  assert.deepEqual((await missing.readDiscoveryRepositories()).data, {
+    state: "unavailable",
+    reason: "gh-not-installed",
+  });
+  assert.equal(tokens.length, 2);
+  gh.set("signed-in");
+  const web = await f.startWeb([f.directory], {
+    ghExecutable: gh.executable,
+    discovery: factory,
+  });
+  const cookieOf = (r: Response) =>
+    r.headers.get("set-cookie")?.split(";")[0] ?? "";
+  const anonymous = await fetch(`${web.origin}/api/operator/session`);
+  const anon = (await anonymous.json()) as { csrfToken: string };
+  const login = await fetch(`${web.origin}/api/operator/login`, {
+    method: "POST",
+    headers: {
+      cookie: cookieOf(anonymous),
+      origin: web.origin,
+      "content-type": "application/json",
+      "x-csrf-token": anon.csrfToken,
+    },
+    body: JSON.stringify({ password: web.password }),
+  });
+  const cookie = cookieOf(login);
+  const body = await (
+    await fetch(`${web.origin}/api/operator/discovery`, { headers: { cookie } })
+  ).text();
+  assert.deepEqual(JSON.parse(body).data, status.data);
+  const text = JSON.stringify([
+    status,
+    receipt,
+    body,
+    repositories,
+    await api.readWorkspace(),
+  ]);
+  assert.equal(text.includes(fakeGhToken), false);
+});
+
+test("routing, delivery and GitHub source credentials still accept only env references", () => {
+  const routing = operatorCommandSchema.options.find(
+    (o) => o.shape.type.value === "routing.configure",
+  ) as unknown as { shape: { credentialRef: z.ZodType } } | undefined;
+  assert.ok(routing);
+  for (const field of [
+    routing.shape.credentialRef,
+    deliveryPolicySchema.shape.credentialRef,
+    githubConfigurationSchema.shape.credentialRef,
+  ]) {
+    assert.equal(field.safeParse("env:FIXTURE_SOURCE").success, true);
+    assert.equal(field.safeParse("gh:github.com").success, false);
+  }
 });

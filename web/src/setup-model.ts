@@ -191,6 +191,12 @@ export function discoveryReasonCopy(reason: DiscoveryUnavailableReason) {
       return "GitHub discovery is unavailable: GitHub's rate limit was reached.";
     case "unreadable":
       return "GitHub discovery is unavailable: GitHub couldn't be read.";
+    case "gh-not-installed":
+      return "GitHub discovery is unavailable: the GitHub CLI login was chosen, but gh is not installed for the service.";
+    case "gh-not-signed-in":
+      return "GitHub discovery is unavailable: the GitHub CLI login was chosen, but gh is not signed in to github.com. Run gh auth login.";
+    case "gh-unreadable":
+      return "GitHub discovery is unavailable: the service couldn't read the GitHub CLI login.";
   }
 }
 
