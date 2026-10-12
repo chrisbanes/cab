@@ -2249,35 +2249,32 @@ export class ExecutionState {
         .get() !== undefined;
     const tables = ["task_writer_holds", "execution_intents"];
     if (hasTurnRequests) tables.push("turn_requests");
-    const columns = new Map(
-      tables.map((table) => [
-        table,
-        (
+    const tablesMissingHoldKind = tables.filter(
+      (table) =>
+        !(
           this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
             name: string;
           }>
         ).some(({ name }) => name === "holdKind"),
-      ]),
     );
-    const present = [...columns.values()].filter(Boolean).length;
-    if (present === tables.length) return;
-    if (present !== 0)
-      throw new Error("Task stop hold-kind migration found a partial schema");
+    if (tablesMissingHoldKind.length === 0) return;
 
     transaction(this.db, () => {
-      for (const table of tables)
+      for (const table of tablesMissingHoldKind)
         this.db.exec(`ALTER TABLE ${table} ADD COLUMN holdKind TEXT
           CHECK(holdKind IS NULL OR holdKind = 'operator-stop')`);
-      this.db.exec(`UPDATE task_writer_holds SET holdKind = 'operator-stop'
-        WHERE reason = 'Task stopped';
-        UPDATE execution_intents SET holdKind = 'operator-stop'
-        WHERE reason = 'Task stopped' AND EXISTS (
+      if (tablesMissingHoldKind.includes("task_writer_holds"))
+        this.db.exec(`UPDATE task_writer_holds SET holdKind = 'operator-stop'
+          WHERE reason = 'Task stopped'`);
+      if (tablesMissingHoldKind.includes("execution_intents"))
+        this.db.exec(`UPDATE execution_intents SET holdKind = 'operator-stop'
+          WHERE reason = 'Task stopped' AND EXISTS (
           SELECT 1 FROM task_execution_bindings binding
           JOIN task_writer_holds hold ON hold.taskId = binding.taskId
           WHERE binding.workId = execution_intents.workId
             AND hold.holdKind = 'operator-stop'
-        );`);
-      if (hasTurnRequests)
+        )`);
+      if (tablesMissingHoldKind.includes("turn_requests"))
         this.db.exec(`UPDATE turn_requests SET holdKind = 'operator-stop'
           WHERE reason = 'Task stopped' AND EXISTS (
             SELECT 1 FROM task_execution_bindings binding

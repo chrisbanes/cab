@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { DomainStore } from "../src/core/domain.js";
 import { DomainConflictError } from "../src/core/domain.js";
+import { Store } from "../src/core/store.js";
 import {
   commandReceiptSchema,
   operatorCommandSchema,
@@ -13,6 +15,7 @@ import {
   type OperatorApiError,
 } from "../src/standalone/operator-api.js";
 import { ExecutionState } from "../src/standalone/state.js";
+import { SchedulerStore } from "../src/standalone/scheduler.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { startOwnWork } from "./fixtures/questions.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
@@ -406,6 +409,94 @@ test("legacy Stop provenance migrates once and remains typed when display text c
         requestState: "queued",
         requestReason: "Task stopped",
       },
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("Stop migration adds a later scheduler table without reclassifying existing rows", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    new Store(db).ensureHost("codex");
+    new DomainStore(db).migrate();
+    new ExecutionState(db);
+
+    const stoppedTask = randomUUID();
+    const unknownTask = randomUUID();
+    const stoppedWork = `stopped-${randomUUID()}`;
+    const unknownWork = `unknown-${randomUUID()}`;
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, ?, 'operator-stop')",
+    ).run(stoppedTask, "Edited Stop display");
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, 'Task stopped')",
+    ).run(unknownTask);
+    const intent = db.prepare(
+      "INSERT INTO execution_intents (id, workId, prompt, workspace, state, reason, accountType, sandbox, approval) VALUES (?, ?, 'prompt', '/w', 'held', 'Task stopped', 'chatgpt', 'workspaceWrite', 'never')",
+    );
+    const binding = db.prepare(
+      "INSERT INTO task_execution_bindings (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision) VALUES (?, ?, ?, 1, 1, 1, 1)",
+    );
+    const workTaskPairs: Array<[string, string]> = [
+      [stoppedWork, stoppedTask],
+      [unknownWork, unknownTask],
+    ];
+    for (const [workId, taskId] of workTaskPairs) {
+      intent.run(randomUUID(), workId);
+      binding.run(workId, taskId, randomUUID());
+    }
+
+    new SchedulerStore(db);
+    const request = db.prepare(
+      "INSERT INTO turn_requests (requestKey, workId, kind, taskId, prompt, state, reason) VALUES (?, ?, 'assignment', ?, 'prompt', 'held', 'Task stopped')",
+    );
+    request.run(randomUUID(), stoppedWork, stoppedTask);
+    request.run(randomUUID(), unknownWork, unknownTask);
+
+    let state = new ExecutionState(db);
+    const requestKinds = () =>
+      db
+        .prepare(
+          "SELECT workId, holdKind, reason FROM turn_requests ORDER BY workId",
+        )
+        .all();
+    assert.deepEqual(
+      requestKinds().map((row) => ({ ...row })),
+      [
+        {
+          workId: stoppedWork,
+          holdKind: "operator-stop",
+          reason: "Task stopped",
+        },
+        { workId: unknownWork, holdKind: null, reason: "Task stopped" },
+      ].sort((left, right) => left.workId.localeCompare(right.workId)),
+    );
+    assert.equal(state.isTaskStopped(stoppedTask), true);
+    assert.equal(state.isTaskStopped(unknownTask), false);
+    assert.equal(state.hasNonStopTaskHold(unknownTask), true);
+
+    state = new ExecutionState(db);
+    assert.deepEqual(
+      requestKinds().map((row) => ({ ...row })),
+      [
+        {
+          workId: stoppedWork,
+          holdKind: "operator-stop",
+          reason: "Task stopped",
+        },
+        { workId: unknownWork, holdKind: null, reason: "Task stopped" },
+      ].sort((left, right) => left.workId.localeCompare(right.workId)),
+    );
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(
+            "SELECT reason, holdKind FROM task_writer_holds WHERE taskId = ?",
+          )
+          .get(stoppedTask),
+      },
+      { reason: "Edited Stop display", holdKind: "operator-stop" },
     );
   } finally {
     db.close();
