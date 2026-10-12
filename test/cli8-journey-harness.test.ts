@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { completedLead } from "./fixtures/completed-lead.js";
+import { completedLead, until } from "./fixtures/completed-lead.js";
 import { startCliOperator } from "./fixtures/operator-cli.js";
 
 const run = promisify(execFile);
@@ -136,13 +137,20 @@ test("the CLI8 harness refuses live or remote execution without explicit flags",
   }
 });
 
-// CLI8 finding, recorded rather than repaired: adoption advances a completed lead past
-// its result's version, so the follow-up that would resume it is refused. Update this
-// test when the accepted contract changes.
-test("adopting current instructions on a completed lead leaves no follow-up", async (t) => {
+// #935: adopting corrected instructions on a completed lead keeps it resumable.
+test("adopting current instructions on a completed lead keeps the follow-up", async (t) => {
   const o = await startCliOperator(t);
   const { task } = await completedLead(o.s.f, "CLI8 adoption");
   const lead = task.assignmentId;
+  const profileId = String(o.d.assignment(lead).profileId);
+  o.d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    expectedVersion: Number(o.d.profile(profileId).version),
+    summary: "Corrected",
+  });
   const version = () => String(Number(o.d.assignment(lead).version));
   let r = await o.cli("rw", [
     "assignment",
@@ -152,6 +160,10 @@ test("adopting current instructions on a completed lead leaves no follow-up", as
     version(),
   ]);
   assert.equal(r.code, 0, r.out);
+  assert.equal(
+    Number(o.d.assignment(lead).profileRevision),
+    Number(o.d.profile(profileId).version),
+  );
   r = await o.cli("rw", [
     "task",
     "follow-up",
@@ -161,7 +173,11 @@ test("adopting current instructions on a completed lead leaves no follow-up", as
     "--message-file",
     o.file("follow-up.md", "Repeat the check."),
   ]);
-  assert.equal(r.code, 4, r.out);
-  assert.match(r.json().error.message, /cannot be resumed/);
-  assert.equal(o.d.assignment(lead).state, "completed");
+  assert.equal(r.code, 0, r.out);
+  await until(() => o.d.assignment(lead).state === "running", "resumed turn");
+  r = await o.cli("ro", ["assignment", "instructions", lead]);
+  assert.equal(
+    r.json().data.execution.profileRevision,
+    Number(o.d.profile(profileId).version),
+  );
 });
