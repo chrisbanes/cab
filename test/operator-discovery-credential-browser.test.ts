@@ -210,13 +210,29 @@ test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey)
   const use = page.getByRole("button", {
     name: "Use GitHub CLI login (@octo)",
   });
-  await page.route("**/api/operator/commands", (route) => route.abort());
+  // The service records the command but its response is lost, so a re-read sees it configured.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
   try {
     await use.click();
     await page
       .getByRole("button", { name: "Reconcile exact submission" })
       .waitFor();
     assert.equal(await use.count(), 0);
+    // Leaving and returning re-reads discovery as configured; reconciliation stays offered.
+    await page.getByRole("link", { name: "Set discovery credential" }).click();
+    await page.locator("main.page h1", { hasText: "Settings" }).waitFor();
+    await page.getByRole("link", { name: "New project" }).click();
+    await page
+      .getByText(
+        "Discovered from GitHub · 3 repositories visible to the credential",
+      )
+      .waitFor();
+    await page
+      .getByRole("button", { name: "Reconcile exact submission" })
+      .waitFor();
   } finally {
     await page.unroute("**/api/operator/commands");
   }
