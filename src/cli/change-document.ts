@@ -6,7 +6,7 @@ import { writeOut } from "./browse-evidence.js";
 import { CliError } from "./connections.js";
 
 export const CHANGE_SCHEMA = "ensemble.cli.change/v1";
-const MAX_DOCUMENT_BYTES = 512 * 1024;
+export const MAX_DOCUMENT_BYTES = 512 * 1024;
 
 export const changeKinds = [
   "profile.create",
@@ -87,11 +87,12 @@ export async function writeChangeDocument(
 const invalid = (why: string) =>
   new CliError("change-document-invalid", `Change document rejected: ${why}.`);
 
-/** Reads an owner-only regular file and verifies its schema and digest. */
-export async function readChangeDocument(
+/** Reads an owner-only regular file of at most 512 KiB; `invalid` builds each refusal. */
+export async function readOwnerOnlyFile(
   path: string,
-  uid = process.getuid?.(),
-): Promise<ChangeDocument> {
+  uid: number | undefined,
+  invalid: (why: string) => CliError,
+): Promise<string> {
   let handle: Awaited<ReturnType<typeof open>>;
   try {
     handle = await open(
@@ -101,7 +102,6 @@ export async function readChangeDocument(
   } catch {
     throw invalid("it must be a readable regular file, not a symlink");
   }
-  let text: string;
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw invalid("it is not a regular file");
@@ -109,10 +109,18 @@ export async function readChangeDocument(
       throw invalid("it must be owned by you with mode 0600 or stricter");
     if (stat.size > MAX_DOCUMENT_BYTES)
       throw invalid("it is larger than 512 KiB");
-    text = await handle.readFile("utf8");
+    return await handle.readFile("utf8");
   } finally {
     await handle.close();
   }
+}
+
+/** Reads an owner-only regular file and verifies its schema and digest. */
+export async function readChangeDocument(
+  path: string,
+  uid = process.getuid?.(),
+): Promise<ChangeDocument> {
+  const text = await readOwnerOnlyFile(path, uid, invalid);
   let value: unknown;
   try {
     value = JSON.parse(text);

@@ -20,7 +20,7 @@ import type {
 } from "../../src/standalone/recovery-types.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
 import { databaseDigest } from "./database-digest.js";
-import { startCliService } from "./operator-cli.js";
+import { loginCli, startCliService } from "./operator-cli.js";
 
 /** Copied from no-turn-recovery.test.ts: thread start fails before any turn invocation. */
 export class NoTurnRuntime implements Runtime {
@@ -494,4 +494,27 @@ export async function servedGeneration(
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return { s, g, runtime, verifier };
+}
+
+/** A held generation served to a CLI harness logged in as `ro` and `rw`. */
+export async function cliGeneration(
+  t: { after(fn: () => unknown): void },
+  mode: GenerationMode,
+) {
+  const w = await servedGeneration(t, mode);
+  const o = await loginCli(t, w.s);
+  /** Writes an operator evidence file with the evidence schema and `body`. */
+  const evidenceFile = (body: Record<string, unknown>) =>
+    o.file(
+      `${randomUUID()}.json`,
+      JSON.stringify({ schema: "ensemble.cli.recovery-evidence/v1", ...body }),
+    );
+  const receiptEvidence = {
+    receipt: {
+      termination: { kind: "process-exit" },
+      effects: "settled",
+      workspace: "preserved",
+    },
+  };
+  return { ...w, ...o, evidenceFile, receiptEvidence };
 }

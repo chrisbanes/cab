@@ -24,8 +24,13 @@ import {
 } from "./write.js";
 
 export const TASK_WRITE = ["cli.identity", "task.read", "task.write"] as const;
-/** What a write did: saved a record, queued work or a message, requested cancellation, or nothing. */
-export type Effect = "saved" | "queued" | "cancellation-requested" | "none";
+/** What a write did: saved a record, queued work or a message, requested cancellation, completed a synchronous operation, or nothing. */
+export type Effect =
+  | "saved"
+  | "queued"
+  | "cancellation-requested"
+  | "none"
+  | "completed";
 type TaskData = TaskRead["data"];
 
 /** Connects for a write; a read-only credential is refused before any pre-read. */
