@@ -770,6 +770,7 @@ export class DomainStore {
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
+    if (command.type === "task.configure") this.preflightTaskConfigure(command);
     const scope = scopeOf(command);
     const hash = commandHash(command);
     const outcome = transaction(this.db, () => {
@@ -863,6 +864,28 @@ export class DomainStore {
         "INSERT INTO github_imported_tasks (taskId, providerInstance, nodeId, repositoryId) VALUES (?, 'github.com', ?, ?)",
       )
       .run(id.parse(taskId), label.parse(nodeId), label.parse(repositoryId));
+  }
+
+  /**
+   * Checks task.configure authority before key lookup, which must not mask
+   * task absence, project mismatch, or provider-owned fields.
+   */
+  preflightTaskConfigure(
+    command: Extract<ParsedCommand, { type: "task.configure" }>,
+  ): void {
+    this.operator(command);
+    const current = this.task(command.taskId);
+    this.projectMatch(current, command.projectId);
+    if (
+      this.importedTask(command.taskId) &&
+      (command.title !== undefined ||
+        command.outcome !== undefined ||
+        command.ready !== undefined)
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "Imported provider fields and readiness are provider-owned",
+      );
   }
 
   importedTask(taskId: string): Row | undefined {
@@ -1721,20 +1744,9 @@ export class DomainStore {
         return this.task(command.taskId);
       }
       case "task.configure": {
-        this.operator(command);
+        this.preflightTaskConfigure(command);
         const current = this.task(command.taskId);
-        this.projectMatch(current, command.projectId);
         this.version(current, command.expectedVersion);
-        if (
-          this.importedTask(command.taskId) &&
-          (command.title !== undefined ||
-            command.outcome !== undefined ||
-            command.ready !== undefined)
-        )
-          throw new DomainPolicyError(
-            "forbidden",
-            "Imported provider fields and readiness are provider-owned",
-          );
         if (command.title !== undefined)
           this.db
             .prepare("UPDATE tasks SET title = ? WHERE id = ?")
@@ -2408,6 +2420,13 @@ export class DomainCommands {
 
   execute(input: DomainCommand): Promise<unknown> {
     const command = parseCommand(input);
+    if (command.type === "task.configure") {
+      try {
+        this.store.preflightTaskConfigure(command);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }
     const scope = scopeOf(command);
     const key = `${scope}:${command.key}`;
     const hash = createHash("sha256").update(canonical(command)).digest("hex");

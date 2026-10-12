@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { DomainStore } from "../src/core/domain.js";
+import { DomainPolicyError, DomainStore } from "../src/core/domain.js";
 import { GitHubSourceStore } from "../src/core/github-source.js";
 import { Store } from "../src/core/store.js";
 import { LocalOperatorUi } from "../src/standalone/operator.js";
@@ -269,6 +269,20 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
     assert.ok(
       domain.admission(taskId).reasons.includes("source-placement-conflict"),
     );
+    const originalProjectConfigure = {
+      type: "task.configure" as const,
+      actor: "operator" as const,
+      key: randomUUID(),
+      projectId: first,
+      taskId,
+      expectedVersion: Number(domain.task(taskId).version),
+      state: "open" as const,
+    };
+    const originalConfigureReceipt = domain.execute(originalProjectConfigure);
+    assert.deepEqual(
+      domain.execute(originalProjectConfigure),
+      originalConfigureReceipt,
+    );
     const version = Number(domain.task(taskId).version);
     assert.throws(
       () =>
@@ -296,6 +310,13 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
       chosenProjectId: second,
       expectedVersion: String(version),
     });
+    assert.throws(
+      () => domain.execute(originalProjectConfigure),
+      (error) =>
+        error instanceof DomainPolicyError &&
+        error.code === "forbidden" &&
+        error.message === "Task belongs to another project",
+    );
     await assert.rejects(
       () =>
         ui.submit({

@@ -105,6 +105,168 @@ test("operator API maps the issue.comment-only policy by type, not its message",
       error.code === "forbidden",
   );
 });
+
+test("task.configure preflight preserves policy and identity priority around key replay", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const domain = f.service.domain();
+  domain.markImportedTask(ids.taskId, "preflight-import", "repository");
+  const api = new OperatorApi(f.service, [f.directory]);
+  const commands = (
+    api as unknown as {
+      commands: { execute: (command: unknown) => Promise<unknown> };
+    }
+  ).commands;
+  const version = Number(domain.task(ids.taskId).version);
+  const configure = (
+    taskId: string,
+    projectId: string,
+    key: string,
+    fields: Record<string, unknown> = {},
+    expectedVersion = version,
+  ) => ({
+    type: "task.configure" as const,
+    key,
+    projectId,
+    taskId,
+    expectedVersion,
+    ...fields,
+  });
+  const expectApiError = (status: number, code: string) => (error: unknown) =>
+    error instanceof OperatorApiError &&
+    error.status === status &&
+    error.code === code;
+
+  for (const fields of [
+    { title: "Override" },
+    { outcome: "Override outcome" },
+    { ready: false },
+  ])
+    await assert.rejects(
+      api.execute(
+        configure(
+          ids.taskId,
+          ids.projectId,
+          randomUUID(),
+          fields,
+          version + 10,
+        ),
+      ),
+      expectApiError(403, "forbidden"),
+    );
+
+  const durableKey = randomUUID();
+  const durable = configure(ids.taskId, ids.projectId, durableKey);
+  const receipt = await api.execute(durable);
+  assert.deepEqual(await api.execute(durable), receipt);
+  await assert.rejects(
+    api.execute(
+      configure(
+        ids.taskId,
+        ids.projectId,
+        durableKey,
+        { title: "Forbidden despite stale version" },
+        version + 10,
+      ),
+    ),
+    expectApiError(403, "forbidden"),
+  );
+
+  const otherProjectId = randomUUID();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProjectId,
+    name: "Other project",
+    leadProfileId: null,
+  });
+  const otherTaskId = randomUUID();
+  domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProjectId,
+    taskId: otherTaskId,
+    title: "Other task",
+    outcome: "Keep it private",
+  });
+  await assert.rejects(
+    api.execute(
+      configure(otherTaskId, ids.projectId, durableKey, { title: "No" }),
+    ),
+    expectApiError(403, "forbidden"),
+  );
+  await assert.rejects(
+    api.execute(
+      configure(randomUUID(), ids.projectId, durableKey, { title: "No" }),
+    ),
+    expectApiError(404, "not-found"),
+  );
+
+  const localTaskId = randomUUID();
+  domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: localTaskId,
+    title: "Local task",
+    outcome: "Mutable locally",
+  });
+  const localConfigure = configure(localTaskId, ids.projectId, randomUUID(), {
+    title: "Updated locally",
+  });
+  const localReceipt = await api.execute(localConfigure);
+  assert.deepEqual(await api.execute(localConfigure), localReceipt);
+  await assert.rejects(
+    api.execute({ ...localConfigure, title: "Different payload" }),
+    expectApiError(409, "conflict"),
+  );
+
+  const inFlightKey = randomUUID();
+  const inFlightBase = configure(
+    ids.taskId,
+    ids.projectId,
+    inFlightKey,
+    {},
+    Number(domain.task(ids.taskId).version),
+  );
+  const inFlight = commands.execute({ ...inFlightBase, actor: "operator" });
+  const policyRejection = commands.execute({
+    ...configure(ids.taskId, ids.projectId, inFlightKey, {
+      outcome: "Denied",
+    }),
+    actor: "operator",
+  });
+  assert.ok(policyRejection instanceof Promise);
+  await assert.rejects(
+    policyRejection,
+    (error) => error instanceof DomainPolicyError && error.code === "forbidden",
+  );
+  await inFlight;
+
+  const projectVersion = Number(domain.project(ids.projectId).version);
+  const collisionKey = randomUUID();
+  const pendingProjectWrite = commands.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: collisionKey,
+    projectId: ids.projectId,
+    expectedVersion: projectVersion,
+    paused: true,
+  });
+  const wrongProjectInFlight = api.execute(
+    configure(otherTaskId, ids.projectId, collisionKey, { title: "No" }),
+  );
+  const missingTaskInFlight = api.execute(
+    configure(randomUUID(), ids.projectId, collisionKey, { title: "No" }),
+  );
+  await assert.rejects(wrongProjectInFlight, expectApiError(403, "forbidden"));
+  await assert.rejects(missingTaskInFlight, expectApiError(404, "not-found"));
+  await pendingProjectWrite;
+});
 test("workspace reports the Codex runtime as unavailable after a runtime failure", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
