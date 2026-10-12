@@ -1121,6 +1121,7 @@ export class StandaloneService {
         !this.runtimeUnavailableSince.has(harness));
     runtime.onUnexpectedRequest((request) => {
       if (!acceptsNew()) return;
+      const denied = `Unexpected runtime request denied: ${request.method}`;
       const active = state
         .activeExecutions()
         .filter((item) => ownWork(item.workId));
@@ -1170,7 +1171,7 @@ export class StandaloneService {
             pending.id,
             request.threadId,
             request.turnId,
-            `Unexpected App Server request denied: ${request.method}`,
+            denied,
           )
         ) {
           this.supervisor?.turnBound(
@@ -1182,18 +1183,12 @@ export class StandaloneService {
         }
       }
       if (bound.length === 1 && bound[0]?.state === "completed") {
-        this.retractWriterAndSuccessors(
-          bound[0],
-          `Unexpected App Server request denied: ${request.method}`,
-        );
+        this.retractWriterAndSuccessors(bound[0], denied);
         return;
       }
       const affected = bound.length === 1 ? bound : active;
       for (const item of affected) {
-        state.hold(
-          item.id,
-          `Unexpected App Server request denied: ${request.method}`,
-        );
+        state.hold(item.id, denied);
         this.supervisor?.noteAnomaly(item.workId);
         this.diagnosticServiceEvent(item.workId, "unexpected-request", "warn", {
           method: request.method,

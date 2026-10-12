@@ -42,6 +42,22 @@ export type TaskControlReceipt = Extract<
   { kind: "task-stop" | "task-resume" }
 >;
 
+const stopTargetColumns = `(
+      taskId TEXT NOT NULL,
+      workId TEXT NOT NULL REFERENCES execution_intents(workId),
+      threadId TEXT,
+      turnId TEXT,
+      interruptState TEXT NOT NULL CHECK(interruptState IN ('pending','uncertain','acknowledged','failed','unbound')),
+      terminalState TEXT NOT NULL CHECK(terminalState IN ('unknown','completed','failed')),
+      reason TEXT,
+      requestedAt INTEGER NOT NULL,
+      PRIMARY KEY(taskId, workId)
+    )`;
+// Reason texts earlier builds used as the uncertain-interrupt discriminator.
+const legacyUncertainInterruptReason =
+  "Codex interrupt request outcome is uncertain";
+const legacyFailedInterruptReason = "Codex interrupt request failed";
+
 const recoveryReceiptColumns = `(
       id TEXT PRIMARY KEY,
       workId TEXT NOT NULL UNIQUE REFERENCES execution_intents(workId),
@@ -138,7 +154,12 @@ export interface StopTarget {
   workId: string;
   threadId: string | null;
   turnId: string | null;
-  interruptState: "pending" | "acknowledged" | "failed" | "unbound";
+  interruptState:
+    | "pending"
+    | "uncertain"
+    | "acknowledged"
+    | "failed"
+    | "unbound";
   terminalState: "unknown" | "completed" | "failed";
   reason: string | null;
 }
@@ -451,17 +472,7 @@ export class ExecutionState {
       receiptJson TEXT NOT NULL, createdAt INTEGER NOT NULL,
       PRIMARY KEY (taskId, key)
     );
-    CREATE TABLE IF NOT EXISTS execution_stop_targets (
-      taskId TEXT NOT NULL,
-      workId TEXT NOT NULL REFERENCES execution_intents(workId),
-      threadId TEXT,
-      turnId TEXT,
-      interruptState TEXT NOT NULL CHECK(interruptState IN ('pending','acknowledged','failed','unbound')),
-      terminalState TEXT NOT NULL CHECK(terminalState IN ('unknown','completed','failed')),
-      reason TEXT,
-      requestedAt INTEGER NOT NULL,
-      PRIMARY KEY(taskId, workId)
-    );
+    CREATE TABLE IF NOT EXISTS execution_stop_targets ${stopTargetColumns};
     CREATE TABLE IF NOT EXISTS task_writer_ambiguity_holds (
       taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
     );
@@ -672,6 +683,7 @@ export class ExecutionState {
     }
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
+    this.migrateStopInterruptState();
     // Workspace recovery runs before this state is opened. Keep the archival
     // hold only when bounded Git work recorded unresolved filesystem effects.
     const workspaceColumns = this.db
@@ -983,23 +995,18 @@ export class ExecutionState {
     return (
       this.db
         .prepare(`UPDATE execution_stop_targets
-        SET interruptState = 'failed', reason = 'Codex interrupt request outcome is uncertain'
+        SET interruptState = 'uncertain', reason = NULL
         WHERE workId = ? AND interruptState = 'pending' AND threadId IS NOT NULL
         AND turnId IS NOT NULL RETURNING workId`)
         .get(workId) !== undefined
     );
   }
 
-  recordStopInterrupt(
-    workId: string,
-    result: "acknowledged" | "failed",
-    reason: string | null,
-  ): void {
+  recordStopInterrupt(workId: string, result: "acknowledged" | "failed"): void {
     this.db
-      .prepare(`UPDATE execution_stop_targets SET interruptState = ?, reason = ?
-        WHERE workId = ? AND interruptState = 'failed'
-        AND reason = 'Codex interrupt request outcome is uncertain'`)
-      .run(result, reason, workId);
+      .prepare(`UPDATE execution_stop_targets SET interruptState = ?, reason = NULL
+        WHERE workId = ? AND interruptState = 'uncertain'`)
+      .run(result, workId);
   }
 
   recordStopTerminal(
@@ -1024,16 +1031,18 @@ export class ExecutionState {
   }
 
   recordStopAnomaly(workId: string | undefined, reason: string): void {
+    // An anomaly settles an uncertain interrupt as failed, so a late
+    // acknowledgement cannot release it.
+    const settle = `reason = ?, interruptState = CASE WHEN interruptState = 'uncertain'
+      THEN 'failed' ELSE interruptState END`;
     if (workId)
       this.db
-        .prepare(
-          "UPDATE execution_stop_targets SET reason = ? WHERE workId = ?",
-        )
+        .prepare(`UPDATE execution_stop_targets SET ${settle} WHERE workId = ?`)
         .run(reason, workId);
     else
       this.db
         .prepare(
-          "UPDATE execution_stop_targets SET reason = ? WHERE interruptState != 'acknowledged'",
+          `UPDATE execution_stop_targets SET ${settle} WHERE interruptState != 'acknowledged'`,
         )
         .run(reason);
   }
@@ -2177,6 +2186,43 @@ export class ExecutionState {
         })
     )
       throw new Error("Runtime thread qualification could not be persisted");
+  }
+
+  /**
+   * Converts reason-text uncertain interrupts into typed `uncertain` state.
+   * Forward-only: builds that predate `uncertain` cannot parse migrated rows.
+   */
+  private migrateStopInterruptState(): void {
+    const stored = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='execution_stop_targets'",
+      )
+      .get() as { sql: string };
+    if (stored.sql.includes("'uncertain'")) return;
+    transaction(this.db, () => {
+      const columns =
+        "taskId, workId, threadId, turnId, interruptState, terminalState, reason, requestedAt";
+      this.db.exec(
+        `CREATE TABLE execution_stop_targets_typed ${stopTargetColumns}`,
+      );
+      this.db
+        .prepare(`INSERT INTO execution_stop_targets_typed (${columns})
+          SELECT taskId, workId, threadId, turnId,
+            CASE WHEN interruptState = 'failed' AND reason = ? THEN 'uncertain' ELSE interruptState END,
+            terminalState,
+            CASE WHEN interruptState = 'failed' AND reason IN (?, ?) THEN NULL ELSE reason END,
+            requestedAt
+          FROM execution_stop_targets`)
+        .run(
+          legacyUncertainInterruptReason,
+          legacyUncertainInterruptReason,
+          legacyFailedInterruptReason,
+        );
+      this.db.exec(`DROP TABLE execution_stop_targets;
+        ALTER TABLE execution_stop_targets_typed RENAME TO execution_stop_targets;`);
+      if (this.db.prepare("PRAGMA foreign_key_check").all().length)
+        throw new Error("Stop target migration broke a foreign key");
+    });
   }
 
   private migratePreTurnReceipts(): void {
@@ -4871,7 +4917,13 @@ const stopTargetSchema = z.object({
   workId: z.string().min(1),
   threadId: z.string().nullable(),
   turnId: z.string().nullable(),
-  interruptState: z.enum(["pending", "acknowledged", "failed", "unbound"]),
+  interruptState: z.enum([
+    "pending",
+    "uncertain",
+    "acknowledged",
+    "failed",
+    "unbound",
+  ]),
   terminalState: z.enum(["unknown", "completed", "failed"]),
   reason: z.string().nullable(),
   requestedAt: z.number().int(),

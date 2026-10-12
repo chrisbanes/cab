@@ -388,14 +388,18 @@ export class ExecutionSupervisor {
     const outcomes = targets.map((initial): StopObservationOutcome => {
       const current = this.state.stopTarget(initial.workId) ?? initial;
       const interrupt =
-        current.interruptState === "pending"
+        current.interruptState === "pending" ||
+        current.interruptState === "uncertain"
           ? "failed"
           : current.interruptState;
       const terminal =
         current.terminalState === "unknown" ? "unknown" : "observed";
       const reason =
         interrupt === "failed"
-          ? (current.reason ?? "Codex interrupt request outcome is uncertain")
+          ? (current.reason ??
+            (current.interruptState === "failed"
+              ? "Interrupt request failed"
+              : "Interrupt request outcome is uncertain"))
           : interrupt === "unbound"
             ? (current.reason ??
               "Turn identity was not bound during Stop observation")
@@ -430,16 +434,8 @@ export class ExecutionSupervisor {
         if (!runtime) throw new Error("Runtime unavailable");
         return runtime.interruptTurn(threadId, turnId);
       })
-      .then(() =>
-        this.state.recordStopInterrupt(target.workId, "acknowledged", null),
-      )
-      .catch(() =>
-        this.state.recordStopInterrupt(
-          target.workId,
-          "failed",
-          "Codex interrupt request failed",
-        ),
-      );
+      .then(() => this.state.recordStopInterrupt(target.workId, "acknowledged"))
+      .catch(() => this.state.recordStopInterrupt(target.workId, "failed"));
     this.interruptRequests.add(action);
     void action
       .finally(() => this.interruptRequests.delete(action))

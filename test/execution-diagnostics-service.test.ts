@@ -609,7 +609,10 @@ test("an unexpected request is recorded while its hold is unchanged", async () =
       turnId: "turn-1",
     });
     assert.equal(f.intent().state, "held");
-    assert.match(String(f.intent().reason), /Unexpected App Server request/);
+    assert.match(
+      String(f.intent().reason),
+      /Unexpected runtime request denied/,
+    );
     const item = f
       .store()
       .events(f.workId)

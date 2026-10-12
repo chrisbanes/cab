@@ -260,7 +260,7 @@ test("production service rejects installed approval and unknown request forms wi
     assert.equal(held.state, "held");
     assert.equal(held.threadId, "s05-thread");
     assert.equal(held.turnId, "s05-turn");
-    assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+    assert.match(held.reason ?? "", /Unexpected runtime request denied/);
 
     const proof = fixtureProof(proofPath);
     assert.equal(proof.turnStarts, 1);
@@ -368,7 +368,7 @@ test("production callback binds an exact approval during a delayed turn response
     assert.equal(held.state, "held");
     assert.equal(held.threadId, "s05-thread");
     assert.equal(held.turnId, "s05-turn");
-    assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+    assert.match(held.reason ?? "", /Unexpected runtime request denied/);
     const proof = fixtureProof(proofPath);
     assert.deepEqual(proof.responses, [
       {
@@ -416,7 +416,7 @@ test("malformed identity holds the active production execution and denial-pipe f
       assert.equal(held.state, "held");
       assert.equal(held.threadId, "s05-thread");
       assert.equal(held.turnId, "s05-turn");
-      assert.match(held.reason ?? "", /Unexpected App Server request denied/);
+      assert.match(held.reason ?? "", /Unexpected runtime request denied/);
       if (mode === "delayed-unknown") {
         assert.deepEqual(fixtureProof(proofPath).responses, [
           {
