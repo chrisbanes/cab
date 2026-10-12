@@ -518,7 +518,16 @@ entered values and field errors accessible through disclosure. Use Create and st
 as the primary action and Save draft as the secondary action. Explain before submission that starting is subject to
 project state, dependencies, capacity and execution holds. Show the persisted
 state and reason for any wait after submission; creation does not imply running.
-These controls must preserve existing readiness and admission rules.
+Where the operator can clear a wait (paused project, unavailable runtime, unreadable
+Claude token, unconfigured profile runtime), the reason links to that one action;
+it never clears holds or grants access by implication. These controls must
+preserve existing readiness and admission rules.
+
+Until a task has started a turn, Home shows a getting-started checklist derived
+from current service state: runtime readiness, GitHub discovery, lead profile,
+an enabled project and the first task, with Claude optional. A readiness check,
+shared by Settings and the operator CLI, reports what the running service can use
+and one fix per problem. The [user flows](user-flows/) define these journeys.
 
 Use a short guided project setup: project name, lead profile, instructions and
 optional repository access. Choose each repository and ref from lists discovered
@@ -531,6 +540,10 @@ configuration. When discovery is unavailable or a list is truncated, setup accep
 typed values and says so. The service lists folders only under the operator's home folder, and a typed
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
+When no profile exists, setup creates the lead profile inline without losing other
+setup values. The project is created paused; setup then ends with a ready check
+whose primary action resumes the project and opens the composer, and whose
+secondary action keeps it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends and setup offers in one step
 when the service detects it. The service never uses a login the operator did not
@@ -596,6 +609,14 @@ confirmation. A save is keyed against the loaded version: a conflict keeps the
 input and shows the newer version, and an unknown outcome blocks further edits
 until the original save is checked. Saving never resumes work, clears holds or
 grants access by implication.
+
+Every operator write gives one outcome message, sized to its outcome and in plain
+language: a quiet inline line on success, and one alert with a single action when
+a save is rejected, conflicts or has an unknown outcome. The change list is the
+confirmation; consequences are stated there, before the action, not after it.
+Identifiers, versions, command names and error codes stay available under a
+Details disclosure rather than in the message. See
+[action feedback](user-flows/feedback.md).
 
 Project, task list, composer, runtime settings and assignment recovery reads
 rebuild once if project or profile instruction revisions change while the read is
