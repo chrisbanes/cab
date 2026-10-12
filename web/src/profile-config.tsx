@@ -116,8 +116,8 @@ function RuntimeFields({
   return (
     <>
       <DraftField draft={draft} field="runtimeHarness" label="Runtime">
-        <option value="codex">Codex</option>
-        <option value="claude">Claude</option>
+        <option value="codex">{executionHarnessLabels.codex}</option>
+        <option value="claude">{executionHarnessLabels.claude}</option>
       </DraftField>
       {harness === "claude" && (
         <>
