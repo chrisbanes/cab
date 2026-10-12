@@ -19,6 +19,8 @@ sources, sync preview and placement, discovery credential, Claude token, CLI
 credentials, capacity, recovery), project setup, the task composer, task Stop and
 Resume, question answers, approvals, replies, comment review, local review and
 sign-out. The wording rules also apply to read-only status, empty and error copy.
+Sign-out has no receipt and ends the session before it returns: an unconfirmed
+sign-out re-reads the session, treats signed out as success, and shows no Details.
 The operator CLI keeps its receipt output.
 
 ## Before the action

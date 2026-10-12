@@ -31,7 +31,9 @@ The operator never leaves setup to create a prerequisite.
      profile runtime not configured, checkout unverified.
    - Primary **Resume and create first task**: resumes the project through the
      existing project command, then opens the composer with the project selected.
-     Disabled with the blocking reason while anything would make work wait.
+     Disabled with the blocking reason while a listed item would make work wait.
+   - Capacity changes as other work runs, so it never disables the primary. When
+     capacity is full, the check says the first task will wait for capacity.
    - Secondary **Keep paused**, which opens project configuration.
 
 ## States
