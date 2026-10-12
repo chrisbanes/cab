@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { fork, spawnSync } from "node:child_process";
+import { execFileSync, fork, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
@@ -11,6 +11,8 @@ import {
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
+import type { Runtime } from "../src/standalone/codex.js";
+import { StandaloneService } from "../src/standalone/service.js";
 import { tmpdir } from "./temp.js";
 
 const driver = resolve("test/c5/live-journeys.mjs");
@@ -250,4 +252,97 @@ test("a service child whose parent disconnects exits, even before it starts a se
   ]);
   if (code === "timeout") child.kill("SIGKILL");
   assert.equal(code, 0);
+});
+
+test("a shell-only facet turn that follows its brief needs no reporting-repair turn", async () => {
+  const { setupJourney } = await import(
+    pathToFileURL(resolve("test/c5/service-child.mjs")).href
+  );
+  const root = mkdtempSync(join(tmpdir(), "c5-repair-"));
+  const repository = join(root, "repo");
+  mkdirSync(repository);
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: repository, stdio: "ignore" });
+  git("init", "-q", "-b", "main");
+  git(
+    "-c",
+    "user.name=C5",
+    "-c",
+    "user.email=c5@invalid",
+    "commit",
+    "-q",
+    "--allow-empty",
+    "-m",
+    "fixture",
+  );
+  const prompts: string[] = [];
+  // Completes each turn, reporting a result only when the prompt asks for one.
+  let listener: Parameters<NonNullable<Runtime["onToolCall"]>>[0];
+  const runtime = {
+    async start() {},
+    async stop() {},
+    async startThread() {
+      return "thread-1";
+    },
+    async resumeThread() {},
+    async startTurn(_thread: string, _workspace: string, prompt: string) {
+      prompts.push(prompt);
+      return `turn-${prompts.length}`;
+    },
+    async interruptTurn() {},
+    async waitForTurn(threadId: string, turnId: string) {
+      if (prompts.at(-1)?.includes("ensemble_report_result"))
+        await listener({
+          threadId,
+          turnId,
+          callId: `call-${turnId}`,
+          tool: "ensemble_report_result",
+          arguments: { summary: "C5 probe done" },
+        });
+      return "completed" as const;
+    },
+    onUnexpectedRequest() {},
+    onToolCall(next: typeof listener) {
+      listener = next;
+    },
+  } as unknown as Runtime;
+  const service = new StandaloneService(
+    join(root, "data"),
+    () => runtime,
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      power: { enabled: false },
+      routingClient: null,
+    },
+  );
+  try {
+    await service.start();
+    for (const facet of ["scrub", "stop"]) {
+      const before = prompts.length;
+      const { taskId } = await setupJourney(service, {
+        facet,
+        model: "haiku",
+        repository,
+      });
+      for (let i = 0; i < 40; i++) {
+        await new Promise((done) => setTimeout(done, 100));
+        if (
+          prompts.length > before &&
+          service.list().every((item) => item.state === "completed")
+        )
+          break;
+      }
+      await new Promise((done) => setTimeout(done, 500));
+      assert.equal(prompts.length - before, 1, facet);
+      assert.equal(
+        service.coordinationView().readTask(taskId).results.length,
+        1,
+        facet,
+      );
+    }
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

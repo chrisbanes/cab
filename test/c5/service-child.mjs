@@ -108,6 +108,8 @@ export async function startJourneyService({
   return { service, observed, priorProcesses };
 }
 
+export const REPORTED = "C5 probe done";
+
 const PROBE =
   "env | cut -d= -f1 > env-names.txt; env > env-full.txt; ps -E -o command= -p $PPID > ps-parent.txt 2>&1 || echo ps-error > ps-parent.txt";
 
@@ -117,7 +119,8 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
     [
       "Disposable Ensemble qualification probe.",
       `Run exactly one Bash command, verbatim: ${command}`,
-      "Then reply with one short sentence and end the turn. Do not call any Ensemble tool.",
+      // A lead turn that ends without a result gets a reporting-repair turn.
+      `Then call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
     ].join("\n");
   if (facet === "scrub") return shellOnly(PROBE);
   if (facet === "stop" || facet === "crash") return shellOnly("sleep 120");

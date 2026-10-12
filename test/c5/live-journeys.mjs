@@ -595,7 +595,7 @@ async function crash() {
     recipientAssignmentId: held.binding.assignmentId,
     expectedAssignmentVersion: held.binding.assignmentVersion,
     message:
-      "Recovered after a service crash. Do not run any command. Reply with one short sentence and end the turn.",
+      "Recovered after a service crash. Run no command. Call ensemble_report_result exactly once with summary C5 recovered, and end the turn.",
   });
   let resumed;
   try {
