@@ -260,3 +260,41 @@ export async function executeRecovery(
   }
   return recoveryReceipt(c.type, c.key, c.assignmentId, result);
 }
+
+/** Stored command scope of each recovery command type. */
+const storedScope: Record<RecoveryCommand["type"], string> = {
+  "recovery.pre-turn.adopt": "adopt",
+  "recovery.pre-turn.recover": "recover",
+  "recovery.no-turn.adopt": "adopt-no-turn",
+  "recovery.no-turn.recover": "recover-no-turn",
+  "recovery.conversation.replace": "replace-conversation",
+};
+export const isRecoveryType = (type: string): type is RecoveryCommand["type"] =>
+  recoveryTypes.includes(type);
+
+/**
+ * Reads back one recovery receipt without any effect: recorded only under its own type and
+ * for a work (or replacement) of this assignment. A stored row of another shape throws.
+ */
+export function readRecoveryOperation(
+  service: StandaloneService,
+  type: RecoveryCommand["type"],
+  key: string,
+  assignmentId: string,
+): { state: "not-recorded" } | { state: "recorded"; receipt: CommandReceipt } {
+  const row = service.preTurnCommandRecord(key);
+  if (row?.scope !== storedScope[type]) return { state: "not-recorded" };
+  const result = JSON.parse(row.result) as Record<string, unknown>;
+  const owner =
+    type === "recovery.conversation.replace"
+      ? (JSON.parse(row.payloadMaterial) as { assignmentId?: unknown })
+          .assignmentId
+      : typeof result.workId === "string"
+        ? service.recoveryMaterial(result.workId)?.assignmentId
+        : undefined;
+  if (owner !== assignmentId) return { state: "not-recorded" };
+  return {
+    state: "recorded",
+    receipt: recoveryReceipt(type, key, assignmentId, result),
+  };
+}

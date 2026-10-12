@@ -126,6 +126,8 @@ import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
 import {
   executeRecovery,
   isRecoveryCommand,
+  isRecoveryType,
+  readRecoveryOperation,
   recoveryOptions,
 } from "./operator-recovery.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
@@ -4262,6 +4264,20 @@ export class OperatorApi {
     if (!scope.success || !type.success || !key.success)
       throw new OperatorApiError(400, "invalid-input");
     const [kind, id = ""] = scope.data.split(":");
+    if (isRecoveryType(type.data)) {
+      if (kind !== "assignment")
+        throw new OperatorApiError(400, "invalid-input");
+      try {
+        return operationReadSchema.parse({
+          data: readRecoveryOperation(this.service, type.data, key.data, id),
+          observedAt: Date.now(),
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+    }
     const expected =
       type.data === "capacity.configure"
         ? "system"

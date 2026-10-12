@@ -1782,6 +1782,9 @@ export class StandaloneService {
   replacementFacts(assignmentId: string) {
     return this.requireState().replacementFacts(assignmentId);
   }
+  preTurnCommandRecord(key: string) {
+    return this.requireState().preTurnCommandRecord(key);
+  }
 
   /** Bounded execution list reads; see SchedulerStore.assignmentPage. */
   turnRequestPage(

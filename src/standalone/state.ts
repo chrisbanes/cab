@@ -2354,6 +2354,18 @@ export class ExecutionState {
       );
     return JSON.parse(row.result) as Record<string, string | number>;
   }
+  /** One recorded recovery command by key, for read-only receipt readback. */
+  preTurnCommandRecord(
+    key: string,
+  ): { scope: string; payloadMaterial: string; result: string } | undefined {
+    return this.db
+      .prepare(
+        "SELECT scope,payloadMaterial,result FROM execution_pre_turn_commands WHERE commandKey = ?",
+      )
+      .get(key) as
+      | { scope: string; payloadMaterial: string; result: string }
+      | undefined;
+  }
   private recordPreTurnCommand(
     scope: string,
     command: { key: string },

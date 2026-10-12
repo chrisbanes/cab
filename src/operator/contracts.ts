@@ -3113,12 +3113,17 @@ export const operationTypeSchema = z.enum([
   "assignment.apply",
   "github.configure",
   "github.preview",
+  "recovery.pre-turn.adopt",
+  "recovery.pre-turn.recover",
+  "recovery.no-turn.adopt",
+  "recovery.no-turn.recover",
+  "recovery.conversation.replace",
 ]);
-/** `project:<id>`, `profile:<id>` or `system:capacity`; nothing else is a readable scope. */
+/** `project:<id>`, `profile:<id>`, `assignment:<id>` or `system:capacity`; nothing else is a readable scope. */
 export const operationScopeSchema = z
   .string()
   .regex(
-    /^(?:(?:project|profile):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity)$/i,
+    /^(?:(?:project|profile|assignment):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity)$/i,
   );
 export const operationReadSchema = envelope(
   z.discriminatedUnion("state", [
