@@ -123,7 +123,8 @@ export function facetOutcome(facet, { workerProfileId, nonce }) {
       `Then call ensemble_report_result exactly once with summary ${REPORTED}, and end the turn. Use no other tool.`,
     ].join("\n");
   if (facet === "scrub") return shellOnly(PROBE);
-  if (facet === "stop" || facet === "crash") return shellOnly("sleep 120");
+  // Claude Code blocks a bare `sleep N` (N >= 25) in the foreground.
+  if (facet === "stop" || facet === "crash") return shellOnly("/bin/sleep 120");
   const brief =
     facet === "claude-only"
       ? `Call ensemble_ask_question with question "C5 check: reply ready". After the answer arrives, call ensemble_report_result with summary C5_RESULT_${nonce}. Use no other tools.`

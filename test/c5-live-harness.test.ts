@@ -255,9 +255,15 @@ test("a service child whose parent disconnects exits, even before it starts a se
 });
 
 test("a shell-only facet turn that follows its brief needs no reporting-repair turn", async () => {
-  const { setupJourney } = await import(
+  const { facetOutcome, setupJourney } = await import(
     pathToFileURL(resolve("test/c5/service-child.mjs")).href
   );
+  // The bundled CLI refuses a command whose first part is `sleep N`, N >= 25.
+  for (const facet of ["stop", "crash"])
+    assert.doesNotMatch(
+      facetOutcome(facet, { workerProfileId: "w", nonce: "n" }),
+      /verbatim: sleep\s+\d/,
+    );
   const root = mkdtempSync(join(tmpdir(), "c5-repair-"));
   const repository = join(root, "repo");
   mkdirSync(repository);
