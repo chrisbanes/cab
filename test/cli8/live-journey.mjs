@@ -8,6 +8,8 @@
 //   --phase remote --data DIR --origin https://HOST --port N
 //                                   no turns; fresh credentials for a granted second machine.
 // Prints sanitised evidence JSON. Never reads operator data, ~/.env or real credentials.
+// An interrupted run skips its final cleanup: revoke, delete the run's own Keychain item
+// and remove its root by exact name.
 import assert from "node:assert/strict";
 import { execFile, execFileSync, spawn } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
@@ -488,11 +490,14 @@ function cliRunner(bin, home) {
           bin,
           ...args,
         ],
-        { env },
+        { env, detached: true },
       );
       let text = "";
       let sent = false;
-      const timer = setTimeout(() => child.kill("SIGTERM"), 60_000);
+      const timer = setTimeout(
+        () => process.kill(-child.pid, "SIGTERM"),
+        60_000,
+      );
       child.stdout.on("data", (c) => {
         text += c;
         if (!sent && text.includes("Ensemble CLI token:")) {
@@ -1218,12 +1223,12 @@ function describe(inputs, logs, prompt) {
 async function remotePhase() {
   const data = resolve(option("--data") ?? "");
   const origin = option("--origin") ?? "";
-  if (!existsSync(join(data, "data", "standalone.sqlite")))
-    refuse("--data must be a retained journey root");
   if (!/^https:\/\/[^/]+$/.test(origin))
     refuse("--origin must be an https origin");
   if (!Number(option("--port")))
     refuse("--port N is the loopback port the granted route targets");
+  if (!existsSync(join(data, "data", "standalone.sqlite")))
+    refuse("--data must be a retained journey root");
   root = data;
   retain = true;
   const password = randomBytes(24).toString("hex");
@@ -1244,12 +1249,47 @@ async function remotePhase() {
     transport: `${origin} -> ${s.origin}`,
     turnsAdmitted: 0,
   };
+  // Run on the peer with ENSEMBLE_CLI_CONFIG_DIR set to a temporary directory.
+  const ro = "--connection remote-ro --output json";
+  evidence.remoteChecklist = [
+    [
+      `auth login --connection remote-ro --url ${origin} --token-file RO_TOKEN_FILE`,
+      0,
+    ],
+    [
+      `auth login --connection remote-rw --url ${origin} --token-file RW_TOKEN_FILE`,
+      0,
+    ],
+    [`auth status ${ro} (installationId must equal the host's)`, 0],
+    [`task search FAIL --type result ${ro}`, 0],
+    [`execution list --task TASK ${ro}`, 0],
+    [`execution inputs WORK --compare-current ${ro}`, 0],
+    [`logs --execution WORK ${ro}`, 0],
+    ["profile apply --file CHANGE --connection remote-ro", 3],
+    [
+      "project prepare PROJECT --name NAME --out CHANGE --connection remote-ro",
+      0,
+    ],
+    ["project apply --file CHANGE --connection remote-rw --output json", 0],
+    [
+      "operation get KEY --scope project:PROJECT --type project.configure --connection remote-ro",
+      0,
+    ],
+    [
+      `auth login --connection plain --url http://PEER-VISIBLE-HOST:${option("--port")} --token-file RO_TOKEN_FILE`,
+      2,
+    ],
+  ].map(([command, exit]) => ({ command, expected: exit }));
   process.stderr.write(
-    `Token files: ${tokens} (copy to the peer as 0600). Type "done" when the remote checklist is finished.\n`,
+    `${JSON.stringify(evidence.remoteChecklist, null, 2)}\n`,
   );
-  await new Promise((done) =>
-    process.stdin.on("data", (c) => String(c).includes("done") && done()),
+  process.stderr.write(
+    `Token files: ${tokens} (copy to the peer as 0600). Type "done", or close stdin, to revoke and stop.\n`,
   );
+  await new Promise((done) => {
+    process.stdin.on("data", (c) => String(c).includes("done") && done());
+    process.stdin.on("end", done);
+  });
   for (const name of Object.keys(evidence.credentials)) await s.revoke(name);
   evidence.cleanup.credentialsRevoked = Object.values(
     evidence.credentials,

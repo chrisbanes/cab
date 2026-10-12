@@ -396,13 +396,16 @@ Troubleshooting:
   Log in again only if that change is intended.
 - `credential-store-unavailable`: no Keychain (or no interactive terminal for the
   masked prompt); use `--token-file`. The Keychain lookup uses `HOME`'s login
-  keychain.
+  keychain; with a `HOME` that has none, `auth login` waits on `security` instead of
+  failing.
 - `managed-assignment` (exit 3): the command runs inside an agent turn, which must
   not use operator credentials.
 - After correcting instructions for a completed lead, `assignment apply-current`
   followed by `task follow-up` exits 4, because adoption advances the assignment past
-  its result. Send the follow-up under `task stop`, run `assignment apply-current`,
-  then `task resume`.
+  its result, and the lead cannot then be resumed. Until that is resolved, send the
+  follow-up under `task stop`, run `assignment apply-current`, then `task resume`.
+  Stop is task-wide: it also requests cancellation of the task's other active work,
+  so use it only when nothing else on the task is running.
 - For another machine, reach the service only through a private HTTPS route (for
   example a tailnet-only route to the loopback port), log in there with the `https://`
   origin and a token file, and trust a private CA with `NODE_EXTRA_CA_CERTS`.

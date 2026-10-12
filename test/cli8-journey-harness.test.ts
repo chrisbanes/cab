@@ -3,6 +3,8 @@ import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { completedLead } from "./fixtures/completed-lead.js";
+import { startCliOperator } from "./fixtures/operator-cli.js";
 
 const run = promisify(execFile);
 const root = join(import.meta.dirname, "../..");
@@ -132,4 +134,34 @@ test("the CLI8 harness refuses live or remote execution without explicit flags",
     );
     assert.equal(exit, 2, args.join(" "));
   }
+});
+
+// CLI8 finding, recorded rather than repaired: adoption advances a completed lead past
+// its result's version, so the follow-up that would resume it is refused. Update this
+// test when the accepted contract changes.
+test("adopting current instructions on a completed lead leaves no follow-up", async (t) => {
+  const o = await startCliOperator(t);
+  const { task } = await completedLead(o.s.f, "CLI8 adoption");
+  const lead = task.assignmentId;
+  const version = () => String(Number(o.d.assignment(lead).version));
+  let r = await o.cli("rw", [
+    "assignment",
+    "apply-current",
+    lead,
+    "--expected-version",
+    version(),
+  ]);
+  assert.equal(r.code, 0, r.out);
+  r = await o.cli("rw", [
+    "task",
+    "follow-up",
+    task.taskId,
+    "--expected-version",
+    version(),
+    "--message-file",
+    o.file("follow-up.md", "Repeat the check."),
+  ]);
+  assert.equal(r.code, 4, r.out);
+  assert.match(r.json().error.message, /cannot be resumed/);
+  assert.equal(o.d.assignment(lead).state, "completed");
 });

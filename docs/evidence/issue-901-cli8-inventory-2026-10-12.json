@@ -2,9 +2,9 @@
   "version": 1,
   "issue": 901,
   "date": "2026-10-12",
-  "candidate": "pending-final-head",
+  "candidate": "eda2733e (live run and code); later commits change only evidence, documentation, the inventory guard and tests",
   "states": {
-    "passed": "Real evidence at the final candidate: the operation ran through the installed CLI against the authenticated service in a journey cited from a dated live record (a harness step or an issue-901-cli8-live json), with its observable effect and applicable denial, revision and retry cases; synthetic fixtures alone never qualify.",
+    "passed": "Real evidence at the code candidate: the operation ran through the installed CLI against the authenticated service in a journey cited from a dated live record (a harness step or an issue-901-cli8-live json), with its observable effect and applicable denial, revision and retry cases; synthetic fixtures alone never qualify.",
     "bounded": "Covered only by deterministic or synthetic fixtures (fixture runtime, scripted or fake GitHub, seeded recovery facts, in-process or packed CLI, loopback or a throwaway-certificate TLS proxy) or by a live observation at an earlier candidate; the gap states the bound.",
     "unproved": "No test at this candidate invokes the operation through the CLI against the authenticated service; the gap states the missing check."
   },
@@ -15,20 +15,20 @@
       "pending": "T4 second-machine private HTTPS (awaiting Chris's grant)"
     },
     "CLI02": {
-      "state": "passed",
-      "basis": "Renewed CLI1 Chromium suite at the candidate (UI creation, metadata listing, one-time reveal, rotation before revocation, revocation readback, verifier-only storage, Origin and CSRF), renewed route-wide scope denial fixtures, and in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): session-issued credentials, read-only CLI apply exit 3 and direct POST 403 insufficient-scope with the database digest unchanged, revocation during logs --follow exit 3, local logout leaving the server credential active until revoked (200 then 401), bearer 403 on /runtime/control and session-only credential routes. Scope: one host on loopback."
+      "state": "bounded",
+      "basis": "Renewed CLI1 Chromium suite at the candidate (UI creation, metadata listing, one-time reveal, rotation before revocation, revocation readback, verifier-only storage, Origin and CSRF), renewed route-wide scope denial fixtures, and in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): session-issued credentials, read-only CLI apply exit 3 and direct POST 403 insufficient-scope with the database digest unchanged, revocation during logs --follow exit 3, local logout leaving the server credential active until revoked (200 then 401), bearer 403 on /runtime/control and session-only credential routes. Scope: one host on loopback. Bounded: UI provisioning is qualified by the Chromium suite against a loopback fixture service, not on this live run."
     },
     "CLI03": {
-      "state": "passed",
-      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a browser edit between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration."
+      "state": "bounded",
+      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a browser edit between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration. Bounded: adoption on a completed lead blocks its follow-up (recorded finding), and routing, capacity and creation writes are fixture-only."
     },
     "CLI04": {
       "state": "bounded",
       "basis": "Stop, follow-up and Resume ran through the installed binary in the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns). Answers, approvals, recovery and staged comment review/confirm/send rely on the renewed CLI4-CLI6 fixtures (scripted GitHub dispatcher, seeded recovery facts, fixture runtime); they establish no real provider effect or independent recovery fact."
     },
     "CLI05": {
-      "state": "passed",
-      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write remains unproved (no command)."
+      "state": "bounded",
+      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write remains unproved (no command). Bounded: the diagnosticCapture prepare write is unproved."
     },
     "CLI06": {
       "state": "unproved",
@@ -46,7 +46,6 @@
         "test/operator-cli.test.ts",
         "test/operator-cli-packed.test.ts",
         "docs/evidence/issue-894-cli1-2026-10-11.md",
-        "harness:install",
         "harness:login-keychain",
         "harness:login-token-file",
         "docs/evidence/issue-901-cli8-live-2026-10-12.json"
@@ -534,7 +533,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant). --restore-revision is covered by deterministic fixtures only."
     },
     {
       "id": "profile prepare-create",
@@ -736,8 +735,7 @@
       "evidence": [
         "test/operator-cli-task.test.ts",
         "test/operator-cli-recovery-journey.test.ts",
-        "docs/evidence/issue-898-cli5-2026-10-11.md",
-        "harness:task-message"
+        "docs/evidence/issue-898-cli5-2026-10-11.md"
       ],
       "effect": "Queues an addressed message for a running recipient's next eligible turn (coordination receipt); admits no work itself.",
       "denial": "A read-only credential exits 3 and a direct read-only bearer post is 403; a completed lead exits 2 pointing to task follow-up with nothing sent; another task's assignment exits 4 with no event; empty or over-length text exits 2.",
@@ -765,7 +763,7 @@
       "retry": "A lost reply then rerun reuses the key; operation get does not read coordination receipts.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant). A follow-up after adoption on a completed lead exits 4 (see assignment apply-current)."
     },
     {
       "id": "task stop",
@@ -881,15 +879,16 @@
         "test/operator-cli-config-journey.test.ts",
         "docs/evidence/issue-896-cli3-2026-10-11.md",
         "harness:assignment-apply-current",
-        "docs/evidence/issue-901-cli8-live-2026-10-12.json"
+        "docs/evidence/issue-901-cli8-live-2026-10-12.json",
+        "test/cli8-journey-harness.test.ts"
       ],
       "effect": "Rebinds an assignment to the current instruction revisions (boundIsCurrent) for the next turn; never rewrites an active turn.",
       "denial": "A read-only credential exits 3 with the digest unchanged; a revoked profile exits 4 policy-denied; an unknown assignment exits 2; a missing --expected-version exits 2 with no request.",
       "revision": "A stale --expected-version, up front or made stale between read and send, exits 4; a recorded execution request no longer matches the new binding.",
       "retry": "The journal key and --request-id replay once; operation get reads the assignment.apply receipt.",
       "observation": "real",
-      "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "state": "bounded",
+      "gap": "Ran live before turn 2, but adopting on a completed lead advances it past its result's version, so task follow-up then exits 4 and the lead cannot be resumed (src/core/domain.ts assignment.apply; src/core/coordination.ts resumableResult; test/cli8-journey-harness.test.ts). The live journey adopted after a follow-up under Stop. Recorded for decision, not repaired."
     },
     {
       "id": "inbox list",

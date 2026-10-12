@@ -35,48 +35,6 @@ const areas = [
   "operation",
 ];
 
-/** The journey harness steps a row may cite (the lead's fixed step list). */
-const harnessSteps = [
-  "install",
-  "login-keychain",
-  "login-token-file",
-  "auth-status",
-  "connection-list",
-  "connection-use",
-  "connection-remove",
-  "auth-logout",
-  "task-list",
-  "task-search",
-  "task-get",
-  "result-get",
-  "result-list",
-  "execution-list",
-  "execution-get",
-  "execution-inputs",
-  "logs",
-  "logs-follow-revoke",
-  "assignment-get",
-  "assignment-instructions",
-  "profile-get",
-  "profile-revisions",
-  "profile-instructions",
-  "readonly-denial-cli",
-  "readonly-denial-direct",
-  "profile-prepare",
-  "profile-apply",
-  "profile-apply-replay",
-  "concurrent-conflict",
-  "project-prepare",
-  "project-apply-lost-response",
-  "operation-get",
-  "assignment-apply-current",
-  "task-stop",
-  "task-follow-up",
-  "task-resume",
-  "task-message",
-  "remote-authority",
-];
-
 const stateSet = ["passed", "bounded", "unproved"];
 const scenarioIds = ["CLI01", "CLI02", "CLI03", "CLI04", "CLI05", "CLI06"];
 
@@ -110,6 +68,33 @@ const inventory = JSON.parse(
   readFileSync(join(evidenceDir, files[0] as string), "utf8"),
 ) as Inventory;
 const commandRows = inventory.rows.filter((r) => r.kind === "command");
+
+type LiveStep = {
+  step: string;
+  exit: number | null;
+  expected: number | null;
+  observation: string;
+};
+const liveFile = readdirSync(evidenceDir).find((f) =>
+  /^issue-901-cli8-live-.*\.json$/.test(f),
+);
+assert.ok(liveFile, "the CLI8 live record exists");
+const liveRecord = JSON.parse(
+  readFileSync(join(evidenceDir, liveFile), "utf8"),
+) as { mode: string; steps: LiveStep[] };
+/** Harness steps the live record shows as real runs with their expected exit. */
+const ranLive = new Set(
+  liveRecord.mode === "live"
+    ? liveRecord.steps
+        .filter(
+          (s) =>
+            s.observation === "real" &&
+            s.exit !== null &&
+            s.exit === s.expected,
+        )
+        .map((s) => s.step)
+    : [],
+);
 const nonEmpty = (s: unknown) => typeof s === "string" && s.trim().length > 0;
 
 /** A cited test names the command as adjacent literals, or as its whole key. */
@@ -178,8 +163,8 @@ test("every row names scenarios, area, existing evidence, a closed state and its
     for (const e of row.evidence) {
       if (e.startsWith("harness:"))
         assert.ok(
-          harnessSteps.includes(e.slice("harness:".length)),
-          `${at}: unknown harness step ${e}`,
+          liveRecord.steps.some((s) => `harness:${s.step}` === e),
+          `${at}: ${e} is not a step of ${liveFile}`,
         );
       else assert.ok(existsSync(join(root, e)), `${at}: missing evidence ${e}`);
     }
@@ -191,33 +176,16 @@ test("every row names scenarios, area, existing evidence, a closed state and its
     if (row.state !== "passed")
       assert.ok(nonEmpty(row.gap), `${at}: gap required while ${row.state}`);
     if (row.state === "passed") {
-      // Passed rows cite the dated live record, and at least one harness step that
-      // the record shows as a real run with its expected exit.
-      const live = row.evidence.find((e) =>
-        /^docs\/evidence\/issue-901-cli8-live-.+\.json$/.test(e),
-      );
-      assert.ok(live, `${at}: passed needs a CLI8 live record`);
-      const record = JSON.parse(readFileSync(join(root, live), "utf8")) as {
-        mode: string;
-        steps: {
-          step: string;
-          exit: number | null;
-          expected: number | null;
-          observation: string;
-        }[];
-      };
-      assert.equal(record.mode, "live", `${at}: ${live} is not a live run`);
+      // Passed rows cite the dated live record and a step that ran there as expected.
       assert.ok(
-        row.evidence.some((e) =>
-          record.steps.some(
-            (step) =>
-              `harness:${step.step}` === e &&
-              step.observation === "real" &&
-              step.exit !== null &&
-              step.exit === step.expected,
-          ),
+        row.evidence.includes(`docs/evidence/${liveFile}`),
+        `${at}: passed needs the CLI8 live record`,
+      );
+      assert.ok(
+        row.evidence.some(
+          (e) => e.startsWith("harness:") && ranLive.has(e.slice(8)),
         ),
-        `${at}: no cited harness step ran as expected in ${live}`,
+        `${at}: no cited harness step ran as expected in ${liveFile}`,
       );
       assert.equal(
         row.observation,
@@ -259,4 +227,21 @@ test("CLI01-CLI06 each have a disposition and every area has a row", () => {
     );
     assert.match(x.reason, /^design excludes from first release: /, x.id);
   }
+});
+
+test("a scenario is passed only when every row naming it is passed", () => {
+  for (const [id, scenario] of Object.entries(inventory.scenarios)) {
+    if (scenario.state !== "passed") continue;
+    const short = inventory.rows.filter(
+      (r) => r.scenarios.includes(id) && r.state !== "passed",
+    );
+    assert.deepEqual(
+      short.map((r) => r.id),
+      [],
+      `${id} is passed with rows that are not`,
+    );
+  }
+  // No second-machine record exists yet, so the remote scenarios cannot pass.
+  for (const id of ["CLI01", "CLI06"])
+    assert.notEqual(inventory.scenarios[id]?.state, "passed", id);
 });
