@@ -164,6 +164,8 @@ export function reserveTurn(state, harness, now = Date.now()) {
   const attempt = attempts[current.number - 1];
   if (now - attempt.startedAt > ATTEMPT_MS)
     throw new BudgetExhausted("attempt wall-time cap reached");
+  if (now - state.sessionStartedAt > SESSION_MS)
+    throw new BudgetExhausted("session wall-time cap reached");
   if (attempt.turns[harness] + 1 > FACETS[current.facet][harness])
     throw new BudgetExhausted(`${current.facet}: ${harness} turn cap reached`);
   if (state.totals[harness] + 1 > GLOBAL_CAPS[harness])
@@ -227,9 +229,23 @@ export function reserveTurnInFile(harness, file = ledgerPath()) {
   return updateLedger(file, (state) => reserveTurn(state, harness));
 }
 
-/** Exit 0 only for a passed attempt with a clean leak scan; inconclusive fails. */
-export const exitCode = ({ leaks, failure, outcome }) =>
-  leaks.length || failure || outcome !== "passed" ? 1 : 0;
+/** An attempt's wall time: 20 minutes, bounded by what remains of the session. */
+export const attemptLimitMs = (sessionStartedAt, now = Date.now()) =>
+  Math.max(0, Math.min(ATTEMPT_MS, sessionStartedAt + SESSION_MS - now));
+
+/**
+ * Exit 0 only for a passed attempt with a clean leak scan, a stopped service and
+ * every recorded process verified exited; inconclusive fails.
+ */
+export const exitCode = ({ leaks, failure, outcome, cleanup, processes }) =>
+  leaks.length ||
+  failure ||
+  outcome !== "passed" ||
+  !cleanup?.serviceStopped ||
+  cleanup.serviceStopError ||
+  (processes ?? []).some((p) => p.verification !== "verified")
+    ? 1
+    : 0;
 
 /** Labels of secret or local-path material found in evidence text; empty when clean. */
 export function scanForLeaks(text, { token, roots = [], home } = {}) {

@@ -367,20 +367,30 @@ test("facet turns that follow their brief need no repair turn, and the crash fol
   }
 });
 
-test("only a passed attempt with a clean leak scan exits 0; inconclusive fails", async () => {
+test("only a passed attempt with a clean leak scan and verified shutdown exits 0", async () => {
   const { exitCode } = await harness();
-  const clean = { leaks: [], failure: null };
+  const clean = {
+    leaks: [],
+    failure: null,
+    cleanup: { serviceStopped: true },
+    processes: [{ verification: "verified" }],
+  };
   assert.equal(exitCode({ ...clean, outcome: "passed" }), 0);
   assert.equal(exitCode({ ...clean, outcome: "inconclusive" }), 1);
   assert.equal(exitCode({ ...clean, outcome: "failed" }), 1);
+  const passed = { ...clean, outcome: "passed" };
+  assert.equal(exitCode({ ...passed, cleanup: { serviceStopped: false } }), 1);
   assert.equal(
-    exitCode({ leaks: ["home-path"], failure: null, outcome: "passed" }),
+    exitCode({
+      ...passed,
+      cleanup: { serviceStopped: true, serviceStopError: "stop failed" },
+    }),
     1,
   );
-  assert.equal(
-    exitCode({ leaks: [], failure: { kind: "harness" }, outcome: "passed" }),
-    1,
-  );
+  for (const verification of ["conflict", "unknown", "none"])
+    assert.equal(exitCode({ ...passed, processes: [{ verification }] }), 1);
+  assert.equal(exitCode({ ...passed, leaks: ["home-path"] }), 1);
+  assert.equal(exitCode({ ...passed, failure: { kind: "harness" } }), 1);
 });
 
 /** Runs `script` in `count` concurrent Node processes; resolves their stdout. */
@@ -478,4 +488,25 @@ test("a ledger lock left by an exited driver fails closed and stays", async () =
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("turns and attempts stop at the session wall-time cap", async () => {
+  const {
+    BudgetExhausted,
+    attemptLimitMs,
+    beginAttempt,
+    emptyLedger,
+    reserveTurn,
+  } = await harness();
+  const session = 2 * 60 * 60_000;
+  // An attempt opened a minute before the session cap may not reserve after it.
+  const state = beginAttempt(emptyLedger(0), "claude-only", session - 60_000);
+  assert.equal(reserveTurn(state, "claude", session).totals.claude, 1);
+  assert.throws(
+    () => reserveTurn(state, "claude", session + 1),
+    BudgetExhausted,
+  );
+  assert.equal(attemptLimitMs(0, session - 60_000), 60_000);
+  assert.equal(attemptLimitMs(0, 0), 20 * 60_000);
+  assert.equal(attemptLimitMs(0, session + 5), 0);
 });

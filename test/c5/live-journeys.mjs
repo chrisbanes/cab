@@ -17,6 +17,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   ATTEMPT_MS,
+  attemptLimitMs,
   BudgetExhausted,
   exitCode,
   ledgerPath,
@@ -556,6 +557,8 @@ async function crash() {
     record.processIdentity,
     10_000,
   );
+  if (cli.verification !== "verified")
+    throw new Error("the crashed turn's Claude CLI exit is not verified");
   stage("restart");
   const second = await spawnChild();
   const read = async () =>
@@ -697,6 +700,16 @@ function cleanup() {
     for (const identity of active.codex)
       await settleProcess("codex-app-server", identity);
     delete process.env[TOKEN_VARIABLE];
+    // An unsafe shutdown fails the attempt, so the ledger and outcome record it.
+    if (
+      !evidence.cleanup.serviceStopped ||
+      evidence.processes.some((p) => p.verification !== "verified")
+    )
+      evidence.failure ??= {
+        stage: "cleanup",
+        kind: "harness",
+        message: "a service stop or process exit was not verified",
+      };
     for (const workspace of active.workspaces) {
       await releaseClaudeTemporaryBase(workspace).catch(() => {});
       evidence.cleanup.temporaryBases.push(
@@ -720,14 +733,16 @@ function cleanup() {
 async function attemptBody(attempt) {
   evidence.attempt = attempt.number;
   evidence.model = { claude: attempt.model, reasoningEffort: "low" };
-  attemptDeadline = Date.now() + ATTEMPT_MS;
+  const limitMs = attemptLimitMs(readLedger(ledgerFile).sessionStartedAt);
+  attemptDeadline = Date.now() + limitMs;
   let abort;
   const aborted = new Promise((_, reject) => {
     abort = reject;
   });
   const timer = setTimeout(
-    () => abort(new BudgetExhausted("attempt wall-time cap reached")),
-    ATTEMPT_MS,
+    () =>
+      abort(new BudgetExhausted("attempt or session wall-time cap reached")),
+    limitMs,
   );
   const onSignal = (signal) => abort(new Error(`received ${signal}`));
   process.on("SIGINT", onSignal);
@@ -812,11 +827,7 @@ const leaks = scanForLeaks(text, {
   roots: [join(physicalTmpdir(), ROOT_PREFIX), "/tmp/ens-"],
   home: homedir(),
 });
-const code = exitCode({
-  leaks,
-  failure: evidence.failure,
-  outcome: evidence.outcome,
-});
+const code = exitCode({ leaks, ...evidence });
 // Exit after the write drains: orphaned work after a timeout or signal must not
 // keep the process alive, and a pipe write on macOS is asynchronous.
 process.stdout.write(
