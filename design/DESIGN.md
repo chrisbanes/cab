@@ -394,7 +394,7 @@ and disclosure detail; do not shrink their entire height into a laptop viewport.
 | Canvas contents (every section and frame with node IDs) | `H7aUq1` |
 | Settings, sign-in & recovery section | Section `dwLnk`; review notes 130 `DuF5u` |
 | Sign-in desktop and phone | 108 `nQvin`, 109 `MxgGj`, 110 `Wut6u`, 111 `yr1m8`, 112 `W64weN` |
-| Account menu and settings index | 113 `DhtZq`, 114 `vEr15` |
+| Account menu, settings index and discovery credential source | 113 `DhtZq`, 114 `vEr15`, 114b `FcO5o` |
 | Guided project setup, error, first run, discovery unavailable and folder picker | 115 `wk678`, 116 `q6ZqlW`, 117 `bkNmZ`, 117b `T6VX5`, 131 `M6N2BQ` |
 | Project configuration and phone state | 118 `gi83t`, 119 `w0ozf`, 120 `SBB7W`, 121 `Pwzju` |
 | Profiles and routing | 122 `F6d3SQ`, 123 `O96oS`, 124 `Z8uZnh`, 125 `c8af5` |
@@ -405,6 +405,34 @@ and disclosure detail; do not shrink their entire height into a laptop viewport.
 
 Workspace inspection frames 77–106 and the task-overview, review, assignment and
 search frames have their own node tables in the sections below.
+
+### GitHub discovery credential
+
+Frame 114's Projects panel carries the installation discovery credential row; 114b
+`FcO5o` draws it open, and 117b `T6VX5` draws the setup alert when discovery is
+unconfigured.
+
+- **Configured (114):** "GitHub discovery credential · GitHub CLI · @account ·
+  read-only use" with Change and Clear. Clear removes the reference and is the
+  reverse of choosing a source. An environment-variable reference keeps its
+  existing lines.
+- **Open (114b):** a source choice, with GitHub CLI marked recommended and
+  Environment variable marked advanced.
+  - **GitHub CLI.** The service detects a login non-interactively. When it finds
+    one, the row shows "Signed in to github.com as @account" with **Use this
+    login**. Otherwise it shows exactly one of the following, with no action:
+    "gh not installed", "gh not signed in · run gh auth login" or "gh login
+    unreadable from the service".
+  - **Environment variable.** A Variable name field; `env:` is implied.
+  - The form also carries the use note (read-only use, removed from agent and
+    helper environments, keychain limit) and Cancel. The token itself is never
+    shown.
+- **Setup alert (117b):** when discovery is unconfigured and the service detects a
+  gh login, the alert offers **Use GitHub CLI login (@account)** before **Set
+  discovery credential**. The action configures the reference in one step and
+  re-reads discovery. Without a detected login, only **Set discovery credential**
+  appears. Ensemble never uses a gh login the operator did not choose. Frame 116
+  draws discovery available and is unchanged.
 
 ### CLI credentials
 
