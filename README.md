@@ -146,6 +146,14 @@ each acceptance scenario to its evidence and disposition.
   can remain held for reconciliation. See the
   [execution policy](docs/design/standalone.md#default-execution-policy) and
   [acceptance plan](docs/acceptance.md) for the boundaries and required evidence.
+- **Claude runtime.** Profiles can select a Claude Code runtime, implemented under
+  [ADR-1008](docs/adr/1008-claude-code-execution-harness.md), but the production
+  service does not enable it until bounded live journeys
+  ([#827](https://github.com/chrisbanes/ensemble/issues/827)) qualify it. Its
+  execution policy and disclosed limits differ from Codex's (see the
+  [specification](docs/SPEC.md)). It uses the operator's own Claude subscription,
+  and Anthropic's [terms](https://code.claude.com/docs/en/legal-and-compliance) do
+  not explicitly address a self-hosted single-operator service.
 - **Deferred integrations.** Optional ChatGPT daily operations/events and native Codex
   task visibility/handover are deferred until after the standalone MVP. Planning,
   probes and implementation are paused under

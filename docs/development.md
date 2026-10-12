@@ -26,6 +26,21 @@ qualification is separate and runs only when requested explicitly, for example
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.
 
+The Claude runtime ([ADR-1008](adr/1008-claude-code-execution-harness.md)) is
+implemented but not enabled in the production service until the
+[#827](https://github.com/chrisbanes/ensemble/issues/827) journeys qualify it.
+Its token is the operator's own subscription token from `claude setup-token`,
+configured in Settings as an `env:NAME` reference. The variable must be in the
+service process environment when the service starts; the generated LaunchAgent
+does not set it, so add it to the service environment yourself. A reference
+configured while the service runs takes effect after a restart.
+`npm run c5:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
+bounded journey against disposable data and prints redacted evidence. It refuses
+any other arguments, a missing `CLAUDE_CODE_OAUTH_TOKEN` (read from the
+environment, then `~/.env`) or a missing ChatGPT.app Codex launcher before creating
+anything, and enforces per-attempt and session turn caps through a ledger in the
+temporary directory. It needs an explicit grant to run.
+
 The command surface is `npm run service -- <serve|operator|run|list> ABSOLUTE_DATA_DIR`.
 `run` also takes `workId`, `prompt`, an existing absolute workspace directory,
 and optionally `previousWorkId` for a follow-up in a completed conversation.

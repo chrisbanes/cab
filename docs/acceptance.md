@@ -241,6 +241,21 @@ qualification. Records belong in `docs/evidence/` and must identify the candidat
 service/client/runtime, observed effects and limits. Documentation acceptance
 alone passes none of these scenarios.
 
+### Claude execution harness scenarios
+
+[ADR-1008](adr/1008-claude-code-execution-harness.md) requires these bounded
+real-runtime journeys before the Claude runtime is enabled or advertised. Each runs
+under an explicit grant against a disposable repository and temporary data only.
+Deterministic tests already cover fault handling, capability rejection and policy
+denial.
+
+| ID | Given / when | Required observable result | Layer |
+| --- | --- | --- | --- |
+| C5-1 | Claude lead and Claude worker on a disposable repository | The lead delegates; the worker asks a question through `ensemble_ask_question`, receives the operator's answer and reports a result; the lead requests completion and the task finalizes | Service + Claude runtime |
+| C5-2 | Codex lead delegates to a Claude worker | The Claude worker's result reaches the Codex lead, which requests completion; each assignment keeps its runtime | Service + Codex + Claude runtime |
+| C5-3 | Stop a running Claude turn; separately, kill the service mid-turn and restart | Stop is observed or the hold stays visible with the writer hold. After the crash, the uncertainty hold is visible, writer and capacity holds remain and no turn starts until explicit recovery resumes the same session once; nothing retries or releases ownership early | Service + Claude runtime |
+| C5-4 | Sandboxed Bash in a Claude turn reads its environment | The subprocess token scrub is qualified, or any residual exposure is recorded as a disclosed limit | Claude runtime |
+
 ### ChatGPT and native Codex acceptance
 
 These integrations are deferred until after the standalone MVP
@@ -420,6 +435,11 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   local review resumed it, and the resumed turn on the same thread received the
   review's anchors and reported a result. Evidence:
   [live follow-up](evidence/issue-828-operator-follow-up-live-2026-10-09.md).
+- **Claude execution harness** (C5-1–C5-4) — **Unproved.** The runtime is
+  implemented and its fault, rejection, policy, Stop and restart holds are covered
+  by deterministic tests. A guarded driver (`npm run c5:live`) is ready for the
+  journeys, which have not run, so the runtime is not enabled in the production
+  service.
 - **ChatGPT and native Codex** (X01–X08) — **Unproved**, deferred. X01 and X02 stay
   unproved: the inspected App Server and SDK surfaces expose standalone thread
   creation but not saved-project placement, linked native workers, project/task
