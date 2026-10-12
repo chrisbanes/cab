@@ -162,7 +162,8 @@ or run `node dist/src/cli/main.js` directly.
    - `assignment apply-current ASSIGNMENT_ID --expected-version N` rebinds the
      assignment to the current profile and project revisions for its next turn; an
      active turn is not rewritten. Adoption is one-way: restore older text as a new
-     revision and adopt again.
+     revision and adopt again. A completed lead stays resumable: a later
+     `task follow-up` resumes it under the adopted revisions.
    - `capacity get` shows global and per-project limits and usage.
    - `operation get REQUEST_ID --scope project:ID|profile:ID|system:capacity --type
      TYPE` reads a recorded receipt; the same UUID in another scope or type never
@@ -416,13 +417,6 @@ Troubleshooting:
   failing.
 - `managed-assignment` (exit 3): the command runs inside an agent turn, which must
   not use operator credentials.
-- After correcting instructions for a completed lead, `assignment apply-current`
-  followed by `task follow-up` exits 4, because adoption advances the assignment past
-  its result, and the lead cannot then be resumed
-  ([#935](https://github.com/chrisbanes/ensemble/issues/935)). Until that is resolved, send the
-  follow-up under `task stop`, run `assignment apply-current`, then `task resume`.
-  Stop is task-wide: it also requests cancellation of the task's other active work,
-  so use it only when nothing else on the task is running.
 - For another machine, reach the service only through a private HTTPS route (for
   example a tailnet-only route to the loopback port), log in there with the `https://`
   origin and a token file, and trust a private CA with `NODE_EXTRA_CA_CERTS`.

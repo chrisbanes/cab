@@ -4123,7 +4123,7 @@ export class CoordinationStore {
         refusal:
           "Follow-up unavailable: latest result is not the newest unambiguous work",
       };
-    // Defensive: a follow-up advances the version, so its result is no longer resumable.
+    // Defensive: a follow-up returns the assignment to pending; any turn that completes it again has newer work.
     if (
       this.one(
         "SELECT 1 AS prior FROM coordination_follow_ups WHERE resultId = ?",
@@ -4138,8 +4138,9 @@ export class CoordinationStore {
 
   /**
    * A completed assignment's result that a follow-up may resume: the
-   * assignment's newest, unambiguous work at its current version. The
-   * assignment form selects the newest result of the current conversation.
+   * assignment's newest, unambiguous work in its current conversation. It keys on
+   * work identity, not version, so adopting current instructions keeps it resumable.
+   * The assignment form selects the newest result of the current conversation.
    */
   private resumableResult(
     target: { resultId: string } | { assignmentId: string },
@@ -4172,7 +4173,6 @@ export class CoordinationStore {
           ON conversation.assignmentId = assignment.id
           AND conversation.revision = revision.conversationRevision
         WHERE ${filter} AND assignment.taskId = result.taskId
-          AND assignment.version = result.assignmentVersion
           AND assignment.state = 'completed'
           AND NOT EXISTS (
             SELECT 1 FROM task_work_revisions newer

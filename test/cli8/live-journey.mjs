@@ -951,9 +951,8 @@ async function journey() {
       (await json("assignment-get", ["assignment", "get", leadId])).data
         .version,
     );
-  // Adopting first would advance the completed lead past its result's version and refuse
-  // the follow-up, so the follow-up resumes the lead under Stop, adoption binds the
-  // corrected revision, and Resume admits the one turn.
+  // The follow-up resumes the lead under Stop so no turn is admitted before adoption
+  // binds the corrected revision; Resume then admits the one turn.
   await json("task-stop", ["task", "stop", taskId], names.rw);
   await json(
     "task-follow-up",
