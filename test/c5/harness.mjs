@@ -87,7 +87,8 @@ const alive = (pid) => {
 /**
  * Runs `transition` on the ledger under an exclusive lock file holding the
  * owner's PID, so concurrent drivers cannot lose attempts or turn counts. A lock
- * whose owner process is gone is stale and removed.
+ * whose owner has gone fails closed, like an open attempt: removing it
+ * automatically could race another waiter and admit two owners.
  */
 export function updateLedger(file, transition) {
   const lock = `${file}.lock`;
@@ -99,13 +100,17 @@ export function updateLedger(file, transition) {
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
-      // ponytail: PID liveness only; a reused PID keeps a stale lock until it exits.
+      // Empty only between its owner's create and PID write.
       const owner = Number(readFileSync(lock, "utf8") || Number.NaN);
       if (Number.isInteger(owner) && owner > 0 && !alive(owner))
-        rmSync(lock, { force: true });
-      else if (Date.now() > deadline)
-        throw new Error("Ledger lock is held by a running driver");
-      else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+        throw new BudgetExhausted(
+          `ledger lock ${lock} is stale; remove it only after verifying no driver runs`,
+        );
+      if (Date.now() > deadline)
+        throw new BudgetExhausted(
+          "ledger lock is still held or unreadable; verify no driver runs",
+        );
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
     }
   }
   try {

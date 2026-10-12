@@ -455,8 +455,9 @@ console.log(n);`,
   }
 });
 
-test("a ledger lock left by an exited driver is stale and removed", async () => {
+test("a ledger lock left by an exited driver fails closed and stays", async () => {
   const {
+    BudgetExhausted,
     beginAttempt,
     emptyLedger,
     readLedger,
@@ -470,9 +471,10 @@ test("a ledger lock left by an exited driver is stale and removed", async () => 
     assert.equal(exited.status, 0);
     writeLedger(beginAttempt(emptyLedger(), "scrub"), file);
     writeFileSync(`${file}.lock`, String(exited.pid));
-    reserveTurnInFile("claude", file);
-    assert.equal(readLedger(file).totals.claude, 1);
-    assert.equal(existsSync(`${file}.lock`), false);
+    assert.throws(() => reserveTurnInFile("claude", file), BudgetExhausted);
+    assert.throws(() => reserveTurnInFile("claude", file), /stale/);
+    assert.equal(readLedger(file).totals.claude, 0);
+    assert.equal(existsSync(`${file}.lock`), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
