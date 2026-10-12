@@ -4487,7 +4487,7 @@ export class OperatorApi {
   /** The exact identity and advisory eligibility each recovery command needs. */
   async readRecoveryOptions(assignmentId: string) {
     return this.readWithInstructionFence(async () => {
-      const base = await this.readAssignmentRecoveryOnce(assignmentId);
+      const base = await this.readAssignmentRecoveryOnce(assignmentId, true);
       const { projectId } = this.requireAssignment(assignmentId);
       const excluded = await this.exclusions(projectId, base.data.taskId);
       return recoveryOptions(this.service, base, projectId, excluded, (v) =>
@@ -4495,7 +4495,8 @@ export class OperatorApi {
       );
     });
   }
-  private async readAssignmentRecoveryOnce(assignmentId: string) {
+  /** Task-wide recovery records, or with `own` only this assignment's, before the bound of 20. */
+  private async readAssignmentRecoveryOnce(assignmentId: string, own = false) {
     const d = this.domain(),
       { taskId, projectId } = this.requireAssignment(assignmentId),
       snapshot = this.workspaceSnapshot([taskId]),
@@ -4513,7 +4514,8 @@ export class OperatorApi {
         r.binding
           ? r.binding.taskId === taskId &&
             known.has(r.binding.assignmentId) &&
-            uuid.safeParse(r.binding.assignmentId).success
+            uuid.safeParse(r.binding.assignmentId).success &&
+            (!own || r.binding.assignmentId === assignmentId)
           : selected?.workId === r.workId &&
             selected.assignmentId === assignmentId &&
             selected.taskId === taskId &&

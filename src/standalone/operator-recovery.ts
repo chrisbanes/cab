@@ -18,7 +18,7 @@ type Blocker = z.infer<typeof recoveryBlockerSchema>;
 type Base = z.infer<typeof assignmentRecoverySchema>;
 
 /**
- * Enriches the assignment recovery read with the exact identity each recovery command
+ * Enriches this assignment's own recovery records (bounded after that filter) with the exact identity each recovery command
  * binds and advisory eligibility. `exact` returns a string only when redaction leaves it
  * unchanged; anything withheld blocks the paths that would send it.
  */
@@ -39,11 +39,7 @@ export function recoveryOptions(
     if (kept === null || kept.length > max) withheld = true;
     return kept !== null && kept.length <= max ? kept : null;
   };
-  // The base read lists every assignment of the task; only this one's generations apply.
-  const mine = base.data.records.filter(
-    (r) => r.binding === null || r.binding.assignmentId === assignmentId,
-  );
-  const records = mine.map((r) => {
+  const records = base.data.records.map((r) => {
     const material =
       r.workId === null ? undefined : service.recoveryMaterial(r.workId);
     const own = material?.assignmentId === assignmentId ? material : undefined;
