@@ -198,12 +198,24 @@ const settled = (state) => !["running", "submitting"].includes(state);
 
 /** In-process service for every facet but crash; each turn gets TURN_MS, then Stop. */
 async function inProcess(run) {
+  // Before the service exposes the token, so git children never inherit it.
+  const repository = gitFixture();
   const current = await startJourneyService({
     dataDir: join(root, "data"),
     launcher,
     ledgerFile,
     token,
   });
+  if (active.closing) {
+    // Cleanup already ran; this late service must not outlive the attempt.
+    await current.service.stop().catch(() => {});
+    for (const identity of [
+      ...current.priorProcesses,
+      current.observed.runtimes.codex?.processIdentity?.(),
+    ])
+      await settleProcess("codex-app-server (late)", identity);
+    throw new Error("attempt closed during service start");
+  }
   active.current = current;
   active.codex.push(...current.priorProcesses);
   for (const identity of current.priorProcesses)
@@ -231,7 +243,7 @@ async function inProcess(run) {
   const ids = await setupJourney(current.service, {
     facet,
     model: evidence.model.claude,
-    repository: gitFixture(),
+    repository,
   });
   current.taskId = ids.taskId;
   await run(current, ids, check);
@@ -410,6 +422,7 @@ async function stop(current, ids, check) {
 const IPC_MS = 120_000;
 /** Forks the journey service; every call times out and fails when the child exits. */
 async function spawnChild() {
+  if (active.closing) throw new Error("attempt closed; no new service child");
   const child = fork(new URL("./service-child.mjs", import.meta.url), [], {
     stdio: ["ignore", "ignore", "ignore", "ipc"],
   });
@@ -466,6 +479,11 @@ async function spawnChild() {
   for (const identity of started.priorProcesses)
     await settleProcess("codex-app-server (before token)", identity);
   active.codex.push(started.codex);
+  if (active.closing) {
+    await stopChild(entry);
+    await settleProcess("codex-app-server (late)", started.codex);
+    throw new Error("attempt closed during service child start");
+  }
   return entry;
 }
 
@@ -622,6 +640,7 @@ async function crash() {
 let cleaned;
 /** Runs once on every exit path: success, failure, attempt timeout or signal. */
 function cleanup() {
+  active.closing = true;
   cleaned ??= (async () => {
     clearInterval(active.watchdog);
     const current = active.current;
@@ -691,13 +710,14 @@ async function attemptBody(attempt) {
   process.on("SIGINT", onSignal);
   process.on("SIGTERM", onSignal);
   let failureKind = null;
+  let work;
   try {
     root = mkdtempSync(join(physicalTmpdir(), ROOT_PREFIX));
     chmodSync(root, 0o700);
     // Non-secret positive control: shows the scrub probe reads Bash's environment.
     process.env.ENSEMBLE_C5_CONTROL = "present";
     stage("run");
-    const work =
+    work =
       facet === "crash"
         ? crash()
         : inProcess((current, ids, check) =>
@@ -728,6 +748,8 @@ async function attemptBody(attempt) {
   } finally {
     clearTimeout(timer);
     await cleanup();
+    // Let abandoned work reach its closing checks and stop what it started.
+    await Promise.race([work?.catch(() => {}), delay(60_000)]);
     process.off("SIGINT", onSignal);
     process.off("SIGTERM", onSignal);
   }

@@ -269,6 +269,12 @@ async function child() {
       process.send({ id, error: String(error?.message ?? error) });
     }
   });
+  // A child whose parent has gone always shuts down.
+  process.on("disconnect", () => {
+    void Promise.resolve(current?.service.stop()).finally(() =>
+      process.exit(0),
+    );
+  });
   process.send({ ready: true });
 }
 
