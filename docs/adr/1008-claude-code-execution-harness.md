@@ -55,14 +55,14 @@ The file is read without caching whenever a Claude preflight, turn start or stat
 read needs the token, and whenever spawn environments and operator reads compute
 their exclusions. It is opened without following a final symbolic link, and the
 opened descriptor must be a regular file owned by the service user, with no group
-or other permission bits and at most 4096 bytes, before anything is read. Its
-content, with trailing whitespace removed, must be one run of printable ASCII
-characters. Otherwise the file is never read and Claude work waits with a reason
-such as `subscription token file permits group or other access`, which names
-neither the path nor the value; the status read shows the token unavailable.
-Intermediate symbolic links in the path (such as macOS `/var`) are followed and
-the parent directories' ownership is not checked; the operator keeps the file in a
-private directory. Replacing the file atomically rotates the token from the next
+or other permission bits and at most 4096 bytes, before anything is read; otherwise
+it is not read. Its content, with trailing whitespace removed, must be one run of
+printable ASCII characters; otherwise it is not used. In either case Claude work
+waits with a reason such as `subscription token file permits group or other
+access`, which names neither the path nor the value, and the status read shows the
+token unavailable. Intermediate symbolic links in the path (such as macOS `/var`)
+are followed, the parent directories' ownership is not checked and access control
+lists are not inspected; the operator keeps the file in a private directory. Replacing the file atomically rotates the token from the next
 turn without a restart; a running turn keeps the value it started with.
 
 The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))

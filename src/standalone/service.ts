@@ -5234,6 +5234,7 @@ export class StandaloneService {
         revisions?.instructionsRevision ?? Number(project.instructionsRevision),
       );
       const discovery = domain.discoveryCredentialReference();
+      const claudeRef = domain.claudeTokenReference();
       const fixtureValues =
         this.options.conversationHistoryExclusions?.() ?? [];
       const workspace = this.workspaceBindings?.get(taskId);
@@ -5269,9 +5270,7 @@ export class StandaloneService {
               process.env[discovery.slice(4)] ?? "",
             ]
           : []),
-        ...((ref) => (ref ? claudeTokenExclusions(ref).redactions : []))(
-          domain.claudeTokenReference(),
-        ),
+        ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
           const id = String(p.id);
