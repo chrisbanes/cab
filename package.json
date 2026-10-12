@@ -27,6 +27,7 @@
     "s04d:live": "node test/s04d/live-operator.mjs --live",
     "cli7:live": "node test/cli7/live-diagnostics.mjs --live --one-attempt",
     "cli8:live": "node test/cli8/live-journey.mjs --live --max-turns 2",
+    "c5:live": "node test/c5/live-journeys.mjs",
     "s05:live": "node test/s05/live-journey.mjs",
     "s05:routing": "node test/s05/live-routing.mjs",
     "s03b:live": "node test/s03b/live-runtime.mjs --live",
