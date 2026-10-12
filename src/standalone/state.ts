@@ -1734,6 +1734,10 @@ export class ExecutionState {
         this.db.exec(
           "ALTER TABLE runtime_terminal_evidence ADD COLUMN failureEvidence TEXT",
         );
+      // Operator reads look up a work's latest terminal turn.
+      this.db.exec(
+        "CREATE INDEX IF NOT EXISTS runtime_terminal_evidence_work_idx ON runtime_terminal_evidence(workId, lastObservedAt)",
+      );
       this.db
         .prepare(
           "INSERT OR IGNORE INTO runtime_retention_migrations (migrationId) VALUES (?)",
@@ -1789,6 +1793,36 @@ export class ExecutionState {
           "UPDATE runtime_terminal_evidence SET conflicted = 1 WHERE threadId = ? AND turnId = ?",
         )
         .run(row.threadId, turnId);
+  }
+
+  /** Bounded failure classification of a work's latest terminal turn when it failed, else null. */
+  terminalFailure(workId: string): {
+    classification: "transient" | "permanent" | "unknown";
+    reasonCode: string;
+  } | null {
+    const row = this.db
+      .prepare(
+        "SELECT * FROM runtime_terminal_evidence WHERE workId = ? AND firstStatus IS NOT NULL ORDER BY lastObservedAt DESC LIMIT 1",
+      )
+      .get(workId) as { firstStatus?: unknown } | undefined;
+    if (row?.firstStatus !== "failed") return null;
+    const unknown = {
+      classification: "unknown",
+      reasonCode: "unknown",
+    } as const;
+    try {
+      const failure = parseRuntimeTerminalEvidence(row).failure;
+      return failure
+        ? {
+            classification: failure.classification,
+            reasonCode: /^[A-Za-z0-9_.:-]{1,64}$/.test(failure.reasonCode)
+              ? failure.reasonCode
+              : "unknown",
+          }
+        : unknown;
+    } catch {
+      return unknown;
+    }
   }
 
   runtimeTerminal(

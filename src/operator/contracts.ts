@@ -17,6 +17,15 @@ import {
 import {
   executionHarnessSchema,
   profileRuntimeSchema,
+  supportedRuntimeSettingsSchema,
+} from "../core/execution-runtime.js";
+export {
+  executionHarnessLabels,
+  type ExecutionHarness,
+  type ProfileRuntime,
+  runtimeSummary,
+  type SupportedRuntimeSettings,
+  unsupportedRuntimeField,
 } from "../core/execution-runtime.js";
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
@@ -72,15 +81,48 @@ export const profileSummarySchema = z
   .strict();
 const envelope = <T extends z.ZodType>(schema: T) =>
   z.object({ data: schema, observedAt: time }).strict();
+/** What a harness enforces and its disclosed limits; null until disclosable. */
+const policyDisclosureSchema = z
+  .object({
+    lines: z.array(z.string().max(300)).max(10),
+    limits: z.array(z.string().max(300)).max(12),
+  })
+  .strict();
+const harnessStatusBase = {
+  harness: executionHarnessSchema,
+  policy: policyDisclosureSchema.nullable(),
+  /** Null until the runtime has read them; then the server validates against them. */
+  settings: supportedRuntimeSettingsSchema.nullable(),
+};
+/** One per harness; `not-configured` is not in the service's `runtimeHarnesses`. */
+export const harnessStatusSchema = z.discriminatedUnion("state", [
+  z.object({ ...harnessStatusBase, state: z.literal("available") }).strict(),
+  z
+    .object({ ...harnessStatusBase, state: z.literal("not-configured") })
+    .strict(),
+  z
+    .object({
+      ...harnessStatusBase,
+      state: z.literal("unavailable"),
+      since: time,
+    })
+    .strict(),
+]);
+export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
+/** Workspace profile rows also carry the current revision's execution runtime. */
+const workspaceProfileSchema = profileSummarySchema
+  .extend({ runtime: profileRuntimeSchema })
+  .strict();
 export const workspaceSchema = envelope(
   z
     .object({
       projects: z.array(projectSummarySchema),
-      profiles: z.array(profileSummarySchema),
+      profiles: z.array(workspaceProfileSchema),
       runtime: z.discriminatedUnion("state", [
         z.object({ state: z.literal("available") }).strict(),
         z.object({ state: z.literal("unavailable"), since: time }).strict(),
       ]),
+      harnesses: z.array(harnessStatusSchema),
     })
     .strict(),
 );
@@ -991,6 +1033,14 @@ const generation = z
     instructionsRevision: revision,
     profileRevision: revision,
     harness: executionHarnessSchema.nullable(),
+    /** The latest failed turn's bounded classification; null when none failed. */
+    failure: z
+      .object({
+        classification: z.enum(["transient", "permanent", "unknown"]),
+        reasonCode: z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/),
+      })
+      .strict()
+      .nullable(),
   })
   .strict();
 export const assignmentSchema = z
@@ -1010,6 +1060,8 @@ export const assignmentSchema = z
     instructionsRevision: revision,
     currentProfileRevision: revision,
     currentInstructionsRevision: revision,
+    /** The execution runtime of the captured profile revision. */
+    runtime: profileRuntimeSchema,
     executionGeneration: generation.nullable(),
   })
   .strict();
@@ -1933,6 +1985,16 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      ...base,
+      type: z.literal("claude-token.configure"),
+      credentialRef: z
+        .string()
+        .regex(/^env:[A-Z][A-Z0-9_]*$/)
+        .nullable(),
+    })
+    .strict(),
+  z
+    .object({
       ...domainBase,
       type: z.literal("github.preview"),
       selectionId: z.string().trim().min(1).max(512),
@@ -2065,6 +2127,13 @@ export const configurationReceiptSchema = z
         .object({
           commandType: z.literal("discovery.configure"),
           resourceId: z.literal("system:discovery"),
+          configured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("claude-token.configure"),
+          resourceId: z.literal("system:claude-token"),
           configured: z.boolean(),
         })
         .strict(),
@@ -2584,6 +2653,24 @@ export type Execution = z.infer<typeof executionSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 
 const githubSegment = z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/);
+/**
+ * The Claude subscription token reference: booleans and a closed state only, never the
+ * reference name or value. `restart-required`: configured after the service started.
+ */
+export const claudeTokenStatusSchema = envelope(
+  z
+    .object({
+      configured: z.boolean(),
+      available: z.boolean(),
+      state: z.enum([
+        "not-configured",
+        "missing-value",
+        "restart-required",
+        "available",
+      ]),
+    })
+    .strict(),
+);
 /** Installation discovery credential: whether a reference is set and has a value. Never the name. */
 export const discoveryStatusSchema = envelope(
   z.object({ configured: z.boolean(), available: z.boolean() }).strict(),

@@ -120,3 +120,45 @@ test("operator project, profile, routing, and task views render scoped editable 
     db.close();
   }
 });
+
+test("the retained profile page shows the runtime read-only and its save keeps it", async () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    db.exec("PRAGMA foreign_keys = ON");
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const ui = new LocalOperatorUi(domain);
+    const profileId = randomUUID();
+    domain.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name: "Claude worker",
+      instructions: "build",
+      capabilities: "code",
+      runtime: { harness: "claude", model: "sonnet", reasoningEffort: "high" },
+    });
+    const page = ui.profile(profileId, "csrf");
+    assert.match(page, /Execution runtime: Claude · sonnet · high\./);
+    assert.doesNotMatch(form(page, "profile.configure"), /runtime/i);
+    await ui.submit({
+      key: randomUUID(),
+      type: "profile.configure",
+      profileId,
+      expectedVersion: "1",
+      name: "Claude worker",
+      instructions: "build more",
+      capabilities: "code",
+    });
+    assert.equal(Number(domain.profile(profileId).version), 2);
+    assert.deepEqual(domain.profileRuntime(profileId), {
+      harness: "claude",
+      model: "sonnet",
+      reasoningEffort: "high",
+    });
+  } finally {
+    db.close();
+  }
+});

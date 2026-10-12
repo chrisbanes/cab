@@ -327,6 +327,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
       projects: [{ ...c.project }],
       profiles: [c.profiles[0]],
       runtime: { state: "available" },
+      harnesses: [],
     },
     observedAt: 0,
   } as never;

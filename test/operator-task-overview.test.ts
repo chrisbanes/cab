@@ -264,10 +264,12 @@ test("assignmentRow names requester, destination, wait and short id", () => {
     name: "Mira",
     requesterAssignmentId: null,
     resultDestination: "task result",
+    runtime: { harness: "codex" },
   };
   const builder = (brief: string) => ({
     assignmentId: randomUUID(),
     name: "Builder",
+    runtime: { harness: "claude", model: "sonnet", reasoningEffort: null },
     brief,
     requesterAssignmentId: lead.assignmentId,
     resultRecipientAssignmentId: lead.assignmentId,
@@ -279,6 +281,8 @@ test("assignmentRow names requester, destination, wait and short id", () => {
   assert.equal(row.title, `Builder · ${"x".repeat(80)}…`);
   assert.equal(row.flow, "Mira → Mira");
   assert.equal(row.wait, "Waiting reason unknown");
+  assert.equal(row.runtime, "Claude · sonnet · default effort");
+  assert.equal(assignmentRow(lead as never, all).runtime, "Codex");
   assert.equal(
     assignmentRow(lead as never, all).flow,
     "Operator → task result",

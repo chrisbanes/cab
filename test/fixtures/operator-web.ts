@@ -16,6 +16,10 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
+import {
+  claudePolicyLimits,
+  claudeTemporaryBase,
+} from "../../src/standalone/claude.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
@@ -26,6 +30,7 @@ import {
   OperatorWebBoundary,
   OperatorWebBundle,
 } from "../../src/standalone/operator-web.js";
+import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import {
   StandaloneService,
@@ -139,12 +144,32 @@ export interface OperatorFixture<R extends Runtime> {
   ): Promise<void>;
 }
 
+/** A Claude-shaped fake: the optional seams the operator UI reads, no SDK. */
+export class ClaudeShapedFixtureRuntime extends OperatorFixtureRuntime {
+  readonly harness = "claude" as const;
+  supportedSettings(): Record<string, string[]> | undefined {
+    return { default: ["low", "high"], sonnet: ["high"] };
+  }
+  effectivePolicy(workspace: string) {
+    return {
+      writableRoots: [workspace, claudeTemporaryBase(workspace)],
+      sharedWriteRoots: [] as string[],
+      network: "denied" as const,
+      fileToolConfinement: "hook" as const,
+      limits: [...claudePolicyLimits],
+    };
+  }
+}
+
 export function createOperatorFixture<R extends Runtime>(
   routingClient: RoutingChoiceClient | null,
   readerFactory: GitHubReaderFactory | undefined,
   delivery: StandaloneServiceOptions["delivery"] | undefined,
   lifecycleOptions: FixtureLifecycleOptions,
-  runtimeFactory: (context: RuntimeSpawnContext) => R,
+  runtimeFactory: (
+    context: RuntimeSpawnContext,
+    harness: ExecutionHarness,
+  ) => R,
   serviceOptions?: StandaloneServiceOptions,
 ): Promise<OperatorFixture<R>>;
 export function createOperatorFixture(
@@ -162,7 +187,10 @@ export async function createOperatorFixture<
   readerFactory?: GitHubReaderFactory,
   delivery?: StandaloneServiceOptions["delivery"],
   lifecycleOptions: FixtureLifecycleOptions = {},
-  runtimeFactory?: (context: RuntimeSpawnContext) => R,
+  runtimeFactory?: (
+    context: RuntimeSpawnContext,
+    harness: ExecutionHarness,
+  ) => R,
   serviceOptions: StandaloneServiceOptions = {},
 ): Promise<OperatorFixture<R>> {
   const lifecycle = new FixtureLifecycle(lifecycleOptions);
@@ -216,14 +244,15 @@ export async function createOperatorFixture<
   const makeService = () =>
     new StandaloneService(
       join(directory, "data"),
-      (context) => {
+      (context, harness) => {
         let currentRuntime: R;
-        if (runtimeFactory) currentRuntime = runtimeFactory(context);
+        if (runtimeFactory) currentRuntime = runtimeFactory(context, harness);
         else {
           if (!defaultRuntime) defaultRuntime = new OperatorFixtureRuntime();
           currentRuntime = defaultRuntime as unknown as R;
         }
-        runtime = currentRuntime;
+        // `fixture.runtime` stays the default (Codex) harness's runtime.
+        if (harness === "codex") runtime = currentRuntime;
         return currentRuntime;
       },
       undefined,

@@ -237,6 +237,13 @@ export function DraftOutcome({
 function ReceiptText({ receipt }: { receipt: CommandReceipt }) {
   if (receipt.kind !== "configuration") return null;
   const r = receipt.result;
+  if (r.commandType === "claude-token.configure")
+    return (
+      <>
+        Recorded Claude token reference:{" "}
+        {r.configured ? "configured" : "cleared"}.
+      </>
+    );
   if (r.commandType === "discovery.configure")
     return (
       <>
@@ -355,10 +362,13 @@ export async function submitDraft(
   session: Session,
   command: unknown,
   refresh: () => void,
+  /** Pre-submit field errors: when any is present nothing is sent. */
+  errors: Record<string, string> = {},
 ) {
   const form = e.currentTarget;
   e.preventDefault();
-  await d.submit(client, command, session.csrfToken);
+  if (Object.keys(errors).length) d.reject(errors);
+  else await d.submit(client, command, session.csrfToken);
   if (d.phase === "recorded") refresh();
   else if (d.phase === "rejected")
     requestAnimationFrame(() =>

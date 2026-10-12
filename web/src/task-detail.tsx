@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { ActionLink, isPlainClick } from "./components.js";
 import { assignmentRow } from "./task-overview.js";
+import { ExecutionNotices } from "./execution-notice.js";
 import "./task-detail.css";
 
 /** Move to a task section in place: no history entry, focus on its heading. */
@@ -85,8 +86,9 @@ export function AssignmentRows({
               {row.title}
             </button>
             <p className="metadata muted">
-              {row.id} · {row.flow} · {a.state} · {row.wait}
+              {row.id} · {row.flow} · {a.state} · {row.runtime} · {row.wait}
             </p>
+            <ExecutionNotices assignment={a} />
           </div>
         );
       })}

@@ -1,8 +1,11 @@
 import { useCallback } from "react";
 import {
+  executionHarnessLabels,
   runtimeSettingsSchema,
   assignmentRecoverySchema,
 } from "../../src/operator/contracts.js";
+import { executionSummary, harnessStateLabel } from "./execution-runtime.js";
+import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
 import { useOperatorResource } from "./resource.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
@@ -149,6 +152,43 @@ export function RuntimeSettings(p: SettingsProps) {
                 saved={p.drafts.saved("capacity.configure")}
                 label="Saved capacity"
               />
+              <Panel
+                title="Execution runtimes"
+                description="Work for a runtime that is not enabled or unavailable waits; it never falls back to another runtime."
+              >
+                {p.workspace?.data.harnesses.map((h) => (
+                  <div className="settings-row" key={h.harness}>
+                    <div className="settings-row-heading">
+                      <h3 className="small-heading">
+                        {executionHarnessLabels[h.harness]}
+                      </h3>
+                      <StatusBadge
+                        tone={
+                          h.state === "unavailable"
+                            ? "error"
+                            : h.state === "available"
+                              ? "success"
+                              : "neutral"
+                        }
+                      >
+                        {harnessStateLabel[h.state]}
+                      </StatusBadge>
+                    </div>
+                    {h.state === "unavailable" && (
+                      <p className="metadata muted">
+                        Restart the service to retry this runtime.
+                      </p>
+                    )}
+                    <h4 className="small-heading">
+                      Effective execution policy
+                    </h4>
+                    <PolicyDisclosure
+                      harness={h.harness}
+                      workspace={p.workspace}
+                    />
+                  </div>
+                ))}
+              </Panel>
             </div>
             <section
               className="settings-column"
@@ -319,6 +359,10 @@ export function AssignmentRecovery(
                     execution ended.
                   </p>
                 )}
+                <p className="body">
+                  Execution runtime: {executionSummary(data.assignment).line}.
+                </p>
+                <ExecutionNotices assignment={data.assignment} />
               </Panel>
               <Panel
                 title="Recorded evidence"

@@ -27,6 +27,11 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.commandType === "discovery.configure" &&
       result.configured === (c.credentialRef !== null)
     );
+  if (c.type === "claude-token.configure")
+    return (
+      result.commandType === "claude-token.configure" &&
+      result.configured === (c.credentialRef !== null)
+    );
   const resource =
     "profileId" in c
       ? c.profileId
@@ -166,6 +171,19 @@ export class ConfigurationDraft {
     this.phase = "editing";
     this.dirty = false;
     this.notice = "";
+    this.changed();
+  }
+  /** Reject before sending: field errors keyed by command path, as after a rejected send. */
+  reject(errors: Record<string, string>) {
+    if (
+      this.phase === "pending" ||
+      this.phase === "recorded" ||
+      this.lifecycle.uncertain
+    )
+      return;
+    this.errors = errors;
+    this.phase = "rejected";
+    this.notice = "Check the highlighted fields.";
     this.changed();
   }
   async submit(client: OperatorClient, input: unknown, csrf: string) {

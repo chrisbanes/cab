@@ -391,6 +391,8 @@ export class OperatorWebBoundary {
     if (path === "/api/operator/runtime") return this.api.readRuntimeSettings();
     if (path === "/api/operator/discovery")
       return this.api.readDiscoveryStatus();
+    if (path === "/api/operator/claude-token")
+      return this.api.readClaudeTokenStatus();
     if (path === "/api/operator/discovery/repositories")
       return this.api.readDiscoveryRepositories();
     const recovery = path.match(
@@ -436,6 +438,7 @@ export class OperatorWebBoundary {
         "/api/operator/source-refresh",
         "/api/operator/source-observations",
         "/api/operator/discovery",
+        "/api/operator/claude-token",
         "/api/operator/discovery/repositories",
         "/api/operator/discovery/branches",
         "/api/operator/discovery/projects",

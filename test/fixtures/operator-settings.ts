@@ -6,7 +6,16 @@ import { promisify } from "node:util";
 import { chromium, type Browser, type Page } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { BrowserJourney } from "./browser-diagnostics.js";
-import { createOperatorFixture, seedOperatorRecovery } from "./operator-web.js";
+import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
+import type {
+  RuntimeSpawnContext,
+  StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
+import {
+  createOperatorFixture,
+  type OperatorFixtureRuntime,
+  seedOperatorRecovery,
+} from "./operator-web.js";
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
 export const desktop = { width: 1366, height: 900 },
@@ -194,9 +203,32 @@ export async function startSettings(
   path: string,
   viewport = desktop,
   launch = () => chromium.launch(),
+  options: {
+    runtimeFactory?: (
+      context: RuntimeSpawnContext,
+      harness: ExecutionHarness,
+    ) => OperatorFixtureRuntime;
+    serviceOptions?: StandaloneServiceOptions;
+  } = {},
 ) {
   const f = await journey.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    options.runtimeFactory
+      ? createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+          options.runtimeFactory,
+          options.serviceOptions,
+        )
+      : createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+          undefined,
+          options.serviceOptions,
+        ),
   );
   let browser: Browser | undefined;
   journey.cleanup(

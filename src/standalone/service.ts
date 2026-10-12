@@ -131,8 +131,19 @@ import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
   defaultExecutionHarness,
   type ExecutionHarness,
+  executionHarnessLabels,
   executionHarnessSchema,
 } from "./execution-harness.js";
+import type { HarnessStatus } from "../operator/contracts.js";
+import {
+  type SupportedRuntimeSettings,
+  supportedRuntimeSettingsSchema,
+} from "../core/execution-runtime.js";
+import {
+  claudePolicyDisclosure,
+  codexPolicyDisclosure,
+  type PolicyDisclosure,
+} from "./execution-policy.js";
 import {
   SchedulerStore,
   type TurnRequest,
@@ -189,7 +200,11 @@ const immutableRevisionMismatches = new Set([
 /** The Claude turn's base environment and token, or why no turn may start. */
 export type ClaudeTurnEnvironment =
   | { env: NodeJS.ProcessEnv; token: string }
-  | { unavailable: string };
+  | {
+      unavailable: string;
+      /** Machine-readable cause for status reads; the reason text is unchanged. */
+      code?: "not-configured" | "empty" | "restart-required";
+    };
 
 export interface RuntimeSpawnContext {
   spawnEnvironment: () => NodeJS.ProcessEnv;
@@ -242,11 +257,6 @@ const runtimeFailedError = (): never => {
 /** Runtime-issued identities are only unique within one harness. */
 const runtimeKey = (harness: ExecutionHarness, identity: string) =>
   JSON.stringify([harness, identity]);
-
-const harnessLabel: Record<ExecutionHarness, string> = {
-  codex: "Codex",
-  claude: "Claude",
-};
 
 interface PromptPart {
   name:
@@ -404,6 +414,8 @@ export class StandaloneService {
     number
   >();
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
+  /** Built at start; status reads use it without spawning anything. */
+  private claudeContext: RuntimeSpawnContext["claude"];
   /** Settles when a non-default runtime reports failure; see untilFailure. */
   private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
   /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
@@ -770,15 +782,23 @@ export class StandaloneService {
           return { ...snapshot };
         },
       };
-      const unavailable = (reason: string) => ({
+      const unavailable = (
+        reason: string,
+        code: "not-configured" | "empty" | "restart-required",
+      ) => ({
         unavailable: `Claude runtime unavailable: ${reason}`,
+        code,
       });
       // Never wider than what the running runtimes inherited at start.
       const claude = {
         configDirectory: join(this.dataDir, "claude", "config"),
         turnEnvironment: (): ClaudeTurnEnvironment => {
           const name = claudeTokenName();
-          if (!name) return unavailable("subscription token is not configured");
+          if (!name)
+            return unavailable(
+              "subscription token is not configured",
+              "not-configured",
+            );
           const snapshot = this.runtimeSpawnSnapshot ?? {};
           const token = process.env[name];
           if (
@@ -787,8 +807,10 @@ export class StandaloneService {
           )
             return unavailable(
               "Claude token reference was configured after the service started; restart the service",
+              "restart-required",
             );
-          if (!token) return unavailable("subscription token is unavailable");
+          if (!token)
+            return unavailable("subscription token is unavailable", "empty");
           return {
             env: credentialFreeEnvironment(
               snapshot,
@@ -799,6 +821,7 @@ export class StandaloneService {
           };
         },
       };
+      this.claudeContext = claude;
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       spawnEnvironment.spawnEnvironment();
       this.runtimeUnavailableSince.clear();
@@ -1264,9 +1287,9 @@ export class StandaloneService {
   /** Why work bound to this harness cannot be admitted now, if anything. */
   private runtimeWaitReason(harness: ExecutionHarness): string | undefined {
     if (!this.runtimeHarnesses.includes(harness))
-      return `${harnessLabel[harness]} runtime is not configured`;
+      return `${executionHarnessLabels[harness]} runtime is not configured`;
     if (this.runtimeUnavailableSince.has(harness))
-      return `${harnessLabel[harness]} runtime unavailable; restart the service`;
+      return `${executionHarnessLabels[harness]} runtime unavailable; restart the service`;
     return undefined;
   }
 
@@ -1625,15 +1648,90 @@ export class StandaloneService {
     return this.requireState().taskBinding(workId)?.harness ?? null;
   }
 
+  /** Booleans and a closed state only; the token value never leaves this method. */
+  claudeTokenStatus() {
+    const configured = this.domain().claudeTokenReference() !== null;
+    const result = configured
+      ? this.claudeContext?.turnEnvironment()
+      : undefined;
+    const state = !configured
+      ? "not-configured"
+      : !result ||
+          ("unavailable" in result && result.code !== "restart-required")
+        ? "missing-value"
+        : "unavailable" in result
+          ? "restart-required"
+          : "available";
+    return { configured, available: state === "available", state } as const;
+  }
+
+  terminalFailure(workId: string) {
+    return this.requireState().terminalFailure(workId);
+  }
+
   /** In-memory only: a manual service restart is the recovery path. */
   runtimeStatus():
     | { state: "available" }
     | { state: "unavailable"; since: number } {
-    // ponytail: reports the default harness only; per-harness status is C4.
     const since = this.runtimeUnavailableSince.get(defaultExecutionHarness);
     return since === undefined
       ? { state: "available" }
       : { state: "unavailable", since };
+  }
+
+  /** In-memory only, one per harness in `executionHarnessSchema` order. */
+  harnessStatuses(): HarnessStatus[] {
+    return executionHarnessSchema.options.map((harness) => {
+      const policy = this.harnessPolicy(harness),
+        settings = this.harnessSettings(harness);
+      if (!this.runtimeHarnesses.includes(harness))
+        return { harness, state: "not-configured", policy, settings };
+      const since = this.runtimeUnavailableSince.get(harness);
+      return since === undefined
+        ? { harness, state: "available", policy, settings }
+        : { harness, state: "unavailable", since, policy, settings };
+    });
+  }
+
+  /** Supported model and effort values from a started runtime that has read them, else null. */
+  harnessSettings(harness: ExecutionHarness): SupportedRuntimeSettings | null {
+    const runtime = this.runtimes.get(harness) as
+      | (Runtime & { supportedSettings?: () => unknown })
+      | undefined;
+    if (
+      !runtime?.supportedSettings ||
+      this.runtimeUnavailableSince.has(harness)
+    )
+      return null;
+    const raw = runtime.supportedSettings();
+    if (!raw || typeof raw !== "object") return null;
+    const parsed = supportedRuntimeSettingsSchema.safeParse({
+      models: Object.entries(raw).map(([model, efforts]) => ({
+        model,
+        efforts,
+      })),
+    });
+    return parsed.success ? parsed.data : null;
+  }
+
+  /** Codex's is static; Claude's comes from its started runtime, else null. */
+  private harnessPolicy(harness: ExecutionHarness): PolicyDisclosure | null {
+    if (harness === "codex") return codexPolicyDisclosure();
+    const runtime = this.runtimes.get(harness) as
+      | (Runtime & { effectivePolicy?: (workspace: string) => unknown })
+      | undefined;
+    if (!runtime?.effectivePolicy || this.runtimeUnavailableSince.has(harness))
+      return null;
+    // Any absolute workspace: the disclosure names roots by category only.
+    const workspace = "/ensemble-task-workspace";
+    try {
+      return claudePolicyDisclosure(
+        runtime.effectivePolicy(workspace),
+        workspace,
+      );
+    } catch {
+      return null;
+    }
   }
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
@@ -4132,7 +4230,7 @@ export class StandaloneService {
       if (!runtime) return;
       if (runtime.preflightTurn) {
         const preflight = runtime.preflightTurn.bind(runtime);
-        const failed = `${harnessLabel[harness]} runtime unavailable: preflight failed`;
+        const failed = `${executionHarnessLabels[harness]} runtime unavailable: preflight failed`;
         // A settings lookup failure waits like any other preflight failure.
         const reason = await this.untilFailure(
           runtime,

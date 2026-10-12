@@ -13,6 +13,11 @@ import type { ExecutionIntent } from "./state.js";
 import type { StandaloneService } from "./service.js";
 import type { StopObservation } from "./supervisor.js";
 import { escapeHtml, hidden } from "./operator-html.js";
+import {
+  type ExecutionHarness,
+  executionHarnessLabels,
+} from "./execution-harness.js";
+import { runtimeSummary } from "../core/execution-runtime.js";
 
 const positiveIntegerString = z
   .string()
@@ -60,6 +65,7 @@ type RuntimeDomain = Pick<
   | "dependencies"
   | "execute"
   | "profile"
+  | "profileRuntime"
   | "project"
   | "projects"
   | "task"
@@ -76,7 +82,8 @@ export interface RuntimeOperatorApi {
   ): RecoveryRecord[];
   recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[];
   powerStatus(): ReturnType<StandaloneService["powerStatus"]>;
-  runtimeStatus(): ReturnType<StandaloneService["runtimeStatus"]>;
+  harnessStatuses(): ReturnType<StandaloneService["harnessStatuses"]>;
+  bindingHarness(workId: string): ExecutionHarness | null;
   currentTurnRequest(
     assignmentId: string,
     version: number,
@@ -101,10 +108,14 @@ function overview(api: RuntimeOperatorApi, csrfToken: string): string {
   const capacity = api.capacityLimits(
     projects.map((project) => String(project.id)),
   );
-  const unavailable =
-    api.runtimeStatus().state === "unavailable"
-      ? '<p role="alert">Codex runtime unavailable — restart the service</p>'
-      : "";
+  const statuses = api.harnessStatuses();
+  const unavailable = statuses
+    .filter((status) => status.state === "unavailable")
+    .map(
+      (status) =>
+        `<p role="alert">${executionHarnessLabels[status.harness]} runtime unavailable — restart the service</p>`,
+    )
+    .join("");
   return `<main><h1>Runtime</h1>${unavailable}<section><h2>Capacity</h2><p>Global active turns: ${capacity.globalLimit}; currently in use: ${capacity.currentUsage.global}.</p><p>Default project active turns: ${capacity.defaultProjectLimit}.</p>${projects
     .map((project) => {
       const projectId = String(project.id);
@@ -131,9 +142,19 @@ function overview(api: RuntimeOperatorApi, csrfToken: string): string {
         .join("");
       return `<section><h3>${escapeHtml(project.name)} — ${project.paused ? "Paused" : "Active"}</h3>${rows ? `<ul>${rows}</ul>` : "<p>No tasks.</p>"}</section>`;
     })
-    .join(
-      "",
-    )}</section><section><h2>Effective execution policy</h2><p>Default policy: workspace writes with broad host-permitted reads.</p><p>Command network access is disabled. Approval policy is never.</p><p>Stricter isolation, exhaustive ambient access containment, and universal descendant containment are not proved.</p><p>Codex runs with the operator's existing runtime login; Ensemble does not provide an independent execution sandbox.</p></section></main>`;
+    .join("")}</section><section><h2>Effective execution policy</h2>${statuses
+    .map(({ harness, policy }) => {
+      if (!policy) return "";
+      const text = [...policy.lines, ...policy.limits]
+        // Element content: apostrophes stay literal so Codex's text is unchanged.
+        .map((line) => `<p>${line.replace(/[&<>]/g, (c) => escapeHtml(c))}</p>`)
+        .join("");
+      // Codex keeps its retained, unheaded paragraphs.
+      return harness === "codex"
+        ? text
+        : `<h3>${executionHarnessLabels[harness]}</h3>${text}`;
+    })
+    .join("")}</section></main>`;
 }
 
 function admissionReason(reason: string): string {
@@ -402,7 +423,7 @@ function taskPage(
             "Apply current instructions for the next turn",
           )
         : "<p>Current instruction and profile revisions are applied.</p>";
-      return `<li><a href="${assignmentHref(assignmentId)}">${escapeHtml(profile.name)}${lead ? " (project lead)" : ""}</a>: ${escapeHtml(status)}. Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.${apply}</li>`;
+      return `<li><a href="${assignmentHref(assignmentId)}">${escapeHtml(profile.name)}${lead ? " (project lead)" : ""}</a>: ${escapeHtml(status)}. ${runtimeLine(assignment, api)} Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.${apply}</li>`;
     })
     .join("");
   const dependencyRows = dependencies.length
@@ -496,6 +517,34 @@ function taskPage(
   return `<main><h1>${escapeHtml(task.title)}</h1><p>Project: ${escapeHtml(project.name)}. Project state: ${project.paused ? "Paused" : "Active"}. Task state: ${escapeHtml(task.state)}; ${task.ready ? "Ready" : "Not ready"}.</p><p>${admissionStatus}.</p>${lead}<p>Execution status: ${escapeHtml(status)}.</p><p>Local dependencies gate new execution independently of readiness.</p><section><h2>Task-scoped assignments</h2>${assignments.length ? `<ul>${rows}</ul>` : "<p>No assignments have been selected.</p>"}</section><section><h2>Task dependencies</h2><ul>${dependencyRows}</ul>${dependencyForm(task, candidates, dependencyIds, csrfToken)}</section>${executionHoldSection(taskId, api)}<section><h2>Task controls</h2><p>Stop requests cancellation and observes for a bounded period. Effects may continue. Resume clears only the operator Stop and never releases an unresolved execution hold.</p>${stopForm}${resumeForm}</section></main>`;
 }
 
+/** The persisted binding harness when bound, else the captured revision's runtime. */
+function runtimeLine(
+  assignment: {
+    id?: unknown;
+    version?: unknown;
+    profileId?: unknown;
+    profileRevision?: unknown;
+  },
+  api: RuntimeOperatorApi,
+): string {
+  const runtime = api
+    .domain()
+    .profileRuntime(
+      String(assignment.profileId),
+      Number(assignment.profileRevision),
+    );
+  const request = api.currentTurnRequest(
+    String(assignment.id),
+    Number(assignment.version),
+  );
+  const bound = request ? api.bindingHarness(request.workId) : null;
+  return `Execution runtime: ${escapeHtml(
+    bound && bound !== runtime.harness
+      ? executionHarnessLabels[bound]
+      : runtimeSummary(runtime),
+  )}.`;
+}
+
 function assignmentPage(
   assignmentId: string,
   api: RuntimeOperatorApi,
@@ -527,7 +576,7 @@ function assignmentPage(
         "Apply current instructions for the next turn",
       )
     : "<p>Current instruction and profile revisions are applied.</p>";
-  return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="${taskHref(String(task.id))}">${escapeHtml(task.title)}</a> in ${escapeHtml(project.name)}.</p><p>Execution status: ${escapeHtml(status)}.</p><p>Accountable project lead: ${leadProfile ? escapeHtml(leadProfile.name) : "No project lead is configured"}; lead accountability remains with the project.</p><p>Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.</p><p>Result destination: ${escapeHtml(assignment.resultDestination)}.</p><p><a href="/coordination/assignment/${encodeURIComponent(assignmentId)}">Conversation and coordination history</a></p>${executionHoldSection(String(task.id), api)}<section><h2>Instruction revisions</h2><p>Changing configuration does not change this assignment until explicitly applied for its next turn.</p>${apply}</section></main>`;
+  return `<main><h1>${escapeHtml(profile.name)} assignment</h1><p>Task: <a href="${taskHref(String(task.id))}">${escapeHtml(task.title)}</a> in ${escapeHtml(project.name)}.</p><p>Execution status: ${escapeHtml(status)}.</p><p>${runtimeLine(assignment, api)}</p><p>Accountable project lead: ${leadProfile ? escapeHtml(leadProfile.name) : "No project lead is configured"}; lead accountability remains with the project.</p><p>Captured instruction revision ${escapeHtml(assignment.instructionsRevision)}; profile revision ${escapeHtml(assignment.profileRevision)}.</p><p>Result destination: ${escapeHtml(assignment.resultDestination)}.</p><p><a href="/coordination/assignment/${encodeURIComponent(assignmentId)}">Conversation and coordination history</a></p>${executionHoldSection(String(task.id), api)}<section><h2>Instruction revisions</h2><p>Changing configuration does not change this assignment until explicitly applied for its next turn.</p>${apply}</section></main>`;
 }
 
 export class RuntimeOperatorRoutes {

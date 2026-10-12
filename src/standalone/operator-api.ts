@@ -30,7 +30,9 @@ import {
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
+  claudeTokenStatusSchema,
   discoveryStatusSchema,
+  unsupportedRuntimeField,
   executionDetailSchema,
   executionEventsSchema,
   executionInputsSchema,
@@ -410,6 +412,7 @@ export class OperatorApi {
     return JSON.stringify(
       [
         d.discoveryCredentialReference(),
+        d.claudeTokenReference(),
         ...d
           .projects()
           .flatMap((p) => [
@@ -480,13 +483,16 @@ export class OperatorApi {
         projects = d.projects();
       const values = [...this.controlPaths],
         covered = new Set<string>();
-      const discovery = d.discoveryCredentialReference();
-      if (discovery) {
-        const envKey = discovery.slice(4);
-        values.push(discovery, envKey);
-        const value = process.env[envKey];
-        if (value) values.push(value);
-      }
+      for (const ref of [
+        d.discoveryCredentialReference(),
+        d.claudeTokenReference(),
+      ])
+        if (ref) {
+          const envKey = ref.slice(4);
+          values.push(ref, envKey);
+          const value = process.env[envKey];
+          if (value) values.push(value);
+        }
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining = 128;
       if (profiles.length + projects.length > remaining) return undefined;
@@ -1761,11 +1767,40 @@ export class OperatorApi {
         projects: this.domain()
           .projects()
           .map((p) => this.project(p, excluded)),
-        profiles: this.profiles(excluded),
+        profiles: this.profiles(excluded).map((p) => ({
+          ...p,
+          runtime: this.domain().profileRuntime(p.id),
+        })),
         runtime: this.service.runtimeStatus(),
+        harnesses: this.service.harnessStatuses(),
       },
       observedAt: Date.now(),
     });
+  }
+  /** Only a held Claude execution's failure is reported; Codex presentation is unchanged. */
+  private generation(
+    request: {
+      workId: string;
+      assignmentVersion: number;
+      sequence: number;
+      instructionsRevision: number;
+      profileRevision: number;
+    },
+    held: boolean,
+  ) {
+    const harness = this.service.bindingHarness(request.workId);
+    return {
+      workId: request.workId,
+      assignmentVersion: request.assignmentVersion,
+      requestSequence: request.sequence,
+      instructionsRevision: request.instructionsRevision,
+      profileRevision: request.profileRevision,
+      harness,
+      failure:
+        harness === "claude" && held
+          ? this.service.terminalFailure(request.workId)
+          : null,
+    };
   }
   private selection(a: Row) {
     return selectAssignmentExecution(a, this.service);
@@ -2670,18 +2705,24 @@ export class OperatorApi {
             d.profile(String(a.profileId)).version,
           ),
           currentInstructionsRevision: Number(p.instructionsRevision),
+          runtime: d.profileRuntime(
+            String(a.profileId),
+            Number(a.profileRevision),
+          ),
           executionGeneration:
             request?.assignmentVersion &&
             request.instructionsRevision &&
             request.profileRevision
-              ? {
-                  workId: request.workId,
-                  assignmentVersion: request.assignmentVersion,
-                  requestSequence: request.sequence,
-                  instructionsRevision: request.instructionsRevision,
-                  profileRevision: request.profileRevision,
-                  harness: this.service.bindingHarness(request.workId),
-                }
+              ? this.generation(
+                  {
+                    workId: request.workId,
+                    sequence: request.sequence,
+                    assignmentVersion: request.assignmentVersion,
+                    instructionsRevision: request.instructionsRevision,
+                    profileRevision: request.profileRevision,
+                  },
+                  s.intent?.state === "held",
+                )
               : null,
         };
       }),
@@ -4615,6 +4656,12 @@ export class OperatorApi {
   private home() {
     return this.setup.home ?? homedir();
   }
+  readClaudeTokenStatus() {
+    return claudeTokenStatusSchema.parse({
+      data: this.service.claudeTokenStatus(),
+      observedAt: Date.now(),
+    });
+  }
   readDiscoveryStatus() {
     const ref = this.domain().discoveryCredentialReference();
     return discoveryStatusSchema.parse({
@@ -5485,6 +5532,21 @@ export class OperatorApi {
         }
         return commandReceipt(c.type, c.key, "system:capacity", raw);
       }
+      if (c.type === "claude-token.configure") {
+        const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
+          configured: boolean;
+        };
+        return commandReceiptSchema.parse({
+          kind: "configuration",
+          key: c.key,
+          recorded: true,
+          result: {
+            commandType: c.type,
+            resourceId: "system:claude-token",
+            configured: raw.configured,
+          },
+        });
+      }
       if (c.type === "discovery.configure") {
         const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
           configured: boolean;
@@ -5511,6 +5573,22 @@ export class OperatorApi {
         c.type === "github.configure" ||
         c.type === "github.place"
       ) {
+        // Supported values are authoritative once the runtime has read them.
+        if (
+          (c.type === "profile.create" || c.type === "profile.configure") &&
+          c.runtime?.harness === "claude"
+        ) {
+          const supported = this.service.harnessSettings("claude");
+          const field =
+            supported && unsupportedRuntimeField(c.runtime, supported);
+          // An exact replay returns its recorded receipt whatever is supported now.
+          if (
+            field &&
+            this.domain().recordedCommand({ ...c, actor: "operator" }) ===
+              undefined
+          )
+            throw new OperatorApiError(400, "invalid-input", [field]);
+        }
         // Setup paths may be home-relative; the domain verifies and records absolute ones.
         const command =
           c.type === "project.create" && c.repositories

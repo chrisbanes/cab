@@ -9,8 +9,17 @@ import { ConversationHistoryStore } from "../src/standalone/conversation-history
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { OperatorApi } from "../src/standalone/operator-api.js";
-import { createOperatorFixture } from "./fixtures/operator-web.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../src/standalone/operator-api.js";
+import { executionPolicy } from "../src/standalone/codex.js";
+import { codexPolicyDisclosure } from "../src/standalone/execution-policy.js";
+import {
+  ClaudeShapedFixtureRuntime,
+  createOperatorFixture,
+  OperatorFixtureRuntime,
+} from "./fixtures/operator-web.js";
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -962,11 +971,14 @@ test("global labels exclude retained private revisions without any task or proje
     profiles: () => d.profiles(),
     profile: d.profile.bind(d),
     profileRevision: d.profileRevision.bind(d),
+    profileRuntime: d.profileRuntime.bind(d),
+    claudeTokenReference: () => null,
     projects: () => [],
   };
   const isolated = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
+    harnessStatuses: () => [],
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   assert.doesNotMatch(
     JSON.stringify(await isolated.readWorkspace()),
@@ -991,10 +1003,13 @@ test("global snapshot privacy fails closed before excessive revision lookup work
       lookups++;
       return { instructions: "PRIVATE" };
     },
+    profileRuntime: () => ({ harness: "codex" }),
+    claudeTokenReference: () => null,
   };
   const api = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
+    harnessStatuses: () => [],
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   const read = await api.readWorkspace();
   assert.equal(read.data.profiles[0]?.name, null);
@@ -1551,4 +1566,279 @@ test("task reads report the persisted binding harness of each execution generati
     /Claude runtime is not configured/,
   );
   assert.equal(f.runtime.turns, 1);
+  assert.deepEqual(assignment?.runtime, {
+    harness: "claude",
+    model: null,
+    reasoningEffort: null,
+  });
+  assert.equal(assignment?.executionGeneration?.failure, null);
+
+  // A failed Claude turn reports its bounded classification; malformed codes read unknown.
+  const workId = String(assignment?.executionGeneration?.workId);
+  const failed = (reasonCode: string) =>
+    f.seedPersistedState((db) => {
+      db.prepare("DELETE FROM runtime_terminal_evidence WHERE workId = ?").run(
+        workId,
+      );
+      db.prepare(
+        "INSERT INTO runtime_terminal_evidence (threadId,turnId,firstStatus,workId,firstRuntimeGeneration,lastRuntimeGeneration,firstObservedAt,lastObservedAt,failureEvidence,harness) VALUES ('t','u','failed',?,'g','g',1,1,?,'claude')",
+      ).run(
+        workId,
+        JSON.stringify({
+          classification: "permanent",
+          reasonCode,
+          source: "harness",
+          harnessRetries: null,
+        }),
+      );
+    });
+  const failure = async () =>
+    (await api.readTask(taskId)).data.assignments.find(
+      (a) => a.assignmentId === assignmentId,
+    )?.executionGeneration?.failure;
+  failed("unauthorized");
+  // Reported only while the execution intent is held.
+  assert.equal(await failure(), null);
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE execution_intents SET state = 'held' WHERE workId = ?")
+      .run(workId),
+  );
+  assert.deepEqual(await failure(), {
+    classification: "permanent",
+    reasonCode: "unauthorized",
+  });
+  failed("bad code <script>");
+  assert.deepEqual(await failure(), {
+    classification: "permanent",
+    reasonCode: "unknown",
+  });
+
+  // The Codex assignment keeps its captured revision's runtime after the profile moves to Claude.
+  const codex = (await api.readTask(ids.taskId)).data.assignments[0];
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: String(codex?.profileId),
+    expectedVersion: Number(d.profile(String(codex?.profileId)).version),
+    runtime: { harness: "claude", model: "sonnet", reasoningEffort: "high" },
+  });
+  const after = (await api.readTask(ids.taskId)).data.assignments[0];
+  assert.deepEqual(after?.runtime, { harness: "codex" });
+  assert.equal(
+    after?.currentProfileRevision,
+    Number(codex?.profileRevision) + 1,
+  );
+  assert.equal(after?.executionGeneration?.harness, "codex");
+  assert.equal(after?.executionGeneration?.failure, null);
+});
+
+test("workspace reads report every harness's status", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const read = await new OperatorApi(f.service, [f.directory]).readWorkspace();
+  assert.deepEqual(
+    read.data.harnesses.map(({ harness, state, settings }) => ({
+      harness,
+      state,
+      settings,
+    })),
+    [
+      { harness: "codex", state: "available", settings: null },
+      { harness: "claude", state: "not-configured", settings: null },
+    ],
+  );
+  assert.deepEqual(read.data.harnesses[0]?.policy, codexPolicyDisclosure());
+  assert.equal(read.data.harnesses[1]?.policy, null);
+  // The disclosure describes the policy Codex is actually given.
+  assert.deepEqual(executionPolicy("/w"), {
+    type: "workspaceWrite",
+    writableRoots: ["/w"],
+    networkAccess: false,
+    excludeSlashTmp: true,
+    excludeTmpdirEnvVar: true,
+  });
+  assert.deepEqual(read.data.runtime, { state: "available" });
+
+  const both = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) => {
+      if (harness === "claude") throw Error("Claude unavailable");
+      return new OperatorFixtureRuntime();
+    },
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => both.close());
+  const api = new OperatorApi(both.service, [both.directory]);
+  const [codex, claude] = (await api.readWorkspace()).data.harnesses;
+  assert.equal(codex?.state, "available");
+  assert.equal(claude?.state, "unavailable");
+  assert.equal(typeof (claude as { since?: number }).since, "number");
+  both.runtime.crash();
+  assert.equal(
+    (await api.readWorkspace()).data.harnesses[0]?.state,
+    "unavailable",
+  );
+});
+
+test("profile commands reject Claude values the started runtime does not support", async (t) => {
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) =>
+      harness === "claude"
+        ? new ClaudeShapedFixtureRuntime()
+        : new OperatorFixtureRuntime(),
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const create = (model: string | null, reasoningEffort: string | null) => {
+    const profileId = randomUUID();
+    return {
+      profileId,
+      run: () =>
+        api.execute({
+          type: "profile.create",
+          key: randomUUID(),
+          profileId,
+          name: "Claude",
+          instructions: "x",
+          capabilities: "x",
+          runtime: { harness: "claude", model, reasoningEffort },
+        }),
+    };
+  };
+  for (const [model, effort, field] of [
+    ["nope", null, "runtime.model"],
+    ["sonnet", "low", "runtime.reasoningEffort"],
+  ] as const) {
+    const c = create(model, effort);
+    await assert.rejects(c.run(), (error: unknown) => {
+      assert.ok(error instanceof OperatorApiError);
+      assert.deepEqual(error.fieldPaths, [field]);
+      return true;
+    });
+    assert.equal(
+      f.service
+        .domain()
+        .profiles()
+        .some((p) => p.id === c.profileId),
+      false,
+    );
+  }
+  const ok = create("sonnet", "high");
+  await ok.run();
+  assert.deepEqual(f.service.domain().profileRuntime(ok.profileId), {
+    harness: "claude",
+    model: "sonnet",
+    reasoningEffort: "high",
+  });
+});
+
+test("unknown well-shaped Claude values save while supported settings are unknown", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const profileId = randomUUID();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "profile.create",
+    key: randomUUID(),
+    profileId,
+    name: "Claude",
+    instructions: "x",
+    capabilities: "x",
+    runtime: {
+      harness: "claude",
+      model: "future-model",
+      reasoningEffort: null,
+    },
+  });
+  assert.equal(
+    (f.service.domain().profileRuntime(profileId) as { model: string }).model,
+    "future-model",
+  );
+});
+
+test("an exact profile replay returns its receipt after supported settings become known", async (t) => {
+  class LateSettings extends ClaudeShapedFixtureRuntime {
+    known = false;
+    override supportedSettings() {
+      return this.known ? super.supportedSettings() : undefined;
+    }
+  }
+  const claude = new LateSettings();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    (_context, harness) =>
+      harness === "claude" ? claude : new OperatorFixtureRuntime(),
+    { runtimeHarnesses: ["codex", "claude"] },
+  );
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const command = {
+    type: "profile.create" as const,
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Claude",
+    instructions: "x",
+    capabilities: "x",
+    runtime: {
+      harness: "claude" as const,
+      model: "opus",
+      reasoningEffort: null,
+    },
+  };
+  const first = await api.execute(command);
+  claude.known = true;
+  assert.deepEqual(await api.execute(command), first);
+  await assert.rejects(
+    api.execute({ ...command, key: randomUUID(), profileId: randomUUID() }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.fieldPaths?.[0] === "runtime.model",
+  );
+});
+
+test("task reads redact the Claude token reference and its value", async (t) => {
+  const name = "FIXTURE_CLAUDE_REDACTION",
+    value = "claude-redaction-canary-7781";
+  const previous = process.env[name];
+  process.env[name] = value;
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const d = f.service.domain();
+  d.execute({
+    type: "claude-token.configure",
+    actor: "operator",
+    key: randomUUID(),
+    credentialRef: `env:${name}`,
+  });
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    expectedVersion: Number(d.task(ids.taskId).version),
+    outcome: `Use ${value} via ${name}`,
+  });
+  const read = JSON.stringify(
+    await new OperatorApi(f.service, [f.directory]).readTask(ids.taskId),
+  );
+  assert.equal(read.includes(value), false);
+  assert.equal(read.includes(name), false);
 });
