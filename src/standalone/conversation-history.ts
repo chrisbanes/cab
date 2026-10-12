@@ -116,7 +116,7 @@ export function sanitizeConversationText(
     for (
       let at = text.indexOf(value);
       at !== -1;
-      at = text.indexOf(value, at + 1)
+      at = text.indexOf(value, at + value.length)
     )
       spans.push([at, at + value.length]);
   for (const [pattern, kept] of patterns)
