@@ -547,8 +547,8 @@ export class OperatorApi {
           values.push(repo.path, repo.gitCommonDirectory);
       }
       if (taskId) {
-        // The 128-row bounds are installation-wide; count before reading any row.
-        if (this.service.retainedRowsExceed(128)) return undefined;
+        // The 128-row bound is this task's own retained rows, counted before any row is read.
+        if (this.service.taskRetainedRowsExceed(taskId, 128)) return undefined;
         const assignments = d.assignments(taskId);
         if (assignments.length > 128 || historyBindings.length > 400)
           return undefined;

@@ -112,9 +112,11 @@ function useLegacyReads(t: TestContext, service: StandaloneService) {
     ),
     t.mock.method(
       service,
-      "retainedRowsExceed",
-      (n: number) =>
-        service.turnRequests().length > n || service.recoveryView().length > n,
+      "taskRetainedRowsExceed",
+      (taskId: string, n: number) =>
+        service.turnRequests().filter((r) => r.taskId === taskId).length > n ||
+        service.recoveryView().filter((r) => r.binding?.taskId === taskId)
+          .length > n,
     ),
     t.mock.method(
       ExecutionState.prototype,
@@ -303,7 +305,7 @@ test("targeted selection and reads equal the retired full-history implementation
   assert.ok(Object.values(uncertain.data.execution.holds).some(Boolean));
 });
 
-test("operator reads do not read unrelated history, below and above the global bound", async (t) => {
+test("operator reads do not read unrelated history, whatever its size", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
   const { ids } = await world(f);
@@ -356,7 +358,7 @@ test("operator reads do not read unrelated history, below and above the global b
   for (const [key, rows] of Object.entries(regimeB.rows))
     assert.ok(
       rows <= (regimeA.rows[key] ?? 0),
-      `${key}: ${rows} history rows, ${regimeA.rows[key]} below the bound`,
+      `${key}: ${rows} history rows, ${regimeA.rows[key]} before`,
     );
   type Summary = Record<string, unknown> & { id: string; title: unknown };
   const summaries = (out: Record<string, unknown>) =>
@@ -374,8 +376,13 @@ test("operator reads do not read unrelated history, below and above the global b
     summaries(regimeB.out).map(pick),
     summaries(regimeA.out).map(pick),
   );
-  assert.ok(summaries(regimeB.out).every((s) => s.title === null));
+  // Unrelated rows never withhold a task's prose.
   assert.ok(summaries(regimeA.out).some((s) => s.title !== null));
+  assert.deepEqual(
+    summaries(regimeB.out).map((s) => s.title),
+    summaries(regimeA.out).map((s) => s.title),
+  );
+  assert.deepEqual(regimeB.out, regimeA.out);
   for (const key of Object.keys(regimeA.out).filter((k) =>
     k.startsWith("page:"),
   ))

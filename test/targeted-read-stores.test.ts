@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, StatementSync } from "node:sqlite";
 import { test } from "node:test";
 import { CoordinationStore } from "../src/core/coordination.js";
 import { DomainStore } from "../src/core/domain.js";
@@ -175,10 +175,27 @@ test("targeted history reads return the full-history rows in the same order", as
     assert.deepEqual(state.byWorkId(intent.workId), intent);
   assert.equal(state.byWorkId(randomUUID()), undefined);
 
-  for (const n of [1, 5, view.length, view.length + 1])
-    assert.equal(state.recoveryCountUpTo(n), Math.min(n, view.length));
-  for (const n of [1, 5, requests.length, requests.length + 1])
-    assert.equal(scheduler.countUpTo(n), Math.min(n, requests.length));
+  for (const taskId of tasks) {
+    const ownRecovery = view.filter((r) => r.binding?.taskId === taskId).length,
+      ownRequests = requests.filter((r) => r.taskId === taskId).length;
+    for (const n of [1, 5, ownRecovery, ownRecovery + 1])
+      assert.equal(
+        state.recoveryCountForTaskUpTo(taskId, n),
+        Math.min(n, ownRecovery),
+      );
+    for (const n of [1, 5, ownRequests, ownRequests + 1])
+      assert.equal(
+        scheduler.countForTaskUpTo(taskId, n),
+        Math.min(n, ownRequests),
+      );
+  }
+  assert.ok(
+    tasks.some(
+      (taskId) =>
+        view.some((r) => r.binding?.taskId === taskId) &&
+        requests.some((r) => r.taskId === taskId),
+    ),
+  );
   // The service wrappers route to the same reads.
   assert.deepEqual(
     f.service.recoveryForTask(recoveryTask),
@@ -202,25 +219,72 @@ test("targeted history reads return the full-history rows in the same order", as
   );
 });
 
-test("retainedRowsExceed is the global 128-row bound of either history kind", async (t) => {
+test("taskRetainedRowsExceed is the task's own 128-row bound, per kind", async (t) => {
   for (const kinds of [
     { requests: true, recovery: false },
     { requests: false, recovery: true },
   ]) {
     const f = await createOperatorFixture();
     t.after(() => f.close());
-    seedOrphanHistory(f, 128, kinds);
-    assert.equal(
-      Math.max(
-        f.service.turnRequests().length,
-        f.service.recoveryView().length,
-      ),
-      128,
-    );
-    assert.equal(f.service.retainedRowsExceed(128), false);
-    seedOrphanHistory(f, 1, kinds);
-    assert.equal(f.service.retainedRowsExceed(128), true);
+    const ids = await seedCatalog(f);
+    const taskId = ids.normal.id,
+      assignment = f.service.domain().assignments(taskId)[0];
+    assert.ok(assignment);
+    const owner = {
+      taskId,
+      projectId: ids.projectId,
+      assignmentId: String(assignment.id),
+    };
+    const own = () =>
+      kinds.requests
+        ? f.service.turnRequestsForTask(taskId).length
+        : f.service.recoveryForTask(taskId).length;
+    // Rows of other tasks never count, however many.
+    seedOrphanHistory(f, 129, kinds);
+    assert.equal(f.service.taskRetainedRowsExceed(taskId, 128), false);
+    seedOrphanHistory(f, 128 - own(), kinds, owner);
+    assert.equal(own(), 128);
+    assert.equal(f.service.taskRetainedRowsExceed(taskId, 128), false);
+    seedOrphanHistory(f, 1, kinds, owner);
+    assert.equal(own(), 129);
+    assert.equal(f.service.taskRetainedRowsExceed(taskId, 128), true);
+    // The other task is unaffected by this one's excess.
+    assert.equal(f.service.taskRetainedRowsExceed(ids.running.id, 128), false);
   }
+});
+
+test("per-task retained-row counts are indexed and capped", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const sql = new Map<string, unknown[]>();
+  const get = StatementSync.prototype.get;
+  t.mock.method(
+    StatementSync.prototype,
+    "get",
+    function (this: StatementSync, ...args: Parameters<StatementSync["get"]>) {
+      if (/COUNT\(\*\)/.test(this.sourceSQL))
+        sql.set(this.sourceSQL, args as unknown[]);
+      return get.apply(this, args);
+    },
+  );
+  const taskId = randomUUID();
+  f.service.taskRetainedRowsExceed(taskId, 128);
+  const plans = new Map<string, string>();
+  f.seedPersistedState((db) => {
+    for (const [statement, args] of sql)
+      plans.set(
+        statement,
+        db
+          .prepare(`EXPLAIN QUERY PLAN ${statement}`)
+          .all(...(args as never[]))
+          .map((row) => String((row as { detail: string }).detail))
+          .join("\n"),
+      );
+  });
+  const text = [...plans.values()].join("\n");
+  assert.match(text, /INDEX turn_requests_taskId_sequence/);
+  assert.match(text, /INDEX task_execution_bindings_task/);
+  assert.doesNotMatch(text, /SCAN turn_requests|SCAN task_execution_bindings/);
 });
 
 test("targeted-read indexes exist on new and reopened databases", async (t) => {
