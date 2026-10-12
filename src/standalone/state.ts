@@ -685,6 +685,7 @@ export class ExecutionState {
     this.migrateRuntimeRetention();
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
+    this.migrateTaskStopHoldKind();
     // Workspace recovery runs before this state is opened. Keep the archival
     // hold only when bounded Git work recorded unresolved filesystem effects.
     const workspaceColumns = this.db
@@ -891,7 +892,7 @@ export class ExecutionState {
   private holdTask(id: string): { active: number } {
     this.db
       .prepare(
-        "INSERT OR IGNORE INTO task_writer_holds (taskId, reason) VALUES (?, 'Task stopped')",
+        "INSERT OR IGNORE INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
       )
       .run(id);
     const active = this.db
@@ -924,23 +925,23 @@ export class ExecutionState {
         Date.now(),
       );
     this.db
-      .prepare(`UPDATE execution_intents SET state = 'held', reason = 'Task stopped'
+      .prepare(`UPDATE execution_intents SET state = 'held', reason = 'Task stopped', holdKind = 'operator-stop'
           WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
           AND state IN ('submitting','running')`)
       .run(id);
     this.db
-      .prepare(`UPDATE execution_intents SET reason = 'Task stopped'
+      .prepare(`UPDATE execution_intents SET reason = 'Task stopped', holdKind = 'operator-stop'
           WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
           AND state IN ('ready','capacity-waiting')`)
       .run(id);
     if (this.hasTurnRequests) {
       this.db
-        .prepare(`UPDATE turn_requests SET state = 'held', reason = 'Task stopped'
+        .prepare(`UPDATE turn_requests SET state = 'held', reason = 'Task stopped', holdKind = 'operator-stop'
             WHERE workId IN (SELECT workId FROM execution_stop_targets WHERE taskId = ?)
             AND state = 'active'`)
         .run(id);
       this.db
-        .prepare(`UPDATE turn_requests SET reason = 'Task stopped'
+        .prepare(`UPDATE turn_requests SET reason = 'Task stopped', holdKind = 'operator-stop'
             WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
             AND state = 'queued'`)
         .run(id);
@@ -1057,19 +1058,19 @@ export class ExecutionState {
   private releaseStop(id: string): { cleared: boolean; requeued: number } {
     const cleared = this.db
       .prepare(
-        "DELETE FROM task_writer_holds WHERE taskId = ? AND reason = 'Task stopped'",
+        "DELETE FROM task_writer_holds WHERE taskId = ? AND holdKind = 'operator-stop'",
       )
       .run(id) as { changes: number };
     const requeued = this.db
-      .prepare(`UPDATE execution_intents SET state = 'ready', reason = NULL
+      .prepare(`UPDATE execution_intents SET state = 'ready', reason = NULL, holdKind = NULL
           WHERE workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
-          AND state IN ('ready','capacity-waiting') AND reason = 'Task stopped'`)
+          AND state IN ('ready','capacity-waiting') AND holdKind = 'operator-stop'`)
       .run(id) as { changes: number };
     if (this.hasTurnRequests)
       this.db
-        .prepare(`UPDATE turn_requests SET reason = NULL WHERE state = 'queued'
+        .prepare(`UPDATE turn_requests SET reason = NULL, holdKind = NULL WHERE state = 'queued'
             AND workId IN (SELECT workId FROM task_execution_bindings WHERE taskId = ?)
-            AND reason = 'Task stopped'`)
+            AND holdKind = 'operator-stop'`)
         .run(id);
     return { cleared: cleared.changes > 0, requeued: Number(requeued.changes) };
   }
@@ -1079,9 +1080,21 @@ export class ExecutionState {
     return (
       this.db
         .prepare(
-          "SELECT 1 FROM task_writer_holds WHERE taskId = ? AND reason = 'Task stopped'",
+          "SELECT 1 FROM task_writer_holds WHERE taskId = ? AND holdKind = 'operator-stop'",
         )
         .get(taskId) !== undefined
+    );
+  }
+
+  /** True when any independent or unrecognized task hold remains alongside Stop. */
+  hasNonStopTaskHold(taskId: string): boolean {
+    return (
+      this.db
+        .prepare(`SELECT 1 WHERE
+          EXISTS (SELECT 1 FROM task_writer_holds WHERE taskId = ? AND holdKind IS NOT 'operator-stop')
+          OR EXISTS (SELECT 1 FROM task_writer_ambiguity_holds WHERE taskId = ?)
+          OR EXISTS (SELECT 1 FROM task_archival_holds WHERE taskId = ?)`)
+        .get(taskId, taskId, taskId) !== undefined
     );
   }
 
@@ -2223,6 +2236,55 @@ export class ExecutionState {
         ALTER TABLE execution_stop_targets_typed RENAME TO execution_stop_targets;`);
       if (this.db.prepare("PRAGMA foreign_key_check").all().length)
         throw new Error("Stop target migration broke a foreign key");
+    });
+  }
+
+  /** Converts only the known legacy Stop reason, once, while preserving display text. */
+  private migrateTaskStopHoldKind(): void {
+    const hasTurnRequests =
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='turn_requests'",
+        )
+        .get() !== undefined;
+    const tables = ["task_writer_holds", "execution_intents"];
+    if (hasTurnRequests) tables.push("turn_requests");
+    const columns = new Map(
+      tables.map((table) => [
+        table,
+        (
+          this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+            name: string;
+          }>
+        ).some(({ name }) => name === "holdKind"),
+      ]),
+    );
+    const present = [...columns.values()].filter(Boolean).length;
+    if (present === tables.length) return;
+    if (present !== 0)
+      throw new Error("Task stop hold-kind migration found a partial schema");
+
+    transaction(this.db, () => {
+      for (const table of tables)
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN holdKind TEXT
+          CHECK(holdKind IS NULL OR holdKind = 'operator-stop')`);
+      this.db.exec(`UPDATE task_writer_holds SET holdKind = 'operator-stop'
+        WHERE reason = 'Task stopped';
+        UPDATE execution_intents SET holdKind = 'operator-stop'
+        WHERE reason = 'Task stopped' AND EXISTS (
+          SELECT 1 FROM task_execution_bindings binding
+          JOIN task_writer_holds hold ON hold.taskId = binding.taskId
+          WHERE binding.workId = execution_intents.workId
+            AND hold.holdKind = 'operator-stop'
+        );`);
+      if (hasTurnRequests)
+        this.db.exec(`UPDATE turn_requests SET holdKind = 'operator-stop'
+          WHERE reason = 'Task stopped' AND EXISTS (
+            SELECT 1 FROM task_execution_bindings binding
+            JOIN task_writer_holds hold ON hold.taskId = binding.taskId
+            WHERE binding.workId = turn_requests.workId
+              AND hold.holdKind = 'operator-stop'
+          )`);
     });
   }
 
@@ -3645,15 +3707,21 @@ export class ExecutionState {
         WHERE workId = ? ORDER BY recordedAt, rowid`)
         .all(workId) as Array<{ kind: string }>;
       const holdRow = this.db
-        .prepare(`SELECT h.reason,
+        .prepare(`SELECT h.reason, h.holdKind,
         EXISTS (SELECT 1 FROM task_writer_admissions admission WHERE admission.workId = ?) AS writer,
         EXISTS (SELECT 1 FROM execution_capacity_reservations reservation WHERE reservation.workId = ?) AS capacity,
-        EXISTS (SELECT 1 FROM task_writer_holds stop WHERE stop.taskId = h.taskId AND stop.reason = 'Task stopped') AS stop
+        EXISTS (SELECT 1 FROM task_writer_holds stop WHERE stop.taskId = h.taskId AND stop.holdKind = 'operator-stop') AS stop
         FROM task_execution_bindings binding
         JOIN task_writer_holds h ON h.taskId = binding.taskId
         WHERE binding.workId = ? LIMIT 1`)
         .get(workId, workId, workId) as
-        | { reason: string; writer: number; capacity: number; stop: number }
+        | {
+            reason: string;
+            holdKind: string | null;
+            writer: number;
+            capacity: number;
+            stop: number;
+          }
         | undefined;
       const writerAndCapacity = this.db
         .prepare(`SELECT
@@ -3677,8 +3745,8 @@ export class ExecutionState {
               bootId: row.bootId,
             });
       const taskReason =
-        holdRow?.reason === "Task stopped"
-          ? "Task stopped"
+        holdRow?.holdKind === "operator-stop"
+          ? holdRow.reason
           : holdRow
             ? recoveryReason("unknown")
             : null;

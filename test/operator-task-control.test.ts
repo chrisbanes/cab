@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainConflictError } from "../src/core/domain.js";
 import {
@@ -177,13 +179,13 @@ test("Resume clears only the operator Stop and counts requeued work", async (t) 
     const state = new ExecutionState(db);
     const workId = `queued-${randomUUID()}`;
     db.prepare(
-      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,accountType,sandbox,approval) VALUES (?,?,'p','/w','capacity-waiting','Task stopped','chatgpt','workspaceWrite','never')",
+      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,holdKind,accountType,sandbox,approval) VALUES (?,?,'p','/w','capacity-waiting','Task stopped','operator-stop','chatgpt','workspaceWrite','never')",
     ).run(randomUUID(), workId);
     db.prepare(
       "INSERT INTO task_execution_bindings (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision) VALUES (?,?,?,1,1,1,1)",
     ).run(workId, b.taskId, b.assignmentId);
     db.prepare(
-      "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, 'Task stopped')",
+      "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
     ).run(b.taskId);
     receipt = state.controlTask({
       type: "task.resume",
@@ -244,6 +246,170 @@ test("keyless and receipted Stop and Resume share one hold", async (t) => {
   assert.equal(f.service.isTaskStopped(a.taskId), true);
   await f.service.resumeTask(a.taskId);
   assert.equal(f.service.isTaskStopped(a.taskId), false);
+});
+
+test("legacy Stop provenance migrates once and remains typed when display text changes", async (t) => {
+  const f = await fixture(t);
+  const { a, work } = await startOwnWork(f, "Legacy Stop", "Migration project");
+  const { a: unknown, work: unknownWork } = await startOwnWork(
+    f,
+    "Unknown hold",
+    "Unknown hold project",
+  );
+  await control(f, "task.stop", a.taskId);
+  await f.service.stop();
+
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  try {
+    // Recreate the prior schema and its reason-only Stop rows before startup.
+    for (const table of [
+      "task_writer_holds",
+      "execution_intents",
+      "turn_requests",
+    ])
+      db.exec(`ALTER TABLE ${table} DROP COLUMN holdKind`);
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, ?)",
+    ).run(unknown.taskId, "Unrecognized legacy hold");
+    db.prepare(
+      "UPDATE execution_intents SET state = 'capacity-waiting', reason = 'Task stopped' WHERE workId = ?",
+    ).run(unknownWork.workId);
+    db.prepare(
+      "UPDATE turn_requests SET state = 'queued', reason = 'Task stopped' WHERE workId = ?",
+    ).run(unknownWork.workId);
+
+    let state = new ExecutionState(db);
+    assert.equal(state.isTaskStopped(a.taskId), true);
+    assert.equal(state.isTaskStopped(unknown.taskId), false);
+    const migrated = rows(
+      f,
+      `SELECT holdKind, reason FROM task_writer_holds WHERE taskId = ?
+     UNION ALL SELECT holdKind, reason FROM execution_intents WHERE workId = ?
+     UNION ALL SELECT holdKind, reason FROM turn_requests WHERE workId = ?`,
+      a.taskId,
+      work.workId,
+      work.workId,
+    );
+    assert.deepEqual(migrated, [
+      { holdKind: "operator-stop", reason: "Task stopped" },
+      { holdKind: "operator-stop", reason: "Task stopped" },
+      { holdKind: "operator-stop", reason: "Task stopped" },
+    ]);
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(`SELECT intent.holdKind AS intentKind, request.holdKind AS requestKind
+      FROM execution_intents intent JOIN turn_requests request ON request.workId = intent.workId
+      WHERE intent.workId = ?`)
+          .get(unknownWork.workId),
+      },
+      { intentKind: null, requestKind: null },
+    );
+    const firstMigration = rows(
+      f,
+      `SELECT 'task' AS tableName, taskId AS id, holdKind, reason FROM task_writer_holds
+     UNION ALL SELECT 'intent', workId, holdKind, reason FROM execution_intents
+     UNION ALL SELECT 'request', workId, holdKind, reason FROM turn_requests
+     ORDER BY tableName, id`,
+    );
+    state = new ExecutionState(db);
+    assert.deepEqual(
+      rows(
+        f,
+        `SELECT 'task' AS tableName, taskId AS id, holdKind, reason FROM task_writer_holds
+       UNION ALL SELECT 'intent', workId, holdKind, reason FROM execution_intents
+       UNION ALL SELECT 'request', workId, holdKind, reason FROM turn_requests
+       ORDER BY tableName, id`,
+      ),
+      firstMigration,
+    );
+
+    db.prepare(
+      "UPDATE task_writer_holds SET reason = 'Stop label edited' WHERE taskId = ?",
+    ).run(a.taskId);
+    db.prepare(
+      "UPDATE execution_intents SET reason = 'Intent label edited' WHERE workId = ?",
+    ).run(work.workId);
+    db.prepare(
+      "UPDATE turn_requests SET reason = 'Request label edited' WHERE workId = ?",
+    ).run(work.workId);
+    db.prepare(
+      "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, 'Fixture ambiguity')",
+    ).run(a.taskId);
+    db.prepare(
+      "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, 'Fixture archive')",
+    ).run(a.taskId);
+    state = new ExecutionState(db);
+    assert.equal(state.taskHold(a.taskId), "Fixture ambiguity");
+    assert.equal(state.isTaskStopped(a.taskId), true);
+    assert.equal(state.hasNonStopTaskHold(a.taskId), true);
+    db.prepare(
+      "UPDATE task_writer_ambiguity_holds SET reason = 'Ambiguity label edited' WHERE taskId = ?",
+    ).run(a.taskId);
+    assert.equal(state.hasNonStopTaskHold(a.taskId), true);
+    db.prepare(
+      "UPDATE task_archival_holds SET reason = 'Archive label edited' WHERE taskId = ?",
+    ).run(a.taskId);
+    assert.equal(state.hasNonStopTaskHold(a.taskId), true);
+    assert.equal(state.taskHold(a.taskId), "Ambiguity label edited");
+    assert.equal(
+      state
+        .recoveryForTask(a.taskId)
+        .find((item) => item.workId === work.workId)?.holds.stop,
+      true,
+    );
+    assert.deepEqual(
+      rows(
+        f,
+        "SELECT reason FROM task_writer_holds WHERE taskId = ?",
+        a.taskId,
+      ),
+      [{ reason: "Stop label edited" }],
+    );
+
+    state.resumeTask(a.taskId);
+    assert.equal(state.isTaskStopped(a.taskId), false);
+    assert.equal(state.taskHold(a.taskId), "Ambiguity label edited");
+    assert.equal(state.hasNonStopTaskHold(a.taskId), true);
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(`SELECT intent.holdKind AS intentKind, request.holdKind AS requestKind
+      FROM execution_intents intent JOIN turn_requests request ON request.workId = intent.workId
+      WHERE intent.workId = ?`)
+          .get(work.workId),
+      },
+      { intentKind: "operator-stop", requestKind: "operator-stop" },
+    );
+    state = new ExecutionState(db);
+    assert.deepEqual(
+      rows(
+        f,
+        "SELECT reason FROM task_writer_holds WHERE taskId = ?",
+        unknown.taskId,
+      ),
+      [{ reason: "Unrecognized legacy hold" }],
+    );
+    state.resumeTask(unknown.taskId);
+    assert.deepEqual(
+      {
+        ...db
+          .prepare(`SELECT intent.state AS intentState, intent.reason AS intentReason,
+      request.state AS requestState, request.reason AS requestReason
+      FROM execution_intents intent JOIN turn_requests request ON request.workId = intent.workId
+      WHERE intent.workId = ?`)
+          .get(unknownWork.workId),
+      },
+      {
+        intentState: "capacity-waiting",
+        intentReason: "Task stopped",
+        requestState: "queued",
+        requestReason: "Task stopped",
+      },
+    );
+  } finally {
+    db.close();
+  }
 });
 
 test("Stop and Resume commands and receipts parse strictly and append to their unions", () => {
