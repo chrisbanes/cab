@@ -770,7 +770,7 @@ export class DomainStore {
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
-    if (command.type === "task.configure") this.preflightTaskConfigure(command);
+    this.preflightOperatorProjectCommand(command);
     const scope = scopeOf(command);
     const hash = commandHash(command);
     const outcome = transaction(this.db, () => {
@@ -875,6 +875,8 @@ export class DomainStore {
   ): void {
     this.operator(command);
     const current = this.task(command.taskId);
+    if (!this.projectListed(String(current.projectId)))
+      throw new DomainNotFoundError();
     this.projectMatch(current, command.projectId);
     if (
       this.importedTask(command.taskId) &&
@@ -886,6 +888,41 @@ export class DomainStore {
         "forbidden",
         "Imported provider fields and readiness are provider-owned",
       );
+  }
+
+  /**
+   * Preserves the operator API's project/target checks before command-key
+   * lookup. These checks must also run before in-flight admission in
+   * DomainCommands, or a reused key can mask a target/project refusal.
+   */
+  preflightOperatorProjectCommand(command: ParsedCommand): void {
+    if (command.type === "task.configure") {
+      this.preflightTaskConfigure(command);
+      return;
+    }
+    if (
+      command.actor !== "operator" ||
+      !("projectId" in command) ||
+      !(
+        command.type === "assignment.apply" ||
+        command.type === "dependency.add" ||
+        command.type === "dependency.remove"
+      )
+    )
+      return;
+
+    if (command.type === "assignment.apply") {
+      const assignment = this.assignment(command.assignmentId);
+      this.project(command.projectId);
+      this.projectMatch(assignment, command.projectId);
+      return;
+    }
+
+    const task = this.task(command.taskId);
+    if (!this.projectListed(String(task.projectId)))
+      throw new DomainNotFoundError();
+    this.project(command.projectId);
+    this.projectMatch(task, command.projectId);
   }
 
   importedTask(taskId: string): Row | undefined {
@@ -1610,6 +1647,7 @@ export class DomainStore {
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
+    this.preflightOperatorProjectCommand(command);
     switch (command.type) {
       case "project.create": {
         this.operator(command);
@@ -2420,9 +2458,9 @@ export class DomainCommands {
 
   execute(input: DomainCommand): Promise<unknown> {
     const command = parseCommand(input);
-    if (command.type === "task.configure") {
+    if (command.type === "task.configure" || command.actor === "operator") {
       try {
-        this.store.preflightTaskConfigure(command);
+        this.store.preflightOperatorProjectCommand(command);
       } catch (error) {
         return Promise.reject(error);
       }
