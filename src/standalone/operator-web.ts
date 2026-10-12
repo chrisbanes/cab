@@ -399,6 +399,11 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/assignments\/([^/]+)\/recovery$/,
     );
     if (recovery) return this.api.readAssignmentRecovery(recovery[1] ?? "");
+    const recoveryOptions = path.match(
+      /^\/api\/operator\/assignments\/([^/]+)\/recovery-options$/,
+    );
+    if (recoveryOptions)
+      return this.api.readRecoveryOptions(recoveryOptions[1] ?? "");
     const assignment = path.match(
       /^\/api\/operator\/assignments\/([^/]+)(\/instructions)?$/,
     );
@@ -473,7 +478,7 @@ export class OperatorWebBoundary {
       /^\/api\/operator\/tasks\/[^/]+\/comparisons$/.test(path) ||
       /^\/api\/operator\/tasks\/[^/]+\/questions\/[^/]+$/.test(path) ||
       /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
-      /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|instructions))?$/.test(
+      /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|recovery-options|instructions))?$/.test(
         path,
       ) ||
       /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/(?:instructions|impact)$/.test(

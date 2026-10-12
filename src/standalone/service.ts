@@ -1776,6 +1776,12 @@ export class StandaloneService {
   replaceConversationCommand(command: ReplaceConversationCommand) {
     return this.requireState().replaceConversationCommand(command);
   }
+  recoveryMaterial(workId: string) {
+    return this.requireState().recoveryMaterial(workId);
+  }
+  replacementFacts(assignmentId: string) {
+    return this.requireState().replacementFacts(assignmentId);
+  }
 
   /** Bounded execution list reads; see SchedulerStore.assignmentPage. */
   turnRequestPage(

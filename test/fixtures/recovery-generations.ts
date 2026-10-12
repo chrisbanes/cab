@@ -19,6 +19,7 @@ import type {
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
+import { startCliService } from "./operator-cli.js";
 
 /** Copied from no-turn-recovery.test.ts: thread start fails before any turn invocation. */
 export class NoTurnRuntime implements Runtime {
@@ -467,3 +468,21 @@ export async function holdGeneration(
   };
 }
 export type HeldGeneration = Awaited<ReturnType<typeof holdGeneration>>;
+
+/** A served CLI service whose runtime holds one generation of `mode`. */
+export async function servedGeneration(
+  t: { after(fn: () => unknown): void },
+  mode: GenerationMode,
+) {
+  const runtime = generationRuntime(mode);
+  const verifier = controllableVerifier();
+  const s = await startCliService(t, {
+    service: {
+      supervisor: { observationMs: 50 },
+      terminationVerifier: verifier.verifier,
+    },
+    runtimeFactory: () => runtime,
+  });
+  const g = await holdGeneration(s.f.service, runtime, mode);
+  return { s, g, runtime, verifier };
+}

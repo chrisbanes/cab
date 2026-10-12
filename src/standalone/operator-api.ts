@@ -123,6 +123,7 @@ import {
   type LocalReviewSyncIdentity,
 } from "../core/local-review.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import { recoveryOptions } from "./operator-recovery.js";
 import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   compareRepository,
@@ -4461,6 +4462,17 @@ export class OperatorApi {
     return this.readWithInstructionFence(() =>
       this.readAssignmentRecoveryOnce(assignmentId),
     );
+  }
+  /** The exact identity and advisory eligibility each recovery command needs. */
+  async readRecoveryOptions(assignmentId: string) {
+    return this.readWithInstructionFence(async () => {
+      const base = await this.readAssignmentRecoveryOnce(assignmentId);
+      const { projectId } = this.requireAssignment(assignmentId);
+      const excluded = await this.exclusions(projectId, base.data.taskId);
+      return recoveryOptions(this.service, base, projectId, excluded, (v) =>
+        this.exact(v, excluded),
+      );
+    });
   }
   private async readAssignmentRecoveryOnce(assignmentId: string) {
     const d = this.domain(),

@@ -2432,6 +2432,57 @@ export class ExecutionState {
       AND request.previousWorkId IS NULL AND link.previousWorkId IS NULL`)
       .get(workId) as Record<string, string | number | null> | undefined;
   }
+  /**
+   * The exact identity each recovery command binds for one work, read with the same
+   * joins the commands re-check; undefined when the work has no execution intent.
+   */
+  recoveryMaterial(workId: string):
+    | {
+        preTurn: Record<string, string | number | null> | undefined;
+        noTurn: Record<string, string | number | null> | undefined;
+        intent: { state: string; reason: string | null };
+        request: { state: string; reason: string | null } | undefined;
+        assignmentId: string | null;
+      }
+    | undefined {
+    const intent = this.db
+      .prepare("SELECT state, reason FROM execution_intents WHERE workId=?")
+      .get(workId) as { state: string; reason: string | null } | undefined;
+    if (!intent) return undefined;
+    const request = this.hasTurnRequests
+      ? (this.db
+          .prepare(
+            "SELECT state, reason, assignmentId FROM turn_requests WHERE workId=?",
+          )
+          .get(workId) as
+          | {
+              state: string;
+              reason: string | null;
+              assignmentId: string | null;
+            }
+          | undefined)
+      : undefined;
+    return {
+      preTurn: this.preTurnContext(workId),
+      noTurn: this.noTurnContext(workId),
+      intent: { state: intent.state, reason: intent.reason },
+      request: request && { state: request.state, reason: request.reason },
+      assignmentId:
+        this.taskBinding(workId)?.assignmentId ?? request?.assignmentId ?? null,
+    };
+  }
+  /** What conversation replacement re-checks, read without changing anything. */
+  replacementFacts(assignmentId: string) {
+    const conversation = this.db
+      .prepare(
+        "SELECT revision FROM assignment_conversations WHERE assignmentId=?",
+      )
+      .get(assignmentId) as { revision: number } | undefined;
+    return {
+      conversationRevision: conversation?.revision ?? 1,
+      unresolvedExecution: this.assignmentHasUnresolvedExecution(assignmentId),
+    };
+  }
   private noTurnWitnessForWork(workId: string):
     | {
         id: string;
