@@ -133,6 +133,31 @@ export function finishAttempt(state, outcome, failureKind = null) {
   };
 }
 
+/**
+ * Opens one attempt in the ledger file, runs `body`, and always closes the
+ * attempt, as failed when `body` throws. A still-open attempt (a driver that was
+ * killed) refuses new attempts until it is closed by hand.
+ */
+export async function withAttempt(file, facet, body) {
+  const state = readLedger(file);
+  if (state.current)
+    throw new BudgetExhausted(
+      `attempt ${state.current.facet}#${state.current.number} is still open; close it only after verifying no driver runs`,
+    );
+  const next = beginAttempt(state, facet);
+  writeLedger(next, file);
+  let result = { outcome: "failed", failureKind: "harness" };
+  try {
+    result = await body(next.attempts[facet].at(-1));
+    return result;
+  } finally {
+    writeLedger(
+      finishAttempt(readLedger(file), result.outcome, result.failureKind),
+      file,
+    );
+  }
+}
+
 /** File-backed reservation shared by the driver and its child service. */
 export function reserveTurnInFile(harness, file = ledgerPath()) {
   const next = reserveTurn(readLedger(file), harness);

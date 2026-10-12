@@ -7,8 +7,18 @@ import { BudgetExhausted, reserveTurnInFile } from "./harness.mjs";
 
 export const TOKEN_VARIABLE = "ENSEMBLE_C5_CLAUDE_TOKEN";
 
-/** Starts the real service with ledger-wrapped Codex and Claude runtimes and the token reference. */
-export async function startJourneyService({ dataDir, launcher, ledgerFile }) {
+/**
+ * Starts the real service with ledger-wrapped runtimes and the token reference.
+ * The token enters this process's environment only after the reference is
+ * configured and the first service generation has stopped, so no runtime spawned
+ * before the reference existed can inherit it.
+ */
+export async function startJourneyService({
+  dataDir,
+  launcher,
+  ledgerFile,
+  token,
+}) {
   const { StandaloneService, createRuntime } = await import(
     "../../dist/src/standalone/service.js"
   );
@@ -48,9 +58,14 @@ export async function startJourneyService({ dataDir, launcher, ledgerFile }) {
           success: null,
         };
         observed.calls.push(entry);
-        const result = await listener(call);
-        entry.success = result.success;
-        return result;
+        try {
+          const result = await listener(call);
+          entry.success = result.success;
+          return result;
+        } catch (error) {
+          entry.success = false;
+          throw error;
+        }
       });
     return runtime;
   };
@@ -71,23 +86,26 @@ export async function startJourneyService({ dataDir, launcher, ledgerFile }) {
     },
   );
   await service.start();
-  if (service.domain().claudeTokenReference() === null) {
-    // A reference configured after start is honoured only after a restart.
+  if (service.domain().claudeTokenReference() === null)
     service.domain().execute({
       type: "claude-token.configure",
       actor: "operator",
       key: randomUUID(),
       credentialRef: `env:${TOKEN_VARIABLE}`,
     });
+  // The caller verifies this generation's App Server exit by exact identity.
+  const priorProcesses = [
+    observed.runtimes.codex?.processIdentity?.() ?? null,
+  ].filter(Boolean);
+  await service.stop();
+  process.env[TOKEN_VARIABLE] = token;
+  await service.start();
+  const status = service.claudeTokenStatus();
+  if (status.state !== "available") {
     await service.stop();
-    await service.start();
+    throw new Error(`Claude token reference is ${status.state}`);
   }
-  const token = service.claudeTokenStatus();
-  if (token.state !== "available") {
-    await service.stop();
-    throw new Error(`Claude token reference is ${token.state}`);
-  }
-  return { service, observed };
+  return { service, observed, priorProcesses };
 }
 
 const PROBE =
@@ -216,7 +234,10 @@ async function child() {
   const ops = {
     async start(args) {
       current = await startJourneyService(args);
-      return { pid: process.pid };
+      return {
+        priorProcesses: current.priorProcesses,
+        codex: current.observed.runtimes.codex?.processIdentity?.() ?? null,
+      };
     },
     setup: (args) => setupJourney(current.service, args),
     snapshot: ({ taskId }) =>
@@ -225,6 +246,8 @@ async function child() {
     message: (args) =>
       current.service.coordinationView().postOperatorMessage(args),
     stopTask: ({ taskId }) => current.service.stopTask(taskId),
+    // In-process read through OperatorApi; it does not exercise the HTTP
+    // `execution.read` token scope.
     async operatorRead({ workId, root }) {
       const { OperatorApi } = await import(
         "../../dist/src/standalone/operator-api.js"

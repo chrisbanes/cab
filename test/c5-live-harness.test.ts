@@ -43,6 +43,7 @@ test("driver refuses anything but exactly --live --facet <name> and creates noth
   ]) {
     const result = run(args, {
       PATH: process.env.PATH,
+      TMPDIR: tmpdir(),
       CLAUDE_CODE_OAUTH_TOKEN: SENTINEL,
     });
     assert.equal(result.status, 2, args.join(" "));
@@ -61,6 +62,7 @@ test("a live facet without a token refuses before any root or ledger write", () 
     const ledger = existsSync(ledgerFile());
     const result = run(["--live", "--facet", "scrub"], {
       PATH: process.env.PATH,
+      TMPDIR: tmpdir(),
       HOME: home,
     });
     assert.equal(result.status, 2);
@@ -140,6 +142,45 @@ test("attempts are capped at two, escalate to sonnet only after a compliance fai
     /attempt wall-time/,
   );
   assert.throws(() => reserveTurn(emptyLedger(), "claude"), /no open attempt/);
+});
+
+test("an attempt always closes, as failed when its body throws, and an open attempt refuses the next", async () => {
+  const { withAttempt, readLedger, writeLedger, beginAttempt, emptyLedger } =
+    await harness();
+  const dir = mkdtempSync(join(tmpdir(), "c5-ledger-"));
+  const file = join(dir, "ledger.json");
+  try {
+    await assert.rejects(
+      withAttempt(file, "scrub", async () => {
+        throw new Error("prelude failed");
+      }),
+      /prelude failed/,
+    );
+    let state = readLedger(file);
+    assert.equal(state.current, null);
+    assert.deepEqual(
+      [state.attempts.scrub[0].outcome, state.attempts.scrub[0].failureKind],
+      ["failed", "harness"],
+    );
+    await withAttempt(file, "scrub", async (attempt: { number: number }) => {
+      assert.equal(attempt.number, 2);
+      return { outcome: "passed", failureKind: null };
+    });
+    state = readLedger(file);
+    assert.equal(state.current, null);
+    assert.equal(state.attempts.scrub[1].outcome, "passed");
+    writeLedger(beginAttempt(emptyLedger(), "stop"), file);
+    let ran = false;
+    await assert.rejects(
+      withAttempt(file, "stop", async () => {
+        ran = true;
+      }),
+      /still open/,
+    );
+    assert.equal(ran, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the leak scan flags secrets and local paths and passes a clean sample", async () => {

@@ -1,6 +1,7 @@
 // Guarded live Claude journeys for #827. Refuses without exactly
-// `--live --facet <name>`; the token, launcher and ledger are checked before
-// any disposable root exists. Prints redacted evidence JSON only.
+// `--live --facet <name>`; the token, launcher, versions and dist imports are
+// checked before the ledger attempt opens or any disposable root exists.
+// Prints redacted, leak-scanned evidence JSON only.
 import { execFileSync, fork } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -17,8 +18,6 @@ import { join } from "node:path";
 import {
   ATTEMPT_MS,
   BudgetExhausted,
-  beginAttempt,
-  finishAttempt,
   ledgerPath,
   parseArgs,
   physicalTmpdir,
@@ -27,7 +26,7 @@ import {
   removeRoot,
   scanForLeaks,
   TURN_MS,
-  writeLedger,
+  withAttempt,
 } from "./harness.mjs";
 import {
   setupJourney,
@@ -54,30 +53,14 @@ delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 const launcher =
   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
 if (!existsSync(launcher)) refuse("the approved Codex launcher is absent");
-const ledgerFile = ledgerPath();
-const opened = readLedger(ledgerFile);
-if (opened.current)
-  refuse(
-    `ledger attempt ${opened.current.facet}#${opened.current.number} is still open; close it only after verifying no driver runs`,
-  );
-try {
-  writeLedger(beginAttempt(opened, facet), ledgerFile);
-} catch (error) {
-  if (error instanceof BudgetExhausted) refuse(`budget: ${error.message}`);
-  throw error;
-}
-const attempt = readLedger(ledgerFile).attempts[facet].at(-1);
 
+// Everything that can fail before work starts runs before the attempt opens.
 const { claudeTemporaryBase, releaseClaudeTemporaryBase } = await import(
   "../../dist/src/standalone/claude.js"
 );
 const { captureProcessIdentity } = await import(
   "../../dist/src/standalone/termination.js"
 );
-
-class ComplianceError extends Error {}
-const delay = (ms) => new Promise((done) => setTimeout(done, ms));
-const attemptDeadline = Date.now() + ATTEMPT_MS;
 const sdkPackage = JSON.parse(
   readFileSync(
     "node_modules/@anthropic-ai/claude-agent-sdk/package.json",
@@ -86,7 +69,7 @@ const sdkPackage = JSON.parse(
 );
 const evidence = {
   facet,
-  attempt: attempt.number,
+  attempt: null,
   candidate: execFileSync("git", ["rev-parse", "HEAD"], {
     encoding: "utf8",
   }).trim(),
@@ -101,7 +84,7 @@ const evidence = {
       encoding: "utf8",
     }).trim(),
   },
-  model: { claude: attempt.model, reasoningEffort: "low" },
+  model: null,
   stage: "fixture",
   outcome: "failed",
   failure: null,
@@ -111,6 +94,10 @@ const evidence = {
   trace: [],
   cleanup: { serviceStopped: false, temporaryBases: [], rootRemoved: false },
 };
+const ledgerFile = ledgerPath();
+const { delay } = c0;
+
+class ComplianceError extends Error {}
 const stage = (name) => {
   evidence.stage = name;
   process.stderr.write(`[c5-live] ${facet} ${name}\n`);
@@ -118,7 +105,25 @@ const stage = (name) => {
 const trace = {
   record: (event, data) => evidence.trace.push({ event, ...data }),
 };
-const workspaces = new Set();
+let attemptDeadline = Date.now() + ATTEMPT_MS;
+let root;
+/** Everything cleanup must reach, whichever path ends the attempt. */
+const active = {
+  current: null,
+  watchdog: null,
+  codex: [],
+  children: [],
+  claude: new Map(),
+  workspaces: new Set(),
+};
+const noteClaude = (records) => {
+  for (const r of records)
+    if (r.processIdentity)
+      active.claude.set(
+        `${r.processIdentity.processId}:${r.processIdentity.processStartedAt}`,
+        r.processIdentity,
+      );
+};
 
 /** Polls within the attempt's wall time; a missing model action is a compliance failure. */
 async function waitUntil(predicate, ms, what, compliance = false) {
@@ -132,11 +137,15 @@ async function waitUntil(predicate, ms, what, compliance = false) {
   }
 }
 
+const settledProcesses = new Map();
 /** Waits for an exact process to exit; stops it by verified identity only after the grace period. */
 async function settleProcess(label, identity, graceMs = 10_000) {
+  if (!identity) return { label, exitedByItself: false, verification: "none" };
+  const key = `${identity.processId}:${identity.processStartedAt}`;
+  if (settledProcesses.has(key)) return settledProcesses.get(key);
   const entry = { label, exitedByItself: false, verification: "unknown" };
+  settledProcesses.set(key, entry);
   evidence.processes.push(entry);
-  if (!identity) return entry;
   const until = Date.now() + graceMs;
   do {
     if ((await c0.verifyExit(identity)).kind === "verified") {
@@ -150,17 +159,7 @@ async function settleProcess(label, identity, graceMs = 10_000) {
   return entry;
 }
 
-async function releaseBases() {
-  for (const workspace of workspaces) {
-    await releaseClaudeTemporaryBase(workspace);
-    evidence.cleanup.temporaryBases.push(
-      existsSync(claudeTemporaryBase(workspace)) ? "remains" : "removed",
-    );
-  }
-  workspaces.clear();
-}
-
-function gitFixture(root) {
+function gitFixture() {
   const repository = join(root, "repo");
   mkdirSync(repository, { mode: 0o700 });
   const git = (...args) =>
@@ -198,15 +197,20 @@ const running = (records) =>
 const settled = (state) => !["running", "submitting"].includes(state);
 
 /** In-process service for every facet but crash; each turn gets TURN_MS, then Stop. */
-async function inProcess(root, run) {
+async function inProcess(run) {
   const current = await startJourneyService({
     dataDir: join(root, "data"),
     launcher,
     ledgerFile,
+    token,
   });
-  const codexIdentity = current.observed.runtimes.codex?.processIdentity?.();
+  active.current = current;
+  active.codex.push(...current.priorProcesses);
+  for (const identity of current.priorProcesses)
+    await settleProcess("codex-app-server (before token)", identity);
+  active.codex.push(current.observed.runtimes.codex?.processIdentity?.());
   let timedOut = false;
-  const watchdog = setInterval(() => {
+  active.watchdog = setInterval(() => {
     const now = Date.now();
     for (const turn of current.observed.turns)
       if (
@@ -224,35 +228,13 @@ async function inProcess(root, run) {
     if (timedOut)
       throw new Error("a turn exceeded its time cap and was stopped");
   };
-  try {
-    const repository = gitFixture(root);
-    const ids = await setupJourney(current.service, {
-      facet,
-      model: attempt.model,
-      repository,
-    });
-    current.taskId = ids.taskId;
-    await run(current, ids, check);
-  } finally {
-    clearInterval(watchdog);
-    const identities = current.taskId
-      ? current.service
-          .recoveryForTask(current.taskId)
-          .map((r) => r.processIdentity)
-          .filter(Boolean)
-      : [];
-    for (const workspace of current.observed.workspaces)
-      workspaces.add(workspace);
-    evidence.startTurn = {
-      turns: current.observed.turns.length,
-      refused: current.observed.refused,
-    };
-    await current.service.stop();
-    evidence.cleanup.serviceStopped = true;
-    for (const identity of identities)
-      await settleProcess("claude-cli", identity);
-    await settleProcess("codex-app-server", codexIdentity);
-  }
+  const ids = await setupJourney(current.service, {
+    facet,
+    model: evidence.model.claude,
+    repository: gitFixture(),
+  });
+  current.taskId = ids.taskId;
+  await run(current, ids, check);
 }
 
 async function coordination(current, ids, check) {
@@ -372,24 +354,30 @@ async function scrub(current, ids, check) {
 }
 
 async function stop(current, ids, check) {
+  const records = () => {
+    const r = current.service.recoveryForTask(ids.taskId);
+    noteClaude(r);
+    return r;
+  };
   const record = await waitUntil(
     () => {
       check();
-      return running(current.service.recoveryForTask(ids.taskId));
+      return running(records());
     },
     TURN_MS,
     "running Claude turn with a process identity",
+    true,
   );
   await delay(15_000); // Lets the sleep start inside the turn.
+  if (!running(records()))
+    throw new ComplianceError("the turn ended before Stop; sleep did not run");
   const starts = () =>
     current.observed.turns.length + current.observed.refused.length;
   const before = starts();
   const observation = await current.service.stopTask(ids.taskId);
   const after = await waitUntil(
     () => {
-      const r = current.service
-        .recoveryForTask(ids.taskId)
-        .find((x) => x.workId === record.workId);
+      const r = records().find((x) => x.workId === record.workId);
       return r && settled(r.intent.state) ? r : null;
     },
     60_000,
@@ -419,146 +407,181 @@ async function stop(current, ids, check) {
     throw new Error("a turn started after Stop");
 }
 
-/** SIGKILLs the exact child service mid-turn, restarts it, then recovers by receipt. */
-async function crash(root) {
-  const dataDir = join(root, "data");
-  const repository = gitFixture(root);
-  const children = [];
-  const spawnChild = async () => {
-    const child = fork(new URL("./service-child.mjs", import.meta.url), [], {
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
-    });
-    const entry = {
-      child,
-      identity: await captureProcessIdentity(child.pid),
-      exited: new Promise((done) => child.once("exit", done)),
-      pending: new Map(),
-    };
-    children.push(entry);
-    await new Promise((ready, failed) => {
-      child.once("error", failed);
-      child.once("exit", () => failed(new Error("service child exited")));
-      child.on("message", (message) => {
-        if (message.ready) return ready();
-        const call = entry.pending.get(message.id);
-        entry.pending.delete(message.id);
-        if (message.error) call?.failed(new Error(message.error));
-        else call?.done(message.result);
-      });
-    });
-    entry.call = (op, args) =>
-      new Promise((done, failed) => {
-        const id = randomUUID();
-        entry.pending.set(id, { done, failed });
-        child.send({ id, op, args });
-      });
-    await entry.call("start", { dataDir, launcher, ledgerFile });
-    return entry;
+const IPC_MS = 120_000;
+/** Forks the journey service; every call times out and fails when the child exits. */
+async function spawnChild() {
+  const child = fork(new URL("./service-child.mjs", import.meta.url), [], {
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  const entry = {
+    child,
+    identity: await captureProcessIdentity(child.pid),
+    pending: new Map(),
+    refused: [],
   };
+  entry.exited = new Promise((done) => child.once("exit", done));
+  active.children.push(entry);
+  const failAll = (error) => {
+    for (const call of entry.pending.values()) call.failed(error);
+    entry.pending.clear();
+  };
+  child.once("exit", () => failAll(new Error("service child exited")));
+  child.once("error", failAll);
+  await new Promise((ready, failed) => {
+    child.once("exit", () => failed(new Error("service child exited")));
+    child.once("error", failed);
+    child.on("message", (message) => {
+      if (message.ready) return ready();
+      const call = entry.pending.get(message.id);
+      entry.pending.delete(message.id);
+      if (message.error) call?.failed(new Error(message.error));
+      else call?.done(message.result);
+    });
+  });
+  entry.call = (op, args) =>
+    new Promise((done, failed) => {
+      const id = randomUUID();
+      const timer = setTimeout(() => {
+        entry.pending.delete(id);
+        failed(new Error(`service child ${op} timed out`));
+      }, IPC_MS);
+      entry.pending.set(id, {
+        done: (value) => {
+          clearTimeout(timer);
+          done(value);
+        },
+        failed: (error) => {
+          clearTimeout(timer);
+          failed(error);
+        },
+      });
+      child.send({ id, op, args });
+    });
+  const started = await entry.call("start", {
+    dataDir: join(root, "data"),
+    launcher,
+    ledgerFile,
+    token,
+  });
+  for (const identity of started.priorProcesses)
+    await settleProcess("codex-app-server (before token)", identity);
+  active.codex.push(started.codex);
+  return entry;
+}
+
+async function stopChild(entry) {
+  if (entry.child.exitCode !== null || entry.child.signalCode !== null) return;
+  try {
+    await entry.call("stop");
+    entry.child.disconnect();
+  } catch {}
+  await Promise.race([entry.exited, delay(15_000)]);
+  await settleProcess("service-child", entry.identity, 1000);
+}
+
+/** SIGKILLs the exact child service mid-turn, restarts it, then recovers by receipt. */
+async function crash() {
+  const repository = gitFixture();
   const snapshot = async (entry, taskId) => {
     const s = await entry.call("snapshot", { taskId });
-    for (const workspace of s.workspaces) workspaces.add(workspace);
+    for (const workspace of s.workspaces) active.workspaces.add(workspace);
+    noteClaude(s.recovery);
     entry.refused = s.refused;
     return s;
   };
-  const stopChild = async (entry) => {
-    if (entry.child.exitCode !== null || entry.child.signalCode !== null)
-      return;
-    try {
-      await Promise.race([entry.call("stop"), delay(30_000)]);
-      entry.child.disconnect();
-    } catch {}
-    await Promise.race([entry.exited, delay(15_000)]);
-    await settleProcess("service-child", entry.identity, 1000);
+  const first = await spawnChild();
+  const ids = await first.call("setup", {
+    facet,
+    model: evidence.model.claude,
+    repository,
+  });
+  const record = await waitUntil(
+    async () => running((await snapshot(first, ids.taskId)).recovery),
+    TURN_MS,
+    "running Claude turn with a process identity",
+    true,
+  );
+  await delay(15_000);
+  if (!running((await snapshot(first, ids.taskId)).recovery))
+    throw new ComplianceError("the turn ended before the crash");
+  stage("sigkill");
+  const killed = await c0.terminateExact(
+    first.identity,
+    trace,
+    "service-child",
+    { signals: ["SIGKILL"] },
+  );
+  await first.exited;
+  const cli = await settleProcess(
+    "claude-cli (killed service)",
+    record.processIdentity,
+    10_000,
+  );
+  stage("restart");
+  const second = await spawnChild();
+  const read = async () =>
+    (await snapshot(second, ids.taskId)).recovery.find(
+      (r) => r.workId === record.workId,
+    );
+  const held = await read();
+  // ponytail: in-process OperatorApi read; the HTTP `execution.read` token scope is not exercised.
+  const operator = await second.call("operatorRead", {
+    workId: record.workId,
+    root,
+  });
+  await delay(30_000);
+  const quiet = await snapshot(second, ids.taskId);
+  const retained = await read();
+  const allHeld = (h) => Boolean(h?.writer && h.capacity && h.uncertainty);
+  evidence.observations = {
+    serviceKill: killed,
+    cliExitedByItself: cli.exitedByItself,
+    heldState: held?.intent.state ?? null,
+    observationKinds: held?.observations.map((o) => o.kind) ?? [],
+    holds: held?.holds ?? null,
+    operatorExecutionState: operator.state,
+    operatorReadPath:
+      "in-process OperatorApi.readExecution; the HTTP execution.read token scope is not exercised",
+    startTurnInQuietWindow: quiet.turns.length + quiet.refused.length,
+    holdsAfterQuietWindow: retained?.holds ?? null,
+    recoveryRoute:
+      "service seam resolveHeldExecution; no operator HTTP or CLI route",
   };
+  if (
+    held?.intent.state !== "held" ||
+    !allHeld(held.holds) ||
+    !allHeld(retained?.holds) ||
+    operator.state !== "held" ||
+    evidence.observations.startTurnInQuietWindow !== 0
+  )
+    throw new Error(
+      "the crash did not leave a visible, retained uncertainty hold",
+    );
+  stage("recover");
+  await second.call("resolve", {
+    receipt: {
+      workId: held.workId,
+      workRevision: held.generation.workRevision,
+      requestSequence: held.generation.requestSequence,
+      threadId: held.intent.threadId,
+      turnId: held.intent.turnId,
+      processIdentity: held.processIdentity,
+      termination: { kind: "process-exit" },
+      effects: "settled",
+      workspace: "preserved",
+    },
+  });
+  await second.call("message", {
+    key: randomUUID(),
+    taskId: ids.taskId,
+    recipientAssignmentId: held.binding.assignmentId,
+    expectedAssignmentVersion: held.binding.assignmentVersion,
+    message:
+      "Recovered after a service crash. Do not run any command. Reply with one short sentence and end the turn.",
+  });
+  let resumed;
   try {
-    const first = await spawnChild();
-    const ids = await first.call("setup", {
-      facet,
-      model: attempt.model,
-      repository,
-    });
-    const record = await waitUntil(
-      async () => running((await snapshot(first, ids.taskId)).recovery),
-      TURN_MS,
-      "running Claude turn with a process identity",
-    );
-    await delay(15_000);
-    stage("sigkill");
-    const killed = await c0.terminateExact(
-      first.identity,
-      trace,
-      "service-child",
-      { signals: ["SIGKILL"] },
-    );
-    await first.exited;
-    const cli = await settleProcess(
-      "claude-cli (killed service)",
-      record.processIdentity,
-      10_000,
-    );
-    stage("restart");
-    const second = await spawnChild();
-    const read = async () =>
-      (await snapshot(second, ids.taskId)).recovery.find(
-        (r) => r.workId === record.workId,
-      );
-    const held = await read();
-    const operator = await second.call("operatorRead", {
-      workId: record.workId,
-      root,
-    });
-    await delay(30_000);
-    const quiet = await snapshot(second, ids.taskId);
-    const retained = await read();
-    evidence.observations = {
-      serviceKill: killed,
-      cliExitedByItself: cli.exitedByItself,
-      heldState: held?.intent.state ?? null,
-      observationKinds: held?.observations.map((o) => o.kind) ?? [],
-      holds: held?.holds ?? null,
-      operatorExecutionState: operator.state,
-      startTurnInQuietWindow: quiet.turns.length + quiet.refused.length,
-      holdsAfterQuietWindow: retained?.holds ?? null,
-      recoveryRoute:
-        "service seam resolveHeldExecution; no operator HTTP or CLI route",
-    };
-    const holds = held?.holds;
-    if (
-      held?.intent.state !== "held" ||
-      !holds.writer ||
-      !holds.capacity ||
-      !holds.uncertainty ||
-      !retained?.holds.writer ||
-      operator.state !== "held" ||
-      evidence.observations.startTurnInQuietWindow !== 0
-    )
-      throw new Error(
-        "the crash did not leave a visible, retained uncertainty hold",
-      );
-    stage("recover");
-    await second.call("resolve", {
-      receipt: {
-        workId: held.workId,
-        workRevision: held.generation.workRevision,
-        requestSequence: held.generation.requestSequence,
-        threadId: held.intent.threadId,
-        turnId: held.intent.turnId,
-        processIdentity: held.processIdentity,
-        termination: { kind: "process-exit" },
-        effects: "settled",
-        workspace: "preserved",
-      },
-    });
-    await second.call("message", {
-      key: randomUUID(),
-      taskId: ids.taskId,
-      recipientAssignmentId: held.binding.assignmentId,
-      expectedAssignmentVersion: held.binding.assignmentVersion,
-      message:
-        "Recovered after a service crash. Do not run any command. Reply with one short sentence and end the turn.",
-    });
-    const resumed = await waitUntil(
+    resumed = await waitUntil(
       async () => {
         const s = await snapshot(second, ids.taskId);
         const turn = s.turns[0];
@@ -566,96 +589,173 @@ async function crash(root) {
           s.list.some(
             (i) => i.turnId === turn.turnId && i.state === "completed",
           )
-          ? { turn, s }
+          ? turn
           : null;
       },
       TURN_MS,
       "recovered Claude turn",
       true,
     );
-    const released = await read();
-    Object.assign(evidence.observations, {
-      recoveredTurns: resumed.s.turns.length,
-      sameThread: resumed.turn.threadId === held.intent.threadId,
-      holdsAfterRecovery: released?.holds ?? null,
-    });
-    evidence.startTurn.turns = 1 + resumed.s.turns.length;
-    if (resumed.s.turns.length !== 1 || !evidence.observations.sameThread)
-      throw new Error(
-        "recovery did not resume exactly one turn on the same session",
-      );
-    const recovered = resumed.s.recovery.find(
-      (r) => r.intent.turnId === resumed.turn.turnId,
-    )?.processIdentity;
-    await stopChild(second);
-    await settleProcess("claude-cli (recovered turn)", recovered);
-  } finally {
-    for (const entry of children) await stopChild(entry);
-    evidence.startTurn.refused = children.flatMap((e) => e.refused ?? []);
-    evidence.cleanup.serviceStopped = children.every(
-      (e) => e.child.exitCode !== null || e.child.signalCode !== null,
-    );
+  } catch (error) {
+    // The recovered turn gets TURN_MS too, then Stop.
+    await second.call("stopTask", { taskId: ids.taskId }).catch(() => {});
+    throw error;
   }
+  await delay(30_000);
+  const after = await snapshot(second, ids.taskId);
+  const released = after.recovery.find((r) => r.workId === record.workId);
+  Object.assign(evidence.observations, {
+    recoveredTurns: after.turns.length,
+    sameThread: resumed.threadId === held.intent.threadId,
+    holdsAfterRecovery: released?.holds ?? null,
+  });
+  evidence.startTurn.turns = 1 + after.turns.length;
+  if (after.turns.length !== 1 || after.refused.length !== 0)
+    throw new Error("recovery started other than exactly one turn");
+  if (!evidence.observations.sameThread)
+    throw new Error("the recovered turn did not resume the same session");
+  const h = released?.holds;
+  if (!h || h.writer || h.capacity || h.uncertainty)
+    throw new Error("holds were not released after the recovered turn");
 }
 
-let root;
-let failureKind = null;
-try {
-  root = mkdtempSync(join(physicalTmpdir(), ROOT_PREFIX));
-  chmodSync(root, 0o700);
-  process.env[TOKEN_VARIABLE] = token;
-  // Non-secret positive control: shows the scrub probe reads Bash's environment.
-  process.env.ENSEMBLE_C5_CONTROL = "present";
-  stage("run");
-  if (facet === "crash") await crash(root);
-  else
-    await inProcess(root, (current, ids, check) =>
-      facet === "scrub"
-        ? scrub(current, ids, check)
-        : facet === "stop"
-          ? stop(current, ids, check)
-          : coordination(current, ids, check),
-    );
-  evidence.outcome =
-    facet === "scrub" && evidence.observations.disposition === "inconclusive"
-      ? "inconclusive"
-      : "passed";
-} catch (error) {
-  failureKind =
-    error instanceof ComplianceError ? "model-compliance" : "harness";
-  evidence.failure = {
-    stage: evidence.stage,
-    kind: failureKind,
-    message: String(error?.message ?? error),
-  };
-} finally {
-  delete process.env[TOKEN_VARIABLE];
-  await releaseBases().catch(() => {});
-  if (root)
-    try {
-      evidence.cleanup.rootRemoved = removeRoot(root);
-    } catch (error) {
-      evidence.failure ??= {
-        stage: "cleanup",
-        kind: "harness",
-        message: String(error?.message),
+let cleaned;
+/** Runs once on every exit path: success, failure, attempt timeout or signal. */
+function cleanup() {
+  cleaned ??= (async () => {
+    clearInterval(active.watchdog);
+    const current = active.current;
+    if (current) {
+      try {
+        if (current.taskId)
+          noteClaude(current.service.recoveryForTask(current.taskId));
+      } catch {}
+      for (const workspace of current.observed.workspaces)
+        active.workspaces.add(workspace);
+      evidence.startTurn = {
+        turns: current.observed.turns.length,
+        refused: current.observed.refused,
       };
+      try {
+        await current.service.stop();
+        evidence.cleanup.serviceStopped = true;
+      } catch (error) {
+        evidence.cleanup.serviceStopError = String(error?.message ?? error);
+      }
     }
+    for (const entry of active.children) await stopChild(entry);
+    if (active.children.length) {
+      evidence.cleanup.serviceStopped = active.children.every(
+        (e) => e.child.exitCode !== null || e.child.signalCode !== null,
+      );
+      evidence.startTurn.refused = active.children.flatMap((e) => e.refused);
+    }
+    for (const identity of active.claude.values())
+      await settleProcess("claude-cli", identity);
+    for (const identity of active.codex)
+      await settleProcess("codex-app-server", identity);
+    delete process.env[TOKEN_VARIABLE];
+    for (const workspace of active.workspaces) {
+      await releaseClaudeTemporaryBase(workspace).catch(() => {});
+      evidence.cleanup.temporaryBases.push(
+        existsSync(claudeTemporaryBase(workspace)) ? "remains" : "removed",
+      );
+    }
+    if (root)
+      try {
+        evidence.cleanup.rootRemoved = removeRoot(root);
+      } catch (error) {
+        evidence.failure ??= {
+          stage: "cleanup",
+          kind: "harness",
+          message: String(error?.message),
+        };
+      }
+  })();
+  return cleaned;
+}
+
+async function attemptBody(attempt) {
+  evidence.attempt = attempt.number;
+  evidence.model = { claude: attempt.model, reasoningEffort: "low" };
+  attemptDeadline = Date.now() + ATTEMPT_MS;
+  let abort;
+  const aborted = new Promise((_, reject) => {
+    abort = reject;
+  });
+  const timer = setTimeout(
+    () => abort(new BudgetExhausted("attempt wall-time cap reached")),
+    ATTEMPT_MS,
+  );
+  const onSignal = (signal) => abort(new Error(`received ${signal}`));
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  let failureKind = null;
+  try {
+    root = mkdtempSync(join(physicalTmpdir(), ROOT_PREFIX));
+    chmodSync(root, 0o700);
+    // Non-secret positive control: shows the scrub probe reads Bash's environment.
+    process.env.ENSEMBLE_C5_CONTROL = "present";
+    stage("run");
+    const work =
+      facet === "crash"
+        ? crash()
+        : inProcess((current, ids, check) =>
+            facet === "scrub"
+              ? scrub(current, ids, check)
+              : facet === "stop"
+                ? stop(current, ids, check)
+                : coordination(current, ids, check),
+          );
+    work.catch(() => {});
+    await Promise.race([work, aborted]);
+    evidence.outcome =
+      facet === "scrub" && evidence.observations.disposition === "inconclusive"
+        ? "inconclusive"
+        : "passed";
+  } catch (error) {
+    failureKind =
+      error instanceof ComplianceError
+        ? "model-compliance"
+        : error instanceof BudgetExhausted
+          ? "budget"
+          : "harness";
+    evidence.failure = {
+      stage: evidence.stage,
+      kind: failureKind,
+      message: String(error?.message ?? error),
+    };
+  } finally {
+    clearTimeout(timer);
+    await cleanup();
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
+  }
   // A refused reservation means the facet failed on budget, whatever surfaced first.
   if (evidence.startTurn.refused.length) {
     failureKind = "budget";
     evidence.outcome = "failed";
   }
-  writeLedger(
-    finishAttempt(readLedger(ledgerFile), evidence.outcome, failureKind),
-    ledgerFile,
-  );
-  const closed = readLedger(ledgerFile);
-  evidence.budget = {
-    attempt: closed.attempts[facet].at(-1),
-    totals: closed.totals,
+  if (evidence.failure) evidence.outcome = "failed";
+  return { outcome: evidence.outcome, failureKind };
+}
+
+try {
+  await withAttempt(ledgerFile, facet, attemptBody);
+} catch (error) {
+  if (error instanceof BudgetExhausted && evidence.attempt === null)
+    refuse(`budget: ${error.message}`);
+  evidence.failure ??= {
+    stage: evidence.stage,
+    kind: "harness",
+    message: String(error?.message ?? error),
   };
 }
+const closed = readLedger(ledgerFile);
+evidence.budget = {
+  attempt: closed.attempts[facet]?.at(-1) ?? null,
+  totals: closed.totals,
+};
 // Redact before anything is written, then refuse to print on any residual leak.
 const text = JSON.stringify(
   c0.redact(evidence, c0.redactionContext(root, token)),
@@ -667,10 +767,13 @@ const leaks = scanForLeaks(text, {
   roots: [join(physicalTmpdir(), ROOT_PREFIX), "/tmp/ens-"],
   home: homedir(),
 });
-if (leaks.length) {
-  process.stdout.write(`${JSON.stringify({ facet, leakScan: leaks })}\n`);
-  process.exitCode = 1;
-} else {
-  process.stdout.write(`${text}\n`);
-  process.exitCode = evidence.failure || evidence.outcome === "failed" ? 1 : 0;
-}
+const code =
+  leaks.length || evidence.failure || evidence.outcome === "failed" ? 1 : 0;
+// Exit after the write drains: orphaned work after a timeout or signal must not
+// keep the process alive, and a pipe write on macOS is asynchronous.
+process.stdout.write(
+  leaks.length
+    ? `${JSON.stringify({ facet, leakScan: leaks })}\n`
+    : `${text}\n`,
+  () => process.exit(code),
+);
