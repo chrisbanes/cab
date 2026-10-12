@@ -98,4 +98,7 @@ export type Values = {
   "body-file"?: string | undefined;
   "expected-task-version"?: string | undefined;
   "review-id"?: string | undefined;
+  work?: string | undefined;
+  "evidence-file"?: string | undefined;
+  "expected-conversation-revision"?: string | undefined;
 };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -273,6 +273,18 @@ test("the packed CLI installs offline and works against a real service over loop
   ]);
   assert.equal(r.code, 0, r.err);
   assert.equal(JSON.parse(r.out).data.issue, null);
+  // CLI6: the installed binary reaches the recovery read (no assignment here).
+  r = await cli([
+    "recovery",
+    "get",
+    randomUUID(),
+    "--connection",
+    "local",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 2, r.err);
+  assert.equal(JSON.parse(r.out).error.code, "not-found");
   r = await cli(["task", "get", s.taskId], {
     ENSEMBLE_MANAGED_ASSIGNMENT: "1",
   });

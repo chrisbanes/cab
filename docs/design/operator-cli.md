@@ -372,7 +372,8 @@ CLI and submits a write directly. Capability names are `cli.identity`,
 `assignment.read`, `instructions.read`, `result.read`, `artifact.read`,
 `configuration.write`, `operation.read`, `capacity.read`,
 `configuration.impact`, `execution.read`, `diagnostics.read`, `task.write`,
-`attention.read`, `attention.write`, `source.write` and `delivery.write`; a command whose capabilities the service does not
+`attention.read`, `attention.write`, `source.write`, `delivery.write`, `recovery.read`
+and `recovery.write`; a command whose capabilities the service does not
 advertise fails with `unsupported-service` before any other read.
 
 `GET /api/operator/operations?scope=&type=&key=` returns `recorded` with the
@@ -380,7 +381,8 @@ receipt `POST /api/operator/commands` returned, or `not-recorded`. It accepts on
 the scopes `project:<id>`, `profile:<id>` and `system:capacity` with the
 configuration and adoption types and, for a project, `github.configure` and
 `github.preview` (a preview whose selection ID is now excluded text reads
-`503 unavailable`), rebuilds the receipt from the stored result with
+`503 unavailable`), and `assignment:<id>` with the five recovery types (a key reads
+`recorded` only under its own type and for that assignment's work), rebuilds the receipt from the stored result with
 the same projection as `POST`, and reports a stored result of another shape as
 `409 conflict`. `GET /api/operator/projects/:id/impact` and
 `/profiles/:id/impact` list at most 200 bound assignments (default 200, `limit`
@@ -401,8 +403,8 @@ stopCleared, requeued}`, are recorded in one transaction with the Stop hold chan
 scoped to the task: the same key and content replays with no effect, other content
 conflicts. `expectedVersion` is optional, so an unrelated task edit cannot block a
 Stop. The keyless web Stop and retained Resume forms share the same hold. JSON
-`data.effect` is `saved`, `queued`, `cancellation-requested` or `none` (`completed`
-is reserved for synchronous operations). Because these intents are repeatable, the
+`data.effect` is `saved`, `queued`, `cancellation-requested`, `none` or `completed`
+(a synchronous operation, such as recovery). Because these intents are repeatable, the
 CLI reuses a journal key only while it is unresolved (latest state `sending` or
 `unknown`, never after `recorded` or a definite rejection); the output reports
 reuse and, for Stop and Resume, whether Stop is in effect after a possible replay.
@@ -444,6 +446,41 @@ is `403`; other failures stay `command-outcome-unknown`. Posted comments carry a
 hidden `<!-- ensemble-operation:ID -->` marker that the provider read-back matches.
 Installation-wide source refresh, `source.review`, handback settlement and a list of
 pending comment reviews are not CLI commands.
+
+Recovery drives the five existing evidence-bearing operations through receipted
+commands on `POST /api/operator/commands`, scoped `assignment:<id>`:
+`recovery.pre-turn.adopt`, `recovery.pre-turn.recover`, `recovery.no-turn.adopt`,
+`recovery.no-turn.recover` and `recovery.conversation.replace`. Each carries
+`assignmentId` and the existing service command's fields; the API checks the work is
+bound to that assignment and calls the unchanged service method with exactly the
+inner command the retained `/runtime/control/*` session routes pass, so a key
+recorded through either entry point replays through the other. Receipts are
+`recovery-adoption {path, assignmentId, workId, witnessId}`, `recovery-resolution
+{path, assignmentId, workId, receiptId, state: "reconciled"}` and
+`conversation-replacement {assignmentId, revision}`. Definite refusals (stale or
+mismatched identity, unverified termination, an existing or missing witness, a
+reconciled generation, stale replacement versions, unresolved execution, a task
+hold, a key reused for other material or another type) are `409`; malformed
+commands are `400`; other failures stay `command-outcome-unknown`.
+`GET /api/operator/assignments/:id/recovery-options` (read scope) lists the
+assignment's own generations (newest 20, filtered before the bound; writer, capacity
+and uncertainty holds are this assignment's, Stop and task holds task-wide) with the
+exact identity each command binds and advisory per-path
+eligibility with closed blockers (`not-held`, `ownership-released`,
+`context-unavailable`, `witness-missing`, `witness-present`, `other-witness`,
+`already-reconciled`, `reason-withheld`, `identity-withheld`, `task-held`,
+`unresolved-execution`). It discloses the held process identity to both credential
+scopes as permitted diagnostic content; a string redaction would change reads
+`null` and blocks the paths that would send it. `recovery prepare` writes an
+`ensemble.cli.recovery/v1` document (owner-only, at most 512 KiB, canonical-JSON
+SHA-256 digest) from that read plus a strict `ensemble.cli.recovery-evidence/v1`
+operator file; attestations remain operator assertions the service cannot verify.
+`recovery submit` uses the default journal key rule: an identical rerun replays, and
+a definitely refused key is not reused. Adoption, recovery and replacement are
+irreversible; none resumes or dispatches work, and continuation still needs
+replacement plus a new message. Operator Stop/Resume are unchanged; there is no
+force unlock, release by time or acknowledgement, and no route for the keyless
+bound-turn recovery.
 
 ## Acceptance scenarios
 

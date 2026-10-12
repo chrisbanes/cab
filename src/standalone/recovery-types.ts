@@ -96,3 +96,8 @@ export interface RecoveryRecord {
     predecessorThreadId: string;
   };
 }
+
+/** A definite refusal by an evidence-bearing recovery command; nothing was applied. */
+export class RecoveryRejectedError extends Error {
+  override readonly name = "RecoveryRejectedError";
+}

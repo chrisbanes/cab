@@ -355,6 +355,7 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/projects/${id}/composer-options`,
     `/api/operator/assignments/${id}/history`,
     `/api/operator/assignments/${id}/recovery`,
+    `/api/operator/assignments/${id}/recovery-options`,
     `/api/operator/tasks/${id}/results`,
     `/api/operator/tasks/${id}/messages`,
     `/api/operator/assignments/${id}`,
@@ -383,8 +384,16 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/executions/assignment:${id}:initial`,
     `/api/operator/executions/assignment:${id}:initial/inputs`,
     `/api/operator/executions/assignment:${id}:initial/events`,
+    `/api/operator/assignments/${id}/recovery-options`,
   ])
     assert.equal(operatorRouteAuthority("GET", path), "read", path);
+  assert.equal(
+    operatorRouteAuthority(
+      "POST",
+      `/api/operator/assignments/${id}/recovery-options`,
+    ),
+    undefined,
+  );
   const known = Object.create(
     OperatorWebBoundary.prototype,
   ) as OperatorWebBoundary;

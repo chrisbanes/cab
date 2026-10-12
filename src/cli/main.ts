@@ -98,6 +98,13 @@ assignment. delivery refresh is installation-wide. send-comment --review-id
 first replays that review to check it is approved; an ID that is not an existing
 review records a new pending review instead, and nothing is posted.
 
+Recovery: recovery prepare writes an owner-only document from the observed
+generation identity plus your --evidence-file; nothing is inferred, defaulted or
+confirmed by a flag. recovery submit sends it once. Adoption, recovery and
+conversation replacement cannot be undone, and none of them resumes the task or
+dispatches work; continue with a new task message after replacement. Adoption
+here records evidence and is unrelated to assignment apply-current.
+
 ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.
 `;
 
@@ -183,6 +190,9 @@ export async function main(
         "body-file": { type: "string" },
         "expected-task-version": { type: "string" },
         "review-id": { type: "string" },
+        work: { type: "string" },
+        "evidence-file": { type: "string" },
+        "expected-conversation-revision": { type: "string" },
       },
     });
     jsonl = values.output === "jsonl" && positionals[0] === "logs";

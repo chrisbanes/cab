@@ -15,6 +15,14 @@ import {
   taskReviewReadSchema,
 } from "../core/task-review-contracts.js";
 import {
+  historicalNoTurnAdoptionBodySchema,
+  historicalPreTurnAdoptionBodySchema,
+  noTurnRecoveryBodySchema,
+  preTurnRecoveryBodySchema,
+  recoveryPaths,
+  replaceConversationBodySchema,
+} from "../core/recovery-contracts.js";
+import {
   executionHarnessSchema,
   profileRuntimeSchema,
   supportedRuntimeSettingsSchema,
@@ -2070,6 +2078,46 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision.optional(),
     })
     .strict(),
+  // Evidence-bearing recovery: the inner service command plus its assignment scope.
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.pre-turn.adopt"),
+      assignmentId: uuid,
+      ...historicalPreTurnAdoptionBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.pre-turn.recover"),
+      assignmentId: uuid,
+      ...preTurnRecoveryBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.no-turn.adopt"),
+      assignmentId: uuid,
+      ...historicalNoTurnAdoptionBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.no-turn.recover"),
+      assignmentId: uuid,
+      ...noTurnRecoveryBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.conversation.replace"),
+      ...replaceConversationBodySchema.shape,
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -2212,6 +2260,61 @@ const recoveryHolds = z
     task: z.boolean(),
   })
   .strict();
+const assignmentRecoveryRecordSchema = z
+  .object({
+    workId: safeText,
+    generation: z
+      .object({
+        workRevision: revision.nullable(),
+        requestSequence: revision,
+      })
+      .strict(),
+    binding: z
+      .object({
+        assignmentId: uuid,
+        assignmentVersion: revision,
+        instructionsRevision: revision,
+        profileRevision: revision,
+      })
+      .strict()
+      .nullable(),
+    intentState: z.enum([
+      "ready",
+      "capacity-waiting",
+      "held",
+      "submitting",
+      "running",
+      "completed",
+      "reconciled",
+      "resolved-failed",
+      "unknown",
+    ]),
+    requestState: z
+      .enum(["queued", "active", "completed", "held", "unknown"])
+      .nullable(),
+    holds: recoveryHolds,
+    observations: z.array(recoveryObservationSchema).max(12),
+    pendingEffectCount: time,
+    noTurnSubmission: z
+      .object({
+        id: uuid,
+        source: z.literal("operator-adopted"),
+        idleThreadMayExist: z.literal(true),
+      })
+      .strict()
+      .optional(),
+    preTurnRejection: z
+      .object({
+        id: uuid,
+        source: z.enum(["runtime", "operator-adopted"]),
+        predecessorThreadId: safeText,
+      })
+      .strict()
+      .optional(),
+    receiptRecorded: z.boolean(),
+    workspace: z.enum(["preserved", "reconciled", "unknown"]),
+  })
+  .strict();
 export const assignmentRecoverySchema = envelope(
   z
     .object({
@@ -2222,61 +2325,104 @@ export const assignmentRecoverySchema = envelope(
       holds: recoveryHolds,
       evidenceAvailable: z.boolean(),
       omittedCount: time,
+      records: z.array(assignmentRecoveryRecordSchema).max(20),
+    })
+    .strict(),
+);
+/** Closed reasons a recovery path is not currently eligible; advisory, the service decides. */
+export const recoveryBlockerSchema = z.enum([
+  "not-held",
+  "ownership-released",
+  "context-unavailable",
+  "witness-missing",
+  "witness-present",
+  "other-witness",
+  "already-reconciled",
+  "reason-withheld",
+  "identity-withheld",
+  "task-held",
+  "unresolved-execution",
+]);
+export const recoveryPathSchema = z.enum(recoveryPaths);
+const boundedText = z.string().max(4000);
+/** Exact recovery identity of one assignment's generations, with advisory eligibility. */
+export const recoveryOptionsSchema = envelope(
+  z
+    .object({
+      assignmentId: uuid,
+      taskId: uuid,
+      projectId: uuid,
+      assignmentVersion: revision,
+      conversationRevision: revision,
+      held: z.boolean(),
+      holds: recoveryHolds,
+      evidenceAvailable: z.boolean(),
+      omittedCount: time,
+      /** Exact strings withheld because redaction changed them or was unavailable. */
+      gaps: z.array(z.enum(["content-redacted", "redaction-unavailable"])),
+      replacement: z
+        .object({
+          eligible: z.boolean(),
+          blockedBy: z.array(recoveryBlockerSchema),
+          expectedAssignmentVersion: revision,
+          expectedConversationRevision: revision,
+        })
+        .strict(),
       records: z
         .array(
           z
             .object({
-              workId: safeText,
+              workId: z.string().max(512).nullable(),
               generation: z
                 .object({
                   workRevision: revision.nullable(),
                   requestSequence: revision,
                 })
                 .strict(),
-              binding: z
-                .object({
-                  assignmentId: uuid,
-                  assignmentVersion: revision,
-                  instructionsRevision: revision,
-                  profileRevision: revision,
-                })
-                .strict()
-                .nullable(),
-              intentState: z.enum([
-                "ready",
-                "capacity-waiting",
-                "held",
-                "submitting",
-                "running",
-                "completed",
-                "reconciled",
-                "resolved-failed",
-                "unknown",
-              ]),
-              requestState: z
-                .enum(["queued", "active", "completed", "held", "unknown"])
-                .nullable(),
+              intentState: assignmentRecoveryRecordSchema.shape.intentState,
+              requestState: assignmentRecoveryRecordSchema.shape.requestState,
               holds: recoveryHolds,
               observations: z.array(recoveryObservationSchema).max(12),
-              pendingEffectCount: time,
-              noTurnSubmission: z
+              process: z
                 .object({
-                  id: uuid,
-                  source: z.literal("operator-adopted"),
-                  idleThreadMayExist: z.literal(true),
+                  processId: boundedText,
+                  processStartedAt: boundedText,
+                  bootId: boundedText,
                 })
                 .strict()
-                .optional(),
-              preTurnRejection: z
-                .object({
-                  id: uuid,
-                  source: z.enum(["runtime", "operator-adopted"]),
-                  predecessorThreadId: safeText,
-                })
+                .nullable(),
+              retainedReason: boundedText.nullable(),
+              writerSequence: revision.nullable(),
+              conversationRevision: revision.nullable(),
+              predecessor: z
+                .object({ workId: boundedText, threadId: boundedText })
                 .strict()
-                .optional(),
+                .nullable(),
+              witnesses: z
+                .object({
+                  preTurn: z
+                    .object({
+                      id: uuid,
+                      source: z.enum(["runtime", "operator-adopted"]),
+                    })
+                    .strict()
+                    .nullable(),
+                  noTurn: z.object({ id: uuid }).strict().nullable(),
+                })
+                .strict(),
               receiptRecorded: z.boolean(),
               workspace: z.enum(["preserved", "reconciled", "unknown"]),
+              paths: z
+                .array(
+                  z
+                    .object({
+                      path: recoveryPathSchema,
+                      eligible: z.boolean(),
+                      blockedBy: z.array(recoveryBlockerSchema),
+                    })
+                    .strict(),
+                )
+                .max(4),
             })
             .strict(),
         )
@@ -2614,6 +2760,38 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       requeued: z.number().int().nonnegative().safe(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("recovery-adoption"),
+      key: uuid,
+      recorded: z.literal(true),
+      path: z.enum(["pre-turn-adopt", "no-turn-adopt"]),
+      assignmentId: uuid,
+      workId: z.string().min(1).max(512),
+      witnessId: uuid,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("recovery-resolution"),
+      key: uuid,
+      recorded: z.literal(true),
+      path: z.enum(["pre-turn-recover", "no-turn-recover"]),
+      assignmentId: uuid,
+      workId: z.string().min(1).max(512),
+      receiptId: uuid,
+      state: z.literal("reconciled"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("conversation-replacement"),
+      key: uuid,
+      recorded: z.literal(true),
+      assignmentId: uuid,
+      revision,
+    })
+    .strict(),
 ]);
 export const apiErrorSchema = z
   .object({
@@ -2879,6 +3057,8 @@ export const cliCapabilities = [
   "attention.write",
   "source.write",
   "delivery.write",
+  "recovery.read",
+  "recovery.write",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(
@@ -2933,12 +3113,17 @@ export const operationTypeSchema = z.enum([
   "assignment.apply",
   "github.configure",
   "github.preview",
+  "recovery.pre-turn.adopt",
+  "recovery.pre-turn.recover",
+  "recovery.no-turn.adopt",
+  "recovery.no-turn.recover",
+  "recovery.conversation.replace",
 ]);
-/** `project:<id>`, `profile:<id>` or `system:capacity`; nothing else is a readable scope. */
+/** `project:<id>`, `profile:<id>`, `assignment:<id>` or `system:capacity`; nothing else is a readable scope. */
 export const operationScopeSchema = z
   .string()
   .regex(
-    /^(?:(?:project|profile):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity)$/i,
+    /^(?:(?:project|profile|assignment):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity)$/i,
   );
 export const operationReadSchema = envelope(
   z.discriminatedUnion("state", [

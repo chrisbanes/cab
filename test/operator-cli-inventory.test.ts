@@ -39,6 +39,7 @@ const documented = [
   "approval get",
   "project sources",
   "delivery get",
+  "recovery get",
 ];
 
 /** The documented CLI3 configuration, adoption and receipt commands. */
@@ -71,6 +72,8 @@ const documentedWrites = [
   "delivery review-comment",
   "delivery confirm-comment",
   "delivery send-comment",
+  "recovery prepare",
+  "recovery submit",
 ];
 
 test("every documented browse command runs read-only with a coverage envelope", async (t) => {
@@ -89,6 +92,10 @@ test("every documented browse command runs read-only with a coverage envelope", 
     /task create, task message, task follow-up, question answer and\napproval decide cannot be undone/,
   );
   assert.match(help.out, /Reverse pairs: task stop\/resume/);
+  assert.match(
+    help.out,
+    /Adoption, recovery and\nconversation replacement cannot be undone/,
+  );
   for (const command of [...browseCommands.values(), ...writeCommands.values()])
     assert.ok(help.out.includes(command.usage), command.usage);
 
@@ -129,6 +136,8 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "attention.write",
     "source.write",
     "delivery.write",
+    "recovery.read",
+    "recovery.write",
   ]);
 
   const { taskId, projectId, profileId, assignmentId } = native.seeded;
@@ -138,6 +147,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
     "project get": [projectId],
     "project sources": [projectId],
     "delivery get": [taskId],
+    "recovery get": [assignmentId],
     "profile get": [profileId],
     "task list": [],
     "task search": ["evidence", "--historical"],

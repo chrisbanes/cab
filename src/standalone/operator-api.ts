@@ -123,6 +123,14 @@ import {
   type LocalReviewSyncIdentity,
 } from "../core/local-review.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import {
+  executeRecovery,
+  isRecoveryCommand,
+  isRecoveryType,
+  readRecoveryOperation,
+  recoveryOptions,
+} from "./operator-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   compareRepository,
@@ -4256,6 +4264,20 @@ export class OperatorApi {
     if (!scope.success || !type.success || !key.success)
       throw new OperatorApiError(400, "invalid-input");
     const [kind, id = ""] = scope.data.split(":");
+    if (isRecoveryType(type.data)) {
+      if (kind !== "assignment")
+        throw new OperatorApiError(400, "invalid-input");
+      try {
+        return operationReadSchema.parse({
+          data: readRecoveryOperation(this.service, type.data, key.data, id),
+          observedAt: Date.now(),
+        });
+      } catch (error) {
+        if (error instanceof z.ZodError || error instanceof SyntaxError)
+          throw new OperatorApiError(409, "conflict");
+        throw error;
+      }
+    }
     const expected =
       type.data === "capacity.configure"
         ? "system"
@@ -4462,7 +4484,19 @@ export class OperatorApi {
       this.readAssignmentRecoveryOnce(assignmentId),
     );
   }
-  private async readAssignmentRecoveryOnce(assignmentId: string) {
+  /** The exact identity and advisory eligibility each recovery command needs. */
+  async readRecoveryOptions(assignmentId: string) {
+    return this.readWithInstructionFence(async () => {
+      const base = await this.readAssignmentRecoveryOnce(assignmentId, true);
+      const { projectId } = this.requireAssignment(assignmentId);
+      const excluded = await this.exclusions(projectId, base.data.taskId);
+      return recoveryOptions(this.service, base, projectId, excluded, (v) =>
+        this.exact(v, excluded),
+      );
+    });
+  }
+  /** Task-wide recovery records, or with `own` only this assignment's, before the bound of 20. */
+  private async readAssignmentRecoveryOnce(assignmentId: string, own = false) {
     const d = this.domain(),
       { taskId, projectId } = this.requireAssignment(assignmentId),
       snapshot = this.workspaceSnapshot([taskId]),
@@ -4480,7 +4514,8 @@ export class OperatorApi {
         r.binding
           ? r.binding.taskId === taskId &&
             known.has(r.binding.assignmentId) &&
-            uuid.safeParse(r.binding.assignmentId).success
+            uuid.safeParse(r.binding.assignmentId).success &&
+            (!own || r.binding.assignmentId === assignmentId)
           : selected?.workId === r.workId &&
             selected.assignmentId === assignmentId &&
             selected.taskId === taskId &&
@@ -5622,6 +5657,17 @@ export class OperatorApi {
             version: Number(r.version),
           },
         });
+      }
+      if (isRecoveryCommand(c)) {
+        this.requireAssignment(c.assignmentId);
+        try {
+          return await executeRecovery(this.service, c);
+        } catch (error) {
+          // Definite refusals only; infrastructure failures stay uncertain below.
+          if (error instanceof RecoveryRejectedError)
+            throw new OperatorApiError(409, "conflict");
+          throw error;
+        }
       }
       if (c.type === "task.stop" || c.type === "task.resume") {
         this.requireTask(c.taskId);

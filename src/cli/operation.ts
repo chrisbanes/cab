@@ -9,7 +9,7 @@ import { CliError } from "./connections.js";
 import { keyValues } from "./render.js";
 import type { WriteCommand } from "./write.js";
 
-/** Human summary of a configuration or adoption receipt. */
+/** Human summary of a configuration, adoption or recovery receipt. */
 export function receiptLines(receipt: CommandReceipt): [string, string][] {
   if (receipt.kind === "domain" && "profileRevision" in receipt.result)
     return [
@@ -18,6 +18,14 @@ export function receiptLines(receipt: CommandReceipt): [string, string][] {
       ["Profile revision", String(receipt.result.profileRevision)],
       ["Instructions revision", String(receipt.result.instructionsRevision)],
     ];
+  if (
+    receipt.kind === "recovery-adoption" ||
+    receipt.kind === "recovery-resolution" ||
+    receipt.kind === "conversation-replacement"
+  )
+    return Object.entries(receipt)
+      .filter(([k]) => !["kind", "key", "recorded"].includes(k))
+      .map(([k, v]): [string, string] => [k, String(v)]);
   if (receipt.kind !== "configuration") return [];
   const r = receipt.result;
   return [
@@ -44,7 +52,7 @@ export const operationCommands = new Map<string, WriteCommand>([
         if (!scope.success)
           throw new CliError(
             "invalid-input",
-            "--scope must be project:ID, profile:ID or system:capacity.",
+            "--scope must be project:ID, profile:ID, assignment:ID or system:capacity.",
           );
         const type = operationTypeSchema.safeParse(ctx.values.type);
         if (!type.success)
@@ -56,6 +64,7 @@ export const operationCommands = new Map<string, WriteCommand>([
           "cli.identity",
           "operation.read",
           ...(type.data.startsWith("github.") ? ["source.write"] : []),
+          ...(type.data.startsWith("recovery.") ? ["recovery.read"] : []),
         ]);
         const request = {
           service: session.identity.service.installationId,

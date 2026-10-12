@@ -73,8 +73,12 @@ that share the web UI's Stop hold; Resume clears only the operator Stop.
 sources and repository links (a `github.configure` change document applied with
 `project apply`), activate a selection and place a conflicting imported task;
 `delivery get|refresh|review-comment|confirm-comment|send-comment` inspect delivery
-and drive the existing refresh and staged comment commands. Recovery is planned;
-their delivery sequencing belongs in GitHub under
+and drive the existing refresh and staged comment commands. `recovery
+get|prepare|submit` inspect an assignment's held generations and submit the
+existing adoption, pre-turn and no-turn recovery and conversation-replacement
+commands from an owner-only, digest-bound document built from observed identity and
+an explicit operator evidence file; none resumes or dispatches work. Further CLI
+delivery sequencing belongs in GitHub under
 [epic #893](https://github.com/chrisbanes/ensemble/issues/893).
 
 The CLI uses the running service locally or over the existing private network,
