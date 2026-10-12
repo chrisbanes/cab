@@ -38,14 +38,42 @@ Ensemble coordination tools are served through an in-process SDK MCP server.
 Use the operator's own Claude subscription through a `claude setup-token` token,
 mirroring the Codex operator login. API-key billing stays deferred.
 
-The token is configured as an `env:NAME` reference, like Ensemble's other provider
-credentials: the value stays in the service environment and is never stored or
-rendered back. The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
-resolves the reference at turn start and sets it only as the Claude subprocess's
-token variable; it never logs it. Every other spawn environment, including Codex,
-omits the token and any nonempty exact-value alias of it, and a newly configured
-reference already inherited by a running runtime holds activation until restart,
-as for delivery credentials. Delivery credentials are likewise excluded from the
+The token is configured as a reference and never stored or rendered back. Two
+forms are accepted:
+
+- `file:/absolute/path` names an owner-only file holding the token. This is the
+  form for the installed LaunchAgent service, whose plist and environment then
+  hold no Claude secret. The path is absolute with no empty, `.` or `..` segment.
+- `env:NAME` names a variable in the service environment, like Ensemble's other
+  provider credentials; it suits foreground and development runs.
+
+`file:` is added alongside `env:NAME` rather than replacing it: it alone solves the
+installed service, and the environment form keeps its exclusion and restart rules.
+Configuration checks only the syntax, so the file can be created afterwards.
+
+The file is read without caching whenever a Claude preflight, turn start or status
+read needs the token, and whenever spawn environments and operator reads compute
+their exclusions. It is opened without following a final symbolic link, and the
+opened descriptor must be a regular file owned by the service user, with no group
+or other permission bits and at most 4096 bytes, before anything is read. Its
+content, with trailing whitespace removed, must be one run of printable ASCII
+characters. Otherwise the file is never read and Claude work waits with a reason
+such as `subscription token file permits group or other access`, which names
+neither the path nor the value; the status read shows the token unavailable.
+Intermediate symbolic links in the path (such as macOS `/var`) are followed and
+the parent directories' ownership is not checked; the operator keeps the file in a
+private directory. Replacing the file atomically rotates the token from the next
+turn without a restart; a running turn keeps the value it started with.
+
+The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
+sets the resolved token only as the Claude subprocess's token variable; it never
+logs it. Every other spawn environment, including Codex and helper children such
+as `git`, omits the token variable and any variable holding the same nonempty value.
+Operator reads and conversation history redact the reference, its variable name
+or file path, and the value. A token already inherited by the running runtimes
+(an `env:NAME` reference configured after start, or a file whose value is also in
+the service environment) holds activation until restart, as for delivery
+credentials. Delivery credentials are likewise excluded from the
 Claude spawn environment. Inside the Claude process, the runtime enables Claude
 Code's subprocess environment scrub (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`) so
 Bash, hooks and stdio MCP children do not inherit the token; its effect is

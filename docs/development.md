@@ -29,10 +29,12 @@ Tailscale access.
 The production service runs the Claude runtime
 ([ADR-1008](adr/1008-claude-code-execution-harness.md)) beside Codex; profiles
 select it explicitly. Its token is the operator's own subscription token from `claude setup-token`,
-configured in Settings as an `env:NAME` reference. The variable must be in the
-service process environment when the service starts; the generated LaunchAgent
-does not set it, so add it to the service environment yourself. A reference
-configured while the service runs takes effect after a restart.
+configured in Settings as a `file:/absolute/path` or `env:NAME` reference. The
+installed LaunchAgent service uses an owner-only token file
+([operations](operations/standalone-macos.md#claude-subscription-token)); a
+replaced file applies from the next turn. An `env:NAME` variable must be in the
+service process environment when the service starts, and a reference configured
+while the service runs takes effect after a restart.
 `npm run c5:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
 bounded journey against disposable data and prints redacted evidence. It refuses
 any other arguments, a missing `CLAUDE_CODE_OAUTH_TOKEN` (read from the
