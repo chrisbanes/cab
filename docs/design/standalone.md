@@ -272,6 +272,21 @@ retention budgets, cold indexed lookup, direct cancellation and memory deltas wi
 deterministic real-SQLite fixtures. These workload measurements establish the
 tested bounds only, not a universal latency or heap guarantee.
 
+Some stored names predate harness selection and keep their Codex names. They are
+retained, not renamed; code maps them to harness-neutral meanings. Rows written
+before harness selection read as Codex through the `harness` column default of
+`codex`. Claude failures are classified and held, never retried
+(`harnessRetrySupported`), so only Codex rows carry retry values.
+
+| Stored name | Neutral meaning | Mapped by |
+| --- | --- | --- |
+| `execution_retry_chains.codexRetriesUsed`, `execution_retry_resolutions.codexRetriesUsed` | Runtime-internal retries used by the chain | `harnessRetriesUsed` in `ExecutionState` |
+| `execution_retry_attempts.codexRetries`, `execution_retry_resolutions.codexRetries` | Runtime-internal retries reported for one failure | `harnessRetries` in `ExecutionState` |
+| `failureSource = 'codexErrorInfo'` CHECK on `execution_retry_attempts` and `execution_retry_resolutions` | The runtime's own failure classification | `retryFailureSource` |
+| `codexErrorInfo` and `codexRetries` keys in `runtime_terminal_evidence.failureEvidence` JSON | Failure source `harness` and `harnessRetries` | `legacyRuntimeTerminalFailureEvidenceSchema` (read only; new rows use neutral keys) |
+| `runtime_thread_qualification.codexVersion` and the native-input qualification `codexVersion` | Qualified runtime version | Codex runtime only |
+| `standalone-codex` host installation | Standalone host identity | `Store.ensureHost` |
+
 ## Default execution policy
 
 Select supported App Server `workspaceWrite` controls with task working directory
