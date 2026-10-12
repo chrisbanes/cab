@@ -5,7 +5,7 @@
   "candidate": "eda2733e (live run and code); later commits change only evidence, documentation, the inventory guard and tests",
   "states": {
     "passed": "Real evidence at the code candidate: the operation ran through the installed CLI against the authenticated service in a journey cited from a dated live record (a harness step or an issue-901-cli8-live json), with its observable effect and applicable denial, revision and retry cases; synthetic fixtures alone never qualify.",
-    "bounded": "Covered only by deterministic or synthetic fixtures (fixture runtime, scripted or fake GitHub, seeded recovery facts, in-process or packed CLI, loopback or a throwaway-certificate TLS proxy) or by a live observation at an earlier candidate; the gap states the bound.",
+    "bounded": "Covered only by deterministic or synthetic fixtures (fixture runtime, scripted or fake GitHub, seeded recovery facts, in-process or packed CLI, loopback or a throwaway-certificate TLS proxy) or by a live observation at an earlier candidate, or real evidence limited by a recorded defect; the gap states the bound.",
     "unproved": "No test at this candidate invokes the operation through the CLI against the authenticated service; the gap states the missing check."
   },
   "scenarios": {
@@ -20,7 +20,7 @@
     },
     "CLI03": {
       "state": "bounded",
-      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a browser edit between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration. Bounded: adoption on a completed lead blocks its follow-up (recorded finding), and routing, capacity and creation writes are fixture-only."
+      "basis": "In the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns): exact profile apply creating revision 2 and an identical replay returning the same receipt, a rename through the session command route between prepare and apply exiting 4 with the digest unchanged, a dropped reply exiting 6 then operation get recorded and the rerun replaying with one version bump, and explicit adoption (boundIsCurrent false then true) before the next turn. Renewed CLI3 fixtures cover assignment creation between prepare and apply, identical UUIDs in distinct scopes and restoration. Bounded: adoption on a completed lead blocks its follow-up (recorded finding), and routing, capacity and creation writes are fixture-only."
     },
     "CLI04": {
       "state": "bounded",
@@ -28,7 +28,7 @@
     },
     "CLI05": {
       "state": "bounded",
-      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write remains unproved (no command). Bounded: the diagnosticCapture prepare write is unproved."
+      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write remains unproved (no command). Bounded by that unproved write."
     },
     "CLI06": {
       "state": "unproved",
