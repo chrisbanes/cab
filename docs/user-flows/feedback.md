@@ -55,6 +55,9 @@ The operator CLI keeps its receipt output.
   action has no button. Never both.
 - "Check whether it saved" resubmits the exact original request, so it never
   duplicates an effect.
+- CLI credential create and rotate have no request key, so resubmitting would
+  issue another credential. Their unknown outcome offers **Check the list**, which
+  re-reads the credentials instead of resubmitting.
 
 ## Details
 

@@ -28,7 +28,8 @@ The operator never leaves setup to create a prerequisite.
 5. **Ready check.** Replaces the "Recorded … as a paused project" alert:
    - Lists what was recorded (instructions revision, repository access, linked
      GitHub Project) and any item that would make work wait: runtime unavailable,
-     profile runtime not configured, checkout unverified.
+     profile runtime not configured, Claude token unavailable for a Claude lead
+     (Fix opens [Add Claude](claude-runtime.md)), checkout unverified.
    - Primary **Resume and create first task**: resumes the project through the
      existing project command, then opens the composer with the project selected.
      Disabled with the blocking reason while a listed item would make work wait.
