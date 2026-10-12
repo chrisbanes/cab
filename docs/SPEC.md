@@ -549,10 +549,10 @@ falls back to another. The operator UI selects and shows each profile's runtime,
 the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as an `env:NAME` reference without showing it.
 
-The Claude runtime is implemented and selectable per profile, but it is not enabled
-in the production service until bounded live journeys
-([#827](https://github.com/chrisbanes/ensemble/issues/827)) qualify it; until then
-Claude work waits visibly as not configured. Its execution policy differs from
+The production service runs both runtimes; profiles default to Codex. The Claude
+runtime is qualified, with limits, by bounded live journeys
+([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
+an available token reference waits visibly. Its execution policy differs from
 Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 
 - `dontAsk` permissions with an explicit tool allowlist and a `PreToolUse` hook that
@@ -566,13 +566,16 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
   are supplied as text.
 - Agents ask questions only through `ensemble_ask_question`.
 
-Each runtime's effective policy lists its disclosed limits. For Claude these include
-the subprocess token scrub, which is not yet qualified: Bash, hooks and stdio MCP
-children may still see the token. Surfaces the journeys do not test remain limits.
+Each runtime's effective policy lists its disclosed limits. For Claude, the
+subprocess token scrub is qualified for sandboxed Bash only; hooks run in process and
+no stdio MCP servers are allowed. A Claude CLI process can outlive a crashed service,
+so the operator verifies its exit before recovering the turn. Recovery continues
+from the assignment's latest completed turn, so a crash during its first turn
+continues in a fresh session. Surfaces the journeys did not test remain limits.
 The token comes from the operator's own subscription through `claude setup-token`.
 Anthropic's terms do not explicitly address a single-operator service driven by its
-owner, so the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
-are rechecked before the harness is advertised.
+owner; the [current terms](https://code.claude.com/docs/en/legal-and-compliance)
+are rechecked when self-hosting by others is considered.
 
 Configuration forms edit current values in place rather than requiring a complete
 replacement. Private values (instructions, routing guidance, search queries and

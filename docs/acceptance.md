@@ -244,7 +244,9 @@ alone passes none of these scenarios.
 ### Claude execution harness scenarios
 
 [ADR-1008](adr/1008-claude-code-execution-harness.md) requires these bounded
-real-runtime journeys before the Claude runtime is enabled or advertised. Each runs
+real-runtime journeys before the Claude runtime is enabled or advertised; all four
+are **Bounded** by the
+[#827 evidence](evidence/issue-827-claude-journeys-2026-10-12.md). Each runs
 under an explicit grant against a disposable repository and temporary data only.
 Deterministic tests already cover fault handling, capability rejection and policy
 denial.
@@ -435,11 +437,14 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   local review resumed it, and the resumed turn on the same thread received the
   review's anchors and reported a result. Evidence:
   [live follow-up](evidence/issue-828-operator-follow-up-live-2026-10-09.md).
-- **Claude execution harness** (C5-1–C5-4) — **Unproved.** The runtime is
-  implemented and its fault, rejection, policy, Stop and restart holds are covered
-  by deterministic tests. A guarded driver (`npm run c5:live`) is ready for the
-  journeys, which have not run, so the runtime is not enabled in the production
-  service.
+- **Claude execution harness** (C5-1–C5-4) — **Bounded.** Fault, rejection,
+  policy, Stop and restart holds are covered by deterministic tests, and the guarded
+  driver (`npm run c5:live`) ran each journey once to a pass on Claude Code
+  `2.1.296`: Claude-only, Codex lead with a Claude worker, Stop, and a service crash
+  recovered through the service seam (no operator route) on the same session. The
+  token scrub is qualified for sandboxed Bash only. Untested surfaces, including
+  the launchd-installed service, other platforms and token expiry, remain limits.
+  Evidence: [Claude journeys](evidence/issue-827-claude-journeys-2026-10-12.md).
 - **ChatGPT and native Codex** (X01–X08) — **Unproved**, deferred. X01 and X02 stay
   unproved: the inspected App Server and SDK surfaces expose standalone thread
   creation but not saved-project placement, linked native workers, project/task

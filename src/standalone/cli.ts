@@ -52,13 +52,19 @@ export async function waitForServiceExit(
   return reason;
 }
 
+/** Both harnesses run in production; profiles still default to Codex (ADR-1008, #827). */
+export const productionRuntimeHarnesses = ["codex", "claude"] as const;
+
+export const productionService = (dataDir: string) =>
+  // Invalid retention variables fail startup rather than using defaults.
+  new StandaloneService(dataDir, undefined, undefined, {
+    diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
+    runtimeHarnesses: productionRuntimeHarnesses,
+  });
+
 export async function main(
   commandLine = process.argv.slice(2),
-  serviceFactory: (dataDir: string) => StandaloneService = (dataDir) =>
-    // Invalid retention variables fail startup rather than using defaults.
-    new StandaloneService(dataDir, undefined, undefined, {
-      diagnostics: { limits: diagnosticLimitsFromEnv(process.env) },
-    }),
+  serviceFactory: (dataDir: string) => StandaloneService = productionService,
 ): Promise<void> {
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)

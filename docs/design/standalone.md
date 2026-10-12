@@ -33,7 +33,7 @@ endpoint; runtime access, existing holds and reviewed cutover remain unchanged. 
 
 - Use Codex first, with the existing operator login, and qualify Codex App Server
   as the integration surface. [ADR-1008](../adr/1008-claude-code-execution-harness.md)
-  adds Claude Code as a second harness (not implemented); API-key billing for agent
+  adds Claude Code as a second harness (qualified with limits by #827); API-key billing for agent
   execution is deferred. Separately configured TypeSafe API access is permitted for
   projects that explicitly enable assignment routing.
 - Do not silently switch authentication or add API billing if unattended use fails.
