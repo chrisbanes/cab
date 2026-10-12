@@ -402,7 +402,8 @@ Troubleshooting:
   not use operator credentials.
 - After correcting instructions for a completed lead, `assignment apply-current`
   followed by `task follow-up` exits 4, because adoption advances the assignment past
-  its result, and the lead cannot then be resumed. Until that is resolved, send the
+  its result, and the lead cannot then be resumed
+  ([#935](https://github.com/chrisbanes/ensemble/issues/935)). Until that is resolved, send the
   follow-up under `task stop`, run `assignment apply-current`, then `task resume`.
   Stop is task-wide: it also requests cancellation of the task's other active work,
   so use it only when nothing else on the task is running.

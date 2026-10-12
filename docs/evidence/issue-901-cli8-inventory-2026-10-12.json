@@ -11,8 +11,7 @@
   "scenarios": {
     "CLI01": {
       "state": "unproved",
-      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) ran the packed binary installed outside the checkout, with Keychain and token-file logins, investigated the failed task (search, result, execution inputs with the submitted digest, logs, bound instructions), compared current settings and prepared the profile diff. Missing: the second privately connected machine over verified HTTPS; the TLS-proxy and redirect checks are same-host fixtures only.",
-      "pending": "T4 second-machine private HTTPS (awaiting Chris's grant)"
+      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) ran the packed binary installed outside the checkout, with Keychain and token-file logins, investigated the failed task (search, result, execution inputs with the submitted digest, logs, bound instructions), compared current settings and prepared the profile diff. Missing: the second privately connected machine over verified HTTPS; the TLS-proxy and redirect checks are same-host fixtures only. Unproved: prerequisite unavailable (no second trusted machine was granted)."
     },
     "CLI02": {
       "state": "bounded",
@@ -32,8 +31,7 @@
     },
     "CLI06": {
       "state": "unproved",
-      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) identified the submitted inputs (digest match), commandExecution and dynamicToolCall items with the ensemble_report_result tool record, observed ENSEMBLE_MANAGED_ASSIGNMENT=1 in the Codex tool shell, and drove correction, adoption and one follow-up turn; deterministic boundary evidence is renewed. Missing: the private-remote half of the journey.",
-      "pending": "T4 second-machine private HTTPS (awaiting Chris's grant)"
+      "basis": "Host side real: the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) identified the submitted inputs (digest match), commandExecution and dynamicToolCall items with the ensemble_report_result tool record, observed ENSEMBLE_MANAGED_ASSIGNMENT=1 in the Codex tool shell, and drove correction, adoption and one follow-up turn; deterministic boundary evidence is renewed. Missing: the private-remote half of the journey. Unproved: prerequisite unavailable (no second trusted machine was granted)."
     }
   },
   "rows": [
@@ -56,7 +54,7 @@
       "retry": "n/a: login is not a receipted mutation; re-running replaces the local connection.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "auth status",
@@ -76,7 +74,7 @@
       "retry": "n/a: read; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "auth logout",
@@ -96,7 +94,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "connection list",
@@ -115,7 +113,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "connection use",
@@ -134,7 +132,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "connection remove",
@@ -153,7 +151,7 @@
       "retry": "n/a: local; no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project list",
@@ -172,7 +170,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project get",
@@ -191,7 +189,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project instructions",
@@ -209,7 +207,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project revisions",
@@ -226,7 +224,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Only the inventory smoke invokes project revisions through the CLI (envelope, coverage, unchanged digest); no CLI test checks its revision list, redaction or unknown-id paths, which only profile revisions has. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Only the inventory smoke invokes project revisions through the CLI (envelope, coverage, unchanged digest); no CLI test checks its revision list, redaction or unknown-id paths, which only profile revisions has. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project sources",
@@ -246,7 +244,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Source readers are injected and no live GitHub was used. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Source readers are injected and no live GitHub was used. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "capacity get",
@@ -264,7 +262,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Capacity is not one of the ten design areas; it is assigned to project configuration. Lowering a limit below live usage was not exercised. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Capacity is not one of the ten design areas; it is assigned to project configuration. Lowering a limit below live usage was not exercised. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project prepare",
@@ -284,7 +282,7 @@
       "retry": "n/a: prepare is local and sends no request.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project prepare-create",
@@ -302,7 +300,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project apply",
@@ -327,7 +325,7 @@
       "retry": "Replaying the identical document applies once; a lost reply exits 6 and operation get reads it recorded; a fresh process or service restart reuses the key with one version bump; one UUID in three scopes selects only its own receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project prepare-routing",
@@ -344,7 +342,7 @@
       "retry": "n/a: prepare is local; apply replay is covered by project apply.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Apply of a routing document is covered through project apply with a read-write credential only. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Apply of a routing document is covered through project apply with a read-write credential only. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project prepare-source",
@@ -362,7 +360,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Source readers are injected and no live GitHub was used. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Source readers are injected and no live GitHub was used. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project preview-source",
@@ -380,7 +378,7 @@
       "retry": "A lost reply exits 6 and operation get --type github.preview reads it back; after a restart the identical rerun records once; a throwing reader exits 6 with the identity.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "The provider read uses an injected reader; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "The provider read uses an injected reader; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "project place-task",
@@ -398,7 +396,7 @@
       "retry": "A lost reply exits 6 naming only --request-id (operation get does not read github.place); after a restart the rerun reports the earlier placement from the task read without its receipt.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "The receipt is not readable through operation get, so a rerun reports the placement from the task read. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "The receipt is not readable through operation get, so a rerun reports the placement from the task read. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "capacity prepare",
@@ -417,7 +415,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Capacity is not one of the ten design areas; it is assigned to project configuration. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Capacity is not one of the ten design areas; it is assigned to project configuration. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "capacity apply",
@@ -435,7 +433,7 @@
       "retry": "The identical document replays one receipt; the packed binary prepares, applies and reads back.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Missing CLI-level read-only denial for capacity apply. Lowering a limit below live usage was not exercised. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Missing CLI-level read-only denial for capacity apply. Lowering a limit below live usage was not exercised. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "profile list",
@@ -453,7 +451,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "profile get",
@@ -473,7 +471,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "profile instructions",
@@ -493,7 +491,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "profile revisions",
@@ -513,7 +511,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "profile prepare",
@@ -533,7 +531,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant). --restore-revision is covered by deterministic fixtures only."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). --restore-revision is covered by deterministic fixtures only."
     },
     {
       "id": "profile prepare-create",
@@ -551,7 +549,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Creation is not reversible (revoke instead). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Creation is not reversible (revoke instead). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "profile apply",
@@ -575,7 +573,7 @@
       "retry": "Re-applying the same document replays one receipt; a lost reply exits 6, operation get reads it and the rerun reuses the key; one UUID in distinct scopes stays distinct.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task list",
@@ -595,7 +593,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task search",
@@ -614,7 +612,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task get",
@@ -636,7 +634,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task messages",
@@ -653,7 +651,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Each page performs a full task read before slicing (#875). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Each page performs a full task read before slicing (#875). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "task create",
@@ -671,7 +669,7 @@
       "retry": "The same --request-id creates once, an identical rerun without it creates a second task; a lost reply then rerun (also after a service restart) creates one task.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Creation is irreversible (no delete or cancel; hold with --ready false or Stop). A ready task dispatches with the fixture runtime only. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Creation is irreversible (no delete or cancel; hold with --ready false or Stop). A ready task dispatches with the fixture runtime only. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "task configure",
@@ -689,7 +687,7 @@
       "retry": "A lost reply then rerun reuses the key.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "task add-dependency",
@@ -707,7 +705,7 @@
       "retry": "n/a: no retry case beyond the shared journal rules covered in operator-cli-write.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "task remove-dependency",
@@ -725,7 +723,7 @@
       "retry": "n/a: no retry case beyond the shared journal rules covered in operator-cli-write.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "task message",
@@ -743,7 +741,7 @@
       "retry": "A lost reply then rerun reuses the key; operation get does not read coordination receipts.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Messages are irreversible. After recovery, a new message admits work only with the fixture runtime. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Messages are irreversible. After recovery, a new message admits work only with the fixture runtime. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "task follow-up",
@@ -763,7 +761,7 @@
       "retry": "A lost reply then rerun reuses the key; operation get does not read coordination receipts.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant). A follow-up after adoption on a completed lead exits 4 (see assignment apply-current)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted). A follow-up after adoption on a completed lead exits 4 (see assignment apply-current)."
     },
     {
       "id": "task stop",
@@ -785,7 +783,7 @@
       "retry": "A lost Stop then rerun replays the receipt; the keyless retained form and the receipted command share one hold; the output reports whether Stop is in effect.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "task resume",
@@ -808,7 +806,7 @@
       "retry": "A lost Resume then rerun replays the old receipt and reports Stop not in effect with new --request-id advice.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "assignment get",
@@ -828,7 +826,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "assignment history",
@@ -845,7 +843,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "assignment instructions",
@@ -867,7 +865,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "assignment apply-current",
@@ -906,7 +904,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "The inbox scans every task per read (#875). Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "The inbox scans every task per read (#875). Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "question get",
@@ -923,7 +921,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "approval get",
@@ -941,7 +939,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "question answer",
@@ -959,7 +957,7 @@
       "retry": "A lost reply, service restart and rerun reuse the key and record once.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Native question answering through the CLI is proved only against a fake service asserting the exact question.native.answer body; the real service path is covered by native question service tests, not a CLI journey. Answers are irreversible. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Native question answering through the CLI is proved only against a fake service asserting the exact question.native.answer body; the real service path is covered by native question service tests, not a CLI journey. Answers are irreversible. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "approval decide",
@@ -977,7 +975,7 @@
       "retry": "A lost reply then rerun records once.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "An approval whose target is withheld cannot be decided through the CLI (fails closed, 409). Decisions are irreversible. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "An approval whose target is withheld cannot be decided through the CLI (fails closed, 409). Decisions are irreversible. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "execution list",
@@ -999,7 +997,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "execution get",
@@ -1020,7 +1018,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "execution inputs",
@@ -1041,7 +1039,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "logs",
@@ -1064,7 +1062,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "recovery get",
@@ -1083,7 +1081,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Held generations are seeded recovery facts and the copied no-turn and pre-turn test runtimes, never a real stuck process. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Held generations are seeded recovery facts and the copied no-turn and pre-turn test runtimes, never a real stuck process. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "recovery prepare",
@@ -1101,7 +1099,7 @@
       "retry": "n/a: prepare is local.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Attestations and hashes are operator assertions the service cannot verify. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Attestations and hashes are operator assertions the service cannot verify. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "recovery submit",
@@ -1119,7 +1117,7 @@
       "retry": "An identical rerun replays one receipt; a lost reply exits 6 and operation get reads it recorded; two concurrent submissions reconcile once.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Real process termination was not exercised and the keyless bound-turn recovery has no route (excluded). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Real process termination was not exercised and the keyless bound-turn recovery has no route (excluded). Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "result list",
@@ -1138,7 +1136,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "result get",
@@ -1157,7 +1155,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "result evidence",
@@ -1174,7 +1172,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "artifact get",
@@ -1193,7 +1191,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "delivery get",
@@ -1212,7 +1210,7 @@
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "The provider is the scripted GitHub delivery dispatcher over the real GitHubHttpDeliveryProvider; no live GitHub. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not yet in a live journey outside the checkout (T3), and no second machine or private HTTPS (T4)."
+      "gap": "The provider is the scripted GitHub delivery dispatcher over the real GitHubHttpDeliveryProvider; no live GitHub. Exercised through the in-process CLI and the packed binary against a loopback service (and a throwaway-certificate TLS proxy) with fixture runtimes: not in the live journey outside the checkout, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "delivery refresh",
@@ -1230,7 +1228,7 @@
       "retry": "A lost reply exits 6 and the identical rerun reuses the key; operation get does not read delivery.refresh receipts.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Refresh is installation-wide (stated in the output). Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Refresh is installation-wide (stated in the output). Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "delivery review-comment",
@@ -1248,7 +1246,7 @@
       "retry": "The review key is its operation id; an identical rerun replays the review.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Scripted GitHub only; no live GitHub. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "delivery confirm-comment",
@@ -1266,7 +1264,7 @@
       "retry": "n/a: the decision is final; no retry beyond the shared journal rules.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "Decisions are irreversible; scripted GitHub only. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "Decisions are irreversible; scripted GitHub only. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "delivery send-comment",
@@ -1285,7 +1283,7 @@
       "retry": "A lost reply exits 6 and the identical rerun returns the recorded receipt with one comment; a new --request-id posts a second; a 409 for a recorded operation is exit 6 and rerun replays.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "A posted comment cannot be edited or retracted; there is no list of pending reviews. Scripted GitHub only; no live GitHub post. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not yet through the installed binary in a live journey (T3), and no second machine or private HTTPS (T4)."
+      "gap": "A posted comment cannot be edited or retracted; there is no list of pending reviews. Scripted GitHub only; no live GitHub post. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
       "id": "operation get",
@@ -1313,7 +1311,7 @@
       "retry": "The same UUID in other scopes reads each scope's own receipt or not-recorded; a lost reply is reconciled by reading, or by a same-key rerun.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "project prepare diagnosticCapture",
@@ -1376,7 +1374,7 @@
       "retry": "n/a: a denied command leaves no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "remote authority boundary",
@@ -1398,7 +1396,7 @@
       "retry": "n/a: a denied route leaves no receipt.",
       "observation": "real",
       "state": "passed",
-      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not yet run from a second machine over private HTTPS (T4, awaiting grant)."
+      "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
       "id": "verified HTTPS transport and redirect rejection",
@@ -1416,7 +1414,7 @@
       "retry": "n/a: a transport refusal sent nothing.",
       "observation": "synthetic",
       "state": "bounded",
-      "gap": "The HTTPS proofs use a local TLS proxy with a throwaway certificate on the same host; no private route (Tailscale Serve), second machine or real certificate chain (T4)."
+      "gap": "The HTTPS proofs use a local TLS proxy with a throwaway certificate on the same host; no private route (Tailscale Serve), second machine or real certificate chain (prerequisite unavailable: no second trusted machine was granted)."
     }
   ],
   "excluded": [

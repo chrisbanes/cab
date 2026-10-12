@@ -124,7 +124,7 @@ owns delivery scope and status.
   evidence and attestations the operator states explicitly. A bounded live Codex
   journey through the packaged CLI on this host is recorded in the
   [CLI8 record](docs/evidence/issue-901-cli8-2026-10-12.md); use from a second
-  privately connected machine is not yet qualified. See
+  privately connected machine is unproved because none was available. See
   [development](docs/development.md#operator-cli).
 
 Automated tests with real SQLite and Chromium, plus bounded live Codex and browser
