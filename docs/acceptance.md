@@ -196,7 +196,8 @@ diagnostics capture, reads and following in the
 attention and Stop/Resume in the
 [CLI5 record](evidence/issue-898-cli5-2026-10-11.md), and for GitHub sources,
 delivery and staged comments in the
-[CLI4 record](evidence/issue-897-cli4-2026-10-12.md). None qualifies a scenario on
+[CLI4 record](evidence/issue-897-cli4-2026-10-12.md), and for evidence-bearing
+recovery in the [CLI6 record](evidence/issue-899-cli6-2026-10-12.md). None qualifies a scenario on
 its own.
 
 The six journeys also require command-by-command coverage of the full

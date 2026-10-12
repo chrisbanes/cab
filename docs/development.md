@@ -323,6 +323,58 @@ or run `node dist/src/cli/main.js` directly.
    `github.configure` and `github.preview` receipts; placements, refreshes and
    comments are settled by rerunning with the same key.
 
+9. Evidence-bearing recovery. `recovery get ASSIGNMENT_ID` and `recovery prepare`
+   work with either scope; `recovery submit` needs a read/write credential (a
+   read-only one exits 3 before anything is sent):
+   - `recovery get ASSIGNMENT_ID` shows the assignment version, conversation
+     revision, holds and up to the 20 newest recovery generations: work ID,
+     generation, intent and request state, process identity, held reason,
+     predecessor, witnesses, observations and receipt, and for each path
+     (`pre-turn-adopt`, `pre-turn-recover`, `no-turn-adopt`, `no-turn-recover`,
+     plus `conversation-replace` for the assignment) whether it is eligible, what
+     blocks it and the inputs it requires. Eligibility is advisory; the service
+     re-checks everything. A string that redaction would change is withheld (gap
+     `content-redacted` or `redaction-unavailable`) and blocks the paths that would
+     send it; older generations are gap `item-omitted`, none at all
+     `evidence-unavailable`. `assignment get` prints a `Recovery:` pointer while the
+     assignment is held.
+   - `recovery prepare PATH ASSIGNMENT_ID --out FILE --work WORK_ID
+     --evidence-file FILE` (or, for `conversation-replace`, `--expected-version N
+     --expected-conversation-revision N` and no evidence file) writes an owner-only
+     `ensemble.cli.recovery/v1` document with the exact command, the observed
+     versions and a digest, and sends nothing. The identity comes from the read; the
+     evidence file supplies everything the service cannot observe. It is strict
+     JSON of at most 64 KiB with `"schema": "ensemble.cli.recovery-evidence/v1"`
+     and, per path, exactly: `pre-turn-adopt` — `rpcError` (the persisted
+     `{code, message}`), `evidence` (`frozenSourceRevision`,
+     `frozenHarnessSha256`, `evidenceSha256`, `approvedDecisionSha256`,
+     `reviewReference`, `approvalReference`) and `attestation`
+     (`beforeTurnRejected`, `noTurnSubmitted`, `independentlyReviewed`, each
+     `true`); `no-turn-adopt` — `evidence` (the same plus `invocationLedgerSha256`)
+     and `attestation` (`completeSynchronousWriteAheadLedger`,
+     `noStartTurnInvocation`, `independentlyReviewed`, `idleThreadMayExist`);
+     either recovery — `receipt` (`termination: {"kind":"process-exit"}`,
+     `effects: "settled"`, `workspace: "preserved"|"reconciled"`). A missing,
+     `false`, extra or malformed item exits 2 before any request; there is no
+     `--yes`, `--confirm`, `--force` or attestation flag. An ineligible path exits 4
+     naming its blockers; an unlisted work exits 2.
+   - `recovery submit --file FILE [--request-id UUID]` revalidates the document
+     (owner-only, digest, same installation) and sends it once. Adoption records an
+     immutable witness (`saved`); recovery verifies termination of the stored
+     process and reconciles ownership (`completed`); conversation replacement
+     increments the revision (`saved`). None resumes the task or dispatches work:
+     after replacement, continue with a new `task message`. A refusal (stale
+     identity, unverified termination, an existing witness, a stale revision or a
+     task hold) exits 4 with the current blockers and observations; missing,
+     expired or stale evidence is never a successful recovery, and that key is not
+     reused. An identical rerun replays the recorded receipt; a lost reply exits 6
+     and is settled with `operation get KEY --scope assignment:ID --type TYPE` or
+     the same command.
+
+   Adoption, recovery and replacement cannot be undone, and adoption here records
+   evidence: it is unrelated to `assignment apply-current`. The bound-turn
+   receipt has no CLI or operator route.
+
 `ORIGIN` is `http://127.0.0.1:PORT` for the service on this machine, or an
 `https://` origin for a separately managed private transport. Other `http:` URLs are
 rejected. Certificates are always verified; for a private CA set

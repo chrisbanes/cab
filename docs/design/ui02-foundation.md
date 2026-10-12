@@ -43,7 +43,7 @@ Each semicolon-separated control is individually retained at the listed destinat
 
 The delivery rows cover the existing delivery controls: the exact policy/authority editor is retained, and the task delivery facts, guarded handback settlement and observation refresh live in the coordination task page. Only observation refresh has a JSON command; policy editing and settlement have no JSON delivery adapter. Settlement records an operator decision; refresh requests provider observations. Neither action alone completes the local task.
 
-Advanced authenticated recovery routes have no rendered form or React control. The host operator supplies the reviewed evidence and exact command material under the existing Origin, session and CSRF checks; model tools have no adoption authority.
+Advanced authenticated recovery routes have no rendered form or React control. The host operator supplies the reviewed evidence and exact command material under the existing Origin, session and CSRF checks; model tools have no adoption authority. The operator CLI reaches the same service methods through receipted `recovery.*` commands on `/api/operator/commands`; a command key recorded through either entry point replays through the other, and these session routes stay closed to bearer credentials.
 
 | Advanced route | Owner and disposition |
 | --- | --- |

@@ -162,7 +162,7 @@ test("an operator journey through the CLI reads back through the UI projections"
   );
 });
 
-test("read-only bearer tokens are refused for every CLI5 command type with no change", async (t) => {
+test("read-only bearer tokens are refused for every CLI5 and CLI6 command type with no change", async (t) => {
   const o = await startCliOperator(t);
   const { s } = o;
   const read = await s.issue("read", "journey-ro");
@@ -236,6 +236,17 @@ test("read-only bearer tokens are refused for every CLI5 command type with no ch
     },
     { type: "task.stop", taskId: s.taskId },
     { type: "task.resume", taskId: s.taskId },
+    // CLI6 recovery types are refused by scope before any validation.
+    { type: "recovery.pre-turn.adopt", assignmentId: id },
+    { type: "recovery.pre-turn.recover", assignmentId: id },
+    { type: "recovery.no-turn.adopt", assignmentId: id },
+    { type: "recovery.no-turn.recover", assignmentId: id },
+    {
+      type: "recovery.conversation.replace",
+      assignmentId: id,
+      expectedAssignmentVersion: 1,
+      expectedConversationRevision: 1,
+    },
   ]) {
     const r = await s.bearer(read.token, "/api/operator/commands", {
       method: "POST",
