@@ -111,7 +111,40 @@ export async function ghToken(
   const token = result.stdout.replace(/\r?\n$/, "");
   if (result.failure || !/^[\x21-\x7e]{1,512}$/.test(token))
     return { state: "unreadable" };
+  remember(token);
   return { token };
+}
+
+// ponytail: in memory only; a token rotated more than eight times since start is no longer excluded.
+const resolvedLimit = 8;
+const resolved = new Set<string>();
+/** Kept only to exclude and redact; never persisted, returned or used for a read. */
+function remember(token: string) {
+  resolved.delete(token);
+  resolved.add(token);
+  for (const oldest of resolved) {
+    if (resolved.size <= resolvedLimit) break;
+    resolved.delete(oldest);
+  }
+}
+
+/**
+ * What child environments and reads must exclude for a discovery reference: env names to drop,
+ * values to drop wherever they appear, and every string to redact. For `gh:github.com` these
+ * are gh's own token variables and every token value this process has resolved.
+ */
+export function discoveryCredentialExclusions(
+  ref: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { names: string[]; values: string[]; redactions: string[] } {
+  if (ref.startsWith("gh:")) {
+    const names = ["GH_TOKEN", "GITHUB_TOKEN"];
+    const values = [...resolved, ...names.flatMap((name) => env[name] || [])];
+    return { names, values, redactions: [ref, ...values] };
+  }
+  const name = ref.slice(4);
+  const values = env[name] ? [env[name]] : [];
+  return { names: [name], values, redactions: [ref, name, ...values] };
 }
 
 /**

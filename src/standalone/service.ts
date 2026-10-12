@@ -52,6 +52,11 @@ import {
   claudeTokenSource,
   readClaudeToken,
 } from "./claude-token.js";
+import {
+  discoveryCredentialExclusions,
+  ghEnvironment,
+  ghToken,
+} from "./gh-credential.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
   managedAssignmentEnvironment,
@@ -311,6 +316,8 @@ export interface StandaloneServiceOptions {
   };
   github?: { readerFactory?: GitHubReaderFactory; intervalMs?: number };
   routingClient?: RoutingChoiceClient | null;
+  /** The `gh` executable for a `gh:github.com` discovery reference; defaults to `gh`. */
+  ghExecutable?: string;
   /** Test-only values remain in memory and are never persisted. */
   conversationHistoryExclusions?: () => readonly string[];
   supervisor?: ExecutionSupervisorOptions;
@@ -771,17 +778,42 @@ export class StandaloneService {
         const ref = domain.claudeTokenReference();
         return ref ? claudeTokenExclusions(ref) : { names: [], values: [] };
       };
-      // Helper children (git, ps, pmset, …) never inherit the Claude token either.
-      setChildCredentialExclusions(claudeTokenExcluded);
+      // Resolve a gh login once so its token value is excluded from the spawn snapshot too;
+      // a failure does not block start.
+      if (domain.discoveryCredentialReference()?.startsWith("gh:"))
+        await ghToken({
+          executable: this.options.ghExecutable,
+          environment: ghEnvironment(domain),
+        });
+      const discoveryExcluded = () => {
+        const ref = domain.discoveryCredentialReference();
+        return ref
+          ? discoveryCredentialExclusions(ref)
+          : { names: [], values: [] };
+      };
+      // Helper children (git, ps, pmset, …) never inherit the Claude token or discovery credential.
+      setChildCredentialExclusions(() => {
+        const claude = claudeTokenExcluded(),
+          discovery = discoveryExcluded();
+        return {
+          names: [...claude.names, ...discovery.names],
+          values: [...claude.values, ...discovery.values],
+        };
+      });
       const spawnEnvironment = {
         spawnEnvironment: () => {
-          const claude = claudeTokenExcluded();
+          const claude = claudeTokenExcluded(),
+            discovery = discoveryExcluded();
           const snapshot = managedAssignmentEnvironment(
             credentialFreeEnvironment(
               process.env,
-              [...deliveryCredentialNames(), ...claude.names],
+              [
+                ...deliveryCredentialNames(),
+                ...claude.names,
+                ...discovery.names,
+              ],
               process.env,
-              claude.values,
+              [...claude.values, ...discovery.values],
             ),
           );
           this.runtimeSpawnSnapshot = snapshot;
@@ -806,6 +838,7 @@ export class StandaloneService {
               "not-configured",
             );
           const snapshot = this.runtimeSpawnSnapshot ?? {};
+          const discovery = discoveryExcluded();
           const source = claudeTokenSource(ref);
           if (source.kind === "file") {
             // Read on every call, never cached: a replaced file applies from the next turn.
@@ -823,9 +856,9 @@ export class StandaloneService {
             return {
               env: credentialFreeEnvironment(
                 snapshot,
-                deliveryCredentialNames(),
+                [...deliveryCredentialNames(), ...discovery.names],
                 process.env,
-                [read.value],
+                [read.value, ...discovery.values],
               ),
               token: read.value,
             };
@@ -845,8 +878,9 @@ export class StandaloneService {
           return {
             env: credentialFreeEnvironment(
               snapshot,
-              [...deliveryCredentialNames(), name],
+              [...deliveryCredentialNames(), name, ...discovery.names],
               process.env,
+              discovery.values,
             ),
             token,
           };
@@ -5264,11 +5298,7 @@ export class StandaloneService {
             : [],
         ),
         ...(discovery
-          ? [
-              discovery,
-              discovery.slice(4),
-              process.env[discovery.slice(4)] ?? "",
-            ]
+          ? discoveryCredentialExclusions(discovery).redactions
           : []),
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...fixtureValues,

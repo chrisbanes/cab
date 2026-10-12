@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
 import type { z } from "zod";
+import { childCredentialExclusions } from "./child-environment.js";
 import { transaction, type Database } from "./store.js";
 import {
   contextCaptureSchema,
@@ -214,7 +215,10 @@ export class TaskReviewStore {
           .all() as Row[]),
       );
     for (const ref of refs) {
-      if (ref.credentialRef) {
+      // A `gh:` discovery reference has no variable; its token values come from the exclusions below.
+      if (String(ref.credentialRef).startsWith("gh:"))
+        excluded.push(String(ref.credentialRef));
+      else if (ref.credentialRef) {
         const name = String(ref.credentialRef).slice(4);
         excluded.push(String(ref.credentialRef), name);
         if (process.env[name]) excluded.push(process.env[name]!);
@@ -268,6 +272,7 @@ export class TaskReviewStore {
     for (const [key, v] of Object.entries(process.env))
       if (/TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL/.test(key) && v)
         excluded.push(v);
+    excluded.push(...childCredentialExclusions().values);
     return excluded;
   }
   private safe(

@@ -106,6 +106,7 @@ import {
 } from "./github-discovery.js";
 import {
   detectGh,
+  discoveryCredentialExclusions,
   ghEnvironment,
   type GhOptions,
   ghToken,
@@ -433,7 +434,15 @@ export class OperatorApi {
         createHash("sha256").update(text).digest("hex");
     // A file reference fences on its value, or on why there is none.
     const claudeRead = claude && readClaudeToken(claudeTokenSource(claude));
+    const discovery = d.discoveryCredentialReference();
     return JSON.stringify([
+      // Every value the discovery exclusions hold, including resolved gh tokens.
+      discovery
+        ? [
+            discovery,
+            digest(discoveryCredentialExclusions(discovery).values.join("\0")),
+          ]
+        : null,
       claude && claudeRead
         ? [
             claude,
@@ -445,7 +454,6 @@ export class OperatorApi {
           ]
         : null,
       ...[
-        d.discoveryCredentialReference(),
         ...d
           .projects()
           .flatMap((p) => [
@@ -511,12 +519,8 @@ export class OperatorApi {
         covered = new Set<string>();
       const discovery = d.discoveryCredentialReference(),
         claude = d.claudeTokenReference();
-      if (discovery) {
-        const envKey = discovery.slice(4);
-        values.push(discovery, envKey);
-        const value = process.env[envKey];
-        if (value) values.push(value);
-      }
+      if (discovery)
+        values.push(...discoveryCredentialExclusions(discovery).redactions);
       if (claude) values.push(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining = 128;
