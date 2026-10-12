@@ -236,15 +236,15 @@ export class SchedulerStore {
       .map((row) => this.parse(row as Record<string, unknown>));
   }
 
-  /** Requests counted up to `limit`, reading at most `limit` rows. */
-  countUpTo(limit: number): number {
+  /** One task's requests counted up to `limit`, reading at most `limit` index entries. */
+  countForTaskUpTo(taskId: string, limit: number): number {
     return Number(
       (
         this.db
           .prepare(
-            "SELECT COUNT(*) AS count FROM (SELECT 1 FROM turn_requests LIMIT ?)",
+            "SELECT COUNT(*) AS count FROM (SELECT 1 FROM turn_requests WHERE taskId = ? LIMIT ?)",
           )
-          .get(limit) as { count: number }
+          .get(taskId, limit) as { count: number }
       ).count,
     );
   }

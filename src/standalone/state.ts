@@ -3572,14 +3572,19 @@ export class ExecutionState {
     );
   }
 
-  /** Recovery identities counted up to `limit`, reading at most `limit` rows. */
-  recoveryCountUpTo(limit: number): number {
+  /**
+   * The rows `recoveryForTask(taskId)` would load (without `alsoWorkId`), counted
+   * up to `limit`, reading at most `limit` index entries.
+   */
+  recoveryCountForTaskUpTo(taskId: string, limit: number): number {
     return Number(
       (
         this.db
           .prepare(`SELECT COUNT(*) AS count FROM
-          (SELECT 1 FROM execution_recovery_identities LIMIT ?)`)
-          .get(limit) as { count: number }
+          (SELECT 1 FROM task_execution_bindings binding
+          JOIN execution_recovery_identities identity ON identity.workId = binding.workId
+          WHERE binding.taskId = ? LIMIT ?)`)
+          .get(taskId, limit) as { count: number }
       ).count,
     );
   }

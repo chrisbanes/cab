@@ -88,20 +88,27 @@ async function shownTitle(api: OperatorApi, taskId: string) {
 }
 
 for (const kind of ["requests", "recovery"] as const)
-  test(`the global 128-row ${kind} bound is decided by a capped count before any history row`, async (t) => {
+  test(`the 128-row ${kind} bound is the task's own, decided by a capped count before any history row`, async (t) => {
     const f = await createOperatorFixture();
     t.after(() => f.close());
     const ids = await world(f);
     const api = new OperatorApi(f.service, [f.directory]);
-    const size = () =>
+    const kinds = {
+      requests: kind === "requests",
+      recovery: kind === "recovery",
+    };
+    const own = () =>
+      kind === "requests"
+        ? f.service.turnRequestsForTask(ids.taskId).length
+        : f.service.recoveryForTask(ids.taskId).length;
+    const all = () =>
       kind === "requests"
         ? f.service.turnRequests().length
         : f.service.recoveryView().length;
-    seedOrphanHistory(f, 128 - size(), {
-      requests: kind === "requests",
-      recovery: kind === "recovery",
-    });
-    assert.equal(size(), 128);
+
+    // Unrelated rows, however many, never withhold the task's prose.
+    seedOrphanHistory(f, 129, kinds);
+    assert.ok(all() > 128);
     assert.equal(await shownTitle(api, ids.taskId), title);
     const scoped = new OperatorApi(
       forbid(f.service, ["recoveryView", "turnRequests", "list"]),
@@ -109,11 +116,12 @@ for (const kind of ["requests", "recovery"] as const)
     );
     assert.equal(await shownTitle(scoped, ids.taskId), title);
 
-    seedOrphanHistory(f, 1, {
-      requests: kind === "requests",
-      recovery: kind === "recovery",
-    });
-    assert.equal(size(), 129);
+    // The task's own rows: 128 shown, 129 withheld.
+    seedOrphanHistory(f, 128 - own(), kinds, ids);
+    assert.equal(own(), 128);
+    assert.equal(await shownTitle(api, ids.taskId), title);
+    seedOrphanHistory(f, 1, kinds, ids);
+    assert.equal(own(), 129);
     assert.equal(await shownTitle(api, ids.taskId), null);
     const rowless = new OperatorApi(
       forbid(f.service, [

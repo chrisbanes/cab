@@ -72,19 +72,22 @@ export function historyRowCounter(t: TestContext) {
 
 /**
  * Completed generations bound to tasks and assignments that do not exist: an
- * intent, recovery identity and binding, and/or a turn request each.
+ * intent, recovery identity and binding, and/or a turn request each. With
+ * `owner`, they belong to that task and assignment (version 1, revisions 1/1) so
+ * only the count bound can reject them.
  */
 export function seedOrphanHistory(
   f: Fixture,
   count: number,
   kinds = { requests: true, recovery: true },
+  owner?: { taskId: string; projectId: string; assignmentId: string },
 ) {
   f.seedPersistedState((db) => {
     db.exec("BEGIN");
     for (let i = 0; i < count; i++) {
       const workId = `orphan-${randomUUID()}`,
-        taskId = randomUUID(),
-        assignmentId = randomUUID();
+        taskId = owner?.taskId ?? randomUUID(),
+        assignmentId = owner?.assignmentId ?? randomUUID();
       if (kinds.recovery) {
         db.prepare(
           "INSERT INTO execution_intents (id,workId,prompt,workspace,state,accountType,sandbox,approval) VALUES (?,?,'ORPHAN PROMPT','/orphan','completed','chatgpt','workspaceWrite','never')",
@@ -99,7 +102,13 @@ export function seedOrphanHistory(
       if (kinds.requests)
         db.prepare(
           "INSERT INTO turn_requests (requestKey,workId,kind,taskId,projectId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,prompt,state) VALUES (?,?,'assignment',?,?,?,1,1,1,'ORPHAN PROMPT','completed')",
-        ).run(randomUUID(), workId, taskId, randomUUID(), assignmentId);
+        ).run(
+          randomUUID(),
+          workId,
+          taskId,
+          owner?.projectId ?? randomUUID(),
+          assignmentId,
+        );
     }
     db.exec("COMMIT");
   });

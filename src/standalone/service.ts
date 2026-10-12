@@ -1820,12 +1820,12 @@ export class StandaloneService {
     return this.schedulerStore.forTask(taskId);
   }
 
-  /** Whether either retained history table holds more than `limit` rows. */
-  retainedRowsExceed(limit: number): boolean {
+  /** Whether the task's own turn requests or recovery identities exceed `limit`, each kind counted separately. */
+  taskRetainedRowsExceed(taskId: string, limit: number): boolean {
     if (!this.schedulerStore) throw new Error("Service is not started");
     return (
-      this.schedulerStore.countUpTo(limit + 1) > limit ||
-      this.requireState().recoveryCountUpTo(limit + 1) > limit
+      this.schedulerStore.countForTaskUpTo(taskId, limit + 1) > limit ||
+      this.requireState().recoveryCountForTaskUpTo(taskId, limit + 1) > limit
     );
   }
 
