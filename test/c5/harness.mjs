@@ -100,11 +100,18 @@ export function updateLedger(file, transition) {
       break;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
+      let text;
+      try {
+        text = readFileSync(lock, "utf8");
+      } catch (missing) {
+        if (missing.code === "ENOENT") continue; // Released meanwhile: retry.
+        throw missing;
+      }
       // Empty only between its owner's create and PID write.
-      const owner = Number(readFileSync(lock, "utf8") || Number.NaN);
+      const owner = Number(text || Number.NaN);
       if (Number.isInteger(owner) && owner > 0 && !alive(owner))
         throw new BudgetExhausted(
-          `ledger lock ${lock} is stale; remove it only after verifying no driver runs`,
+          "ledger lock is stale; remove it only after verifying no driver runs",
         );
       if (Date.now() > deadline)
         throw new BudgetExhausted(
