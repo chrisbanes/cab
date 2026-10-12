@@ -384,7 +384,8 @@ async function stop(current, ids, check) {
   );
   await delay(15_000); // Lets the sleep start inside the turn.
   if (!running(records()))
-    throw new ComplianceError("the turn ended before Stop; sleep did not run");
+    // Not compliance: the CLI's own refusal ended the first such turn (#827).
+    throw new Error("the turn ended before Stop; sleep did not run");
   const starts = () =>
     current.observed.turns.length + current.observed.refused.length;
   const before = starts();

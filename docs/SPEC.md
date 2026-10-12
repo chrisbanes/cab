@@ -569,7 +569,8 @@ Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 Each runtime's effective policy lists its disclosed limits. For Claude, the
 subprocess token scrub is qualified for sandboxed Bash only; hooks run in process and
 no stdio MCP servers are allowed. A Claude CLI process can outlive a crashed service,
-so the operator verifies its exit before recovering the turn. Recovery continues
+so the operator verifies its exit before recovering the turn; bound-turn recovery
+has no operator HTTP or CLI route yet. Recovery continues
 from the assignment's latest completed turn, so a crash during its first turn
 continues in a fresh session. Surfaces the journeys did not test remain limits.
 The token comes from the operator's own subscription through `claude setup-token`.

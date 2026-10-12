@@ -439,8 +439,8 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   [live follow-up](evidence/issue-828-operator-follow-up-live-2026-10-09.md).
 - **Claude execution harness** (C5-1–C5-4) — **Bounded.** Fault, rejection,
   policy, Stop and restart holds are covered by deterministic tests, and the guarded
-  driver (`npm run c5:live`) ran each journey once to a pass on Claude Code
-  `2.1.296`: Claude-only, Codex lead with a Claude worker, Stop, and a service crash
+  driver (`npm run c5:live`) passed each journey on Claude Code `2.1.296` (scrub,
+  Stop and crash on their second attempt after harness repairs, Stop on `sonnet`): Claude-only, Codex lead with a Claude worker, Stop, and a service crash
   recovered through the service seam (no operator route) on the same session. The
   token scrub is qualified for sandboxed Bash only. Untested surfaces, including
   the launchd-installed service, other platforms and token expiry, remain limits.
