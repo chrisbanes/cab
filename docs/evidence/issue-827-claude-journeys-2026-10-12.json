@@ -1,0 +1,788 @@
+{
+  "issue": 827,
+  "date": "2026-10-12",
+  "runs": [
+    {
+      "facet": "scrub",
+      "attempt": 1,
+      "candidate": "b19b84b1bb1759ac39c5d0722064945193e91f89",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "run",
+      "outcome": "failed",
+      "failure": {
+        "stage": "run",
+        "kind": "model-compliance",
+        "message": "probe files timed out"
+      },
+      "observations": {},
+      "startTurn": {
+        "turns": 1,
+        "refused": [
+          {
+            "harness": "claude",
+            "reason": "scrub: claude turn cap reached"
+          }
+        ]
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 1,
+          "model": "haiku",
+          "startedAt": 1791787313645,
+          "turns": {
+            "claude": 1,
+            "codex": 0
+          },
+          "outcome": "failed",
+          "failureKind": "budget"
+        },
+        "totals": {
+          "claude": 1,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "scrub",
+      "attempt": 2,
+      "candidate": "c167cfc4a3f806f4fd7f637612ff1155d68a569f",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "run",
+      "outcome": "passed",
+      "failure": null,
+      "observations": {
+        "tokenNamePresent": false,
+        "referenceNamePresent": false,
+        "tokenValueInEnv": false,
+        "tokenValueInParentPs": false,
+        "parentPsReadable": false,
+        "controlPresent": true,
+        "hooksAndStdioMcp": "not applicable: the hook runs in-process and strict MCP config allows no stdio servers",
+        "disposition": "qualified"
+      },
+      "startTurn": {
+        "turns": 1,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 2,
+          "model": "haiku",
+          "startedAt": 1791787748683,
+          "turns": {
+            "claude": 1,
+            "codex": 0
+          },
+          "outcome": "passed",
+          "failureKind": null
+        },
+        "totals": {
+          "claude": 2,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "stop",
+      "attempt": 1,
+      "candidate": "c167cfc4a3f806f4fd7f637612ff1155d68a569f",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "run",
+      "outcome": "failed",
+      "failure": {
+        "stage": "run",
+        "kind": "model-compliance",
+        "message": "the turn ended before Stop; sleep did not run"
+      },
+      "observations": {},
+      "startTurn": {
+        "turns": 1,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 1,
+          "model": "haiku",
+          "startedAt": 1791787772838,
+          "turns": {
+            "claude": 1,
+            "codex": 0
+          },
+          "outcome": "failed",
+          "failureKind": "model-compliance"
+        },
+        "totals": {
+          "claude": 3,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "stop",
+      "attempt": 2,
+      "candidate": "272f3b8f39c9020ba3e9678220dbdd18f2dae739",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "sonnet",
+        "reasoningEffort": "low"
+      },
+      "stage": "run",
+      "outcome": "passed",
+      "failure": null,
+      "observations": {
+        "interrupt": "acknowledged",
+        "terminal": "observed",
+        "stateAfter": "held",
+        "holds": {
+          "task": "Task stopped",
+          "writer": true,
+          "capacity": true,
+          "uncertainty": true,
+          "stop": true
+        },
+        "cliExitedByItself": true,
+        "startTurnAfterStop": 0
+      },
+      "startTurn": {
+        "turns": 1,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli (stopped turn)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 2,
+          "model": "sonnet",
+          "startedAt": 1791787925927,
+          "turns": {
+            "claude": 1,
+            "codex": 0
+          },
+          "outcome": "passed",
+          "failureKind": null
+        },
+        "totals": {
+          "claude": 4,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "crash",
+      "attempt": 1,
+      "candidate": "272f3b8f39c9020ba3e9678220dbdd18f2dae739",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "recover",
+      "outcome": "failed",
+      "failure": {
+        "stage": "recover",
+        "kind": "harness",
+        "message": "the recovered turn did not resume the same session"
+      },
+      "observations": {
+        "serviceKill": "verified",
+        "cliExitedByItself": false,
+        "heldState": "held",
+        "observationKinds": ["unknown", "unknown"],
+        "holds": {
+          "task": null,
+          "writer": true,
+          "capacity": true,
+          "uncertainty": true,
+          "stop": false
+        },
+        "operatorExecutionState": "held",
+        "operatorReadPath": "in-process OperatorApi.readExecution; the HTTP execution.read token scope is not exercised",
+        "startTurnInQuietWindow": 0,
+        "holdsAfterQuietWindow": {
+          "task": null,
+          "writer": true,
+          "capacity": true,
+          "uncertainty": true,
+          "stop": false
+        },
+        "recoveryRoute": "service seam resolveHeldExecution; no operator HTTP or CLI route",
+        "recoveredTurns": 1,
+        "sameThread": false,
+        "holdsAfterRecovery": {
+          "task": null,
+          "writer": false,
+          "capacity": false,
+          "uncertainty": false,
+          "stop": false
+        }
+      },
+      "startTurn": {
+        "turns": 2,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli (killed service)",
+          "exitedByItself": false,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "service-child",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [
+        {
+          "event": "terminate",
+          "label": "service-child",
+          "signal": "SIGKILL",
+          "pid": "24274"
+        },
+        {
+          "event": "terminate",
+          "label": "service-child",
+          "signal": "SIGKILL",
+          "outcome": "verified"
+        },
+        {
+          "event": "terminate",
+          "label": "claude-cli (killed service)",
+          "signal": "SIGTERM",
+          "pid": "24717"
+        },
+        {
+          "event": "terminate",
+          "label": "claude-cli (killed service)",
+          "signal": "SIGTERM",
+          "outcome": "verified"
+        }
+      ],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 1,
+          "model": "haiku",
+          "startedAt": 1791787982935,
+          "turns": {
+            "claude": 2,
+            "codex": 0
+          },
+          "outcome": "failed",
+          "failureKind": "harness"
+        },
+        "totals": {
+          "claude": 6,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "crash",
+      "attempt": 2,
+      "candidate": "98867e546d898b902d4fb47243b56a0ca9ea1da0",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "recover",
+      "outcome": "passed",
+      "failure": null,
+      "observations": {
+        "serviceKill": "verified",
+        "cliExitedByItself": false,
+        "heldState": "held",
+        "observationKinds": ["unknown", "unknown"],
+        "holds": {
+          "task": null,
+          "writer": true,
+          "capacity": true,
+          "uncertainty": true,
+          "stop": false
+        },
+        "operatorExecutionState": "held",
+        "operatorReadPath": "in-process OperatorApi.readExecution; the HTTP execution.read token scope is not exercised",
+        "startTurnInQuietWindow": 0,
+        "holdsAfterQuietWindow": {
+          "task": null,
+          "writer": true,
+          "capacity": true,
+          "uncertainty": true,
+          "stop": false
+        },
+        "recoveryRoute": "service seam resolveHeldExecution; no operator HTTP or CLI route",
+        "recoveredTurns": 1,
+        "sameThread": true,
+        "holdsAfterRecovery": {
+          "task": null,
+          "writer": false,
+          "capacity": false,
+          "uncertainty": false,
+          "stop": false
+        }
+      },
+      "startTurn": {
+        "turns": 3,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli (killed service)",
+          "exitedByItself": false,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "service-child",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [
+        {
+          "event": "terminate",
+          "label": "service-child",
+          "signal": "SIGKILL",
+          "pid": "33941"
+        },
+        {
+          "event": "terminate",
+          "label": "service-child",
+          "signal": "SIGKILL",
+          "outcome": "verified"
+        },
+        {
+          "event": "terminate",
+          "label": "claude-cli (killed service)",
+          "signal": "SIGTERM",
+          "pid": "34892"
+        },
+        {
+          "event": "terminate",
+          "label": "claude-cli (killed service)",
+          "signal": "SIGTERM",
+          "outcome": "verified"
+        }
+      ],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 2,
+          "model": "haiku",
+          "startedAt": 1791788248658,
+          "turns": {
+            "claude": 3,
+            "codex": 0
+          },
+          "outcome": "passed",
+          "failureKind": null
+        },
+        "totals": {
+          "claude": 9,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "claude-only",
+      "attempt": 1,
+      "candidate": "98867e546d898b902d4fb47243b56a0ca9ea1da0",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "run",
+      "outcome": "passed",
+      "failure": null,
+      "observations": {
+        "leadHarness": "claude",
+        "questionAnswered": true,
+        "resultNonceMatched": true,
+        "completionFinalized": true,
+        "turnsByHarness": {
+          "claude": 4,
+          "codex": 0
+        },
+        "tools": [
+          {
+            "harness": "claude",
+            "tool": "ensemble_delegate",
+            "success": true
+          },
+          {
+            "harness": "claude",
+            "tool": "ensemble_ask_question",
+            "success": true
+          },
+          {
+            "harness": "claude",
+            "tool": "ensemble_report_result",
+            "success": true
+          },
+          {
+            "harness": "claude",
+            "tool": "ensemble_request_completion",
+            "success": true
+          }
+        ]
+      },
+      "startTurn": {
+        "turns": 4,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "codex-app-server",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 1,
+          "model": "haiku",
+          "startedAt": 1791788362234,
+          "turns": {
+            "claude": 4,
+            "codex": 0
+          },
+          "outcome": "passed",
+          "failureKind": null
+        },
+        "totals": {
+          "claude": 13,
+          "codex": 0
+        }
+      }
+    },
+    {
+      "facet": "mixed",
+      "attempt": 1,
+      "candidate": "98867e546d898b902d4fb47243b56a0ca9ea1da0",
+      "node": "v24.21.0",
+      "sdk": "0.3.296",
+      "claudeCode": "2.1.296",
+      "codex": {
+        "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+        "version": "codex-cli 0.162.0-alpha.17.2"
+      },
+      "model": {
+        "claude": "haiku",
+        "reasoningEffort": "low"
+      },
+      "stage": "run",
+      "outcome": "passed",
+      "failure": null,
+      "observations": {
+        "leadHarness": "codex",
+        "questionAnswered": false,
+        "resultNonceMatched": true,
+        "completionFinalized": true,
+        "turnsByHarness": {
+          "claude": 1,
+          "codex": 2
+        },
+        "tools": [
+          {
+            "harness": "codex",
+            "tool": "ensemble_delegate",
+            "success": true
+          },
+          {
+            "harness": "claude",
+            "tool": "ensemble_report_result",
+            "success": true
+          },
+          {
+            "harness": "codex",
+            "tool": "ensemble_request_completion",
+            "success": true
+          }
+        ]
+      },
+      "startTurn": {
+        "turns": 3,
+        "refused": []
+      },
+      "processes": [
+        {
+          "label": "codex-app-server (before token)",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        },
+        {
+          "label": "claude-cli",
+          "exitedByItself": true,
+          "verification": "verified"
+        }
+      ],
+      "trace": [],
+      "cleanup": {
+        "serviceStopped": true,
+        "temporaryBases": ["removed"],
+        "rootRemoved": true
+      },
+      "budget": {
+        "attempt": {
+          "number": 1,
+          "model": "haiku",
+          "startedAt": 1791788396179,
+          "turns": {
+            "claude": 1,
+            "codex": 2
+          },
+          "outcome": "passed",
+          "failureKind": null
+        },
+        "totals": {
+          "claude": 14,
+          "codex": 2
+        }
+      }
+    }
+  ]
+}
