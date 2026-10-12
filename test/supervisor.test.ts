@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "./temp.js";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { StandaloneService } from "../src/standalone/service.js";
 import type {
@@ -11,6 +12,7 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
+import type { ExecutionState } from "../src/standalone/state.js";
 
 interface StopOutcome {
   workId: string;
@@ -95,6 +97,7 @@ class SupervisorRuntime implements Runtime {
   prompts: string[] = [];
   interrupts: Array<{ threadId: string; turnId: string }> = [];
   interruptError: Error | undefined;
+  interruptGate: Promise<void> | undefined;
   startThreadGate: Promise<string> | undefined;
   startTurnGate: Promise<string> | undefined;
   turnGate: Promise<void> | undefined;
@@ -145,6 +148,7 @@ class SupervisorRuntime implements Runtime {
 
   async interruptTurn(threadId: string, turnId: string) {
     this.beforeInterrupt?.();
+    await this.interruptGate;
     if (this.interruptError) throw this.interruptError;
     this.interrupts.push({ threadId, turnId });
   }
@@ -259,6 +263,7 @@ async function fixture(options?: ServiceOptions) {
   runtime.prompts = [];
   return {
     root,
+    dataDir: join(root, "data"),
     service,
     runtime,
     projectId,
@@ -426,5 +431,305 @@ test("Stop before capacity admission keeps queued work stopped until explicit re
   } finally {
     activeGate.resolve();
     await f.close();
+  }
+});
+
+function internals(service: StandaloneService) {
+  return service as unknown as { db: DatabaseSync; state: ExecutionState };
+}
+
+function stopRow(service: StandaloneService, workId: string) {
+  return internals(service)
+    .db.prepare(
+      "SELECT interruptState, reason FROM execution_stop_targets WHERE workId = ?",
+    )
+    .get(workId) as { interruptState: string; reason: string | null };
+}
+
+/** Stops a bound running turn whose interrupt request waits on a gate. */
+async function stopBoundTurn(options: { interruptError?: Error } = {}) {
+  const clock = new ManualClock();
+  const f = await fixture({ supervisor: { clock, observationMs: 3000 } });
+  const turn = deferred<void>();
+  const entered = deferred<void>();
+  const interrupt = deferred<void>();
+  f.runtime.turnGate = turn.promise;
+  f.runtime.turnEntered = entered.resolve;
+  f.runtime.interruptGate = interrupt.promise;
+  f.runtime.interruptError = options.interruptError;
+  const run = f.service.submitTask("stoppable", f.assignmentId, "Write");
+  await entered.promise;
+  const stopping = f.service.stopTask(f.taskId);
+  assert.equal(await waitUntil(() => clock.sleeping), true);
+  return {
+    ...f,
+    clock,
+    stopping,
+    interrupt,
+    row: () => stopRow(f.service, "stoppable"),
+    async observe() {
+      clock.advance(3000);
+      return (await stopping).outcomes.find(
+        (outcome) => outcome.workId === "stoppable",
+      );
+    },
+    async close() {
+      interrupt.resolve();
+      turn.resolve();
+      await run.catch(() => {});
+      await f.close();
+    },
+  };
+}
+
+test("an uncertain Stop interrupt is typed state and settles from a late acknowledgement", async () => {
+  const f = await stopBoundTurn();
+  try {
+    assert.deepEqual(
+      { ...f.row() },
+      {
+        interruptState: "uncertain",
+        reason: null,
+      },
+    );
+    const outcome = await f.observe();
+    assert.equal(outcome?.interrupt, "failed");
+    assert.equal(outcome?.reason, "Interrupt request outcome is uncertain");
+
+    f.interrupt.resolve();
+    assert.equal(
+      await waitUntil(() => f.row().interruptState === "acknowledged"),
+      true,
+    );
+    assert.equal(f.row().reason, null);
+    const again = f.service.stopTask(f.taskId);
+    assert.equal(await waitUntil(() => f.clock.sleeping), true);
+    f.clock.advance(3000);
+    assert.equal(
+      (await again).outcomes.find((item) => item.workId === "stoppable")
+        ?.interrupt,
+      "acknowledged",
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("a failed Stop interrupt request is typed failed with neutral text", async () => {
+  const f = await stopBoundTurn({ interruptError: new Error("refused") });
+  try {
+    f.interrupt.resolve();
+    assert.equal(
+      await waitUntil(() => f.row().interruptState === "failed"),
+      true,
+    );
+    assert.equal(f.row().reason, null);
+    const outcome = await f.observe();
+    assert.equal(outcome?.interrupt, "failed");
+    assert.equal(outcome?.reason, "Interrupt request failed");
+  } finally {
+    await f.close();
+  }
+});
+
+test("an anomaly blocks a late Stop acknowledgement", async () => {
+  const f = await stopBoundTurn();
+  const reason =
+    "A runtime terminal report conflicted with the bound execution";
+  try {
+    internals(f.service).state.recordStopAnomaly("stoppable", reason);
+    assert.deepEqual({ ...f.row() }, { interruptState: "failed", reason });
+    f.interrupt.resolve();
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual({ ...f.row() }, { interruptState: "failed", reason });
+    assert.equal((await f.observe())?.reason, reason);
+  } finally {
+    await f.close();
+  }
+});
+
+test("Stop target reason text is display-only", async () => {
+  const f = await stopBoundTurn();
+  try {
+    const { db, state } = internals(f.service);
+    db.prepare(
+      "UPDATE execution_stop_targets SET reason = 'Arbitrary text' WHERE workId = 'stoppable'",
+    ).run();
+    state.recordStopInterrupt("stoppable", "acknowledged");
+    assert.deepEqual(
+      { ...f.row() },
+      {
+        interruptState: "acknowledged",
+        reason: null,
+      },
+    );
+  } finally {
+    await f.close();
+  }
+});
+
+test("legacy reason-text Stop targets migrate to typed interrupt state", async () => {
+  const f = await fixture({
+    supervisor: { clock: new ManualClock(), observationMs: 3000 },
+  });
+  const legacyUncertain = "Codex interrupt request outcome is uncertain";
+  const legacyFailed = "Codex interrupt request failed";
+  const rows: Array<
+    [string, string, string | null, string, string | null, string]
+  > = [
+    // workId, interruptState, reason, terminalState, threadId, expected
+    ["crash", "failed", legacyUncertain, "unknown", "t-crash", "uncertain"],
+    ["legacy-failed", "failed", legacyFailed, "unknown", "t-f", "failed"],
+    [
+      "conflict",
+      "failed",
+      "Conflicting late execution identity",
+      "unknown",
+      "t-c",
+      "failed",
+    ],
+    [
+      "anomaly",
+      "failed",
+      "Known unfinished execution remains after terminal status",
+      "unknown",
+      "t-a",
+      "failed",
+    ],
+    ["pending", "pending", null, "unknown", null, "pending"],
+    ["acked", "acknowledged", null, "completed", "t-ack", "acknowledged"],
+    ["unbound", "unbound", null, "unknown", null, "unbound"],
+  ];
+  const dbPath = join(f.dataDir, "standalone.sqlite");
+  const select = (db: DatabaseSync) =>
+    db
+      .prepare(
+        "SELECT workId, interruptState, reason FROM execution_stop_targets ORDER BY workId",
+      )
+      .all()
+      .map((row) => ({ ...row }));
+  const storedSql = (db: DatabaseSync) =>
+    (
+      db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='execution_stop_targets'",
+        )
+        .get() as { sql: string }
+    ).sql;
+  const columns = (db: DatabaseSync) =>
+    JSON.stringify(
+      db.prepare("PRAGMA table_info(execution_stop_targets)").all(),
+    );
+  let service = f.service;
+  try {
+    await service.stopTask(f.taskId);
+    await service.stop();
+
+    const legacy = new DatabaseSync(dbPath);
+    const sql = storedSql(legacy);
+    const before = columns(legacy);
+    legacy.exec("BEGIN IMMEDIATE");
+    legacy.exec(
+      sql
+        .replace("execution_stop_targets", "legacy_stop_targets")
+        .replace("'pending','uncertain',", "'pending',"),
+    );
+    legacy.exec(`INSERT INTO legacy_stop_targets SELECT * FROM execution_stop_targets;
+      DROP TABLE execution_stop_targets;
+      ALTER TABLE legacy_stop_targets RENAME TO execution_stop_targets;`);
+    for (const [workId, interruptState, reason, terminal, threadId] of rows) {
+      legacy
+        .prepare(
+          "INSERT INTO execution_intents (id, workId, prompt, workspace, state, reason, threadId, turnId, accountType, sandbox, approval) VALUES (?, ?, 'Fixture', '/tmp', 'held', 'Fixture hold', ?, ?, 'chatgpt', 'workspaceWrite', 'never')",
+        )
+        .run(randomUUID(), workId, threadId, threadId && `${threadId}-turn`);
+      legacy
+        .prepare(
+          "INSERT INTO execution_stop_targets (taskId, workId, threadId, turnId, interruptState, terminalState, reason, requestedAt) VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+        )
+        .run(
+          f.taskId,
+          workId,
+          threadId,
+          threadId && `${threadId}-turn`,
+          interruptState,
+          terminal,
+          reason,
+        );
+    }
+    legacy.exec("COMMIT");
+    assert.doesNotMatch(storedSql(legacy), /'uncertain'/);
+    assert.deepEqual(
+      select(legacy).find((row) => row.workId === "crash")?.reason,
+      legacyUncertain,
+    );
+    legacy.close();
+
+    const reopen = async () => {
+      const runtime = new SupervisorRuntime();
+      const next = createService(f.dataDir, runtime, {
+        supervisor: { clock: new ManualClock(), observationMs: 3000 },
+      });
+      await next.start();
+      return { next, runtime };
+    };
+    let opened = await reopen();
+    service = opened.next;
+    const { db } = internals(service);
+    assert.match(storedSql(db), /'uncertain'/);
+    assert.equal(columns(db), before);
+    const migrated = select(db);
+    assert.deepEqual(
+      migrated,
+      rows
+        .map(([workId, , reason, , , expected]) => ({
+          workId,
+          interruptState: expected,
+          reason:
+            reason === legacyUncertain || reason === legacyFailed
+              ? null
+              : reason,
+        }))
+        .sort((a, b) => a.workId.localeCompare(b.workId)),
+    );
+    assert.deepEqual(db.prepare("PRAGMA foreign_key_check").all(), []);
+
+    await service.stop();
+    opened = await reopen();
+    service = opened.next;
+    assert.deepEqual(select(internals(service).db), migrated);
+    assert.match(storedSql(internals(service).db), /'uncertain'/);
+
+    const observation = await service.stopTask(f.taskId);
+    const reasonOf = (workId: string) =>
+      observation.outcomes.find((outcome) => outcome.workId === workId)?.reason;
+    assert.equal(reasonOf("crash"), "Interrupt request outcome is uncertain");
+    assert.equal(reasonOf("legacy-failed"), "Interrupt request failed");
+    assert.doesNotMatch(JSON.stringify(observation), /Codex/);
+
+    await service.resumeTask(f.taskId);
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    assert.equal(service.isTaskStopped(f.taskId), false);
+    assert.equal(stopRow(service, "crash").interruptState, "uncertain");
+    assert.equal(
+      service.list().find((item) => item.workId === "crash")?.state,
+      "held",
+    );
+    assert.equal(opened.runtime.turns, 0);
+
+    const after = internals(service);
+    for (const [workId] of rows)
+      after.state.recordStopInterrupt(workId, "acknowledged");
+    assert.deepEqual(
+      select(after.db),
+      migrated.map((row) =>
+        row.workId === "crash"
+          ? { ...row, interruptState: "acknowledged" }
+          : row,
+      ),
+    );
+  } finally {
+    await service.stop();
+    rmSync(f.root, { recursive: true, force: true });
   }
 });

@@ -324,6 +324,9 @@ not evidence that the installed authenticated configuration applied a policy.
    restart with dispatch held: verify a new host boot and that old execution is not
    restarted before reconciliation. This is a recovery procedure to qualify, not
    authorization to reboot the host.
+   A Stop interrupt request is recorded as `uncertain` before the runtime is asked
+   and settles only from that request's outcome; a crash leaves it `uncertain`,
+   and no interrupt state releases ownership.
 4. Reconcile partial workspace changes and uncertain external effects separately;
    host restart does not undo or settle remote actions. Persist the resolution
    evidence and reconcile writer/capacity ownership atomically. Explicit resume
