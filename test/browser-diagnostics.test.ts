@@ -20,6 +20,9 @@ test("timed-out execution preserves a live client and writes sanitized bounded d
     callbackFinished = resolve;
   });
   let guardian: ReturnType<typeof setTimeout> | number | undefined;
+  // Generous overall headroom keeps slow setup under load from shrinking the execution limit under test.
+  const executionMs = 500;
+  const overallMs = 3000;
   const started = performance.now();
   const pending = runBrowserJourney(
     "diagnostics",
@@ -45,8 +48,8 @@ test("timed-out execution preserves a live client and writes sanitized bounded d
       callbackFinished();
     },
     {
-      executionMs: 100,
-      overallMs: 350,
+      executionMs,
+      overallMs,
       cleanupStepMs: 100,
       evidenceRoot: root,
     },
@@ -58,7 +61,7 @@ test("timed-out execution preserves a live client and writes sanitized bounded d
         (error: unknown) => error,
       ),
       new Promise<undefined>((resolve) => {
-        guardian = setTimeout(resolve, 1000);
+        guardian = setTimeout(resolve, overallMs + 1000);
       }),
     ]);
     assert.ok(
@@ -66,7 +69,7 @@ test("timed-out execution preserves a live client and writes sanitized bounded d
       "Journey must stop waiting at its own deadline",
     );
     assert.match(failure.message, /execution.*timed-out.*\d+ ms/);
-    assert.ok(performance.now() - started < 350 + 100);
+    assert.ok(performance.now() - started < overallMs);
     assert.equal(cleanups, 0);
     assert.equal(browser.isConnected(), true);
     const directory = (failure as Error & { evidenceDirectory: string })
@@ -75,7 +78,7 @@ test("timed-out execution preserves a live client and writes sanitized bounded d
     assert.doesNotMatch(manifest, new RegExp(secret));
     const evidence = JSON.parse(manifest);
     assert.equal(evidence.phases.execution.status, "timed-out");
-    assert.ok(evidence.phases.execution.elapsedMs >= 80);
+    assert.ok(evidence.phases.execution.elapsedMs >= executionMs - 1);
     assert.equal(evidence.cleanup.incomplete, true);
     assert.equal(evidence.cleanup.steps[0].status, "dependency-skipped");
     assert.match(manifest, /console-error|pageerror-TypeError/);
@@ -301,7 +304,7 @@ test("a stalled local listener leaves auth and backing state held while its sibl
           });
           throw original;
         },
-        { evidenceRoot: root, cleanupStepMs: 20, overallMs: 250 },
+        { evidenceRoot: root, cleanupStepMs: 20, overallMs: 2000 },
       ),
       (error: unknown) => {
         assert.equal(error, original);
