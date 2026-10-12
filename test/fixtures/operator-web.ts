@@ -451,13 +451,12 @@ export async function createOperatorFixture<
             credentials: service.operatorCredentials(),
             web: new OperatorWebBoundary(
               bundle,
-              new OperatorApi(
-                service,
-                controlPaths,
-                undefined,
-                readerFactory,
-                setup,
-              ),
+              new OperatorApi(service, controlPaths, undefined, readerFactory, {
+                ...setup,
+                // Fixtures never run the host's real gh unless a test provides one.
+                ghExecutable:
+                  setup?.ghExecutable ?? join(directory, "no-gh", "gh"),
+              }),
             ),
           },
         );

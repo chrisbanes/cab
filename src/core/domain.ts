@@ -15,6 +15,7 @@ import {
   type LinkedRepository,
 } from "./github-source.js";
 import { setupRepositorySchema } from "./github-source-contracts.js";
+import { discoveryCredentialReference } from "./credential-reference.js";
 import {
   defaultProfileRuntime,
   profileRuntimeSchema,
@@ -282,10 +283,7 @@ const commandSchema = z.discriminatedUnion("type", [
     .object({
       ...commandBase,
       type: z.literal("discovery.configure"),
-      credentialRef: z
-        .string()
-        .regex(/^env:[A-Z][A-Z0-9_]*$/)
-        .nullable(),
+      credentialRef: discoveryCredentialReference.nullable(),
     })
     .strict(),
   z

@@ -13,10 +13,16 @@ import { runGit } from "./git-process.js";
 import type { DiscoveryReader } from "./github-discovery.js";
 import { isWithin } from "./workspace-inspection.js";
 
-/** Test seams for guided setup: the home folder and the discovery reader factory. */
+/** Test seams for guided setup: the home folder, the discovery reader factory and `gh`. */
 export interface OperatorSetupSeams {
   home?: string;
-  discovery?: (credentialRef: string) => DiscoveryReader;
+  /** Receives the reference and its resolved token (undefined when the variable is unset). */
+  discovery?: (
+    credentialRef: string,
+    token: string | undefined,
+  ) => DiscoveryReader;
+  /** The `gh` executable; defaults to `gh` on the service `PATH`. */
+  ghExecutable?: string;
 }
 
 /** A folder request outside what the picker may list (400 malformed, 403 outside home, 404 missing). */

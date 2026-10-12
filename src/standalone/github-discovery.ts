@@ -6,7 +6,10 @@ export type DiscoveryFailureReason =
   | "unauthorized"
   | "forbidden"
   | "rate-limited"
-  | "unreadable";
+  | "unreadable"
+  | "gh-not-installed"
+  | "gh-not-signed-in"
+  | "gh-unreadable";
 /** A failed discovery read. The message is the reason code only, never a token or URL. */
 export class DiscoveryFailure extends Error {
   constructor(readonly reason: DiscoveryFailureReason) {

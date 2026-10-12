@@ -105,6 +105,12 @@ import {
   GitHubDiscoveryReader,
 } from "./github-discovery.js";
 import {
+  detectGh,
+  ghEnvironment,
+  type GhOptions,
+  ghToken,
+} from "./gh-credential.js";
+import {
   FolderAccessError,
   listHomeFolders,
   type OperatorSetupSeams,
@@ -4708,25 +4714,50 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  readDiscoveryStatus() {
+  private gh(): GhOptions {
+    return {
+      executable: this.setup.ghExecutable,
+      environment: ghEnvironment(this.domain()),
+    };
+  }
+  /** Detects the `gh` login on every read, so the choice is offered even when unconfigured. */
+  async readDiscoveryStatus() {
     const ref = this.domain().discoveryCredentialReference();
+    const gh = await detectGh(this.gh());
+    const source = ref === null ? null : ref.startsWith("gh:") ? "gh" : "env";
     return discoveryStatusSchema.parse({
       data: {
         configured: ref !== null,
-        available: ref !== null && Boolean(process.env[ref.slice(4)]),
+        available:
+          source === "gh"
+            ? gh.state === "signed-in"
+            : ref !== null && Boolean(process.env[ref.slice(4)]),
+        source,
+        gh,
       },
       observedAt: Date.now(),
     });
   }
-  /** The discovery reference and a digest of its value: what a discovery result was read with. */
+  /**
+   * What a discovery result was read with: an `env:` reference and a digest of its value, or
+   * a `gh:` reference alone (an account switch during one read is not detected).
+   */
   private discoveryFence() {
     const ref = this.domain().discoveryCredentialReference();
+    if (ref?.startsWith("gh:")) return JSON.stringify([ref]);
     return JSON.stringify([
       ref,
       createHash("sha256")
         .update(ref ? (process.env[ref.slice(4)] ?? "") : "")
         .digest("hex"),
     ]);
+  }
+  /** The reference's token, resolved on every read; a `gh` failure is its reason. */
+  private async discoveryToken(ref: string): Promise<string | undefined> {
+    if (!ref.startsWith("gh:")) return process.env[ref.slice(4)] || undefined;
+    const resolved = await ghToken(this.gh());
+    if ("token" in resolved) return resolved.token;
+    throw new DiscoveryFailure(`gh-${resolved.state}`);
   }
   /** Run one discovery read; every failure is an `unavailable` reason, never a message. */
   private async discoveryRead<T extends z.ZodType>(
@@ -4745,9 +4776,9 @@ export class OperatorApi {
         try {
           const reader = (
             this.setup.discovery ??
-            ((r: string) =>
-              new GitHubDiscoveryReader(process.env[r.slice(4)] || undefined))
-          )(ref);
+            ((_: string, token: string | undefined) =>
+              new GitHubDiscoveryReader(token))
+          )(ref, await this.discoveryToken(ref));
           current = { state: "ready", ...(await read(reader)) };
         } catch (error) {
           current = {
