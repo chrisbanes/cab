@@ -62,8 +62,9 @@ waits with a reason such as `subscription token file permits group or other
 access`, which names neither the path nor the value, and the status read shows the
 token unavailable. Intermediate symbolic links in the path (such as macOS `/var`)
 are followed, the parent directories' ownership is not checked and access control
-lists are not inspected; the operator keeps the file in a private directory. Replacing the file atomically rotates the token from the next
-turn without a restart; a running turn keeps the value it started with.
+lists are not inspected; the operator keeps the file in a private directory.
+Replacing the file atomically rotates the token from the next turn without a
+restart; a running turn keeps the value it started with.
 
 The Claude runtime ([#825](https://github.com/chrisbanes/ensemble/issues/825))
 sets the resolved token only as the Claude subprocess's token variable; it never
