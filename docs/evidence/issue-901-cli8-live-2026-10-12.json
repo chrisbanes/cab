@@ -1,0 +1,612 @@
+{
+  "harness": "test/cli8/live-journey.mjs",
+  "mode": "live",
+  "client": "scripted external client driving the installed binary",
+  "candidate": "eda2733ea241e963de8514c8369bee652b49354f",
+  "node": "v24.21.0",
+  "npm": "11.19.0",
+  "platform": "darwin arm64",
+  "codex": {
+    "launcher": "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "launcherSha256": "50ab38ba21d0d9f8346f32f41848382f15b556190f3c7a07e885a4fb73e379c8",
+    "version": "codex-cli 0.162.0-alpha.17.2"
+  },
+  "service": {
+    "transport": "loopback HTTP",
+    "installationId": "57910315-cb65-464c-8d61-ae311aa9d9b1",
+    "seeding": "profile, project and task seeded host-locally; not a CLI step"
+  },
+  "install": {
+    "prefix": "<root>/install/project",
+    "outsideCheckout": true,
+    "testsShipped": false
+  },
+  "credentials": {
+    "cli8-ro": {
+      "id": "92e8af1f-194b-4fb5-ac36-cf8b4f39286c",
+      "scope": "read",
+      "revoked": true
+    },
+    "cli8-rw": {
+      "id": "87c45872-f10c-43bf-8128-bca8e2a154cf",
+      "scope": "read-write",
+      "revoked": true
+    },
+    "cli8-follow": {
+      "id": "51086bac-8dcb-4e91-9239-1dd22cdf0ee9",
+      "scope": "read",
+      "revoked": true
+    }
+  },
+  "turns": {
+    "maxTurns": 2,
+    "startTurnCalls": 2,
+    "rejectedStartTurns": 0,
+    "h1": {
+      "afterResultNoAdmission": true,
+      "stoppedNoAdmission": true,
+      "exactlyTwo": true
+    }
+  },
+  "steps": [
+    {
+      "step": "login-token-file",
+      "command": "auth login --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --url http://127.0.0.1:56263 --token-file <root>/client/cli8-197960f9-81ba-4187-b324-3d79148beec3.token",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "login-token-file",
+      "command": "auth login --connection cli8-af5f13fc-99fd-435c-94b5-15d0f1b00bcb --url http://127.0.0.1:56263 --token-file <root>/client/cli8-af5f13fc-99fd-435c-94b5-15d0f1b00bcb.token",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "login-keychain",
+      "command": "auth login --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --url http://127.0.0.1:56263",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real",
+      "storage": "keychain (pseudo-terminal)"
+    },
+    {
+      "step": "auth-status",
+      "command": "auth status --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "connection-list",
+      "command": "connection list --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "connection-use",
+      "command": "connection use cli8-197960f9-81ba-4187-b324-3d79148beec3",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "task-list",
+      "command": "task list --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "task-search",
+      "command": "task search FAIL --type result --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "task-get",
+      "command": "task get 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "result-list",
+      "command": "result list 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "result-get",
+      "command": "result get 05a936f7-a3a3-4589-a4de-bc2fddabcf5d 51851773-5bc1-43b6-9efd-32164e480bf6 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "execution-list",
+      "command": "execution list --task 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "execution-get",
+      "command": "execution get assignment:405909eb-0f08-4a5f-8a94-40d12b71cbf9:initial --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "execution-inputs",
+      "command": "execution inputs assignment:405909eb-0f08-4a5f-8a94-40d12b71cbf9:initial --compare-current --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "logs",
+      "command": "logs --execution assignment:405909eb-0f08-4a5f-8a94-40d12b71cbf9:initial --limit 200 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-get",
+      "command": "assignment get 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-instructions",
+      "command": "assignment instructions 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "profile-get",
+      "command": "profile get e4dd491a-9986-484c-8b21-cef9aab17eb4 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "profile-revisions",
+      "command": "profile revisions e4dd491a-9986-484c-8b21-cef9aab17eb4 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "profile-instructions",
+      "command": "profile instructions e4dd491a-9986-484c-8b21-cef9aab17eb4 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "profile-prepare",
+      "command": "profile prepare e4dd491a-9986-484c-8b21-cef9aab17eb4 --instructions-file <root>/client/profile-v2.md --expected-version 1 --out <root>/client/profile-change.json --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "readonly-denial-cli",
+      "command": "profile apply --file <root>/client/profile-change.json --connection cli8-197960f9-81ba-4187-b324-3d79148beec3",
+      "exit": 3,
+      "expected": 3,
+      "observation": "real"
+    },
+    {
+      "step": "readonly-denial-direct",
+      "command": "POST /api/operator/commands (read bearer)",
+      "exit": 403,
+      "expected": 403,
+      "code": "insufficient-scope",
+      "observation": "real"
+    },
+    {
+      "step": "profile-apply",
+      "command": "profile apply --file <root>/client/profile-change.json --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "profile-apply-replay",
+      "command": "profile apply --file <root>/client/profile-change.json --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "project-prepare",
+      "command": "project prepare 0eaca889-1ed3-40a0-97a4-8b6b60f10791 --name CLI8 journey (agent) --out <root>/client/rename.json --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "concurrent-conflict",
+      "command": "project apply --file <root>/client/rename.json --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20",
+      "exit": 4,
+      "expected": 4,
+      "observation": "real"
+    },
+    {
+      "step": "login-token-file",
+      "command": "auth login --connection cli8-22c72624-608f-4113-be8f-eb05eaf8070b --url http://127.0.0.1:56370 --token-file <root>/client/cli8-22c72624-608f-4113-be8f-eb05eaf8070b.token",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "project-prepare",
+      "command": "project prepare 0eaca889-1ed3-40a0-97a4-8b6b60f10791 --name CLI8 journey (renamed) --out <root>/client/lost.json --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "project-apply-lost-response",
+      "command": "project apply --file <root>/client/lost.json --connection cli8-22c72624-608f-4113-be8f-eb05eaf8070b --output json",
+      "exit": 6,
+      "expected": 6,
+      "observation": "real"
+    },
+    {
+      "step": "operation-get",
+      "command": "operation get 95b638a7-84b5-421e-b141-b0bde31a2660 --scope project:0eaca889-1ed3-40a0-97a4-8b6b60f10791 --type project.configure --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "project-apply-lost-response",
+      "command": "project apply --file <root>/client/lost.json --connection cli8-22c72624-608f-4113-be8f-eb05eaf8070b --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-instructions",
+      "command": "assignment instructions 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "task-stop",
+      "command": "task stop 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-get",
+      "command": "assignment get 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "task-follow-up",
+      "command": "task follow-up 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --expected-version 1 --message-file <root>/client/follow-up.md --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-get",
+      "command": "assignment get 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-apply-current",
+      "command": "assignment apply-current 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --expected-version 2 --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "assignment-instructions",
+      "command": "assignment instructions 405909eb-0f08-4a5f-8a94-40d12b71cbf9 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "task-resume",
+      "command": "task resume 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-edf78f28-6783-4130-9018-1b8e74dbbf20 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "logs-follow-revoke",
+      "command": "logs --execution <work> --follow --output jsonl",
+      "exit": 3,
+      "expected": 3,
+      "observation": "real",
+      "endedBeforeRevocation": false
+    },
+    {
+      "step": "execution-list",
+      "command": "execution list --task 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "execution-inputs",
+      "command": "execution inputs assignment:405909eb-0f08-4a5f-8a94-40d12b71cbf9:v3:inbox:11bc0bc0-75e5-4369-8aa1-46a1e4a776e0 --compare-current --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "logs",
+      "command": "logs --execution assignment:405909eb-0f08-4a5f-8a94-40d12b71cbf9:v3:inbox:11bc0bc0-75e5-4369-8aa1-46a1e4a776e0 --limit 200 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "result-list",
+      "command": "result list 05a936f7-a3a3-4589-a4de-bc2fddabcf5d --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "result-get",
+      "command": "result get 05a936f7-a3a3-4589-a4de-bc2fddabcf5d 0e6685d6-d047-456a-8e91-89c07a0fb5a5 --connection cli8-197960f9-81ba-4187-b324-3d79148beec3 --output json",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "remote-authority",
+      "command": "POST /runtime/control/stop (read/write bearer)",
+      "exit": 403,
+      "expected": 403,
+      "observation": "real"
+    },
+    {
+      "step": "remote-authority",
+      "command": "GET /api/operator/credentials (read/write bearer)",
+      "exit": 403,
+      "expected": 403,
+      "observation": "real"
+    },
+    {
+      "step": "remote-authority",
+      "command": "POST /api/operator/credentials (read/write bearer)",
+      "exit": 403,
+      "expected": 403,
+      "observation": "real"
+    },
+    {
+      "step": "auth-logout",
+      "command": "auth logout --connection cli8-197960f9-81ba-4187-b324-3d79148beec3",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "connection-remove",
+      "command": "connection remove cli8-edf78f28-6783-4130-9018-1b8e74dbbf20",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    },
+    {
+      "step": "connection-remove",
+      "command": "connection remove cli8-22c72624-608f-4113-be8f-eb05eaf8070b",
+      "exit": 0,
+      "expected": 0,
+      "observation": "real"
+    }
+  ],
+  "observations": {
+    "connections": [
+      {
+        "credential": "token-file",
+        "sameService": true
+      },
+      {
+        "credential": "token-file",
+        "sameService": true
+      },
+      {
+        "credential": "keychain",
+        "sameService": true
+      }
+    ],
+    "turn1": [
+      {
+        "state": "completed",
+        "reasonPresent": false
+      }
+    ],
+    "searchFoundFailure": true,
+    "turn1Result": "FAIL missing-required-phrase",
+    "execution1": {
+      "segments": [
+        {
+          "name": "request",
+          "state": "available",
+          "revision": null
+        },
+        {
+          "name": "role",
+          "state": "available",
+          "revision": null
+        },
+        {
+          "name": "review-references",
+          "state": "available",
+          "revision": null
+        },
+        {
+          "name": "project-instructions",
+          "state": "available",
+          "revision": 2
+        },
+        {
+          "name": "profile-instructions",
+          "state": "available",
+          "revision": 1
+        }
+      ],
+      "submittedDigestMatches": true,
+      "comparison": [
+        {
+          "name": "project-instructions",
+          "sameRevision": true
+        },
+        {
+          "name": "profile-instructions",
+          "sameRevision": true
+        }
+      ],
+      "kinds": ["service", "setting", "input", "runtime", "tool"],
+      "runtimeItems": [
+        "commandExecution/started",
+        "commandExecution/completed",
+        "dynamicToolCall/started",
+        "dynamicToolCall/completed",
+        "turn/completed"
+      ],
+      "toolItems": ["ensemble_report_result"],
+      "service": [
+        "thread-bound",
+        "input-captured",
+        "turn-bound",
+        "terminal-observed",
+        "execution-settled"
+      ],
+      "managedAssignmentOutput": "1",
+      "gaps": []
+    },
+    "prepared": {
+      "mode": "600",
+      "diff": {
+        "lines": [
+          "  CLI8 lead profile. Keep every turn short and do exactly what the task says.",
+          "+ CLI8_REQUIRED_PHRASE: amber-9040e1"
+        ],
+        "truncated": false
+      }
+    },
+    "readOnlyDigestUnchanged": true,
+    "profileApply": {
+      "version": 2,
+      "replayedSameReceipt": true,
+      "replayReused": true
+    },
+    "conflictDigestUnchanged": true,
+    "lostResponse": {
+      "operationState": "recorded",
+      "rerunSameKey": true,
+      "versionBumps": 1,
+      "name": "CLI8 journey (renamed)"
+    },
+    "beforeAdoption": {
+      "boundIsCurrent": false
+    },
+    "afterAdoption": {
+      "boundIsCurrent": true
+    },
+    "execution2": {
+      "segments": [
+        {
+          "name": "request",
+          "state": "available",
+          "revision": null
+        },
+        {
+          "name": "role",
+          "state": "available",
+          "revision": null
+        },
+        {
+          "name": "review-references",
+          "state": "available",
+          "revision": null
+        },
+        {
+          "name": "project-instructions",
+          "state": "available",
+          "revision": 2
+        },
+        {
+          "name": "profile-instructions",
+          "state": "available",
+          "revision": 2
+        }
+      ],
+      "submittedDigestMatches": true,
+      "comparison": [
+        {
+          "name": "project-instructions",
+          "sameRevision": true
+        },
+        {
+          "name": "profile-instructions",
+          "sameRevision": true
+        }
+      ],
+      "kinds": ["service", "setting", "input", "runtime", "tool"],
+      "runtimeItems": [
+        "commandExecution/started",
+        "commandExecution/completed",
+        "dynamicToolCall/started",
+        "dynamicToolCall/completed",
+        "turn/completed"
+      ],
+      "toolItems": ["ensemble_report_result"],
+      "service": [
+        "thread-bound",
+        "input-captured",
+        "turn-bound",
+        "terminal-observed",
+        "execution-settled"
+      ],
+      "managedAssignmentOutput": "1",
+      "gaps": [],
+      "phrasePresent": true
+    },
+    "turn2Result": "PASS <phrase>",
+    "turn2ExpectedPass": true,
+    "turn1ExpectedFail": true,
+    "logout": {
+      "serverCredentialAfterLocalLogout": 200,
+      "afterRevoke": 401
+    }
+  },
+  "leaks": {
+    "cliOutputs": false,
+    "databaseBytes": false,
+    "evidenceJson": false
+  },
+  "cleanup": {
+    "credentialsRevoked": true,
+    "serverCredentialsRevoked": true,
+    "keychainItemAbsent": true,
+    "serviceStopped": true,
+    "appServerExit": "verified",
+    "fixtureRemoved": true,
+    "retainedData": true
+  },
+  "failure": null
+}

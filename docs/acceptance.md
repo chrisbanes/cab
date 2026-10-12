@@ -178,12 +178,12 @@ implementation and evidence remain unproved until the delivery slices qualify it
 
 | Scenarios | Evidence state | Required evidence |
 | --- | --- | --- |
-| CLI01 | **Unproved** | Packaged-client local/private-remote authenticated investigation, with service/client and transport identities. |
-| CLI02 | **Unproved** | End-to-end authenticated browser/service credential creation, listing, one-time reveal, rotation and revocation with service readback; server-side scope denial across all applicable routes; expiry/revocation during follow; browser-session protection and credential lifecycle fixtures. Pre-seeded tokens and service-only fixtures do not qualify UI provisioning. |
-| CLI03 | **Unproved** | Exact-change, concurrent-edit, assignment-created-between-prepare/apply and lost-response fixtures, including identical UUIDs in distinct scopes, restoration and assignment adoption. |
-| CLI04 | **Unproved** | Shared CLI/UI action fixtures covering answers, approvals, Stop/Resume, recovery holds and staged delivery. |
-| CLI05 | **Unproved** | Redaction, instruction projection, historical gaps, capture/storage failure, age/quota pruning and bounded read/follow fixtures. |
-| CLI06 | **Unproved** | Integrated bounded real-runtime local/private-remote journey and deterministic boundary evidence, reusing valid slice evidence with explicit limits. |
+| CLI01 | **Unproved: prerequisite unavailable** (no second trusted machine was granted; the host journey ran) | Packaged-client local/private-remote authenticated investigation, with service/client and transport identities. |
+| CLI02 | **Bounded** | End-to-end authenticated browser/service credential creation, listing, one-time reveal, rotation and revocation with service readback; server-side scope denial across all applicable routes; expiry/revocation during follow; browser-session protection and credential lifecycle fixtures. Pre-seeded tokens and service-only fixtures do not qualify UI provisioning. |
+| CLI03 | **Bounded** | Exact-change, concurrent-edit, assignment-created-between-prepare/apply and lost-response fixtures, including identical UUIDs in distinct scopes, restoration and assignment adoption. |
+| CLI04 | **Bounded** | Shared CLI/UI action fixtures covering answers, approvals, Stop/Resume, recovery holds and staged delivery. |
+| CLI05 | **Bounded** | Redaction, instruction projection, historical gaps, capture/storage failure, age/quota pruning and bounded read/follow fixtures. |
+| CLI06 | **Unproved: prerequisite unavailable** (no second trusted machine was granted; the host journey ran) | Integrated bounded real-runtime local/private-remote journey and deterministic boundary evidence, reusing valid slice evidence with explicit limits. |
 
 Slice evidence for authentication and task inspection, with its limits, is in the
 [CLI1 record](evidence/issue-894-cli1-2026-10-11.md), and for read-only browsing of
@@ -199,6 +199,8 @@ delivery and staged comments in the
 [CLI4 record](evidence/issue-897-cli4-2026-10-12.md), and for evidence-bearing
 recovery in the [CLI6 record](evidence/issue-899-cli6-2026-10-12.md). None qualifies a scenario on
 its own.
+The assembled qualification, its limits and the scenario states above are in the
+[CLI8 record](evidence/issue-901-cli8-2026-10-12.md).
 
 The six journeys also require command-by-command coverage of the full
 [first-release command surface](design/operator-cli.md#command-surface).
@@ -206,7 +208,12 @@ Each operation below needs a packaged-CLI invocation through the authenticated
 service, its observable output/effect and applicable denial, revision and retry
 cases. The evidence inventory must identify each covered operation and any
 missing coverage; a representative journey cannot qualify omitted commands.
-These obligations remain **Unproved** until that evidence exists.
+The [CLI8 inventory](evidence/issue-901-cli8-inventory-2026-10-12.json) records
+each operation's state: those the host live journey ran are passed, except
+`assignment apply-current`, which blocks a completed lead's follow-up
+([#935](https://github.com/chrisbanes/ensemble/issues/935)); the rest are
+bounded to deterministic fixtures, and the `project prepare` write for
+`diagnosticCapture` is **Unproved** because the CLI has no flag for it.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |

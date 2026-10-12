@@ -121,9 +121,10 @@ owns delivery scope and status.
   confirmation and one receipted send. It shows each held generation's exact identity,
   holds and recovery paths, and submits the existing evidence-bearing adoption,
   recovery and conversation-replacement operations from prepared documents whose
-  evidence and attestations the operator states explicitly. The remaining
-  [operator CLI](docs/design/operator-cli.md) command areas are planned under
-  [epic #893](https://github.com/chrisbanes/ensemble/issues/893); see
+  evidence and attestations the operator states explicitly. A bounded live Codex
+  journey through the packaged CLI on this host is recorded in the
+  [CLI8 record](docs/evidence/issue-901-cli8-2026-10-12.md); use from a second
+  privately connected machine is unproved because none was available. See
   [development](docs/development.md#operator-cli).
 
 Automated tests with real SQLite and Chromium, plus bounded live Codex and browser
