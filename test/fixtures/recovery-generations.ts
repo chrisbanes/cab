@@ -19,6 +19,7 @@ import type {
   TerminationVerifier,
 } from "../../src/standalone/recovery-types.js";
 import type { StandaloneService } from "../../src/standalone/service.js";
+import { databaseDigest } from "./database-digest.js";
 import { startCliService } from "./operator-cli.js";
 
 /** Copied from no-turn-recovery.test.ts: thread start fails before any turn invocation. */
@@ -400,7 +401,7 @@ export async function holdGeneration(
           },
     /** The exact service adoption command (historical pre-turn or no-turn). */
     adoption(
-      key = randomUUID(),
+      key: string = randomUUID(),
     ): HistoricalNoTurnAdoption | HistoricalPreTurnAdoption {
       if (noTurn)
         return {
@@ -445,7 +446,7 @@ export async function holdGeneration(
     },
     witnessId,
     /** The exact service recovery command for the current witness. */
-    recovery(witness = witnessId(), key = randomUUID()) {
+    recovery(witness = witnessId(), key: string = randomUUID()) {
       return {
         key,
         receipt: {
@@ -484,5 +485,13 @@ export async function servedGeneration(
     runtimeFactory: () => runtime,
   });
   const g = await holdGeneration(s.f.service, runtime, mode);
+  // Let the held turn's background capture settle so digests compare only our effects.
+  let last = "";
+  for (let i = 0; i < 100; i++) {
+    const current = databaseDigest(s.f);
+    if (current === last) break;
+    last = current;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
   return { s, g, runtime, verifier };
 }

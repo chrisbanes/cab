@@ -123,7 +123,12 @@ import {
   type LocalReviewSyncIdentity,
 } from "../core/local-review.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
-import { recoveryOptions } from "./operator-recovery.js";
+import {
+  executeRecovery,
+  isRecoveryCommand,
+  recoveryOptions,
+} from "./operator-recovery.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   compareRepository,
@@ -5634,6 +5639,17 @@ export class OperatorApi {
             version: Number(r.version),
           },
         });
+      }
+      if (isRecoveryCommand(c)) {
+        this.requireAssignment(c.assignmentId);
+        try {
+          return await executeRecovery(this.service, c);
+        } catch (error) {
+          // Definite refusals only; infrastructure failures stay uncertain below.
+          if (error instanceof RecoveryRejectedError)
+            throw new OperatorApiError(409, "conflict");
+          throw error;
+        }
       }
       if (c.type === "task.stop" || c.type === "task.resume") {
         this.requireTask(c.taskId);

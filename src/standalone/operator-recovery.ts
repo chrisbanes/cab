@@ -1,10 +1,17 @@
 import type { z } from "zod";
-import type { RecoveryPath } from "../core/recovery-contracts.js";
+import {
+  type RecoveryPath,
+  recoveryCommandTypes,
+} from "../core/recovery-contracts.js";
 import {
   type assignmentRecoverySchema,
+  type CommandReceipt,
+  commandReceiptSchema,
+  type OperatorCommand,
   recoveryOptionsSchema,
   type recoveryBlockerSchema,
 } from "../operator/contracts.js";
+import { RecoveryRejectedError } from "./recovery-types.js";
 import type { StandaloneService } from "./service.js";
 
 type Blocker = z.infer<typeof recoveryBlockerSchema>;
@@ -169,3 +176,87 @@ export function recoveryOptions(
 
 const numberOrNull = (value: unknown) =>
   typeof value === "number" ? value : null;
+
+export type RecoveryCommand = Extract<
+  OperatorCommand,
+  { type: (typeof recoveryCommandTypes)[RecoveryPath] }
+>;
+const recoveryTypes: readonly string[] = Object.values(recoveryCommandTypes);
+export const isRecoveryCommand = (c: OperatorCommand): c is RecoveryCommand =>
+  recoveryTypes.includes(c.type);
+
+/** Builds the receipt of a recovery command from the service result, as POST and readback do. */
+export function recoveryReceipt(
+  type: RecoveryCommand["type"],
+  key: string,
+  assignmentId: string,
+  result: Record<string, unknown>,
+): CommandReceipt {
+  const path = (Object.keys(recoveryCommandTypes) as RecoveryPath[]).find(
+    (p) => recoveryCommandTypes[p] === type,
+  );
+  const base = { key, recorded: true, assignmentId };
+  return commandReceiptSchema.parse(
+    path === "conversation-replace"
+      ? { ...base, kind: "conversation-replacement", revision: result.revision }
+      : path?.endsWith("adopt")
+        ? {
+            ...base,
+            kind: "recovery-adoption",
+            path,
+            workId: result.workId,
+            witnessId: result.witnessId,
+          }
+        : {
+            ...base,
+            kind: "recovery-resolution",
+            path,
+            workId: result.workId,
+            receiptId: result.id,
+            state: result.state,
+          },
+  );
+}
+
+/**
+ * Runs one recovery command through the unchanged service method with exactly the inner
+ * command the retained session routes pass, so a key replays through either entry point.
+ * The caller has checked the assignment exists; a work bound elsewhere is a refusal.
+ */
+export async function executeRecovery(
+  service: StandaloneService,
+  c: RecoveryCommand,
+): Promise<CommandReceipt> {
+  if (c.type === "recovery.conversation.replace") {
+    const { type: _type, ...command } = c;
+    const result = service.replaceConversationCommand(command);
+    return recoveryReceipt(c.type, c.key, c.assignmentId, result);
+  }
+  const workId = "receipt" in c ? c.receipt.workId : c.workId;
+  if (service.recoveryMaterial(workId)?.assignmentId !== c.assignmentId)
+    throw new RecoveryRejectedError("Work is not bound to this assignment");
+  let result: Record<string, unknown>;
+  switch (c.type) {
+    case "recovery.pre-turn.adopt": {
+      const { type: _t, assignmentId: _a, ...command } = c;
+      result = service.adoptHistoricalPreTurnRejection(command);
+      break;
+    }
+    case "recovery.no-turn.adopt": {
+      const { type: _t, assignmentId: _a, ...command } = c;
+      result = service.adoptHistoricalNoTurnSubmission(command);
+      break;
+    }
+    case "recovery.pre-turn.recover": {
+      const { type: _t, assignmentId: _a, ...command } = c;
+      result = await service.recoverPreTurnExecution(command);
+      break;
+    }
+    case "recovery.no-turn.recover": {
+      const { type: _t, assignmentId: _a, ...command } = c;
+      result = await service.recoverNoTurnExecution(command);
+      break;
+    }
+  }
+  return recoveryReceipt(c.type, c.key, c.assignmentId, result);
+}

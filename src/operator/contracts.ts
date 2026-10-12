@@ -14,7 +14,14 @@ import {
   feedbackReferenceSchema,
   taskReviewReadSchema,
 } from "../core/task-review-contracts.js";
-import { recoveryPaths } from "../core/recovery-contracts.js";
+import {
+  historicalNoTurnAdoptionBodySchema,
+  historicalPreTurnAdoptionBodySchema,
+  noTurnRecoveryBodySchema,
+  preTurnRecoveryBodySchema,
+  recoveryPaths,
+  replaceConversationBodySchema,
+} from "../core/recovery-contracts.js";
 import {
   executionHarnessSchema,
   profileRuntimeSchema,
@@ -2071,6 +2078,46 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       expectedVersion: revision.optional(),
     })
     .strict(),
+  // Evidence-bearing recovery: the inner service command plus its assignment scope.
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.pre-turn.adopt"),
+      assignmentId: uuid,
+      ...historicalPreTurnAdoptionBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.pre-turn.recover"),
+      assignmentId: uuid,
+      ...preTurnRecoveryBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.no-turn.adopt"),
+      assignmentId: uuid,
+      ...historicalNoTurnAdoptionBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.no-turn.recover"),
+      assignmentId: uuid,
+      ...noTurnRecoveryBodySchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...base,
+      type: z.literal("recovery.conversation.replace"),
+      ...replaceConversationBodySchema.shape,
+    })
+    .strict(),
 ]);
 export const configurationReceiptSchema = z
   .object({
@@ -2713,6 +2760,38 @@ export const commandReceiptSchema = z.discriminatedUnion("kind", [
       requeued: z.number().int().nonnegative().safe(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("recovery-adoption"),
+      key: uuid,
+      recorded: z.literal(true),
+      path: z.enum(["pre-turn-adopt", "no-turn-adopt"]),
+      assignmentId: uuid,
+      workId: z.string().min(1).max(512),
+      witnessId: uuid,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("recovery-resolution"),
+      key: uuid,
+      recorded: z.literal(true),
+      path: z.enum(["pre-turn-recover", "no-turn-recover"]),
+      assignmentId: uuid,
+      workId: z.string().min(1).max(512),
+      receiptId: uuid,
+      state: z.literal("reconciled"),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("conversation-replacement"),
+      key: uuid,
+      recorded: z.literal(true),
+      assignmentId: uuid,
+      revision,
+    })
+    .strict(),
 ]);
 export const apiErrorSchema = z
   .object({
@@ -2979,6 +3058,7 @@ export const cliCapabilities = [
   "source.write",
   "delivery.write",
   "recovery.read",
+  "recovery.write",
 ] as const;
 /** Assignments a profile or project change would affect, observed at read time. */
 export const configurationImpactSchema = envelope(
