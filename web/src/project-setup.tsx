@@ -467,32 +467,28 @@ export function ProjectSetup(p: SettingsProps) {
               ].includes(discovery.reason) ? (
                 <>
                   {ghLogin?.state === "signed-in" &&
-                    discovery.reason === "unconfigured" && (
+                    discovery.reason === "unconfigured" &&
+                    ghDraft.phase !== "unknown" && (
                       <Button
                         type="button"
                         disabled={ghDraft.phase === "pending"}
                         onClick={async () => {
-                          if (ghDraft.phase === "unknown")
-                            await ghDraft.reconcile(p.client, csrf);
-                          else
-                            await ghDraft.submit(
-                              p.client,
-                              {
-                                type: "discovery.configure",
-                                key: ghDraft.values.key,
-                                credentialRef: "gh:github.com",
-                              },
-                              csrf,
-                            );
+                          await ghDraft.submit(
+                            p.client,
+                            {
+                              type: "discovery.configure",
+                              key: ghDraft.values.key,
+                              credentialRef: "gh:github.com",
+                            },
+                            csrf,
+                          );
                           if (ghDraft.phase === "recorded") {
                             ghDraft.startOperation({ key: key() });
                             retry();
                           }
                         }}
                       >
-                        {ghDraft.phase === "unknown"
-                          ? "Reconcile exact submission"
-                          : `Use GitHub CLI login (@${ghLogin.login})`}
+                        {`Use GitHub CLI login (@${ghLogin.login})`}
                       </Button>
                     )}
                   <ActionLink variant="secondary" href="/app/settings">
@@ -522,6 +518,22 @@ export function ProjectSetup(p: SettingsProps) {
             >
               {ghDraft.notice}
             </Alert>
+          )}
+          {ghDraft.phase === "unknown" && (
+            <div className="setup-inline-actions">
+              <Button
+                type="button"
+                onClick={async () => {
+                  await ghDraft.reconcile(p.client, csrf);
+                  if (ghDraft.phase === "recorded") {
+                    ghDraft.startOperation({ key: key() });
+                    retry();
+                  }
+                }}
+              >
+                Reconcile exact submission
+              </Button>
+            </div>
           )}
           {rows.map((row, i) => {
             const source = sourceOf(row);

@@ -200,6 +200,40 @@ test("Setup offers the detected GitHub CLI login in one step", async (_t, journe
   await captureBrowserEvidence(page, "1366-setup-use-gh-login");
 });
 
+test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    ghExecutable: gh.executable,
+  });
+  const use = page.getByRole("button", {
+    name: "Use GitHub CLI login (@octo)",
+  });
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  try {
+    await use.click();
+    await page
+      .getByRole("button", { name: "Reconcile exact submission" })
+      .waitFor();
+    assert.equal(await use.count(), 0);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await page
+    .getByRole("button", { name: "Reconcile exact submission" })
+    .click();
+  await page
+    .getByText(
+      "Discovered from GitHub · 3 repositories visible to the credential",
+    )
+    .waitFor();
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
 test("Setup offers no gh action when gh is not signed in", async (_t, journey) => {
   const gh = createFakeGh("not-signed-in");
   journey.cleanup(async () => gh.close(), "fake-gh.close");

@@ -6,6 +6,7 @@ import {
   type ghLoginStateSchema,
 } from "../../src/operator/contracts.js";
 import { Button } from "./components.js";
+import { Alert } from "./ui/alert.js";
 import { useOperatorResource } from "./resource.js";
 import {
   DraftField,
@@ -252,13 +253,9 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
         )}
       </div>
       {!shown && d.notice && (
-        <DraftOutcome
-          draft={d}
-          client={p.client}
-          session={p.session}
-          label="Clear"
-          onRecorded={settled}
-        />
+        <Alert variant="destructive" role="alert">
+          {d.notice}
+        </Alert>
       )}
       {shown && (
         <form
