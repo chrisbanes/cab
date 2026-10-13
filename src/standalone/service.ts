@@ -1,18 +1,24 @@
-import type { GhLoginScope } from "./gh-credential.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { z } from "zod";
 import {
+  credentialFreeEnvironment,
+  setChildCredentialExclusions,
+} from "../core/child-environment.js";
+import {
+  CommandResultValidationError,
+  parseDomainCommandOutcome,
+} from "../core/command-results.js";
+import {
   type CoordinationCall,
   type CoordinationReceipt,
-  type CoordinationToolResponse,
   CoordinationStore,
+  type CoordinationToolResponse,
   type InboxDelivery,
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
-import { reviewMetadataSchema } from "../core/task-review.js";
 import {
   canonicalMaterial,
   type DeliveryActionRecord,
@@ -34,11 +40,22 @@ import {
   DomainStore,
 } from "../core/domain.js";
 import {
+  type SupportedRuntimeSettings,
+  supportedRuntimeSettingsSchema,
+} from "../core/execution-runtime.js";
+import {
   GitHubSourceStore,
   verifiedRepository,
 } from "../core/github-source.js";
 import { Store } from "../core/store.js";
-import { OperatorApi } from "./operator-api.js";
+import { reviewMetadataSchema } from "../core/task-review.js";
+import type { HarnessStatus } from "../operator/contracts.js";
+import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
+import {
+  claudeTokenExclusions,
+  claudeTokenSource,
+  readClaudeToken,
+} from "./claude-token.js";
 import {
   CodexRuntime,
   parseFailureEvidence,
@@ -49,26 +66,7 @@ import {
   type RuntimeToolResult,
   type RuntimeTurnSettings,
 } from "./codex.js";
-import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
-import {
-  claudeTokenExclusions,
-  claudeTokenSource,
-  readClaudeToken,
-} from "./claude-token.js";
-import {
-  credentialReferenceExclusions,
-  ghEnvironment,
-  ghToken,
-} from "./gh-credential.js";
-import {
-  CredentialGitHubSourceReader,
-  gitHubSourceCredentialStatus,
-} from "./github-source-credential.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
-import {
-  managedAssignmentEnvironment,
-  OperatorCredentialStore,
-} from "./operator-credentials.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import {
   ConversationHistoryCapture,
@@ -79,14 +77,6 @@ import {
   dispatchCoordinationTool,
   isCoordinationTool,
 } from "./coordination-tools.js";
-import {
-  captureRetainedReviewAnchor,
-  captureRetainedResultEvidence,
-  failedRetainedResultEvidenceCandidate,
-  retainedReviewAnchorMaterialHash,
-  retainedReviewAnchorStageRequestSchema,
-  type RetainedReviewAnchorStageRequest,
-} from "./retained-evidence.js";
 import { CoordinationView } from "./coordination-view.js";
 import {
   STANDALONE_MARKER_CONTENTS,
@@ -100,10 +90,27 @@ import {
   ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
-  credentialFreeEnvironment,
-  setChildCredentialExclusions,
-} from "../core/child-environment.js";
+  defaultExecutionHarness,
+  type ExecutionHarness,
+  executionHarnessLabels,
+  executionHarnessSchema,
+} from "./execution-harness.js";
+import {
+  claudePolicyDisclosure,
+  codexPolicyDisclosure,
+  type PolicyDisclosure,
+} from "./execution-policy.js";
+import type { GhLoginScope } from "./gh-credential.js";
+import {
+  credentialReferenceExclusions,
+  ghEnvironment,
+  ghToken,
+} from "./gh-credential.js";
 import type { GitHubDeliveryProvider } from "./github-delivery.js";
+import {
+  CredentialGitHubSourceReader,
+  gitHubSourceCredentialStatus,
+} from "./github-source-credential.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
@@ -112,6 +119,11 @@ import {
   type RuntimeUserInputOutcome,
   type RuntimeUserInputRequest,
 } from "./native-input.js";
+import { OperatorApi } from "./operator-api.js";
+import {
+  managedAssignmentEnvironment,
+  OperatorCredentialStore,
+} from "./operator-credentials.js";
 import {
   CaffeinateAssertion,
   ExecutionPower,
@@ -134,6 +146,14 @@ import type {
   TerminationVerifier,
 } from "./recovery-types.js";
 import {
+  captureRetainedResultEvidence,
+  captureRetainedReviewAnchor,
+  failedRetainedResultEvidenceCandidate,
+  type RetainedReviewAnchorStageRequest,
+  retainedReviewAnchorMaterialHash,
+  retainedReviewAnchorStageRequestSchema,
+} from "./retained-evidence.js";
+import {
   RoutingAttemptStore,
   type RoutingChoiceClient,
   RoutingCoordinator,
@@ -146,22 +166,6 @@ import {
 } from "./routing.js";
 import type { RuntimeSafetyPort } from "./runtime-retention.js";
 import {
-  defaultExecutionHarness,
-  type ExecutionHarness,
-  executionHarnessLabels,
-  executionHarnessSchema,
-} from "./execution-harness.js";
-import type { HarnessStatus } from "../operator/contracts.js";
-import {
-  type SupportedRuntimeSettings,
-  supportedRuntimeSettingsSchema,
-} from "../core/execution-runtime.js";
-import {
-  claudePolicyDisclosure,
-  codexPolicyDisclosure,
-  type PolicyDisclosure,
-} from "./execution-policy.js";
-import {
   SchedulerStore,
   type TurnRequest,
   TurnScheduler,
@@ -170,12 +174,12 @@ import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
   ExecutionState,
-  type TaskExecutionBinding,
-  type TaskExecutionBindingRecord,
+  harnessRetrySupported,
   type StopTarget,
   type TaskControlReceipt,
+  type TaskExecutionBinding,
+  type TaskExecutionBindingRecord,
   type TaskExecutionContext,
-  harnessRetrySupported,
 } from "./state.js";
 import {
   ExecutionSupervisor,
@@ -2497,13 +2501,20 @@ export class StandaloneService {
   async configureCapacity(
     command: Omit<CapacityConfigureCommand, "actor" | "type">,
   ): Promise<CapacityLimits> {
-    const result = this.domain().execute({
-      ...command,
-      type: "capacity.configure",
-      actor: "operator",
-    });
+    const outcome = parseDomainCommandOutcome(
+      "capacity.configure",
+      this.domain().execute({
+        ...command,
+        type: "capacity.configure",
+        actor: "operator",
+      }),
+    );
+    if (outcome.type !== "capacity.configure")
+      throw new CommandResultValidationError(
+        "Capacity configuration returned the wrong result type",
+      );
     await this.wakeScheduler();
-    return result as CapacityLimits;
+    return outcome.result;
   }
 
   /** The task command owns identity; provisioning never follows a conversation ID. */

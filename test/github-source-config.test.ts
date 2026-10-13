@@ -2,31 +2,33 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { type AddressInfo, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer, type AddressInfo } from "node:net";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { CommandResultValidationError } from "../src/core/command-results.js";
 import { browserSuite } from "./fixtures/browser-diagnostics.js";
+
 const browserTest = browserSuite("github-source");
-import { chromium, type Browser } from "playwright";
-import { DomainStore } from "../src/core/domain.js";
-import { DomainCommands } from "../src/core/domain.js";
+
+import { type Browser, chromium } from "playwright";
+import { DomainCommands, DomainStore } from "../src/core/domain.js";
 import { GitHubSourceStore } from "../src/core/github-source.js";
 import { Store } from "../src/core/store.js";
-import { StandaloneService } from "../src/standalone/service.js";
+import type { GitHubSourceReader } from "../src/standalone/github-source.js";
 import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../src/standalone/operator.js";
 import { OperatorAuth } from "../src/standalone/operator-auth.js";
-import type { GitHubSourceReader } from "../src/standalone/github-source.js";
+import { StandaloneService } from "../src/standalone/service.js";
 
 test("operator-owned GitHub configuration survives restart and rejects stale or agent changes", () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-github-config-"));
@@ -737,6 +739,250 @@ test("linked repository verification is asynchronous and stale configuration can
     assert.equal(verifications, 2);
   } finally {
     release?.();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed repository verification output fails as an internal result error", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-invalid-result-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  let malformed = true;
+  let verificationCount = 0;
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db, undefined, async (link) => {
+      verificationCount++;
+      return {
+        ...link,
+        gitCommonDirectory: malformed ? "relative/.git" : root,
+      };
+    });
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    const command = {
+      type: "github.configure" as const,
+      actor: "operator" as const,
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all" as const,
+        conditions: [{ kind: "label" as const, name: "ready" }],
+      },
+      repositories: [{ repositoryId: "R_1", path: root, ref: "main" }],
+    };
+
+    const commands = new DomainCommands(domain);
+    await assert.rejects(
+      commands.execute(command),
+      CommandResultValidationError,
+    );
+    assert.equal(domain.githubConfiguration(projectId).version, 1);
+    assert.deepEqual(domain.githubConfiguration(projectId).repositories, []);
+    assert.equal(domain.recordedResult(projectId, command.key), undefined);
+
+    malformed = false;
+    const result = await commands.execute(command);
+    assert.equal(verificationCount, 2);
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(domain.recordedResult(projectId, command.key), result);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("duplicate verified repository identities roll back and corrupt receipts fail closed", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-duplicate-result-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  let duplicate = true;
+  let verificationCount = 0;
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db, undefined, async (link) => {
+      verificationCount++;
+      return {
+        ...link,
+        repositoryId: duplicate ? "R_DUP" : link.repositoryId,
+        gitCommonDirectory: root,
+      };
+    });
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    const command = {
+      type: "github.configure" as const,
+      actor: "operator" as const,
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all" as const,
+        conditions: [{ kind: "label" as const, name: "ready" }],
+      },
+      repositories: [
+        { repositoryId: "R_1", path: root, ref: "main" },
+        { repositoryId: "R_2", path: root, ref: "main" },
+      ],
+    };
+    const commands = new DomainCommands(domain);
+
+    await assert.rejects(
+      commands.execute(command),
+      CommandResultValidationError,
+    );
+    assert.equal(verificationCount, 2);
+    assert.equal(domain.githubConfiguration(projectId).version, 1);
+    assert.deepEqual(domain.githubConfiguration(projectId).repositories, []);
+    assert.equal(domain.recordedResult(projectId, command.key), undefined);
+
+    duplicate = false;
+    const result = await commands.execute(command);
+    assert.equal(verificationCount, 4);
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      result.repositories.map((repository) => repository.repositoryId),
+      ["R_1", "R_2"],
+    );
+
+    const corrupted = {
+      ...result,
+      repositories: result.repositories.map((repository) => ({
+        ...repository,
+        repositoryId: "R_DUP",
+      })),
+    };
+    db.prepare(
+      "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+    ).run(JSON.stringify(corrupted), projectId, command.key);
+    await assert.rejects(
+      domain.configureGitHub(command),
+      CommandResultValidationError,
+    );
+    assert.throws(
+      () => domain.recordedResult(projectId, command.key, "github.configure"),
+      CommandResultValidationError,
+    );
+    assert.equal(verificationCount, 4);
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      domain
+        .githubConfiguration(projectId)
+        .repositories.map((repository) => repository.repositoryId),
+      ["R_1", "R_2"],
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("verified GitHub command duplicates share correlation and replay without rechecking", async () => {
+  const root = mkdtempSync(
+    join(tmpdir(), "ensemble-github-correlated-replay-"),
+  );
+  const filename = join(root, "db.sqlite");
+  const projectId = randomUUID();
+  let db = new DatabaseSync(filename);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let entered = false;
+  let verifications = 0;
+  try {
+    new Store(db).ensureHost("test");
+    let domain = new DomainStore(db, undefined, async (link) => {
+      entered = true;
+      verifications++;
+      await gate;
+      return { ...link, gitCommonDirectory: root };
+    });
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    const command = {
+      type: "github.configure" as const,
+      actor: "operator" as const,
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all" as const,
+        conditions: [{ kind: "label" as const, name: "ready" }],
+      },
+      repositories: [{ repositoryId: "R_1", path: root, ref: "main" }],
+    };
+    const commands = new DomainCommands(domain);
+    const first = commands.execute(command);
+    const matching = commands.execute(command);
+    assert.equal(first, matching);
+    for (let i = 0; i < 100 && !entered; i++)
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    assert.equal(entered, true);
+    await assert.rejects(
+      commands.execute({ ...command, credentialRef: "env:OTHER" }),
+      /different payload/i,
+    );
+    release();
+    const result = await first;
+    assert.equal(verifications, 1);
+    assert.deepEqual(domain.recordedResult(projectId, command.key), result);
+    assert.deepEqual(result, {
+      version: 2,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [
+        {
+          repositoryId: "R_1",
+          path: root,
+          ref: "main",
+          gitCommonDirectory: root,
+        },
+      ],
+    });
+
+    db.close();
+    db = new DatabaseSync(filename);
+    new Store(db).ensureHost("test");
+    domain = new DomainStore(db);
+    domain.migrate();
+    assert.deepEqual(await new DomainCommands(domain).execute(command), result);
+    assert.equal(verifications, 1);
+  } finally {
+    release();
     db.close();
     rmSync(root, { recursive: true, force: true });
   }

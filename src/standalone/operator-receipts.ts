@@ -1,11 +1,8 @@
-import type { z } from "zod";
+import type { DomainCommandOutcome } from "../core/command-results.js";
 import {
   type CommandReceipt,
   commandReceiptSchema,
-  type operationTypeSchema,
 } from "../operator/contracts.js";
-
-type ReceiptCommandType = z.infer<typeof operationTypeSchema>;
 
 /** A stored result that lacks a field the requested receipt type needs. */
 export class ReceiptShapeError extends Error {
@@ -16,95 +13,179 @@ export class ReceiptShapeError extends Error {
 }
 
 /**
- * Projects a stored domain result into the receipt POST returned. Only IDs, numbers and
- * flags are read, so stored private text (instructions, guidance) never reaches a receipt.
+ * Projects a validated domain result into its public receipt. Private text is never
+ * copied into a receipt; each command variant names the fields it exposes.
  */
 export function commandReceipt(
-  type: ReceiptCommandType,
+  outcome: DomainCommandOutcome,
   key: string,
   resourceId: string,
-  raw: unknown,
 ): CommandReceipt {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw))
-    throw new ReceiptShapeError();
-  const r = raw as Record<string, unknown>;
-  const field = (name: string) => {
-    if (!(name in r) || r[name] === undefined) throw new ReceiptShapeError();
-    return r[name];
-  };
-  const result =
-    type === "assignment.apply"
-      ? {
-          id: String(field("id")),
-          taskId: String(field("taskId")),
-          projectId: String(field("projectId")),
-          version: Number(field("version")),
-          profileRevision: Number(field("profileRevision")),
-          instructionsRevision: Number(field("instructionsRevision")),
-        }
-      : type === "project.create" || type === "project.configure"
-        ? {
-            commandType: type,
-            resourceId: String(field("id")),
-            version: Number(field("version")),
-            paused: Boolean(field("paused")),
-            leadProfileId:
-              field("leadProfileId") === null ? null : String(r.leadProfileId),
-            instructionsRevision: Number(field("instructionsRevision")),
-          }
-        : type === "profile.create" || type === "profile.configure"
-          ? {
-              commandType: type,
-              resourceId: String(field("id")),
-              version: Number(field("version")),
-              revoked: Boolean(field("revoked")),
-            }
-          : type === "github.configure"
-            ? {
-                commandType: type,
-                resourceId,
-                version: Number(field("version")),
-                credentialConfigured: field("credentialRef") !== null,
-                selectionCount: (field("selections") as unknown[]).length,
-                repositoryCount: (field("repositories") as unknown[]).length,
-              }
-            : type === "github.preview"
-              ? {
-                  commandType: type,
-                  resourceId: String(field("projectId")),
-                  selectionId: field("selectionId"),
-                  configVersion: field("configVersion"),
-                  active: field("active"),
-                }
-              : type === "routing.configure"
-                ? {
-                    commandType: type,
-                    resourceId,
-                    version: Number(field("version")),
-                    enabled: Boolean(field("enabled")),
-                    credentialConfigured: Boolean(field("credentialAvailable")),
-                  }
-                : {
-                    commandType: type,
-                    resourceId: "system:capacity",
-                    globalLimit: field("globalLimit"),
-                    defaultProjectLimit: field("defaultProjectLimit"),
-                    projectOverrides: field("projectOverrides"),
-                  };
-  const parsed = commandReceiptSchema.safeParse({
-    kind: type === "assignment.apply" ? "domain" : "configuration",
-    key,
-    recorded: true,
-    result,
-  });
+  const result = (() => {
+    switch (outcome.type) {
+      case "assignment.apply":
+        return {
+          kind: "domain" as const,
+          key,
+          recorded: true as const,
+          result: {
+            id: outcome.result.id,
+            taskId: outcome.result.taskId,
+            projectId: outcome.result.projectId,
+            version: outcome.result.version,
+            profileRevision: outcome.result.profileRevision,
+            instructionsRevision: outcome.result.instructionsRevision,
+          },
+        };
+      case "project.create":
+      case "project.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: outcome.result.id,
+            version: outcome.result.version,
+            paused: outcome.result.paused === 1,
+            leadProfileId: outcome.result.leadProfileId,
+            instructionsRevision: outcome.result.instructionsRevision,
+          },
+        };
+      case "profile.create":
+      case "profile.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: outcome.result.id,
+            version: outcome.result.version,
+            revoked: outcome.result.revoked === 1,
+          },
+        };
+      case "routing.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId,
+            version: outcome.result.version,
+            enabled: outcome.result.enabled === 1,
+            credentialConfigured: outcome.result.credentialAvailable === 1,
+          },
+        };
+      case "github.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId,
+            version: outcome.result.version,
+            credentialConfigured: outcome.result.credentialRef !== null,
+            selectionCount: outcome.result.selections.length,
+            repositoryCount: outcome.result.repositories.length,
+          },
+        };
+      case "github.activate":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: "github.preview" as const,
+            resourceId: outcome.result.projectId,
+            selectionId: outcome.result.selectionId,
+            configVersion: outcome.result.configVersion,
+            active: outcome.result.active,
+          },
+        };
+      case "capacity.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: "system:capacity" as const,
+            globalLimit: outcome.result.globalLimit,
+            defaultProjectLimit: outcome.result.defaultProjectLimit,
+            projectOverrides: outcome.result.projectOverrides,
+          },
+        };
+      case "discovery.configure":
+      case "claude-token.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId:
+              outcome.type === "discovery.configure"
+                ? ("system:discovery" as const)
+                : ("system:claude-token" as const),
+            configured: outcome.result.configured,
+          },
+        };
+      case "github.place":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: outcome.result.id,
+            projectId: outcome.result.projectId,
+            version: outcome.result.version,
+          },
+        };
+      case "task.create":
+      case "task.configure":
+      case "source.review":
+      case "dependency.add":
+      case "dependency.remove":
+      case "imported-blockers.set":
+        return {
+          kind: "domain" as const,
+          key,
+          recorded: true as const,
+          result: {
+            id: outcome.result.id,
+            projectId: outcome.result.projectId,
+            version: outcome.result.version,
+            state: outcome.result.state,
+            ready: outcome.result.ready === 1,
+          },
+        };
+      case "delivery.configure":
+      case "assignment.create":
+        throw new ReceiptShapeError();
+      default: {
+        const exhaustive: never = outcome;
+        throw exhaustive;
+      }
+    }
+  })();
+  switch (outcome.type) {
+    case "project.create":
+    case "profile.create":
+      if (outcome.result.version !== 1) throw new ReceiptShapeError();
+      break;
+    case "project.configure":
+    case "profile.configure":
+    case "assignment.apply":
+      if (outcome.result.version === 1) throw new ReceiptShapeError();
+      break;
+    default:
+      break;
+  }
+  const parsed = commandReceiptSchema.safeParse(result);
   if (!parsed.success) throw new ReceiptShapeError();
-  // Creation always records version 1; configure and apply always bump past it.
-  if (
-    (type.startsWith("project.") ||
-      type.startsWith("profile.") ||
-      type === "assignment.apply") &&
-    type.endsWith(".create") !== (Number(r.version) === 1)
-  )
-    throw new ReceiptShapeError();
   return parsed.data;
 }
