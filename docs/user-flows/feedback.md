@@ -1,11 +1,13 @@
 # Action feedback
 
-**Status:** planned. Today a routing save shows five confirmations at once and
-other configuration saves three or four: a "Recorded. Latest observations may
-differ…" notice, a receipt line such as "Recorded project.configure: 3f2a…; version
-7.", a saved notice repeating both, and panel lines with the saved time. Replies,
-answers and the composer use receipt vocabulary and show raw codes, while
-credential-reference saves give no confirmation at all.
+**Status:** implemented for configuration saves in Settings: projects, profiles,
+routing, GitHub source, sync preview and placement, discovery credential, Claude
+token, capacity and project setup. They share `web/src/action-feedback.tsx`: one
+message per save, with the receipt in a collapsed Details disclosure. Planned: the
+task composer, Stop and Resume, question answers, approvals, replies, comment
+review, local review, sign-out and CLI credentials, and the read-only status, empty
+and error copy. Those surfaces still use receipt vocabulary and raw codes in their
+messages.
 
 ## Goal
 
