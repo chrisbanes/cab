@@ -41,7 +41,7 @@ import {
 } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 
-const emptyProfile = () => ({
+export const emptyProfile = () => ({
   name: "",
   summary: "",
   instructions: "",
@@ -51,8 +51,20 @@ const emptyProfile = () => ({
   key: key(),
 });
 
-const claudeSettings = (workspace: SettingsProps["workspace"]) =>
+export const claudeSettings = (workspace: SettingsProps["workspace"]) =>
   workspace?.data.harnesses.find((h) => h.harness === "claude")?.settings;
+
+/** The one `profile.create` command, shared by the Settings form and guided setup. */
+export const profileCreateCommand = (v: Values) => ({
+  type: "profile.create",
+  key: v.key,
+  profileId: v.profileId,
+  name: v.name,
+  summary: v.summary,
+  instructions: v.instructions,
+  capabilities: v.capabilities,
+  runtime: runtimeCommand(v),
+});
 
 const runtimeChangeNote =
   "A runtime change saves a new profile revision and affects new conversations only; existing conversations keep their runtime.";
@@ -101,7 +113,7 @@ function SettingOptions({
 }
 
 /** Runtime selector, plus model and effort for Claude (blank uses the harness default). */
-function RuntimeFields({
+export function RuntimeFields({
   draft,
   workspace,
 }: {
@@ -177,16 +189,7 @@ export function ProfileCreate(p: SettingsProps) {
                 d,
                 p.client,
                 p.session,
-                {
-                  type: "profile.create",
-                  key: d.values.key,
-                  profileId: d.values.profileId,
-                  name: d.values.name,
-                  summary: d.values.summary,
-                  instructions: d.values.instructions,
-                  capabilities: d.values.capabilities,
-                  runtime: runtimeCommand(d.values),
-                },
+                profileCreateCommand(d.values),
                 p.refresh,
                 runtimeErrors(d.values, claudeSettings(p.workspace)),
               )

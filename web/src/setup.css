@@ -24,7 +24,8 @@
   margin: 0;
 }
 
-.setup-row {
+.setup-row,
+.setup-profile {
   display: grid;
   gap: var(--space-12);
   min-width: 0;

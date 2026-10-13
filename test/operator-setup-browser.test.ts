@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
+import type { Page } from "playwright";
 import { DiscoveryFailure } from "../src/standalone/github-discovery.js";
 import {
   browserSuite,
@@ -274,11 +275,11 @@ test("Setup falls back to typed entry without discovery and on first run", async
       .getAttribute("href"),
     "/app/settings",
   );
+  // With no profiles the lead is chosen by creating one in place, never by leaving setup.
+  await page.getByRole("group", { name: "New lead profile" }).waitFor();
   assert.equal(
-    await page
-      .getByRole("link", { name: "Create a lead profile" })
-      .getAttribute("href"),
-    "/app/settings/profiles/new",
+    await page.getByLabel("Lead profile", { exact: true }).count(),
+    0,
   );
   const repo = page.getByLabel("Repository (owner/name)");
   await repo.fill("Acme/Atlas");
@@ -663,4 +664,141 @@ test("Setup validates a typed row holding only a ref instead of dropping it", as
     await page.getByLabel("Ref", { exact: true }).inputValue(),
     "main",
   );
+});
+
+/** Every command the page sends from now on. */
+const sentCommands = (page: Page) => {
+  const sent: { type: string; [field: string]: unknown }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      sent.push(r.postDataJSON());
+  });
+  return sent;
+};
+const profileGroup = (page: Page) =>
+  page.getByRole("group", { name: "New lead profile" });
+
+test("Setup creates the lead profile inline and keeps every other setup value", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, {
+    profiles: false,
+    discovery: false,
+  });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page
+    .getByLabel("Instructions", { exact: true })
+    .fill("Project instructions");
+  await page.getByLabel("Repository (owner/name)").fill("acme/atlas");
+  await page.getByLabel("Ref", { exact: true }).fill("main");
+  await page.getByLabel("Local repository path").fill("~/src/atlas");
+  for (const field of ["Profile name", "Summary", "Profile instructions"])
+    await inline.getByLabel(field, { exact: true }).waitFor();
+  assert.equal(await inline.getByLabel("Runtime").inputValue(), "codex");
+  const sent = sentCommands(page);
+  // Enter with the name empty checks the profile only; it never submits the project.
+  await inline.getByLabel("Profile name", { exact: true }).press("Enter");
+  await page.getByText(fixFields).waitFor();
+  assert.equal(
+    await inline
+      .getByLabel("Profile name", { exact: true })
+      .getAttribute("aria-invalid"),
+    "true",
+  );
+  assert.equal(await outcomeMessages(page).count(), 1);
+  assert.equal(sent.length, 0);
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByLabel("Profile name", { exact: true }).press("Enter");
+  await savedOutcome(page, /^Profile created\. Other setup values kept\./);
+  assert.deepEqual(
+    sent.map((c) => c.type),
+    ["profile.create"],
+  );
+  const [created] = sent as unknown as {
+    profileId: string;
+    runtime: unknown;
+    capabilities: string;
+  }[];
+  assert.deepEqual(created?.runtime, { harness: "codex" });
+  assert.equal(created?.capabilities, "");
+  const lead = page.getByLabel("Lead profile", { exact: true });
+  await lead.waitFor();
+  assert.equal(await lead.inputValue(), created?.profileId);
+  await inline.waitFor({ state: "detached" });
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Atlas",
+  );
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).inputValue(),
+    "Project instructions",
+  );
+  assert.equal(
+    await page.getByLabel("Repository (owner/name)").inputValue(),
+    "acme/atlas",
+  );
+  assert.equal(
+    await page.getByLabel("Local repository path").inputValue(),
+    "~/src/atlas",
+  );
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await savedOutcome(page, /^Created Atlas\./);
+  assert.deepEqual(
+    sent.map((c) => c.type),
+    ["profile.create", "project.create"],
+  );
+  assert.equal(sent[1]?.leadProfileId, created?.profileId);
+  assert.equal(f.service.domain().projects().length, 1);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("Setup keeps its input when the inline profile is rejected", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  const name = inline.getByLabel("Profile name", { exact: true });
+  await name.fill("x".repeat(513));
+  const sent = sentCommands(page);
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByText(fixFields).waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
+  assert.equal(await name.inputValue(), "x".repeat(513));
+  assert.equal(await name.getAttribute("aria-invalid"), "true");
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Atlas",
+  );
+  assert.equal(sent.length, 0);
+  // The project can still be created without a lead.
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByText(/^Created Atlas\./).waitFor();
+  assert.equal(sent.at(-1)?.leadProfileId, null);
+});
+
+test("Setup warns before leaving only while it holds changed input", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  const prompts = () =>
+    page.evaluate(() => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented;
+    });
+  const becomes = (expected: boolean) =>
+    page.waitForFunction((want) => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented === want;
+    }, expected);
+  assert.equal(await prompts(), false);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await becomes(true);
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByText(/^Created Atlas\./).waitFor();
+  await becomes(false);
 });
