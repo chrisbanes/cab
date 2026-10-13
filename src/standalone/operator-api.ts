@@ -4495,7 +4495,7 @@ export class OperatorApi {
   /** The exact identity and advisory eligibility each recovery command needs. */
   async readRecoveryOptions(assignmentId: string) {
     return this.readWithInstructionFence(async () => {
-      const base = await this.readAssignmentRecoveryOnce(assignmentId, true);
+      const base = await this.readAssignmentRecoveryOnce(assignmentId);
       const { projectId } = this.requireAssignment(assignmentId);
       const excluded = await this.exclusions(projectId, base.data.taskId);
       return recoveryOptions(this.service, base, projectId, excluded, (v) =>
@@ -4503,8 +4503,8 @@ export class OperatorApi {
       );
     });
   }
-  /** Task-wide recovery records, or with `own` only this assignment's, before the bound of 20. */
-  private async readAssignmentRecoveryOnce(assignmentId: string, own = false) {
+  /** Task-wide holds and the selected assignment's records before the bound of 20. */
+  private async readAssignmentRecoveryOnce(assignmentId: string) {
     const d = this.domain(),
       { taskId, projectId } = this.requireAssignment(assignmentId),
       snapshot = this.workspaceSnapshot([taskId]),
@@ -4516,28 +4516,32 @@ export class OperatorApi {
     const selected = this.selection(d.assignment(assignmentId)).request,
       known = new Set(d.assignments(taskId).map((a) => String(a.id))),
       excluded = await this.exclusions(projectId, taskId);
-    const records = this.service
+    const taskRecords = this.service
       .recoveryForTask(taskId, selected?.workId)
       .filter((r) =>
         r.binding
           ? r.binding.taskId === taskId &&
             known.has(r.binding.assignmentId) &&
-            uuid.safeParse(r.binding.assignmentId).success &&
-            (!own || r.binding.assignmentId === assignmentId)
+            uuid.safeParse(r.binding.assignmentId).success
           : selected?.workId === r.workId &&
             selected.assignmentId === assignmentId &&
             selected.taskId === taskId &&
             r.request?.assignmentId === assignmentId,
       );
+    const records = taskRecords.filter(
+      (r) => !r.binding || r.binding.assignmentId === assignmentId,
+    );
     const taskHold = this.service.taskHold(taskId);
     const holds = {
       stop:
-        this.service.isTaskStopped(taskId) || records.some((r) => r.holds.stop),
-      writer: records.some((r) => r.holds.writer),
-      capacity: records.some((r) => r.holds.capacity),
-      uncertainty: records.some((r) => r.holds.uncertainty),
+        this.service.isTaskStopped(taskId) ||
+        taskRecords.some((r) => r.holds.stop),
+      writer: taskRecords.some((r) => r.holds.writer),
+      capacity: taskRecords.some((r) => r.holds.capacity),
+      uncertainty: taskRecords.some((r) => r.holds.uncertainty),
       task:
-        taskHold !== undefined || records.some((r) => r.holds.task !== null),
+        taskHold !== undefined ||
+        taskRecords.some((r) => r.holds.task !== null),
     };
     const visible = records.slice(-20);
     const intentStates = new Set([
