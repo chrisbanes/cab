@@ -113603,7 +113603,7 @@
                                   "type": "ref",
                                   "ref": "X:A4VOm",
                                   "name": "Selection kind",
-                                  "width": "fill_container",
+                                  "width": 158,
                                   "descendants": {
                                     "X:Yd2lV": {
                                       "content": "S-1 · Selection kind",
@@ -113706,7 +113706,7 @@
                                   "type": "ref",
                                   "ref": "X:A4VOm",
                                   "name": "Selection kind",
-                                  "width": "fill_container",
+                                  "width": 158,
                                   "descendants": {
                                     "X:Yd2lV": {
                                       "content": "S-3 · Selection kind",
@@ -114035,29 +114035,72 @@
                           }
                         },
                         {
-                          "id": "S7IVV2",
-                          "type": "ref",
-                          "ref": "X:A4VOm",
-                          "name": "Credential reference change",
+                          "type": "frame",
+                          "id": "b331J",
+                          "name": "GitHub source credential",
                           "width": "fill_container",
-                          "descendants": {
-                            "X:Yd2lV": {
-                              "content": "Credential reference change",
-                              "fontFamily": "$font-sans"
+                          "layout": "vertical",
+                          "gap": 8,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "j4L22P",
+                              "name": "Credential status",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "GitHub source credential · GitHub CLI · @chrisbanes · usable",
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
                             },
-                            "X:Ch62V": {
-                              "cornerRadius": "$radius-lg",
-                              "padding": [
-                                6,
-                                10
-                              ],
-                              "fill": "$nova-input-bg"
-                            },
-                            "X:V1STL": {
-                              "content": "Preserve current reference",
-                              "fontFamily": "$font-sans"
+                            {
+                              "type": "frame",
+                              "id": "CbI4x",
+                              "name": "Credential actions",
+                              "gap": 8,
+                              "children": [
+                                {
+                                  "id": "bnZde",
+                                  "type": "ref",
+                                  "ref": "X:C10zH",
+                                  "name": "Change",
+                                  "padding": [
+                                    6,
+                                    10
+                                  ],
+                                  "descendants": {
+                                    "X:l8v2I": {
+                                      "enabled": false
+                                    },
+                                    "X:poRwU": {
+                                      "content": "Change",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                },
+                                {
+                                  "id": "ZpmYI",
+                                  "type": "ref",
+                                  "ref": "X:C10zH",
+                                  "name": "Clear",
+                                  "padding": [
+                                    6,
+                                    10
+                                  ],
+                                  "descendants": {
+                                    "X:l8v2I": {
+                                      "enabled": false
+                                    },
+                                    "X:poRwU": {
+                                      "content": "Clear",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
                             }
-                          }
+                          ]
                         },
                         {
                           "type": "text",
@@ -114066,7 +114109,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Only an env:NAME reference is accepted. Its value stays server-side.",
+                          "content": "Choose GitHub CLI or a service environment variable. Saving a change or Clear requires preview at the new source version.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -114253,7 +114296,7 @@
                                   "type": "ref",
                                   "ref": "X:A4VOm",
                                   "name": "Condition",
-                                  "width": "fill_container",
+                                  "width": 158,
                                   "descendants": {
                                     "X:Yd2lV": {
                                       "content": "Condition",
@@ -114909,7 +114952,7 @@
                   "id": "UMeH3",
                   "name": "Source status",
                   "fill": "$X:--muted-foreground",
-                  "content": "1 conflicting placement · 1 placement outcome to check",
+                  "content": "Source credential missing · selections inactive",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -115071,7 +115114,7 @@
                                   "fill": "$X:--muted-foreground",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "Previewing a source checks it against GitHub and activates it. Activation doesn't import tasks or prove a successful sync.",
+                                  "content": "GitHub source credential required. Choose GitHub CLI or an environment variable in GitHub source settings, then preview this version.",
                                   "lineHeight": 1.45,
                                   "fontFamily": "$font-sans",
                                   "fontSize": 12,
@@ -115111,6 +115154,7 @@
                           "id": "dY5fV",
                           "name": "Preview actions",
                           "width": "fill_container",
+                          "height": "fit_content(32)",
                           "gap": 8,
                           "alignItems": "center",
                           "children": [
@@ -115125,6 +115169,7 @@
                                 10
                               ],
                               "gap": 6,
+                              "enabled": false,
                               "descendants": {
                                 "X:8jVfJ": {
                                   "enabled": false
@@ -115138,13 +115183,21 @@
                           ]
                         },
                         {
-                          "id": "NaQcV",
+                          "id": "h2mfFJ",
                           "type": "ref",
-                          "ref": "ugjxZ",
-                          "name": "Success line",
+                          "ref": "X:C10zH",
+                          "name": "Set source credential",
+                          "padding": [
+                            6,
+                            10
+                          ],
                           "descendants": {
-                            "dQMvl": {
-                              "content": "Saved. S-3 is active."
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Set source credential →",
+                              "fontFamily": "$font-sans"
                             }
                           }
                         }
@@ -115255,7 +115308,7 @@
                                   "fill": "$X:--muted-foreground",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "Newest attempt 11:02 · successful sync 11:02",
+                                  "content": "No attempt or successful sync yet · credential required",
                                   "lineHeight": 1.45,
                                   "fontFamily": "$font-sans",
                                   "fontSize": 12,
@@ -115278,7 +115331,7 @@
                                   "cornerRadius": 9999,
                                   "descendants": {
                                     "X:zHpCv": {
-                                      "content": "Complete",
+                                      "content": "Blocked",
                                       "fontWeight": "500",
                                       "fontFamily": "$font-sans"
                                     }
@@ -115333,7 +115386,7 @@
                                   "fill": "$X:--muted-foreground",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "Newest attempt 11:06 · successful sync unavailable",
+                                  "content": "No attempt or successful sync yet · credential required",
                                   "lineHeight": 1.45,
                                   "fontFamily": "$font-sans",
                                   "fontSize": 12,
@@ -115356,7 +115409,7 @@
                                   "cornerRadius": 9999,
                                   "descendants": {
                                     "X:zHpCv": {
-                                      "content": "Partial",
+                                      "content": "Blocked",
                                       "fontWeight": "500",
                                       "fontFamily": "$font-sans"
                                     }
@@ -115400,15 +115453,16 @@
                           ]
                         },
                         {
-                          "id": "WI6Wg",
-                          "type": "ref",
-                          "ref": "ugjxZ",
-                          "name": "Success line",
-                          "descendants": {
-                            "dQMvl": {
-                              "content": "Refreshed. 1 source is partial."
-                            }
-                          }
+                          "type": "text",
+                          "id": "CHqvV",
+                          "name": "Blocked credential explanation",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Set the source credential before preview or refresh.",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
                         }
                       ]
                     }
@@ -115664,6 +115718,10 @@
                             },
                             "m9nZn2/X:poRwU": {
                               "content": "Check whether it saved"
+                            },
+                            "JfVeC": {
+                              "enabled": false,
+                              "width": 457
                             }
                           }
                         }
@@ -115809,7 +115867,7 @@
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "· GitHub S-1 complete · synced 11:02",
+                  "content": "· GitHub source credential required",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -115822,7 +115880,7 @@
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "· S-3 partial · no successful sync yet",
+                  "content": "· S-1 and S-3 inactive · no sync attempt",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -115888,7 +115946,7 @@
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Check AT-149's placement, then choose AT-151's project. Source and placement changes are desktop-first.",
+                  "content": "Open GitHub source settings and choose a credential. Then preview at the new version. Placement holds remain separate.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -211796,6 +211854,4332 @@
               "fontFamily": "$font-sans",
               "fontSize": 13,
               "fontWeight": "normal"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "xCaEr",
+      "x": 1466,
+      "y": 43220,
+      "name": "119b · Project source credential · change",
+      "theme": {
+        "X:Mode": "Dark",
+        "X:Base": "Neutral",
+        "X:Accent": "Default"
+      },
+      "clip": true,
+      "width": 1366,
+      "height": 1100,
+      "fill": "$X:--background",
+      "children": [
+        {
+          "id": "u2m2Eg",
+          "type": "ref",
+          "ref": "X:PV1ln",
+          "name": "Sidebar · Atlas",
+          "height": "fill_container",
+          "width": 224,
+          "theme": {
+            "X:Mode": "Dark",
+            "X:Base": "Neutral",
+            "X:Accent": "Default"
+          },
+          "descendants": {
+            "X:6xhgh": {
+              "gap": 8
+            },
+            "X:u7yK2": {
+              "enabled": false,
+              "width": 32,
+              "height": 32,
+              "cornerRadius": 8
+            },
+            "X:xFmFv": {
+              "content": "Ensemble",
+              "fontFamily": "$font-sans"
+            },
+            "X:f9xLx": {
+              "content": "Personal workspace",
+              "fontSize": 12,
+              "fontFamily": "$font-sans"
+            },
+            "X:DEU9D": {
+              "enabled": false
+            },
+            "X:47U5w": {
+              "type": "frame",
+              "id": "w2n0Pn",
+              "name": "Ensemble navigation",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "id": "G6iPu",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Overview",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "layout-dashboard"
+                    },
+                    "X:0Ru22": {
+                      "content": "Overview",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "o0hfE",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Inbox",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "inbox"
+                    },
+                    "X:0Ru22": {
+                      "content": "Inbox",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "type": "text",
+                      "id": "seElO",
+                      "name": "Unresolved request count",
+                      "fill": "$X:--muted-foreground",
+                      "content": "5",
+                      "fontFamily": "$font-sans",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  }
+                },
+                {
+                  "id": "iDEpX",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Tasks",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "list-todo"
+                    },
+                    "X:0Ru22": {
+                      "content": "Tasks",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "x15T6l",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Search",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "search"
+                    },
+                    "X:0Ru22": {
+                      "content": "Search",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "Y4bgw",
+                  "type": "ref",
+                  "ref": "X:24cM4",
+                  "name": "Projects section",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "descendants": {
+                    "X:pWGDv": {
+                      "content": "Projects",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "IaMK5",
+                  "type": "ref",
+                  "ref": "X:qCCo8",
+                  "name": "Atlas",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Atlas",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "VDe9j",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Relay",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Relay",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "wBnv8",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Fieldnotes",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Fieldnotes",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "kzuY2",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "New project",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "plus"
+                    },
+                    "X:0Ru22": {
+                      "content": "New project",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            },
+            "X:q9yup": {
+              "width": "fill_container",
+              "gap": 8
+            },
+            "X:sODDz": {
+              "id": "KitqV",
+              "type": "ref",
+              "ref": "X:DpPVg",
+              "name": "Operator avatar",
+              "width": 28,
+              "height": 28,
+              "descendants": {
+                "X:wVlpW": {
+                  "content": "CB",
+                  "fontSize": 12,
+                  "fontFamily": "$font-sans"
+                }
+              }
+            },
+            "X:gJPjN": {
+              "content": "Chris Bennett",
+              "fontFamily": "$font-sans"
+            },
+            "X:9biS6": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "sqI7z",
+          "name": "Main content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "e1S4R",
+              "name": "Breadcrumb",
+              "fill": "$X:--muted-foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Settings / Projects / Atlas / GitHub source",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "cgLYC",
+              "name": "Page title",
+              "width": "fill_container",
+              "gap": 8,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Z6Wo5",
+                  "name": "Title",
+                  "fill": "$X:--foreground",
+                  "content": "Atlas · project configuration",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 18,
+                  "fontWeight": "600"
+                },
+                {
+                  "id": "gT0VD",
+                  "type": "ref",
+                  "ref": "X:C10zH",
+                  "name": "Refresh",
+                  "cornerRadius": "$radius-lg",
+                  "padding": [
+                    6,
+                    10
+                  ],
+                  "gap": 6,
+                  "effect": [],
+                  "fill": "$nova-outline-bg",
+                  "descendants": {
+                    "X:l8v2I": {
+                      "enabled": false
+                    },
+                    "X:poRwU": {
+                      "content": "Refresh",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "lN7QE",
+              "name": "Configuration status",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "BKvxw",
+                  "type": "ref",
+                  "ref": "X:3IiAS",
+                  "name": "Enabled badge",
+                  "cornerRadius": 9999,
+                  "descendants": {
+                    "X:zHpCv": {
+                      "content": "Enabled",
+                      "fontWeight": "500",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "type": "text",
+                  "id": "XV7XD",
+                  "name": "Source version",
+                  "fill": "$X:--muted-foreground",
+                  "content": "GitHub source saved 10:40 · credential configured",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "id": "J9LS9G",
+              "type": "ref",
+              "ref": "X:PbofX",
+              "name": "Project configuration sections",
+              "width": "fit_content",
+              "height": 32,
+              "theme": {
+                "X:Mode": "Dark",
+                "X:Base": "Neutral",
+                "X:Accent": "Default"
+              },
+              "cornerRadius": "$radius-lg",
+              "padding": 3,
+              "children": [
+                {
+                  "id": "poqZz",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "General",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "General",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "lzUws",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "Routing",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "Routing",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "EtysF",
+                  "type": "ref",
+                  "ref": "X:coMmv",
+                  "name": "GitHub source · selected",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "GitHub source",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "Y9q62",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "Placement",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "Sync & placement",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "iu4VH",
+              "name": "Columns",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "T47F5",
+                  "name": "Replacement form",
+                  "width": 760,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "yTziH",
+                      "name": "1 · Complete replacement selections",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "koJPZ",
+                          "name": "1 · Complete replacement selections header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "LZr5D",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "oerf3",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "1 · Discovery sources",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "Q7C3B",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Edit sources in place. Private search queries stay hidden; replace one to change it. New sources are added inactive.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "WDfxA",
+                          "name": "Selection S-1",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "end",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "JhRMY",
+                              "name": "Kind",
+                              "width": 160,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "oNvZu",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Selection kind",
+                                  "width": 158,
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "S-1 · Selection kind",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "Repository",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "yBt3M",
+                              "name": "Repo",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "Q5sqP",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Repository",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Repository",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "acme/atlas",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "id": "tjfE2",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Remove",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Remove",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "KTEBR",
+                          "name": "Selection S-3",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "end",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "mcLgr",
+                              "name": "Kind",
+                              "width": 160,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "HaE8Z",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Selection kind",
+                                  "width": 158,
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "S-3 · Selection kind",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "GitHub Project",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "LnYre",
+                              "name": "Filter",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "GxhSF",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Complete Project filter",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Project filter",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "Atlas roadmap · status:Next",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "id": "bRcLt",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Remove",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Remove",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "id": "x69c3",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Add source",
+                          "cornerRadius": "$radius-lg",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "gap": 6,
+                          "effect": [],
+                          "fill": "$nova-outline-bg",
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Add source",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "EMdss",
+                      "name": "3 · Repository access replacement",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "nczUc",
+                          "name": "3 · Repository access replacement header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "gJJ7q",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "ckXqB",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "3 · Repository access",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "fMuMh",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Every change is listed for review before saving. Removing all access asks for confirmation.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "OPpGW",
+                          "name": "Repository acme/atlas",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "end",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "vkNro",
+                              "name": "Repo",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "AHxpE",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Linked repository",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Linked repository",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "acme/atlas",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "j3oni",
+                              "name": "Ref",
+                              "width": 100,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "EY9zl",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Ref",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Ref",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "main",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Qv6XA",
+                              "name": "Path",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "v1tXh",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "New local repository path",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Local repository path",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "Kept · private",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "id": "AvUMe",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Remove",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Remove",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "id": "EaMHW",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Add repository",
+                          "cornerRadius": "$radius-lg",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "gap": 6,
+                          "effect": [],
+                          "fill": "$nova-outline-bg",
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Add repository",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "lb1qe",
+                          "name": "Source credential editor",
+                          "width": "fill_container",
+                          "fill": "$X:--muted",
+                          "cornerRadius": "$radius-lg",
+                          "layout": "vertical",
+                          "gap": 10,
+                          "padding": 12,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "p3Z5W",
+                              "name": "Editing status",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "GitHub source credential · editing · saved choice kept until Save changes",
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "pqeeC",
+                              "type": "ref",
+                              "ref": "X:LbK20",
+                              "name": "GitHub CLI choice",
+                              "descendants": {
+                                "X:GPiWl": {
+                                  "content": "GitHub CLI",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            },
+                            {
+                              "type": "text",
+                              "id": "vWxRp",
+                              "name": "Detected account",
+                              "fill": "$X:--muted-foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Signed in to github.com as @chrisbanes. Choose this login explicitly for this source.",
+                              "fontFamily": "$font-sans",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "JyTD1",
+                              "type": "ref",
+                              "ref": "X:D9Y8K",
+                              "name": "Environment variable choice",
+                              "descendants": {
+                                "X:GPiWl": {
+                                  "content": "Environment variable",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            },
+                            {
+                              "id": "SDydx",
+                              "type": "ref",
+                              "ref": "X:1415a",
+                              "name": "Source environment reference",
+                              "width": "fill_container",
+                              "descendants": {
+                                "X:BX0XX": {
+                                  "content": "New environment reference · env:NAME",
+                                  "fontFamily": "$font-sans"
+                                },
+                                "X:SDRKn": {
+                                  "content": "env:GITHUB_SOURCE_TOKEN",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            },
+                            {
+                              "id": "qJsJL",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Cancel credential edit",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Cancel",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "icnHs",
+                          "name": "Credential reference change help",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Cancel restores only the credential edit. Other source draft changes stay here. Discovery never supplies a source identity.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "KTHiA",
+                      "name": "Confirm and save",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "x1EhS",
+                          "name": "Source actions",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "RZKWO",
+                              "type": "ref",
+                              "ref": "X:VSnC2",
+                              "name": "Replace source configuration",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "descendants": {
+                                "X:8jVfJ": {
+                                  "enabled": false
+                                },
+                                "X:8tnXG": {
+                                  "content": "Save changes",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            },
+                            {
+                              "id": "DdObG",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Discard changes",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Discard changes",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "B9rosy",
+                  "name": "Current configuration",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "V6zOm",
+                      "name": "2 · Readiness matching",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "sV4yO",
+                          "name": "2 · Readiness matching header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "D6Ahm",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "lYqHC",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "2 · Readiness matching",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "z8vA4v",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Readiness admits work; it never grants repository access.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "MfiQF",
+                          "type": "ref",
+                          "ref": "X:A4VOm",
+                          "name": "Readiness matching",
+                          "width": "fill_container",
+                          "descendants": {
+                            "X:Yd2lV": {
+                              "content": "Readiness matching",
+                              "fontFamily": "$font-sans"
+                            },
+                            "X:Ch62V": {
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "fill": "$nova-input-bg"
+                            },
+                            "X:V1STL": {
+                              "content": "All conditions",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "TyklI",
+                          "name": "Condition 1",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "oBrVc",
+                              "name": "Kind",
+                              "width": 160,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "khWez",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Condition",
+                                  "width": 158,
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "Condition",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "Label",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "MXnxl",
+                              "name": "Value",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "jNtrX",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Ready label",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Ready label",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "ready",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "OE5Ze",
+                      "name": "Changes to save",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "JPf6i",
+                          "name": "Heading",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Changes to save · 1",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "XZMvP",
+                          "name": "Added source",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "+ S-3 · GitHub Project Atlas roadmap · filter status:Next · added inactive",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "rzzdw",
+                          "name": "Readiness change",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Readiness · unchanged",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "AG9UW",
+                          "name": "Access change",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Repository access · unchanged (acme/atlas)",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ZVFKQ",
+                          "name": "Save boundary",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Saving imports no tasks and activates nothing. Preview S-3 to activate it.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "XbW7W",
+                      "name": "Source boundary",
+                      "width": "fill_container",
+                      "fill": "$X:--muted",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "b6FV1a",
+                          "name": "Heading",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Source boundary",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "tmYDV",
+                          "name": "· Saving replaces configuration only. It imports no tasks, a",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· Saving replaces configuration only. It imports no tasks, activates no selection and resumes no work.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "PrFLd",
+                          "name": "· Activation is a separate preview step.",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· Activation is a separate preview step in Sync & placement.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "LllXk",
+                          "name": "· Use the exact source editor for private or partial edits.",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· Private values stay hidden; replacing one is explicit.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "gjYWT",
+      "x": 2932,
+      "y": 43220,
+      "name": "120b · Sync & placement / source credential unusable",
+      "theme": {
+        "X:Mode": "Dark",
+        "X:Base": "Neutral",
+        "X:Accent": "Default"
+      },
+      "clip": true,
+      "width": 1366,
+      "height": 900,
+      "fill": "$X:--background",
+      "children": [
+        {
+          "id": "Tyoq0",
+          "type": "ref",
+          "ref": "X:PV1ln",
+          "name": "Sidebar · Atlas",
+          "height": "fill_container",
+          "width": 224,
+          "theme": {
+            "X:Mode": "Dark",
+            "X:Base": "Neutral",
+            "X:Accent": "Default"
+          },
+          "descendants": {
+            "X:6xhgh": {
+              "gap": 8
+            },
+            "X:u7yK2": {
+              "enabled": false,
+              "width": 32,
+              "height": 32,
+              "cornerRadius": 8
+            },
+            "X:xFmFv": {
+              "content": "Ensemble",
+              "fontFamily": "$font-sans"
+            },
+            "X:f9xLx": {
+              "content": "Personal workspace",
+              "fontSize": 12,
+              "fontFamily": "$font-sans"
+            },
+            "X:DEU9D": {
+              "enabled": false
+            },
+            "X:47U5w": {
+              "type": "frame",
+              "id": "sA8BL",
+              "name": "Ensemble navigation",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "id": "tSTqw",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Overview",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "layout-dashboard"
+                    },
+                    "X:0Ru22": {
+                      "content": "Overview",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "uANts",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Inbox",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "inbox"
+                    },
+                    "X:0Ru22": {
+                      "content": "Inbox",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "type": "text",
+                      "id": "L2HUB",
+                      "name": "Unresolved request count",
+                      "fill": "$X:--muted-foreground",
+                      "content": "5",
+                      "fontFamily": "$font-sans",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  }
+                },
+                {
+                  "id": "sJm3M",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Tasks",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "list-todo"
+                    },
+                    "X:0Ru22": {
+                      "content": "Tasks",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "bTvsU",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Search",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "search"
+                    },
+                    "X:0Ru22": {
+                      "content": "Search",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "DSbAz",
+                  "type": "ref",
+                  "ref": "X:24cM4",
+                  "name": "Projects section",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "descendants": {
+                    "X:pWGDv": {
+                      "content": "Projects",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "E1chWF",
+                  "type": "ref",
+                  "ref": "X:qCCo8",
+                  "name": "Atlas",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Atlas",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "mbDoU",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Relay",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Relay",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "GuxmT",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Fieldnotes",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Fieldnotes",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "pf2Y6",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "New project",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "plus"
+                    },
+                    "X:0Ru22": {
+                      "content": "New project",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            },
+            "X:q9yup": {
+              "width": "fill_container",
+              "gap": 8
+            },
+            "X:sODDz": {
+              "id": "mSsRg",
+              "type": "ref",
+              "ref": "X:DpPVg",
+              "name": "Operator avatar",
+              "width": 28,
+              "height": 28,
+              "descendants": {
+                "X:wVlpW": {
+                  "content": "CB",
+                  "fontSize": 12,
+                  "fontFamily": "$font-sans"
+                }
+              }
+            },
+            "X:gJPjN": {
+              "content": "Chris Bennett",
+              "fontFamily": "$font-sans"
+            },
+            "X:9biS6": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "j6gCC",
+          "name": "Main content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "j4VKUu",
+              "name": "Breadcrumb",
+              "fill": "$X:--muted-foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Settings / Projects / Atlas / Sync & placement",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "Ml8ls",
+              "name": "Page title",
+              "width": "fill_container",
+              "gap": 8,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "k9AnQ",
+                  "name": "Title",
+                  "fill": "$X:--foreground",
+                  "content": "Atlas · project configuration",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 18,
+                  "fontWeight": "600"
+                },
+                {
+                  "id": "yEkl3",
+                  "type": "ref",
+                  "ref": "X:C10zH",
+                  "name": "Refresh",
+                  "cornerRadius": "$radius-lg",
+                  "padding": [
+                    6,
+                    10
+                  ],
+                  "gap": 6,
+                  "effect": [],
+                  "fill": "$nova-outline-bg",
+                  "descendants": {
+                    "X:l8v2I": {
+                      "enabled": false
+                    },
+                    "X:poRwU": {
+                      "content": "Refresh",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "c3wYB",
+              "name": "Configuration status",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "wiozM",
+                  "type": "ref",
+                  "ref": "X:3IiAS",
+                  "name": "Enabled badge",
+                  "cornerRadius": 9999,
+                  "descendants": {
+                    "X:zHpCv": {
+                      "content": "Enabled",
+                      "fontWeight": "500",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "type": "text",
+                  "id": "HcvLr",
+                  "name": "Source status",
+                  "fill": "$X:--muted-foreground",
+                  "content": "GitHub CLI source credential · not usable",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "id": "IbqbB",
+              "type": "ref",
+              "ref": "X:PbofX",
+              "name": "Project configuration sections",
+              "width": "fit_content",
+              "height": 32,
+              "theme": {
+                "X:Mode": "Dark",
+                "X:Base": "Neutral",
+                "X:Accent": "Default"
+              },
+              "cornerRadius": "$radius-lg",
+              "padding": 3,
+              "children": [
+                {
+                  "id": "RpZWN",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "General",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "General",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "KmOUs",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "Routing",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "Routing",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "Tq2ez",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "GitHub source",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "GitHub source",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "VxaoH",
+                  "type": "ref",
+                  "ref": "X:coMmv",
+                  "name": "Placement · selected",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "Sync & placement",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Y2vCHh",
+              "name": "Columns",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Ixh0S",
+                  "name": "Left column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "MgYRB",
+                      "name": "Preview and activation",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "d6JKQ",
+                          "name": "Preview and activation header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "lLqpx",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "NXS7J",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Preview and activation",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "b7CC3a",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "GitHub CLI is not signed in. Run gh auth login on the service host, then retry preview. Change the credential in GitHub source settings.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "BLraD",
+                          "type": "ref",
+                          "ref": "X:A4VOm",
+                          "name": "Selection to preview",
+                          "width": "fill_container",
+                          "descendants": {
+                            "X:Yd2lV": {
+                              "content": "Selection to preview",
+                              "fontFamily": "$font-sans"
+                            },
+                            "X:Ch62V": {
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "fill": "$nova-input-bg"
+                            },
+                            "X:V1STL": {
+                              "content": "S-3 (GitHub Project)",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "MgKgO",
+                          "name": "Preview actions",
+                          "width": "fill_container",
+                          "height": "fit_content(32)",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "A0tNIn",
+                              "type": "ref",
+                              "ref": "X:VSnC2",
+                              "name": "Preview and activate selection",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "enabled": false,
+                              "descendants": {
+                                "X:8jVfJ": {
+                                  "enabled": false
+                                },
+                                "X:8tnXG": {
+                                  "content": "Preview and activate selection",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "id": "f7Ztnf",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Set source credential",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Change source credential →",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "tjO0N",
+                      "name": "Source observations",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "nG6Xt",
+                          "name": "Source observations header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "U8X5tU",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "uDrB2",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Source sync",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "rKWAl",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Refresh checks every enabled source in this installation. An attempt is separate from a successful sync.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "EE0Sk",
+                          "name": "S-1 · acme/atlas issues",
+                          "width": "fill_container",
+                          "stroke": "$X:--border",
+                          "strokeWidth": {
+                            "top": 1
+                          },
+                          "gap": 8,
+                          "padding": [
+                            8,
+                            0
+                          ],
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "z7s1af",
+                              "name": "Text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "XCTNa",
+                                  "name": "Name",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "S-1 · acme/atlas issues",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 14,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "KhiEr",
+                                  "name": "Detail",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Latest attempt incomplete · last success 11:02 is stale",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "d9nxi0",
+                              "name": "Status and action",
+                              "gap": 8,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "id": "EsJUK",
+                                  "type": "ref",
+                                  "ref": "X:3IiAS",
+                                  "name": "Complete badge",
+                                  "cornerRadius": 9999,
+                                  "descendants": {
+                                    "X:zHpCv": {
+                                      "content": "Blocked",
+                                      "fontWeight": "500",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "e4smEW",
+                          "name": "S-3 · Atlas roadmap",
+                          "width": "fill_container",
+                          "stroke": "$X:--border",
+                          "strokeWidth": {
+                            "top": 1
+                          },
+                          "gap": 8,
+                          "padding": [
+                            8,
+                            0
+                          ],
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "yBcHv",
+                              "name": "Text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "XDiGP",
+                                  "name": "Name",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "S-3 · Atlas roadmap",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 14,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "OSloS",
+                                  "name": "Detail",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Latest attempt incomplete · no successful sync",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Z1nfyt",
+                              "name": "Status and action",
+                              "gap": 8,
+                              "alignItems": "center",
+                              "children": [
+                                {
+                                  "id": "wblLX",
+                                  "type": "ref",
+                                  "ref": "X:WuUMk",
+                                  "name": "Partial badge",
+                                  "cornerRadius": 9999,
+                                  "descendants": {
+                                    "X:zHpCv": {
+                                      "content": "Blocked",
+                                      "fontWeight": "500",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "u7towo",
+                          "name": "Observation actions",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "n4SlTb",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Refresh all sources",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Refresh all sources",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "BHcn1",
+                          "name": "Blocked credential explanation",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Credential unavailable. Blocker status is unknown.",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "YZCRj",
+                  "name": "Right column",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "BTYiN",
+                      "name": "Conflicting source placement",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "G8DhVH",
+                          "name": "Conflicting source placement header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "w2D9QB",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "yfG3i",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Conflicting source placement",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "j34n5h",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "AT-151 · Document shortcut conflicts · acme/atlas#151",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "N52H4c",
+                          "name": "Conflict explanation",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Matched by Atlas S-1 and Relay S-2. The task has no established assignments, so new work is held until you choose its project. Permissions are never combined.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "id": "Y81rcj",
+                          "type": "ref",
+                          "ref": "X:A4VOm",
+                          "name": "Placement project",
+                          "width": "fill_container",
+                          "descendants": {
+                            "X:Yd2lV": {
+                              "content": "Placement project",
+                              "fontFamily": "$font-sans"
+                            },
+                            "X:Ch62V": {
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "fill": "$nova-input-bg"
+                            },
+                            "X:V1STL": {
+                              "content": "Choose actual membership",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "id": "bYIDW",
+                          "name": "Placement boundary",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Saving a placement doesn't start work or grant repository access; start rules still apply.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "frame",
+                          "id": "cJgmk",
+                          "name": "Placement actions",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "AYTlC",
+                              "type": "ref",
+                              "ref": "X:VSnC2",
+                              "name": "Record placement",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "descendants": {
+                                "X:8jVfJ": {
+                                  "enabled": false
+                                },
+                                "X:8tnXG": {
+                                  "content": "Record placement",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            },
+                            {
+                              "id": "SAm8Z",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Advanced source review controls",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Advanced source review controls",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Bgawn",
+                      "name": "Placement outcome",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "LsQBY",
+                          "name": "Placement submission outcome header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "c3xou",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "MREjC",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Placement outcome",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "MYE40",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "AT-149 · Retry flaky webhook test · acme/atlas#149",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "JnWoB",
+                          "type": "ref",
+                          "ref": "TsFAB",
+                          "name": "Placement not confirmed",
+                          "width": "fill_container",
+                          "descendants": {
+                            "E8Uyng": {
+                              "content": "We couldn't confirm the placement."
+                            },
+                            "R4kmG": {
+                              "content": "Your choice is still here."
+                            },
+                            "m9nZn2/X:poRwU": {
+                              "content": "Check whether it saved"
+                            },
+                            "JfVeC": {
+                              "enabled": false,
+                              "width": 457
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "PbDkZ",
+      "x": 4398,
+      "y": 43220,
+      "name": "119c · Source credential Clear / save outcome unknown",
+      "theme": {
+        "X:Mode": "Dark",
+        "X:Base": "Neutral",
+        "X:Accent": "Default"
+      },
+      "clip": true,
+      "width": 1366,
+      "height": 1000,
+      "fill": "$X:--background",
+      "children": [
+        {
+          "id": "Cu58l",
+          "type": "ref",
+          "ref": "X:PV1ln",
+          "name": "Sidebar · Atlas",
+          "height": "fill_container",
+          "width": 224,
+          "theme": {
+            "X:Mode": "Dark",
+            "X:Base": "Neutral",
+            "X:Accent": "Default"
+          },
+          "descendants": {
+            "X:6xhgh": {
+              "gap": 8
+            },
+            "X:u7yK2": {
+              "enabled": false,
+              "width": 32,
+              "height": 32,
+              "cornerRadius": 8
+            },
+            "X:xFmFv": {
+              "content": "Ensemble",
+              "fontFamily": "$font-sans"
+            },
+            "X:f9xLx": {
+              "content": "Personal workspace",
+              "fontSize": 12,
+              "fontFamily": "$font-sans"
+            },
+            "X:DEU9D": {
+              "enabled": false
+            },
+            "X:47U5w": {
+              "type": "frame",
+              "id": "lsUqx",
+              "name": "Ensemble navigation",
+              "width": "fill_container",
+              "height": "fill_container",
+              "layout": "vertical",
+              "gap": 4,
+              "children": [
+                {
+                  "id": "rF4KF",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Overview",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "layout-dashboard"
+                    },
+                    "X:0Ru22": {
+                      "content": "Overview",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "mEaYK",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Inbox",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "inbox"
+                    },
+                    "X:0Ru22": {
+                      "content": "Inbox",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "type": "text",
+                      "id": "H2XWwz",
+                      "name": "Unresolved request count",
+                      "fill": "$X:--muted-foreground",
+                      "content": "5",
+                      "fontFamily": "$font-sans",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  }
+                },
+                {
+                  "id": "kx1jw",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Tasks",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "list-todo"
+                    },
+                    "X:0Ru22": {
+                      "content": "Tasks",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "qdfy9",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Search",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "search"
+                    },
+                    "X:0Ru22": {
+                      "content": "Search",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "aQZBg",
+                  "type": "ref",
+                  "ref": "X:24cM4",
+                  "name": "Projects section",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "descendants": {
+                    "X:pWGDv": {
+                      "content": "Projects",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "bOqSb",
+                  "type": "ref",
+                  "ref": "X:qCCo8",
+                  "name": "Atlas",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Atlas",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "nD43L",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Relay",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Relay",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "r71eR1",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "Fieldnotes",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "folder"
+                    },
+                    "X:0Ru22": {
+                      "content": "Fieldnotes",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                },
+                {
+                  "id": "g9RU2",
+                  "type": "ref",
+                  "ref": "X:jBcUh",
+                  "name": "New project",
+                  "width": "fill_container",
+                  "theme": {
+                    "X:Mode": "Dark",
+                    "X:Base": "Neutral",
+                    "X:Accent": "Default"
+                  },
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    6,
+                    8
+                  ],
+                  "descendants": {
+                    "X:r6B2W": {
+                      "icon": "plus"
+                    },
+                    "X:0Ru22": {
+                      "content": "New project",
+                      "fontFamily": "$font-sans"
+                    },
+                    "X:ttBco": {
+                      "enabled": false
+                    }
+                  }
+                }
+              ]
+            },
+            "X:q9yup": {
+              "width": "fill_container",
+              "gap": 8
+            },
+            "X:sODDz": {
+              "id": "LGbdP",
+              "type": "ref",
+              "ref": "X:DpPVg",
+              "name": "Operator avatar",
+              "width": 28,
+              "height": 28,
+              "descendants": {
+                "X:wVlpW": {
+                  "content": "CB",
+                  "fontSize": 12,
+                  "fontFamily": "$font-sans"
+                }
+              }
+            },
+            "X:gJPjN": {
+              "content": "Chris Bennett",
+              "fontFamily": "$font-sans"
+            },
+            "X:9biS6": {
+              "enabled": false
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "i8N71",
+          "name": "Main content",
+          "width": "fill_container",
+          "height": "fill_container",
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 20,
+          "children": [
+            {
+              "type": "text",
+              "id": "eJEGd",
+              "name": "Breadcrumb",
+              "fill": "$X:--muted-foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Settings / Projects / Atlas / GitHub source",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "p35Q3",
+              "name": "Page title",
+              "width": "fill_container",
+              "gap": 8,
+              "justifyContent": "space_between",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "DMYHF",
+                  "name": "Title",
+                  "fill": "$X:--foreground",
+                  "content": "Atlas · project configuration",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 18,
+                  "fontWeight": "600"
+                },
+                {
+                  "id": "PHMaa",
+                  "type": "ref",
+                  "ref": "X:C10zH",
+                  "name": "Refresh",
+                  "cornerRadius": "$radius-lg",
+                  "padding": [
+                    6,
+                    10
+                  ],
+                  "gap": 6,
+                  "effect": [],
+                  "fill": "$nova-outline-bg",
+                  "descendants": {
+                    "X:l8v2I": {
+                      "enabled": false
+                    },
+                    "X:poRwU": {
+                      "content": "Refresh",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "eja1r",
+              "name": "Configuration status",
+              "width": "fill_container",
+              "gap": 8,
+              "alignItems": "center",
+              "children": [
+                {
+                  "id": "RHDVX",
+                  "type": "ref",
+                  "ref": "X:3IiAS",
+                  "name": "Enabled badge",
+                  "cornerRadius": 9999,
+                  "descendants": {
+                    "X:zHpCv": {
+                      "content": "Enabled",
+                      "fontWeight": "500",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "type": "text",
+                  "id": "k0aZ6B",
+                  "name": "Source version",
+                  "fill": "$X:--muted-foreground",
+                  "content": "GitHub source saved 10:40 · credential configured",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 14,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "id": "LKB2L",
+              "type": "ref",
+              "ref": "X:PbofX",
+              "name": "Project configuration sections",
+              "width": "fit_content",
+              "height": 32,
+              "theme": {
+                "X:Mode": "Dark",
+                "X:Base": "Neutral",
+                "X:Accent": "Default"
+              },
+              "cornerRadius": "$radius-lg",
+              "padding": 3,
+              "children": [
+                {
+                  "id": "V92R9",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "General",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "General",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "nKvOF",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "Routing",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "Routing",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "sumIq",
+                  "type": "ref",
+                  "ref": "X:coMmv",
+                  "name": "GitHub source · selected",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "GitHub source",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                },
+                {
+                  "id": "zMHBz",
+                  "type": "ref",
+                  "ref": "X:QY0Ka",
+                  "name": "Placement",
+                  "width": "fit_content",
+                  "cornerRadius": "$radius-md",
+                  "padding": [
+                    2,
+                    6
+                  ],
+                  "descendants": {
+                    "X:qYQHc": {
+                      "content": "Sync & placement",
+                      "fontFamily": "$font-sans"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "R3Iti7",
+              "name": "Columns",
+              "width": "fill_container",
+              "gap": 16,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "M1FuD",
+                  "name": "Replacement form",
+                  "width": 760,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "ayaI9",
+                      "name": "1 · Complete replacement selections",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "y5l8ms",
+                          "name": "1 · Complete replacement selections header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "F9cMJ",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "e2Q1E6",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "1 · Discovery sources",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "AeGpS",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Edit sources in place. Private search queries stay hidden; replace one to change it. New sources are added inactive.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "J031av",
+                          "name": "Selection S-1",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "end",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "m8YzB",
+                              "name": "Kind",
+                              "width": 160,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "Zb6vK",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Selection kind",
+                                  "width": 158,
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "S-1 · Selection kind",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "Repository",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "qdUua",
+                              "name": "Repo",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "t4FfRq",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Repository",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Repository",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "acme/atlas",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "id": "WJt5P",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Remove",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Remove",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "kvPuq",
+                          "name": "Selection S-3",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "end",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "L28Wt",
+                              "name": "Kind",
+                              "width": 160,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "X1mji",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Selection kind",
+                                  "width": 158,
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "S-3 · Selection kind",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "GitHub Project",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "Q4zFPb",
+                              "name": "Filter",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "M7e0e",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Complete Project filter",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Project filter",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "Atlas roadmap · status:Next",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "id": "oVknj",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Remove",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Remove",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "id": "FlvCp",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Add source",
+                          "cornerRadius": "$radius-lg",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "gap": 6,
+                          "effect": [],
+                          "fill": "$nova-outline-bg",
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Add source",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "ck03T",
+                      "name": "3 · Repository access replacement",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "qfo7u",
+                          "name": "3 · Repository access replacement header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "Rr4Uz",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "gTwfQ",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "3 · Repository access",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "sfTHK",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Every change is listed for review before saving. Removing all access asks for confirmation.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "d0gOVO",
+                          "name": "Repository acme/atlas",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "alignItems": "end",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "k0e4W4",
+                              "name": "Repo",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "THNYs",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Linked repository",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Linked repository",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "acme/atlas",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "iz5u9",
+                              "name": "Ref",
+                              "width": 100,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "jHIsf",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Ref",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Ref",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "main",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "kJ7hZ",
+                              "name": "Path",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "ox0AT",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "New local repository path",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Local repository path",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "Kept · private",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "id": "HY57t",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Remove",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Remove",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "id": "nTEYM",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Add repository",
+                          "cornerRadius": "$radius-lg",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "gap": 6,
+                          "effect": [],
+                          "fill": "$nova-outline-bg",
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Add repository",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "MoxFb",
+                          "name": "GitHub source credential",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 8,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "XiaUy",
+                              "name": "Credential status",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Credential Clear · unsaved draft · saved reference remains until confirmed",
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "frame",
+                              "id": "efL57",
+                              "name": "Credential actions",
+                              "gap": 8,
+                              "children": [
+                                {
+                                  "id": "mQBZf",
+                                  "type": "ref",
+                                  "ref": "X:C10zH",
+                                  "name": "Change",
+                                  "padding": [
+                                    6,
+                                    10
+                                  ],
+                                  "descendants": {
+                                    "X:l8v2I": {
+                                      "enabled": false
+                                    },
+                                    "X:poRwU": {
+                                      "content": "Change",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                },
+                                {
+                                  "id": "M7YGt",
+                                  "type": "ref",
+                                  "ref": "X:C10zH",
+                                  "name": "Clear",
+                                  "padding": [
+                                    6,
+                                    10
+                                  ],
+                                  "descendants": {
+                                    "X:l8v2I": {
+                                      "enabled": false
+                                    },
+                                    "X:poRwU": {
+                                      "content": "Clear",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "HCXKN",
+                          "name": "Credential reference change help",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Clear keeps source definitions and imported history. Confirmed Clear makes selections inactive and blocker knowledge unknown.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "iJJ0u",
+                      "name": "Confirm and save",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "IAjtp",
+                          "name": "Source actions",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "ZQCuM",
+                              "type": "ref",
+                              "ref": "X:VSnC2",
+                              "enabled": false,
+                              "name": "Replace source configuration",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "descendants": {
+                                "X:8jVfJ": {
+                                  "enabled": false
+                                },
+                                "X:8tnXG": {
+                                  "content": "Save changes",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            },
+                            {
+                              "id": "C3mY5A",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Discard changes",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Discard changes",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "C11tNx",
+                  "name": "Current configuration",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Ns2pc",
+                      "name": "2 · Readiness matching",
+                      "width": "fill_container",
+                      "fill": "$X:--card",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "strokeWidth": 1,
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "VkV5Y",
+                          "name": "2 · Readiness matching header",
+                          "width": "fill_container",
+                          "gap": 8,
+                          "justifyContent": "space_between",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "U3fIGT",
+                              "name": "Heading text",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 2,
+                              "children": [
+                                {
+                                  "type": "text",
+                                  "id": "MH6cY",
+                                  "name": "Heading",
+                                  "fill": "$X:--foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "2 · Readiness matching",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 16,
+                                  "fontWeight": "500"
+                                },
+                                {
+                                  "type": "text",
+                                  "id": "h7C6t",
+                                  "name": "Status summary",
+                                  "fill": "$X:--muted-foreground",
+                                  "textGrowth": "fixed-width",
+                                  "width": "fill_container",
+                                  "content": "Readiness admits work; it never grants repository access.",
+                                  "lineHeight": 1.45,
+                                  "fontFamily": "$font-sans",
+                                  "fontSize": 12,
+                                  "fontWeight": "normal"
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "id": "rWyZO",
+                          "type": "ref",
+                          "ref": "X:A4VOm",
+                          "name": "Readiness matching",
+                          "width": "fill_container",
+                          "descendants": {
+                            "X:Yd2lV": {
+                              "content": "Readiness matching",
+                              "fontFamily": "$font-sans"
+                            },
+                            "X:Ch62V": {
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "fill": "$nova-input-bg"
+                            },
+                            "X:V1STL": {
+                              "content": "All conditions",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "p0vEc",
+                          "name": "Condition 1",
+                          "width": "fill_container",
+                          "gap": 12,
+                          "children": [
+                            {
+                              "type": "frame",
+                              "id": "O4aoNj",
+                              "name": "Kind",
+                              "width": 160,
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "RboWA",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Condition",
+                                  "width": 158,
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "Condition",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "Label",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
+                              "id": "li0j1",
+                              "name": "Value",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "gap": 6,
+                              "children": [
+                                {
+                                  "id": "rqkeO",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Ready label",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Ready label",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "ready",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "QpuiX",
+                      "name": "Source save not confirmed",
+                      "width": "fill_container",
+                      "fill": "$nova-warning-bg",
+                      "cornerRadius": "$radius-xl",
+                      "layout": "vertical",
+                      "gap": 10,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "mXG16",
+                          "name": "Unknown save heading",
+                          "fill": "$nova-warning-fg",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "We could not confirm the source save.",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "tcTew",
+                          "name": "Unknown save recovery",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Your Clear and other changes are still here. Check this same save before changing or retrying the draft.",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "id": "F81Dx",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Check source save",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Check whether it saved",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        },
+                        {
+                          "type": "text",
+                          "id": "Dk1hT",
+                          "name": "New version recovery",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "After a confirmed Change or Clear, reconfigure a usable credential and preview selections at the new source version.",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "rF7Qx",
+                      "name": "Source boundary",
+                      "width": "fill_container",
+                      "fill": "$X:--muted",
+                      "cornerRadius": "$radius-xl",
+                      "stroke": "$X:--border",
+                      "layout": "vertical",
+                      "gap": 8,
+                      "padding": 16,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "aT4oF",
+                          "name": "Heading",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Source boundary",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "type": "text",
+                          "id": "Nh135",
+                          "name": "· Saving replaces configuration only. It imports no tasks, a",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· Saving replaces configuration only. It imports no tasks, activates no selection and resumes no work.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "W2HIX",
+                          "name": "· Activation is a separate preview step.",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· Activation is a separate preview step in Sync & placement.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
+                          "id": "HCoKI",
+                          "name": "· Use the exact source editor for private or partial edits.",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· Private values stay hidden; replacing one is explicit.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }

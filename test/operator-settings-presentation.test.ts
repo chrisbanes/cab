@@ -1,3 +1,5 @@
+import { sourceCredentialExplanation } from "../src/standalone/github-source-credential.js";
+import { sourceCredentialCopy } from "../web/src/settings-view.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
@@ -233,6 +235,30 @@ test("source rows, change lines and command use keep markers and never paths", (
     "Credential reference: cleared",
   ]);
   assert.equal(lines.join(" ").includes("PRIVATE"), false);
+  assert.equal(
+    sourceCommand(projectId, {
+      ...values,
+      referenceMode: "gh",
+      credentialRef: "env:PRIVATE",
+    }).credentialRef,
+    "gh:github.com",
+  );
+  assert.ok(
+    sourceChanges(c.source, {
+      ...values,
+      referenceMode: "gh",
+      credentialRef: "env:PRIVATE",
+    }).includes("Credential reference: use GitHub CLI login"),
+  );
+  assert.ok(
+    !sourceChanges(c.source, {
+      ...values,
+      referenceMode: "gh",
+      credentialRef: "env:PRIVATE",
+    })
+      .join(" ")
+      .includes("PRIVATE"),
+  );
   const command = sourceCommand(projectId, values);
   assert.deepEqual(command.selections, [
     { id: "S-1", keep: true },
@@ -550,4 +576,18 @@ test("adoption resolves every identity collision explicitly", () => {
   const replaced = sourceChanges(latest, replaceTheirs);
   assert.ok(replaced.includes("− Repository access: acme/new"));
   assert.ok(replaced.includes("+ Repository access: acme/new · main"));
+});
+
+test("source failure copy matches JSON and advanced HTML without provider details", () => {
+  for (const reason of [
+    "missing-credential",
+    "invalid-credential-reference",
+    "gh-not-installed",
+    "gh-not-signed-in",
+    "gh-unreadable",
+  ] as const)
+    assert.equal(
+      sourceCredentialCopy(reason),
+      sourceCredentialExplanation(reason),
+    );
 });

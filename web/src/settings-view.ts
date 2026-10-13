@@ -1,4 +1,5 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
+import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { z } from "zod";
 import type {
   CommandReceipt,
@@ -206,7 +207,9 @@ export function projectStateSummary(
     ? "Check what was saved for the unknown placement in Sync & placement."
     : c.placements.length
       ? `Choose the project for ${c.placements[0]?.title ?? "the conflicting task"} in Sync & placement.`
-      : "Nothing needs attention here.";
+      : c.source.selections.length && c.source.credential?.usable === false
+        ? "Set or change the credential in GitHub source settings, then preview this source version."
+        : "Nothing needs attention here.";
   return { state, next };
 }
 
@@ -231,4 +234,27 @@ export function holdPills(h: {
     pill("Capacity", h.capacity, "Held", "None reported"),
     pill("Uncertainty", h.uncertainty, "Active", "None reported"),
   ];
+}
+
+/** Controlled source failures contain no provider output or private reference names. */
+export function sourceCredentialCopy(reason: string | null | undefined) {
+  switch (reason) {
+    case "missing-credential":
+    case "invalid-credential-reference":
+    case "gh-not-installed":
+    case "gh-not-signed-in":
+    case "gh-unreadable":
+      return sourceCredentialExplanation(reason);
+    default:
+      return "Source credential status is unavailable. Reload before previewing.";
+  }
+}
+export function sourceCredentialSummary(
+  source: ProjectConfigurationData["source"],
+) {
+  const status = source.credential;
+  if (!source.credentialConfigured) return "Unconfigured";
+  if (!status) return "Configured · status unavailable";
+  const kind = status.source === "gh" ? "GitHub CLI" : "Environment reference";
+  return `${kind} · ${status.usable ? "usable" : "unavailable"}`;
 }

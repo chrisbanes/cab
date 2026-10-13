@@ -97,11 +97,41 @@ export async function detectGh(options: GhOptions = {}): Promise<GhLoginState> {
     : { state: "unreadable" };
 }
 
+/** A request-local login probe shared only by identical captured process contexts. */
+export class GhLoginScope {
+  private readonly probes = new Map<string, Promise<GhLoginState>>();
+
+  detect(options: GhOptions): Promise<GhLoginState> {
+    const environment = options.environment ?? process.env;
+    const key = JSON.stringify([
+      options.executable ?? "gh",
+      options.timeoutMs ?? 10_000,
+      Object.entries(environment)
+        .filter(([, value]) => value !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    ]);
+    let probe = this.probes.get(key);
+    if (!probe) {
+      probe = detectGh(options);
+      this.probes.set(key, probe);
+    }
+    return probe;
+  }
+}
+
 /** The github.com token from `gh auth token`, after detection; never cached for reads. */
 export async function ghToken(
   options: GhOptions = {},
 ): Promise<{ token: string } | { state: GhFailureState }> {
   const detected = await detectGh(options);
+  return ghTokenAfterDetection(detected, options);
+}
+
+/** Uses the paired login probe, but always runs a fresh token command. */
+export async function ghTokenAfterDetection(
+  detected: GhLoginState,
+  options: GhOptions = {},
+): Promise<{ token: string } | { state: GhFailureState }> {
   if (detected.state !== "signed-in") return detected;
   const result = await run(
     ["auth", "token", "--hostname", "github.com"],
@@ -115,42 +145,44 @@ export async function ghToken(
   return { token };
 }
 
-// ponytail: in memory only; a token rotated more than eight times since start is no longer excluded.
-const resolvedLimit = 8;
+// Exclusion-only lifetime memory grows with distinct rotations; each value is at most 512 bytes.
 const resolved = new Set<string>();
 /** Kept only to exclude and redact; never persisted, returned or used for a read. */
 function remember(token: string) {
-  resolved.delete(token);
   resolved.add(token);
-  for (const oldest of resolved) {
-    if (resolved.size <= resolvedLimit) break;
-    resolved.delete(oldest);
-  }
 }
 
 /**
- * What child environments and reads must exclude for a discovery reference: env names to drop,
+ * What children and public output must exclude for a selected reference: env names to drop,
  * values to drop wherever they appear, and every string to redact. For `gh:github.com` these
  * are gh's own token variables and every token value this process has resolved.
  */
-export function discoveryCredentialExclusions(
-  ref: string,
+export function credentialReferenceExclusions(
+  ref: string | null,
   env: NodeJS.ProcessEnv = process.env,
 ): { names: string[]; values: string[]; redactions: string[] } {
-  if (ref.startsWith("gh:")) {
+  if (ref === "gh:github.com") {
     const names = ["GH_TOKEN", "GITHUB_TOKEN"];
     const values = [...resolved, ...names.flatMap((name) => env[name] || [])];
     return { names, values, redactions: [ref, ...values] };
   }
-  const name = ref.slice(4);
-  const values = env[name] ? [env[name]] : [];
-  return { names: [name], values, redactions: [ref, name, ...values] };
+  const name = ref?.startsWith("env:") ? ref.slice(4) : null;
+  const names = name ? [name] : [];
+  const values = [...resolved, ...names.flatMap((key) => env[key] || [])];
+  return {
+    names,
+    values,
+    redactions: [...(ref ? [ref] : []), ...names, ...values],
+  };
 }
 
+/** Compatibility name for discovery callers; lifetime values survive a cleared reference. */
+export const discoveryCredentialExclusions = credentialReferenceExclusions;
+
 /**
- * The service environment `gh` runs with: the Claude token and delivery credentials removed,
- * and an `env:` discovery credential too. Only a `gh:` reference keeps `GH_TOKEN` and
- * `GITHUB_TOKEN`, which `gh` may read to resolve it.
+ * The environment for this explicit gh operation, independent of discovery's identity.
+ * Remove unrelated source, discovery, delivery and Claude credentials and value aliases.
+ * Only a selected gh reference keeps gh's token variables; keychain access remains a host limit.
  */
 export function ghEnvironment(
   domain: Pick<
@@ -159,25 +191,42 @@ export function ghEnvironment(
     | "projects"
     | "deliveryCredentialReference"
     | "discoveryCredentialReference"
-  >,
+  > &
+    Partial<Pick<DomainStore, "githubConfiguration">>,
+  options?: { reference: string | null; environment?: NodeJS.ProcessEnv },
 ): NodeJS.ProcessEnv {
+  const environment = options?.environment ?? process.env;
   const claudeRef = domain.claudeTokenReference();
   const claude = claudeRef
-    ? claudeTokenExclusions(claudeRef)
+    ? claudeTokenExclusions(claudeRef, environment)
     : { names: [], values: [] };
   const delivery = domain.projects().flatMap((p) => {
     const ref = domain.deliveryCredentialReference(String(p.id));
     return ref ? [ref.slice(4)] : [];
   });
   const discoveryRef = domain.discoveryCredentialReference();
-  const discovery =
-    discoveryRef && !discoveryRef.startsWith("gh:")
-      ? discoveryCredentialExclusions(discoveryRef)
-      : { names: [], values: [] };
-  return credentialFreeEnvironment(
-    process.env,
-    [...delivery, ...claude.names, ...discovery.names],
-    process.env,
-    [...claude.values, ...discovery.values],
+  const reference = options ? options.reference : discoveryRef;
+  const sources = domain.projects().flatMap((p) => {
+    const ref = domain.githubConfiguration?.(String(p.id)).credentialRef;
+    return ref?.startsWith("env:") ? [ref.slice(4)] : [];
+  });
+  const discovery = discoveryRef?.startsWith("env:")
+    ? [discoveryRef.slice(4)]
+    : [];
+  const gh = ["GH_TOKEN", "GITHUB_TOKEN"];
+  const result = credentialFreeEnvironment(
+    environment,
+    [...delivery, ...sources, ...claude.names, ...discovery, ...gh],
+    environment,
+    [
+      ...claude.values,
+      ...credentialReferenceExclusions(null, environment).values,
+    ],
   );
+  // Explicit gh selection permits only these current variables, even when another
+  // configured credential shares their name or value. All aliases remain removed.
+  if (reference === "gh:github.com")
+    for (const key of gh)
+      if (environment[key] !== undefined) result[key] = environment[key];
+  return result;
 }

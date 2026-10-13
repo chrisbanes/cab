@@ -800,7 +800,7 @@ test("a gh discovery reference reads with the gh login on every read and never r
   assert.equal(text.includes(fakeGhToken), false);
 });
 
-test("routing, delivery and GitHub source credentials still accept only env references", () => {
+test("routing and delivery stay env-only while sources accept the exact gh login", () => {
   const routing = operatorCommandSchema.options.find(
     (o) => o.shape.type.value === "routing.configure",
   ) as unknown as { shape: { credentialRef: z.ZodType } } | undefined;
@@ -808,9 +808,13 @@ test("routing, delivery and GitHub source credentials still accept only env refe
   for (const field of [
     routing.shape.credentialRef,
     deliveryPolicySchema.shape.credentialRef,
-    githubConfigurationSchema.shape.credentialRef,
   ]) {
     assert.equal(field.safeParse("env:FIXTURE_SOURCE").success, true);
     assert.equal(field.safeParse("gh:github.com").success, false);
   }
+  const source = githubConfigurationSchema.shape.credentialRef;
+  assert.equal(source.safeParse("env:FIXTURE_SOURCE").success, true);
+  assert.equal(source.safeParse("gh:github.com").success, true);
+  assert.equal(source.safeParse("gh:other.host").success, false);
+  assert.equal(source.safeParse(null).success, true);
 });

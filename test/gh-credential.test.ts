@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { credentialFreeEnvironment } from "../src/core/child-environment.js";
 import {
+  credentialReferenceExclusions,
   detectGh,
   ghEnvironment,
   ghToken,
@@ -46,6 +48,214 @@ test("gh detection and token resolution map every state without revealing the to
   for (const environment of gh.environments()) {
     assert.equal(environment.GH_PROMPT_DISABLED, "1");
     assert.equal(environment.GH_NO_UPDATE_NOTIFIER, "1");
+  }
+});
+
+test("source gh environment ignores discovery choice and removes unrelated credential aliases", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const environment = {
+    PATH: process.env.PATH,
+    SOURCE: "source-canary",
+    SOURCE_ALIAS: "source-canary",
+    DISCOVERY: "discovery-canary",
+    DISCOVERY_ALIAS: "discovery-canary",
+    DELIVERY: "delivery-canary",
+    DELIVERY_ALIAS: "delivery-canary",
+    CLAUDE: "claude-canary",
+    CLAUDE_ALIAS: "claude-canary",
+    GH_TOKEN: "chosen-gh-canary",
+    GITHUB_TOKEN: "chosen-github-canary",
+    GH_ALIAS: "chosen-gh-canary",
+    SAFE: "safe-value",
+  };
+  for (const discovery of [null, "env:DISCOVERY"]) {
+    const domain = {
+      claudeTokenReference: () => "env:CLAUDE",
+      projects: () => [{ id: "p" }] as never,
+      deliveryCredentialReference: () => "env:DELIVERY",
+      discoveryCredentialReference: () => discovery,
+      githubConfiguration: () => ({ credentialRef: "env:SOURCE" }) as never,
+    };
+    const child = ghEnvironment(domain, {
+      reference: "gh:github.com",
+      environment,
+    });
+    assert.equal(child.GH_TOKEN, environment.GH_TOKEN);
+    assert.equal(child.GITHUB_TOKEN, environment.GITHUB_TOKEN);
+    assert.equal(child.SAFE, "safe-value");
+    assert.equal(child.GH_ALIAS, undefined);
+    for (const name of [
+      "SOURCE",
+      "SOURCE_ALIAS",
+      "DELIVERY",
+      "DELIVERY_ALIAS",
+      "CLAUDE",
+      "CLAUDE_ALIAS",
+      ...(discovery ? ["DISCOVERY", "DISCOVERY_ALIAS"] : []),
+    ])
+      assert.equal(child[name], undefined, name);
+    await ghToken({ executable: gh.executable, environment: child });
+    const received = gh.environments().at(-1);
+    assert.ok(received);
+    assert.equal(received.GH_TOKEN, environment.GH_TOKEN);
+    assert.equal(received.SOURCE_ALIAS, undefined);
+    const detection = ghEnvironment(domain, { reference: null, environment });
+    assert.equal(detection.GH_TOKEN, undefined);
+    assert.equal(detection.GITHUB_TOKEN, undefined);
+  }
+});
+
+test("explicit source gh keeps its token variables across configured name and value collisions", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  for (const role of ["source", "delivery", "discovery", "claude"]) {
+    for (const collision of [
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "ALIAS_GH",
+      "ALIAS_GITHUB",
+    ]) {
+      const environment = {
+        GH_TOKEN: "chosen-gh-collision",
+        GITHUB_TOKEN: "chosen-github-collision",
+        ALIAS_GH: "chosen-gh-collision",
+        ALIAS_GITHUB: "chosen-github-collision",
+        SAFE: "safe-value",
+      };
+      const ref = `env:${collision}`;
+      const domain = {
+        claudeTokenReference: () => (role === "claude" ? ref : null),
+        projects: () => [{ id: "p" }] as never,
+        deliveryCredentialReference: () => (role === "delivery" ? ref : null),
+        discoveryCredentialReference: () =>
+          role === "discovery" ? ref : "env:OTHER_DISCOVERY",
+        githubConfiguration: () =>
+          ({ credentialRef: role === "source" ? ref : null }) as never,
+      };
+      const selected = ghEnvironment(domain, {
+        reference: "gh:github.com",
+        environment,
+      });
+      assert.equal(
+        selected.GH_TOKEN,
+        environment.GH_TOKEN,
+        `${role}/${collision}`,
+      );
+      assert.equal(
+        selected.GITHUB_TOKEN,
+        environment.GITHUB_TOKEN,
+        `${role}/${collision}`,
+      );
+      assert.equal(selected.ALIAS_GH, undefined);
+      assert.equal(selected.ALIAS_GITHUB, undefined);
+      assert.equal(selected.SAFE, "safe-value");
+      await ghToken({ executable: gh.executable, environment: selected });
+      const received = gh.environments().at(-1);
+      assert.equal(received?.GH_TOKEN, environment.GH_TOKEN);
+      assert.equal(received?.GITHUB_TOKEN, environment.GITHUB_TOKEN);
+      assert.equal(received?.ALIAS_GH, undefined);
+      const detection = ghEnvironment(domain, { reference: null, environment });
+      assert.equal(detection.GH_TOKEN, undefined);
+      assert.equal(detection.GITHUB_TOKEN, undefined);
+      assert.equal(detection.ALIAS_GH, undefined);
+      assert.equal(detection.ALIAS_GITHUB, undefined);
+    }
+  }
+});
+
+test("gh helper strips lifetime resolved aliases after rotation and Clear while retaining only chosen variables", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const old = "gho_helper-old-rotation";
+  const current = "gho_helper-current-rotation";
+  gh.setToken(old);
+  await ghToken({ executable: gh.executable });
+  gh.setToken(current);
+  await ghToken({ executable: gh.executable });
+  const domain = {
+    claudeTokenReference: () => null,
+    projects: () => [],
+    deliveryCredentialReference: () => null,
+    discoveryCredentialReference: () => null,
+  };
+  const environment = {
+    GH_TOKEN: current,
+    GITHUB_TOKEN: current,
+    OLD_NEUTRAL_ALIAS: old,
+    CURRENT_NEUTRAL_ALIAS: current,
+    SAFE: "safe-value",
+  };
+  const selected = ghEnvironment(domain, {
+    reference: "gh:github.com",
+    environment,
+  });
+  assert.deepEqual(selected, {
+    GH_TOKEN: current,
+    GITHUB_TOKEN: current,
+    SAFE: "safe-value",
+  });
+  const detection = ghEnvironment(domain, { reference: null, environment });
+  assert.deepEqual(detection, { SAFE: "safe-value" });
+});
+
+test("resolved values survive more than eight rotations and Clear for exclusion only", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const options = { executable: gh.executable };
+  const tokens = Array.from(
+    { length: 12 },
+    (_, i) => `gho_lifetime-rotation-${i}`,
+  );
+  for (const token of tokens) {
+    gh.setToken(token);
+    assert.deepEqual(await ghToken(options), { token });
+  }
+  const environment = {
+    OLD_ALIAS: tokens[0],
+    NEW_ALIAS: tokens.at(-1),
+    KEEP: "safe",
+  };
+  for (const ref of ["gh:github.com", "env:OTHER", null]) {
+    const excluded = credentialReferenceExclusions(ref, environment);
+    for (const token of tokens) {
+      assert.ok(excluded.values.includes(token));
+      assert.ok(excluded.redactions.includes(token));
+    }
+    const child = credentialFreeEnvironment(
+      environment,
+      excluded.names,
+      environment,
+      excluded.values,
+    );
+    assert.deepEqual(child, { KEEP: "safe" });
+  }
+  gh.set("not-signed-in");
+  assert.deepEqual(await ghToken(options), { state: "not-signed-in" });
+});
+
+test("gh token values have a 512-byte bound and invalid output is not remembered", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const valid = "x".repeat(512);
+  gh.setToken(valid);
+  assert.deepEqual(await ghToken({ executable: gh.executable }), {
+    token: valid,
+  });
+  for (const invalid of [
+    "x".repeat(513),
+    "bad token",
+    "token\nsecond-line",
+    "",
+  ]) {
+    gh.setToken(invalid);
+    assert.deepEqual(await ghToken({ executable: gh.executable }), {
+      state: "unreadable",
+    });
+    assert.equal(
+      credentialReferenceExclusions(null).values.includes(invalid),
+      false,
+    );
   }
 });
 

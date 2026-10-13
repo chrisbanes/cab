@@ -1,3 +1,4 @@
+import { sourceCredentialSummary } from "./settings-view.js";
 import { useCallback } from "react";
 import {
   projectConfigurationSchema,
@@ -106,6 +107,7 @@ export function ProjectConfiguration(
             {statusLine(tab, data, p, unsettled.length)}
           </p>
           <ProjectStateCards
+            projectId={projectId}
             {...projectStateSummary(
               data,
               observations.state.data?.data ?? null,
@@ -176,7 +178,7 @@ function statusLine(
   if (tab === "routing")
     return `${data.project.paused ? `Paused: new admission is held. Routing changes do not resume ${data.project.name ?? "this project"}.` : admission} ${savedLine("Routing", data.routing.version, saved("routing.configure"))}.`;
   if (tab === "github")
-    return `${savedLine("GitHub source", data.source.version, saved("github.configure"))} · credential ${data.source.credentialConfigured ? "configured" : "unconfigured"}`;
+    return `${savedLine("GitHub source", data.source.version, saved("github.configure"))} · ${sourceCredentialSummary(data.source)}`;
   if (tab === "sync")
     return data.placements.length || unknownPlacements
       ? `${plural(data.placements.length, "conflicting placement")} · ${plural(unknownPlacements, "placement outcome")} to check`
@@ -185,7 +187,15 @@ function statusLine(
 }
 
 /** Phone-first summary (frame 121): what is true now and the next step. Hidden on desktop. */
-function ProjectStateCards({ state, next }: { state: string[]; next: string }) {
+function ProjectStateCards({
+  state,
+  next,
+  projectId,
+}: {
+  state: string[];
+  next: string;
+  projectId: string;
+}) {
   return (
     <div className="settings-phone-cards">
       <section className="settings-aside" aria-label="Current state">
@@ -200,6 +210,11 @@ function ProjectStateCards({ state, next }: { state: string[]; next: string }) {
       <section className="settings-aside" aria-label="Next step">
         <h2 className="small-heading">Next step</h2>
         <p className="body">{next}</p>
+        {next.includes("credential") && (
+          <a href={`/app/projects/${projectId}/settings?tab=github`}>
+            Set or change source credential
+          </a>
+        )}
       </section>
     </div>
   );
@@ -375,7 +390,7 @@ function CredentialReferences({
   return (
     <Panel
       title="Credential and environment references"
-      description="Only env:NAME references are accepted; values stay server-side and never appear here."
+      description="Routing uses env:NAME. GitHub sources accept a GitHub CLI login or env:NAME; values stay server-side."
     >
       {row(
         "Routing · TypeSafe",
@@ -388,7 +403,7 @@ function CredentialReferences({
       )}
       {row(
         "GitHub source",
-        source ? "Reference configured" : "Reference unconfigured",
+        sourceCredentialSummary(data.source),
         source ? "Configured" : "Unconfigured",
         `${page}?tab=github`,
         "Change in GitHub source",

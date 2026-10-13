@@ -205,7 +205,14 @@ export class ServiceClient {
         // On the command route `forbidden` is a domain policy denial, not authentication.
         code === "forbidden" ? "policy-denied" : code,
         `${error.success ? error.data.error.message : `The service rejected the command (${response.status}).`}${paths.length ? ` Fields: ${paths.join(", ")}` : ""}`,
-        { requestId, retryable: false, status: response.status },
+        {
+          requestId,
+          retryable: false,
+          status: response.status,
+          ...(error.success && error.data.error.credentialReason
+            ? { credentialReason: error.data.error.credentialReason }
+            : {}),
+        },
       );
     }
     if (parsed === undefined) throw unknown();
