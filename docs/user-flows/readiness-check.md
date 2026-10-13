@@ -1,7 +1,8 @@
 # Readiness check
 
-**Status:** planned. Install stays the procedure in
-[standalone macOS operations](../operations/standalone-macos.md).
+**Status:** implemented. Install stays the procedure in
+[standalone macOS operations](../operations/standalone-macos.md). The Getting
+started Runtime row and first-task Fix actions that read these checks are planned.
 
 ## Goal
 
@@ -10,7 +11,7 @@ what the service can and cannot use, with one fix line per problem.
 
 ## Entry points
 
-- `ensemble doctor` in the operator CLI.
+- `ensemble doctor` in the operator CLI (read credential with `diagnostics.read`).
 - Settings → Readiness panel.
 - [Getting started](getting-started.md) Runtime row and [first task](first-task.md)
   Fix actions.
@@ -34,4 +35,10 @@ service sees rather than the operator's interactive shell.
 - Output never includes token values; it names references, not secrets.
 - The Claude sandbox self-test needs a task workspace and admits exactly one turn,
   so it runs before each turn and a failure shows on the waiting task, not here.
+- Claude's supported models are read from its runtime before the first Claude turn.
+  Until then a Claude profile cannot be confirmed, and Runtime harness fails with
+  "Claude's supported models are not known yet"; run a Claude task, then run the
+  check again.
+- `ensemble doctor` exits 0 whenever the read succeeds, whatever the checks report;
+  its JSON `data` is the service's `data` unchanged.
 - Re-running is the only action. The check changes nothing.
