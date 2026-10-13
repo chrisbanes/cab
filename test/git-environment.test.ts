@@ -1,12 +1,10 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
-// ponytail: this scan reads text, so it cannot see a dynamically built command. When #914
-// moves repository verification out of core it becomes "src/core does not import
-// node:child_process".
+// ponytail: these scans read text, so they cannot see a dynamically built command or import.
 const spawnsProcesses = /from\s+["']node:child_process["']/;
 const namesGit = /["'`]git["'`]/;
 
@@ -65,16 +63,14 @@ test("every production Git spawn uses the shared hardened environment", () => {
     .filter(([, text]) => spawnsProcesses.test(text) && namesGit.test(text))
     .map(([path]) => path)
     .sort();
-  assert.deepEqual(gitFiles, [
-    join("src", "core", "github-source.ts"),
-    join("src", "standalone", "git-process.ts"),
-  ]);
+  assert.deepEqual(gitFiles, [join("src", "standalone", "git-process.ts")]);
   // These callers run Git only through the shared runner.
   for (const name of [
     "workspaces",
     "workspace-inspection",
     "workspace-comparison",
     "operator-setup",
+    "repository-verification",
   ])
     assert.equal(
       spawnsProcesses.test(
@@ -83,4 +79,17 @@ test("every production Git spawn uses the shared hardened environment", () => {
       false,
       name,
     );
+});
+
+test("the domain core neither spawns processes nor reaches the filesystem or standalone", () => {
+  const hostImport =
+    /from\s+["'](?:node:(?:child_process|fs)\b|[^"']*\/standalone\/)/;
+  const offenders = [...productionSources()]
+    .filter(
+      ([path, text]) =>
+        path.startsWith(`${join("src", "core")}${sep}`) &&
+        hostImport.test(text),
+    )
+    .map(([path]) => path);
+  assert.deepEqual(offenders, []);
 });

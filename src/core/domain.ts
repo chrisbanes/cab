@@ -29,9 +29,9 @@ import {
   type LinkedRepository,
   linkedRepositorySchema,
   RepositoryVerificationError,
+  type RepositoryVerifier,
   readinessSchema,
   selectionSchema,
-  verifiedRepository,
 } from "./github-source.js";
 import { setupRepositorySchema } from "./github-source-contracts.js";
 import { type Database, transaction } from "./store.js";
@@ -383,12 +383,16 @@ function commandHash(command: ParsedCommand): string {
   return createHash("sha256").update(canonical(command)).digest("hex");
 }
 
+/** Fail closed: the host injects the verifier that touches the filesystem and Git. */
+const unconfiguredVerifier: RepositoryVerifier = () =>
+  Promise.reject(new Error("Repository verification is not configured"));
+
 /** Durable S04a command and read boundary. All commands use one SQLite transaction. */
 export class DomainStore {
   constructor(
     private readonly db: Database,
     private readonly onChange?: () => void,
-    private readonly verifyRepository: typeof verifiedRepository = verifiedRepository,
+    private readonly verifyRepository: RepositoryVerifier = unconfiguredVerifier,
   ) {}
 
   migrate(): void {

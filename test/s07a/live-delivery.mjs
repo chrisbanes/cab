@@ -23,6 +23,7 @@ import { StandaloneDataDirectory } from "../../dist/src/standalone/data-director
 import { DomainStore } from "../../dist/src/core/domain.js";
 import { Store } from "../../dist/src/core/store.js";
 import { GitHubSourceStore } from "../../dist/src/core/github-source.js";
+import { verifiedRepository } from "../../dist/src/standalone/repository-verification.js";
 import { CodexRuntime } from "../../dist/src/standalone/codex.js";
 import { StandaloneService } from "../../dist/src/standalone/service.js";
 import { OperatorAuth } from "../../dist/src/standalone/operator-auth.js";
@@ -73,6 +74,7 @@ const evidence = {
         "src/core/delivery.ts",
         "src/core/coordination.ts",
         "src/core/github-source.ts",
+        "src/standalone/repository-verification.ts",
         "src/standalone/delivery.ts",
         "src/standalone/github-delivery.ts",
         "src/standalone/service.ts",
@@ -461,7 +463,7 @@ try {
   const owner = StandaloneDataDirectory.openExclusive(data);
   const db = new DatabaseSync(owner.databasePath);
   new Store(db).ensureHost("standalone-codex");
-  const domain = new DomainStore(db);
+  const domain = new DomainStore(db, undefined, verifiedRepository);
   domain.migrate();
   new GitHubSourceStore(db).migrate();
   for (const j of m.journeys) {
