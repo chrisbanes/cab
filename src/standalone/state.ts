@@ -466,7 +466,8 @@ export class ExecutionState {
     CREATE INDEX IF NOT EXISTS task_execution_bindings_assignment
       ON task_execution_bindings(assignmentId, assignmentVersion);
     CREATE TABLE IF NOT EXISTS task_writer_holds (
-      taskId TEXT PRIMARY KEY, reason TEXT NOT NULL
+      taskId TEXT, reason TEXT NOT NULL,
+      holdKind TEXT CHECK(holdKind IS NULL OR holdKind = 'operator-stop')
     );
     CREATE TABLE IF NOT EXISTS task_control_receipts (
       taskId TEXT NOT NULL, key TEXT NOT NULL, payloadHash TEXT NOT NULL,
@@ -1102,9 +1103,15 @@ export class ExecutionState {
 
   taskHold(taskId: string): string | undefined {
     const row = this.db
-      .prepare(`SELECT reason FROM task_writer_ambiguity_holds WHERE taskId = ?
-        UNION ALL SELECT reason FROM task_writer_holds WHERE taskId = ?
-        UNION ALL SELECT reason FROM task_archival_holds WHERE taskId = ? LIMIT 1`)
+      .prepare(`SELECT COALESCE(NULLIF(reason, ''), 'Task held') AS reason
+        FROM (
+          SELECT reason, 0 AS priority FROM task_writer_ambiguity_holds WHERE taskId = ?
+          UNION ALL
+          SELECT reason, CASE WHEN holdKind = 'operator-stop' THEN 2 ELSE 1 END
+            FROM task_writer_holds WHERE taskId = ?
+          UNION ALL
+          SELECT reason, 3 AS priority FROM task_archival_holds WHERE taskId = ?
+        ) ORDER BY priority LIMIT 1`)
       .get(taskId, taskId, taskId) as { reason: string } | undefined;
     return row?.reason;
   }
@@ -2259,7 +2266,27 @@ export class ExecutionState {
           }>
         ).some(({ name }) => name === "holdKind"),
     );
-    if (tablesMissingHoldKind.length === 0) return;
+    const holdColumns = this.db
+      .prepare("PRAGMA table_info(task_writer_holds)")
+      .all() as Array<{ name: string; pk: number }>;
+    const taskIdPrimaryKey =
+      holdColumns.filter(({ pk }) => pk > 0).length === 1 &&
+      holdColumns.find(({ name }) => name === "taskId")?.pk === 1;
+    const holdKindIndex = this.db
+      .prepare(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name='task_writer_holds_task_kind'",
+      )
+      .get() as { sql: string } | undefined;
+    const indexSql = holdKindIndex?.sql
+      ?.toLowerCase()
+      .replaceAll('"', "")
+      .replaceAll(/\s/g, "");
+    if (
+      tablesMissingHoldKind.length === 0 &&
+      !taskIdPrimaryKey &&
+      indexSql?.includes("coalesce(holdkind,'unknown')")
+    )
+      return;
 
     transaction(this.db, () => {
       for (const table of tablesMissingHoldKind)
@@ -2284,6 +2311,33 @@ export class ExecutionState {
             WHERE binding.workId = turn_requests.workId
               AND hold.holdKind = 'operator-stop'
           )`);
+
+      // Earlier schemas keyed this table only by taskId, which prevented an
+      // independent ownership hold and operator Stop from coexisting. Rebuild
+      // the table transactionally while preserving every stored row and its
+      // display reason, then enforce one row per task and hold kind. This also
+      // runs for the already-typed schema introduced before this migration.
+      const currentHoldColumns = this.db
+        .prepare("PRAGMA table_info(task_writer_holds)")
+        .all() as Array<{ name: string; pk: number }>;
+      const stillHasTaskIdPrimaryKey =
+        currentHoldColumns.filter(({ pk }) => pk > 0).length === 1 &&
+        currentHoldColumns.find(({ name }) => name === "taskId")?.pk === 1;
+      if (stillHasTaskIdPrimaryKey) {
+        this.db.exec("DROP INDEX IF EXISTS task_writer_holds_task_kind");
+        this.db.exec(`CREATE TABLE task_writer_holds_rebuild (
+          taskId TEXT, reason TEXT NOT NULL,
+          holdKind TEXT CHECK(holdKind IS NULL OR holdKind = 'operator-stop')
+        )`);
+        this.db.exec(`INSERT INTO task_writer_holds_rebuild (taskId, reason, holdKind)
+          SELECT taskId, reason, holdKind FROM task_writer_holds`);
+        this.db.exec("DROP TABLE task_writer_holds");
+        this.db.exec(
+          "ALTER TABLE task_writer_holds_rebuild RENAME TO task_writer_holds",
+        );
+      }
+      this.db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS task_writer_holds_task_kind
+        ON task_writer_holds(taskId, COALESCE(holdKind, 'unknown'))`);
     });
   }
 
@@ -3706,19 +3760,30 @@ export class ExecutionState {
         WHERE workId = ? ORDER BY recordedAt, rowid`)
         .all(workId) as Array<{ kind: string }>;
       const holdRow = this.db
-        .prepare(`SELECT h.reason, h.holdKind,
+        .prepare(`SELECT (
+          SELECT h.reason FROM task_writer_holds h
+          WHERE h.taskId = binding.taskId
+          ORDER BY CASE WHEN h.holdKind = 'operator-stop' THEN 1 ELSE 0 END,
+            h.rowid LIMIT 1
+        ) AS reason, (
+          SELECT h.holdKind FROM task_writer_holds h
+          WHERE h.taskId = binding.taskId
+          ORDER BY CASE WHEN h.holdKind = 'operator-stop' THEN 1 ELSE 0 END,
+            h.rowid LIMIT 1
+        ) AS holdKind,
         EXISTS (SELECT 1 FROM task_writer_admissions admission WHERE admission.workId = ?) AS writer,
         EXISTS (SELECT 1 FROM execution_capacity_reservations reservation WHERE reservation.workId = ?) AS capacity,
-        EXISTS (SELECT 1 FROM task_writer_holds stop WHERE stop.taskId = h.taskId AND stop.holdKind = 'operator-stop') AS stop
-        FROM task_execution_bindings binding
-        JOIN task_writer_holds h ON h.taskId = binding.taskId
-        WHERE binding.workId = ? LIMIT 1`)
+        EXISTS (SELECT 1 FROM task_writer_holds present WHERE present.taskId = binding.taskId) AS present,
+        EXISTS (SELECT 1 FROM task_writer_holds stop WHERE stop.taskId = binding.taskId
+          AND stop.holdKind = 'operator-stop') AS stop
+        FROM task_execution_bindings binding WHERE binding.workId = ?`)
         .get(workId, workId, workId) as
         | {
-            reason: string;
+            reason: string | null;
             holdKind: string | null;
             writer: number;
             capacity: number;
+            present: number;
             stop: number;
           }
         | undefined;
@@ -3746,7 +3811,7 @@ export class ExecutionState {
       const taskReason =
         holdRow?.holdKind === "operator-stop"
           ? holdRow.reason
-          : holdRow
+          : holdRow?.present === 1
             ? recoveryReason("unknown")
             : null;
       const preTurnWitness = this.witnessForWork(workId);

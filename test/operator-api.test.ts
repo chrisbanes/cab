@@ -685,7 +685,13 @@ test("task summaries classify Stop and independent holds by type, not display re
   const stopOnly = await seed(f);
   const withAmbiguity = await seed(f);
   const withArchival = await seed(f);
-  for (const { taskId } of [stopOnly, withAmbiguity, withArchival])
+  const withWriterHold = await seed(f);
+  for (const { taskId } of [
+    stopOnly,
+    withAmbiguity,
+    withArchival,
+    withWriterHold,
+  ])
     await f.service.stopTask(taskId);
 
   f.seedPersistedState((db) => {
@@ -699,6 +705,9 @@ test("task summaries classify Stop and independent holds by type, not display re
     db.prepare(
       "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)",
     ).run(withArchival.taskId, "Archival is awaiting review");
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, '')",
+    ).run(withWriterHold.taskId);
   });
 
   const taskSummary = async (taskId: string) => {
@@ -713,6 +722,12 @@ test("task summaries classify Stop and independent holds by type, not display re
   assert.equal(stop.execution.state, "stopping");
   assert.equal(stop.execution.holds.stop, true);
   assert.equal(stop.codes.includes("execution-uncertain"), false);
+
+  const writerHold = await taskSummary(withWriterHold.taskId);
+  assert.equal(writerHold.execution.state, "stopping");
+  assert.equal(writerHold.execution.holds.stop, true);
+  assert.ok(writerHold.codes.includes("execution-uncertain"));
+  assert.equal(f.service.taskHold(withWriterHold.taskId), "Task held");
 
   const ambiguityBefore = await taskSummary(withAmbiguity.taskId);
   assert.equal(ambiguityBefore.execution.state, "stopping");
