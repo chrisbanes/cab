@@ -26,7 +26,7 @@ export const doctorCommand: BrowseCommand = {
           checks.map((c) => [
             c.label,
             STATUS[c.status],
-            oneLine(c.reason, 500),
+            c.reason === null ? "" : oneLine(c.reason, 500),
           ]),
         ),
         ...checks

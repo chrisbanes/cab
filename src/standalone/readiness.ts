@@ -28,7 +28,10 @@ import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
 
-type Discovery = z.infer<typeof discoveryStatusSchema>["data"];
+type Discovery = Pick<
+  z.infer<typeof discoveryStatusSchema>["data"],
+  "configured" | "available"
+>;
 
 /** An active-or-revoked profile's execution runtime; its name never enters readiness. */
 export type ReadinessProfile = {
@@ -452,7 +455,15 @@ export function serviceReadiness(
     uid: process.getuid?.(),
     ...paths,
     codexLogin: () => service.verifyCodexLogin(),
-    discovery: async () => (await api.readDiscoveryStatus()).data,
+    discovery: async () => {
+      // Only a `gh:` reference needs the `gh` probe; a stalled `gh` must not fail `env:`.
+      const ref = service.domain().discoveryCredentialReference();
+      if (ref?.startsWith("gh:")) return (await api.readDiscoveryStatus()).data;
+      return {
+        configured: ref !== null,
+        available: ref !== null && Boolean(process.env[ref.slice(4)]),
+      };
+    },
     claudeTokenReference: () => service.domain().claudeTokenReference(),
     claudeTokenStatus: () => service.claudeTokenStatus(),
     harnessStatuses: () => service.harnessStatuses(),

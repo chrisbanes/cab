@@ -73,6 +73,8 @@ test("doctor reports the service's readiness checks, equal to the API read and w
     /Fix Claude token: Make the token file a private regular file/,
   );
   assert.match(human.out, /GitHub discovery\s+Not configured/);
+  assert.ok(api.data.checks.some((c) => c.status === "pass"));
+  assert.ok(!human.out.includes("(unavailable)"), "a pass has no reason");
 
   const everything = [json.out, json.err, human.out, human.err].join("\n");
   for (const secret of [CANARY, tokenPath, root, s.f.directory])

@@ -22,7 +22,9 @@ import {
   Readiness,
   type ReadinessDeps,
   type ReadinessProfile,
+  serviceReadiness,
 } from "../src/standalone/readiness.js";
+import type { StandaloneService } from "../src/standalone/service.js";
 import {
   assertCanonicalDirectoryPath,
   assertExistingCanonicalDirectoryPath,
@@ -63,12 +65,7 @@ function deps(f: Fixture, over: Partial<ReadinessDeps> = {}): ReadinessDeps {
     dataDir: f.data,
     authFile: f.auth,
     codexLogin: async () => "verified",
-    discovery: async () => ({
-      configured: false,
-      available: false,
-      source: null,
-      gh: { state: "not-signed-in" },
-    }),
+    discovery: async () => ({ configured: false, available: false }),
     claudeTokenReference: () => null,
     claudeTokenStatus: () => ({ state: "not-configured" }),
     harnessStatuses: () => [
@@ -204,6 +201,49 @@ test("github discovery is not configured, readable or failing", async (t) => {
     assert.equal(result.status, "fail");
     assert.ok(!JSON.stringify(result).includes(TOKEN));
   }
+});
+
+test("service discovery probes gh only for a gh reference", async (t) => {
+  const f = fixture(t);
+  const variable = "ENSEMBLE_READINESS_DISCOVERY_TEST";
+  let ref: string | null = null;
+  let probes = 0;
+  const service = {
+    verifyCodexLogin: async () => "verified",
+    domain: () => ({
+      discoveryCredentialReference: () => ref,
+      claudeTokenReference: () => null,
+      profiles: () => [],
+    }),
+    claudeTokenStatus: () => ({ state: "not-configured" }),
+    harnessStatuses: () => [],
+    harnessSettings: () => null,
+  } as unknown as StandaloneService;
+  const api = {
+    readDiscoveryStatus: async () => {
+      probes++;
+      return {
+        data: { configured: true, available: true, source: "gh" as const },
+      };
+    },
+  } as never;
+  const discovery = async () =>
+    (
+      await serviceReadiness(service, api, {
+        dataDir: f.data,
+        authFile: f.auth,
+      }).read()
+    ).data.checks.find((c) => c.id === "github-discovery")?.status;
+  assert.equal(await discovery(), "not-configured");
+  ref = `env:${variable}`;
+  assert.equal(await discovery(), "fail");
+  process.env[variable] = "set";
+  t.after(() => delete process.env[variable]);
+  assert.equal(await discovery(), "pass");
+  assert.equal(probes, 0);
+  ref = "gh:github.com";
+  assert.equal(await discovery(), "pass");
+  assert.equal(probes, 1);
 });
 
 test("the Claude token check reports each reference state without path or value", async (t) => {
