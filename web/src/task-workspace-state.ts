@@ -210,14 +210,14 @@ export class LocalReviewState {
     label: string;
     anchor: ReviewAnchorCandidate;
     body: string;
-    error: string;
+    error: ReplyOutcome | null;
     saving: boolean;
     returnFocus: HTMLElement | null;
   } | null = null;
   editing: Record<string, string> = {};
   summary: string | null = null;
   pending = false;
-  notice = "";
+  notice: ReplyOutcome | null = null;
   send: LocalReviewSend | null = null;
   inspectKey: string | null = null;
 }

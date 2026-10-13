@@ -9,7 +9,9 @@ import {
   type Session,
 } from "../../src/operator/contracts.js";
 import type { CommandState, OperatorClient } from "./api.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
+import { failureCause } from "./outcome-copy.js";
 import {
   leadAwaitingRecoveryNotice,
   leadResumeNotice,
@@ -19,6 +21,7 @@ import { useOperatorResource } from "./resource.js";
 import type {
   LocalReviewSend,
   LocalReviewState,
+  ReplyOutcome,
   ReviewAnchorCandidate,
 } from "./task-workspace-state.js";
 import { Textarea } from "./ui/textarea.js";
@@ -90,6 +93,32 @@ function restoredSend(taskId: string): LocalReviewSend | null {
   }
 }
 
+/** Why a draft or send write failed, in plain words; the code itself goes to Details. */
+function causeOf(code: string | undefined, state?: CommandState["state"]) {
+  if (state === "unknown") return "the connection was lost";
+  switch (code) {
+    case "local-review-batch-too-large":
+      return "it is too large to send, so shorten or remove comments";
+    case "local-review-comment-anchor-required":
+      return "a comment has no exact line context, so remove it";
+    case "local-review-recipient-unavailable":
+      return "the lead can no longer receive a review";
+    case "conflict":
+      return "the draft changed elsewhere";
+    default:
+      return failureCause(code ?? "");
+  }
+}
+
+const sendDetails = (taskId: string, send: LocalReviewSend) =>
+  detailRows({
+    command: "review.send",
+    resource: taskId,
+    version: send.expectedDraftVersion,
+    requestKey: send.key,
+    code: send.reason,
+  });
+
 function useLocalReviewController({
   client,
   session,
@@ -154,8 +183,27 @@ function useLocalReviewController({
 
   const execute = async (input: Parameters<OperatorClient["command"]>[0]) =>
     client.command(input, session.csrfToken);
-  const failure = (result: CommandState) =>
-    result.state === "recorded" ? "" : (result.code ?? result.state);
+  /** One alert naming the cause and saying the input is kept; the code sits in Details. */
+  const failure = (
+    result: CommandState,
+    what: string,
+    kept: string,
+  ): ReplyOutcome => ({
+    tone: "error",
+    message: `${what}: ${causeOf(
+      result.state === "recorded" ? undefined : result.code,
+      result.state,
+    )}. ${kept}`,
+    details:
+      result.state === "recorded"
+        ? []
+        : detailRows({
+            command: result.command.type,
+            resource: taskId,
+            requestKey: result.command.key,
+            code: result.code,
+          }),
+  });
 
   const saveDraft = async (
     content: DraftRead["draft"],
@@ -193,15 +241,15 @@ function useLocalReviewController({
     } else if (result.code === "local-review-batch-too-large") {
       // Refused before any operation was recorded.
       send.status = "rejected";
-      send.reason = "too large to send; shorten or remove comments";
+      send.reason = result.code;
     } else if (result.code === "local-review-comment-anchor-required") {
       // Refused before any operation was recorded.
       send.status = "rejected";
-      send.reason = "a comment has no exact line context; remove it";
+      send.reason = result.code;
     } else if (result.code === "local-review-recipient-unavailable") {
       // Definitive: the lead can no longer receive the message, nothing was queued.
       send.status = "rejected";
-      send.reason = "the project lead can no longer receive a review";
+      send.reason = result.code;
     } else {
       // Without a receipt the send may still have committed; only the same-key
       // reconciliation can confirm delivery or a no-delivery outcome.
@@ -223,7 +271,7 @@ function useLocalReviewController({
         label,
         anchor,
         body: "",
-        error: "",
+        error: null,
         saving: false,
         returnFocus:
           document.activeElement instanceof HTMLElement
@@ -257,7 +305,7 @@ function useLocalReviewController({
       if (!composer || !draft || composer.saving || !composer.body.trim())
         return;
       composer.saving = true;
-      composer.error = "";
+      composer.error = null;
       changed();
       const staged = await execute({
         type: "review.anchor.stage",
@@ -272,7 +320,11 @@ function useLocalReviewController({
       ) {
         // Keep the typed text; an unvalidated anchor is never added.
         composer.saving = false;
-        composer.error = `The exact lines could not be captured (${failure(staged)}). Your comment is kept.`;
+        composer.error = failure(
+          staged,
+          "Couldn't capture the exact lines",
+          "Your comment is kept.",
+        );
         await resource.refresh();
         changed();
         return;
@@ -293,7 +345,11 @@ function useLocalReviewController({
       );
       if (saved.state !== "recorded") {
         composer.saving = false;
-        composer.error = `The comment could not be saved (${failure(saved)}). Your comment is kept.`;
+        composer.error = failure(
+          saved,
+          "Couldn't save the comment",
+          "Your comment is kept.",
+        );
         changed();
         return;
       }
@@ -321,8 +377,12 @@ function useLocalReviewController({
             delete state.editing[comment.commentId];
       state.notice =
         result.state === "recorded"
-          ? ""
-          : `Comments could not be removed (${failure(result)}).`;
+          ? null
+          : failure(
+              result,
+              "Couldn't remove the comments",
+              "Your draft is kept.",
+            );
       changed();
     },
     async updateComment(commentId: string, body: string | null) {
@@ -349,8 +409,8 @@ function useLocalReviewController({
       if (result.state === "recorded") delete state.editing[commentId];
       state.notice =
         result.state === "recorded"
-          ? ""
-          : `Draft change failed (${failure(result)}). Your text is kept.`;
+          ? null
+          : failure(result, "Couldn't save the change", "Your text is kept.");
       changed();
       if (result.state !== "recorded") return;
       if (body !== null)
@@ -380,8 +440,8 @@ function useLocalReviewController({
       if (result.state === "recorded") state.summary = null;
       state.notice =
         result.state === "recorded"
-          ? ""
-          : `Summary could not be saved (${failure(result)}). Your text is kept.`;
+          ? null
+          : failure(result, "Couldn't save the summary", "Your text is kept.");
       changed();
     },
     async send() {
@@ -447,8 +507,8 @@ function useLocalReviewController({
       }
       state.notice =
         result.state === "recorded"
-          ? ""
-          : `Draft could not be cleared (${failure(result)}).`;
+          ? null
+          : failure(result, "Couldn't clear the draft", "Your draft is kept.");
       await resource.refresh();
       changed();
     },
@@ -600,7 +660,13 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
           review.changed();
         }}
       />
-      {composer.error && <p role="alert">{composer.error}</p>}
+      {composer.error && (
+        <ActionOutcome
+          tone={composer.error.tone}
+          message={composer.error.message}
+          details={composer.error.details}
+        />
+      )}
       <div className="task-actions">
         <Button
           type="submit"
@@ -951,7 +1017,13 @@ export function LocalReviewPanel() {
           )}
         </>
       )}
-      {state.notice && <p role="alert">{state.notice}</p>}
+      {state.notice && (
+        <ActionOutcome
+          tone={state.notice.tone}
+          message={state.notice.message}
+          details={state.notice.details}
+        />
+      )}
       {draft && comments.length > 0 && !send && (
         <div className="review-send">
           <p>
@@ -1020,43 +1092,46 @@ export function LocalReviewPanel() {
         <p role="status">Sending review to {send.recipientName}…</p>
       )}
       {send?.status === "unknown" && (
-        <div role="status">
-          <p>
-            Delivery to {send.recipientName} is unknown. The review is frozen
-            and will not be edited or resent with different content.
-          </p>
-          <Button onClick={() => void review.reconcile()}>
-            Check delivery
-          </Button>
-        </div>
+        <ActionOutcome
+          tone="warning"
+          message={`We couldn't confirm the review reached ${send.recipientName}. Your draft is kept.`}
+          action={{
+            label: "Check whether it saved",
+            onClick: () => review.reconcile(),
+          }}
+          details={sendDetails(review.taskId, send)}
+        />
       )}
       {send &&
         (send.status === "rejected" || send.status === "not-recorded") && (
-          <div role="alert">
-            <p>
-              The review was not delivered
-              {send.reason ? ` (${send.reason})` : ""}. Your comments remain
-              editable.
-            </p>
-            <Button variant="secondary" onClick={() => review.clearSend()}>
-              Return to draft
-            </Button>
-          </div>
+          <ActionOutcome
+            tone="error"
+            message={`The review wasn't sent${
+              send.reason ? `: ${causeOf(send.reason)}` : ""
+            }. Your comments are kept.`}
+            action={{
+              label: "Return to draft",
+              onClick: () => review.clearSend(),
+            }}
+            details={sendDetails(review.taskId, send)}
+          />
         )}
       {send?.status === "recorded" && (
-        <div role="status">
-          <p>
-            Review sent to {send.recipientName}.{" "}
-            {send.resumedLead
-              ? `${send.recipientName} was resumed with this review as a follow-up.`
-              : "One local message was queued."}
-          </p>
+        <ActionOutcome
+          tone="success"
+          message={
+            send.resumedLead
+              ? `Review sent to ${send.recipientName}. ${send.recipientName} was resumed with this review as a follow-up.`
+              : `Review sent to ${send.recipientName}.`
+          }
+          details={sendDetails(review.taskId, send)}
+        >
           {draft?.state !== "sent" && (
             <Button variant="secondary" onClick={() => review.clearSend()}>
               Dismiss
             </Button>
           )}
-        </div>
+        </ActionOutcome>
       )}
       <SentReviews />
       {state.inspectKey && <SentReview operationKey={state.inspectKey} />}

@@ -462,7 +462,7 @@ export function TaskWorkspace({
       document.removeEventListener("click", leave, true);
       document.removeEventListener("focusin", intentionalFocus);
     };
-  }, [state]);
+  }, [state, taskId]);
   const readingFocusTarget = () => {
     const record = state.focusRecord
       ? [...document.querySelectorAll<HTMLElement>("[data-record-id]")].find(

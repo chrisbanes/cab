@@ -17,6 +17,9 @@ import {
 import { seedReviewTask } from "./fixtures/task-review.js";
 
 const test = browserSuite("ui10-local-review");
+/** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
+const serviceWords =
+  /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
 
 function git(root: string, ...args: string[]) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -277,13 +280,26 @@ test("production local review composes exact multi-origin anchors and sends one 
   await review
     .getByRole("button", { name: /^Send review \(2 comments\)/ })
     .click();
-  await review.getByText(/Delivery to .* is unknown/).waitFor();
+  const outcome = review.locator("[data-slot=action-outcome]");
+  await outcome
+    .getByText(
+      "We couldn't confirm the review reached Task lead. Your draft is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  // One warning with one action; the code is only in Details.
+  assert.equal(await outcome.count(), 1);
+  assert.equal(await outcome.getByRole("button").count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  const fields = await outcome.locator("dl").innerText();
+  assert.match(fields, /Command\s+review\.send/);
+  assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
+  assert.match(fields, /Code\s+command-outcome-unknown/);
   await page.unroute("**/api/operator/commands");
   assert.equal(events(), 1);
-  await review.getByRole("button", { name: "Check delivery" }).click();
-  await review
-    .getByText(/Review sent to .*One local message was queued/)
-    .waitFor();
+  await review.getByRole("button", { name: "Check whether it saved" }).click();
+  await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1, "reconciliation never sends a second event");
   const sent = review.getByRole("region", { name: "Sent review", exact: true });
   await sent.getByText("Edited file comment").waitFor();
@@ -380,6 +396,62 @@ const activeAttribute = (page: Page, name: string) =>
     (attribute) => document.activeElement?.hasAttribute(attribute),
     name,
   );
+
+test("a refused comment save shows one plain alert, keeps the text and puts the code in Details", async (_t, j) => {
+  const { web, task, page, pageErrors } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Refused comment");
+  await page.route("**/api/operator/commands", (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.draft.save") return route.continue();
+    return route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "forbidden", message: "Refused" },
+      }),
+    });
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  const alert = files.locator("[data-slot=action-outcome]");
+  await alert
+    .getByText(
+      "Couldn't save the comment: you don't have permission. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await alert.count(), 1);
+  assert.equal(await alert.getAttribute("role"), "alert");
+  assert.doesNotMatch(await alert.locator("p").innerText(), serviceWords);
+  assert.equal(
+    await files.getByLabel("Comment", { exact: true }).inputValue(),
+    "Refused comment",
+  );
+  await alert.getByText("Details", { exact: true }).click();
+  const fields = await alert.locator("dl").innerText();
+  assert.match(fields, /Command\s+review\.draft\.save/);
+  assert.match(fields, /Code\s+forbidden/);
+  assert.deepEqual(
+    pageErrors.filter((text) => !/status of 403/.test(text)),
+    [],
+  );
+});
 
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
   const { web, task, page, pageErrors } = await startReview(j);
@@ -516,9 +588,7 @@ test("phone local review comments and sends to a receipt using the keyboard", as
   });
   await send.focus();
   await page.keyboard.press("Enter");
-  await review
-    .getByText(/Review sent to .*One local message was queued/)
-    .waitFor();
+  await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1);
   const sent = review.getByRole("region", { name: "Sent review", exact: true });
   await sent.getByText("Phone keyboard comment").waitFor();
@@ -621,9 +691,11 @@ test("a lead that completes after the page loaded is resumed; a held lead is a d
     .click();
   await review
     .getByText(
-      /not delivered \(the project lead can no longer receive a review\)/,
+      "The review wasn't sent: the lead can no longer receive a review. Your comments are kept.",
+      { exact: true },
     )
     .waitFor();
+  assert.equal(await review.locator("[data-slot=action-outcome]").count(), 1);
   await review.getByRole("button", { name: "Return to draft" }).click();
   await review.getByText("Comment for a held lead").waitFor();
   assert.equal(
@@ -732,9 +804,7 @@ test("sent reviews stay inspectable after reload and Start a new review", async 
   await review
     .getByRole("button", { name: /^Send review \(1 comment\)/ })
     .click();
-  await review
-    .getByText(/Review sent to .*One local message was queued/)
-    .waitFor();
+  await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1);
 
   await page.reload();
@@ -793,7 +863,17 @@ test("a stored comment without line context can be removed so the review can be 
   await review.getByRole("button", { name: "Edit" }).first().click();
   await review.getByLabel("Edit comment").fill("Edited while legacy remains");
   await review.getByRole("button", { name: "Save edit" }).click();
-  await review.getByText(/Draft change failed \(invalid-input\)/).waitFor();
+  const refused = review.locator("[data-slot=action-outcome]");
+  await refused
+    .getByText(
+      "Couldn't save the change: the service didn't accept it. Your text is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await refused.count(), 1);
+  assert.doesNotMatch(await refused.locator("p").innerText(), serviceWords);
+  await refused.getByText("Details", { exact: true }).click();
+  assert.match(await refused.locator("dl").innerText(), /Code\s+invalid-input/);
   await review.getByRole("button", { name: "Cancel edit" }).click();
   // Leave an editor open on a legacy comment; bulk removal must clear it.
   await review.getByRole("button", { name: "Edit" }).last().click();
