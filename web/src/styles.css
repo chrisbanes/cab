@@ -452,18 +452,6 @@ nav {
   display: none;
 }
 
-.logout-notice {
-  position: fixed;
-  bottom: 16px;
-  left: 16px;
-  right: 16px;
-  padding: 16px;
-  background: color-mix(in srgb, var(--destructive) 20%, var(--background));
-  color: var(--foreground);
-  border: 1px solid var(--destructive);
-  border-radius: var(--radius-lg);
-}
-
 .task-actions {
   display: flex;
   flex-wrap: wrap;

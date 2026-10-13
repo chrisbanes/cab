@@ -42,6 +42,7 @@ import {
   NavigationRow,
   PageHeader,
 } from "./components.js";
+import { ActionOutcome } from "./action-feedback.js";
 import { Alert } from "./ui/alert.js";
 import { loadTaskList, taskRouteSubtitle } from "./tasks.js";
 import { TaskComposer } from "./task-composer.js";
@@ -359,9 +360,11 @@ export function App() {
     [navigationVersion, setNavigationVersion] = useState(0),
     [drawer, setDrawer] = useState(false),
     [logoutPending, setLogoutPending] = useState(false),
-    [logoutNotice, setLogoutNotice] = useState<string | null>(null),
+    [stillSignedIn, setStillSignedIn] = useState(false),
     [expiredNotice, setExpiredNotice] = useState(false),
     [refreshNonce, setRefreshNonce] = useState(0);
+  // Set when a sign-out could not be confirmed; the session re-read that follows settles it.
+  const unconfirmedSignOut = useRef(false);
   const searchState = useRef(new Map<string, SearchState>());
   const taskStates = useRef(new TaskWorkspaceStates());
   const questionStates = useRef(new QuestionResponseStates());
@@ -413,6 +416,12 @@ export function App() {
           );
         acceptedIdentity.current = identity;
         setLogoutPending(false);
+        setStillSignedIn(false);
+      }
+      // Signed out is the outcome; only a session that survived needs a word.
+      if (unconfirmedSignOut.current) {
+        unconfirmedSignOut.current = false;
+        setStillSignedIn(next.authenticated);
       }
       if (next.authenticated) setExpiredNotice(false);
       setSession(next);
@@ -573,26 +582,19 @@ export function App() {
     );
   if (!session.authenticated)
     return (
-      <>
-        <Login
-          key={session.csrfToken}
-          client={client}
-          session={session}
-          expired={expiredNotice}
-          onSignedIn={(next) => {
-            if (pathname === "/login") {
-              history.replaceState(null, "", "/app");
-              setPath("/app");
-            }
-            acceptSession(next);
-          }}
-        />
-        {logoutNotice && (
-          <p className="logout-notice body" role="alert">
-            {logoutNotice} Current session requires sign-in.
-          </p>
-        )}
-      </>
+      <Login
+        key={session.csrfToken}
+        client={client}
+        session={session}
+        expired={expiredNotice}
+        onSignedIn={(next) => {
+          if (pathname === "/login") {
+            history.replaceState(null, "", "/app");
+            setPath("/app");
+          }
+          acceptSession(next);
+        }}
+      />
     );
   const entryKey = history.state?.navKey ?? path;
   let activeSearch = searchState.current.get(entryKey);
@@ -714,7 +716,7 @@ export function App() {
     inboxState.current.clear();
     searchState.current.clear();
     setLogoutPending(true);
-    setLogoutNotice(null);
+    setStillSignedIn(false);
     try {
       await client.logout(session?.csrfToken ?? "");
     } catch (error) {
@@ -723,9 +725,7 @@ export function App() {
         error instanceof ClientError &&
         error.status !== 401
       )
-        setLogoutNotice(
-          "Sign-out outcome is unknown. Session status has been checked; review before retrying.",
-        );
+        unconfirmedSignOut.current = true;
     } finally {
       if (isCurrentScope()) {
         setSession(null);
@@ -820,10 +820,11 @@ export function App() {
             {...inboxHeaderProps}
             {...taskHeaderProps}
           />
-          {logoutNotice && (
-            <p className="body error-text" role="alert">
-              {logoutNotice}
-            </p>
+          {stillSignedIn && (
+            <ActionOutcome
+              tone="warning"
+              message="We couldn't sign you out. You're still signed in."
+            />
           )}
           {workspace.state.data?.data.harnesses
             .filter((h) => h.state === "unavailable")
