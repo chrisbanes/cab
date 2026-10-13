@@ -2,7 +2,11 @@ import type {
   DomainCommandOutcome,
   DomainCommandResultMap,
 } from "../src/core/command-results.js";
-import type { DomainCommand } from "../src/core/domain.js";
+import type {
+  DomainCommand,
+  DomainCommands,
+  DomainStore,
+} from "../src/core/domain.js";
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
@@ -28,6 +32,42 @@ const mismatched: DomainCommandOutcome = {
   result: projectResult,
 };
 void mismatched;
+
+declare const store: DomainStore;
+declare const commands: DomainCommands;
+declare const taskCommand: Extract<DomainCommand, { type: "task.configure" }>;
+const synchronousTask = store.execute(taskCommand);
+const taskState: "open" | "done" | "cancelled" = synchronousTask.state;
+void taskState;
+// @ts-expect-error A task command's synchronous result is not a project result.
+const synchronousProject: DomainCommandResultMap["project.configure"] =
+  synchronousTask;
+void synchronousProject;
+
+const replayedTask = store.recordedCommand(taskCommand);
+if (replayedTask !== undefined) {
+  const replayedState: "open" | "done" | "cancelled" = replayedTask.state;
+  void replayedState;
+  // @ts-expect-error A replayed task result has no project instructions.
+  replayedTask.instructions;
+}
+
+const typedReceipt = store.recordedResult("scope", "key", "task.configure");
+if (typedReceipt !== undefined) {
+  const receiptType: "task.configure" = typedReceipt.type;
+  const receiptState: "open" | "done" | "cancelled" = typedReceipt.result.state;
+  void [receiptType, receiptState];
+}
+
+async function asynchronousCorrelation() {
+  const result = await commands.execute(taskCommand);
+  const state: "open" | "done" | "cancelled" = result.state;
+  void state;
+  // @ts-expect-error An in-flight task result cannot be assigned to a project result.
+  const project: DomainCommandResultMap["project.configure"] = result;
+  void project;
+}
+void asynchronousCorrelation;
 
 function exhaustive(outcome: DomainCommandOutcome): string {
   switch (outcome.type) {

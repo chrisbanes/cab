@@ -622,6 +622,7 @@ export class DomainStore {
     });
   }
 
+  execute<C extends DomainCommand>(input: C): DomainCommandResultMap[C["type"]];
   execute(input: DomainCommand): DomainCommandResultMap[DomainCommand["type"]] {
     const command = parseCommand(input);
     if (
@@ -774,6 +775,9 @@ export class DomainStore {
     return row?.credentialRef ? String(row.credentialRef) : null;
   }
 
+  recordedCommand<C extends DomainCommand>(
+    input: C,
+  ): DomainCommandResultMap[C["type"]] | undefined;
   recordedCommand(
     input: DomainCommand,
   ): DomainCommandResultMap[DomainCommand["type"]] | undefined {
@@ -789,11 +793,11 @@ export class DomainStore {
 
   /** The stored result for a receipt scope and key, or undefined when unused. */
   recordedResult(scope: string, key: string): unknown;
-  recordedResult(
+  recordedResult<C extends DomainCommand["type"]>(
     scope: string,
     key: string,
-    type: DomainCommand["type"],
-  ): DomainCommandOutcome | undefined;
+    type: C,
+  ): Extract<DomainCommandOutcome, { type: C }> | undefined;
   recordedResult(
     scope: string,
     key: string,
@@ -2546,6 +2550,9 @@ export class DomainCommands {
 
   constructor(private readonly store: DomainStore) {}
 
+  execute<C extends DomainCommand>(
+    input: C,
+  ): Promise<DomainCommandResultMap[C["type"]]>;
   execute(
     input: DomainCommand,
   ): Promise<DomainCommandResultMap[DomainCommand["type"]]> {

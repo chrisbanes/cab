@@ -3,7 +3,11 @@ import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
-import { CommandResultValidationError } from "../core/command-results.js";
+import {
+  CommandResultValidationError,
+  type DomainCommandResultMap,
+  parseDomainCommandOutcome,
+} from "../core/command-results.js";
 import type {
   CoordinationInteraction,
   TaskCompletionRequest,
@@ -11,6 +15,7 @@ import type {
 import type { OperatorCommentReview } from "../core/delivery.js";
 import { materialDigest } from "../core/delivery.js";
 import {
+  type DomainCommand,
   DomainCommands,
   DomainConflictError,
   DomainNotFoundError,
@@ -4337,14 +4342,17 @@ export class OperatorApi {
           : "project";
     if (kind !== expected) throw new OperatorApiError(400, "invalid-input");
     // Domain receipt scopes: the bare project ID, `profile:<id>`, `system:capacity`.
-    const raw = this.domain().recordedResult(
-      kind === "project" ? id : scope.data,
-      key.data,
-    );
+    const receiptType =
+      type.data === "github.preview" ? "github.activate" : type.data;
     let data: unknown = { state: "not-recorded" };
-    if (raw !== undefined)
-      try {
-        const receipt = commandReceipt(type.data, key.data, id, raw);
+    try {
+      const raw = this.domain().recordedResult(
+        kind === "project" ? id : scope.data,
+        key.data,
+        receiptType,
+      );
+      if (raw !== undefined) {
+        const receipt = commandReceipt(raw, key.data, id);
         // A selection ID is operator text; disclose it only as the POST receipt does.
         if (
           receipt.kind === "configuration" &&
@@ -4356,14 +4364,15 @@ export class OperatorApi {
         )
           throw new OperatorApiError(503, "unavailable");
         data = { state: "recorded", receipt };
-      } catch (error) {
-        if (
-          error instanceof ReceiptShapeError ||
-          error instanceof CommandResultValidationError
-        )
-          throw new OperatorApiError(409, "conflict");
-        throw error;
       }
+    } catch (error) {
+      if (
+        error instanceof ReceiptShapeError ||
+        error instanceof CommandResultValidationError
+      )
+        throw new OperatorApiError(409, "conflict");
+      throw error;
+    }
     return operationReadSchema.parse({ data, observedAt: Date.now() });
   }
   async readProfileConfiguration(profileId: string) {
@@ -4766,7 +4775,7 @@ export class OperatorApi {
       type: "github.activate" as const,
       actor: "operator" as const,
     };
-    let raw: unknown = this.domain().recordedCommand(command);
+    let raw = this.domain().recordedCommand(command);
     if (raw === undefined) {
       const config = this.domain().githubConfiguration(c.projectId);
       if (config.version !== c.expectedVersion)
@@ -4824,7 +4833,11 @@ export class OperatorApi {
     const excluded = await this.exclusions(c.projectId);
     if (!this.disclosable(c.selectionId, excluded))
       throw new Error("Receipt unavailable");
-    return commandReceipt(c.type, c.key, c.projectId, raw);
+    return commandReceipt(
+      parseDomainCommandOutcome("github.activate", raw),
+      c.key,
+      c.projectId,
+    );
   }
   private home() {
     return this.setup.home ?? homedir();
@@ -4981,9 +4994,9 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  private async executeDomain(
-    c: Parameters<typeof this.commands.execute>[0],
-  ): Promise<unknown> {
+  private async executeDomain<C extends DomainCommand>(
+    c: C,
+  ): Promise<DomainCommandResultMap[C["type"]]> {
     try {
       return await this.commands.execute(c);
     } catch (error) {
@@ -5701,7 +5714,7 @@ export class OperatorApi {
       }
       if (c.type === "capacity.configure") {
         const command = { ...c, actor: "operator" as const };
-        let raw: unknown = this.domain().recordedCommand(command);
+        let raw = this.domain().recordedCommand(command);
         if (raw === undefined) {
           for (const id of Object.keys(c.projectOverrides))
             this.requireProject(id);
@@ -5714,37 +5727,27 @@ export class OperatorApi {
               : {}),
           });
         }
-        return commandReceipt(c.type, c.key, "system:capacity", raw);
+        return commandReceipt(
+          parseDomainCommandOutcome("capacity.configure", raw),
+          c.key,
+          "system:capacity",
+        );
       }
       if (c.type === "claude-token.configure") {
-        const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
-          configured: boolean;
-        };
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: "system:claude-token",
-            configured: raw.configured,
-          },
-        });
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("claude-token.configure", outcome),
+          c.key,
+          "system:claude-token",
+        );
       }
       if (c.type === "discovery.configure") {
-        const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
-          configured: boolean;
-        };
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: "system:discovery",
-            configured: raw.configured,
-          },
-        });
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("discovery.configure", outcome),
+          c.key,
+          "system:discovery",
+        );
       }
       if (c.type === "github.preview")
         return await this.previewGitHubSelection(c);
@@ -5785,27 +5788,13 @@ export class OperatorApi {
               }
             : c;
         const raw = await this.executeDomain({ ...command, actor: "operator" });
-        if (c.type !== "github.place")
-          return commandReceipt(
-            c.type,
-            c.key,
-            c.type === "routing.configure" || c.type === "github.configure"
-              ? c.projectId
-              : "",
-            raw,
-          );
-        const r = raw as Row;
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: String(r.id),
-            projectId: String(r.projectId),
-            version: Number(r.version),
-          },
-        });
+        return commandReceipt(
+          parseDomainCommandOutcome(c.type, raw),
+          c.key,
+          c.type === "routing.configure" || c.type === "github.configure"
+            ? c.projectId
+            : "",
+        );
       }
       if (isRecoveryCommand(c)) {
         this.requireAssignment(c.assignmentId);
@@ -5825,22 +5814,11 @@ export class OperatorApi {
       if ("projectId" in c) {
         this.requireProject(c.projectId);
         const raw = await this.executeDomain({ ...c, actor: "operator" });
-        if (c.type === "assignment.apply")
-          return commandReceipt(c.type, c.key, c.projectId, raw);
-        const r = raw as Row;
-        const result = {
-          id: String(r.id),
-          projectId: String(r.projectId),
-          version: Number(r.version),
-          state: r.state,
-          ready: Boolean(r.ready),
-        };
-        return commandReceiptSchema.parse({
-          kind: "domain",
-          key: c.key,
-          recorded: true,
-          result,
-        });
+        return commandReceipt(
+          parseDomainCommandOutcome(c.type, raw),
+          c.key,
+          c.projectId,
+        );
       }
       this.requireTask(c.taskId);
       const view = this.coordination();

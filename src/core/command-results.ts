@@ -193,6 +193,10 @@ export function parseLinkedRepositoryResult(value: unknown) {
 }
 
 /** Validate an untrusted apply, receipt, or provider result without changing its shape. */
+export function parseDomainCommandOutcome<K extends DomainCommandType>(
+  type: K,
+  value: unknown,
+): Extract<DomainCommandOutcome, { type: K }>;
 export function parseDomainCommandOutcome(
   type: DomainCommandType,
   value: unknown,

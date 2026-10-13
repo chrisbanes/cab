@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
-import { DatabaseSync } from "node:sqlite";
-import { join } from "node:path";
 import { execFile } from "node:child_process";
-import { mkdir, realpath, writeFile } from "node:fs/promises";
-import { promisify } from "node:util";
-import { githubConfigurationCommandSchema } from "../src/core/github-source-contracts.js";
-import { DomainStore, DomainPolicyError } from "../src/core/domain.js";
 import { randomUUID } from "node:crypto";
+import { mkdir, realpath, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { promisify } from "node:util";
+import { DomainPolicyError, DomainStore } from "../src/core/domain.js";
+import { githubConfigurationCommandSchema } from "../src/core/github-source-contracts.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import {
-  seedOperatorRecovery,
   createOperatorFixture,
+  seedOperatorRecovery,
 } from "./fixtures/operator-web.js";
 
 test("configuration receipts preserve original creation after later configuration and private instructions never cross the API", async (t) => {
@@ -27,6 +27,7 @@ test("configuration receipts preserve original creation after later configuratio
     capabilities: "Review",
   };
   const receipt = await api.execute(profile);
+  assert.match(JSON.stringify(receipt), /"revoked":false/);
   await api.execute({
     type: "profile.configure",
     key: randomUUID(),
@@ -45,6 +46,8 @@ test("configuration receipts preserve original creation after later configuratio
     leadProfileId: null,
   };
   const created = await api.execute(project);
+  assert.match(JSON.stringify(created), /"paused":true/);
+  assert.match(JSON.stringify(created), /"leadProfileId":null/);
   await api.execute({
     type: "project.configure",
     key: randomUUID(),
@@ -52,13 +55,15 @@ test("configuration receipts preserve original creation after later configuratio
     expectedVersion: 1,
     instructions: "PRIVATE PROJECT SENTINEL",
   });
-  await api.execute({
+  const unpaused = await api.execute({
     type: "project.configure",
     key: randomUUID(),
     projectId: project.projectId,
     expectedVersion: 2,
     name: "New name",
+    paused: false,
   });
+  assert.match(JSON.stringify(unpaused), /"paused":false/);
   assert.deepEqual(await api.execute(project), created);
   assert.equal(
     f.service.domain().project(project.projectId).instructions,
@@ -99,6 +104,7 @@ test("GitHub omitted reference is preserved at apply and its original receipt re
   });
   const omitted = { ...base, key: randomUUID(), expectedVersion: 2 };
   const original = await api.execute(omitted);
+  assert.match(JSON.stringify(original), /"credentialConfigured":true/);
   assert.equal(
     f.service.domain().githubConfiguration(projectId).credentialRef,
     "env:FIRST_REF",
@@ -599,9 +605,11 @@ test("unavailable delivery exclusions fail closed without replacing safe labels 
   }
   assert.equal(f.runtime.turns, 0);
 });
+
+import { OperatorApiError } from "../src/standalone/operator-api.js";
 import { OperatorClient } from "../web/src/api.js";
 import { ConfigurationDraft } from "../web/src/settings-state.js";
-import { OperatorApiError } from "../src/standalone/operator-api.js";
+
 test("typed post-commit failure remains unknown through private configuration consumer and original API replay applies once", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -697,12 +705,14 @@ test("routing guidance is kept when omitted and cleared only by an explicit empt
     enabled: false,
     candidateProfileIds: [],
   };
-  await api.execute({
+  const disabledReceipt = await api.execute({
     ...routing,
     key: randomUUID(),
     expectedVersion: 1,
     guidance: "PRIVATE ROUTING SENTINEL",
   });
+  assert.match(JSON.stringify(disabledReceipt), /"enabled":false/);
+  assert.match(JSON.stringify(disabledReceipt), /"credentialConfigured":false/);
   const before = d.routing(projectId);
   const omitted = {
     ...routing,
@@ -712,6 +722,7 @@ test("routing guidance is kept when omitted and cleared only by an explicit empt
     candidateProfileIds: [profileId],
   };
   const receipt = await api.execute(omitted);
+  assert.match(JSON.stringify(receipt), /"enabled":true/);
   const after = d.routing(projectId);
   assert.equal(after.guidance, "PRIVATE ROUTING SENTINEL");
   assert.equal(after.enabled, 1);

@@ -1,4 +1,5 @@
-import { DatabaseSync } from "node:sqlite";
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   mkdtempSync,
@@ -7,27 +8,27 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "./temp.js";
-import { DomainStore, DomainPolicyError } from "../src/core/domain.js";
-import { CoordinationStore } from "../src/core/coordination.js";
-import { CoordinationView } from "../src/standalone/coordination-view.js";
-import { ExecutionState } from "../src/standalone/state.js";
-import { RoutingAttemptStore } from "../src/standalone/routing.js";
-import { ConversationHistoryStore } from "../src/standalone/conversation-history.js";
-import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { CoordinationStore } from "../src/core/coordination.js";
+import { DomainPolicyError, DomainStore } from "../src/core/domain.js";
+import { executionPolicy } from "../src/standalone/codex.js";
+import { ConversationHistoryStore } from "../src/standalone/conversation-history.js";
+import { CoordinationView } from "../src/standalone/coordination-view.js";
+import { codexPolicyDisclosure } from "../src/standalone/execution-policy.js";
 import {
   OperatorApi,
   OperatorApiError,
 } from "../src/standalone/operator-api.js";
-import { executionPolicy } from "../src/standalone/codex.js";
-import { codexPolicyDisclosure } from "../src/standalone/execution-policy.js";
+import { RoutingAttemptStore } from "../src/standalone/routing.js";
+import { ExecutionState } from "../src/standalone/state.js";
 import {
   ClaudeShapedFixtureRuntime,
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "./fixtures/operator-web.js";
+import { tmpdir } from "./temp.js";
+
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -48,9 +49,10 @@ test("API preserves original durable task receipts independently of current vers
     taskId: randomUUID(),
     title: "Actual task",
     outcome: "Finish",
-    ready: true,
+    ready: false,
   };
   const first = await api.execute(command);
+  assert.match(JSON.stringify(first), /"ready":false/);
   assert.deepEqual(await api.execute(command), first);
   assert.equal(
     (await api.readTask(command.taskId)).data.execution.state,
