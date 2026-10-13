@@ -742,6 +742,7 @@ async function loseStageAnswer(
   page: Page,
   task: { taskId: string },
   web: { origin: string; password: string },
+  replay: "continue" | "refuse" = "continue",
 ) {
   await signIn(
     page,
@@ -772,7 +773,15 @@ async function loseStageAnswer(
       lost = false;
       await route.fetch();
       await route.abort("connectionreset");
-    } else await route.continue();
+    } else if (replay === "refuse")
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "forbidden", message: "Refused" },
+        }),
+      });
+    else await route.continue();
   });
   await files
     .getByRole("button", { name: "Save comment", exact: true })
@@ -808,6 +817,80 @@ test("an unconfirmed anchor stays checkable from a new navigation entry and fini
   assert.equal(saves.length, 1);
   assert.equal(await review.getByText("Settled after leaving").count(), 1);
   await warning.getByText("Comment added.", { exact: true }).waitFor();
+});
+
+test("a refused replay on a new entry is reported in the panel and does not block new comments", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { review } = await loseStageAnswer(page, task, web, "refuse");
+  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
+  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+  const panel = review.locator("[data-slot=action-outcome]");
+  await panel
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  // The composer's form is not on this page, so the refusal is said in the panel, once.
+  await panel
+    .getByText(
+      "Couldn't capture the exact lines: you don't have permission. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await panel.count(), 1);
+  // The leftover composer does not hold the Add button: a new comment can start here.
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /diff\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 1: keep" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await files.getByLabel("Comment", { exact: true }).waitFor();
+});
+
+test("a review send in flight when its page goes away is left for the next page to check", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const review = page.locator("#local-review");
+  let entered!: () => void;
+  let release!: () => void;
+  const sendEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.send") return route.continue();
+    entered();
+    await gate;
+    await route.continue();
+  });
+  await review
+    .getByRole("button", { name: /^Send review \(1 comment\)/ })
+    .click();
+  await sendEntered;
+  await page
+    .getByRole("link", { name: "Search", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await page
+    .getByRole("button", { name: "Back to originating workspace", exact: true })
+    .click();
+  release();
+  // The old page's answer is not applied to a page that is gone; the new page checks it.
+  await review
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Review sent to Task lead.").waitFor();
+  await review.getByRole("button", { name: "Start a new review" }).waitFor();
 });
 
 test("an unconfirmed anchor is settled by the page that checks it after a remount", async (_t, j) => {

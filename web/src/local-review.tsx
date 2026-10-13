@@ -118,6 +118,43 @@ function causeOf(code: string | undefined) {
   }
 }
 
+/** How each draft write reads when it fails or cannot be confirmed. */
+const writeCopy: Record<
+  DraftWrite["kind"],
+  { what: string; confirmed: string; kept: string }
+> = {
+  stage: {
+    what: "Couldn't capture the exact lines",
+    confirmed: "the exact lines were captured",
+    kept: "Your comment is kept.",
+  },
+  add: {
+    what: "Couldn't save the comment",
+    confirmed: "the comment was saved",
+    kept: "Your comment is kept.",
+  },
+  edit: {
+    what: "Couldn't save the change",
+    confirmed: "the change was saved",
+    kept: "Your text is kept.",
+  },
+  summary: {
+    what: "Couldn't save the summary",
+    confirmed: "the summary was saved",
+    kept: "Your text is kept.",
+  },
+  unanchored: {
+    what: "Couldn't remove the comments",
+    confirmed: "the comments were removed",
+    kept: "Your draft is kept.",
+  },
+  discard: {
+    what: "Couldn't clear the draft",
+    confirmed: "the draft was cleared",
+    kept: "Your draft is kept.",
+  },
+};
+
 const sendDetails = (taskId: string, send: LocalReviewSend) =>
   detailRows({
     command: "review.send",
@@ -191,42 +228,6 @@ function useLocalReviewController({
 
   const execute = async (input: Parameters<OperatorClient["command"]>[0]) =>
     client.command(input, session.csrfToken);
-  /** How each draft write reads when it fails or cannot be confirmed. */
-  const writeCopy: Record<
-    DraftWrite["kind"],
-    { what: string; confirmed: string; kept: string }
-  > = {
-    stage: {
-      what: "Couldn't capture the exact lines",
-      confirmed: "the exact lines were captured",
-      kept: "Your comment is kept.",
-    },
-    add: {
-      what: "Couldn't save the comment",
-      confirmed: "the comment was saved",
-      kept: "Your comment is kept.",
-    },
-    edit: {
-      what: "Couldn't save the change",
-      confirmed: "the change was saved",
-      kept: "Your text is kept.",
-    },
-    summary: {
-      what: "Couldn't save the summary",
-      confirmed: "the summary was saved",
-      kept: "Your text is kept.",
-    },
-    unanchored: {
-      what: "Couldn't remove the comments",
-      confirmed: "the comments were removed",
-      kept: "Your draft is kept.",
-    },
-    discard: {
-      what: "Couldn't clear the draft",
-      confirmed: "the draft was cleared",
-      kept: "Your draft is kept.",
-    },
-  };
   /**
    * One alert naming the cause and saying the input is kept, or, when the response was lost,
    * one warning whose check replays the exact request. The code sits in Details.
@@ -255,14 +256,43 @@ function useLocalReviewController({
         };
   };
 
-  // The page that started a write may be gone when its answer arrives.
+  // The page that started a write may be gone when its answer arrives. Every mounted
+  // page re-renders from the shared state, so a write settled elsewhere still shows here.
   const alive = useRef(true);
+  const rerender = useRef(changed);
+  rerender.current = changed;
   useEffect(() => {
     alive.current = true;
+    const unsubscribe = state.subscribe(() => rerender.current());
     return () => {
       alive.current = false;
+      unsubscribe();
+      // A send in flight is left unknown for the page that opens next to check.
+      if (state.send?.status === "sending") {
+        state.send.status = "unknown";
+        storeSend(taskId, state.send);
+      }
     };
-  }, []);
+  }, [state, taskId]);
+
+  /** Keep a write as the one exact request that the current page's check will replay. */
+  const holdUnconfirmed = (
+    command: Command,
+    intent: DraftWrite,
+    result?: CommandState,
+  ) => {
+    state.unconfirmed = {
+      command,
+      intent,
+      outcome: failure(
+        result?.state === "unknown"
+          ? result
+          : { state: "unknown", command, code: "command-outcome-unknown" },
+        intent,
+      ),
+    };
+    state.notice = null;
+  };
 
   /**
    * Run a draft write. When its response is lost, or the page that sent it is gone, the exact
@@ -276,22 +306,12 @@ function useLocalReviewController({
     refreshWhenRecorded = true,
   ) => {
     state.pending = true;
-    changed();
+    state.notify();
     const result = await execute(command);
     if (result.state === "unknown" || !alive.current) {
-      state.unconfirmed = {
-        command,
-        intent,
-        outcome: failure(
-          result.state === "unknown"
-            ? result
-            : { state: "unknown", command, code: "command-outcome-unknown" },
-          intent,
-        ),
-      };
-      state.notice = null;
+      holdUnconfirmed(command, intent, result);
       if (alive.current) await resource.refresh();
-      changed();
+      state.notify();
       return;
     }
     state.unconfirmed = null;
@@ -301,7 +321,7 @@ function useLocalReviewController({
     // The panel stays frozen through the refresh and the settle; only an unconfirmed
     // write (one a settle started) keeps it frozen after that.
     state.pending = state.unconfirmed !== null;
-    changed();
+    state.notify();
   };
 
   /** The one success line of a draft write, with the receipt behind it in Details. */
@@ -349,7 +369,7 @@ function useLocalReviewController({
     if (state.unconfirmed) return;
     const composer = state.composer;
     state.composer = null;
-    changed();
+    state.notify();
     // Return to the selected line when it is still rendered, else the origin's
     // button; the trigger may re-render, so prefer live controls.
     requestAnimationFrame(() => {
@@ -367,13 +387,25 @@ function useLocalReviewController({
     });
   };
 
+  /** A refused comment write: unlock the composer and say so where the operator can see it. */
+  const refuse = (result: CommandState, intent: DraftWrite) => {
+    const composer = state.composer;
+    const outcome = failure(result, intent);
+    if (composer) {
+      composer.error = outcome;
+      composer.saving = false;
+    }
+    // Without the composer's form on screen the panel carries the message.
+    if (!state.composerShown) state.notice = outcome;
+    state.notify();
+  };
+
   /** Settle a draft write by what it was for, using this page's draft and resource. */
   const settle = async (
     command: Command,
     intent: DraftWrite,
     result: CommandState,
   ) => {
-    const composer = state.composer;
     switch (intent.kind) {
       case "stage": {
         if (
@@ -382,14 +414,7 @@ function useLocalReviewController({
         ) {
           // Without this page's draft the stage stays unconfirmed: replaying it is safe.
           if (!draft) {
-            state.unconfirmed = {
-              command,
-              intent,
-              outcome: failure(
-                { state: "unknown", command, code: "command-outcome-unknown" },
-                intent,
-              ),
-            };
+            holdUnconfirmed(command, intent);
             return;
           }
           await write(
@@ -412,11 +437,7 @@ function useLocalReviewController({
           return;
         }
         // Keep the typed text; an unvalidated anchor is never added.
-        if (composer) {
-          composer.error = failure(result, intent);
-          composer.saving = false;
-        }
-        changed();
+        refuse(result, intent);
         return;
       }
       case "add": {
@@ -425,11 +446,7 @@ function useLocalReviewController({
           closeComposer();
           return;
         }
-        if (composer) {
-          composer.error = failure(result, intent);
-          composer.saving = false;
-        }
-        changed();
+        refuse(result, intent);
         return;
       }
       case "edit": {
@@ -440,7 +457,7 @@ function useLocalReviewController({
             result,
             intent.remove ? "Comment removed." : "Comment updated.",
           ) ?? failure(result, intent);
-        changed();
+        state.notify();
         if (result.state !== "recorded") return;
         if (!intent.remove)
           focusLater(`[data-review-edit="${CSS.escape(intent.commentId)}"]`);
@@ -458,7 +475,7 @@ function useLocalReviewController({
         state.notice =
           succeeded(command, result, "Summary saved.") ??
           failure(result, intent);
-        changed();
+        state.notify();
         return;
       }
       case "unanchored": {
@@ -471,7 +488,7 @@ function useLocalReviewController({
             result,
             "Comments without line context removed.",
           ) ?? failure(result, intent);
-        changed();
+        state.notify();
         return;
       }
       case "discard": {
@@ -485,7 +502,7 @@ function useLocalReviewController({
         state.notice =
           succeeded(command, result, "Started a new review.") ??
           failure(result, intent);
-        changed();
+        state.notify();
         return;
       }
     }
@@ -545,7 +562,7 @@ function useLocalReviewController({
             ? document.activeElement
             : null,
       };
-      changed();
+      state.notify();
     },
     close() {
       closeComposer();
@@ -563,7 +580,7 @@ function useLocalReviewController({
         return;
       composer.saving = true;
       composer.error = null;
-      changed();
+      state.notify();
       await write(
         {
           type: "review.anchor.stage",
@@ -633,7 +650,7 @@ function useLocalReviewController({
     },
     cancelEdit(commentId: string) {
       delete state.editing[commentId];
-      changed();
+      state.notify();
       focusLater(`[data-review-edit="${CSS.escape(commentId)}"]`);
     },
     async saveSummary() {
@@ -660,7 +677,7 @@ function useLocalReviewController({
       };
       state.send = send;
       storeSend(taskId, send);
-      changed();
+      state.notify();
       const result = await execute({
         type: "review.send",
         key: send.key,
@@ -669,15 +686,17 @@ function useLocalReviewController({
         recipientAssignmentId: send.recipientAssignmentId,
         expectedAssignmentVersion: send.expectedAssignmentVersion,
       });
+      // Left unknown when the page went away: the page that opens next checks it.
+      if (!alive.current) return;
       settleSend(send, result);
       await Promise.all([resource.refresh(), sentList.refresh()]);
-      changed();
+      state.notify();
     },
     async reconcile() {
       const send = state.send;
       if (send?.status !== "unknown") return;
       send.status = "sending";
-      changed();
+      state.notify();
       // Same key and material only: reconciliation never sends an edited review.
       const result = await execute({
         type: "review.send.reconcile",
@@ -687,9 +706,10 @@ function useLocalReviewController({
         recipientAssignmentId: send.recipientAssignmentId,
         expectedAssignmentVersion: send.expectedAssignmentVersion,
       });
+      if (!alive.current) return;
       settleSend(send, result);
       await Promise.all([resource.refresh(), sentList.refresh()]);
-      changed();
+      state.notify();
     },
     async startNew() {
       if (!draft || state.pending) return;
@@ -707,7 +727,7 @@ function useLocalReviewController({
     clearSend() {
       state.send = null;
       storeSend(taskId, null);
-      changed();
+      state.notify();
     },
   };
 }
@@ -766,8 +786,10 @@ export function CommentAction({
 }) {
   const review = useLocalReview();
   if (!review) return null;
-  // Stays focusable while a composer is open so Cancel/Save can return focus here.
-  const composing = review.state.composer !== null;
+  // Stays focusable while a composer is open so Cancel/Save can return focus here. A composer
+  // whose form is not on this page does not hold the button: opening one replaces it.
+  const composing =
+    review.state.composer !== null && review.state.composerShown;
   return (
     <Button
       variant="secondary"
@@ -792,6 +814,18 @@ export function CommentAction({
 export function ReviewComposer({ originKey }: { originKey: string }) {
   const review = useLocalReview();
   const composer = review?.state.composer;
+  const shown = Boolean(review && composer?.originKey === originKey);
+  const state = review?.state;
+  // Tell the state this form is on screen, so a message for it is placed here and a
+  // composer that is not on this page does not block new comments.
+  useEffect(() => {
+    if (!shown || !state) return;
+    state.composerShown = true;
+    state.notify();
+    return () => {
+      state.composerShown = false;
+    };
+  }, [shown, state]);
   if (!review || !composer || composer.originKey !== originKey) return null;
   const { anchor } = composer;
   return (
@@ -865,7 +899,7 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
           details={composer.error.details}
         />
       )}
-      {review.state.unconfirmed && composer.saving && (
+      {review.state.unconfirmed && (
         <p className="metadata muted" role="status">
           Check whether it saved in Local review.
         </p>

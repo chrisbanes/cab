@@ -224,6 +224,19 @@ export class LocalReviewState {
   editing: Record<string, string> = {};
   summary: string | null = null;
   pending = false;
+  /** The composer's form is on screen: its origin row is mounted on this page. */
+  composerShown = false;
+  private readonly listeners = new Set<() => void>();
+  /** The mounted pages to re-render; each removes itself when it unmounts. */
+  subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  notify() {
+    for (const listener of this.listeners) listener();
+  }
   /** A draft write whose response was lost: the exact request, replayed by the check. */
   unconfirmed: {
     command: OperatorCommand;
