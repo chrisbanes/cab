@@ -552,6 +552,26 @@ Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
 
+Project GitHub sources independently choose `env:NAME` or exactly `gh:github.com`.
+The discovery credential never supplies a missing source credential. Source settings
+offer the detected GitHub CLI account or an environment variable, with Change,
+Cancel and Clear. Every selection, preview, issue-status and blocker read resolves
+the chosen credential afresh. Missing or unusable credentials show an actionable
+reason in source settings, Sync & placement and preview, including before the first
+sync attempt; unavailable provider knowledge is incomplete and blockers are unknown.
+Change or Clear uses the versioned, keyed source save, preserves definitions and
+imported history, invalidates activation and requires preview at the new version.
+Unknown save outcomes retain the draft and reconcile the same request.
+
+All source credentials are excluded by name and value from Codex spawn, Claude turns
+and helper environments, independently of discovery. Successfully resolved gh values
+remain in process memory solely for exclusion and redaction after Clear or rotation;
+they are never reused for reads or persisted. Each value is bounded to 512 bytes,
+while distinct rotations grow this retained set until restart. Existing Codex spawn
+environments need a service restart to apply changed exclusions. Runtime permissions
+may still let agents reach the host gh login or keychain. Delivery and routing remain
+env-only; Ensemble supplies no separate host sandbox.
+
 Settings present each project's repository access and GitHub discovery sources
 together, labelled separately, rather than as two unrelated lists.
 

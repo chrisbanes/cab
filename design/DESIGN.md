@@ -396,7 +396,7 @@ and disclosure detail; do not shrink their entire height into a laptop viewport.
 | Sign-in desktop and phone | 108 `nQvin`, 109 `MxgGj`, 110 `Wut6u`, 111 `yr1m8`, 112 `W64weN` |
 | Account menu, settings index and discovery credential source | 113 `DhtZq`, 114 `vEr15`, 114b `FcO5o` |
 | Guided project setup, error, first run, discovery unavailable and folder picker | 115 `wk678`, 116 `q6ZqlW`, 117 `bkNmZ`, 117b `T6VX5`, 131 `M6N2BQ` |
-| Project configuration and phone state | 118 `gi83t`, 119 `w0ozf`, 120 `SBB7W`, 121 `Pwzju` |
+| Project configuration and phone state | 118 `gi83t`, 119 `w0ozf`, 119b `xCaEr`, 119c `PbDkZ`, 120 `SBB7W`, 120b `gjYWT`, 121 `Pwzju` |
 | Profiles and routing | 122 `F6d3SQ`, 123 `O96oS`, 124 `Z8uZnh`, 125 `c8af5` |
 | Runtime, assignment recovery and not found | 126 `AqYk0`, 127 `iEF1o`, 128 `ur1mr`, 129 `HCNJ2` |
 | Stop confirmation | 132 `uQrNE` |
@@ -442,6 +442,30 @@ unconfigured.
   re-reads discovery. Without a detected login, only **Set discovery credential**
   appears. Ensemble never uses a gh login the operator did not choose. Frame 116
   draws discovery available and is unchanged.
+
+### Project source credential
+
+Frame 119 `w0ozf` shows the configured GitHub CLI account with Change and Clear in
+`b331J`. Frame 119b `xCaEr` opens GitHub CLI and Environment variable choices;
+the detected account is an offer, and selecting a source identity is explicit.
+Cancel abandons only the credential edit, keeping unrelated source draft changes.
+The environment field takes a name only; `env:` is implied and values stay private.
+Discovery never supplies the source identity.
+
+Frame 119c `PbDkZ` draws an uncertain Clear save with the retained draft and
+**Check whether it saved**. Confirmed Change or Clear preserves definitions and
+history, invalidates activation and requires preview at the new source version.
+Reconciliation uses the same request; no new save is issued while its outcome is
+unknown.
+
+Frame 120 `SBB7W` shows missing credentials in preview `x0geR` and observations
+`aL7YS`, with a route to GitHub source settings and no invented attempt or success
+timestamp. Frame 120b `gjYWT` shows a configured but unusable login: sign in on the
+service host or change the source credential. Not installed and unreadable use the
+same blocked presentation with their own actionable reason. Stale success is not
+proof of current completeness; blocker status remains unknown. Frame 121 `Pwzju`
+shows the missing-source state in `UBzbi` and the credential-then-preview next step
+in `p1X7qH`, preserving independent placement holds and the phone's read-only design.
 
 ### CLI credentials
 
