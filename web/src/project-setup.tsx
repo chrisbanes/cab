@@ -103,7 +103,8 @@ export function ProjectSetup(p: SettingsProps) {
   };
   // Offered only while discovery is unconfigured; Ensemble never uses a login the operator did not choose.
   const ghDraft = useDraft(p.drafts, "discovery.configure:setup");
-  useEffect(() => ghDraft.initialize({ key: key() }), [ghDraft]);
+  // A new visit starts clean; an unsettled login stays until it is checked.
+  useEffect(() => ghDraft.startOperation({ key: key() }), [ghDraft]);
   const unconfigured =
     discovery.state === "unavailable" && discovery.reason === "unconfigured";
   const [ghLogin, setGhLogin] = useState<GhLogin | null>(null);
@@ -476,7 +477,7 @@ export function ProjectSetup(p: SettingsProps) {
                             csrf,
                           );
                           if (ghDraft.phase === "recorded") {
-                            ghDraft.startOperation({ key: key() });
+                            ghDraft.startOperation({ key: key() }, true);
                             retry();
                           }
                         }}
@@ -506,11 +507,10 @@ export function ProjectSetup(p: SettingsProps) {
             )}
           <DraftMessage
             draft={ghDraft}
-            success={null}
             check={async () => {
               await ghDraft.reconcile(p.client, csrf);
               if (ghDraft.phase === "recorded") {
-                ghDraft.startOperation({ key: key() });
+                ghDraft.startOperation({ key: key() }, true);
                 retry();
               }
             }}

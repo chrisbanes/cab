@@ -74,7 +74,9 @@ means.
 
 - Name what changed in the operator's terms: project, profile, repository, task.
 - Avoid service vocabulary in messages: recorded, receipt, observation, admission,
-  reconcile, submission, revision (say "version" only in Details).
+  reconcile, submission, revision. Numeric versions, IDs, command names and codes
+  appear only in Details; plain "version" is fine ("A newer version was saved
+  elsewhere.").
 - Say whether input is safe on every failure: "Your changes are still here."
 - Use sentence case and no more than two short sentences.
 

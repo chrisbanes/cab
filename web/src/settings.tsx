@@ -182,6 +182,10 @@ export function DraftMessage({
   children?: ReactNode;
 }) {
   const details = detailRows(draft.details);
+  // A message that follows a send replaces the control the operator used, so it takes the
+  // focus; one restored on a later visit does not.
+  const sent = useRef(false);
+  if (draft.phase === "pending") sent.current = true;
   switch (draft.phase) {
     case "pending":
       return null;
@@ -206,6 +210,7 @@ export function DraftMessage({
           tone="warning"
           message={draft.notice}
           action={check && { label: "Check whether it saved", onClick: check }}
+          focusAction={sent.current}
           details={details}
         />
       );

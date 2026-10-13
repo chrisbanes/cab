@@ -17,6 +17,7 @@ export function ActionOutcome({
   tone,
   message,
   action,
+  focusAction = false,
   details = [],
   children,
 }: {
@@ -24,6 +25,8 @@ export function ActionOutcome({
   message: ReactNode;
   /** The single thing to do next. */
   action?: { label: string; onClick: () => void | Promise<void> } | undefined;
+  /** Move focus to the action as it appears, when the control the operator used is gone. */
+  focusAction?: boolean | undefined;
   details?: readonly OutcomeField[] | undefined;
   /** Extra content under the message, such as a follow-up link. */
   children?: ReactNode;
@@ -36,7 +39,12 @@ export function ActionOutcome({
       </p>
       {children}
       {action && (
-        <Button type="button" variant="secondary" onClick={action.onClick}>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={action.onClick}
+          autoFocus={focusAction}
+        >
           {action.label}
         </Button>
       )}

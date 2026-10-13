@@ -227,6 +227,11 @@ test("an unknown save freezes the form until the exact submission is reconciled"
     await page.getByText("We couldn't confirm the save.").waitFor();
     assert.equal(await outcomeMessages(page).count(), 1);
     assert.equal(await name.isDisabled(), true);
+    // The Save button is gone, so focus moves to the one action instead of the page body.
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent),
+      "Check whether it saved",
+    );
   } finally {
     await page.unroute("**/api/operator/commands");
   }
@@ -630,6 +635,83 @@ test("GitHub source conflict keeps rows and an unknown save is checked once", as
   assert.deepEqual(
     d.githubConfiguration(ids.atlas).selections.map((s) => s.id),
     ["S-1", "S-2", "S-5"],
+  );
+});
+
+test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page.route("**/api/operator/commands", (r) => r.abort());
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByText("We couldn't confirm the save.").waitFor();
+  // S-2 is removed elsewhere while the save is unsettled; the form keeps its kept row.
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  await refresh(page);
+  await page.getByText("S-2 is no longer saved", { exact: false }).waitFor();
+  // Exactly one action: the unknown outcome's check, never a second way to review.
+  assert.equal(
+    await page.getByRole("button", { name: "Review changes" }).count(),
+    0,
+  );
+  const unknown = outcomeMessages(page);
+  assert.equal(await unknown.count(), 1);
+  assert.equal(await unknown.getByRole("button").count(), 1);
+  await unknown
+    .getByRole("button", { name: "Check whether it saved" })
+    .waitFor();
+  assert.equal(
+    (await unknown.locator("p").innerText()).trim(),
+    "We couldn't confirm the save.",
+  );
+});
+
+test("a re-read of another writer's routing retires the saved line", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  const saved = await savedOutcome(page);
+  await saved.getByText(/^Saved\. Routing now uses .*Nora/).waitFor();
+  // A plain re-read of the same version keeps the confirmation.
+  await refresh(page);
+  await savedOutcome(page, /^Saved\. Routing now uses .*Nora/);
+  // Another writer saves routing, and the next re-read must not describe it as this save.
+  const d = f.service.domain();
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  await refresh(page);
+  await page
+    .getByRole("region", { name: "Saved routing" })
+    .getByText("Candidates: Eli", { exact: true })
+    .waitFor();
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.doesNotMatch(
+    await page.locator(".settings-status").innerText(),
+    /Saved \d\d:\d\d/,
   );
 });
 

@@ -146,6 +146,15 @@ export class ConfigurationDraft {
   private base: Record<string, string | boolean | string[]> = {};
   initialize(values: Record<string, string | boolean | string[]>) {
     if (!this.dirty && !this.frozen) {
+      // A read at another version was saved by someone else, so the confirmation of this
+      // session's save no longer describes what the page now shows.
+      if (
+        this.savedAt !== null &&
+        values.expectedVersion !== this.base.expectedVersion
+      ) {
+        this.savedAt = null;
+        this.details = {};
+      }
       this.values = { ...values };
       this.base = { ...values };
       this.changed();
@@ -203,11 +212,11 @@ export class ConfigurationDraft {
     if (this.phase === "pending" || this.lifecycle.uncertain) return;
     const { savedAt, details } = this;
     this.purge();
+    this.initialize(values);
     if (keepSaved) {
       this.savedAt = savedAt;
       this.details = details;
     }
-    this.initialize(values);
   }
   purge() {
     this.generation++;

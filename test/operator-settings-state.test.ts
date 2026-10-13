@@ -836,3 +836,49 @@ test("every outcome reads in plain words and keeps the receipt fields for Detail
   for (const text of Object.values(outcomeCopy))
     assert.ok(text.split(/(?<=\.)\s/).length <= 2, text);
 });
+
+test("a save stays confirmed across a re-read of the same version, not across another writer's", async () => {
+  const projectId = randomUUID();
+  const client = new OperatorClient(async (_url, init) => {
+    const c = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "configuration",
+      key: c.key,
+      recorded: true,
+      result: {
+        commandType: "project.configure",
+        resourceId: projectId,
+        version: 3,
+        paused: false,
+        leadProfileId: null,
+        instructionsRevision: 1,
+      },
+    });
+  });
+  const draft = new ConfigurationDraft();
+  draft.set("name", "Atlas");
+  await draft.submit(
+    client,
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 2,
+      name: "Atlas",
+    },
+    "csrf",
+  );
+  assert.equal(draft.phase, "recorded");
+  // The first read after the save carries the saved version.
+  draft.startOperation({ name: "Atlas", expectedVersion: "3" }, true);
+  assert.equal(typeof draft.savedAt, "number");
+  // A later read of the same version, with a fresh request key, is still this save.
+  draft.initialize({ name: "Atlas", expectedVersion: "3", key: "next" });
+  assert.equal(typeof draft.savedAt, "number");
+  assert.equal(draft.details.version, 3);
+  // A read of a version someone else saved no longer matches the confirmation.
+  draft.initialize({ name: "Theirs", expectedVersion: "4", key: "later" });
+  assert.equal(draft.savedAt, null);
+  assert.deepEqual(draft.details, {});
+  assert.equal(draft.values.name, "Theirs");
+});

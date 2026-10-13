@@ -76,6 +76,8 @@ export function SourceTab(p: TabProps) {
         data.source.credential?.gh.state !== "signed-in") ||
       (removesAll && !v.removeAll);
   const adopt = () => {
+    // An unsettled save keeps its own message; nothing is loaded or discarded then.
+    if (locked(d)) return;
     d.adoptLatest(data.source.version, initial, [["mode", "conditions"]]);
     const rows = adoptSourceRows(data.source, d.values);
     if (rows.dropped.length)
@@ -148,7 +150,7 @@ export function SourceTab(p: TabProps) {
           {stale.join(", ")} {stale.length === 1 ? "is" : "are"} no longer
           saved. Review the changes made elsewhere, or discard yours, before
           saving.
-          {d.phase !== "conflict" && (
+          {!locked(d) && d.phase !== "conflict" && (
             <Button type="button" variant="secondary" onClick={adopt}>
               Review changes
             </Button>

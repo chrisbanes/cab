@@ -1073,7 +1073,12 @@ test("actual source placement retains its original receipt after transfer remove
     submitted = JSON.parse(response.request().postData() ?? "{}"),
     original = await response.json();
   assert.equal(response.status(), 200);
-  await savedOutcome(page);
+  // The line names the task and project in plain words, with no IDs or versions.
+  const placed = await savedOutcome(page);
+  assert.equal(
+    (await placed.locator("p").innerText()).trim(),
+    "Saved. Conflicting imported task now belongs to Actual membership target.",
+  );
   assert.equal(d.task(taskId).projectId, target);
   d.execute({
     type: "task.configure",
@@ -1327,6 +1332,26 @@ test("mounted reference and placement fields have unique associated controls", a
   await placements.nth(1).selectOption(ids.projectId);
   assert.equal(await placements.nth(0).inputValue(), target);
   await capture(page, "1366-unique-reference-placement-controls");
+  // Each recorded placement leaves its own line, and the lines say which task they are.
+  const record = page.getByRole("button", {
+    name: "Record placement",
+    exact: true,
+  });
+  await record.nth(0).click();
+  await outcomeMessages(page)
+    .filter({ hasText: /^Saved\. Conflicting imported task now belongs to / })
+    .waitFor();
+  await record.first().click();
+  await outcomeMessages(page)
+    .filter({ hasText: /^Saved\. Second placement now belongs to / })
+    .waitFor();
+  const lines = await outcomeMessages(page).locator("p").allInnerTexts();
+  assert.equal(lines.length, 2);
+  assert.equal(new Set(lines).size, 2);
+  assert.doesNotMatch(
+    lines.join(" "),
+    /[0-9a-f]{8}-[0-9a-f]{4}-|version \d|recorded/i,
+  );
   assert.equal(f.runtime.turns, 0);
 });
 

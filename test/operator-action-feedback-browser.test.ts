@@ -238,6 +238,11 @@ for (const [device, viewport] of [
         .getByRole("button", { name: "Check whether it saved" })
         .waitFor();
       assert.equal(await surface.locked(page).isDisabled(), true);
+      // Focus moves to the one action when the Save button is replaced by it.
+      assert.equal(
+        await page.evaluate(() => document.activeElement?.textContent),
+        "Check whether it saved",
+      );
       // Details hold the receipt fields and copy as plain key: value lines.
       await warning.getByText("Details", { exact: true }).click();
       for (const label of ["Command", "Resource", "Request key", "Code"])

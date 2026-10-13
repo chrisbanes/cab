@@ -112,7 +112,11 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
           <UnsettledPlacement key={command.taskId} {...p} command={command} />
         ))}
         {p.drafts.recordedPlacements(p.projectId).map((placed) => (
-          <DraftMessage key={placed.receipt?.key} draft={placed} />
+          <DraftMessage
+            key={placed.receipt?.key}
+            draft={placed}
+            success={`Saved. ${placed.values.placementTitle || "The task"} now belongs to ${placed.values.placementProject || "the chosen project"}.`}
+          />
         ))}
         {data.placements.length === 0 && unsettled.length === 0 && (
           <Panel
@@ -268,6 +272,13 @@ function PlacementConfiguration(
       <form
         onSubmit={(e) => {
           d.set("placementOriginProjectId", p.projectId);
+          // The conflict row is gone once this is recorded, so keep the words for the saved line.
+          d.set("placementTitle", c.title ?? "");
+          d.set(
+            "placementProject",
+            c.choices.find((r) => r.id === d.values.chosenProjectId)?.name ??
+              "",
+          );
           void submitDraft(
             e,
             d,

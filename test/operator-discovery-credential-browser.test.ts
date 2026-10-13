@@ -211,6 +211,8 @@ test("Setup offers the detected GitHub CLI login in one step", async (_t, journe
       "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
+  // The save is confirmed like the Settings row, not left to the list reappearing.
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",
@@ -260,6 +262,7 @@ test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey)
       "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",
