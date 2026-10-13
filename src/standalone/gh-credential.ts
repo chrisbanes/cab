@@ -183,22 +183,20 @@ export function ghEnvironment(
   const discovery = discoveryRef?.startsWith("env:")
     ? [discoveryRef.slice(4)]
     : [];
-  const gh = reference === "gh:github.com" ? [] : ["GH_TOKEN", "GITHUB_TOKEN"];
-  const ghValues = [environment.GH_TOKEN, environment.GITHUB_TOKEN].filter(
-    (value): value is string => Boolean(value),
-  );
-  const ghAliases = Object.keys(environment).filter(
-    (key) =>
-      key !== "GH_TOKEN" &&
-      key !== "GITHUB_TOKEN" &&
-      ghValues.includes(environment[key] ?? ""),
-  );
+  const gh = ["GH_TOKEN", "GITHUB_TOKEN"];
   const result = credentialFreeEnvironment(
     environment,
     [...delivery, ...sources, ...claude.names, ...discovery, ...gh],
     environment,
-    claude.values,
+    [
+      ...claude.values,
+      ...credentialReferenceExclusions(null, environment).values,
+    ],
   );
-  for (const key of ghAliases) delete result[key];
+  // Explicit gh selection permits only these current variables, even when another
+  // configured credential shares their name or value. All aliases remain removed.
+  if (reference === "gh:github.com")
+    for (const key of gh)
+      if (environment[key] !== undefined) result[key] = environment[key];
   return result;
 }
