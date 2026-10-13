@@ -13,6 +13,10 @@ import {
   phone,
   startSettings,
 } from "./fixtures/operator-settings.js";
+import {
+  ClaudeShapedFixtureRuntime,
+  OperatorFixtureRuntime,
+} from "./fixtures/operator-web.js";
 import { tmpdir } from "./temp.js";
 
 const test = browserSuite("readiness-panel");
@@ -172,3 +176,47 @@ for (const [name, viewport] of [
     if (viewport === phone) await noPageOverflow(page);
   });
 }
+
+test("the panel never shows the name of a profile the runtime rejects", async (_t, journey) => {
+  const { f, page } = await startSettings(
+    journey,
+    "/app/settings",
+    desktop,
+    undefined,
+    {
+      runtimeFactory: (_context, harness) =>
+        harness === "claude"
+          ? new ClaudeShapedFixtureRuntime()
+          : new OperatorFixtureRuntime(),
+      serviceOptions: { runtimeHarnesses: ["codex", "claude"] },
+    },
+  );
+  const canaries = [
+    "panel-name-canary-token-7781",
+    "file:/Users/private-owner/claude-token",
+    "env:PANEL_NAME_CANARY_VARIABLE",
+  ];
+  f.service.domain().execute({
+    type: "profile.create",
+    key: randomUUID(),
+    actor: "operator",
+    profileId: randomUUID(),
+    name: canaries.join(" "),
+    summary: "canary",
+    instructions: "canary",
+    capabilities: "canary",
+    runtime: { harness: "claude", model: "not-a-model", reasoningEffort: null },
+  });
+  const panel = page.locator(".settings-panel", {
+    has: page.getByRole("heading", { name: "Readiness", exact: true }),
+  });
+  await panel.getByRole("button", { name: "Run again" }).click();
+  await panel
+    .getByText(
+      "1 profile uses a model or reasoning effort the runtime does not accept",
+    )
+    .waitFor();
+  const text = await panel.innerText();
+  for (const canary of canaries)
+    assert.equal(text.includes(canary), false, canary);
+});

@@ -13,9 +13,15 @@ import {
   readinessSchema,
 } from "../src/operator/readiness.js";
 import { CodexRuntime } from "../src/standalone/codex.js";
+import type { Runtime } from "../src/standalone/codex.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import { databaseDigest } from "./fixtures/database-digest.js";
+import { harness } from "./fixtures/cli-harness.js";
 import { startCliService } from "./fixtures/operator-cli.js";
+import {
+  ClaudeShapedFixtureRuntime,
+  OperatorFixtureRuntime,
+} from "./fixtures/operator-web.js";
 import { tmpdir } from "./temp.js";
 
 const READINESS = "/api/operator/readiness";
@@ -150,4 +156,77 @@ for await (const line of createInterface({input: process.stdin})) {
     service as unknown as { runtimeUnavailableSince: Map<string, number> }
   ).runtimeUnavailableSince.set("codex", 1);
   assert.equal(await service.verifyCodexLogin(), "unavailable");
+});
+
+test("a rejected profile's name never reaches readiness output", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-ready-name-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tokenPath = join(root, "claude-token");
+  const TOKEN_VALUE = "ready-name-canary-token-5530";
+  writeFileSync(tokenPath, `${TOKEN_VALUE}\n`, { mode: 0o600 });
+  const PRIVATE_PATH = "/Users/private-owner/secret-project";
+  const REFERENCE = "env:READY_NAME_CANARY_VARIABLE";
+  const s = await startCliService(t, {
+    service: { runtimeHarnesses: ["codex", "claude"] },
+    runtimeFactory: ((_context: unknown, harness: string) =>
+      harness === "claude"
+        ? new ClaudeShapedFixtureRuntime()
+        : new OperatorFixtureRuntime()) as unknown as () => Runtime,
+  });
+  const d = s.f.service.domain();
+  d.execute({
+    type: "claude-token.configure",
+    key: crypto.randomUUID(),
+    actor: "operator",
+    credentialRef: `file:${tokenPath}`,
+  });
+  // The domain accepts a Claude model the runtime does not list, as after a runtime change.
+  d.execute({
+    type: "profile.create",
+    key: crypto.randomUUID(),
+    actor: "operator",
+    profileId: crypto.randomUUID(),
+    name: `${TOKEN_VALUE} ${tokenPath} ${PRIVATE_PATH} ${REFERENCE}`,
+    summary: "canary",
+    instructions: "canary",
+    capabilities: "canary",
+    runtime: { harness: "claude", model: "not-a-model", reasoningEffort: null },
+  });
+  const read = await s.issue("read");
+  const api = await (await s.bearer(read.token, READINESS)).text();
+  const h = harness(t);
+  const login = await h.run([
+    "auth",
+    "login",
+    "--connection",
+    "home",
+    "--url",
+    s.origin,
+    "--token-file",
+    h.tokenFile(read.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const doctor = await h.run(["doctor", "--output", "json"]);
+  const human = await h.run(["doctor"]);
+  assert.equal(doctor.code, 0, doctor.err);
+
+  const harnessCheck = readinessSchema
+    .parse(JSON.parse(api))
+    .data.checks.find((c) => c.id === "runtime-harness");
+  assert.equal(harnessCheck?.status, "fail");
+  assert.equal(
+    harnessCheck?.reason,
+    "1 profile uses a model or reasoning effort the runtime does not accept",
+  );
+  const everything = [api, doctor.out, doctor.err, human.out, human.err].join(
+    "\n",
+  );
+  for (const secret of [
+    TOKEN_VALUE,
+    tokenPath,
+    PRIVATE_PATH,
+    REFERENCE,
+    "READY_NAME_CANARY_VARIABLE",
+  ])
+    assert.equal(everything.includes(secret), false, secret);
 });

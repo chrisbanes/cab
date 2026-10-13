@@ -35,7 +35,9 @@ service sees rather than the operator's interactive shell.
 - Every row that is not a pass shows its fix line, in the CLI and in Settings. A
   failed re-run keeps the last results visible, marked as the last fetched, with a
   warning; Run again is never disabled, so keyboard focus stays on it.
-- Output never includes token values; it names references, not secrets.
+- Output never includes token values or paths, and never a profile name: Runtime
+  harness counts the profiles whose model or reasoning effort the runtime does not
+  accept, and the Profiles list shows which.
 - The Claude sandbox self-test needs a task workspace and admits exactly one turn,
   so it runs before each turn and a failure shows on the waiting task, not here.
 - Claude's supported models are read from its runtime before the first Claude turn.

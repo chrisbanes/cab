@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   realpathSync,
   rmSync,
   statSync,
@@ -22,6 +23,10 @@ import {
   type ReadinessDeps,
   type ReadinessProfile,
 } from "../src/standalone/readiness.js";
+import {
+  assertCanonicalDirectoryPath,
+  assertExistingCanonicalDirectoryPath,
+} from "../src/standalone/data-directory.js";
 import { tmpdir } from "./temp.js";
 
 const TOKEN = "canary-readiness-token-4417";
@@ -89,9 +94,10 @@ async function check(
   return found;
 }
 
+const REJECTED = (n: number) =>
+  `${n} ${n === 1 ? "profile uses" : "profiles use"} a model or reasoning effort the runtime does not accept`;
 const profiles = (...p: ReadinessProfile[]) => ({ profiles: () => p });
-const codexProfile = (name = "Dev"): ReadinessProfile => ({
-  name,
+const codexProfile = (): ReadinessProfile => ({
   revoked: false,
   runtime: { harness: "codex" },
 });
@@ -300,8 +306,7 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   assert.equal(down.status, "fail");
   assert.match(down.fix ?? "", /^Restart the service/);
 
-  const claudeProfile = (name: string, runtime = claude("sonnet", "high")) => ({
-    name,
+  const claudeProfile = (runtime = claude("sonnet", "high")) => ({
     revoked: false,
     runtime,
   });
@@ -310,34 +315,26 @@ test("the runtime harness check follows the profiles in use", async (t) => {
     harnessStatuses: () => [...claudeUp],
     harnessSettings: () => claudeSettings,
   });
+  assert.equal((await harness(withClaude(claudeProfile()))).status, "pass");
   assert.equal(
-    (await harness(withClaude(claudeProfile("Writer")))).status,
-    "pass",
-  );
-  assert.equal(
-    (await harness(withClaude(claudeProfile("Default", claude(null))))).status,
+    (await harness(withClaude(claudeProfile(claude(null))))).status,
     "fail",
     "the default model is only accepted when the runtime lists it",
   );
 
-  const badModel = await harness(
-    withClaude(claudeProfile("Writer", claude("opus"))),
-  );
+  const badModel = await harness(withClaude(claudeProfile(claude("opus"))));
   assert.equal(badModel.status, "fail");
-  assert.equal(badModel.reason, "Profile Writer: model is not accepted");
+  assert.equal(badModel.reason, REJECTED(1));
   const badEffort = await harness(
-    withClaude(claudeProfile("Editor", claude("sonnet", "max"))),
+    withClaude(claudeProfile(claude("sonnet", "max"))),
   );
-  assert.equal(
-    badEffort.reason,
-    "Profile Editor: reasoning effort is not accepted",
-  );
+  assert.equal(badEffort.reason, REJECTED(1));
 
   assert.equal(
     (
       await harness(
         withClaude(codexProfile(), {
-          ...claudeProfile("Old", claude("opus")),
+          ...claudeProfile(claude("opus")),
           revoked: true,
         }),
       )
@@ -347,7 +344,7 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   );
 
   const unknown = await harness({
-    ...withClaude(claudeProfile("Writer")),
+    ...withClaude(claudeProfile()),
     harnessSettings: () => null,
   });
   assert.equal(unknown.status, "fail");
@@ -355,7 +352,7 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   assert.match(unknown.fix ?? "", /^Run a Claude task/);
 
   const notRunning = await harness({
-    ...withClaude(claudeProfile("Writer")),
+    ...withClaude(claudeProfile()),
     harnessStatuses: () => [
       { harness: "codex", state: "available" },
       { harness: "claude", state: "not-configured" },
@@ -429,44 +426,33 @@ test("read returns all seven checks in fixed order and parses with the shared sc
   assert.deepEqual(claudeTokenCheckSchema.parse(token), token);
 });
 
-test("many or long failing profiles keep the reason inside the schema", async (t) => {
+test("failing profiles are counted, never named, and stay inside the schema", async (t) => {
   const f = fixture(t);
   const claudeUp = [
     { harness: "codex", state: "available" },
     { harness: "claude", state: "available" },
   ] as const;
-  const wrong = (name: string): ReadinessProfile => ({
-    name,
+  const wrong = (): ReadinessProfile => ({
     revoked: false,
     runtime: claude("not-a-model"),
   });
-  const run = async (names: string[]) => {
+  const run = async (count: number) => {
     const { data } = await new Readiness(
       deps(f, {
         harnessStatuses: () => [...claudeUp],
         harnessSettings: () => claudeSettings,
-        profiles: () => names.map(wrong),
+        profiles: () => Array.from({ length: count }, wrong),
       }),
     ).read();
     return data.checks;
   };
-
-  const long = await run(["N".repeat(512)]);
-  const longHarness = long.find((c) => c.id === "runtime-harness");
-  assert.equal(longHarness?.status, "fail");
-  assert.match(
-    longHarness?.reason ?? "",
-    /^Profile N+…: model is not accepted$/,
-  );
-
-  const many = await run(Array.from({ length: 20 }, (_, i) => `Reviewer ${i}`));
-  const manyHarness = many.find((c) => c.id === "runtime-harness");
-  assert.equal(manyHarness?.status, "fail");
-  assert.match(manyHarness?.reason ?? "", /and 17 more$/);
-  assert.equal(many.length, 7, "the other checks are unaffected");
-
-  const worst = await run(Array.from({ length: 20 }, () => "W".repeat(512)));
-  assert.equal(worst.length, 7);
+  for (const count of [1, 2, 20]) {
+    const checks = await run(count);
+    const harness = checks.find((c) => c.id === "runtime-harness");
+    assert.equal(harness?.status, "fail");
+    assert.equal(harness?.reason, REJECTED(count));
+    assert.equal(checks.length, 7, "the other checks are unaffected");
+  }
 });
 
 test("an invalid check result degrades to that check's failure, not a failed read", async (t) => {
@@ -557,4 +543,52 @@ test("running the checks changes nothing on disk and leaks no canary", async (t)
     first.data.checks.filter((c) => c.status === "fail").length >= 4,
     "the scenario exercises the failure paths",
   );
+});
+
+test("the data path check keeps the canonical-path semantics without blocking the loop", async (t) => {
+  const f = fixture(t);
+  const real = join(f.root, "real");
+  mkdirSync(real, { mode: 0o700 });
+  symlinkSync(real, join(f.root, "link"));
+  writeFileSync(join(f.root, "file"), "");
+  const cases = [
+    f.data,
+    join(f.root, "link"),
+    join(f.root, "link", "child"),
+    join(f.root, "file", "child"),
+    join(f.root, "missing"),
+    join(f.root, "missing", "child"),
+    `${f.root}/data/../data`,
+    "relative/path",
+    "",
+  ];
+  for (const path of cases) {
+    let sync: boolean;
+    try {
+      assertCanonicalDirectoryPath(path, "Path");
+      sync = true;
+    } catch {
+      sync = false;
+    }
+    let async: boolean;
+    try {
+      await assertExistingCanonicalDirectoryPath(path, "Path");
+      async = true;
+    } catch {
+      async = false;
+    }
+    // A missing final component is allowed by neither variant without `missing`.
+    assert.equal(async, sync, path);
+    assert.equal(
+      (await check(f, "data-paths", { dataDir: path })).status === "pass",
+      sync && path === f.data,
+      path,
+    );
+  }
+  // The readiness module has no synchronous filesystem calls on its request path.
+  const source = readFileSync(
+    join(import.meta.dirname, "../../src/standalone/readiness.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /[A-Za-z]Sync\(|assertCanonicalDirectoryPath/);
 });

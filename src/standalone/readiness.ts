@@ -24,15 +24,14 @@ import {
   readinessSchema,
 } from "../operator/readiness.js";
 import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
-import { assertCanonicalDirectoryPath } from "./data-directory.js";
+import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
 
 type Discovery = z.infer<typeof discoveryStatusSchema>["data"];
 
-/** An active-or-revoked profile with its current execution runtime. */
+/** An active-or-revoked profile's execution runtime; its name never enters readiness. */
 export type ReadinessProfile = {
-  name: string;
   revoked: boolean;
   runtime: ProfileRuntime;
 };
@@ -323,7 +322,7 @@ export class Readiness {
       this.deps.harnessStatuses().map((s) => [s.harness, s.state]),
     );
     const reasons: string[] = [];
-    const rejected: string[] = [];
+    let rejected = 0;
     let unknownSettings = false;
     let other = false;
     for (const harness of new Set(used.map((p) => p.runtime.harness)))
@@ -348,18 +347,15 @@ export class Readiness {
       const field = unsupportedRuntimeField(runtime, settings);
       if (field) {
         other = true;
-        const name =
-          profile.name.length > 40
-            ? `${profile.name.slice(0, 39)}…`
-            : profile.name;
-        rejected.push(
-          `Profile ${name}: ${field === "runtime.model" ? "model" : "reasoning effort"} is not accepted`,
-        );
+        rejected++;
       }
     }
-    // A few profiles, then a count, so the reason stays inside the schema bound.
-    reasons.push(...rejected.slice(0, 3));
-    if (rejected.length > 3) reasons.push(`and ${rejected.length - 3} more`);
+    // Names are operator-controlled text that the redaction boundary of the other reads
+    // covers; readiness only counts, so no profile name can reach its output.
+    if (rejected > 0)
+      reasons.push(
+        `${rejected} ${rejected === 1 ? "profile uses" : "profiles use"} a model or reasoning effort the runtime does not accept`,
+      );
     if (unknownSettings)
       reasons.push("Claude's supported models are not known yet");
     if (reasons.length === 0) return pass(id);
@@ -377,9 +373,9 @@ export class Readiness {
     const broken: { reason: string; fix: string }[] = [];
     const rule = (reason: string, fix: string) => broken.push({ reason, fix });
 
-    const canonical = (path: string) => {
+    const canonical = async (path: string) => {
       try {
-        assertCanonicalDirectoryPath(path, "Path");
+        await assertExistingCanonicalDirectoryPath(path, "Path");
         return true;
       } catch {
         return false;
@@ -393,7 +389,7 @@ export class Readiness {
       }
     };
 
-    const data = canonical(dataDir) ? await state(dataDir) : null;
+    const data = (await canonical(dataDir)) ? await state(dataDir) : null;
     if (!data?.isDirectory())
       rule(
         "Data directory must be an absolute, canonical directory",
@@ -413,7 +409,7 @@ export class Readiness {
     }
 
     const auth =
-      isAbsolute(authFile) && canonical(dirname(authFile))
+      isAbsolute(authFile) && (await canonical(dirname(authFile)))
         ? await state(authFile)
         : null;
     if (!auth?.isFile())
@@ -466,7 +462,6 @@ export function serviceReadiness(
         .domain()
         .profiles()
         .map((row) => ({
-          name: String(row.name),
           revoked: Number(row.revoked) !== 0,
           runtime: service.domain().profileRuntime(String(row.id)),
         })),

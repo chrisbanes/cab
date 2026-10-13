@@ -7,6 +7,7 @@ import {
   realpathSync,
   writeFileSync,
 } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
@@ -42,6 +43,37 @@ export function assertCanonicalDirectoryPath(
         (missing === "leaf" && index === components.length - 1)
       )
         return input;
+      throw new Error(`${label} parent must be a real directory`, {
+        cause: error,
+      });
+    }
+    if (state.isSymbolicLink() || !state.isDirectory())
+      throw new Error(
+        `${label} path contains a symlink or non-directory ancestor`,
+      );
+  }
+  return input;
+}
+
+/**
+ * `assertCanonicalDirectoryPath` for a path that must already exist, without blocking the
+ * event loop: same checks, asynchronous `lstat`. For request-time reads such as readiness.
+ */
+export async function assertExistingCanonicalDirectoryPath(
+  input: string,
+  label: string,
+): Promise<string> {
+  if (!isAbsolute(input)) throw new Error(`${label} path must be absolute`);
+  if (resolve(input) !== input)
+    throw new Error(`${label} path must be lexically canonical`);
+  let current: string = sep;
+  for (const component of input.slice(sep.length).split(sep).filter(Boolean)) {
+    current = join(current, component);
+    let state: Awaited<ReturnType<typeof lstat>>;
+    try {
+      state = await lstat(current);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       throw new Error(`${label} parent must be a real directory`, {
         cause: error,
       });
