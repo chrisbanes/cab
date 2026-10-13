@@ -513,9 +513,10 @@ use the desktop copy.
   have no request key, so that action only re-reads the credentials and never
   resubmits. Revoke is by id: a failed or unconfirmed revoke stays inside the
   dialog as text without a button (139 `PnQRM`, 142 `MaR6q`).
-- Rotate and Revoke each leave one success line on the panel: "Rotated <name>. The
-  old credential stays active until you revoke it." and "Revoked <name>." (165
-  `TGj4A`). Create's confirmation is the one-time token dialog.
+- Rotate and Revoke each leave one success line: "Rotated <name>. The old
+  credential stays active until you revoke it." and "Revoked <name>." (165 `TGj4A`
+  draws it in the credential row; the build shows it above the list). Create's
+  confirmation is the one-time token dialog.
 - Settings (account menu → `/app/settings`) is the only entry point, and the
   page-title Refresh re-reads the list (the phone frames draw only the top-level
   header). No deep link, context menu, extension or notification surface
@@ -572,6 +573,10 @@ to the outcome. Frames 1–153 were swept to the same rules; 167 lists each chan
   (`TsFAB`). An unknown outcome locks the other fields. The button is **Check
   whether it saved** and resends the exact original request; CLI credential create
   and rotate have no request key, so theirs is **Check the list**, a re-read (136).
+  A replaced, withdrawn or already answered question is a changed-elsewhere
+  warning, "This question was already answered, changed or withdrawn. Your answer
+  is still here.", with **Review current request** (the Stale request card of 22
+  `evQB1`).
 - **Copy:** at most two short sentences. Message text never uses recorded,
   receipt, observation, admission, reconcile, submission or revision, and never
   shows command names, IDs, versions, hashes or raw codes. Every failure says the
@@ -588,15 +593,17 @@ to the outcome. Frames 1–153 were swept to the same rules; 167 lists each chan
   service is unavailable. Your answer is still here." with the code in Details (162b
   `Gi4zR`, 28 `uJVe2`); a reply "Sent to Ada." (163 `o6kBCw`, 61 `AVuFr`); a review
   "Review sent to Mira." (97 `CACzF`, 104 `u0YEF`), or "We couldn't confirm the
-  review reached Mira." with **Check whether it saved** (96 `X3wI8B`). Stop
-  confirmation is the affected-assignments sentence plus one sentence on what Stop
-  does, with Stop task and Keep running (132 `uQrNE`, 164 `h0FyJW`). An unconfirmed
-  sign-out re-reads the session: signed out is success and shows nothing; a session
-  that survived shows one warning, "We couldn't sign you out. You're still signed
-  in.", in the shell only (130 `DuF5u`).
-- **Drawn ahead of the build:** 39 `Z6U3T4`, 161 `thtaf` and 166c `N7QIqz` draw "It
-  will wait: …" in the success line beside the Resume project Fix. The build shows
-  the wait reason on its own line below "Task created." until the Fix actions ship.
+  review reached Mira." with **Check whether it saved** (96 `X3wI8B`), or, when
+  refused, one error Alert "The review wasn't sent: …" with **Return to draft** (95
+  `OBijt`). Stop confirmation is the affected-assignments sentence plus one
+  sentence on what Stop does, with Stop task and Keep running (132 `uQrNE`, 164
+  `h0FyJW`). An unconfirmed sign-out re-reads the session: signed out is success and
+  shows nothing; a session that survived shows one warning, "We couldn't sign you
+  out. You're still signed in.", in the shell only (130 `DuF5u`).
+- **Drawn ahead of the build:** 161 `thtaf` and 166c `N7QIqz` draw "It will wait: …"
+  in the success line beside the Resume project Fix, and 39 `Z6U3T4` draws "It will
+  wait for capacity." there. The build shows the wait reason on its own line below
+  "Task created." until the Fix actions ship.
 
 Warning colours are the local `nova-warning-fg` and `nova-warning-bg` tokens;
 shadcn has no warning variant.

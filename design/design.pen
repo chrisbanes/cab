@@ -23625,7 +23625,7 @@
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Submission failed",
+                  "content": "Send failed",
                   "lineHeight": 1.25,
                   "fontFamily": "$font-sans",
                   "fontSize": 18,
@@ -23638,7 +23638,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Couldn't send your answers. Your answers are still here.",
+                  "content": "Couldn't send the answer: the service is unavailable. Your answer is still here.",
                   "lineHeight": 1.5,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -23722,7 +23722,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Couldn't send your answer: the question was replaced. Your answer is still here.",
+                  "content": "This question was already answered, changed or withdrawn. Your answer is still here.",
                   "lineHeight": 1.5,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -90993,10 +90993,13 @@
                 {
                   "type": "text",
                   "id": "h834v",
+                  "x": 12,
+                  "y": 36,
                   "name": "Ensemble confirmed that no review was delivered. Your 2 comments and summar",
+                  "enabled": false,
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": "fill_container(334)",
                   "content": "Ensemble confirmed that no review was delivered. Your 2 comments and summary remain editable.",
                   "lineHeight": 1.4,
                   "fontFamily": "$font-sans",
@@ -91004,6 +91007,42 @@
                   "fontWeight": "normal"
                 }
               ]
+            },
+            {
+              "id": "ZsqOB",
+              "type": "ref",
+              "ref": "NaPr2",
+              "name": "Send refused alert",
+              "width": "fill_container",
+              "descendants": {
+                "E4Apxu": {
+                  "content": "The review wasn't sent: the lead can no longer receive a review."
+                },
+                "T7OnsT": {
+                  "content": "Your comments are kept."
+                },
+                "CohoX": {
+                  "enabled": true
+                },
+                "CohoX/X:poRwU": {
+                  "content": "Return to draft"
+                },
+                "Zyyh5/pMN71": {
+                  "content": "review.send"
+                },
+                "Zyyh5/DfcEu": {
+                  "content": "AT-142"
+                },
+                "Zyyh5/KLIpp": {
+                  "content": "3"
+                },
+                "Zyyh5/SYYuE": {
+                  "content": "9d2e…"
+                },
+                "Zyyh5/E9I4M": {
+                  "content": "local-review-recipient-unavailable"
+                }
+              }
             },
             {
               "type": "text",
@@ -91043,6 +91082,7 @@
                 10
               ],
               "gap": 6,
+              "enabled": false,
               "descendants": {
                 "X:8jVfJ": {
                   "enabled": false
@@ -91067,6 +91107,7 @@
               "gap": 6,
               "effect": [],
               "fill": "$nova-outline-bg",
+              "enabled": false,
               "descendants": {
                 "X:l8v2I": {
                   "enabled": false
@@ -91080,10 +91121,13 @@
             {
               "type": "text",
               "id": "l1szLl",
+              "x": 16,
+              "y": 475,
               "name": "Edit draft before retrying if needed.",
+              "enabled": false,
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
-              "width": "fill_container",
+              "width": "fill_container(358)",
               "content": "Edit draft before retrying if needed.",
               "lineHeight": 1.4,
               "fontFamily": "$font-sans",
@@ -199188,7 +199232,7 @@
                               "enabled": false
                             },
                             "CohoX/X:poRwU": {
-                              "content": "Open the current question"
+                              "content": "Action"
                             },
                             "OqhqK/y4CiJx": {
                               "icon": "chevron-down"
@@ -208841,7 +208885,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Lifecycle state copy rewritten to the new messages (sent, couldn’t send, question replaced, withdrawn, answered elsewhere).",
+                          "content": "Lifecycle state copy rewritten to the new messages (sent, couldn’t send, question replaced, withdrawn, answered elsewhere); the failed and stale examples use the build's failure and conflict wording.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -210461,7 +210505,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "In-progress copy is one status line, “Sending review to Mira…”, in place of the Send button; lock note removed; RV-42 removed from visible copy.",
+                          "content": "In-progress copy is one status line, “Sending review to Mira…”, in place of the Send button; lock note removed; RV-42 removed from visible copy. 95 (confirmed failure): one error Alert “The review wasn't sent: …” with Return to draft replaces the explanation, Retry and Edit draft.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -211863,7 +211907,7 @@
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· 39, 161 and 166c draw “It will wait: …” in the success line beside the Resume project Fix. The build shows the same wait reason on its own line below “Task created.” until the Fix actions ship (#950).",
+              "content": "· 161 and 166c draw “It will wait: …” in the success line beside the Resume project Fix; 39 draws “It will wait for capacity.” there. The build shows the wait reason on its own line below “Task created.” until the Fix actions ship (#950).",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 13,
