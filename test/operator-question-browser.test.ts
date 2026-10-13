@@ -215,6 +215,17 @@ test("production mixed form preserves literal schema, keyboard input, field erro
       footer.buttons.every((b) => b.visible && b.hit),
       JSON.stringify(footer),
     );
+    // Opened Details scrolls inside the footer rather than covering the form.
+    const details = form.locator(".question-submit summary");
+    await details.click();
+    const open = await form
+      .locator(".question-submit")
+      .evaluate((el) => ({
+        footer: el.getBoundingClientRect().height,
+        view: innerHeight,
+      }));
+    assert.ok(open.footer <= open.view * 0.75, JSON.stringify(open));
+    await details.click();
     assert.equal(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
@@ -258,13 +269,22 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   }
   await page.setViewportSize({ width: 1366, height: 900 });
   await page.unroute("**/api/operator/commands");
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
   await page.route("**/api/operator/commands", async (route) => {
     commands.push(route.request().postData() ?? "");
+    await gate;
     await route.continue();
   });
   await form
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
+  // In progress is the button label alone: no outcome message while the check runs.
+  await form.getByRole("button", { name: "Sending…", exact: true }).waitFor();
+  assert.equal(await form.locator("[data-slot=action-outcome]").count(), 0);
+  release();
   await form
     .getByText("Answer sent. It reaches the requester on its next turn.", {
       exact: true,

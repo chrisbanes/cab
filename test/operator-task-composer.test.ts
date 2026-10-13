@@ -360,6 +360,13 @@ test("failed frozen readback sends no POST and reconciliation also requires stor
   assert.equal(posts, 0);
   assert.equal(unknown.phase, "unknown");
   assert.equal(JSON.stringify(unknown.frozen), frozen);
+  // The unconfirmed creation keeps its one warning and its request key.
+  assert.equal(unknown.failed, false);
+  assert.match(
+    unknown.notice,
+    /^We couldn't check whether the task was created/,
+  );
+  assert.equal(unknown.details.requestKey, unknown.frozen?.key);
 });
 
 test("valid multibyte selected input fits recovery and exact HTTP byte boundary rejects one byte over", async () => {
@@ -788,4 +795,32 @@ test("every creation outcome reads in plain words and keeps the receipt fields f
   refused.edit({ title: "Again" });
   assert.equal(refused.failed, false);
   assert.equal(refused.notice, "");
+});
+
+test("a creation interrupted mid-send restores as unconfirmed with its own request key", async () => {
+  const state = new ComposerState(memoryStorage());
+  state.edit({ projectId: randomUUID(), title: "Task", outcome: "Finish" });
+  // An earlier refused attempt leaves its own key and code behind.
+  await state.submit(
+    new OperatorClient(async () =>
+      Response.json(
+        { error: { code: "forbidden", message: "No" } },
+        { status: 403 },
+      ),
+    ),
+    "csrf",
+    true,
+  );
+  assert.equal(state.details.code, "forbidden");
+  const sending = state.submit(
+    new OperatorClient(() => new Promise<Response>(() => {})),
+    "csrf",
+    true,
+  );
+  assert.equal(state.phase, "pending");
+  state.dispose();
+  void sending;
+  assert.equal(state.phase, "unknown");
+  assert.equal(state.details.requestKey, state.frozen?.key);
+  assert.equal(state.details.code, undefined);
 });

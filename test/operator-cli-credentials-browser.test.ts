@@ -177,7 +177,7 @@ test("Settings issues, rotates and revokes CLI credentials without keeping the t
   const refused = outcomes.filter({ hasText: "Couldn't create" });
   await refused
     .getByText(
-      "Couldn't create the credential: you don't have permission. The list below is up to date.",
+      "Couldn't create the credential: you don't have permission. Your entries are still here; we're reloading the list below.",
       { exact: true },
     )
     .waitFor();
@@ -234,7 +234,7 @@ test("Settings issues, rotates and revokes CLI credentials without keeping the t
   await again.getByRole("button", { name: "Revoke credential" }).click();
   await again
     .getByText(
-      "Couldn't revoke agent-rw: you don't have permission. The list below is up to date.",
+      "Couldn't revoke agent-rw: you don't have permission. We're reloading the list below.",
       { exact: true },
     )
     .waitFor();

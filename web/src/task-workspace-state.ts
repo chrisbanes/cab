@@ -72,6 +72,8 @@ export class TaskFileTabState {
   }
   /** Notice for a refreshed preview whose bytes differ from the previous observation. */
   changeNotice = "";
+  /** The hashes and raw states behind `changeNotice`, shown only in Details. */
+  changeDetails: OutcomeField[] = [];
   get selectedRange() {
     if (this.selectedLine === null) return null;
     const anchor = this.rangeAnchorLine ?? this.selectedLine;

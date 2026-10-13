@@ -265,6 +265,7 @@ export function QuestionResponse({
               <ActionOutcome
                 tone="success"
                 message={answerCopy.sent}
+                focus={sent.current}
                 details={
                   state.outcome === "recorded" ? detailRows(state.details) : []
                 }
@@ -468,7 +469,7 @@ export function QuestionResponse({
                 )}
                 <QuestionHolds holds={holds} />
                 <div className="question-actions">
-                  {!state.lifecycle.uncertain && (
+                  {(!state.lifecycle.uncertain || state.sending) && (
                     <Button
                       type="submit"
                       disabled={

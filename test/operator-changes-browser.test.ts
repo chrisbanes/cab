@@ -805,7 +805,7 @@ test("production Changes preserves exact repository baselines and last-good refr
   assert.equal(failedRefresh.url(), controlledFailureUrl);
   await changes
     .getByRole("alert")
-    .getByText(/Refresh failed/)
+    .getByText(/Couldn't refresh the comparison: the service is unavailable\./)
     .waitFor();
   expected503WindowEndedAt = Date.now();
   consoleState.expected503Window = false;
@@ -821,7 +821,8 @@ test("production Changes preserves exact repository baselines and last-good refr
     afterFailure.comparison,
     new RegExp(alphaBody.data.comparisonId),
   );
-  assert.match(afterFailure.comparison, /Refresh failed/);
+  assert.match(afterFailure.comparison, /Couldn't refresh the comparison/);
+  assert.match(afterFailure.comparison, /The last one is still shown\./);
   assert.doesNotMatch(afterFailure.comparison, /Refreshing…/);
   assert.equal(afterFailure.selection, beforeFailure.selection);
   assert.equal(afterFailure.anchor.label, beforeFailure.anchor.label);

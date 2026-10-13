@@ -1019,6 +1019,8 @@ export function LocalReviewPanel() {
       )}
       {state.notice && (
         <ActionOutcome
+          // A new message starts with Details collapsed.
+          key={`${state.notice.message}:${state.notice.details.map(([, v]) => v).join()}`}
           tone={state.notice.tone}
           message={state.notice.message}
           details={state.notice.details}

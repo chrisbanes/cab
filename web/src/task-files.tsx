@@ -57,47 +57,46 @@ function pathLabel(scope: TaskFilesState["scope"], path: readonly string[]) {
 
 type PreviewData = NonNullable<TaskFileTabState["preview"]>;
 
-/** Hashes and raw states behind a change notice; the notice itself stays in plain words. */
-const changeDetails = new WeakMap<object, OutcomeField[]>();
-
+/** The plain notice for a refreshed preview, with the hashes and raw states behind it. */
 function previewChange(
-  tab: object,
   previous: PreviewData | null,
   next: PreviewData,
-) {
+): { notice: string; details: OutcomeField[] } {
   const hash = (value: PreviewData | null) =>
     value?.state === "ready" ? value.preview?.sha256 : undefined;
   const before = hash(previous);
   const after = hash(next);
-  const set = (message: string, fields: OutcomeField[]) => {
-    changeDetails.set(tab, fields);
-    return message;
-  };
-  changeDetails.delete(tab);
   if (before && after)
     return before === after
-      ? ""
-      : set(
-          "Changed since you last looked. Earlier comments stay on the version they selected.",
-          [
+      ? { notice: "", details: [] }
+      : {
+          notice:
+            "Changed since you last looked. Earlier comments stay on the version they selected.",
+          details: [
             ["Previous SHA-256", before],
             ["Current SHA-256", after],
           ],
-        );
+        };
   if (before)
-    return set("No longer readable since you last looked.", [
-      ["Previous SHA-256", before],
-      ["State", next.state],
-      ...(next.metadata?.reason
-        ? [["Reason", String(next.metadata.reason)] as OutcomeField]
-        : []),
-    ]);
+    return {
+      notice: "No longer readable since you last looked.",
+      details: [
+        ["Previous SHA-256", before],
+        ["State", next.state],
+        ...(next.metadata?.reason
+          ? [["Reason", String(next.metadata.reason)] as OutcomeField]
+          : []),
+      ],
+    };
   if (after && previous)
-    return set("Readable now. It could not be read when you last looked.", [
-      ["Previous state", previous.state],
-      ["SHA-256", after],
-    ]);
-  return "";
+    return {
+      notice: "Readable now. It could not be read when you last looked.",
+      details: [
+        ["Previous state", previous.state],
+        ["SHA-256", after],
+      ],
+    };
+  return { notice: "", details: [] };
 }
 
 function fileEntryKey(
@@ -941,11 +940,14 @@ export function TaskFiles({
     )
       return;
     // A re-read of the same file is a Refresh; compare it with what was shown.
-    if (activeTab.preview !== response.response.data)
-      activeTab.changeNotice =
+    if (activeTab.preview !== response.response.data) {
+      const change =
         activeTab.previewKey === previewKey
-          ? previewChange(activeTab, activeTab.preview, response.response.data)
-          : "";
+          ? previewChange(activeTab.preview, response.response.data)
+          : { notice: "", details: [] };
+      activeTab.changeNotice = change.notice;
+      activeTab.changeDetails = change.details;
+    }
     activeTab.preview = response.response.data;
     activeTab.previewKey = previewKey;
     activeTab.observedAt = response.response.observedAt;
@@ -1366,7 +1368,9 @@ export function TaskFiles({
                       {activeTab.changeNotice}
                     </p>
                     <OutcomeDetails
-                      fields={changeDetails.get(activeTab) ?? []}
+                      // A new notice starts with Details collapsed.
+                      key={activeTab.changeDetails.map(([, v]) => v).join()}
+                      fields={activeTab.changeDetails}
                     />
                   </>
                 )}

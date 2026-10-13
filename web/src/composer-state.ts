@@ -164,6 +164,8 @@ export const creationCopy = {
   drafted: "Draft saved.",
   unknown: (ready: boolean) =>
     `We couldn't confirm the ${ready ? "task was created" : "draft was saved"}. Your input is kept until you check.`,
+  unsafeToCheck: (ready: boolean) =>
+    `We couldn't check whether the ${ready ? "task was created" : "draft was saved"}: this browser can't keep your input safe. Your input is kept until you check.`,
   refused: (ready: boolean, cause: string, kept = true) =>
     `Couldn't ${ready ? "create the task" : "save the draft"}: ${cause}. ${
       kept
@@ -211,6 +213,7 @@ export class ComposerState {
       this.lifecycle.restoreUnknown(command);
       this.phase = "unknown";
       this.notice = creationCopy.unknown(command.ready);
+      this.details = this.describe(command);
     }
   }
   recovered = false;
@@ -351,17 +354,20 @@ export class ComposerState {
       this.savedOnDevice = true;
     } catch {
       this.savedOnDevice = false;
-      if (!wasUnknown) {
+      if (wasUnknown) {
+        // The unconfirmed creation stays as it was, with its one action.
+        this.notice = creationCopy.unsafeToCheck(command.ready);
+      } else {
         this.lifecycle.reset();
         this.phase = "editable";
+        this.failed = true;
+        this.notice = creationCopy.refused(
+          command.ready,
+          "this browser can't keep your input safe, so nothing was sent",
+          false,
+        );
+        this.details = {};
       }
-      this.failed = true;
-      this.notice = creationCopy.refused(
-        command.ready,
-        "this browser can't keep your input safe, so nothing was sent",
-        false,
-      );
-      this.details = {};
       this.publish();
       return;
     }

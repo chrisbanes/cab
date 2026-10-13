@@ -129,6 +129,8 @@ export function OperatorCredentialsSection(p: SettingsProps) {
       did: string;
       confirmed: string;
       resend: boolean;
+      /** The closing sentence of a failure, when it has more to say than the reload. */
+      after?: string;
       resource?: string;
     },
   ) => {
@@ -143,13 +145,13 @@ export function OperatorCredentialsSection(p: SettingsProps) {
         code === "command-outcome-unknown"
           ? {
               tone: "warning",
-              message: `We couldn't confirm ${what.confirmed}. The list below is up to date.`,
+              message: `We couldn't confirm ${what.confirmed}. We're reloading the list below.`,
               details,
               check: !what.resend,
             }
           : {
               tone: "error",
-              message: `Couldn't ${what.did}: ${failureCause(code)}. The list below is up to date.`,
+              message: `Couldn't ${what.did}: ${failureCause(code)}. ${what.after ?? "We're reloading the list below."}`,
               details,
             },
       );
@@ -186,6 +188,7 @@ export function OperatorCredentialsSection(p: SettingsProps) {
         did: "create the credential",
         confirmed: "the credential was created",
         resend: false,
+        after: "Your entries are still here; we're reloading the list below.",
       },
     );
   };

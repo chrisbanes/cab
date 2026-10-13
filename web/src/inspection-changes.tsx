@@ -10,7 +10,9 @@ import {
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
+import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
+import { failureCause } from "./outcome-copy.js";
 import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
@@ -698,9 +700,9 @@ export function TaskWorkspaceChanges({
           {currentRequest?.pending && <span>Refreshing…</span>}
           {currentRequest?.error && (
             <span role="alert">
-              Refresh failed (
-              <span className="identifier">{currentRequest.error}</span>); the
-              last successful comparison remains shown.
+              Couldn't refresh the comparison:{" "}
+              {failureCause(currentRequest.error)}. The last one is still shown.{" "}
+              <span className="identifier">{currentRequest.error}</span>
             </span>
           )}
           {current.state === "unavailable" &&
@@ -747,10 +749,12 @@ export function TaskWorkspaceChanges({
         <p role="status">Reading the selected comparison…</p>
       )}
       {currentRequest?.error && !current && (
-        <p role="alert">
-          Comparison is unavailable (
-          <span className="identifier">{currentRequest.error}</span>).
-        </p>
+        <div role="alert">
+          <p>
+            Comparison is unavailable: {failureCause(currentRequest.error)}.
+          </p>
+          <OutcomeDetails fields={[["Code", currentRequest.error]]} />
+        </div>
       )}
       {current?.state === "unavailable" && (
         <p role="status">

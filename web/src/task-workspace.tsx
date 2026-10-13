@@ -205,8 +205,11 @@ export function TaskWorkspace({
   onHeader?: (report: TaskHeaderReport | null) => void;
 }) {
   const [aux, setAux] = useState<ReplyOutcome | null>(null);
-  // Set once this visit sends something, so the message that replaces the control takes focus.
+  // The message that follows a send replaces the control the operator used, so it takes focus.
+  // That holds for a check of an unknown outcome and for an unknown outcome itself, whose
+  // Send button gives way to the check; never for the Results and Changes actions.
   const sent = useRef(false);
+  const checking = useRef(false);
   const setSourceObservation = (value: "known" | "pending" | "unknown") => {
     state.sourceObservation = value;
     changed();
@@ -309,6 +312,10 @@ export function TaskWorkspace({
     if (headerReport) onHeader?.(JSON.parse(headerReport));
   }, [headerReport, onHeader]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
+  // The answer to a check has had its turn at the focus.
+  useEffect(() => {
+    if (!pending) checking.current = false;
+  });
   const completeSourceObservation =
     !data?.source ||
     (data.source.memberships.length > 0 &&
@@ -1042,11 +1049,13 @@ export function TaskWorkspace({
       if (!owned()) return;
       state.sourceRefreshFailed = true;
       setSourceObservation("unknown");
-      state.notice = {
-        tone: "warning",
-        message: "Source refresh failed. Last successful source retained.",
-        details: [],
-      };
+      // An unconfirmed reply keeps its message and its one action.
+      if (!state.uncertain)
+        state.notice = {
+          tone: "warning",
+          message: "Source refresh failed. Last successful source retained.",
+          details: [],
+        };
       changed();
     }
   }
@@ -1954,13 +1963,16 @@ export function TaskWorkspace({
               key={`${outcome.tone}:${outcome.details.find(([label]) => label === "Request key")?.[1]}`}
               tone={outcome.tone}
               message={outcome.message}
-              focus={sent.current}
+              focus={(sent.current && state.uncertain) || checking.current}
               details={outcome.details}
               action={
                 state.uncertain
                   ? {
                       label: "Check whether it saved",
-                      onClick: () => send(),
+                      onClick: () => {
+                        checking.current = true;
+                        return send();
+                      },
                     }
                   : undefined
               }
