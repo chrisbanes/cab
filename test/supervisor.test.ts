@@ -12,7 +12,7 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
-import type { ExecutionState } from "../src/standalone/state.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 interface StopOutcome {
   workId: string;
@@ -435,7 +435,10 @@ test("Stop before capacity admission keeps queued work stopped until explicit re
 });
 
 function internals(service: StandaloneService) {
-  return service as unknown as { db: DatabaseSync; state: ExecutionState };
+  return {
+    db: (service as unknown as { db: DatabaseSync }).db,
+    ...startedOf(service),
+  };
 }
 
 function stopRow(service: StandaloneService, workId: string) {

@@ -34,6 +34,7 @@ import {
   unexpectedRequest,
   type UnexpectedRequest,
 } from "../src/standalone/codex.js";
+import { startedOf, timersOf } from "./fixtures/service-internals.js";
 
 class FakeRuntime implements Runtime {
   onRequest: ((request: UnexpectedRequest) => void) | undefined;
@@ -89,18 +90,6 @@ class FakeRuntime implements Runtime {
 type ServiceShutdownAccess = {
   db?: DatabaseSync;
   cache?: Database;
-  state?: ExecutionState;
-  githubSynchronizer?: { stop(): Promise<void> };
-  deliveryCoordinator?: { stop(): Promise<void> };
-  scheduler?: {
-    stop(): void;
-    settle(): Promise<void>;
-    timer?: NodeJS.Timeout;
-  };
-  supervisor?: { cancelObservations(): void; settle(): Promise<void> };
-  power?: { stop(): Promise<void> };
-  githubPollTimer?: NodeJS.Timeout;
-  powerPollTimer?: NodeJS.Timeout;
 };
 
 function shutdownAccess(service: StandaloneService): ServiceShutdownAccess {
@@ -951,13 +940,14 @@ test("shutdown preserves ordered failures, settles active work, and retains dura
     );
     await turnStarted;
 
-    const access = shutdownAccess(service);
-    const db = access.db;
-    const synchronizer = access.githubSynchronizer;
-    const delivery = access.deliveryCoordinator;
-    const scheduler = access.scheduler;
-    const supervisor = access.supervisor;
-    const power = access.power;
+    const db = shutdownAccess(service).db;
+    const {
+      githubSynchronizer: synchronizer,
+      deliveryCoordinator: delivery,
+      scheduler,
+      supervisor,
+      power,
+    } = startedOf(service);
     assert.ok(db?.isOpen);
     assert.ok(synchronizer && delivery && scheduler && supervisor && power);
 
@@ -1006,9 +996,11 @@ test("shutdown preserves ordered failures, settles active work, and retains dura
       true,
       "SQLite remains open until active work settles",
     );
-    assert.equal(access.githubPollTimer, undefined);
-    assert.equal(access.powerPollTimer, undefined);
-    assert.equal(scheduler.timer, undefined);
+    assert.equal(timersOf(service).size, 0);
+    assert.equal(
+      (scheduler as unknown as { timer?: NodeJS.Timeout }).timer,
+      undefined,
+    );
     assert.throws(
       () => StandaloneDataDirectory.openExclusive(data),
       /already owned/,
@@ -1066,8 +1058,7 @@ test("shutdown preserves an undefined delivery rejection and still releases the 
   let runtimeStopped = false;
   try {
     await service.start();
-    const delivery = shutdownAccess(service).deliveryCoordinator;
-    assert.ok(delivery);
+    const delivery = startedOf(service).deliveryCoordinator;
     delivery.stop = async () => {
       throw undefined;
     };

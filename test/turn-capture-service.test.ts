@@ -22,6 +22,7 @@ import type {
   WorkspaceTurnObservation,
 } from "../src/standalone/workspace-comparison.js";
 import { tmpdir } from "./temp.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 type TurnOutcome = "completed" | "failed";
 
@@ -296,13 +297,7 @@ async function fixture(repositoryCount = 0) {
 }
 
 function storeFor(service: StandaloneService): SqliteWorkspaceComparisonStore {
-  const store = (
-    service as unknown as {
-      workspaceComparisons?: SqliteWorkspaceComparisonStore;
-    }
-  ).workspaceComparisons;
-  assert.ok(store);
-  return store;
+  return startedOf(service).workspaceComparisons;
 }
 
 function hash(text: string): string {

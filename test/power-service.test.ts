@@ -21,6 +21,7 @@ import type {
   PowerEventSource,
 } from "../src/standalone/power.js";
 import type { PowerEventCursor } from "../src/standalone/state.js";
+import { acquiredOf, startedOf } from "./fixtures/service-internals.js";
 
 class FakeChild extends EventEmitter {
   killed = 0;
@@ -263,8 +264,8 @@ test("power-source shutdown failure does not retain the service database owner",
     await next.start();
     await next.stop();
   } finally {
-    const internals = service as unknown as { power: unknown };
-    internals.power = undefined;
+    const acquired = acquiredOf(service);
+    if (acquired) acquired.power = undefined;
     await service.stop().catch(() => {});
     rmSync(root, { recursive: true, force: true });
   }
@@ -326,14 +327,7 @@ async function postTurnPowerFixture(
       },
     },
   );
-  const store = () =>
-    (
-      service as unknown as {
-        schedulerStore: {
-          byWorkId(workId: string): { state: string; reason: string | null };
-        };
-      }
-    ).schedulerStore;
+  const store = () => startedOf(service).schedulerStore;
   try {
     await service.start();
     await service.submit("first", "first prompt", firstWorkspace);
@@ -416,14 +410,8 @@ test("a post-turn power poll that resumes admission does not deadlock the schedu
 test("a turn ending while admission awaits still requires a later power poll", async () => {
   await postTurnPowerFixture(
     async ({ service, runtime, events, secondWorkspace, queued }) => {
-      const power = (
-        service as unknown as {
-          power: {
-            poll(): Promise<void>;
-            executionEnded(workId: string): Promise<void>;
-          };
-        }
-      ).power;
+      const power = startedOf(service).power;
+      assert.ok(power);
       // Make the observation fresh so only the mid-admission end can stale it.
       await new Promise<void>((resolve) => setTimeout(resolve, 2));
       await power.poll();

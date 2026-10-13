@@ -389,6 +389,74 @@ interface ServiceGeneration {
   diagnosticQueue: Promise<void>;
 }
 
+/** Every component operations use; published whole once start-up can admit work. */
+interface Started {
+  state: ExecutionState;
+  domain: DomainStore;
+  githubSources: GitHubSourceStore;
+  githubSynchronizer: GitHubSynchronizer;
+  coordination: CoordinationStore;
+  deliveryStore: DeliveryStore;
+  deliveryCoordinator: DeliveryCoordinator;
+  routingAttempts: RoutingAttemptStore;
+  workspaces: WorkspaceManager;
+  workspaceBindings: SqliteWorkspaceBindingStore;
+  workspaceComparisons: SqliteWorkspaceComparisonStore;
+  operatorCredentials: OperatorCredentialStore;
+  schedulerStore: SchedulerStore;
+  wakeQueries: SchedulerWakeQueries;
+  inboxStartup: InboxStartupReconciliation;
+  supervisor: ExecutionSupervisor;
+  scheduler: TurnScheduler;
+  /** Absent when power supervision is disabled. */
+  power: ExecutionPower | undefined;
+  conversationHistory: ConversationHistoryStore;
+  /** Absent when the store failed to open; executions then run uncaptured. */
+  diagnostics: ExecutionDiagnosticsStore | undefined;
+  /** Status reads use it without spawning anything. */
+  claude: RuntimeSpawnContext["claude"];
+}
+
+function harnessForWork(
+  state: ExecutionState,
+  workId: string,
+): ExecutionHarness {
+  return state.taskBinding(workId)?.harness ?? defaultExecutionHarness;
+}
+
+function retractWriterAndSuccessors(
+  state: ExecutionState,
+  writer: ExecutionIntent,
+  reason: string,
+): void {
+  for (const item of state.writerAndSuccessors(writer.workId))
+    if (
+      item.state === "completed" ||
+      item.state === "submitting" ||
+      item.state === "running"
+    )
+      state.holdTerminalConflict(item.id, reason);
+}
+
+/** Includes lifetime gh values even after every source/discovery reference has been cleared. */
+function gitHubCredentialExclusions(domain: DomainStore) {
+  const references = [
+    domain.discoveryCredentialReference(),
+    ...domain
+      .projects()
+      .map(
+        (project) =>
+          domain.githubConfiguration(String(project.id)).credentialRef,
+      ),
+  ];
+  const excluded = references.map((ref) => credentialReferenceExclusions(ref));
+  return {
+    names: [...new Set(excluded.flatMap((value) => value.names))],
+    values: [...new Set(excluded.flatMap((value) => value.values))],
+    redactions: [...new Set(excluded.flatMap((value) => value.redactions))],
+  };
+}
+
 const backgroundDiagnosticTimeoutMs = 50;
 const backgroundDiagnosticFallback =
   '{"errorCode":"diagnostic-writer-failed"}\n';
@@ -413,42 +481,21 @@ export class StandaloneService {
   private db: DatabaseSync | undefined;
   /** Statement-caching facade over `db` for this generation; `db` stays the lifecycle handle. */
   private cache: CachedDatabase | undefined;
-  private state: ExecutionState | undefined;
-  private domainState: DomainStore | undefined;
-  private githubSourceStore: GitHubSourceStore | undefined;
-  private githubSynchronizer: GitHubSynchronizer | undefined;
-  private githubPollTimer: NodeJS.Timeout | undefined;
-  private coordination: CoordinationStore | undefined;
-  private deliveryStore: DeliveryStore | undefined;
-  private deliveryCoordinator: DeliveryCoordinator | undefined;
-  private runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
-  private routingAttempts: RoutingAttemptStore | undefined;
-  private workspaces: WorkspaceManager | undefined;
-  private workspaceBindings: SqliteWorkspaceBindingStore | undefined;
-  private workspaceComparisons: SqliteWorkspaceComparisonStore | undefined;
-  private operatorCredentialStore: OperatorCredentialStore | undefined;
-  private schedulerStore: SchedulerStore | undefined;
-  private wakeQueries: SchedulerWakeQueries | undefined;
-  private inboxStartup: InboxStartupReconciliation | undefined;
-  private scheduler: TurnScheduler | undefined;
-  private supervisor: ExecutionSupervisor | undefined;
-  private power: ExecutionPower | undefined;
-  private powerPollTimer: NodeJS.Timeout | undefined;
+  /** The only operational view; see started(). */
+  private current: Started | undefined;
+  /** What start() has created so far; teardown releases from it, published or not. */
+  private acquired: Partial<Started> | undefined;
+  private readonly timers = new Set<NodeJS.Timeout>();
   private readonly runtimes = new Map<ExecutionHarness, Runtime>();
   private readonly runtimeUnavailableSince = new Map<
     ExecutionHarness,
     number
   >();
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
-  /** Built at start; status reads use it without spawning anything. */
-  private claudeContext: RuntimeSpawnContext["claude"];
   /** Settles when a non-default runtime reports failure; see untilFailure. */
   private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
   /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
   private readonly detachedRuntimeStops = new Set<Promise<void>>();
-  private conversationHistory: ConversationHistoryStore | undefined;
-  private diagnosticsStore: ExecutionDiagnosticsStore | undefined;
-  private diagnosticPruneTimer: NodeJS.Timeout | undefined;
   /** Keyed like conversation captures; finished ones stay to count late events. */
   private readonly diagnosticCaptures = new Map<
     string,
@@ -542,6 +589,12 @@ export class StandaloneService {
     this.generation = generation;
     this.stopPromise = undefined;
     const { databasePath: database, workspacePath } = dataDirectory;
+    // Re-created if stop() releases it mid-start, so the catch path still sees later parts.
+    const acquire = <K extends keyof Started>(key: K, value: Started[K]) => {
+      this.acquired ??= {};
+      this.acquired[key] = value;
+      return value;
+    };
     try {
       const rawDb = new DatabaseSync(database);
       this.db = rawDb;
@@ -556,11 +609,12 @@ export class StandaloneService {
         "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL",
       );
       new Store(db).ensureHost("standalone-codex");
-      this.workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
-      this.operatorCredentialStore = new OperatorCredentialStore(db);
-      this.conversationHistory = new ConversationHistoryStore(db);
+      const workspaceComparisons = new SqliteWorkspaceComparisonStore(db);
+      const operatorCredentials = new OperatorCredentialStore(db);
+      const conversationHistory = new ConversationHistoryStore(db);
+      let diagnostics: ExecutionDiagnosticsStore | undefined;
       try {
-        const diagnostics = new ExecutionDiagnosticsStore(db, {
+        const store = new ExecutionDiagnosticsStore(db, {
           ...(this.options.diagnostics?.limits
             ? { limits: this.options.diagnostics.limits }
             : {}),
@@ -568,12 +622,11 @@ export class StandaloneService {
             ? { now: this.options.diagnostics.now }
             : {}),
         });
-        diagnostics.reconcile();
-        diagnostics.closeOpen();
-        this.diagnosticsStore = diagnostics;
+        store.reconcile();
+        store.closeOpen();
+        diagnostics = store;
       } catch {
         // Diagnostics are additive; without the store executions run uncaptured.
-        this.diagnosticsStore = undefined;
       }
       const domain = new DomainStore(
         db,
@@ -584,29 +637,27 @@ export class StandaloneService {
         verifiedRepository,
       );
       domain.migrate();
-      this.domainState = domain;
       const githubSources = new GitHubSourceStore(db);
       githubSources.migrate();
       githubSources.invalidateProviderObservations();
-      this.githubSourceStore = githubSources;
-      this.githubSynchronizer = new GitHubSynchronizer(
-        domain,
-        githubSources,
-        (reference) => this.gitHubSourceReader(reference),
+      const githubSynchronizer = acquire(
+        "githubSynchronizer",
+        new GitHubSynchronizer(domain, githubSources, (reference) =>
+          this.sourceReader(() => domain, reference),
+        ),
       );
       const routingAttempts = new RoutingAttemptStore(db);
       routingAttempts.migrate();
-      this.routingAttempts = routingAttempts;
       const schedulerStore = new SchedulerStore(db);
-      this.schedulerStore = schedulerStore;
       const workspaceBindings = new SqliteWorkspaceBindingStore(db);
-      this.workspaceBindings = workspaceBindings;
-      const workspaces = new WorkspaceManager(
-        workspaceBindings,
-        workspacePath,
-        this.options.workspaceManager,
+      const workspaces = acquire(
+        "workspaces",
+        new WorkspaceManager(
+          workspaceBindings,
+          workspacePath,
+          this.options.workspaceManager,
+        ),
       );
-      this.workspaces = workspaces;
       await workspaces.recover();
       workspaces.assertNotCancelled();
       const state = new ExecutionState(db);
@@ -633,7 +684,7 @@ export class StandaloneService {
         }
       }
       state.holdUnfinishedOnOpen();
-      this.state = state;
+      acquire("state", state);
       const coordination = new CoordinationStore(
         db,
         domain,
@@ -647,13 +698,12 @@ export class StandaloneService {
       // After every table the wake queries read has migrated.
       const wakeQueries = new SchedulerWakeQueries(db);
       wakeQueries.ensureIndexes();
-      this.wakeQueries = wakeQueries;
       coordination.localReviews().purgeEditableDrafts();
-      this.inboxStartup = new InboxStartupReconciliation(db, domain);
+      const inboxStartup = new InboxStartupReconciliation(db, domain);
       coordination.invalidateRuntimeQuestions(
         "Service restarted; native endpoints cannot be reconstructed",
       );
-      this.coordination = coordination;
+      acquire("coordination", coordination);
       // A runtime never reads or extends another harness's retained evidence.
       const own = <T extends { harness: ExecutionHarness } | null>(
         harness: ExecutionHarness,
@@ -707,8 +757,9 @@ export class StandaloneService {
       });
       const deliveryStore = new DeliveryStore(db);
       deliveryStore.migrate();
-      this.deliveryStore = deliveryStore;
-      this.deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
+      // Read by activationAllowed and the Claude turn environment; set by spawnEnvironment.
+      let runtimeSpawnSnapshot: NodeJS.ProcessEnv | undefined;
+      const deliveryCoordinator = new DeliveryCoordinator(deliveryStore, {
         ...(this.options.delivery?.fetcher
           ? { fetcher: this.options.delivery.fetcher }
           : {}),
@@ -716,7 +767,11 @@ export class StandaloneService {
           ? { providerFactory: this.options.delivery.providerFactory }
           : {}),
         authorize: (caller, exceptOperationId, request) => {
-          this.authorizeDelivery(caller, exceptOperationId);
+          this.authorizeDelivery(
+            { deliveryStore, state, domain, coordination },
+            caller,
+            exceptOperationId,
+          );
           if (isOperatorDeliveryCaller(caller)) {
             if (request && request.action.kind !== "issue.comment")
               throw new DomainPolicyError(
@@ -795,11 +850,12 @@ export class StandaloneService {
               ),
         activationAllowed: (policy) =>
           !policy.credentialRef ||
-          (!this.runtimeSpawnSnapshot?.[policy.credentialRef.slice(4)] &&
-            !Object.values(this.runtimeSpawnSnapshot ?? {}).includes(
+          (!runtimeSpawnSnapshot?.[policy.credentialRef.slice(4)] &&
+            !Object.values(runtimeSpawnSnapshot ?? {}).includes(
               process.env[policy.credentialRef.slice(4)] ?? "",
             )),
       });
+      acquire("deliveryCoordinator", deliveryCoordinator);
       const deliveryCredentialNames = () =>
         domain.projects().flatMap((p) => {
           const ref = deliveryStore.configuration(String(p.id)).credentialRef;
@@ -822,7 +878,7 @@ export class StandaloneService {
           executable: this.options.ghExecutable,
           environment: ghEnvironment(domain, { reference: "gh:github.com" }),
         });
-      const githubExcluded = () => this.gitHubCredentialExclusions();
+      const githubExcluded = () => gitHubCredentialExclusions(domain);
       // Helper children exclude configured delivery, Claude and GitHub credentials.
       setChildCredentialExclusions(() => {
         const claude = claudeTokenExcluded(),
@@ -848,7 +904,7 @@ export class StandaloneService {
               [...claude.values, ...github.values],
             ),
           );
-          this.runtimeSpawnSnapshot = snapshot;
+          runtimeSpawnSnapshot = snapshot;
           return { ...snapshot };
         },
       };
@@ -869,7 +925,7 @@ export class StandaloneService {
               "subscription token is not configured",
               "not-configured",
             );
-          const snapshot = this.runtimeSpawnSnapshot ?? {};
+          const snapshot = runtimeSpawnSnapshot ?? {};
           const github = githubExcluded();
           const source = claudeTokenSource(ref);
           if (source.kind === "file") {
@@ -918,7 +974,6 @@ export class StandaloneService {
           };
         },
       };
-      this.claudeContext = claude;
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       spawnEnvironment.spawnEnvironment();
       this.runtimeUnavailableSince.clear();
@@ -936,17 +991,22 @@ export class StandaloneService {
           continue;
         }
         this.runtimes.set(harness, runtime);
-        this.attachRuntime(harness, runtime, state);
+        this.attachRuntime(
+          harness,
+          runtime,
+          state,
+          () => this.acquired?.supervisor,
+        );
       }
-      this.supervisor = new ExecutionSupervisor(
+      const supervisor = new ExecutionSupervisor(
         state,
         // A failed harness is never awaited for inspection or interrupts.
         (workId) => {
           const runtime = this.runtimeUnavailableSince.has(
-            this.harnessForWork(workId),
+            harnessForWork(state, workId),
           )
             ? undefined
-            : this.runtimeForWork(workId);
+            : this.runtimeForWork(state, workId);
           if (!runtime) return undefined;
           const inspect = runtime.inspectExecution?.bind(runtime);
           return {
@@ -971,6 +1031,7 @@ export class StandaloneService {
         this.options.supervisor,
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
+      acquire("supervisor", supervisor);
       for (const [harness, runtime] of this.runtimes) {
         let startup: Promise<void> | undefined;
         let startupSettled = false;
@@ -998,15 +1059,21 @@ export class StandaloneService {
           }
         }
       }
-      await this.supervisor.reconcileOnStart();
-      await this.deliveryCoordinator.refresh();
-      await this.reconcileOwnDeliveryClosures();
-      await this.githubSynchronizer.refresh();
-      this.emitSourceHoldNotices();
-      // The scheduler is deliberately absent until provider reconciliation and
-      // queued-inbox supersession finish; domain notifications cannot admit work.
-      this.inboxStartup.reconcile();
+      await supervisor.reconcileOnStart();
+      await deliveryCoordinator.refresh();
+      await this.reconcileOwnDeliveryClosures({
+        domain,
+        deliveryStore,
+        githubSources,
+        deliveryCoordinator,
+      });
+      await githubSynchronizer.refresh();
+      this.emitSourceHoldNotices({ githubSources, domain, coordination });
+      // Nothing is published until provider reconciliation and queued-inbox
+      // supersession finish; domain notifications cannot admit work.
+      inboxStartup.reconcile();
       const powerOptions = this.options.power;
+      let power: ExecutionPower | undefined;
       if (
         [...this.runtimes.values()].some((runtime) =>
           powerSupervisionEnabled(powerOptions, runtime),
@@ -1021,33 +1088,24 @@ export class StandaloneService {
           throw new Error(
             "Power-event poll interval must be a positive integer no greater than 60000",
           );
-        const power = new ExecutionPower(
+        const executionPower = new ExecutionPower(
           state,
           powerOptions?.eventSource ?? new MacPowerEventSource(),
           powerOptions?.assertion ?? new CaffeinateAssertion(),
-          () => this.requireSupervisor().reconcileOnStart(),
+          () => supervisor.reconcileOnStart(),
           () => this.wakeScheduler(0, generation),
         );
-        this.power = power;
-        await power.start();
-        await power.poll();
-        this.powerPollTimer = setInterval(() => {
-          this.observeBackgroundFailure(generation, "power-poll", () =>
-            power.poll(),
-          );
-        }, pollIntervalMs);
-        this.powerPollTimer.unref();
+        power = acquire("power", executionPower);
+        await executionPower.start();
+        await executionPower.poll();
+        this.timers.add(
+          setInterval(() => {
+            this.observeBackgroundFailure(generation, "power-poll", () =>
+              executionPower.poll(),
+            );
+          }, pollIntervalMs).unref(),
+        );
       }
-      const scheduler = new TurnScheduler(
-        schedulerStore,
-        (request) => this.attemptRequest(request, generation),
-        this.retryNow,
-        (error) =>
-          this.handleBackgroundFailure(generation, "scheduler-drain", error),
-      );
-      this.scheduler = scheduler;
-      scheduler.start();
-      await this.wakeScheduler();
       const githubInterval = this.options.github?.intervalMs ?? 300_000;
       if (
         !Number.isSafeInteger(githubInterval) ||
@@ -1057,47 +1115,78 @@ export class StandaloneService {
         throw new Error(
           "GitHub refresh interval must be between 1000 and 3600000 milliseconds",
         );
-      this.githubPollTimer = setInterval(() => {
-        this.observeBackgroundFailure(generation, "github-poll", () =>
-          this.refreshGitHub(),
-        );
-      }, githubInterval);
-      this.githubPollTimer.unref();
-      const diagnostics = this.diagnosticsStore;
+      const scheduler = acquire(
+        "scheduler",
+        new TurnScheduler(
+          schedulerStore,
+          (request) => this.attemptRequest(request, generation),
+          this.retryNow,
+          (error) =>
+            this.handleBackgroundFailure(generation, "scheduler-drain", error),
+        ),
+      );
+      // Admission begins here: scheduler drains and wakes need the whole record.
+      this.current = {
+        state,
+        domain,
+        githubSources,
+        githubSynchronizer,
+        coordination,
+        deliveryStore,
+        deliveryCoordinator,
+        routingAttempts,
+        workspaces,
+        workspaceBindings,
+        workspaceComparisons,
+        operatorCredentials,
+        schedulerStore,
+        wakeQueries,
+        inboxStartup,
+        supervisor,
+        scheduler,
+        power,
+        conversationHistory,
+        diagnostics,
+        claude,
+      };
+      scheduler.start();
+      await this.wakeScheduler();
+      this.timers.add(
+        setInterval(() => {
+          this.observeBackgroundFailure(generation, "github-poll", () =>
+            this.refreshGitHub(),
+          );
+        }, githubInterval).unref(),
+      );
       if (diagnostics) {
+        const store = diagnostics;
         // prune() catches its own failures; it never stops or holds anything.
-        void diagnostics.prune();
-        this.diagnosticPruneTimer = setInterval(
-          () => void diagnostics.prune(),
-          this.options.diagnostics?.pruneIntervalMs ?? 3_600_000,
+        void store.prune();
+        this.timers.add(
+          setInterval(
+            () => void store.prune(),
+            this.options.diagnostics?.pruneIntervalMs ?? 3_600_000,
+          ).unref(),
         );
-        this.diagnosticPruneTimer.unref();
       }
     } catch (error) {
       generation.accepting = false;
-      const scheduler = this.scheduler;
-      const workspaces = this.workspaces;
+      // Read live, as stop() may release these while start() is still running.
+      const { scheduler, workspaces } = this.acquired ?? {};
       workspaces?.cancelGitWork();
       scheduler?.stop();
-      this.scheduler = undefined;
       try {
-        this.state?.holdReadyOnStartupFailure(
+        this.acquired?.state?.holdReadyOnStartupFailure(
           "Runtime or login unavailable during startup",
         );
       } finally {
         try {
-          if (this.powerPollTimer) clearInterval(this.powerPollTimer);
-          if (this.githubPollTimer) clearInterval(this.githubPollTimer);
-          this.githubPollTimer = undefined;
-          if (this.diagnosticPruneTimer)
-            clearInterval(this.diagnosticPruneTimer);
-          this.diagnosticPruneTimer = undefined;
-          this.powerPollTimer = undefined;
-          await this.power?.stop().catch(() => {});
-          this.power = undefined;
-          this.supervisor?.cancelObservations();
-          await this.githubSynchronizer?.stop().catch(() => {});
-          await this.deliveryCoordinator?.stop().catch(() => {});
+          for (const timer of this.timers) clearInterval(timer);
+          this.timers.clear();
+          await this.acquired?.power?.stop().catch(() => {});
+          this.acquired?.supervisor?.cancelObservations();
+          await this.acquired?.githubSynchronizer?.stop().catch(() => {});
+          await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
           await Promise.all([
             ...[...this.runtimes.values()].map((runtime) =>
               stopRuntime(runtime).catch(() => {}),
@@ -1114,29 +1203,13 @@ export class StandaloneService {
             if (error instanceof Error && error.cause === undefined)
               error.cause = cleanupError;
           }
-          await this.supervisor?.settle();
+          await this.acquired?.supervisor?.settle();
         } finally {
           this.runtimes.clear();
-          this.supervisor = undefined;
-          this.domainState = undefined;
-          this.githubSourceStore = undefined;
-          this.githubSynchronizer = undefined;
-          this.coordination = undefined;
-          this.deliveryCoordinator = undefined;
-          this.deliveryStore = undefined;
-          this.runtimeSpawnSnapshot = undefined;
-          this.routingAttempts = undefined;
+          this.current = undefined;
+          this.acquired = undefined;
           this.routingCoordinators.clear();
-          this.schedulerStore = undefined;
-          this.wakeQueries = undefined;
-          this.scheduler = undefined;
-          this.workspaces = undefined;
-          this.workspaceBindings = undefined;
-          this.workspaceComparisons = undefined;
-          this.operatorCredentialStore = undefined;
           this.clearConversationCaptures();
-          this.conversationHistory = undefined;
-          this.state = undefined;
           try {
             this.closeDatabase();
           } finally {
@@ -1178,11 +1251,15 @@ export class StandaloneService {
     }
   }
 
-  /** Listeners act only on work bound to the emitting runtime's harness. */
+  /**
+   * Listeners act only on work bound to the emitting runtime's harness. They run
+   * before the service is published, so they use start-up's own components.
+   */
   private attachRuntime(
     harness: ExecutionHarness,
     runtime: Runtime,
     state: ExecutionState,
+    supervisor: () => ExecutionSupervisor | undefined,
   ): void {
     const ownWork = (workId: string) =>
       (state.taskBinding(workId)?.harness ?? defaultExecutionHarness) ===
@@ -1240,7 +1317,7 @@ export class StandaloneService {
             item.id,
             `Runtime reported another harness's execution: ${request.method}`,
           );
-          this.supervisor?.noteAnomaly(item.workId);
+          supervisor()?.noteAnomaly(item.workId);
         }
         return;
       }
@@ -1277,7 +1354,7 @@ export class StandaloneService {
             denied,
           )
         ) {
-          this.supervisor?.turnBound(
+          supervisor()?.turnBound(
             pending.workId,
             request.threadId,
             request.turnId,
@@ -1286,20 +1363,22 @@ export class StandaloneService {
         }
       }
       if (bound.length === 1 && bound[0]?.state === "completed") {
-        this.retractWriterAndSuccessors(bound[0], denied);
+        retractWriterAndSuccessors(state, bound[0], denied);
         return;
       }
       const affected = bound.length === 1 ? bound : active;
       for (const item of affected) {
         state.hold(item.id, denied);
-        this.supervisor?.noteAnomaly(item.workId);
+        supervisor()?.noteAnomaly(item.workId);
         this.diagnosticServiceEvent(item.workId, "unexpected-request", "warn", {
           method: request.method,
         });
       }
     });
+    // Before publication no turn of this generation exists to bind a callback to.
     runtime.onUserInputRequest?.((request) => {
       if (
+        !this.current ||
         !acceptsNew() ||
         foreign(request.identity.threadId, request.identity.turnId)
       )
@@ -1314,7 +1393,7 @@ export class StandaloneService {
         this.handleUserInputOutcome(outcome);
     });
     runtime.onToolCall?.((call) =>
-      !acceptsNew() || foreign(call.threadId, call.turnId)
+      !this.current || !acceptsNew() || foreign(call.threadId, call.turnId)
         ? Promise.resolve({
             text: "Coordination call is not bound to current task work",
             success: false,
@@ -1349,8 +1428,8 @@ export class StandaloneService {
               .activeOrLastCompleted(this.lastCompletedWorkId.get(harness))
               .filter((item) => ownWork(item.workId));
       for (const item of matched) {
-        this.retractWriterAndSuccessors(item, anomaly.reason);
-        this.supervisor?.noteAnomaly(item.workId);
+        retractWriterAndSuccessors(state, item, anomaly.reason);
+        supervisor()?.noteAnomaly(item.workId);
         this.diagnosticServiceEvent(item.workId, "terminal-anomaly", "warn", {
           reason: anomaly.reason,
         });
@@ -1358,15 +1437,11 @@ export class StandaloneService {
     });
   }
 
-  private harnessForWork(workId: string): ExecutionHarness {
-    return (
-      this.requireState().taskBinding(workId)?.harness ??
-      defaultExecutionHarness
-    );
-  }
-
-  private runtimeForWork(workId: string): Runtime | undefined {
-    return this.runtimes.get(this.harnessForWork(workId));
+  private runtimeForWork(
+    state: ExecutionState,
+    workId: string,
+  ): Runtime | undefined {
+    return this.runtimes.get(harnessForWork(state, workId));
   }
 
   /**
@@ -1465,13 +1540,15 @@ export class StandaloneService {
   }
 
   private async stopOwned(): Promise<void> {
-    const scheduler = this.scheduler;
-    const supervisor = this.supervisor;
-    const synchronizer = this.githubSynchronizer;
-    const delivery = this.deliveryCoordinator;
+    const {
+      scheduler,
+      supervisor,
+      githubSynchronizer: synchronizer,
+      deliveryCoordinator: delivery,
+      power,
+      workspaces,
+    } = this.acquired ?? {};
     const runtimes = new Map(this.runtimes);
-    const power = this.power;
-    const workspaces = this.workspaces;
     const db = this.db;
     const failures: Array<{ stage: string; error: unknown }> = [];
     const recordFailure = (stage: string, error: unknown) => {
@@ -1495,12 +1572,8 @@ export class StandaloneService {
     } catch (error) {
       recordFailure("scheduler stop", error);
     }
-    if (this.githubPollTimer) clearInterval(this.githubPollTimer);
-    this.githubPollTimer = undefined;
-    if (this.diagnosticPruneTimer) clearInterval(this.diagnosticPruneTimer);
-    this.diagnosticPruneTimer = undefined;
-    if (this.powerPollTimer) clearInterval(this.powerPollTimer);
-    this.powerPollTimer = undefined;
+    for (const timer of this.timers) clearInterval(timer);
+    this.timers.clear();
     try {
       supervisor?.cancelObservations();
     } catch (error) {
@@ -1511,7 +1584,7 @@ export class StandaloneService {
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
       if (this.db?.isOpen && this.cache?.isOpen)
-        this.coordination?.invalidateRuntimeQuestions(
+        this.acquired?.coordination?.invalidateRuntimeQuestions(
           "Service stopped; native endpoints lost",
         );
     });
@@ -1559,27 +1632,10 @@ export class StandaloneService {
         if (released && this.owner === owner) this.owner = undefined;
       }
 
-      this.state = undefined;
-      this.domainState = undefined;
-      this.githubSourceStore = undefined;
-      this.githubSynchronizer = undefined;
-      this.coordination = undefined;
-      this.deliveryCoordinator = undefined;
-      this.deliveryStore = undefined;
+      this.current = undefined;
+      this.acquired = undefined;
       this.runtimes.clear();
-      this.runtimeSpawnSnapshot = undefined;
-      this.routingAttempts = undefined;
       this.routingCoordinators.clear();
-      this.schedulerStore = undefined;
-      this.wakeQueries = undefined;
-      this.scheduler = undefined;
-      this.supervisor = undefined;
-      this.power = undefined;
-      this.workspaces = undefined;
-      this.workspaceBindings = undefined;
-      this.workspaceComparisons = undefined;
-      this.operatorCredentialStore = undefined;
-      this.conversationHistory = undefined;
       this.activeByWorkId.clear();
       this.nativeWaiters.clear();
       this.callbacks.clear();
@@ -1721,15 +1777,15 @@ export class StandaloneService {
   }
 
   list(): ExecutionIntent[] {
-    return this.requireState().list();
+    return this.started().state.list();
   }
 
   recoveryView(): RecoveryRecord[] {
-    return this.requireState().recoveryView();
+    return this.started().state.recoveryView();
   }
 
   executionForWork(workId: string): ExecutionIntent | undefined {
-    return this.requireState().byWorkId(workId);
+    return this.started().state.byWorkId(workId);
   }
 
   recoveryFor(
@@ -1737,7 +1793,7 @@ export class StandaloneService {
     assignmentVersion: number,
     workId?: string,
   ): RecoveryRecord[] {
-    return this.requireState().recoveryFor(
+    return this.started().state.recoveryFor(
       assignmentId,
       assignmentVersion,
       workId,
@@ -1745,24 +1801,23 @@ export class StandaloneService {
   }
 
   recoveryForTask(taskId: string, alsoWorkId?: string): RecoveryRecord[] {
-    return this.requireState().recoveryForTask(taskId, alsoWorkId);
+    return this.started().state.recoveryForTask(taskId, alsoWorkId);
   }
 
   powerStatus() {
-    return this.power?.status() ?? null;
+    return this.current?.power?.status() ?? null;
   }
 
   /** The persisted harness of a bound work, or null before binding. */
   bindingHarness(workId: string): ExecutionHarness | null {
-    return this.requireState().taskBinding(workId)?.harness ?? null;
+    return this.started().state.taskBinding(workId)?.harness ?? null;
   }
 
   /** Booleans and a closed state only; the token value never leaves this method. */
   claudeTokenStatus() {
-    const configured = this.domain().claudeTokenReference() !== null;
-    const result = configured
-      ? this.claudeContext?.turnEnvironment()
-      : undefined;
+    const { domain, claude } = this.started();
+    const configured = domain.claudeTokenReference() !== null;
+    const result = configured ? claude?.turnEnvironment() : undefined;
     const state = !configured
       ? "not-configured"
       : !result ||
@@ -1775,7 +1830,7 @@ export class StandaloneService {
   }
 
   terminalFailure(workId: string) {
-    return this.requireState().terminalFailure(workId);
+    return this.started().state.terminalFailure(workId);
   }
 
   /** In-memory only: a manual service restart is the recovery path. */
@@ -1867,14 +1922,14 @@ export class StandaloneService {
   }
 
   resolveHeldExecution(receipt: RecoveryReceipt) {
-    return this.requireSupervisor().resolveHeldExecution(receipt);
+    return this.started().supervisor.resolveHeldExecution(receipt);
   }
   adoptHistoricalPreTurnRejection(command: HistoricalPreTurnAdoption) {
-    return this.requireState().adoptHistoricalPreTurnRejection(command);
+    return this.started().state.adoptHistoricalPreTurnRejection(command);
   }
   recoverPreTurnExecution(command: PreTurnRecoveryCommand) {
     const value = preTurnRecoveryCommandSchema.parse(command);
-    const replay = this.requireState().preTurnCommandReplay("recover", value);
+    const replay = this.started().state.preTurnCommandReplay("recover", value);
     if (replay)
       return Promise.resolve(
         z
@@ -1886,14 +1941,14 @@ export class StandaloneService {
           .strict()
           .parse(replay),
       );
-    return this.requireSupervisor().resolveHeldExecution(value.receipt, value);
+    return this.started().supervisor.resolveHeldExecution(value.receipt, value);
   }
   adoptHistoricalNoTurnSubmission(command: HistoricalNoTurnAdoption) {
-    return this.requireState().adoptHistoricalNoTurnSubmission(command);
+    return this.started().state.adoptHistoricalNoTurnSubmission(command);
   }
   recoverNoTurnExecution(command: NoTurnRecoveryCommand) {
     const value = noTurnRecoveryCommandSchema.parse(command);
-    const replay = this.requireState().preTurnCommandReplay(
+    const replay = this.started().state.preTurnCommandReplay(
       "recover-no-turn",
       value,
     );
@@ -1908,19 +1963,19 @@ export class StandaloneService {
           .strict()
           .parse(replay),
       );
-    return this.requireSupervisor().resolveHeldExecution(value.receipt, value);
+    return this.started().supervisor.resolveHeldExecution(value.receipt, value);
   }
   replaceConversationCommand(command: ReplaceConversationCommand) {
-    return this.requireState().replaceConversationCommand(command);
+    return this.started().state.replaceConversationCommand(command);
   }
   recoveryMaterial(workId: string) {
-    return this.requireState().recoveryMaterial(workId);
+    return this.started().state.recoveryMaterial(workId);
   }
   replacementFacts(assignmentId: string) {
-    return this.requireState().replacementFacts(assignmentId);
+    return this.started().state.replacementFacts(assignmentId);
   }
   preTurnCommandRecord(key: string) {
-    return this.requireState().preTurnCommandRecord(key);
+    return this.started().state.preTurnCommandRecord(key);
   }
 
   /** Bounded execution list reads; see SchedulerStore.assignmentPage. */
@@ -1930,55 +1985,52 @@ export class StandaloneService {
     before: number | undefined,
     limit: number,
   ): TurnRequest[] {
-    if (!this.schedulerStore) throw new Error("Service is not started");
-    return this.schedulerStore.assignmentPage(scope, id, before, limit);
+    return this.started().schedulerStore.assignmentPage(
+      scope,
+      id,
+      before,
+      limit,
+    );
   }
 
   turnRequest(workId: string): TurnRequest | undefined {
-    if (!this.schedulerStore) throw new Error("Service is not started");
-    return this.schedulerStore.find(workId);
+    return this.started().schedulerStore.find(workId);
   }
 
   turnRequests(): TurnRequest[] {
-    if (!this.schedulerStore) throw new Error("Service is not started");
-    return this.schedulerStore.list();
+    return this.started().schedulerStore.list();
   }
 
   currentTurnRequest(
     assignmentId: string,
     version: number,
   ): TurnRequest | undefined {
-    if (!this.schedulerStore) throw new Error("Service is not started");
-    return this.schedulerStore.current(assignmentId, version);
+    return this.started().schedulerStore.current(assignmentId, version);
   }
 
   turnRequestsForTask(taskId: string): TurnRequest[] {
-    if (!this.schedulerStore) throw new Error("Service is not started");
-    return this.schedulerStore.forTask(taskId);
+    return this.started().schedulerStore.forTask(taskId);
   }
 
   /** Whether the task's own turn requests or recovery identities exceed `limit`, each kind counted separately. */
   taskRetainedRowsExceed(taskId: string, limit: number): boolean {
-    if (!this.schedulerStore) throw new Error("Service is not started");
     return (
-      this.schedulerStore.countForTaskUpTo(taskId, limit + 1) > limit ||
-      this.requireState().recoveryCountForTaskUpTo(taskId, limit + 1) > limit
+      this.started().schedulerStore.countForTaskUpTo(taskId, limit + 1) >
+        limit ||
+      this.started().state.recoveryCountForTaskUpTo(taskId, limit + 1) > limit
     );
   }
 
   taskReview() {
-    if (!this.coordination) throw Error("Service not started");
-    return this.coordination.taskReview();
+    return this.started().coordination.taskReview();
   }
 
   localReviews() {
-    if (!this.coordination) throw Error("Service not started");
-    return this.coordination.localReviews();
+    return this.started().coordination.localReviews();
   }
 
   retainedEvidence() {
-    if (!this.coordination) throw Error("Service not started");
-    return this.coordination.retainedEvidence();
+    return this.started().coordination.retainedEvidence();
   }
 
   async stageReviewAnchorDraft(input: RetainedReviewAnchorStageRequest) {
@@ -2053,7 +2105,7 @@ export class StandaloneService {
           exportComparison: (comparisonId) =>
             this.workspaceComparisonExport(request.taskId, comparisonId),
           comparisonOwner: (comparisonId) =>
-            this.workspaceComparisons?.comparisonOwner(comparisonId),
+            this.current?.workspaceComparisons.comparisonOwner(comparisonId),
           retainedEvidence: evidence,
         }),
       );
@@ -2150,18 +2202,21 @@ export class StandaloneService {
   }
 
   domain(): DomainStore {
-    if (!this.domainState) throw new Error("Service is not started");
-    return this.domainState;
+    return this.started().domain;
   }
 
   /** One source-explicit factory shared by synchronizer and both operator preview surfaces. */
   gitHubSourceReader(reference: string) {
+    return this.sourceReader(() => this.domain(), reference);
+  }
+
+  private sourceReader(domain: () => DomainStore, reference: string) {
     return (
       this.options.github?.readerFactory?.(reference) ??
       new CredentialGitHubSourceReader(reference, {
         gh: () => ({
           executable: this.options.ghExecutable,
-          environment: ghEnvironment(this.domain(), { reference }),
+          environment: ghEnvironment(domain(), { reference }),
         }),
       })
     );
@@ -2196,94 +2251,68 @@ export class StandaloneService {
 
   /** Includes lifetime gh values even after every source/discovery reference has been cleared. */
   gitHubCredentialExclusions() {
-    const domain = this.domain();
-    const references = [
-      domain.discoveryCredentialReference(),
-      ...domain
-        .projects()
-        .map(
-          (project) =>
-            domain.githubConfiguration(String(project.id)).credentialRef,
-        ),
-    ];
-    const excluded = references.map((ref) =>
-      credentialReferenceExclusions(ref),
-    );
-    return {
-      names: [...new Set(excluded.flatMap((value) => value.names))],
-      values: [...new Set(excluded.flatMap((value) => value.values))],
-      redactions: [...new Set(excluded.flatMap((value) => value.redactions))],
-    };
+    return gitHubCredentialExclusions(this.domain());
   }
 
   operatorCredentials(): OperatorCredentialStore {
-    if (!this.operatorCredentialStore)
-      throw new Error("Service is not started");
-    return this.operatorCredentialStore;
+    return this.started().operatorCredentials;
   }
 
   githubSources(): GitHubSourceStore {
-    if (!this.githubSourceStore) throw new Error("Service is not started");
-    return this.githubSourceStore;
+    return this.started().githubSources;
   }
 
   async settleHandback(input: unknown) {
-    if (!this.deliveryCoordinator) throw new Error("Service is not started");
-    const result = await this.deliveryCoordinator.settleHandback(input);
+    const result =
+      await this.started().deliveryCoordinator.settleHandback(input);
     await this.wakeScheduler();
     return result;
   }
   private async finalizeDeliveryCompletion(requestId: string, workId: string) {
-    const coordination = this.coordination;
-    if (!coordination) throw new Error("Service is not started");
-    const request = coordination
+    const started = this.started();
+    const request = started.coordination
       .completionRequests()
       .find((r) => r.requestId === requestId);
     if (!request) throw new Error("Unknown completion request");
     const deliveryValidation =
-      await this.requireDeliveryCoordinator().qualifyCompletion(request.taskId);
-    await this.reconcileOwnDeliveryClosures();
-    return coordination.finalizeTaskCompletion({
+      await started.deliveryCoordinator.qualifyCompletion(request.taskId);
+    await this.reconcileOwnDeliveryClosures(started);
+    return started.coordination.finalizeTaskCompletion({
       requestId,
       workId,
       terminal: "completed",
       deliveryValidation,
     });
   }
-  private requireDeliveryCoordinator(): DeliveryCoordinator {
-    if (!this.deliveryCoordinator) throw new Error("Service is not started");
-    return this.deliveryCoordinator;
-  }
   delivery(): DeliveryStore {
-    if (!this.deliveryStore) throw new Error("Service is not started");
-    return this.deliveryStore;
+    return this.started().deliveryStore;
   }
+  /** Takes its components because delivery refresh can authorize before publication. */
   private authorizeDelivery(
+    {
+      deliveryStore,
+      state,
+      domain,
+      coordination,
+    }: Pick<Started, "deliveryStore" | "state" | "domain" | "coordination">,
     caller: DeliveryCaller,
     exceptOperationId?: string,
   ): void {
     if (isOperatorDeliveryCaller(caller)) {
-      this.delivery().validateOperatorCaller(caller);
+      deliveryStore.validateOperatorCaller(caller);
       if (
-        this.requireState().taskHold(caller.taskId) ||
-        this.domain()
+        state.taskHold(caller.taskId) ||
+        domain
           .admission(caller.taskId)
           .reasons.filter((reason) => !reason.startsWith("external-action-"))
           .length ||
-        this.delivery().actionBlockers(caller.taskId, exceptOperationId).length
+        deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
       )
         throw new DomainConflictError("Task admission is held");
       return;
     }
-    const state = this.requireState(),
-      coordination = this.coordination,
-      intent = state.byWorkId(caller.workId);
-    if (
-      !coordination ||
-      !intent?.threadId ||
-      !intent.turnId ||
-      intent.state !== "running"
-    )
+    const intent = state.byWorkId(caller.workId);
+    if (!intent?.threadId || !intent.turnId || intent.state !== "running")
       throw new Error("Delivery caller is stale");
     const current = coordination.deliveryCaller({
       threadId: intent.threadId,
@@ -2295,12 +2324,12 @@ export class StandaloneService {
     if (canonicalMaterial(current) !== canonicalMaterial(caller))
       throw new Error("Delivery caller revision changed");
     if (state.taskHold(caller.taskId)) throw new Error("Task is held");
-    const reasons = this.domain()
+    const reasons = domain
       .assignmentAdmission(caller.assignmentId)
       .reasons.filter((reason) => !reason.startsWith("external-action-"));
     if (
       reasons.length ||
-      this.delivery().actionBlockers(caller.taskId, exceptOperationId).length
+      deliveryStore.actionBlockers(caller.taskId, exceptOperationId).length
     )
       throw new DomainConflictError("Task admission is held");
   }
@@ -2376,7 +2405,7 @@ export class StandaloneService {
     return this.delivery().confirmOperatorComment(command, () => {
       const record = this.delivery().operatorReview(command.reviewId);
       if (!record) throw new DomainConflictError("Operator review unavailable");
-      this.authorizeDelivery(record.caller);
+      this.authorizeDelivery(this.started(), record.caller);
     });
   }
   async postOperatorComment(command: {
@@ -2405,7 +2434,7 @@ export class StandaloneService {
     const caller = this.operatorCommentCaller(command.taskId);
     if (caller.taskVersion !== command.expectedTaskVersion)
       throw new DomainConflictError("Operator task revision conflict");
-    return this.requireDeliveryCoordinator().submit(
+    return this.started().deliveryCoordinator.submit(
       {
         operationId: command.key,
         action: this.operatorCommentAction(caller, command.body),
@@ -2415,40 +2444,48 @@ export class StandaloneService {
     );
   }
   async refreshGitHub(): Promise<void> {
-    if (!this.githubSynchronizer) throw new Error("Service is not started");
-    await this.deliveryCoordinator?.refresh();
-    await this.reconcileOwnDeliveryClosures();
-    await this.githubSynchronizer.refresh();
-    this.emitSourceHoldNotices();
+    const started = this.started();
+    await started.deliveryCoordinator.refresh();
+    await this.reconcileOwnDeliveryClosures(started);
+    await started.githubSynchronizer.refresh();
+    this.emitSourceHoldNotices(started);
     await this.wakeScheduler();
   }
 
-  private async reconcileOwnDeliveryClosures(): Promise<void> {
-    for (const project of this.domain().projects())
-      for (const task of this.domain().tasks(String(project.id))) {
-        const imported = this.domain().importedTask(String(task.id));
+  /** Takes its components because start-up reconciles before publication. */
+  private async reconcileOwnDeliveryClosures({
+    domain,
+    deliveryStore,
+    githubSources,
+    deliveryCoordinator,
+  }: Pick<
+    Started,
+    "domain" | "deliveryStore" | "githubSources" | "deliveryCoordinator"
+  >): Promise<void> {
+    for (const project of domain.projects())
+      for (const task of domain.tasks(String(project.id))) {
+        const imported = domain.importedTask(String(task.id));
         if (
           !imported ||
-          !this.delivery().ownsConfirmedClosure(
+          !deliveryStore.ownsConfirmedClosure(
             String(task.id),
             String(imported.nodeId),
           )
         )
           continue;
-        const source = this.githubSources().issue(String(imported.nodeId));
+        const source = githubSources.issue(String(imported.nodeId));
         if (!source) continue;
-        const config = this.domain().githubConfiguration(String(project.id));
+        const config = domain.githubConfiguration(String(project.id));
         try {
-          const proof =
-            await this.requireDeliveryCoordinator().inspectOwnClosure(
-              String(task.id),
-              {
-                repositoryId: String(source.repositoryId),
-                nodeId: String(source.nodeId),
-                number: Number(source.issueNumber),
-              },
-            );
-          this.githubSources().recordDeliveryClosure(
+          const proof = await deliveryCoordinator.inspectOwnClosure(
+            String(task.id),
+            {
+              repositoryId: String(source.repositoryId),
+              nodeId: String(source.nodeId),
+              number: Number(source.issueNumber),
+            },
+          );
+          githubSources.recordDeliveryClosure(
             String(project.id),
             config.version,
             proof.snapshot,
@@ -2456,18 +2493,18 @@ export class StandaloneService {
             proof.closerPrNodeId,
           );
         } catch {
-          this.githubSources().recordDeliveryClosureUnavailable(
+          githubSources.recordDeliveryClosureUnavailable(
             String(imported.nodeId),
           );
         }
       }
   }
 
-  private emitSourceHoldNotices(): void {
-    const sources = this.githubSourceStore;
-    const domain = this.domainState;
-    const coordination = this.coordination;
-    if (!sources || !domain || !coordination) return;
+  private emitSourceHoldNotices({
+    githubSources: sources,
+    domain,
+    coordination,
+  }: Pick<Started, "githubSources" | "domain" | "coordination">): void {
     const leadByTask = new Map(
       domain
         .leadBindings()
@@ -2522,18 +2559,12 @@ export class StandaloneService {
   }
 
   coordinationView(): CoordinationView {
-    if (
-      !this.coordination ||
-      !this.routingAttempts ||
-      !this.state ||
-      !this.domainState
-    )
-      throw new Error("Service is not started");
+    const { domain, coordination, state, routingAttempts } = this.started();
     return new CoordinationView(
-      this.domainState,
-      this.coordination,
-      this.state,
-      this.routingAttempts,
+      domain,
+      coordination,
+      state,
+      routingAttempts,
       () => this.wakeScheduler(),
       (taskId, assignmentId, beforeSequence, beforeOmissionSequence, limit) =>
         this.readConversationHistory(
@@ -2624,7 +2655,7 @@ export class StandaloneService {
           "Imported task repository grant changed during verification",
         );
     }
-    const binding = await this.requireWorkspaces().provision(
+    const binding = await this.started().workspaces.provision(
       taskId,
       repositories,
     );
@@ -2633,8 +2664,7 @@ export class StandaloneService {
   }
 
   taskWorkspaceVisibility(taskId: string) {
-    if (!this.workspaceBindings) throw Error("Service not started");
-    const binding = this.workspaceBindings.get(taskId);
+    const binding = this.started().workspaceBindings.get(taskId);
     return createHash("sha256")
       .update(
         JSON.stringify(
@@ -2660,8 +2690,7 @@ export class StandaloneService {
    */
   taskWorkspaceRedactionPaths(taskId: string): string[] {
     this.domain().task(taskId);
-    if (!this.workspaceBindings) throw Error("Service not started");
-    const binding = this.workspaceBindings.get(taskId);
+    const binding = this.started().workspaceBindings.get(taskId);
     if (!binding) return [];
     return [
       ...new Set([
@@ -2676,7 +2705,7 @@ export class StandaloneService {
   }
   taskWorkspace(taskId: string, options?: { reuseRecentIdentity?: boolean }) {
     this.domain().task(taskId);
-    return this.requireWorkspaces().get(taskId, options);
+    return this.started().workspaces.get(taskId, options);
   }
 
   replaceWorkspaceComparison(
@@ -2684,9 +2713,10 @@ export class StandaloneService {
     sides: readonly WorkspaceComparisonSideContent[],
   ): void {
     this.domain().task(comparison.taskId);
-    const store = this.workspaceComparisons;
-    if (!store) throw new Error("Workspace comparison store unavailable");
-    store.replaceCurrentComparison(comparison, sides);
+    this.started().workspaceComparisons.replaceCurrentComparison(
+      comparison,
+      sides,
+    );
   }
 
   currentWorkspaceComparison(
@@ -2695,7 +2725,7 @@ export class StandaloneService {
     target: WorkspaceComparisonSnapshot["target"],
   ): WorkspaceComparisonExport | undefined {
     this.domain().task(taskId);
-    return this.workspaceComparisons?.currentComparison(
+    return this.current?.workspaceComparisons.currentComparison(
       taskId,
       repositoryId,
       target,
@@ -2707,7 +2737,10 @@ export class StandaloneService {
     comparisonId: string,
   ): WorkspaceComparisonExport | undefined {
     this.domain().task(taskId);
-    return this.workspaceComparisons?.comparisonById(taskId, comparisonId);
+    return this.current?.workspaceComparisons.comparisonById(
+      taskId,
+      comparisonId,
+    );
   }
 
   workspaceComparisonExport(
@@ -2715,16 +2748,19 @@ export class StandaloneService {
     comparisonId: string,
   ): WorkspaceComparisonExport | undefined {
     this.domain().task(taskId);
-    return this.workspaceComparisons?.exportComparison(taskId, comparisonId);
+    return this.current?.workspaceComparisons.exportComparison(
+      taskId,
+      comparisonId,
+    );
   }
 
   workspaceComparisonOwner(comparisonId: string): string | undefined {
-    return this.workspaceComparisons?.comparisonOwner(comparisonId);
+    return this.current?.workspaceComparisons.comparisonOwner(comparisonId);
   }
 
   workspaceTurnCaptureSlots(taskId: string) {
     this.domain().task(taskId);
-    return this.workspaceComparisons?.latestTurnCaptures(taskId) ?? {};
+    return this.current?.workspaceComparisons.latestTurnCaptures(taskId) ?? {};
   }
 
   private async turnWorkspaceInspectionCurrent(
@@ -2771,7 +2807,7 @@ export class StandaloneService {
     reason?: WorkspaceTurnCaptureReason,
   ): Promise<WorkspaceTurnCaptureRecord | undefined> {
     const before = capture.before;
-    const store = this.workspaceComparisons;
+    const store = this.current?.workspaceComparisons;
     if (!before || !store) return undefined;
     const after = await this.observeTurnWorkspace(capture.identity.taskId);
     const sideContent = new Map<number, WorkspaceComparisonSideContent>();
@@ -2824,7 +2860,7 @@ export class StandaloneService {
     capture: WorkspaceTurnCaptureRecord,
     reason: WorkspaceTurnCaptureReason,
   ): WorkspaceTurnCaptureRecord | undefined {
-    const store = this.workspaceComparisons;
+    const store = this.current?.workspaceComparisons;
     if (!store) return undefined;
     const next = {
       ...capture,
@@ -2839,7 +2875,7 @@ export class StandaloneService {
   }
 
   private finishTurnCapture(capture: WorkspaceTurnCaptureRecord): void {
-    const store = this.workspaceComparisons;
+    const store = this.current?.workspaceComparisons;
     if (!store) return;
     const {
       before: _before,
@@ -2875,19 +2911,19 @@ export class StandaloneService {
 
   async archiveTask(taskId: string, evidence: WorkspaceCleanupEvidence) {
     this.domain().task(taskId);
-    const state = this.requireState();
+    const state = this.started().state;
     const acquired =
       evidence.writerOwnershipResolved && state.beginArchive(taskId);
     if (!acquired)
-      return this.requireWorkspaces().archiveAndCleanup(taskId, {
+      return this.started().workspaces.archiveAndCleanup(taskId, {
         ...evidence,
         writerOwnershipResolved: false,
       });
     let releaseArchiveHold = false;
     try {
-      const path = this.workspaceBindings?.get(taskId)?.path;
+      const path = this.current?.workspaceBindings.get(taskId)?.path;
       const workspace = path && existsSync(path) ? realpathSync(path) : path;
-      const result = await this.requireWorkspaces().archiveAndCleanup(
+      const result = await this.started().workspaces.archiveAndCleanup(
         taskId,
         evidence,
         () => state.confirmArchive(taskId),
@@ -2910,20 +2946,20 @@ export class StandaloneService {
   /** A replacement keeps the durable assignment and its captured revisions. */
   replaceConversation(assignmentId: string): number {
     this.domain().assignment(assignmentId);
-    return this.requireState().replaceConversation(assignmentId);
+    return this.started().state.replaceConversation(assignmentId);
   }
 
   isCurrentResult(workId: string): boolean {
-    return this.requireState().isCurrentResult(workId);
+    return this.started().state.isCurrentResult(workId);
   }
 
   recordTaskResult(workId: string, payload: string): boolean {
-    return this.requireState().recordResult(workId, payload);
+    return this.started().state.recordResult(workId, payload);
   }
 
   stopTask(taskId: string): Promise<StopObservation> {
     this.domain().task(taskId);
-    return this.afterStop(taskId, this.requireState().stopTask(taskId));
+    return this.afterStop(taskId, this.started().state.stopTask(taskId));
   }
 
   /** Receipted Stop or Resume; a replayed receipt repeats no post-commit work. */
@@ -2934,7 +2970,7 @@ export class StandaloneService {
     expectedVersion?: number | undefined;
   }): Promise<TaskControlReceipt> {
     this.domain().task(command.taskId);
-    const state = this.requireState();
+    const state = this.started().state;
     const { receipt, replayed } = state.controlTask(command);
     if (!replayed) {
       if (command.type === "task.stop")
@@ -2949,79 +2985,66 @@ export class StandaloneService {
     taskId: string,
     targets: StopTarget[],
   ): Promise<StopObservation> {
+    const { state, coordination, supervisor } = this.started();
     for (const target of targets) {
-      const runtime = this.runtimeForWork(target.workId);
+      const runtime = this.runtimeForWork(state, target.workId);
       const runtimeGeneration = runtime?.currentUserInputGeneration?.();
       if (!runtimeGeneration) continue;
-      for (const question of this.coordination?.runtimeQuestionsForWork(
+      for (const question of coordination.runtimeQuestionsForWork(
         target.workId,
         true,
         runtimeGeneration,
-      ) ?? [])
+      ))
         runtime?.cancelUserInput?.(
           question.identity,
           "Task stopped before native receipt",
         );
     }
-    return this.requireSupervisor().observeStop(taskId, targets);
+    return supervisor.observeStop(taskId, targets);
   }
 
   async resumeTask(taskId: string): Promise<void> {
     this.domain().task(taskId);
-    this.requireState().resumeTask(taskId);
+    this.started().state.resumeTask(taskId);
     await this.wakeScheduler();
   }
 
   taskHold(taskId: string): string | undefined {
-    return this.requireState().taskHold(taskId);
+    return this.started().state.taskHold(taskId);
   }
 
   hasNonStopTaskHold(taskId: string): boolean {
-    return this.requireState().hasNonStopTaskHold(taskId);
+    return this.started().state.hasNonStopTaskHold(taskId);
   }
 
   isTaskStopped(taskId: string): boolean {
-    return this.requireState().isTaskStopped(taskId);
+    return this.started().state.isTaskStopped(taskId);
   }
 
   /** A known survivor or unfinished tool callback keeps ownership held. */
   holdKnownSurvivor(workId: string, reason: string): void {
-    const state = this.requireState();
+    const { state, supervisor, coordination } = this.started();
     const intent = state.byWorkId(workId);
     if (!intent || intent.state === "ready")
       throw new Error("No active execution to hold");
     const holdReason = `Known unfinished execution: ${reason}`;
-    this.supervisor?.noteSurvivor(workId);
+    supervisor.noteSurvivor(workId);
     if (
       intent.state === "reconciled" &&
-      this.coordination?.recoveryDispositionForWork(workId) ===
-        "operator-reconciled"
+      coordination.recoveryDispositionForWork(workId) === "operator-reconciled"
     ) {
       state.holdReconciledContinuationSurvivor(workId, holdReason);
     }
-    this.retractWriterAndSuccessors(intent, holdReason);
-  }
-
-  private retractWriterAndSuccessors(
-    writer: ExecutionIntent,
-    reason: string,
-  ): void {
-    const state = this.requireState();
-    for (const item of state.writerAndSuccessors(writer.workId))
-      if (
-        item.state === "completed" ||
-        item.state === "submitting" ||
-        item.state === "running"
-      )
-        state.holdTerminalConflict(item.id, reason);
+    retractWriterAndSuccessors(state, intent, holdReason);
   }
 
   registerExecutionCallback(workId: string, callback: Promise<unknown>): void {
-    const state = this.requireState().byWorkId(workId)?.state;
+    const { state: executions, coordination } = this.started();
+    const state = executions.byWorkId(workId)?.state;
     if (
       state === "completed" ||
       (state === "reconciled" &&
-        this.coordination?.recoveryDispositionForWork(workId) ===
+        coordination.recoveryDispositionForWork(workId) ===
           "operator-reconciled")
     )
       this.holdKnownSurvivor(workId, "late Ensemble callback");
@@ -3040,9 +3063,7 @@ export class StandaloneService {
     call: RuntimeUserInputRequest,
     runtime: Runtime,
   ): void {
-    const state = this.requireState();
-    const coordination = this.coordination;
-    if (!coordination) return;
+    const { state, coordination, supervisor } = this.started();
     try {
       if (
         runtime.currentUserInputGeneration?.() !==
@@ -3061,7 +3082,7 @@ export class StandaloneService {
         );
         if (!snapshot || !state.prebindNativeTurn(snapshot))
           throw new Error("Native callback has no exact admitted binding");
-        this.requireSupervisor().turnBound(
+        this.started().supervisor.turnBound(
           snapshot.workId,
           call.identity.threadId,
           call.identity.turnId,
@@ -3102,7 +3123,7 @@ export class StandaloneService {
       );
       for (const execution of executions) {
         state.hold(execution.id, "Native callback could not be durably bound");
-        this.supervisor?.noteAnomaly(execution.workId);
+        supervisor.noteAnomaly(execution.workId);
       }
       runtime.cancelUserInput?.(
         call.identity,
@@ -3112,7 +3133,8 @@ export class StandaloneService {
   }
   private handleUserInputOutcome(outcome: RuntimeUserInputOutcome): void {
     const waiter = this.nativeWaiters.get(nativeEndpointKey(outcome));
-    const coordination = this.coordination;
+    // Outcomes also arrive while runtimes start, before the service is published.
+    const { coordination, state, supervisor } = this.acquired ?? {};
     if (!coordination) return;
     try {
       const record = coordination.recordRuntimeReplyOutcome(outcome);
@@ -3123,13 +3145,13 @@ export class StandaloneService {
         outcome.outcome === "uncertain" ||
         outcome.outcome === "unavailable"
       ) {
-        const execution = this.state?.byWorkId(record.requestingWorkId);
+        const execution = state?.byWorkId(record.requestingWorkId);
         if (execution) {
-          this.state?.hold(
+          state?.hold(
             execution.id,
             "Native input delivery unavailable or uncertain",
           );
-          this.supervisor?.noteAnomaly(execution.workId);
+          supervisor?.noteAnomaly(execution.workId);
         }
       }
     } catch {
@@ -3162,19 +3184,20 @@ export class StandaloneService {
           // Keep the writer held if the uncertainty update fails too.
         }
       const workId = waiter?.workId ?? record?.requestingWorkId;
-      const execution = workId ? this.state?.byWorkId(workId) : undefined;
-      if (execution) {
-        this.retractWriterAndSuccessors(
+      const execution = workId ? state?.byWorkId(workId) : undefined;
+      if (state && execution) {
+        retractWriterAndSuccessors(
+          state,
           execution,
           "Native receipt could not be durably committed",
         );
-        this.supervisor?.noteAnomaly(execution.workId);
+        supervisor?.noteAnomaly(execution.workId);
       }
     }
   }
   private runtimeAnswerEligibility(question: RuntimeQuestionRecord): string[] {
-    const state = this.requireState(),
-      runtime = this.runtimeForWork(question.requestingWorkId),
+    const state = this.started().state,
+      runtime = this.runtimeForWork(state, question.requestingWorkId),
       domain = this.domain();
     const reasons: string[] = [
       ...domain.admission(question.taskId, false).reasons,
@@ -3220,7 +3243,7 @@ export class StandaloneService {
     if (state.stopTarget(question.requestingWorkId))
       reasons.push("task-stopped");
     if (state.powerAdmissionState().held) reasons.push("power-held");
-    if (this.supervisor?.hasKnownRisk(question.requestingWorkId))
+    if (this.current?.supervisor.hasKnownRisk(question.requestingWorkId))
       reasons.push("known-execution-risk");
     if (
       state.hasCompetingTaskExecution(
@@ -3238,7 +3261,7 @@ export class StandaloneService {
       this.flushRuntimeAnswersFor(runtime);
   }
   private flushRuntimeAnswersFor(runtime: Runtime): void {
-    const coordination = this.coordination;
+    const coordination = this.current?.coordination;
     const runtimeGeneration = runtime.currentUserInputGeneration?.();
     if (!coordination || !runtimeGeneration || !runtime.replyUserInput) return;
     let cursor = "";
@@ -3252,7 +3275,12 @@ export class StandaloneService {
         cursor = question.interactionId;
         // Generations are not unique across harnesses: reply only through the
         // runtime the question's work is bound to; its own flush delivers it.
-        if (this.runtimeForWork(question.requestingWorkId) !== runtime)
+        if (
+          this.runtimeForWork(
+            this.started().state,
+            question.requestingWorkId,
+          ) !== runtime
+        )
           continue;
         if (
           !question.answers ||
@@ -3288,10 +3316,11 @@ export class StandaloneService {
             },
           )
           .catch(() => {
-            const current = this.coordination?.runtimeQuestionByInteractionId(
-              question.interactionId,
-              question.taskId,
-            );
+            const current =
+              this.current?.coordination.runtimeQuestionByInteractionId(
+                question.interactionId,
+                question.taskId,
+              );
             if (
               current?.replyIntentId &&
               [...this.runtimes.values()].includes(runtime)
@@ -3307,8 +3336,7 @@ export class StandaloneService {
   }
 
   private handleToolCall(call: RuntimeToolCall): Promise<RuntimeToolResult> {
-    const coordination = this.coordination;
-    const state = this.state;
+    const { coordination, state } = this.current ?? {};
     if (!coordination || !state || !isCoordinationTool(call.tool))
       return Promise.resolve({
         text: "Coordination tool is unavailable for this execution",
@@ -3354,7 +3382,7 @@ export class StandaloneService {
         if (call.tool === "ensemble_external_action") {
           const caller = coordination.deliveryCaller(call as CoordinationCall);
           capturedDeliveryCaller = caller;
-          const result = await this.requireDeliveryCoordinator().submit(
+          const result = await this.started().deliveryCoordinator.submit(
             call.arguments,
             caller,
           );
@@ -3362,7 +3390,7 @@ export class StandaloneService {
             result.state === "confirmed-success" &&
             result.request.action.kind.startsWith("pr.")
           )
-            await this.requireDeliveryCoordinator().refresh();
+            await this.started().deliveryCoordinator.refresh();
           if (
             result.state === "confirmed-success" &&
             (result.request.action.kind === "pr.merge" ||
@@ -3383,7 +3411,7 @@ export class StandaloneService {
         if (call.tool === "ensemble_register_pr") {
           const caller = coordination.deliveryCaller(call as CoordinationCall);
           capturedDeliveryCaller = caller;
-          const result = await this.requireDeliveryCoordinator().registerPr(
+          const result = await this.started().deliveryCoordinator.registerPr(
             call.arguments,
             caller,
           );
@@ -3536,7 +3564,7 @@ export class StandaloneService {
     const assignment = domain.assignment(assignmentId);
     const taskId = String(assignment.taskId);
     const task = domain.task(taskId);
-    this.requireSchedulerStore().ensure({
+    this.started().schedulerStore.ensure({
       requestKey: `task:${workId}`,
       workId,
       kind: "assignment",
@@ -3563,7 +3591,7 @@ export class StandaloneService {
   ): Promise<ExecutionIntent> {
     const workspaceKey = this.validateDirectWorkspace(workspace);
     if (previousWorkId) {
-      const previous = this.requireState().byWorkId(previousWorkId);
+      const previous = this.started().state.byWorkId(previousWorkId);
       if (
         previous?.state !== "completed" ||
         !previous.threadId ||
@@ -3573,7 +3601,7 @@ export class StandaloneService {
           "Previous work is not a completed binding in this workspace",
         );
     }
-    this.requireSchedulerStore().ensure({
+    this.started().schedulerStore.ensure({
       requestKey: `direct:${workId}`,
       workId,
       kind: "direct",
@@ -3588,7 +3616,7 @@ export class StandaloneService {
       workspace: workspaceKey,
       previousWorkId: previousWorkId ?? null,
     });
-    this.requireState().create(workId, prompt, workspaceKey, previousWorkId);
+    this.started().state.create(workId, prompt, workspaceKey, previousWorkId);
     return this.dispatchAndRead(workId);
   }
 
@@ -3596,7 +3624,7 @@ export class StandaloneService {
     await this.wakeScheduler();
     const active = this.activeByWorkId.get(workId);
     if (active) return active;
-    const intent = this.requireState().byWorkId(workId);
+    const intent = this.started().state.byWorkId(workId);
     if (intent) return intent;
     throw new Error("Turn request is queued until its task workspace is ready");
   }
@@ -3646,23 +3674,18 @@ export class StandaloneService {
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
       return;
-    const scheduler = this.scheduler;
-    const store = this.schedulerStore;
-    const domain = this.domainState;
-    const state = this.state;
-    const coordination = this.coordination;
-    const routingAttempts = this.routingAttempts;
-    const queries = this.wakeQueries;
-    if (
-      !scheduler ||
-      !store ||
-      !domain ||
-      !state ||
-      !coordination ||
-      !routingAttempts ||
-      !queries
-    )
-      return;
+    // Unpublished during start-up, so start-up wakes cannot admit work.
+    if (!this.current) return;
+    const {
+      scheduler,
+      schedulerStore: store,
+      domain,
+      state,
+      coordination,
+      routingAttempts,
+      wakeQueries: queries,
+      inboxStartup,
+    } = this.current;
     this.flushRuntimeAnswers();
     const deliveryWorkCompleted = (delivery: InboxDelivery): boolean => {
       const intent = state.byWorkId(delivery.deliveryWorkId);
@@ -4135,7 +4158,7 @@ export class StandaloneService {
         { requestKey: repair.repairWorkId, workId: repair.repairWorkId },
       );
     }
-    for (const queued of store.queued()) this.inboxStartup?.capture(queued);
+    for (const queued of store.queued()) inboxStartup.capture(queued);
     if (this.generation !== generation || !generation.accepting) return;
     await scheduler.wake();
     if (refusalRebindPass === 0 && withdrawStaleRefusedDeliveries() > 0)
@@ -4167,7 +4190,7 @@ export class StandaloneService {
     )
       return [{ name: "request", text: request.prompt }];
 
-    const state = this.requireState();
+    const state = this.started().state;
     const domain = this.domain();
     const binding = state.taskBinding(request.workId);
     if (
@@ -4256,8 +4279,8 @@ export class StandaloneService {
   ): Promise<void> {
     if (!generation || this.generation !== generation || !generation.accepting)
       return;
-    const state = this.requireState();
-    const store = this.requireSchedulerStore();
+    const state = this.started().state;
+    const store = this.started().schedulerStore;
     let workspaceKey: string;
     let context: TaskExecutionContext | undefined;
     let validateAssignment: (() => string[]) | undefined;
@@ -4266,13 +4289,13 @@ export class StandaloneService {
         // Initial local tasks need no repository grant. Existing bindings,
         // including held/missing workspaces, remain the recovery authority.
         if (
-          !this.workspaceBindings?.get(request.taskId) &&
+          !this.current?.workspaceBindings.get(request.taskId) &&
           !this.domain().importedTask(request.taskId) &&
           !state.taskHold(request.taskId) &&
           !state.hasTaskWorkspaceEvidence(request.taskId)
         )
-          await this.requireWorkspaces().provision(request.taskId, []);
-        const binding = await this.requireWorkspaces().forExecution(
+          await this.started().workspaces.provision(request.taskId, []);
+        const binding = await this.started().workspaces.forExecution(
           request.taskId,
         );
         workspaceKey = realpathSync(binding.path);
@@ -4314,13 +4337,16 @@ export class StandaloneService {
             profileRevision,
           }).reasons;
           if (
-            this.requireSchedulerStore()
-              .heldWorkIds(assignmentId, request.workId)
+            this.started()
+              .schedulerStore.heldWorkIds(assignmentId, request.workId)
               .some(
                 (olderWorkId) =>
-                  this.coordination?.recoveryDispositionForWork(olderWorkId) ===
-                    "operator-reconciled" &&
-                  !this.coordination.hasRecoveryContinuation(olderWorkId),
+                  this.current?.coordination.recoveryDispositionForWork(
+                    olderWorkId,
+                  ) === "operator-reconciled" &&
+                  !this.current.coordination.hasRecoveryContinuation(
+                    olderWorkId,
+                  ),
               )
           )
             reasons.push("recovery-continuation-unresolved");
@@ -4491,7 +4517,7 @@ export class StandaloneService {
       }
       // A sleep/wake during a turn that ended before now must be observed
       // first. No await may separate this check from state.begin.
-      const power = this.power;
+      const power = this.current?.power;
       if (power && !power.observedForAdmission()) {
         const reason = "Waiting for power-event observation";
         state.wait(intent.id, reason);
@@ -4562,7 +4588,7 @@ export class StandaloneService {
     workspace: string,
     previous?: ExecutionIntent,
   ): void {
-    const power = this.power;
+    const power = this.current?.power;
     const generation = this.generation;
     const action = (async () => {
       try {
@@ -4599,8 +4625,8 @@ export class StandaloneService {
     previous?: ExecutionIntent,
     generation?: ServiceGeneration,
   ): Promise<ExecutionIntent> {
-    const state = this.requireState();
-    const harness = this.harnessForWork(request.workId);
+    const state = this.started().state;
+    const harness = harnessForWork(state, request.workId);
     const runtime = this.runtimes.get(harness);
     if (!runtime) throw new Error("Runtime unavailable");
     // Shutdown settles active work, so a failed runtime must not leave it pending.
@@ -4611,7 +4637,7 @@ export class StandaloneService {
     let turnCapture: WorkspaceTurnCaptureRecord | undefined;
     let conversationCapture: ConversationHistoryCapture | undefined;
     let diagnostics: ExecutionDiagnosticsCapture | undefined;
-    const comparisonStore = this.workspaceComparisons;
+    const comparisonStore = this.current?.workspaceComparisons;
     if (
       comparisonStore &&
       request.kind === "assignment" &&
@@ -4687,7 +4713,7 @@ export class StandaloneService {
       }
       submissionStage = "bound";
       const threadBound = state.bindThread(intent.id, threadId);
-      this.requireSupervisor().threadBound(request.workId, threadId);
+      this.started().supervisor.threadBound(request.workId, threadId);
       if (!threadBound) throw new Error("Thread binding was held or changed");
       captureThreadId = threadId;
       if (state.get(intent.id).state !== "submitting")
@@ -4759,7 +4785,9 @@ export class StandaloneService {
             ).every((key) => binding[key] === proof[key]);
           const rejectedQuestions = bindingMatchesProof
             ? (
-                this.coordination?.runtimeQuestionsForWork(request.workId) ?? []
+                this.current?.coordination.runtimeQuestionsForWork(
+                  request.workId,
+                ) ?? []
               ).filter(
                 (question) =>
                   question.requestingWorkId === proof.workId &&
@@ -4782,9 +4810,10 @@ export class StandaloneService {
               question.identity,
               "Native prebinding rejected",
             );
-            const current = this.coordination?.runtimeQuestionByEndpoint(
-              question.identity,
-            );
+            const current =
+              this.current?.coordination.runtimeQuestionByEndpoint(
+                question.identity,
+              );
             if (
               current &&
               !["confirmed", "uncertain", "unavailable"].includes(
@@ -4806,7 +4835,7 @@ export class StandaloneService {
         }
       }
       if (!nativeRejected)
-        this.requireSupervisor().turnBound(request.workId, threadId, turnId);
+        this.started().supervisor.turnBound(request.workId, threadId, turnId);
       if (turnBound) {
         diagnostics?.bind(turnId);
         diagnostics?.add(serviceItem("turn-bound", "info", { turnId }));
@@ -4855,7 +4884,7 @@ export class StandaloneService {
           runtimeKey(harness, threadId),
           conversationCapture,
         );
-      this.requireSupervisor().terminalObserved(
+      this.started().supervisor.terminalObserved(
         request.workId,
         threadId,
         turnId,
@@ -4906,7 +4935,7 @@ export class StandaloneService {
         state.complete(intent.id, threadId, turnId);
         if (turnCapture?.comparison) this.finishTurnCapture(turnCapture);
         this.lastCompletedWorkId.set(harness, request.workId);
-        const coordination = this.coordination;
+        const coordination = this.current?.coordination;
         const binding = state.taskBinding(request.workId);
         if (coordination) {
           const delivery = coordination.deliveryForWork(request.workId);
@@ -4949,7 +4978,7 @@ export class StandaloneService {
           evidence.harnessRetries !== null &&
           harnessRetrySupported(harness) &&
           callbacksEnded &&
-          !this.requireSupervisor().hasKnownRisk(request.workId) &&
+          !this.started().supervisor.hasKnownRisk(request.workId) &&
           !state.stopTarget(request.workId) &&
           identity?.threadId === threadId &&
           identity.turnId === turnId &&
@@ -5061,8 +5090,7 @@ export class StandaloneService {
     threadId: string,
   ): ConversationHistoryCapture | undefined {
     try {
-      const history = this.conversationHistory;
-      const state = this.state;
+      const { conversationHistory: history, state } = this.current ?? {};
       if (!history || !state || !request.taskId) return undefined;
       const binding = state.taskBinding(request.workId);
       if (!binding || binding.taskId !== request.taskId) return undefined;
@@ -5089,7 +5117,7 @@ export class StandaloneService {
 
   /** Diagnostic store for operator reads; undefined until started or when unavailable. */
   executionDiagnostics(): ExecutionDiagnosticsStore | undefined {
-    return this.diagnosticsStore;
+    return this.current?.diagnostics;
   }
 
   /**
@@ -5105,8 +5133,8 @@ export class StandaloneService {
     threadId: string,
   ): ExecutionDiagnosticsCapture | undefined {
     try {
-      const store = this.diagnosticsStore;
-      const binding = this.state?.taskBinding(request.workId);
+      const store = this.current?.diagnostics;
+      const binding = this.current?.state.taskBinding(request.workId);
       if (!store || !binding || !request.projectId) return undefined;
       const domain = this.domain();
       const mode = domain.diagnosticCaptureMode(request.projectId);
@@ -5238,7 +5266,7 @@ export class StandaloneService {
     prompt: string,
   ): void {
     try {
-      const binding = this.requireState().taskBinding(request.workId);
+      const binding = this.started().state.taskBinding(request.workId);
       if (!binding) throw new Error("Execution binding unavailable");
       const general = capture.exclusions;
       const domain = this.domain();
@@ -5397,9 +5425,7 @@ export class StandaloneService {
     beforeOmissionSequence?: number,
     limit = 200,
   ): ConversationHistoryAssignmentRead {
-    const history = this.conversationHistory;
-    if (!history) throw new Error("Service is not started");
-    return history.readAssignment(
+    return this.started().conversationHistory.readAssignment(
       taskId,
       assignmentId,
       limit,
@@ -5415,7 +5441,7 @@ export class StandaloneService {
     revisions?: { profileRevision: number; instructionsRevision: number },
     additionalPaths: readonly string[] = [],
   ): readonly string[] | undefined {
-    const domain = this.domainState;
+    const domain = this.current?.domain;
     if (!domain) return undefined;
     try {
       const assignment = domain.assignment(assignmentId);
@@ -5434,7 +5460,7 @@ export class StandaloneService {
       const claudeRef = domain.claudeTokenReference();
       const fixtureValues =
         this.options.conversationHistoryExclusions?.() ?? [];
-      const workspace = this.workspaceBindings?.get(taskId);
+      const workspace = this.current?.workspaceBindings.get(taskId);
       const managedPaths = workspace
         ? [
             workspace.path,
@@ -5467,7 +5493,7 @@ export class StandaloneService {
           const id = String(p.id);
           return [
             domain.routingCredentialReference(id),
-            this.deliveryStore?.configuration(id).credentialRef,
+            this.current?.deliveryStore.configuration(id).credentialRef,
           ].flatMap((ref) =>
             ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],
           );
@@ -5493,23 +5519,8 @@ export class StandaloneService {
     return workspaceKey;
   }
 
-  private requireSchedulerStore(): SchedulerStore {
-    if (!this.schedulerStore) throw new Error("Service is not started");
-    return this.schedulerStore;
-  }
-
-  private requireSupervisor(): ExecutionSupervisor {
-    if (!this.supervisor) throw new Error("Service is not started");
-    return this.supervisor;
-  }
-
-  private requireState(): ExecutionState {
-    if (!this.state) throw new Error("Service is not started");
-    return this.state;
-  }
-
-  private requireWorkspaces(): WorkspaceManager {
-    if (!this.workspaces) throw new Error("Service is not started");
-    return this.workspaces;
+  private started(): Started {
+    if (!this.current) throw new Error("Service is not started");
+    return this.current;
   }
 }

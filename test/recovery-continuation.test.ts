@@ -7,8 +7,6 @@ import { tmpdir } from "./temp.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import { coordinationOperatorRoutes } from "../src/standalone/operator-coordination.js";
-import type { CoordinationStore } from "../src/core/coordination.js";
-import type { ExecutionState } from "../src/standalone/state.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -27,6 +25,7 @@ import {
   ArchivedResumeRejectedError,
   archivedResumeMessage,
 } from "../src/standalone/pre-turn-recovery.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 function deferred() {
   let resolve!: () => void;
@@ -111,10 +110,9 @@ class RecoveryContinuationRuntime implements Runtime {
   }
 }
 function internals(service: StandaloneService) {
-  return service as unknown as {
-    db: DatabaseSync;
-    state: ExecutionState;
-    coordination: CoordinationStore;
+  return {
+    db: (service as unknown as { db: DatabaseSync }).db,
+    ...startedOf(service),
   };
 }
 function command(service: StandaloneService, body: Record<string, unknown>) {
@@ -484,9 +482,7 @@ test("an invalidated recovery continuation keeps the successor waiting without s
     ).run(f.old.workId);
     assert.equal(coordination.hasRecoveryContinuation(f.old.workId), false);
     const { state } = internals(f.service);
-    const store = (
-      f.service as unknown as { schedulerStore: { list(): unknown[] } }
-    ).schedulerStore;
+    const store = startedOf(f.service).schedulerStore;
     const begin = state.begin.bind(state);
     const list = store.list.bind(store);
     let admitting = false;

@@ -32,6 +32,7 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -2160,12 +2161,7 @@ test("restart leaves legacy inbox events for a completed recipient undelivered",
         .messages.find((item) => item.eventId === legacyEventId)?.deliveryState,
       "pending",
     );
-    assert.equal(
-      (
-        service as unknown as { coordination: CoordinationStore }
-      ).coordination.queuedDeliveries().length,
-      0,
-    );
+    assert.equal(startedOf(service).coordination.queuedDeliveries().length, 0);
   } finally {
     if (running) await service.stop();
     rmSync(root, { recursive: true, force: true });
@@ -2394,9 +2390,7 @@ test("completion rejection is final for one lead generation; a fresh turn can co
       /^Completion rejected:/,
     );
 
-    const coordination = (
-      service as unknown as { coordination: CoordinationStore }
-    ).coordination;
+    const coordination = startedOf(service).coordination;
     const rejectedReplay = coordination.finalizeTaskCompletion({
       requestId: rejectedRequestId,
       workId: leadWorkId,
@@ -2605,8 +2599,7 @@ test("restart acknowledges the exact lead inbox batch before finalizing a comple
       .find((item) => item.turnId === "turn-1")?.workId;
     assert.ok(workId);
 
-    coordination = (service as unknown as { coordination: CoordinationStore })
-      .coordination;
+    coordination = startedOf(service).coordination;
     originalFinalizer = coordination.finalizeTaskCompletion.bind(coordination);
     const completeDelivery =
       coordination.completeDeliveryBatch.bind(coordination);
@@ -2700,9 +2693,7 @@ test("restart acknowledges the exact lead inbox batch before finalizing a comple
       CoordinationStore.prototype.finalizeTaskCompletion =
         originalPrototypeFinalizer;
     }
-    const afterBatchAcknowledgement = (
-      service as unknown as { coordination: CoordinationStore }
-    ).coordination;
+    const afterBatchAcknowledgement = startedOf(service).coordination;
     assert.equal(
       afterBatchAcknowledgement.deliveryForWork(workId)?.state,
       "completed",
@@ -2863,9 +2854,7 @@ test("a result-free turn gets one durable reporting repair then holds", async ()
     );
     await new Promise<void>((resolve) => setTimeout(resolve, 20));
     assert.equal(runtime.turns, 2);
-    const repairs = (
-      service as unknown as { coordination: CoordinationStore }
-    ).coordination.reportingRepairs();
+    const repairs = startedOf(service).coordination.reportingRepairs();
     assert.equal(repairs.length, 1);
     assert.equal(repairs[0]?.attempts, 2);
     assert.equal(repairs[0]?.state, "held");
