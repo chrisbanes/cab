@@ -167,9 +167,10 @@ export function ReadyCheck({
               ))}
             </ul>
             <p className="metadata muted">
-              Links open in a new tab. Fix the item, then check again here. If
-              you leave this page, resume later with the Pause project switch in
-              project configuration.
+              {items.some((item) => item.link) && "Links open in a new tab. "}
+              Fix the item, then check again here. If you leave this page,
+              resume later with the Pause project switch in project
+              configuration.
             </p>
             <div>
               <Button
@@ -179,7 +180,7 @@ export function ReadyCheck({
                   void readiness.refresh();
                   void options.refresh();
                   p.refresh();
-                  // The button leaves while a failed read starts again, so focus moves to the result.
+                  // The result takes focus: the button leaves when a failed read starts again.
                   waitsRoot.current?.focus();
                 }}
               >

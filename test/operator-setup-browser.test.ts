@@ -1034,6 +1034,20 @@ test("Setup blocks Resume for a Claude lead whose model or effort the runtime re
     sent.some((c) => c.type === "project.configure"),
     false,
   );
+  // Fixing the profile elsewhere clears the item only through the workspace re-read.
+  f.service.domain().execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    expectedVersion: 1,
+    runtime: { harness: "claude", model: "sonnet", reasoningEffort: "high" },
+  } as never);
+  await ready.getByRole("button", { name: "Check again", exact: true }).click();
+  await ready
+    .getByRole("link", { name: "Edit profile", exact: true })
+    .waitFor({ state: "detached" });
+  await resume.click({ trial: true });
 });
 
 test("Setup keeps the project paused when the operator chooses Keep paused", async (_t, journey) => {
