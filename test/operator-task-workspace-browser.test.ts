@@ -16,6 +16,9 @@ import {
 } from "../web/src/lead-feedback.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 const test = browserSuite("ui04-workspace");
+/** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
+const serviceWords =
+  /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
 test("production workspace retains literal history, pending request, focused reply and exact result through updates and failed reads on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -488,34 +491,61 @@ test("production workspace retains literal history, pending request, focused rep
   await page
     .getByRole("button", { name: "Send to task lead", exact: true })
     .click();
-  await page.getByText(/unknown: command-outcome-unknown/).waitFor();
-  assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
-  await page
-    .getByRole("button", { name: "Set viewing reference", exact: true })
-    .click();
-  await page
-    .getByText("Observation / review receipt recorded", { exact: true })
+  // One warning, in plain words: the draft is kept, the code is only in Details, and the
+  // single action is the exact-request check.
+  const outcome = page.locator("[data-slot=action-outcome]");
+  await outcome
+    .getByText("We couldn't confirm it was sent. Your draft is kept.")
     .waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.equal(await outcome.getByRole("button").count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  assert.equal(
+    await page.getByRole("button", { name: "Send to task lead" }).count(),
+    0,
+  );
+  assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
+  await outcome.getByText("Details", { exact: true }).click();
+  const fields = await outcome.locator("dl").innerText();
+  assert.match(fields, /Command\s+message/);
+  assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
+  assert.match(fields, /Code\s+command-outcome-unknown/);
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/operator/commands") &&
+        (r.request().postData() ?? "").includes("review.view"),
+    ),
+    page
+      .getByRole("button", { name: "Set viewing reference", exact: true })
+      .click(),
+  ]);
+  // A different action's outcome never replaces an unknown reply outcome.
+  await outcome.waitFor();
+  assert.equal(await outcome.count(), 1);
   assert.ok(
     await page
-      .getByRole("button", {
-        name: "Reconcile original operation",
-        exact: true,
-      })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .isEnabled(),
   );
-  await page
-    .getByRole("button", { name: "Refresh delivery observation", exact: true })
-    .click();
-  await page
-    .getByText("Observation / review receipt recorded", { exact: true })
-    .waitFor();
-  assert.ok(
-    await page
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/operator/commands") &&
+        (r.request().postData() ?? "").includes("delivery.refresh"),
+    ),
+    page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Refresh delivery observation",
         exact: true,
       })
+      .click(),
+  ]);
+  await outcome.waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.ok(
+    await page
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .isEnabled(),
   );
   await page.getByLabel("Editable reply").scrollIntoViewIfNeeded();
@@ -523,9 +553,13 @@ test("production workspace retains literal history, pending request, focused rep
     fullPage: false,
   });
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
-  await page.getByText("Receipt recorded", { exact: true }).waitFor();
+  await page.getByText("Sent to Task lead.", { exact: true }).waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  assert.match(await outcome.locator("dl").innerText(), /Kind\s+coordination/);
   assert.equal(replyRequests.length, 2);
   assert.equal(replyRequests[0], replyRequests[1]);
   assert.equal(f.service.domain().task(a.taskId).version, taskBefore);

@@ -3,6 +3,7 @@ import type {
   OperatorCommand,
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
+import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
   workspaceDirectoryReadSchema,
@@ -137,6 +138,13 @@ export class TaskChangesState {
   readingScrollTop = 0;
 }
 
+/** The one message a reply or comment review leaves behind, with its receipt fields. */
+export type ReplyOutcome = {
+  tone: OutcomeTone;
+  message: string;
+  details: readonly OutcomeField[];
+};
+
 class TaskReplyState {
   sourceObservation: "known" | "pending" | "unknown" = "known";
   sourceRefreshFailed = false;
@@ -150,23 +158,16 @@ class TaskReplyState {
   destination: "lead" | "github" = "lead";
   reference: FeedbackReference | undefined;
   frozen: OperatorCommand | null = null;
-  private receipts: {
-    lead: CommandReceipt | null;
-    github: CommandReceipt | null;
-  } = { lead: null, github: null };
-  get receipt() {
-    return this.receipts[this.destination];
-  }
-  set receipt(value: CommandReceipt | null) {
-    this.receipts[this.destination] = value;
-  }
   commentReview: Extract<CommandReceipt, { kind: "comment-review" }> | null =
     null;
-  private notices = { lead: "", github: "" };
+  private notices: Record<"lead" | "github", ReplyOutcome | null> = {
+    lead: null,
+    github: null,
+  };
   get notice() {
     return this.notices[this.destination];
   }
-  set notice(value: string) {
+  set notice(value: ReplyOutcome | null) {
     this.notices[this.destination] = value;
   }
   uncertain = false;
@@ -289,12 +290,6 @@ export class TaskWorkspaceState {
   }
   set frozen(value: TaskReplyState["frozen"]) {
     this.reply.frozen = value;
-  }
-  get receipt() {
-    return this.reply.receipt;
-  }
-  set receipt(value: TaskReplyState["receipt"]) {
-    this.reply.receipt = value;
   }
   get commentReview() {
     return this.reply.commentReview;
