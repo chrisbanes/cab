@@ -1,4 +1,4 @@
-import { test as nodeTest } from "node:test";
+import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { access } from "node:fs/promises";
@@ -624,7 +624,7 @@ test("React shell Inbox poll surfaces a runtime failure on its own", async (_t, 
   await banner.waitFor();
 });
 
-nodeTest(
+browserTest(
   "failed browser assertion surfaces without listener/client cleanup deadlock",
   {
     timeout: 20000,

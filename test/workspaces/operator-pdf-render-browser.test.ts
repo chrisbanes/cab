@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { test } from "node:test";
+import { browserTest as test } from "../fixtures/browser-engines.js";
 import { chromium, type Browser } from "playwright";
 import { build } from "vite";
 import { tmpdir } from "../fixtures/temp.js";

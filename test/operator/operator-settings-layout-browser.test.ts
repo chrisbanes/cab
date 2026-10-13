@@ -133,12 +133,16 @@ test("Settings index is one column with 44px targets on a phone", async (_t, jou
   await captureBrowserEvidence(page, "390-settings");
 });
 
-test("Settings index renders in WebKit", async (_t, journey) => {
-  const { page } = await startSettings(
-    journey,
-    "/app/settings",
-    undefined,
-    () => webkit.launch(),
-  );
-  await page.getByText("3 projects · 1 paused", { exact: false }).waitFor();
-});
+test(
+  "Settings index renders in WebKit",
+  { browserEngine: "webkit" },
+  async (_t, journey) => {
+    const { page } = await startSettings(
+      journey,
+      "/app/settings",
+      undefined,
+      () => webkit.launch(),
+    );
+    await page.getByText("3 projects · 1 paused", { exact: false }).waitFor();
+  },
+);

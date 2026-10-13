@@ -1,3 +1,4 @@
+import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,165 +9,171 @@ import { runBrowserJourney } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { tmpdir } from "../fixtures/temp.js";
 
-test("timed-out execution preserves a live client and writes sanitized bounded diagnostics", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-browser-diagnostics-"));
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  const secret = "SYNTHETIC_SECRET_MUST_NOT_BE_ARTIFACTED";
-  let finish!: () => void;
-  let cleanups = 0;
-  let callbackFinished!: () => void;
-  const callbackDone = new Promise<void>((resolve) => {
-    callbackFinished = resolve;
-  });
-  let guardian: ReturnType<typeof setTimeout> | number | undefined;
-  // Generous overall headroom keeps slow setup under load from shrinking the execution limit under test.
-  const executionMs = 500;
-  const overallMs = 3000;
-  const started = performance.now();
-  const pending = runBrowserJourney(
-    "diagnostics",
-    "synthetic stalled action",
-    async (journey) => {
-      journey.observe(page);
-      journey.cleanup(async () => {
-        cleanups++;
-        await browser.close();
-      });
-      const pageError = page.waitForEvent("pageerror");
-      await page.evaluate((marker) => {
-        console.error(`fixture-console-error ${marker}`);
-        setTimeout(() => {
-          throw new TypeError(`fixture-page-error ${marker}`);
-        }, 0);
-      }, secret);
-      await pageError;
-      await new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-      assert.equal(await journey.capture(page, "late-screenshot"), undefined);
-      callbackFinished();
-    },
-    {
-      executionMs,
-      overallMs,
-      cleanupStepMs: 100,
-      evidenceRoot: root,
-    },
-  );
-  try {
-    const failure = await Promise.race([
-      pending.then(
-        () => undefined,
-        (error: unknown) => error,
-      ),
-      new Promise<undefined>((resolve) => {
-        guardian = setTimeout(resolve, overallMs + 1000);
-      }),
-    ]);
-    assert.ok(
-      failure instanceof Error,
-      "Journey must stop waiting at its own deadline",
-    );
-    assert.match(failure.message, /execution.*timed-out.*\d+ ms/);
-    assert.ok(performance.now() - started < overallMs);
-    assert.equal(cleanups, 0);
-    assert.equal(browser.isConnected(), true);
-    const directory = (failure as Error & { evidenceDirectory: string })
-      .evidenceDirectory;
-    const manifest = await readFile(join(directory, "manifest.json"), "utf8");
-    assert.doesNotMatch(manifest, new RegExp(secret));
-    const evidence = JSON.parse(manifest);
-    assert.equal(evidence.phases.execution.status, "timed-out");
-    assert.ok(evidence.phases.execution.elapsedMs >= executionMs - 1);
-    assert.equal(evidence.cleanup.incomplete, true);
-    assert.equal(evidence.cleanup.steps[0].status, "dependency-skipped");
-    assert.match(manifest, /console-error|pageerror-TypeError/);
-    finish();
-    await callbackDone;
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    const phases = (
-      failure as Error & {
-        phases?: {
-          execution: { status: string; eventual?: { status: string } };
-        };
-      }
-    ).phases;
-    assert.ok(
-      phases,
-      "The underlying operation outcome must remain observable",
-    );
-    assert.equal(phases?.execution.status, "timed-out");
-    assert.equal(phases.execution.eventual?.status, "completed");
-    assert.equal(
-      await readFile(join(directory, "manifest.json"), "utf8"),
-      manifest,
-    );
-    assert.equal(
-      (await readdir(directory)).includes("late-screenshot.png"),
-      false,
-    );
-    assert.equal(cleanups, 0);
-  } finally {
-    clearTimeout(guardian);
-    finish?.();
-    await pending.catch(() => {});
-    await browser.close();
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("screenshot failure remains secondary and a non-diagnostic root is rejected", async () => {
-  const root = await mkdtemp(join(tmpdir(), "ensemble-screenshot-failure-"));
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  await page.close();
-  const original = Error("Original assertion after screenshot failure");
-  try {
-    await assert.rejects(
-      runBrowserJourney(
-        "diagnostics",
-        "closed synthetic page",
-        async (journey) => {
-          await journey.capture(page, "closed-page");
-          throw original;
-        },
-        { evidenceRoot: root },
-      ),
-      (error: unknown) => {
-        assert.equal(error, original);
-        assert.ok(original.cause instanceof AggregateError);
-        assert.match(
-          String(original.cause.errors[1]),
-          /evidence.screenshot: failed/,
-        );
-        return true;
+browserTest(
+  "timed-out execution preserves a live client and writes sanitized bounded diagnostics",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "ensemble-browser-diagnostics-"));
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    const secret = "SYNTHETIC_SECRET_MUST_NOT_BE_ARTIFACTED";
+    let finish!: () => void;
+    let cleanups = 0;
+    let callbackFinished!: () => void;
+    const callbackDone = new Promise<void>((resolve) => {
+      callbackFinished = resolve;
+    });
+    let guardian: ReturnType<typeof setTimeout> | number | undefined;
+    // Generous overall headroom keeps slow setup under load from shrinking the execution limit under test.
+    const executionMs = 500;
+    const overallMs = 3000;
+    const started = performance.now();
+    const pending = runBrowserJourney(
+      "diagnostics",
+      "synthetic stalled action",
+      async (journey) => {
+        journey.observe(page);
+        journey.cleanup(async () => {
+          cleanups++;
+          await browser.close();
+        });
+        const pageError = page.waitForEvent("pageerror");
+        await page.evaluate((marker) => {
+          console.error(`fixture-console-error ${marker}`);
+          setTimeout(() => {
+            throw new TypeError(`fixture-page-error ${marker}`);
+          }, 0);
+        }, secret);
+        await pageError;
+        await new Promise<void>((resolve) => {
+          finish = resolve;
+        });
+        assert.equal(await journey.capture(page, "late-screenshot"), undefined);
+        callbackFinished();
+      },
+      {
+        executionMs,
+        overallMs,
+        cleanupStepMs: 100,
+        evidenceRoot: root,
       },
     );
-    const privateRoot = await mkdtemp(join(root, "fixture-"));
-    await writeFile(
-      join(privateRoot, "private-fixture.sqlite"),
-      "SYNTHETIC_PRIVATE_FIXTURE",
-    );
-    let ran = false;
-    await assert.rejects(
-      runBrowserJourney(
-        "diagnostics",
-        "unowned root",
-        async () => {
-          ran = true;
+    try {
+      const failure = await Promise.race([
+        pending.then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+        new Promise<undefined>((resolve) => {
+          guardian = setTimeout(resolve, overallMs + 1000);
+        }),
+      ]);
+      assert.ok(
+        failure instanceof Error,
+        "Journey must stop waiting at its own deadline",
+      );
+      assert.match(failure.message, /execution.*timed-out.*\d+ ms/);
+      assert.ok(performance.now() - started < overallMs);
+      assert.equal(cleanups, 0);
+      assert.equal(browser.isConnected(), true);
+      const directory = (failure as Error & { evidenceDirectory: string })
+        .evidenceDirectory;
+      const manifest = await readFile(join(directory, "manifest.json"), "utf8");
+      assert.doesNotMatch(manifest, new RegExp(secret));
+      const evidence = JSON.parse(manifest);
+      assert.equal(evidence.phases.execution.status, "timed-out");
+      assert.ok(evidence.phases.execution.elapsedMs >= executionMs - 1);
+      assert.equal(evidence.cleanup.incomplete, true);
+      assert.equal(evidence.cleanup.steps[0].status, "dependency-skipped");
+      assert.match(manifest, /console-error|pageerror-TypeError/);
+      finish();
+      await callbackDone;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const phases = (
+        failure as Error & {
+          phases?: {
+            execution: { status: string; eventual?: { status: string } };
+          };
+        }
+      ).phases;
+      assert.ok(
+        phases,
+        "The underlying operation outcome must remain observable",
+      );
+      assert.equal(phases?.execution.status, "timed-out");
+      assert.equal(phases.execution.eventual?.status, "completed");
+      assert.equal(
+        await readFile(join(directory, "manifest.json"), "utf8"),
+        manifest,
+      );
+      assert.equal(
+        (await readdir(directory)).includes("late-screenshot.png"),
+        false,
+      );
+      assert.equal(cleanups, 0);
+    } finally {
+      clearTimeout(guardian);
+      finish?.();
+      await pending.catch(() => {});
+      await browser.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
+browserTest(
+  "screenshot failure remains secondary and a non-diagnostic root is rejected",
+  async () => {
+    const root = await mkdtemp(join(tmpdir(), "ensemble-screenshot-failure-"));
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    await page.close();
+    const original = Error("Original assertion after screenshot failure");
+    try {
+      await assert.rejects(
+        runBrowserJourney(
+          "diagnostics",
+          "closed synthetic page",
+          async (journey) => {
+            await journey.capture(page, "closed-page");
+            throw original;
+          },
+          { evidenceRoot: root },
+        ),
+        (error: unknown) => {
+          assert.equal(error, original);
+          assert.ok(original.cause instanceof AggregateError);
+          assert.match(
+            String(original.cause.errors[1]),
+            /evidence.screenshot: failed/,
+          );
+          return true;
         },
-        { evidenceRoot: privateRoot },
-      ),
-      /dedicated to test diagnostics/,
-    );
-    assert.equal(ran, false);
-    assert.deepEqual(await readdir(privateRoot), ["private-fixture.sqlite"]);
-  } finally {
-    await browser.close();
-    await rm(root, { recursive: true, force: true });
-  }
-});
+      );
+      const privateRoot = await mkdtemp(join(root, "fixture-"));
+      await writeFile(
+        join(privateRoot, "private-fixture.sqlite"),
+        "SYNTHETIC_PRIVATE_FIXTURE",
+      );
+      let ran = false;
+      await assert.rejects(
+        runBrowserJourney(
+          "diagnostics",
+          "unowned root",
+          async () => {
+            ran = true;
+          },
+          { evidenceRoot: privateRoot },
+        ),
+        /dedicated to test diagnostics/,
+      );
+      assert.equal(ran, false);
+      assert.deepEqual(await readdir(privateRoot), ["private-fixture.sqlite"]);
+    } finally {
+      await browser.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test("local listener rejection preserves the assertion and backing state while other listeners close", async () => {
   const root = await mkdtemp(join(tmpdir(), "ensemble-local-cleanup-"));
@@ -326,46 +333,49 @@ test("a stalled local listener leaves auth and backing state held while its sibl
   }
 });
 
-test("screenshots stay in distinct configured suite evidence directories", async () => {
-  const root = await mkdtemp(
-    join(tmpdir(), "ensemble-screenshot-diagnostics-"),
-  );
-  const browser = await chromium.launch();
-  const page = await browser.newPage();
-  await page.setContent("<h1>Synthetic browser fixture</h1>");
-  const paths: string[] = [];
-  try {
-    for (const suite of [
-      "operator-web",
-      "operator-task",
-      "operator-settings",
-    ]) {
-      const result = await runBrowserJourney(
-        suite,
-        "same synthetic screenshot",
-        async (journey) => {
-          const filename = await journey.capture(page, "synthetic-screen");
-          assert.ok(filename);
-          assert.ok(
-            filename?.startsWith(join(root, `${suite}-${process.pid}`)),
-          );
-          paths.push(filename);
-          const image = await readFile(filename);
-          assert.equal(
-            image.subarray(0, 8).toString("hex"),
-            "89504e470d0a1a0a",
-          );
-        },
-        { evidenceRoot: root },
-      );
-      assert.ok(result.evidenceDirectory.startsWith(root));
+browserTest(
+  "screenshots stay in distinct configured suite evidence directories",
+  async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "ensemble-screenshot-diagnostics-"),
+    );
+    const browser = await chromium.launch();
+    const page = await browser.newPage();
+    await page.setContent("<h1>Synthetic browser fixture</h1>");
+    const paths: string[] = [];
+    try {
+      for (const suite of [
+        "operator-web",
+        "operator-task",
+        "operator-settings",
+      ]) {
+        const result = await runBrowserJourney(
+          suite,
+          "same synthetic screenshot",
+          async (journey) => {
+            const filename = await journey.capture(page, "synthetic-screen");
+            assert.ok(filename);
+            assert.ok(
+              filename?.startsWith(join(root, `${suite}-${process.pid}`)),
+            );
+            paths.push(filename);
+            const image = await readFile(filename);
+            assert.equal(
+              image.subarray(0, 8).toString("hex"),
+              "89504e470d0a1a0a",
+            );
+          },
+          { evidenceRoot: root },
+        );
+        assert.ok(result.evidenceDirectory.startsWith(root));
+      }
+      assert.equal(new Set(paths).size, 3);
+    } finally {
+      await browser.close();
+      await rm(root, { recursive: true, force: true });
     }
-    assert.equal(new Set(paths).size, 3);
-  } finally {
-    await browser.close();
-    await rm(root, { recursive: true, force: true });
-  }
-});
+  },
+);
 
 test("overall expiry bounds a stalled cleanup and labels its uncertain outcome", {
   timeout: 5000,

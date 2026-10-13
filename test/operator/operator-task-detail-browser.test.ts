@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import type { TestContext } from "node:test";
 import { chromium, webkit, type Browser, type Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
@@ -11,6 +13,11 @@ import { seedOwnQuestion } from "../fixtures/questions.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 const test = browserSuite("ui-task-detail");
+const testForEngine = (
+  name: string,
+  browserEngine: "chromium" | "webkit",
+  action: (t: TestContext, journey: BrowserJourney) => Promise<void>,
+) => test(name, { browserEngine }, action);
 const body =
   "Let keyboard users open the command menu.\n\n- [ ] Restore focus\n- [ ] Retain drafts\n- [ ] Announce results";
 
@@ -484,118 +491,124 @@ for (const engine of [
   { name: "chromium", type: chromium },
   { name: "webkit", type: webkit },
 ] as const)
-  test(`Stop confirms first, Keep running sends nothing, Stop task posts the retained form (${engine.name})`, async (_t, j) => {
-    const f = await j.start("fixture.create", () =>
-      createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
-    );
-    let browser: Browser | undefined;
-    j.cleanup(
-      (primary) => f.close(browser, primary),
-      "fixture.close",
-      () => f.lifecycle.steps,
-    );
-    const a = await seed(f);
-    const web = await j.start("fixture.web", () => f.startWeb());
-    browser = await j.start(`browser.launch.${engine.name}`, () =>
-      engine.type.launch(),
-    );
-    const page = await browser.newPage({
-      viewport: { width: 1366, height: 900 },
-    });
-    j.observe(page);
-    page.setDefaultTimeout(5000);
-    const stops: { body: string | null; origin: string | undefined }[] = [];
-    page.on("request", (r) => {
-      if (
-        r.method() === "POST" &&
-        new URL(r.url()).pathname === "/runtime/control/stop"
-      )
-        stops.push({ body: r.postData(), origin: r.headers().origin });
-    });
-    await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-    const stop = page.getByRole("button", { name: "Stop…", exact: true });
-    await stop.waitFor();
-    await stop.click();
-    const dialog = page.getByRole("alertdialog", {
-      name: "Stop Ship an accessible command menu?",
-    });
-    await dialog.waitFor();
-    const text = (await dialog.textContent()) ?? "";
-    for (const line of [
-      "Task lead (lead) and 1 delegated assignment is affected.",
-      "Holds queued and new turns for the lead and every delegated assignment.",
-      "Requests cancellation of active turns. Effects may continue after the observation window.",
-      "Stop, writer and capacity holds stay until termination is verified. Resume clears only Stop.",
-      "Stop is not cancellation or completion. Files, history and results are kept.",
-    ])
-      assert.ok(text.includes(line), `${line} in ${text}`);
-    await page.waitForFunction(
-      () => document.activeElement?.textContent === "Keep running",
-    );
-    await page.keyboard.press("Escape");
-    await dialog.waitFor({ state: "detached" });
-    await page.waitForFunction(
-      () => document.activeElement?.textContent === "Stop…",
-    );
-    await stop.click();
-    await dialog.getByRole("button", { name: "Keep running" }).click();
-    await dialog.waitFor({ state: "detached" });
-    await page.waitForFunction(
-      () => document.activeElement?.textContent === "Stop…",
-    );
-    assert.equal(stops.length, 0);
+  testForEngine(
+    `Stop confirms first, Keep running sends nothing, Stop task posts the retained form (${engine.name})`,
+    engine.name,
+    async (_t, j) => {
+      const f = await j.start("fixture.create", () =>
+        createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+      );
+      let browser: Browser | undefined;
+      j.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      const a = await seed(f);
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start(`browser.launch.${engine.name}`, () =>
+        engine.type.launch(),
+      );
+      const page = await browser.newPage({
+        viewport: { width: 1366, height: 900 },
+      });
+      j.observe(page);
+      page.setDefaultTimeout(5000);
+      const stops: { body: string | null; origin: string | undefined }[] = [];
+      page.on("request", (r) => {
+        if (
+          r.method() === "POST" &&
+          new URL(r.url()).pathname === "/runtime/control/stop"
+        )
+          stops.push({ body: r.postData(), origin: r.headers().origin });
+      });
+      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      const stop = page.getByRole("button", { name: "Stop…", exact: true });
+      await stop.waitFor();
+      await stop.click();
+      const dialog = page.getByRole("alertdialog", {
+        name: "Stop Ship an accessible command menu?",
+      });
+      await dialog.waitFor();
+      const text = (await dialog.textContent()) ?? "";
+      for (const line of [
+        "Task lead (lead) and 1 delegated assignment is affected.",
+        "Holds queued and new turns for the lead and every delegated assignment.",
+        "Requests cancellation of active turns. Effects may continue after the observation window.",
+        "Stop, writer and capacity holds stay until termination is verified. Resume clears only Stop.",
+        "Stop is not cancellation or completion. Files, history and results are kept.",
+      ])
+        assert.ok(text.includes(line), `${line} in ${text}`);
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Keep running",
+      );
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Stop…",
+      );
+      await stop.click();
+      await dialog.getByRole("button", { name: "Keep running" }).click();
+      await dialog.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        () => document.activeElement?.textContent === "Stop…",
+      );
+      assert.equal(stops.length, 0);
 
-    // Phone: stacked 44px dialog buttons.
-    await page.setViewportSize({ width: 390, height: 844 });
-    await stop.click();
-    const buttons = await dialog
-      .getByRole("button")
-      .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().toJSON()));
-    assert.equal(buttons.length, 2);
-    assert.ok(buttons.every((b) => b.height >= 44));
-    assert.ok(buttons[1]!.top >= buttons[0]!.bottom, "buttons stack");
-    await captureBrowserEvidence(page, `stop-dialog-phone-${engine.name}`, {
-      fullPage: false,
-    });
-    await page.setViewportSize({ width: 1366, height: 900 });
-    await captureBrowserEvidence(page, `stop-dialog-${engine.name}`, {
-      fullPage: false,
-    });
+      // Phone: stacked 44px dialog buttons.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await stop.click();
+      const buttons = await dialog
+        .getByRole("button")
+        .evaluateAll((els) =>
+          els.map((e) => e.getBoundingClientRect().toJSON()),
+        );
+      assert.equal(buttons.length, 2);
+      assert.ok(buttons.every((b) => b.height >= 44));
+      assert.ok(buttons[1]!.top >= buttons[0]!.bottom, "buttons stack");
+      await captureBrowserEvidence(page, `stop-dialog-phone-${engine.name}`, {
+        fullPage: false,
+      });
+      await page.setViewportSize({ width: 1366, height: 900 });
+      await captureBrowserEvidence(page, `stop-dialog-${engine.name}`, {
+        fullPage: false,
+      });
 
-    const session = await page.evaluate(() =>
-      fetch("/api/operator/session").then((r) => r.json()),
-    );
-    await dialog.getByRole("button", { name: "Stop task" }).dblclick();
-    await page.waitForURL((u) => u.pathname === `/runtime/task/${a.taskId}`);
-    assert.equal(stops.length, 1);
-    assert.equal(stops[0]?.origin, web.origin);
-    assert.equal(
-      stops[0]?.body,
-      new URLSearchParams({
-        csrfToken: session.csrfToken,
-        taskId: a.taskId,
-      }).toString(),
-    );
-    await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
-    await page.locator("main.page h1").waitFor();
-    const read = await page.evaluate(
-      (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
-      a.taskId,
-    );
-    assert.equal(read.data.execution.holds.stop, true);
-    const requested = page.getByRole("button", {
-      name: "Stop requested",
-      exact: true,
-    });
-    await requested.waitFor();
-    assert.ok(await requested.isDisabled());
-    assert.ok(
-      await page
-        .getByRole("link", { name: "Execution", exact: true })
-        .isVisible(),
-    );
-    assert.match(
-      (await page.locator(".page-header-title p").textContent()) ?? "",
-      /^Stopping; effects may continue/,
-    );
-  });
+      const session = await page.evaluate(() =>
+        fetch("/api/operator/session").then((r) => r.json()),
+      );
+      await dialog.getByRole("button", { name: "Stop task" }).dblclick();
+      await page.waitForURL((u) => u.pathname === `/runtime/task/${a.taskId}`);
+      assert.equal(stops.length, 1);
+      assert.equal(stops[0]?.origin, web.origin);
+      assert.equal(
+        stops[0]?.body,
+        new URLSearchParams({
+          csrfToken: session.csrfToken,
+          taskId: a.taskId,
+        }).toString(),
+      );
+      await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+      await page.locator("main.page h1").waitFor();
+      const read = await page.evaluate(
+        (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
+        a.taskId,
+      );
+      assert.equal(read.data.execution.holds.stop, true);
+      const requested = page.getByRole("button", {
+        name: "Stop requested",
+        exact: true,
+      });
+      await requested.waitFor();
+      assert.ok(await requested.isDisabled());
+      assert.ok(
+        await page
+          .getByRole("link", { name: "Execution", exact: true })
+          .isVisible(),
+      );
+      assert.match(
+        (await page.locator(".page-header-title p").textContent()) ?? "",
+        /^Stopping; effects may continue/,
+      );
+    },
+  );

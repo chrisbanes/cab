@@ -22,6 +22,19 @@ const runner = (await import(
   pathToFileURL(resolve("scripts/run-tests.mjs")).href
 )) as {
   discoverTestFiles(root: string): string[];
+  logicalSuites: string[];
+  parseTestOptions(args: string[]): {
+    profile: string;
+    suite: string;
+    shard: number;
+    shards: number;
+    preflight: boolean;
+  };
+  selectTestFiles(
+    files: string[],
+    options: { suite: string; shard: number; shards: number },
+    timings?: Record<string, number>,
+  ): string[];
   runTestProcess(
     args: string[],
     options?: {
@@ -39,6 +52,87 @@ const runner = (await import(
     },
   ): number;
 };
+
+test("CI options reject ambiguous, empty and incompatible selections", () => {
+  assert.deepEqual(runner.parseTestOptions([]), {
+    profile: "all",
+    suite: "all",
+    shard: 1,
+    shards: 1,
+    preflight: false,
+  });
+  for (const args of [
+    ["--profile=unknown"],
+    ["--profile="],
+    ["--suite=missing"],
+    ["--shard=0/2"],
+    ["--shard=3/2"],
+    ["--shard=1/3"],
+    ["--profile=all", "--profile=service"],
+    ["--unknown"],
+    ["--fixture-preflight", "--profile=service"],
+    ["--fixture-preflight", "--suite=operator"],
+    ["--fixture-preflight", "--shard=1/2"],
+  ])
+    assert.throws(() => runner.parseTestOptions(args), args.join(" "));
+});
+
+test("CI logical suite shards cover the current source inventory exactly once", () => {
+  const all = runner.discoverTestFiles(".");
+  const selected = runner.logicalSuites.flatMap((suite) =>
+    suite === "operator"
+      ? [1, 2].flatMap((shard) =>
+          runner.selectTestFiles(all, { suite, shard, shards: 2 }),
+        )
+      : runner.selectTestFiles(all, { suite, shard: 1, shards: 1 }),
+  );
+  assert.equal(selected.length, new Set(selected).size);
+  assert.deepEqual(selected.sort(), all);
+  const service = [1, 2].flatMap((shard) =>
+    runner.selectTestFiles(all, { suite: "all", shard, shards: 2 }),
+  );
+  assert.equal(service.length, new Set(service).size);
+  assert.deepEqual(service.sort(), all);
+});
+
+test("weighted shards separate heavy files and include newly added files", () => {
+  const files = ["heavy", "medium", "small", "new"].map(
+    (name) => `dist/test/operator/${name}.test.js`,
+  );
+  const timings = {
+    "test/operator/heavy.test.ts": 100,
+    "test/operator/medium.test.ts": 80,
+    "test/operator/small.test.ts": 20,
+  };
+  const first = runner.selectTestFiles(
+    files,
+    { suite: "operator", shard: 1, shards: 2 },
+    timings,
+  );
+  const second = runner.selectTestFiles(
+    files,
+    { suite: "operator", shard: 2, shards: 2 },
+    timings,
+  );
+  assert.notEqual(
+    first.includes(files[0] as string),
+    first.includes(files[1] as string),
+  );
+  assert.deepEqual([...first, ...second].sort(), files.sort());
+  assert.throws(
+    () => runner.selectTestFiles([], { suite: "all", shard: 1, shards: 1 }),
+    /No tests selected/,
+  );
+  assert.throws(
+    () =>
+      runner.selectTestFiles([files[0] as string], {
+        suite: "operator",
+        shard: 2,
+        shards: 2,
+      }),
+    /no tests/,
+  );
+});
 
 test("test discovery includes nested suites once and ignores stale compiled tests", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ensemble-test-discovery-"));

@@ -18,8 +18,29 @@ npm run check
 `check` runs strict type checking, lint, formatting, compilation and tests,
 including deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
-completion tests, and the operator auth, HTTP and Chromium browser tests. CI
-installs the pinned Chromium engine used by those browser tests. Real App Server
+completion tests, and the operator auth, HTTP and browser tests. CI
+builds once and runs logical suites in parallel. PRs and main pushes run Chromium
+coverage on Node 24 and service coverage on Node 26; the operator suite and Node 26
+service run use two shards balanced by observed named-test durations in
+`scripts/test-timings.json`. New files use a median timing fallback. The required
+`check` context aggregates static checks and all applicable test jobs, including
+their failure evidence uploads. Superseded PR runs are cancelled.
+
+Daily CI at 05:00 UTC and manual workflow runs include WebKit on Node 24 and the
+complete suite and build on Node 26. These triggers become available when the
+workflow reaches the default branch. Local `npm run check` continues to run all
+tests and both browsers. For focused checks after building, use:
+
+```sh
+npm run test:built -- --suite=operator --profile=chromium --shard=1/2
+npm run test:built -- --profile=service
+```
+
+`all` is the default profile; `chromium` excludes WebKit, and `service` excludes
+browser-dependent cases while retaining service assertions in mixed test files.
+Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
+their engine. Missing compiled tests, unknown suites/options and empty shards
+fail explicitly. Real App Server
 qualification is separate and runs only when requested explicitly, for example
 `npm run recovery:live` and `npm run routing:live`, which require their `--live` opt-in
 (see the other `*:live` scripts in `package.json`). These checks do not prove

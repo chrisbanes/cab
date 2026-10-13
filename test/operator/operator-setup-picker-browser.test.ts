@@ -175,12 +175,18 @@ test("Folder picker fits a phone", async (_t, journey) => {
   await captureBrowserEvidence(page, "390-picker");
 });
 
-test("Folder picker opens in WebKit", async (_t, journey) => {
-  journey.restart();
-  const { page } = await setupJourney(journey, { engine: "webkit" });
-  await chooseRepository(page, "acme/atlas");
-  await page.getByRole("button", { name: "Choose folder…" }).click();
-  const dialog = page.getByRole("dialog", { name: "Choose repository folder" });
-  await dialog.getByRole("button", { name: /^src/ }).click();
-  await dialog.getByRole("button", { name: /^atlas/ }).waitFor();
-});
+test(
+  "Folder picker opens in WebKit",
+  { browserEngine: "webkit" },
+  async (_t, journey) => {
+    journey.restart();
+    const { page } = await setupJourney(journey, { engine: "webkit" });
+    await chooseRepository(page, "acme/atlas");
+    await page.getByRole("button", { name: "Choose folder…" }).click();
+    const dialog = page.getByRole("dialog", {
+      name: "Choose repository folder",
+    });
+    await dialog.getByRole("button", { name: /^src/ }).click();
+    await dialog.getByRole("button", { name: /^atlas/ }).waitFor();
+  },
+);

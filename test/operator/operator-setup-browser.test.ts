@@ -431,16 +431,20 @@ test("Setup stays usable on a phone", async (_t, journey) => {
   await captureBrowserEvidence(page, "390-setup");
 });
 
-test("Setup creates a repository-free project in WebKit", async (_t, journey) => {
-  journey.restart();
-  const { f, page } = await setupJourney(journey, { engine: "webkit" });
-  await page.getByLabel("Project name", { exact: true }).fill("WebKit");
-  await page
-    .getByRole("button", { name: "Create paused project", exact: true })
-    .click();
-  await savedOutcome(page, /^Created WebKit\. It's paused\./);
-  assert.equal(f.service.domain().projects().length, 1);
-});
+test(
+  "Setup creates a repository-free project in WebKit",
+  { browserEngine: "webkit" },
+  async (_t, journey) => {
+    journey.restart();
+    const { f, page } = await setupJourney(journey, { engine: "webkit" });
+    await page.getByLabel("Project name", { exact: true }).fill("WebKit");
+    await page
+      .getByRole("button", { name: "Create paused project", exact: true })
+      .click();
+    await savedOutcome(page, /^Created WebKit\. It's paused\./);
+    assert.equal(f.service.domain().projects().length, 1);
+  },
+);
 
 test("Setup resets a Project choice when its repository row changes", async (_t, journey) => {
   const { page } = await setupJourney(journey);

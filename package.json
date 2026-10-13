@@ -20,7 +20,7 @@
     "operator-auth": "npm run build && node dist/src/standalone/operator-auth-cli.js",
     "build": "npm run build:service && npm run build:web",
     "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
-    "test": "npm run build && node scripts/run-tests.mjs",
+    "test": "npm run build && npm run test:built",
     "test:fixture-preflight": "npm run build && node scripts/run-tests.mjs --fixture-preflight",
     "routing:view": "node test/coordination/routing-qualification/local-view.mjs",
     "routing:live": "node test/coordination/routing-qualification/live-runtime.mjs --live",
@@ -38,7 +38,8 @@
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
     "build:service": "tsc",
     "build:web": "vite build --config web/vite.config.ts",
-    "native-input:live": "node test/execution/native-input-qualification/runtime-contract.mjs --live --phase service"
+    "native-input:live": "node test/execution/native-input-qualification/runtime-contract.mjs --live --phase service",
+    "test:built": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.296",

@@ -1,3 +1,4 @@
+import { browserTest } from "../fixtures/browser-engines.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { spawn } from "node:child_process";
@@ -14,25 +15,30 @@ const module = await import(
     resolve("test/workspaces/review-qualification/runtime-contract.mjs"),
   ).href
 );
-test("changed callback fake App Server waits for delayed callback, persists exact review/context and renders production UI with verified exact cleanup", async () => {
-  const r = await module.runQualification({ fixture: { delayCallback: true } });
-  assert.equal(r.status, "passed", JSON.stringify(r.failure));
-  assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
-  assert.equal(r.callbackEnded, true);
-  assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
-  assert.equal(r.screenshots.length, 1);
-  assert.equal(r.process, null);
-  assert.equal(r.cleanup.verification.method, "fixture-owned-child-exit");
-  assert.ok(r.cleanup.verification.identity.processId > 0);
-  assert.ok(
-    r.cleanup.verification.exit.signal ||
-      r.cleanup.verification.exit.code !== null,
-  );
-  assert.equal(
-    JSON.parse(readFileSync(r.evidencePath, "utf8")).sourceId,
-    r.sourceId,
-  );
-});
+browserTest(
+  "changed callback fake App Server waits for delayed callback, persists exact review/context and renders production UI with verified exact cleanup",
+  async () => {
+    const r = await module.runQualification({
+      fixture: { delayCallback: true },
+    });
+    assert.equal(r.status, "passed", JSON.stringify(r.failure));
+    assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
+    assert.equal(r.callbackEnded, true);
+    assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
+    assert.equal(r.screenshots.length, 1);
+    assert.equal(r.process, null);
+    assert.equal(r.cleanup.verification.method, "fixture-owned-child-exit");
+    assert.ok(r.cleanup.verification.identity.processId > 0);
+    assert.ok(
+      r.cleanup.verification.exit.signal ||
+        r.cleanup.verification.exit.code !== null,
+    );
+    assert.equal(
+      JSON.parse(readFileSync(r.evidencePath, "utf8")).sourceId,
+      r.sourceId,
+    );
+  },
+);
 test("assertion failure consumes one fake turn, verifies exact process cleanup and retains recorded result/context plus Stop hold across production service restart", async () => {
   const r = await module.runQualification({
     fixture: { assertionFailure: true },
@@ -65,16 +71,19 @@ test("assertion failure consumes one fake turn, verifies exact process cleanup a
   }
 });
 
-test("timed-out browser creation settles and closes its late resource within reserved cleanup without another turn", async () => {
-  const r = await module.runQualification({
-    fixture: { delayBrowserCreation: true },
-  });
-  assert.equal(r.status, "failed");
-  assert.match(r.failure.reason, /browser-start-deadline/);
-  assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
-  assert.equal(r.cleanup.operations["pending-setup-settlement"], "settled");
-  assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
-});
+browserTest(
+  "timed-out browser creation settles and closes its late resource within reserved cleanup without another turn",
+  async () => {
+    const r = await module.runQualification({
+      fixture: { delayBrowserCreation: true },
+    });
+    assert.equal(r.status, "failed");
+    assert.match(r.failure.reason, /browser-start-deadline/);
+    assert.deepEqual(r.counts, { threads: 1, turns: 1, reports: 1 });
+    assert.equal(r.cleanup.operations["pending-setup-settlement"], "settled");
+    assert.equal(r.cleanup.verified, true, JSON.stringify(r.cleanup));
+  },
+);
 
 test("timed-out service startup keeps its late service-stop owner without racing runtime shutdown", async () => {
   const r = await module.runQualification({
@@ -141,20 +150,23 @@ test("grant consumption atomically rejects replay and retains immutable scoped m
   assert.equal(readFileSync(consumedMarker, "utf8"), original);
 });
 
-test("failed late-resource cleanup remains unresolved even after tracked setup promise settles", async () => {
-  const r = await module.runQualification({
-    fixture: { delayBrowserCreation: true, lateCleanupFailure: true },
-  });
-  assert.equal(r.status, "failed");
-  assert.equal(r.cleanup.operations["pending-setup-settlement"], "settled");
-  assert.equal(r.cleanup.lateResources.length, 1);
-  assert.equal(r.cleanup.lateResources[0].state, "failed");
-  assert.match(
-    r.cleanup.lateResources[0].reason,
-    /injected-late-cleanup-failure/,
-  );
-  assert.equal(r.cleanup.verified, false);
-});
+browserTest(
+  "failed late-resource cleanup remains unresolved even after tracked setup promise settles",
+  async () => {
+    const r = await module.runQualification({
+      fixture: { delayBrowserCreation: true, lateCleanupFailure: true },
+    });
+    assert.equal(r.status, "failed");
+    assert.equal(r.cleanup.operations["pending-setup-settlement"], "settled");
+    assert.equal(r.cleanup.lateResources.length, 1);
+    assert.equal(r.cleanup.lateResources[0].state, "failed");
+    assert.match(
+      r.cleanup.lateResources[0].reason,
+      /injected-late-cleanup-failure/,
+    );
+    assert.equal(r.cleanup.verified, false);
+  },
+);
 
 test("malformed callback material promptly ends the one attempt, preserves rejection and verifies exact cleanup without retry", async () => {
   const r = await module.runQualification({

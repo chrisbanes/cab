@@ -3,6 +3,7 @@ import { chromium, webkit, type Browser } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
@@ -277,7 +278,15 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   );
 });
 
-test("opt-in answer textarea grows to its measured bound and preserves selection across Chromium and WebKit resize", async (_t, j) => {
+const textareaEngines = [
+  { name: "chromium", type: chromium },
+  { name: "webkit", type: webkit },
+] as const;
+
+async function runQuestionTextareaJourney(
+  engine: (typeof textareaEngines)[number],
+  j: BrowserJourney,
+) {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -289,200 +298,190 @@ test("opt-in answer textarea grows to its measured bound and preserves selection
   );
   const a = await seedOwnQuestion(f),
     web = await j.start("fixture.web", () => f.startWeb());
-  const engines = [
-    { name: "chromium", type: chromium },
-    { name: "webkit", type: webkit },
-  ] as const;
-  for (const engine of engines) {
-    browser = await j.start(`browser.launch.${engine.name}`, () =>
-      engine.type.launch(),
-    );
-    const page = await browser.newPage({
-      viewport: { width: 390, height: 480 },
-    });
-    j.observe(page);
-    page.setDefaultTimeout(5000);
-    let commandWrites = 0;
-    page.on("request", (request) => {
-      if (
-        request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/operator/commands"
-      )
-        commandWrites++;
-    });
-    await page.goto(
-      `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
-    );
-    await page.getByLabel("Password").fill(web.password);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    const form = page.getByRole("region", { name: "Exact question response" });
-    const answer = form.getByRole("textbox", { name: "Explain", exact: true });
-    await answer.waitFor();
-    await answer.focus();
-    const ordinaryFocus = await answer.evaluate((element) => ({
+  browser = await j.start(`browser.launch.${engine.name}`, () =>
+    engine.type.launch(),
+  );
+  const page = await browser.newPage({
+    viewport: { width: 390, height: 480 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  let commandWrites = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      new URL(request.url()).pathname === "/api/operator/commands"
+    )
+      commandWrites++;
+  });
+  await page.goto(
+    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
+  );
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const form = page.getByRole("region", { name: "Exact question response" });
+  const answer = form.getByRole("textbox", { name: "Explain", exact: true });
+  await answer.waitFor();
+  await answer.focus();
+  const ordinaryFocus = await answer.evaluate((element) => ({
+    outlineStyle: getComputedStyle(element).outlineStyle,
+    outlineWidth: getComputedStyle(element).outlineWidth,
+  }));
+  assert.deepEqual(ordinaryFocus, {
+    outlineStyle: "solid",
+    outlineWidth: "2px",
+  });
+  if (engine.name === "chromium") {
+    await page.emulateMedia({ forcedColors: "active" });
+    const forcedFocus = await answer.evaluate((element) => ({
+      active: document.activeElement === element,
       outlineStyle: getComputedStyle(element).outlineStyle,
       outlineWidth: getComputedStyle(element).outlineWidth,
+      outlineColor: getComputedStyle(element).outlineColor,
     }));
-    assert.deepEqual(ordinaryFocus, {
-      outlineStyle: "solid",
-      outlineWidth: "2px",
-    });
-    if (engine.name === "chromium") {
-      await page.emulateMedia({ forcedColors: "active" });
-      const forcedFocus = await answer.evaluate((element) => ({
-        active: document.activeElement === element,
-        outlineStyle: getComputedStyle(element).outlineStyle,
-        outlineWidth: getComputedStyle(element).outlineWidth,
-        outlineColor: getComputedStyle(element).outlineColor,
-      }));
-      assert.equal(forcedFocus.active, true);
-      assert.equal(forcedFocus.outlineStyle, "solid");
-      assert.equal(forcedFocus.outlineWidth, "2px");
-      assert.notEqual(forcedFocus.outlineColor, "rgba(0, 0, 0, 0)");
-      await page.emulateMedia({ forcedColors: "none" });
-    }
-    await page.addStyleTag({
-      content: ":root { --operator-safe-area-inset-bottom: 24px; }",
-    });
-    const inset = await form.locator(".question-submit").evaluate((element) => {
-      const style = getComputedStyle(element);
-      return {
-        top: Number.parseFloat(style.paddingTop),
-        bottom: Number.parseFloat(style.paddingBottom),
-      };
-    });
-    assert.ok(
-      inset.bottom >= inset.top + 24,
-      `The action footer keeps the emulated 24px inset: ${JSON.stringify(inset)}`,
-    );
+    assert.equal(forcedFocus.active, true);
+    assert.equal(forcedFocus.outlineStyle, "solid");
+    assert.equal(forcedFocus.outlineWidth, "2px");
+    assert.notEqual(forcedFocus.outlineColor, "rgba(0, 0, 0, 0)");
+    await page.emulateMedia({ forcedColors: "none" });
+  }
+  await page.addStyleTag({
+    content: ":root { --operator-safe-area-inset-bottom: 24px; }",
+  });
+  const inset = await form.locator(".question-submit").evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      top: Number.parseFloat(style.paddingTop),
+      bottom: Number.parseFloat(style.paddingBottom),
+    };
+  });
+  assert.ok(
+    inset.bottom >= inset.top + 24,
+    `The action footer keeps the emulated 24px inset: ${JSON.stringify(inset)}`,
+  );
 
-    const longAnswer = "Review evidence and recovery status. ".repeat(36);
-    await answer.fill(longAnswer);
-    const initial = await answer.evaluate((element) => {
-      const textarea = element as HTMLTextAreaElement;
-      return {
-        value: textarea.value,
-        height: textarea.clientHeight,
-        scrollHeight: textarea.scrollHeight,
-        overflowY: getComputedStyle(textarea).overflowY,
-      };
-    });
-    assert.equal(initial.value, longAnswer);
-    assert.ok(
-      initial.height >= 96 && initial.height <= 320,
-      JSON.stringify(initial),
-    );
-    assert.ok(initial.scrollHeight > initial.height, JSON.stringify(initial));
-    assert.equal(initial.overflowY, "auto");
-    await captureBrowserEvidence(page, `${engine.name}-390x480-answer-cap`, {
-      fullPage: false,
-    });
+  const longAnswer = "Review evidence and recovery status. ".repeat(36);
+  await answer.fill(longAnswer);
+  const initial = await answer.evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    return {
+      value: textarea.value,
+      height: textarea.clientHeight,
+      scrollHeight: textarea.scrollHeight,
+      overflowY: getComputedStyle(textarea).overflowY,
+    };
+  });
+  assert.equal(initial.value, longAnswer);
+  assert.ok(
+    initial.height >= 96 && initial.height <= 320,
+    JSON.stringify(initial),
+  );
+  assert.ok(initial.scrollHeight > initial.height, JSON.stringify(initial));
+  assert.equal(initial.overflowY, "auto");
+  await captureBrowserEvidence(page, `${engine.name}-390x480-answer-cap`, {
+    fullPage: false,
+  });
 
-    const selection = { start: 81, end: 117 };
-    await answer.evaluate((element, range) => {
-      const textarea = element as HTMLTextAreaElement;
-      textarea.focus();
-      textarea.setSelectionRange(range.start, range.end, "forward");
-    }, selection);
-    await page.setViewportSize({ width: 800, height: 480 });
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
-    );
-    const resized = await answer.evaluate((element) => {
-      const textarea = element as HTMLTextAreaElement;
-      return {
-        value: textarea.value,
-        height: textarea.clientHeight,
-        start: textarea.selectionStart,
-        end: textarea.selectionEnd,
-        direction: textarea.selectionDirection,
-        focused: document.activeElement === textarea,
-      };
-    });
-    assert.equal(resized.value, longAnswer);
-    assert.equal(
-      resized.height <= initial.height,
-      true,
-      JSON.stringify(resized),
-    );
-    assert.equal(resized.start, selection.start);
-    assert.equal(resized.end, selection.end);
-    assert.equal(resized.direction, "forward");
-    assert.equal(resized.focused, true);
-    await page.keyboard.insertText("EDIT");
-    const edited = `${longAnswer.slice(0, selection.start)}EDIT${longAnswer.slice(selection.end)}`;
-    assert.equal(await answer.inputValue(), edited);
-    await page.setViewportSize({ width: 390, height: 480 });
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
-    );
-    const content = form.locator(".question-content");
-    const contentMetrics = await content.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      return {
-        height: element.clientHeight,
-        scrollHeight: element.scrollHeight,
-        scrollTop: element.scrollTop,
-        overscroll: getComputedStyle(element).overscrollBehaviorY,
-      };
-    });
-    assert.ok(contentMetrics.scrollHeight > contentMetrics.height);
-    assert.ok(contentMetrics.scrollTop > 0);
-    assert.equal(contentMetrics.overscroll, "contain");
-    assert.equal(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= innerWidth,
+  const selection = { start: 81, end: 117 };
+  await answer.evaluate((element, range) => {
+    const textarea = element as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(range.start, range.end, "forward");
+  }, selection);
+  await page.setViewportSize({ width: 800, height: 480 });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
-      true,
-    );
-    await form.locator(".question-submit").scrollIntoViewIfNeeded();
-    const actions = await form
-      .locator(".question-submit button")
-      .evaluateAll((buttons) =>
-        buttons.map((button) => {
-          const rect = button.getBoundingClientRect();
-          return (
-            rect.top >= 0 &&
-            rect.bottom <= innerHeight &&
-            document
-              .elementFromPoint(
-                rect.x + rect.width / 2,
-                rect.y + rect.height / 2,
-              )
-              ?.closest("button") === button
-          );
-        }),
-      );
-    assert.ok(actions.every(Boolean), JSON.stringify(actions));
-    assert.equal(commandWrites, 0);
-    j.diagnostics.push(
-      JSON.stringify({
-        milestone: `${engine.name}-textarea-growth-resize`,
-        initial,
-        resized,
-        inset,
-        contentMetrics,
-        commandWrites,
-        browser: browser.version(),
+  );
+  const resized = await answer.evaluate((element) => {
+    const textarea = element as HTMLTextAreaElement;
+    return {
+      value: textarea.value,
+      height: textarea.clientHeight,
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      direction: textarea.selectionDirection,
+      focused: document.activeElement === textarea,
+    };
+  });
+  assert.equal(resized.value, longAnswer);
+  assert.equal(resized.height <= initial.height, true, JSON.stringify(resized));
+  assert.equal(resized.start, selection.start);
+  assert.equal(resized.end, selection.end);
+  assert.equal(resized.direction, "forward");
+  assert.equal(resized.focused, true);
+  await page.keyboard.insertText("EDIT");
+  const edited = `${longAnswer.slice(0, selection.start)}EDIT${longAnswer.slice(selection.end)}`;
+  assert.equal(await answer.inputValue(), edited);
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  const content = form.locator(".question-content");
+  const contentMetrics = await content.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    return {
+      height: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+      overscroll: getComputedStyle(element).overscrollBehaviorY,
+    };
+  });
+  assert.ok(contentMetrics.scrollHeight > contentMetrics.height);
+  assert.ok(contentMetrics.scrollTop > 0);
+  assert.equal(contentMetrics.overscroll, "contain");
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+    true,
+  );
+  await form.locator(".question-submit").scrollIntoViewIfNeeded();
+  const actions = await form
+    .locator(".question-submit button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const rect = button.getBoundingClientRect();
+        return (
+          rect.top >= 0 &&
+          rect.bottom <= innerHeight &&
+          document
+            .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+            ?.closest("button") === button
+        );
       }),
     );
-    await captureBrowserEvidence(
-      page,
-      `${engine.name}-800x480-resized-answer`,
-      {
-        fullPage: false,
-      },
-    );
-    await browser.close();
-    browser = undefined;
-  }
-});
+  assert.ok(actions.every(Boolean), JSON.stringify(actions));
+  assert.equal(commandWrites, 0);
+  j.diagnostics.push(
+    JSON.stringify({
+      milestone: `${engine.name}-textarea-growth-resize`,
+      initial,
+      resized,
+      inset,
+      contentMetrics,
+      commandWrites,
+      browser: browser.version(),
+    }),
+  );
+  await captureBrowserEvidence(page, `${engine.name}-800x480-resized-answer`, {
+    fullPage: false,
+  });
+  await browser.close();
+  browser = undefined;
+}
+
+for (const engine of textareaEngines)
+  test(
+    `opt-in answer textarea grows to its measured bound and preserves selection across ${engine.name} resize`,
+    { browserEngine: engine.name },
+    (_t, j) => runQuestionTextareaJourney(engine, j),
+  );
 
 test("Inbox queue and selected detail scroll independently at phone heights", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
