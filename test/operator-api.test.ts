@@ -73,6 +73,526 @@ test("API preserves original durable task receipts independently of current vers
     "Real project",
   );
 });
+
+test("operator API maps the issue.comment-only policy by type, not its message", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f, true);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const commands = (
+    api as unknown as {
+      commands: { execute: (command: unknown) => Promise<unknown> };
+    }
+  ).commands;
+  commands.execute = async () => {
+    throw new DomainPolicyError(
+      "forbidden",
+      "Operator delivery only permits issue.comment",
+    );
+  };
+  await assert.rejects(
+    api.execute({
+      type: "task.configure",
+      key: randomUUID(),
+      projectId: ids.projectId,
+      taskId: ids.taskId,
+      expectedVersion: 1,
+      title: "Policy probe",
+    }),
+    (error) =>
+      error instanceof OperatorApiError &&
+      error.status === 403 &&
+      error.code === "forbidden",
+  );
+});
+
+test("task.configure preflight preserves policy and identity priority around key replay", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f);
+  const domain = f.service.domain();
+  domain.markImportedTask(ids.taskId, "preflight-import", "repository");
+  const api = new OperatorApi(f.service, [f.directory]);
+  const commands = (
+    api as unknown as {
+      commands: { execute: (command: unknown) => Promise<unknown> };
+    }
+  ).commands;
+  const version = Number(domain.task(ids.taskId).version);
+  const configure = (
+    taskId: string,
+    projectId: string,
+    key: string,
+    fields: Record<string, unknown> = {},
+    expectedVersion = version,
+  ) => ({
+    type: "task.configure" as const,
+    key,
+    projectId,
+    taskId,
+    expectedVersion,
+    ...fields,
+  });
+  const expectApiError = (status: number, code: string) => (error: unknown) =>
+    error instanceof OperatorApiError &&
+    error.status === status &&
+    error.code === code;
+
+  for (const fields of [
+    { title: "Override" },
+    { outcome: "Override outcome" },
+    { ready: false },
+  ])
+    await assert.rejects(
+      api.execute(
+        configure(
+          ids.taskId,
+          ids.projectId,
+          randomUUID(),
+          fields,
+          version + 10,
+        ),
+      ),
+      expectApiError(403, "forbidden"),
+    );
+
+  const durableKey = randomUUID();
+  const durable = configure(ids.taskId, ids.projectId, durableKey);
+  const receipt = await api.execute(durable);
+  assert.deepEqual(await api.execute(durable), receipt);
+  await assert.rejects(
+    api.execute(
+      configure(
+        ids.taskId,
+        ids.projectId,
+        durableKey,
+        { title: "Forbidden despite stale version" },
+        version + 10,
+      ),
+    ),
+    expectApiError(403, "forbidden"),
+  );
+
+  const otherProjectId = randomUUID();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProjectId,
+    name: "Other project",
+    leadProfileId: null,
+  });
+  const otherTaskId = randomUUID();
+  domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProjectId,
+    taskId: otherTaskId,
+    title: "Other task",
+    outcome: "Keep it private",
+  });
+  await assert.rejects(
+    api.execute(
+      configure(otherTaskId, ids.projectId, durableKey, { title: "No" }),
+    ),
+    expectApiError(403, "forbidden"),
+  );
+  await assert.rejects(
+    api.execute(
+      configure(randomUUID(), ids.projectId, durableKey, { title: "No" }),
+    ),
+    expectApiError(404, "not-found"),
+  );
+
+  const localTaskId = randomUUID();
+  domain.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: localTaskId,
+    title: "Local task",
+    outcome: "Mutable locally",
+  });
+  const localConfigure = configure(localTaskId, ids.projectId, randomUUID(), {
+    title: "Updated locally",
+  });
+  const localReceipt = await api.execute(localConfigure);
+  assert.deepEqual(await api.execute(localConfigure), localReceipt);
+  await assert.rejects(
+    api.execute({ ...localConfigure, title: "Different payload" }),
+    expectApiError(409, "conflict"),
+  );
+
+  const inFlightKey = randomUUID();
+  const inFlightBase = configure(
+    ids.taskId,
+    ids.projectId,
+    inFlightKey,
+    {},
+    Number(domain.task(ids.taskId).version),
+  );
+  const inFlight = commands.execute({ ...inFlightBase, actor: "operator" });
+  const policyRejection = commands.execute({
+    ...configure(ids.taskId, ids.projectId, inFlightKey, {
+      outcome: "Denied",
+    }),
+    actor: "operator",
+  });
+  assert.ok(policyRejection instanceof Promise);
+  await assert.rejects(
+    policyRejection,
+    (error) => error instanceof DomainPolicyError && error.code === "forbidden",
+  );
+  await inFlight;
+
+  const projectVersion = Number(domain.project(ids.projectId).version);
+  const collisionKey = randomUUID();
+  const pendingProjectWrite = commands.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: collisionKey,
+    projectId: ids.projectId,
+    expectedVersion: projectVersion,
+    paused: true,
+  });
+  const wrongProjectInFlight = api.execute(
+    configure(otherTaskId, ids.projectId, collisionKey, { title: "No" }),
+  );
+  const missingTaskInFlight = api.execute(
+    configure(randomUUID(), ids.projectId, collisionKey, { title: "No" }),
+  );
+  await assert.rejects(wrongProjectInFlight, expectApiError(403, "forbidden"));
+  await assert.rejects(missingTaskInFlight, expectApiError(404, "not-found"));
+  await pendingProjectWrite;
+});
+
+test("assignment and dependency commands preflight their target before key conflicts", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const target = await seed(f);
+  const submitted = await seed(f);
+  const domain = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const commands = (
+    api as unknown as {
+      commands: { execute: (command: unknown) => Promise<unknown> };
+    }
+  ).commands;
+  const assignmentId = randomUUID();
+  const assignment = {
+    type: "assignment.create" as const,
+    key: randomUUID(),
+    projectId: target.projectId,
+    taskId: target.taskId,
+    assignmentId,
+    profileId: target.profileId,
+    brief: "Existing assignment",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  };
+  await domain.execute({ ...assignment, actor: "operator" });
+  const assignmentRow = domain.assignment(assignmentId);
+  const targetVersion = Number(domain.task(target.taskId).version);
+
+  const preflightCases = [
+    {
+      command: {
+        type: "assignment.apply" as const,
+        assignmentId,
+        expectedVersion: Number(assignmentRow.version) + 20,
+      },
+      status: 403,
+    },
+    {
+      command: {
+        type: "dependency.add" as const,
+        taskId: target.taskId,
+        blockerTaskId: randomUUID(),
+        expectedVersion: targetVersion + 20,
+      },
+      status: 403,
+    },
+    {
+      command: {
+        type: "dependency.remove" as const,
+        taskId: target.taskId,
+        blockerTaskId: randomUUID(),
+        expectedVersion: targetVersion + 20,
+      },
+      status: 403,
+    },
+    {
+      command: {
+        type: "assignment.apply" as const,
+        assignmentId: randomUUID(),
+        expectedVersion: 1,
+      },
+      status: 404,
+    },
+    {
+      command: {
+        type: "dependency.add" as const,
+        taskId: randomUUID(),
+        blockerTaskId: randomUUID(),
+        expectedVersion: 1,
+      },
+      status: 404,
+    },
+  ];
+  const expectStatus = (status: number) => (error: unknown) =>
+    error instanceof OperatorApiError && error.status === status;
+
+  // A durable receipt from another command must not mask target ownership.
+  const durableKey = randomUUID();
+  await api.execute({
+    type: "project.configure",
+    key: durableKey,
+    projectId: submitted.projectId,
+    expectedVersion: Number(domain.project(submitted.projectId).version),
+    paused: true,
+  });
+  for (const command of preflightCases)
+    await assert.rejects(
+      api.execute({
+        ...command.command,
+        key: durableKey,
+        projectId: submitted.projectId,
+      }),
+      expectStatus(command.status),
+      command.command.type,
+    );
+
+  // The in-flight map has the same priority boundary as durable receipts.
+  const inFlightKey = randomUUID();
+  const pending = commands.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: inFlightKey,
+    projectId: submitted.projectId,
+    expectedVersion: Number(domain.project(submitted.projectId).version),
+    paused: false,
+  });
+  const inFlightAssertions = preflightCases.map((command) =>
+    assert.rejects(
+      api.execute({
+        ...command.command,
+        key: inFlightKey,
+        projectId: submitted.projectId,
+      }),
+      expectStatus(command.status),
+      `${command.command.type} in-flight`,
+    ),
+  );
+  await Promise.all(inFlightAssertions);
+  await pending;
+
+  await assert.rejects(
+    api.execute({
+      type: "assignment.apply",
+      key: randomUUID(),
+      projectId: submitted.projectId,
+      assignmentId,
+      expectedVersion: Number(assignmentRow.version) + 20,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 403,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "dependency.add",
+      key: randomUUID(),
+      projectId: submitted.projectId,
+      taskId: target.taskId,
+      blockerTaskId: randomUUID(),
+      expectedVersion: targetVersion + 20,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 403,
+  );
+
+  for (const command of [
+    {
+      type: "assignment.apply" as const,
+      assignmentId,
+      expectedVersion: Number(assignmentRow.version) + 20,
+    },
+    {
+      type: "dependency.add" as const,
+      taskId: target.taskId,
+      blockerTaskId: randomUUID(),
+      expectedVersion: targetVersion + 20,
+    },
+    {
+      type: "dependency.remove" as const,
+      taskId: target.taskId,
+      blockerTaskId: randomUUID(),
+      expectedVersion: targetVersion + 20,
+    },
+  ]) {
+    const key = randomUUID();
+    await api.execute({
+      type: "project.configure",
+      key,
+      projectId: target.projectId,
+      expectedVersion: Number(domain.project(target.projectId).version),
+      paused: true,
+    });
+    await assert.rejects(
+      api.execute({ ...command, key, projectId: target.projectId }),
+      (error) => error instanceof OperatorApiError && error.status === 409,
+      `${command.type} same-project key conflict`,
+    );
+  }
+
+  // Same-project subordinate errors and missing targets retain their statuses.
+  await assert.rejects(
+    api.execute({
+      type: "assignment.apply",
+      key: randomUUID(),
+      projectId: target.projectId,
+      assignmentId,
+      expectedVersion: Number(assignmentRow.version) + 20,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 409,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "assignment.apply",
+      key: randomUUID(),
+      projectId: target.projectId,
+      assignmentId: randomUUID(),
+      expectedVersion: 1,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 404,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "dependency.add",
+      key: randomUUID(),
+      projectId: target.projectId,
+      taskId: target.taskId,
+      blockerTaskId: randomUUID(),
+      expectedVersion: targetVersion,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 404,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "dependency.remove",
+      key: randomUUID(),
+      projectId: target.projectId,
+      taskId: target.taskId,
+      blockerTaskId: target.taskId,
+      expectedVersion: targetVersion + 20,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 409,
+  );
+  await assert.rejects(
+    api.execute({
+      type: "dependency.add",
+      key: randomUUID(),
+      projectId: target.projectId,
+      taskId: randomUUID(),
+      blockerTaskId: randomUUID(),
+      expectedVersion: 1,
+    }),
+    (error) => error instanceof OperatorApiError && error.status === 404,
+  );
+  assert.equal(domain.assignment(assignmentId).version, assignmentRow.version);
+  assert.equal(domain.task(target.taskId).version, targetVersion);
+  assert.equal(domain.task(target.taskId).importedBlockers, "clear");
+  assert.equal(
+    (await api.readTask(target.taskId)).data.localDependencies.length,
+    0,
+  );
+});
+
+test("target project visibility keeps its not-found precedence before ownership and keys", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const hidden = await seed(f);
+  const visible = await seed(f);
+  const domain = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const commands = (
+    api as unknown as {
+      commands: { execute: (command: unknown) => Promise<unknown> };
+    }
+  ).commands;
+  const hiddenVersion = Number(domain.task(hidden.taskId).version);
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      "DELETE FROM project_instruction_revisions WHERE projectId = ?",
+    ).run(hidden.projectId);
+  });
+
+  const cases = [
+    {
+      type: "task.configure" as const,
+      taskId: hidden.taskId,
+      expectedVersion: hiddenVersion + 10,
+      title: "Hidden task",
+    },
+    {
+      type: "dependency.add" as const,
+      taskId: hidden.taskId,
+      blockerTaskId: randomUUID(),
+      expectedVersion: hiddenVersion + 10,
+    },
+    {
+      type: "dependency.remove" as const,
+      taskId: hidden.taskId,
+      blockerTaskId: randomUUID(),
+      expectedVersion: hiddenVersion + 10,
+    },
+  ];
+  const notFound = (error: unknown) =>
+    error instanceof OperatorApiError && error.status === 404;
+
+  const durableKey = randomUUID();
+  await api.execute({
+    type: "project.configure",
+    key: durableKey,
+    projectId: visible.projectId,
+    expectedVersion: Number(domain.project(visible.projectId).version),
+    paused: true,
+  });
+  for (const command of cases)
+    await assert.rejects(
+      api.execute({
+        ...command,
+        key: durableKey,
+        projectId: visible.projectId,
+      }),
+      notFound,
+      `${command.type} hidden target before durable replay`,
+    );
+
+  const inFlightKey = randomUUID();
+  const pending = commands.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: inFlightKey,
+    projectId: visible.projectId,
+    expectedVersion: Number(domain.project(visible.projectId).version),
+    paused: false,
+  });
+  const inFlightAssertions = cases.map((command) =>
+    assert.rejects(
+      api.execute({
+        ...command,
+        key: inFlightKey,
+        projectId: visible.projectId,
+      }),
+      notFound,
+      `${command.type} hidden target before in-flight admission`,
+    ),
+  );
+  await Promise.all(inFlightAssertions);
+  await pending;
+  assert.equal(domain.task(hidden.taskId).version, hiddenVersion);
+});
 test("workspace reports the Codex runtime as unavailable after a runtime failure", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

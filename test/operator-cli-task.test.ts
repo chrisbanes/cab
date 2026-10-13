@@ -369,6 +369,73 @@ test("task configure and dependencies are versioned, reversible and respect impo
     title: "Local override",
   });
   assert.equal(direct.status, 403);
+  assert.equal((await direct.json()).error.fieldPaths, undefined);
+  for (const update of [{ outcome: "Local outcome" }, { ready: false }]) {
+    const response = await s.sessionPost("/api/operator/commands", {
+      type: "task.configure",
+      key: randomUUID(),
+      projectId: s.projectId,
+      taskId: imported,
+      expectedVersion: importedVersion,
+      ...update,
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.fieldPaths, undefined);
+  }
+  assert.deepEqual(
+    {
+      title: d.task(imported).title,
+      outcome: d.task(imported).outcome,
+      ready: Boolean(d.task(imported).ready),
+      version: Number(d.task(imported).version),
+    },
+    {
+      title: "Imported task",
+      outcome: "Imported body",
+      ready: true,
+      version: importedVersion,
+    },
+  );
+
+  const otherProjectId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProjectId,
+    name: "Other project",
+    leadProfileId: null,
+  });
+  const otherProjectTaskId = randomUUID();
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: otherProjectId,
+    taskId: otherProjectTaskId,
+    title: "Other project task",
+    outcome: "Keep project binding",
+  });
+  const mismatch = await s.sessionPost("/api/operator/commands", {
+    type: "task.configure",
+    key: randomUUID(),
+    projectId: s.projectId,
+    taskId: otherProjectTaskId,
+    expectedVersion: 1,
+    title: "Wrong project",
+  });
+  assert.equal(mismatch.status, 403);
+  assert.equal(d.task(otherProjectTaskId).title, "Other project task");
+  const missing = await s.sessionPost("/api/operator/commands", {
+    type: "task.configure",
+    key: randomUUID(),
+    projectId: s.projectId,
+    taskId: randomUUID(),
+    expectedVersion: 1,
+    title: "Missing task",
+  });
+  assert.equal(missing.status, 404);
+  assert.equal((await missing.json()).error.code, "not-found");
   // A local task may depend on an imported blocker.
   r = await cli("rw", [
     "task",

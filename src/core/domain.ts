@@ -21,6 +21,20 @@ import {
   profileRuntimeSchema,
   type ProfileRuntime,
 } from "./execution-runtime.js";
+import {
+  DomainConflictError,
+  DomainNotFoundError,
+  DomainOperationError,
+  DomainPolicyError,
+  DomainStaleDispositionError,
+} from "./domain-errors.js";
+export {
+  DomainConflictError,
+  DomainNotFoundError,
+  DomainOperationError,
+  DomainPolicyError,
+  DomainStaleDispositionError,
+} from "./domain-errors.js";
 
 const id = z.string().uuid();
 const label = z.string().trim().min(1).max(512);
@@ -313,41 +327,6 @@ function parseCommand(input: unknown) {
 }
 
 export type DomainCommand = z.input<typeof commandSchema>;
-export class DomainConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DomainConflictError";
-  }
-}
-
-export class DomainStaleDispositionError extends Error {
-  constructor(
-    message: string,
-    readonly reason: "external-admission" | "stale",
-  ) {
-    super(message);
-    this.name = "DomainStaleDispositionError";
-  }
-}
-
-export class DomainNotFoundError extends Error {
-  constructor() {
-    super("Unknown domain record");
-    this.name = "DomainNotFoundError";
-  }
-}
-
-export class DomainPolicyError extends Error {
-  constructor(
-    readonly code: "forbidden" | "invalid-input",
-    message: string,
-    readonly fieldPaths?: string[],
-  ) {
-    super(message);
-    this.name = "DomainPolicyError";
-  }
-}
-
 export type CapacityConfigureCommand = Extract<
   DomainCommand,
   { type: "capacity.configure" }
@@ -691,6 +670,7 @@ export class DomainStore {
       throw new DomainPolicyError(
         "invalid-input",
         "Repository verification failed",
+        ["repositories"],
       );
     }
     return this.executeParsed(command, verified);
@@ -790,6 +770,7 @@ export class DomainStore {
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
+    this.preflightOperatorProjectCommand(command);
     const scope = scopeOf(command);
     const hash = commandHash(command);
     const outcome = transaction(this.db, () => {
@@ -827,9 +808,10 @@ export class DomainStore {
       try {
         this.onChange?.();
       } catch (error) {
-        throw new Error("Command committed but change notification failed", {
-          cause: error,
-        });
+        throw new DomainOperationError(
+          "Command committed but change notification failed",
+          { cause: error },
+        );
       }
     return outcome.result;
   }
@@ -882,6 +864,65 @@ export class DomainStore {
         "INSERT INTO github_imported_tasks (taskId, providerInstance, nodeId, repositoryId) VALUES (?, 'github.com', ?, ?)",
       )
       .run(id.parse(taskId), label.parse(nodeId), label.parse(repositoryId));
+  }
+
+  /**
+   * Checks task.configure authority before key lookup, which must not mask
+   * task absence, project mismatch, or provider-owned fields.
+   */
+  preflightTaskConfigure(
+    command: Extract<ParsedCommand, { type: "task.configure" }>,
+  ): void {
+    this.operator(command);
+    const current = this.task(command.taskId);
+    if (!this.projectListed(String(current.projectId)))
+      throw new DomainNotFoundError();
+    this.projectMatch(current, command.projectId);
+    if (
+      this.importedTask(command.taskId) &&
+      (command.title !== undefined ||
+        command.outcome !== undefined ||
+        command.ready !== undefined)
+    )
+      throw new DomainPolicyError(
+        "forbidden",
+        "Imported provider fields and readiness are provider-owned",
+      );
+  }
+
+  /**
+   * Preserves the operator API's project/target checks before command-key
+   * lookup. These checks must also run before in-flight admission in
+   * DomainCommands, or a reused key can mask a target/project refusal.
+   */
+  preflightOperatorProjectCommand(command: ParsedCommand): void {
+    if (command.type === "task.configure") {
+      this.preflightTaskConfigure(command);
+      return;
+    }
+    if (
+      command.actor !== "operator" ||
+      !("projectId" in command) ||
+      !(
+        command.type === "assignment.apply" ||
+        command.type === "dependency.add" ||
+        command.type === "dependency.remove"
+      )
+    )
+      return;
+
+    if (command.type === "assignment.apply") {
+      const assignment = this.assignment(command.assignmentId);
+      this.project(command.projectId);
+      this.projectMatch(assignment, command.projectId);
+      return;
+    }
+
+    const task = this.task(command.taskId);
+    if (!this.projectListed(String(task.projectId)))
+      throw new DomainNotFoundError();
+    this.project(command.projectId);
+    this.projectMatch(task, command.projectId);
   }
 
   importedTask(taskId: string): Row | undefined {
@@ -1606,6 +1647,7 @@ export class DomainStore {
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
   ): unknown {
+    this.preflightOperatorProjectCommand(command);
     switch (command.type) {
       case "project.create": {
         this.operator(command);
@@ -1740,19 +1782,9 @@ export class DomainStore {
         return this.task(command.taskId);
       }
       case "task.configure": {
-        this.operator(command);
+        this.preflightTaskConfigure(command);
         const current = this.task(command.taskId);
-        this.projectMatch(current, command.projectId);
         this.version(current, command.expectedVersion);
-        if (
-          this.importedTask(command.taskId) &&
-          (command.title !== undefined ||
-            command.outcome !== undefined ||
-            command.ready !== undefined)
-        )
-          throw new DomainConflictError(
-            "Imported provider fields and readiness are provider-owned",
-          );
         if (command.title !== undefined)
           this.db
             .prepare("UPDATE tasks SET title = ? WHERE id = ?")
@@ -2426,6 +2458,13 @@ export class DomainCommands {
 
   execute(input: DomainCommand): Promise<unknown> {
     const command = parseCommand(input);
+    if (command.type === "task.configure" || command.actor === "operator") {
+      try {
+        this.store.preflightOperatorProjectCommand(command);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }
     const scope = scopeOf(command);
     const key = `${scope}:${command.key}`;
     const hash = createHash("sha256").update(canonical(command)).digest("hex");

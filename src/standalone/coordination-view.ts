@@ -24,7 +24,11 @@ import type {
   TaskCompletionRequest,
   UnresolvedResultDestination,
 } from "../core/coordination.js";
-import type { DomainStore } from "../core/domain.js";
+import {
+  DomainOperationError,
+  DomainPolicyError,
+  type DomainStore,
+} from "../core/domain.js";
 import type { ConversationHistoryAssignmentRead } from "./conversation-history.js";
 import type {
   RoutingAttempt,
@@ -335,7 +339,16 @@ export class CoordinationView {
   ) {}
 
   async notifyOperatorCommand(): Promise<void> {
-    await this.onCommand();
+    try {
+      await this.onCommand();
+    } catch (error) {
+      throw new DomainOperationError(
+        error instanceof Error ? error.message : "Command outcome is unknown",
+        {
+          cause: error,
+        },
+      );
+    }
   }
 
   /** Assignment identity determines its task; history never authorizes execution. */
@@ -575,7 +588,10 @@ export class CoordinationView {
         .assignments(command.taskId)
         .some((assignment) => assignment.id === command.recipientAssignmentId)
     )
-      throw new Error("Message recipient is not in this task");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Message recipient is not in this task",
+      );
     return this.commitCommand(
       this.coordination.postOperatorMessage({ actor: "operator", ...command }),
     );
@@ -591,7 +607,7 @@ export class CoordinationView {
         .results(command.taskId)
         .some((result) => result.resultId === command.resultId)
     )
-      throw new Error("Result is not in this task");
+      throw new DomainPolicyError("forbidden", "Result is not in this task");
     return this.commitCommand(
       this.coordination.reconcileResultRecipient({
         actor: "operator",
@@ -616,7 +632,7 @@ export class CoordinationView {
     });
     this.requireInteraction(command.taskId, command.interactionId, "question");
     const receipt = this.coordination.answerRuntimeQuestion(command);
-    await this.onCommand();
+    await this.notifyOperatorCommand();
     return receipt;
   }
 
@@ -711,7 +727,8 @@ export class CoordinationView {
       .interactions(taskId)
       .find((item) => item.interactionId === interactionId);
     if (!interaction || interaction.kind !== kind)
-      throw new Error(
+      throw new DomainPolicyError(
+        "forbidden",
         `${kind === "question" ? "Question" : "Approval"} is not in this task`,
       );
     return interaction;
@@ -730,7 +747,7 @@ export class CoordinationView {
         ? { resumedLead: true as const }
         : {}),
     };
-    await this.onCommand();
+    await this.notifyOperatorCommand();
     return receipt;
   }
 

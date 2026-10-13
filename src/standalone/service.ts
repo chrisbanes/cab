@@ -27,6 +27,8 @@ import {
 import {
   type CapacityConfigureCommand,
   type CapacityLimits,
+  DomainConflictError,
+  DomainPolicyError,
   DomainStaleDispositionError,
   DomainStore,
 } from "../core/domain.js";
@@ -691,7 +693,10 @@ export class StandaloneService {
           this.authorizeDelivery(caller, exceptOperationId);
           if (isOperatorDeliveryCaller(caller)) {
             if (request && request.action.kind !== "issue.comment")
-              throw Error("Operator delivery only permits issue.comment");
+              throw new DomainPolicyError(
+                "forbidden",
+                "Operator delivery only permits issue.comment",
+              );
             return;
           }
           if (
@@ -1922,7 +1927,9 @@ export class StandaloneService {
     );
     if (prior) {
       if (prior.state !== "staged")
-        throw new Error("Review anchor operation response kind mismatch");
+        throw new DomainConflictError(
+          "Review anchor operation response kind mismatch",
+        );
       return prior;
     }
 
@@ -1961,10 +1968,10 @@ export class StandaloneService {
       this.turnWorkspaceInspectionCurrent(request.taskId);
     const initialWorkspace = await currentWorkspace();
     if (initialWorkspace.taskVersion !== Number(task.version))
-      throw new Error("Review anchor task version changed");
+      throw new DomainConflictError("Review anchor task version changed");
     const initialPolicy = await currentPolicy();
     if (!initialPolicy || initialPolicy.taskVersion !== Number(task.version))
-      throw new Error("Review anchor policy is unavailable");
+      throw new DomainConflictError("Review anchor policy is unavailable");
     const candidates = [];
     for (const selection of request.anchors)
       candidates.push(
@@ -1994,7 +2001,7 @@ export class StandaloneService {
       latestWorkspace.taskVersion !== initialWorkspace.taskVersion ||
       latestWorkspace.visibility !== initialWorkspace.visibility
     )
-      throw new Error(
+      throw new DomainConflictError(
         "Review anchor task or access binding changed during capture",
       );
     return { candidates, accessFingerprint: initialPolicy.accessFingerprint };
@@ -2136,7 +2143,7 @@ export class StandaloneService {
           .length ||
         this.delivery().actionBlockers(caller.taskId, exceptOperationId).length
       )
-        throw Error("Task admission is held");
+        throw new DomainConflictError("Task admission is held");
       return;
     }
     const state = this.requireState(),
@@ -2166,7 +2173,7 @@ export class StandaloneService {
       reasons.length ||
       this.delivery().actionBlockers(caller.taskId, exceptOperationId).length
     )
-      throw new Error("Task admission is held");
+      throw new DomainConflictError("Task admission is held");
   }
   operatorCommentCaller(taskId: string): OperatorDeliveryCaller {
     const d = this.domain(),
@@ -2177,7 +2184,7 @@ export class StandaloneService {
         ? this.githubSources().review(String(imported.nodeId))
         : undefined;
     if (!imported || !source || !review)
-      throw Error("Imported task source unavailable");
+      throw new DomainConflictError("Imported task source unavailable");
     return {
       actor: "operator",
       principal: "installation-operator",
@@ -2195,7 +2202,8 @@ export class StandaloneService {
   }
   private operatorCommentAction(caller: OperatorDeliveryCaller, body: string) {
     const issue = this.githubSources().issue(caller.sourceNodeId);
-    if (!issue) throw Error("Imported task issue unavailable");
+    if (!issue)
+      throw new DomainConflictError("Imported task issue unavailable");
     return {
       kind: "issue.comment" as const,
       target: {
@@ -2216,7 +2224,9 @@ export class StandaloneService {
     const prior = this.delivery().operatorReview(command.key);
     if (prior) {
       if (prior.commandHash !== materialDigest(command))
-        throw Error("Operator review key reused with different material");
+        throw new DomainConflictError(
+          "Operator review key reused with different material",
+        );
       return prior;
     }
     const caller = this.operatorCommentCaller(command.taskId);
@@ -2236,7 +2246,7 @@ export class StandaloneService {
   }) {
     return this.delivery().confirmOperatorComment(command, () => {
       const record = this.delivery().operatorReview(command.reviewId);
-      if (!record) throw Error("Operator review unavailable");
+      if (!record) throw new DomainConflictError("Operator review unavailable");
       this.authorizeDelivery(record.caller);
     });
   }
@@ -2258,12 +2268,14 @@ export class StandaloneService {
         prior.binding.taskVersion !== command.expectedTaskVersion ||
         prior.request.operatorReviewId !== command.reviewId
       )
-        throw Error("Operation key used with different material or caller");
+        throw new DomainConflictError(
+          "Operation key used with different material or caller",
+        );
       return prior;
     }
     const caller = this.operatorCommentCaller(command.taskId);
     if (caller.taskVersion !== command.expectedTaskVersion)
-      throw Error("Operator task revision conflict");
+      throw new DomainConflictError("Operator task revision conflict");
     return this.requireDeliveryCoordinator().submit(
       {
         operationId: command.key,

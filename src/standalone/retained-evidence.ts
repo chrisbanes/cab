@@ -1,3 +1,4 @@
+import { DomainConflictError } from "../core/domain.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { materialDigest } from "../core/delivery.js";
@@ -487,13 +488,14 @@ function availableReviewAnchorCandidate(
 ): RetainedReviewAnchorCandidate {
   const sourceSha256 = createHash("sha256").update(sourceBytes).digest("hex");
   if (sourceSha256 !== selection.contentSha256)
-    throw new Error("Review anchor content changed");
+    throw new DomainConflictError("Review anchor content changed");
   const selected = anchorLineRange(
     sourceBytes,
     selection.startLine,
     selection.endLine,
   );
-  if (!selected) throw new Error("Review anchor range is invalid");
+  if (!selected)
+    throw new DomainConflictError("Review anchor range is invalid");
   const excerptSha256 = createHash("sha256")
     .update(selected.bytes)
     .digest("hex");
@@ -531,7 +533,8 @@ function anchorOriginRoot(
   const root = binding.repositories.find(
     (repository) => repository.repositoryId === repositoryId,
   )?.workspacePath;
-  if (!root) throw new Error("Review anchor repository binding mismatch");
+  if (!root)
+    throw new DomainConflictError("Review anchor repository binding mismatch");
   return root;
 }
 
@@ -550,10 +553,10 @@ async function assertReviewAnchorPathAllowed(
     !isDisclosable(path, policy.excluded) ||
     privateSegmentsExcluded(segments)
   )
-    throw new Error("Review anchor path is excluded");
+    throw new DomainConflictError("Review anchor path is excluded");
   const current = await currentWorkspace();
   if (current.taskId !== taskId)
-    throw new Error("Review anchor task binding changed");
+    throw new DomainConflictError("Review anchor task binding changed");
   if (current.binding?.state === "ready") {
     const scope: WorkspaceInspectionScope = repositoryId
       ? { kind: "repository", repositoryId }
@@ -566,7 +569,7 @@ async function assertReviewAnchorPathAllowed(
         currentWorkspace,
       )
     )
-      throw new Error("Review anchor path is excluded");
+      throw new DomainConflictError("Review anchor path is excluded");
     return "ready";
   }
   if (originRoot && isAbsolute(originRoot)) {
@@ -577,7 +580,7 @@ async function assertReviewAnchorPathAllowed(
       if (!isAbsolute(excluded)) continue;
       const resolved = resolve(excluded);
       if (isWithin(resolved, target))
-        throw new Error("Review anchor path is excluded");
+        throw new DomainConflictError("Review anchor path is excluded");
     }
     return "ready";
   }
@@ -601,7 +604,7 @@ function validateOptionalResultBinding(
       manifest.threadId !== selection.threadId) ||
     (selection.turnId !== undefined && manifest.turnId !== selection.turnId)
   )
-    throw new Error("Review anchor result binding mismatch");
+    throw new DomainConflictError("Review anchor result binding mismatch");
 
   if (selection.sourceKind === "comparison-side") {
     if (
@@ -623,7 +626,7 @@ function validateOptionalResultBinding(
       comparison.threadId !== manifest.threadId ||
       comparison.turnId !== manifest.turnId
     )
-      throw new Error("Review anchor result binding mismatch");
+      throw new DomainConflictError("Review anchor result binding mismatch");
     return;
   }
 
@@ -638,7 +641,7 @@ function validateOptionalResultBinding(
         item.sha256 === sourceSha256,
     )
   )
-    throw new Error("Review anchor result binding mismatch");
+    throw new DomainConflictError("Review anchor result binding mismatch");
 }
 
 export async function captureRetainedReviewAnchor(
@@ -646,18 +649,19 @@ export async function captureRetainedReviewAnchor(
 ): Promise<RetainedReviewAnchorCandidate> {
   const selection = reviewAnchorSelectionSchema.parse(input.selection);
   if (selection.taskId !== input.identity.taskId)
-    throw new Error("Review anchor task binding mismatch");
+    throw new DomainConflictError("Review anchor task binding mismatch");
   const capturedAt = Date.now();
   const policy = await input.currentPolicy();
-  if (!policy) throw new Error("Review anchor policy is unavailable");
+  if (!policy)
+    throw new DomainConflictError("Review anchor policy is unavailable");
   if (policy.taskVersion !== input.identity.captureTaskVersion)
-    throw new Error("Review anchor task version changed");
+    throw new DomainConflictError("Review anchor task version changed");
   if (
     (selection.repositoryId &&
       !policy.authorizedRepositoryIds.includes(selection.repositoryId)) ||
     !isDisclosable(selection.path, policy.excluded)
   )
-    throw new Error("Review anchor path is excluded");
+    throw new DomainConflictError("Review anchor path is excluded");
 
   if (selection.sourceKind === "result-evidence") {
     const manifest = input.retainedEvidence.result(
@@ -678,14 +682,16 @@ export async function captureRetainedReviewAnchor(
       record.repositoryId !== selection.repositoryId ||
       record.sha256 !== selection.contentSha256
     )
-      throw new Error("Review anchor result source mismatch");
+      throw new DomainConflictError("Review anchor result source mismatch");
     const content = input.retainedEvidence.item(
       selection.taskId,
       selection.resultId as string,
       selection.resultItemId as string,
     );
     if (!content)
-      throw new Error("Review anchor result content is unavailable");
+      throw new DomainConflictError(
+        "Review anchor result content is unavailable",
+      );
     const allowed = await assertReviewAnchorPathAllowed(
       selection.taskId,
       selection.repositoryId,
@@ -711,7 +717,9 @@ export async function captureRetainedReviewAnchor(
       currentPolicy.fingerprint !== policy.fingerprint ||
       currentWorkspace.taskVersion !== input.identity.captureTaskVersion
     )
-      throw new Error("Review anchor policy changed during capture");
+      throw new DomainConflictError(
+        "Review anchor policy changed during capture",
+      );
     const sourceText = textFromBytes(content.bytes);
     if (
       !sourceText ||
@@ -719,7 +727,7 @@ export async function captureRetainedReviewAnchor(
       createHash("sha256").update(content.bytes).digest("hex") !==
         selection.contentSha256
     )
-      throw new Error("Review anchor result content is invalid");
+      throw new DomainConflictError("Review anchor result content is invalid");
     return availableReviewAnchorCandidate(
       selection,
       content.bytes,
@@ -774,7 +782,7 @@ export async function captureRetainedReviewAnchor(
         input.currentWorkspace,
       )
     )
-      throw new Error("Review anchor path is excluded");
+      throw new DomainConflictError("Review anchor path is excluded");
     const preview = await previewWorkspaceFile(
       { taskId: selection.taskId, scope, path: previewPath, showIgnored: true },
       input.currentWorkspace,
@@ -792,7 +800,9 @@ export async function captureRetainedReviewAnchor(
       createHash("sha256").update(sourceBytes).digest("hex") !==
         preview.preview.sha256
     )
-      throw new Error("Review anchor file observation is inconsistent");
+      throw new DomainConflictError(
+        "Review anchor file observation is inconsistent",
+      );
     validateOptionalResultBinding(
       selection,
       input.retainedEvidence,
@@ -807,7 +817,9 @@ export async function captureRetainedReviewAnchor(
       latestWorkspace.taskVersion !== workspace.taskVersion ||
       latestWorkspace.visibility !== workspace.visibility
     )
-      throw new Error("Review anchor binding changed during capture");
+      throw new DomainConflictError(
+        "Review anchor binding changed during capture",
+      );
     return availableReviewAnchorCandidate(
       selection,
       sourceBytes,
@@ -821,7 +833,9 @@ export async function captureRetainedReviewAnchor(
   if (!exported) {
     const owner = input.comparisonOwner(selection.comparisonId as string);
     if (owner && owner !== selection.taskId)
-      throw new Error("Review anchor comparison identity mismatch");
+      throw new DomainConflictError(
+        "Review anchor comparison identity mismatch",
+      );
     return gapReviewAnchorCandidate(
       selection,
       "comparison-unavailable",
@@ -834,9 +848,9 @@ export async function captureRetainedReviewAnchor(
     comparison.taskId !== selection.taskId ||
     comparison.comparisonId !== selection.comparisonId
   )
-    throw new Error("Review anchor comparison identity mismatch");
+    throw new DomainConflictError("Review anchor comparison identity mismatch");
   if (comparison.target !== selection.context)
-    throw new Error("Review anchor comparison context mismatch");
+    throw new DomainConflictError("Review anchor comparison context mismatch");
   if (
     (selection.context === "turn" &&
       (exported.captureState !== "finished" ||
@@ -861,7 +875,7 @@ export async function captureRetainedReviewAnchor(
       comparison.threadId !== selection.threadId ||
       comparison.turnId !== selection.turnId
     )
-      throw new Error("Review anchor turn identity mismatch");
+      throw new DomainConflictError("Review anchor turn identity mismatch");
   }
 
   const entryMatches = comparison.entries
@@ -881,7 +895,7 @@ export async function captureRetainedReviewAnchor(
       );
     });
   if (entryMatches.length !== 1)
-    throw new Error("Review anchor comparison source mismatch");
+    throw new DomainConflictError("Review anchor comparison source mismatch");
   const { entry, entryIndex } = entryMatches[0] as {
     entry: WorkspaceComparisonEntry;
     entryIndex: number;
@@ -931,7 +945,7 @@ export async function captureRetainedReviewAnchor(
     metadata.sha256 !== selection.contentSha256 ||
     metadata.lineCount !== lineCount(sideText)
   )
-    throw new Error("Review anchor side or range is invalid");
+    throw new DomainConflictError("Review anchor side or range is invalid");
   validateOptionalResultBinding(
     selection,
     input.retainedEvidence,
@@ -948,7 +962,9 @@ export async function captureRetainedReviewAnchor(
     latestWorkspace.taskVersion !== currentWorkspace.taskVersion ||
     latestWorkspace.visibility !== currentWorkspace.visibility
   )
-    throw new Error("Review anchor binding changed during capture");
+    throw new DomainConflictError(
+      "Review anchor binding changed during capture",
+    );
   const bytes = Buffer.from(sideText, "utf8");
   return availableReviewAnchorCandidate(
     selection,

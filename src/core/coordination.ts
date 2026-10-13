@@ -27,7 +27,11 @@ import {
   type RuntimeUserInputOutcome,
   type RuntimeUserInputRequest,
 } from "./structured-questions.js";
-import { DomainStore } from "./domain.js";
+import {
+  DomainConflictError,
+  DomainPolicyError,
+  DomainStore,
+} from "./domain.js";
 import {
   RetainedEvidenceStore,
   unavailableRetainedEvidenceCandidate,
@@ -1607,7 +1611,9 @@ export class CoordinationStore {
       );
       if (prior) {
         if (prior.payloadHash !== materialDigest(payload))
-          throw new Error("Operator command key reused with different content");
+          throw new DomainConflictError(
+            "Operator command key reused with different content",
+          );
         return runtimeAnswerReceiptSchema.parse(
           JSON.parse(String(prior.result)),
         );
@@ -1621,7 +1627,7 @@ export class CoordinationStore {
         question.answers ||
         question.revision !== command.expectedRevision
       )
-        throw new Error(
+        throw new DomainConflictError(
           "Native question unavailable, already answered or stale",
         );
       if (
@@ -1632,7 +1638,7 @@ export class CoordinationStore {
           question.identity.turnId,
         )
       )
-        throw new Error("Native requesting work is stale");
+        throw new DomainConflictError("Native requesting work is stale");
       const answers = validateStructuredAnswers(
         question.request.questions,
         command.answers,
@@ -1925,7 +1931,9 @@ export class CoordinationStore {
     );
     if (!prior) return undefined;
     if (prior.payloadHash !== materialDigest(payload))
-      throw new Error("Operator command key reused with different content");
+      throw new DomainConflictError(
+        "Operator command key reused with different content",
+      );
     return runtimeAnswerReceiptSchema.parse(JSON.parse(String(prior.result)));
   }
   private questionAttribution(row: Row) {
@@ -1965,7 +1973,7 @@ export class CoordinationStore {
         String(interaction.interactionId),
       );
     if (rows.length !== 1)
-      throw new Error(
+      throw new DomainConflictError(
         "Question requesting work is stale, cancelled or ambiguous",
       );
   }
@@ -2007,7 +2015,9 @@ export class CoordinationStore {
       this.requireOwnQuestionEligibility(interaction);
       const stored = this.questionForm(command.interactionId);
       if (!stored || stored.answers)
-        throw new Error("Structured question unavailable or already answered");
+        throw new DomainConflictError(
+          "Structured question unavailable or already answered",
+        );
       const answers = validateQuestionAnswers(stored.form, command.answers);
       const event = this.insertInteractionEvent(
         String(interaction.taskId),
@@ -2091,19 +2101,19 @@ export class CoordinationStore {
         interaction.action !== command.action ||
         interaction.target !== (command.target ?? null)
       )
-        throw new Error(
+        throw new DomainConflictError(
           "Approval material does not match the requested revision",
         );
       if (interaction.materialJson === null) {
         if (command.decision === "approved")
-          throw new Error(
+          throw new DomainConflictError(
             "Legacy approval material is unavailable and cannot be approved",
           );
         if (
           command.material !== undefined &&
           interaction.materialHash !== payload.materialHash
         )
-          throw new Error(
+          throw new DomainConflictError(
             "Approval material does not match the requested revision",
           );
       } else if (
@@ -2111,7 +2121,7 @@ export class CoordinationStore {
         canonicalMaterial(command.material) !== interaction.materialJson ||
         interaction.materialHash !== payload.materialHash
       ) {
-        throw new Error(
+        throw new DomainConflictError(
           "Approval material does not match the requested revision",
         );
       }
@@ -2185,21 +2195,28 @@ export class CoordinationStore {
       if (assignment.taskId !== command.taskId)
         throw new Error("Message recipient belongs to another task");
       if (Number(assignment.version) !== command.expectedAssignmentVersion)
-        throw new Error("Message recipient assignment version conflict");
+        throw new DomainConflictError(
+          "Message recipient assignment version conflict",
+        );
       // A completed lead's resumability is checked once, in deliverOperatorFeedback.
       if (
         assignment.state !== "pending" &&
         assignment.state !== "running" &&
         !(assignment.state === "completed" && this.isTaskLead(assignment))
       )
-        throw new Error("Message recipient must be pending or running");
+        throw new DomainConflictError(
+          "Message recipient must be pending or running",
+        );
       if (command.reference) {
         const lead = this.one(
           "SELECT assignmentId FROM task_lead_bindings WHERE taskId=?",
           command.taskId,
         );
         if (lead?.assignmentId !== command.recipientAssignmentId)
-          throw Error("Contextual feedback must target the accountable lead");
+          throw new DomainPolicyError(
+            "forbidden",
+            "Contextual feedback must target the accountable lead",
+          );
       }
       if (command.reference)
         new TaskReviewStore(this.db).validateReference(
@@ -2388,9 +2405,12 @@ export class CoordinationStore {
         resumedLead: false,
       };
     if (!this.isTaskLead(assignment))
-      throw new Error("Message recipient must be pending or running");
+      throw new DomainConflictError(
+        "Message recipient must be pending or running",
+      );
     const resumable = this.resumable(taskId, assignmentId);
-    if ("refusal" in resumable) throw new Error(resumable.refusal);
+    if ("refusal" in resumable)
+      throw new DomainConflictError(resumable.refusal);
     const { result } = resumable;
     const { event } = this.resumeCompletedAssignment(
       result,
@@ -2896,9 +2916,11 @@ export class CoordinationStore {
         command.resultId,
       );
       if (hold.status !== "unresolved")
-        throw new Error("Result destination is already reconciled");
+        throw new DomainConflictError(
+          "Result destination is already reconciled",
+        );
       if (Number(hold.revision) !== command.expectedRevision)
-        throw new Error("Result destination revision conflict");
+        throw new DomainConflictError("Result destination revision conflict");
       const result = this.resultById(command.resultId);
       if (
         !this.permittedRecipient(
@@ -2908,7 +2930,10 @@ export class CoordinationStore {
           command.recipientAssignmentId,
         )
       )
-        throw new Error("Recipient is not permitted by the assignment");
+        throw new DomainPolicyError(
+          "forbidden",
+          "Recipient is not permitted by the assignment",
+        );
       this.insertResultEvent(result, command.recipientAssignmentId);
       this.db
         .prepare(`UPDATE coordination_unresolved_result_destinations
@@ -4011,7 +4036,9 @@ export class CoordinationStore {
     );
     if (!row) return undefined;
     if (row.payloadHash !== materialDigest(payload))
-      throw new Error("Operator command key reused with different content");
+      throw new DomainConflictError(
+        "Operator command key reused with different content",
+      );
     const receipt = z
       .object({ eventId: z.string().uuid() })
       .parse(JSON.parse(String(row.result)));
@@ -4041,9 +4068,11 @@ export class CoordinationStore {
     expectedRevision: number,
   ): void {
     if (interaction.kind !== kind || interaction.status !== "open")
-      throw new Error("Interaction is not open for this response");
+      throw new DomainConflictError(
+        "Interaction is not open for this response",
+      );
     if (Number(interaction.revision) !== expectedRevision)
-      throw new Error("Interaction revision conflict");
+      throw new DomainConflictError("Interaction revision conflict");
   }
 
   private resolveAttention(interactionId: string): void {

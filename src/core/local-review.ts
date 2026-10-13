@@ -1,3 +1,4 @@
+import { DomainConflictError } from "./domain.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { materialDigest } from "./delivery.js";
@@ -377,7 +378,7 @@ export class LocalReviewStore {
       row.ownerKey !== input.ownerKey ||
       row.requestHash !== input.requestHash
     )
-      throw new Error(
+      throw new DomainConflictError(
         "Local review anchor operation ID reused with different material",
       );
     const group = this.one(
@@ -387,7 +388,9 @@ export class LocalReviewStore {
       input.ownerKey,
     );
     if (group?.state !== "open")
-      throw new Error("Local review anchor group is no longer editable");
+      throw new DomainConflictError(
+        "Local review anchor group is no longer editable",
+      );
     return z
       .object({
         groupId: uuid,
@@ -422,9 +425,9 @@ export class LocalReviewStore {
       );
       const current = draftRow ? Number(draftRow.version) : 0;
       if (current !== input.expectedDraftVersion)
-        throw new Error("Local review draft version conflict");
+        throw new DomainConflictError("Local review draft version conflict");
       if (draftRow && draftRow.state !== "editable")
-        throw new Error("Local review draft is frozen");
+        throw new DomainConflictError("Local review draft is frozen");
       const staged = this.retained.stageReviewAnchorDraftWithinTransaction(
         input.taskId,
         input.stageOperationId,
@@ -519,9 +522,9 @@ export class LocalReviewStore {
       );
       const current = currentRow ? Number(currentRow.version) : 0;
       if (current !== input.expectedDraftVersion)
-        throw new Error("Local review draft version conflict");
+        throw new DomainConflictError("Local review draft version conflict");
       if (currentRow && currentRow.state !== "editable")
-        throw new Error("Local review draft is frozen");
+        throw new DomainConflictError("Local review draft is frozen");
       const refs = new Set(
         draft.comments.flatMap((comment) => comment.anchorGroupIds),
       );
@@ -535,7 +538,9 @@ export class LocalReviewStore {
       for (const groupId of refs) {
         const group = byId.get(groupId);
         if (group?.state !== "open")
-          throw new Error("Local review anchor group is unavailable");
+          throw new DomainConflictError(
+            "Local review anchor group is unavailable",
+          );
         const retained = this.retained.reviewAnchorDraft(
           input.taskId,
           String(group.anchorDraftId),
@@ -549,7 +554,9 @@ export class LocalReviewStore {
           retained.anchorIds.length !== expected.length ||
           retained.anchorIds.some((id, index) => id !== expected[index])
         )
-          throw new Error("Local review anchor group membership changed");
+          throw new DomainConflictError(
+            "Local review anchor group membership changed",
+          );
       }
       const next = current + 1;
       const now = Date.now();
@@ -607,10 +614,10 @@ export class LocalReviewStore {
       );
       const current = row ? Number(row.version) : 0;
       if (current !== input.expectedDraftVersion)
-        throw new Error("Local review draft version conflict");
+        throw new DomainConflictError("Local review draft version conflict");
       // A sent draft may be cleared to start the next review; sending stays frozen.
       if (row && row.state !== "editable" && row.state !== "sent")
-        throw new Error("Local review draft is frozen");
+        throw new DomainConflictError("Local review draft is frozen");
       const groups = this.db
         .prepare(`SELECT groupId,anchorDraftId,anchorIdsJson,state
         FROM coordination_local_review_groups WHERE taskId=? AND ownerKey=?`)
@@ -670,7 +677,7 @@ export class LocalReviewStore {
           existing.requestHash !== input.requestHash ||
           existing.requestJson !== requestJson
         )
-          throw new Error(
+          throw new DomainConflictError(
             "Local review send key reused with different material",
           );
         return {
@@ -698,15 +705,15 @@ export class LocalReviewStore {
         !draftRow ||
         Number(draftRow.version) !== request.expectedDraftVersion
       )
-        throw new Error("Local review draft version conflict");
+        throw new DomainConflictError("Local review draft version conflict");
       if (draftRow.state !== "editable")
-        throw new Error("Local review draft is frozen");
+        throw new DomainConflictError("Local review draft is frozen");
       // A new send applies the write rule; frozen operations above stay lenient.
       const draft = draftSchema.parse(JSON.parse(String(draftRow.draftJson)));
       if (!writableDraftSchema.safeParse(draft).success)
         throw new LocalReviewAnchorRequiredError();
       if (!draft.summary && draft.comments.length === 0)
-        throw new Error("Local review draft is empty");
+        throw new DomainConflictError("Local review draft is empty");
       this.validateLead(request, true);
       const groupIds = draft.comments.flatMap(
         (comment) => comment.anchorGroupIds,
@@ -722,7 +729,9 @@ export class LocalReviewStore {
       const frozenGroups = used.map((groupId) => {
         const group = byId.get(groupId);
         if (group?.state !== "open")
-          throw new Error("Local review anchor group is unavailable");
+          throw new DomainConflictError(
+            "Local review anchor group is unavailable",
+          );
         const anchorIds = z
           .array(uuid)
           .min(1)
@@ -737,7 +746,9 @@ export class LocalReviewStore {
           retainedDraft.anchorIds.length !== anchorIds.length ||
           retainedDraft.anchorIds.some((id, index) => id !== anchorIds[index])
         )
-          throw new Error("Local review anchor group membership changed");
+          throw new DomainConflictError(
+            "Local review anchor group membership changed",
+          );
         return {
           groupId,
           anchorDraftId: String(group.anchorDraftId),
@@ -760,7 +771,9 @@ export class LocalReviewStore {
                     anchorId,
                   );
                   if (!retainedAnchor)
-                    throw new Error("Local review anchor is unavailable");
+                    throw new DomainConflictError(
+                      "Local review anchor is unavailable",
+                    );
                   return anchorContext(retainedAnchor, includeExcerpt);
                 }) ?? []
               );
@@ -843,7 +856,7 @@ export class LocalReviewStore {
     return transaction(this.db, () => {
       const row = this.operation(input.request.key);
       if (!row || row.requestHash !== input.requestHash)
-        throw new Error("Local review operation is unavailable");
+        throw new DomainConflictError("Local review operation is unavailable");
       if (row.state === "recorded") {
         const response = asResponse(row);
         return { response, event: this.events.readEvent(String(row.eventId)) };
@@ -854,7 +867,7 @@ export class LocalReviewStore {
         row.payloadHash !== materialDigest(input.payload) ||
         String(row.payloadJson) !== JSON.stringify(input.payload)
       )
-        throw new Error("Local review frozen payload changed");
+        throw new DomainConflictError("Local review frozen payload changed");
       const identity = input.currentIdentity();
       if (
         identity.projectId !== input.expectedIdentity.projectId ||
@@ -863,14 +876,14 @@ export class LocalReviewStore {
         identity.workspaceVisibility !==
           input.expectedIdentity.workspaceVisibility
       )
-        throw new Error(
+        throw new DomainConflictError(
           "Local review task or access binding changed before commit",
         );
       if (
         input.payload.taskId !== input.request.taskId ||
         input.payload.reviewId !== row.reviewId
       )
-        throw new Error("Local review identity changed");
+        throw new DomainConflictError("Local review identity changed");
       this.validateLead(input.request);
       const storedGroups = this.db
         .prepare(`SELECT groupId,ownerKey,anchorDraftId,anchorIdsJson,state
@@ -887,7 +900,9 @@ export class LocalReviewStore {
           stored.ownerKey !== row.ownerKey ||
           stored.anchorDraftId !== group.anchorDraftId
         )
-          throw new Error("Local review anchor group changed before commit");
+          throw new DomainConflictError(
+            "Local review anchor group changed before commit",
+          );
         const ids = z
           .array(uuid)
           .min(1)
@@ -897,7 +912,9 @@ export class LocalReviewStore {
           ids.length !== group.anchorIds.length ||
           ids.some((id, index) => id !== group.anchorIds[index])
         )
-          throw new Error("Local review anchor group membership changed");
+          throw new DomainConflictError(
+            "Local review anchor group membership changed",
+          );
         const anchorDraft = this.retained.reviewAnchorDraft(
           input.request.taskId,
           group.anchorDraftId,
@@ -907,7 +924,9 @@ export class LocalReviewStore {
           anchorDraft.anchorIds.length !== ids.length ||
           anchorDraft.anchorIds.some((id, index) => id !== ids[index])
         )
-          throw new Error("Local review staged anchor references changed");
+          throw new DomainConflictError(
+            "Local review staged anchor references changed",
+          );
         const seal = this.retained.sealReviewAnchorDraftWithinTransaction(
           input.request.taskId,
           group.anchorDraftId,
@@ -965,7 +984,8 @@ export class LocalReviewStore {
           input.request.expectedDraftVersion,
         );
       const latest = this.operation(input.request.key);
-      if (!latest) throw new Error("Local review receipt was not persisted");
+      if (!latest)
+        throw new DomainConflictError("Local review receipt was not persisted");
       return { response: asResponse(latest), event };
     });
   }
@@ -975,7 +995,9 @@ export class LocalReviewStore {
       const row = this.operation(operationId);
       if (!row) return undefined;
       if (row.requestHash !== requestHash)
-        throw new Error("Local review send key reused with different material");
+        throw new DomainConflictError(
+          "Local review send key reused with different material",
+        );
       if (row.state !== "prepared") return asResponse(row);
       const now = Date.now();
       this.db
@@ -1019,7 +1041,7 @@ export class LocalReviewStore {
         task.projectId !== input.currentIdentity.projectId ||
         Number(task.version) !== input.currentIdentity.taskVersion
       )
-        throw new Error(
+        throw new DomainConflictError(
           "Local review task identity changed before reconciliation",
         );
       const row = this.operation(input.request.key);
@@ -1028,7 +1050,7 @@ export class LocalReviewStore {
         (row.requestHash !== input.requestHash ||
           row.requestJson !== requestJson)
       )
-        throw new Error(
+        throw new DomainConflictError(
           "Local review reconcile key reused with different material",
         );
       if (row && row.state !== "prepared") return asResponse(row);
@@ -1090,7 +1112,8 @@ export class LocalReviewStore {
           );
       }
       const updated = this.operation(input.request.key);
-      if (!updated) throw new Error("Local review fence was not persisted");
+      if (!updated)
+        throw new DomainConflictError("Local review fence was not persisted");
       return asResponse(updated);
     });
   }
@@ -1243,9 +1266,13 @@ export class LocalReviewStore {
     if (!lead)
       throw beforeOperation
         ? new LocalReviewRecipientUnavailableError()
-        : new Error("Local review recipient must be the accountable lead");
+        : new DomainConflictError(
+            "Local review recipient must be the accountable lead",
+          );
     if (lead.version !== request.expectedAssignmentVersion)
-      throw new Error("Local review recipient assignment version conflict");
+      throw new DomainConflictError(
+        "Local review recipient assignment version conflict",
+      );
   }
 
   private leadIdentity(taskId: string, assignmentId: string) {
@@ -1325,7 +1352,9 @@ export class LocalReviewStore {
       prior.ownerKey !== input.ownerKey ||
       prior.requestHash !== input.requestHash
     )
-      throw new Error("Local review draft key reused with different material");
+      throw new DomainConflictError(
+        "Local review draft key reused with different material",
+      );
     return z
       .object({
         version: z.number().int().positive(),
