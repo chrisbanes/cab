@@ -28,7 +28,7 @@ const count = z.number().int().nonnegative();
 const position = z.number().int().positive();
 const text = z.string().max(1024 * 1024);
 
-export const workspaceComparisonEntryReasonSchema = z.enum([
+const workspaceComparisonEntryReasonSchema = z.enum([
   "too-large",
   "invalid-text",
   "unsupported-format",
@@ -37,7 +37,7 @@ export const workspaceComparisonEntryReasonSchema = z.enum([
   "output-limit",
   "time-limit",
 ]);
-export const workspaceComparisonReasonSchema = z.enum([
+const workspaceComparisonReasonSchema = z.enum([
   "workspace-unavailable",
   "repository-unavailable",
   "base-branch-required",
@@ -50,7 +50,7 @@ export const workspaceComparisonReasonSchema = z.enum([
   "unsafe-path",
   "workspace-changed",
 ]);
-export const workspaceTurnReasonSchema = z.enum([
+const workspaceTurnReasonSchema = z.enum([
   ...workspaceComparisonReasonSchema.options,
   "unsupported-content",
 ]);

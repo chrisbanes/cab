@@ -16,7 +16,6 @@ export const executionIntentStateSchema = z.enum([
   "reconciled",
   "resolved-failed",
 ]);
-export type ExecutionIntentState = z.infer<typeof executionIntentStateSchema>;
 
 /** Shape only; the installed Claude integration narrows supported values (C3). */
 const runtimeSetting = z

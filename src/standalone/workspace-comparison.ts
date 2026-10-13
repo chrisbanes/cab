@@ -43,9 +43,7 @@ const maxFilterDriverNames = 64;
 const maxFilterDriverNameBytes = 64;
 const maxFilterConfigBytes = 16 * 1024;
 
-// Inferred from the shared lenient bases; rows recorded before `taskVersion`
-// existed lack it, so the stored schemas keep it optional and the in-memory
-// types here require it.
+// Inferred from the shared lenient bases in core/workspace-comparison-contracts.
 export type WorkspaceComparisonAnchor = z.infer<
   typeof workspaceComparisonAnchorBase
 >;
@@ -75,7 +73,11 @@ export interface WorkspaceComparisonExport {
   captureState?: "pending" | "unsettled" | "finished";
 }
 
-/** `taskVersion` is the task revision admitted by this exact turn request. */
+/**
+ * `taskVersion` is the task revision admitted by this exact turn request. Rows
+ * recorded before it existed lack it, so the stored schemas keep it optional
+ * and these in-memory types require it.
+ */
 export type WorkspaceTurnWorkIdentity = Omit<
   z.infer<typeof workspaceTurnIdentityBase>,
   "taskVersion"

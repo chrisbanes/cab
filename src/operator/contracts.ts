@@ -434,9 +434,9 @@ export const retainedEvidenceItemContentReadSchema = envelope(
   ]),
 );
 // Reads stay open-ended on `reason`; the store records the closed gap-reason enum.
-const retainedReviewAnchorRecordSchema = reviewAnchorRecordBaseSchema.extend({
-  reason: z.string().min(1).max(80).optional(),
-});
+const retainedReviewAnchorRecordSchema = reviewAnchorRecordBaseSchema
+  .extend({ reason: z.string().min(1).max(80).optional() })
+  .strict();
 export const retainedReviewAnchorReadSchema = envelope(
   z.discriminatedUnion("state", [
     z
