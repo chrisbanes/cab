@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -80,10 +81,47 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
 });
 
 test("Assignment recovery is read-only, shows the uncertainty alert and five independent holds", async (_t, journey) => {
-  const { ids, page, web } = await startSettings(
+  const { f, ids, page, web } = await startSettings(
     journey,
     "/app/assignments/:assignment/recovery",
   );
+  const siblingId = randomUUID();
+  f.service.domain().execute({
+    type: "assignment.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: ids.relay,
+    taskId: ids.taskId,
+    assignmentId: siblingId,
+    profileId: ids.profiles.Worker as string,
+    brief: "Sibling work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  } as never);
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE execution_intents SET reason = 'Codex runtime unavailable; restart the service' WHERE workId = 'recovery-generation-1'",
+    ).run();
+    db.prepare(
+      "INSERT INTO turn_requests (requestKey,workId,kind,taskId,projectId,assignmentId,taskVersion,assignmentVersion,instructionsRevision,profileRevision,prompt,state,reason) VALUES ('recovery-generation-1-key','recovery-generation-1','assignment',?,?,?,1,1,1,1,'p','held','Codex runtime unavailable; restart the service')",
+    ).run(ids.taskId, ids.relay, ids.assignmentId);
+    const move = db.prepare(
+      "UPDATE task_execution_bindings SET assignmentId = ? WHERE workId = ?",
+    );
+    for (let n = 2; n <= 21; n++)
+      move.run(siblingId, `recovery-generation-${n}`);
+    const workId = "sibling-generation-21";
+    db.prepare(
+      "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed','r',NULL,NULL,'chatgpt','workspaceWrite','never')",
+    ).run(randomUUID(), workId);
+    db.prepare(
+      "INSERT INTO execution_recovery_identities (workId,workRevision,requestSequence,processId,processStartedAt,bootId,threadId,turnId) VALUES (?,1,1000,'p','s','b',NULL,NULL)",
+    ).run(workId);
+    db.prepare(
+      "INSERT INTO task_execution_bindings (workId,taskId,assignmentId,assignmentVersion,instructionsRevision,profileRevision,conversationRevision) VALUES (?,?,?,1,1,1,1)",
+    ).run(workId, ids.taskId, siblingId);
+  });
+  await page.reload();
   await page
     .getByRole("heading", { level: 1, name: "Assignment recovery evidence" })
     .waitFor();
@@ -92,8 +130,22 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
     await page.request.get(
       `${web.origin}/api/operator/assignments/${ids.assignmentId}/recovery`,
     )
-  ).json()) as { data: { holds: Parameters<typeof holdPills>[0] } };
+  ).json()) as {
+    data: {
+      holds: Parameters<typeof holdPills>[0];
+      omittedCount: number;
+      records: Array<{
+        workId: string | null;
+        generation: { requestSequence: number | null };
+      }>;
+    };
+  };
   assert.equal(read.data.holds.uncertainty, true);
+  assert.deepEqual(
+    read.data.records.map((r) => r.generation.requestSequence),
+    [1],
+  );
+  assert.equal(read.data.omittedCount, 0);
   await page.getByText("Execution may still be active.").waitFor();
   const pills = await page
     .locator(".settings-pill")
@@ -103,9 +155,14 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
     holdPills(read.data.holds).map((h) => `${h.label}${h.value}`),
   );
   await page.getByText("Revisions and actual admitted generation").waitFor();
+  await page.getByRole("heading", { name: "Task-wide holds" }).waitFor();
   await page
-    .getByText("1 older recovery record omitted", { exact: false })
+    .getByRole("heading", { name: "Selected assignment evidence" })
     .waitFor();
+  assert.equal(
+    await page.getByText("Generation 1; request 1", { exact: true }).count(),
+    1,
+  );
   assert.equal(
     await page
       .getByRole("link", { name: "Inspect execution" })
@@ -131,6 +188,91 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
     "Refresh",
   ]);
   assert.equal((await page.content()).includes("PRIVATE"), false);
+
+  await page
+    .getByRole("link", { name: "Inspect execution", exact: true })
+    .click();
+  const recoveryLink = page
+    .getByRole("link", { name: "Recovery", exact: true })
+    .first();
+  await recoveryLink.waitFor();
+  assert.equal(
+    await recoveryLink.getAttribute("href"),
+    `/app/assignments/${ids.assignmentId}/recovery`,
+  );
+  await recoveryLink.click();
+  await page
+    .getByRole("heading", { name: "Selected assignment evidence" })
+    .waitFor();
+  assert.equal(
+    await page.getByText("Generation 1; request 1", { exact: true }).count(),
+    1,
+  );
+
+  await page.goto(`${web.origin}/app/settings/runtime`);
+  await page
+    .locator(`a[href="/app/assignments/${siblingId}/recovery"]`)
+    .first()
+    .click();
+  await page.getByRole("heading", { name: "Task-wide holds" }).waitFor();
+  await page
+    .getByRole("heading", { name: "Selected assignment evidence" })
+    .waitFor();
+  const siblingRead = (await (
+    await page.request.get(
+      `${web.origin}/api/operator/assignments/${siblingId}/recovery`,
+    )
+  ).json()) as {
+    data: {
+      holds: Parameters<typeof holdPills>[0];
+      omittedCount: number;
+      records: Array<{
+        workId: string | null;
+        generation: { requestSequence: number | null };
+      }>;
+    };
+  };
+  assert.equal(siblingRead.data.records.length, 20);
+  assert.ok(
+    siblingRead.data.records.every(
+      (r) =>
+        r.workId?.startsWith("recovery-generation-") ||
+        r.workId === "sibling-generation-21",
+    ),
+  );
+  assert.equal(siblingRead.data.omittedCount, 1);
+  assert.equal(siblingRead.data.holds.writer, true);
+  assert.equal(siblingRead.data.holds.capacity, true);
+  assert.equal(siblingRead.data.holds.uncertainty, true);
+  await page.getByText("Execution may still be active.").waitFor();
+  assert.equal(
+    await page.getByText("Generation 1; request 1", { exact: true }).count(),
+    0,
+  );
+  assert.match(
+    await page.getByText(/for this assignment omitted/).innerText(),
+    /task-wide holds above include verified sibling and omitted generations/,
+  );
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Task detail", exact: true })
+      .getAttribute("href"),
+    `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
+  );
+  const siblingHrefs = await page
+    .getByRole("complementary", {
+      name: "Advanced destinations · desktop-first",
+    })
+    .getByRole("link")
+    .evaluateAll((es) => es.map((e) => e.getAttribute("href")));
+  assert.deepEqual(siblingHrefs, [
+    `/runtime/assignment/${siblingId}`,
+    `/runtime/task/${ids.taskId}`,
+    `/coordination/assignment/${siblingId}`,
+    `/app/tasks/${ids.taskId}?assignment=${siblingId}`,
+    `/coordination/task/${ids.taskId}`,
+    `/assignment/${siblingId}`,
+  ]);
   await captureBrowserEvidence(page, "1366-recovery");
 });
 
@@ -142,7 +284,7 @@ test("phone recovery shows Recovery, current holds and the next step", async (_t
   );
   await page.getByRole("heading", { level: 1, name: "Recovery" }).waitFor();
   await page.getByRole("link", { name: "Back to Runtime" }).waitFor();
-  await page.getByRole("complementary", { name: "Current holds" }).waitFor();
+  await page.getByRole("complementary", { name: "Task-wide holds" }).waitFor();
   await page.getByRole("region", { name: "Next step" }).waitFor();
   const height = await page
     .getByRole("link", { name: "Inspect execution" })

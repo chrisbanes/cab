@@ -301,7 +301,7 @@ export function AssignmentRecovery(
           )}
           <div className="settings-phone-cards">
             <Aside
-              title="Current holds"
+              title="Task-wide holds"
               items={pills.map((h) => `${h.label}: ${h.value.toLowerCase()}`)}
             />
             <section className="settings-aside" aria-label="Next step">
@@ -315,7 +315,7 @@ export function AssignmentRecovery(
           <div className="settings-split">
             <div className="settings-column">
               <Panel
-                title="Independent task-associated holds"
+                title="Task-wide holds"
                 description="Aggregated across all verified task records, including omitted generations."
                 className="settings-desktop"
               >
@@ -365,17 +365,17 @@ export function AssignmentRecovery(
                 <ExecutionNotices assignment={data.assignment} />
               </Panel>
               <Panel
-                title="Recorded evidence"
+                title="Selected assignment evidence"
                 description={
                   data.omittedCount > 0
-                    ? `${plural(data.omittedCount, "older recovery record")} omitted; their unresolved holds remain included above.`
+                    ? `${plural(data.omittedCount, "older recovery record")} for this assignment omitted; task-wide holds above include verified sibling and omitted generations.`
                     : undefined
                 }
               >
                 {!data.evidenceAvailable && (
                   <p className="body">
-                    Recovery evidence unavailable. Absence of records does not
-                    prove release.
+                    Recovery evidence unavailable for this assignment. Absence
+                    of records does not prove release.
                   </p>
                 )}
                 {data.records.map((r) => (

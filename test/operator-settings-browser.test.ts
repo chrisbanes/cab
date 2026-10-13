@@ -858,7 +858,10 @@ for (const layout of [
       `${web.origin}/app/assignments/${ids.assignmentId}/recovery`,
     );
     await page
-      .getByText("1 older recovery record omitted", { exact: false })
+      .getByText(
+        "1 older recovery record for this assignment omitted; task-wide holds above include verified sibling and omitted generations.",
+        { exact: false },
+      )
       .waitFor();
     assert.match(
       await page.locator("body").innerText(),
@@ -991,7 +994,10 @@ test("Runtime Settings records lowered capacity separately from usage and retain
     .getByRole("heading", { name: "Assignment recovery evidence", exact: true })
     .waitFor();
   await page
-    .getByText("1 older recovery record omitted", { exact: false })
+    .getByText(
+      "1 older recovery record for this assignment omitted; task-wide holds above include verified sibling and omitted generations.",
+      { exact: false },
+    )
     .waitFor();
 });
 
