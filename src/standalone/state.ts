@@ -701,9 +701,11 @@ export class ExecutionState {
     else this.db.exec("DELETE FROM task_archival_holds");
     this.db.exec(`INSERT OR IGNORE INTO task_writer_ambiguity_holds (taskId, reason)
       SELECT taskId, reason FROM task_writer_holds
-      WHERE reason = 'Legacy work revision order is ambiguous';
+      WHERE reason = 'Legacy work revision order is ambiguous'
+        AND holdKind IS NULL;
     DELETE FROM task_writer_holds
-      WHERE reason = 'Legacy work revision order is ambiguous'`);
+      WHERE reason = 'Legacy work revision order is ambiguous'
+        AND holdKind IS NULL`);
     this.db.exec(`INSERT OR IGNORE INTO execution_request_predecessors
       (workId, previousWorkId, predecessorKnown)
       SELECT workId, NULL, 0 FROM execution_intents`);

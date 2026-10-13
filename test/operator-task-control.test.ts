@@ -206,6 +206,67 @@ test("Resume clears only the operator Stop and counts requeued work", async (t) 
   );
 });
 
+test("reopen preserves a typed Stop whose edited reason matches the legacy ambiguity marker", async (t) => {
+  const f = await fixture(t);
+  const a = await seedReviewTask(f);
+  await control(f, "task.stop", a.taskId);
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE task_writer_holds SET reason = 'Legacy work revision order is ambiguous' WHERE taskId = ?",
+    ).run(a.taskId);
+    db.prepare(
+      "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, 'Independent ownership ambiguity')",
+    ).run(a.taskId);
+  });
+
+  await f.reopen();
+  assert.equal(f.service.isTaskStopped(a.taskId), true);
+  assert.equal(f.service.hasNonStopTaskHold(a.taskId), true);
+  assert.equal(f.service.taskHold(a.taskId), "Independent ownership ambiguity");
+  assert.deepEqual(
+    rows(
+      f,
+      "SELECT reason, holdKind FROM task_writer_holds WHERE taskId = ?",
+      a.taskId,
+    ),
+    [
+      {
+        reason: "Legacy work revision order is ambiguous",
+        holdKind: "operator-stop",
+      },
+    ],
+  );
+  assert.deepEqual(
+    rows(
+      f,
+      "SELECT reason FROM task_writer_ambiguity_holds WHERE taskId = ?",
+      a.taskId,
+    ),
+    [{ reason: "Independent ownership ambiguity" }],
+  );
+
+  await control(f, "task.resume", a.taskId);
+  assert.equal(f.service.isTaskStopped(a.taskId), false);
+  assert.equal(f.service.hasNonStopTaskHold(a.taskId), true);
+  assert.equal(f.service.taskHold(a.taskId), "Independent ownership ambiguity");
+  assert.deepEqual(
+    rows(
+      f,
+      "SELECT reason, holdKind FROM task_writer_holds WHERE taskId = ?",
+      a.taskId,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    rows(
+      f,
+      "SELECT reason FROM task_writer_ambiguity_holds WHERE taskId = ?",
+      a.taskId,
+    ),
+    [{ reason: "Independent ownership ambiguity" }],
+  );
+});
+
 test("a failed receipt write rolls back the hold and a retry applies once", async (t) => {
   const f = await fixture(t);
   const a = await seedReviewTask(f);
