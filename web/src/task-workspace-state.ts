@@ -4,7 +4,6 @@ import type {
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
-import type { CommandState } from "./api.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
   workspaceDirectoryReadSchema,
@@ -149,9 +148,24 @@ export type ReplyOutcome = {
   tone: OutcomeTone;
   message: string;
   details: readonly OutcomeField[];
-  /** An unconfirmed write: offer the check that replays the exact request. */
-  check?: boolean;
 };
+
+/**
+ * What a draft write is for, as plain data: enough for whichever controller is current to
+ * settle the write, so nothing here ties a pending write to the page that started it.
+ */
+export type DraftWrite =
+  | { kind: "stage"; body: string }
+  | { kind: "add" }
+  | {
+      kind: "edit";
+      commentId: string;
+      remove: boolean;
+      neighbourId: string | null;
+    }
+  | { kind: "summary" }
+  | { kind: "unanchored"; commentIds: string[] }
+  | { kind: "discard" };
 
 class TaskReplyState {
   sourceObservation: "known" | "pending" | "unknown" = "known";
@@ -213,7 +227,8 @@ export class LocalReviewState {
   /** A draft write whose response was lost: the exact request, replayed by the check. */
   unconfirmed: {
     command: OperatorCommand;
-    settle: (result: CommandState) => Promise<void> | void;
+    intent: DraftWrite;
+    outcome: ReplyOutcome;
   } | null = null;
   notice: ReplyOutcome | null = null;
   send: LocalReviewSend | null = null;

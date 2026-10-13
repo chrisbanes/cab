@@ -495,7 +495,9 @@ test("a comment save whose response is lost stays one exact request until it is 
   await files
     .getByRole("button", { name: "Save comment", exact: true })
     .click();
-  const warning = files.locator("[data-slot=action-outcome]");
+  // The check lives in the Local review panel, reachable from anywhere in the task.
+  const review = page.locator("#local-review");
+  const warning = review.locator("[data-slot=action-outcome]");
   await warning
     .getByText(
       "We couldn't confirm the comment was saved. Your comment is kept.",
@@ -513,6 +515,9 @@ test("a comment save whose response is lost stays one exact request until it is 
     await files.getByLabel("Comment", { exact: true }).isDisabled(),
     true,
   );
+  // The composer points to the check instead of repeating the warning.
+  await files.getByText("Check whether it saved in Local review.").waitFor();
+  assert.equal(await files.locator("[data-slot=action-outcome]").count(), 0);
   await warning.getByText("Details", { exact: true }).click();
   assert.match(
     await warning.locator("dl").innerText(),
@@ -521,7 +526,6 @@ test("a comment save whose response is lost stays one exact request until it is 
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
-  const review = page.locator("#local-review");
   await review.getByText("Lost response comment").first().waitFor();
   // The check replayed the same save and the same anchor: one comment, no second request.
   assert.equal(saves.length, 2);
@@ -731,6 +735,100 @@ test("the review controls are off from the first request of a new comment until 
   release();
   await review.getByText("Second note").waitFor();
   await page.unroute("**/api/operator/commands");
+});
+
+/** A new comment whose anchor request was committed but whose answer was lost. */
+async function loseStageAnswer(
+  page: Page,
+  task: { taskId: string },
+  web: { origin: string; password: string },
+) {
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Settled after leaving");
+  const stages: string[] = [];
+  const saves: string[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type === "review.draft.save")
+      saves.push(route.request().postData() ?? "");
+    if (body.type !== "review.anchor.stage") return route.continue();
+    stages.push(route.request().postData() ?? "");
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  const review = page.locator("#local-review");
+  await review
+    .locator("[data-slot=action-outcome]")
+    .getByText(
+      "We couldn't confirm the exact lines were captured. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  return { stages, saves, review };
+}
+
+test("an unconfirmed anchor stays checkable from a new navigation entry and finishes the comment once", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { stages, saves, review } = await loseStageAnswer(page, task, web);
+  // Leave and reopen the task through a new entry: no composer is on screen any more.
+  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
+  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .waitFor();
+  assert.equal(await page.getByLabel("Comment", { exact: true }).count(), 0);
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Settled after leaving").first().waitFor();
+  assert.equal(stages.length, 2);
+  assert.equal(stages[0], stages[1]);
+  assert.equal(saves.length, 1);
+  assert.equal(await review.getByText("Settled after leaving").count(), 1);
+  await warning.getByText("Comment added.", { exact: true }).waitFor();
+});
+
+test("an unconfirmed anchor is settled by the page that checks it after a remount", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { stages, saves, review } = await loseStageAnswer(page, task, web);
+  await page
+    .getByRole("link", { name: "Search", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await page
+    .getByRole("button", { name: "Back to originating workspace", exact: true })
+    .click();
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  // The current page saves and reads the draft back: the comment shows without a reload.
+  await review.getByText("Settled after leaving").first().waitFor();
+  assert.equal(stages.length, 2);
+  assert.equal(stages[0], stages[1]);
+  assert.equal(saves.length, 1);
+  await warning.getByText("Comment added.", { exact: true }).waitFor();
 });
 
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
