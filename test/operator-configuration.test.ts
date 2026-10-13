@@ -952,3 +952,171 @@ test("GitHub configuration command contract accepts only exact keep markers and 
     false,
   );
 });
+
+import { chmod, readFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { createFakeGh } from "./fixtures/fake-gh.js";
+
+test("source observations bound child fanout, share equivalent logins and refresh request/fence scopes", async (t) => {
+  const fake = createFakeGh();
+  t.after(() => fake.close());
+  const root = dirname(fake.executable);
+  await mkdir(join(root, "active"));
+  await writeFile(join(root, "login"), "octo");
+  const executable = join(root, "gh");
+  await writeFile(
+    executable,
+    `#!${process.execPath}\n
+const fs = require('node:fs'), path = require('node:path');
+const root = __dirname, marker = path.join(root, 'active', String(process.pid));
+fs.writeFileSync(marker, '');
+const command = process.argv[3];
+fs.appendFileSync(path.join(root, 'events'), JSON.stringify({ command, peak: fs.readdirSync(path.join(root, 'active')).length }) + '\\n');
+setTimeout(() => {
+  const login = fs.readFileSync(path.join(root, 'login'), 'utf8');
+  if (command === 'status') process.stdout.write(JSON.stringify({ hosts: { 'github.com': [{ state: 'success', active: true, login }] } }));
+  else process.stdout.write('gho_fake-observation-' + login + '\\n');
+  fs.unlinkSync(marker);
+}, 40);
+`,
+  );
+  await chmod(executable, 0o700);
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    { ghExecutable: executable },
+  );
+  t.after(() => f.close());
+  const d = f.service.domain();
+  const oldGh = process.env.GH_TOKEN;
+  process.env.GH_TOKEN = "chosen-observation-canary";
+  t.after(() => {
+    if (oldGh === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = oldGh;
+  });
+  const original = f.service.gitHubSourceCredentialStatus.bind(f.service);
+  const scopes = new Set<unknown>();
+  const captures: string[] = [];
+  let mutate: (() => void) | undefined;
+  f.service.gitHubSourceCredentialStatus = async (projectId, scope) => {
+    scopes.add(scope);
+    captures.push(projectId);
+    const result = await original(projectId, scope);
+    mutate?.();
+    mutate = undefined;
+    return result;
+  };
+  t.after(() => {
+    f.service.gitHubSourceCredentialStatus = original;
+  });
+  const projects: string[] = [];
+  for (let i = 0; i < 11; i++) {
+    const projectId = randomUUID();
+    projects.push(projectId);
+    d.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: `Project ${i}`,
+      leadProfileId: null,
+    });
+    d.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef:
+        i < 9 ? "gh:github.com" : i === 9 ? null : "env:MISSING_OBSERVATION",
+      selections: [],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
+  }
+  const events = async () =>
+    (await readFile(join(root, "events"), "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { command: string; peak: number });
+  const api = new OperatorApi(f.service, [f.directory]);
+  const first = await api.readSourceObservations();
+  assert.deepEqual(
+    first.data.projects.map((p) => p.projectId),
+    d.projects().map((p) => String(p.id)),
+  );
+  assert.ok(
+    first.data.projects
+      .filter((p) => projects.slice(0, 9).includes(p.projectId))
+      .every(
+        (p) => p.credential?.usable && p.credential?.gh.state === "signed-in",
+      ),
+  );
+  const initial = await events();
+  assert.equal(
+    initial.filter((e) => e.command === "status").length,
+    2,
+    "chosen-gh and stripped env/null contexts are separate",
+  );
+  assert.equal(initial.filter((e) => e.command === "token").length, 9);
+  assert.ok(initial.every((e) => e.peak <= 4));
+  assert.equal(scopes.size, 1);
+  await writeFile(join(root, "login"), "replacement");
+  const second = await api.readSourceObservations();
+  assert.ok(
+    second.data.projects
+      .filter((p) => projects.slice(0, 9).includes(p.projectId))
+      .every(
+        (p) =>
+          p.credential?.gh.state === "signed-in" &&
+          p.credential?.gh.login === "replacement",
+      ),
+  );
+  assert.equal(scopes.size, 2, "second request gets a fresh login scope");
+  assert.equal(
+    (await events()).filter((e) => e.command === "status").length,
+    4,
+  );
+  const queued = projects[8]!;
+  const before = captures.length;
+  mutate = () => {
+    d.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: queued,
+      expectedVersion: d.githubConfiguration(queued).version,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
+  };
+  const fenced = await api.readSourceObservations();
+  assert.equal(
+    fenced.data.projects.find((p) => p.projectId === queued)?.credential
+      ?.reason,
+    "missing-credential",
+  );
+  assert.equal(
+    captures.length - before,
+    22,
+    "source fence rebuilds the full read once",
+  );
+  assert.equal(scopes.size, 4, "each fence attempt owns a fresh scope");
+  const allEvents = await events();
+  assert.ok(allEvents.every((e) => e.peak <= 4));
+  t.diagnostic(
+    `Observed child peak ${Math.max(...allEvents.map((e) => e.peak))}; first request detection 2, fresh token commands 9; four independent request/attempt scopes.`,
+  );
+  assert.equal(f.runtime.turns, 0);
+});

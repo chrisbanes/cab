@@ -133,6 +133,15 @@ surface. Older code cannot consume a persisted gh source reference; this is a
 reader compatibility limitation, not a demonstrated startup schema failure.
 Take the normal verified snapshot before reverting.
 
+Credential-aware synchronization keeps rate-limit pauses in memory by resolved
+token identity. A rotated token can recover immediately, while the same token
+waits until its reset; each read resolves freshly before checking that pause.
+Operator previews do not inherit sync pauses. Source observation readbacks use
+four request-local workers and share a login probe only across identical captured
+gh contexts, with a fresh token command per selected-gh status. Each request and
+source-version fence retry gets a fresh probe scope. These bounds do not establish
+aggregate process or host keychain containment.
+
 ### Disposable source qualification
 
 `test/944/live-source-credential.mjs` supports preparation separately from launch.
@@ -190,8 +199,10 @@ remain separate. The bounded source qualification passed on candidate
 `9395520e1cb23937f0e7f399b5c3d7bef67c4d89`: real preview and activation preceded
 the separate import, with zero model turns/GitHub writes and proved cleanup. See
 [the dated evidence](../evidence/944-gh-source-credential-2026-10-13.md) for exact
-results and limits. Its single allowance is consumed; rerunning requires separate
-authorization and a fresh bound preparation.
+results and limits. Later sync-pause/status-fanout repairs use controlled fake and
+full-check evidence; they have not received another live run. Its single allowance
+is consumed; rerunning requires separate authorization and a fresh bound
+preparation.
 
 ### Claude subscription token
 

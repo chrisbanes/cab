@@ -1,3 +1,4 @@
+import type { GhLoginScope } from "./gh-credential.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -2105,15 +2106,19 @@ export class StandaloneService {
     );
   }
 
-  async gitHubSourceCredentialStatus(projectId: string) {
+  async gitHubSourceCredentialStatus(projectId: string, scope?: GhLoginScope) {
     const config = this.domain().githubConfiguration(projectId);
     const reference = config.credentialRef;
-    const status = await gitHubSourceCredentialStatus(reference, {
-      gh: () => ({
-        executable: this.options.ghExecutable,
-        environment: ghEnvironment(this.domain(), { reference }),
-      }),
-    });
+    const status = await gitHubSourceCredentialStatus(
+      reference,
+      {
+        gh: () => ({
+          executable: this.options.ghExecutable,
+          environment: ghEnvironment(this.domain(), { reference }),
+        }),
+      },
+      scope,
+    );
     if (status.reason)
       this.githubSources().invalidateCredentialFailure(
         {

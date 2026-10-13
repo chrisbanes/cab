@@ -1424,3 +1424,69 @@ test("GitHub refresh defaults to five minutes", async () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+import { CredentialGitHubSourceReader } from "../src/standalone/github-source-credential.js";
+
+test("synchronizer scopes concrete reader pauses across refreshes and projects but env rotation recovers", async () => {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  addGitHubProject(domain);
+  addGitHubProject(domain);
+  const environment = { TEST_GITHUB: "token-A" };
+  const calls: string[] = [];
+  const sync = new GitHubSynchronizer(
+    domain,
+    sources,
+    (ref) =>
+      new CredentialGitHubSourceReader(ref, {
+        environment,
+        reader: (token) => ({
+          async readSelection() {
+            calls.push(token);
+            return token === "token-A"
+              ? {
+                  complete: false,
+                  issues: [],
+                  reason: "rate-limited",
+                  resumeAt: Date.now() + 60_000,
+                }
+              : { complete: true, issues: [], reason: null };
+          },
+          async readBlockers() {
+            return { complete: true, blockers: [], reason: null };
+          },
+          async readIssueStatus() {
+            return { status: "open" };
+          },
+        }),
+      }),
+  );
+  try {
+    await sync.refresh();
+    await sync.refresh();
+    assert.deepEqual(
+      calls,
+      ["token-A"],
+      "scope survives newly constructed readers across projects/refreshes",
+    );
+    environment.TEST_GITHUB = "token-B";
+    await sync.refresh();
+    assert.deepEqual(calls, ["token-A", "token-B", "token-B"]);
+    for (const project of domain.projects())
+      assert.equal(sources.syncState(String(project.id), "repo")?.complete, 1);
+    environment.TEST_GITHUB = "";
+    await sync.refresh();
+    for (const project of domain.projects())
+      assert.equal(
+        sources.syncState(String(project.id), "repo")?.reason,
+        "missing-credential",
+      );
+  } finally {
+    await sync.stop();
+    db.close();
+  }
+});

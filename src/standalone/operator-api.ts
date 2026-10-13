@@ -1,3 +1,4 @@
+import { GhLoginScope } from "./gh-credential.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
@@ -4688,13 +4689,29 @@ export class OperatorApi {
   }
   private async readSourceObservationsOnce() {
     const d = this.domain();
-    const projects = await Promise.all(
-      d.projects().map(async (p) => ({
-        projectId: String(p.id),
-        credential: await this.service.gitHubSourceCredentialStatus(
-          String(p.id),
-        ),
-      })),
+    const pending = d.projects();
+    const scope = new GhLoginScope();
+    const projects: {
+      projectId: string;
+      credential: Awaited<
+        ReturnType<StandaloneService["gitHubSourceCredentialStatus"]>
+      >;
+    }[] = new Array(pending.length);
+    let next = 0;
+    await Promise.all(
+      Array.from({ length: Math.min(4, pending.length) }, async () => {
+        while (next < pending.length) {
+          const index = next++;
+          const projectId = String(pending[index]!.id);
+          projects[index] = {
+            projectId,
+            credential: await this.service.gitHubSourceCredentialStatus(
+              projectId,
+              scope,
+            ),
+          };
+        }
+      }),
     );
     const excluded = await this.exclusions();
     return sourceObservationSchema.parse({

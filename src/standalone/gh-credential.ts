@@ -97,11 +97,41 @@ export async function detectGh(options: GhOptions = {}): Promise<GhLoginState> {
     : { state: "unreadable" };
 }
 
+/** A request-local login probe shared only by identical captured process contexts. */
+export class GhLoginScope {
+  private readonly probes = new Map<string, Promise<GhLoginState>>();
+
+  detect(options: GhOptions): Promise<GhLoginState> {
+    const environment = options.environment ?? process.env;
+    const key = JSON.stringify([
+      options.executable ?? "gh",
+      options.timeoutMs ?? 10_000,
+      Object.entries(environment)
+        .filter(([, value]) => value !== undefined)
+        .sort(([a], [b]) => a.localeCompare(b)),
+    ]);
+    let probe = this.probes.get(key);
+    if (!probe) {
+      probe = detectGh(options);
+      this.probes.set(key, probe);
+    }
+    return probe;
+  }
+}
+
 /** The github.com token from `gh auth token`, after detection; never cached for reads. */
 export async function ghToken(
   options: GhOptions = {},
 ): Promise<{ token: string } | { state: GhFailureState }> {
   const detected = await detectGh(options);
+  return ghTokenAfterDetection(detected, options);
+}
+
+/** Uses the paired login probe, but always runs a fresh token command. */
+export async function ghTokenAfterDetection(
+  detected: GhLoginState,
+  options: GhOptions = {},
+): Promise<{ token: string } | { state: GhFailureState }> {
   if (detected.state !== "signed-in") return detected;
   const result = await run(
     ["auth", "token", "--hostname", "github.com"],

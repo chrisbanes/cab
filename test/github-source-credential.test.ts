@@ -351,3 +351,208 @@ test("a failed gh options factory never invokes host gh and preserves independen
     token: "env-own-value",
   });
 });
+
+import { SourceRateLimitPauses } from "../src/standalone/github-source-credential.js";
+import { GhLoginScope } from "../src/standalone/gh-credential.js";
+
+test("resolved-token pauses cover all public reads, rotate immediately and prioritize resolver failure", async (t) => {
+  const fake = createFakeGh();
+  t.after(() => fake.close());
+  for (const kind of ["selection", "blockers", "status"] as const) {
+    let calls = 0;
+    let reset = Date.now() + 60_000;
+    const base = new CredentialGitHubSourceReader("gh:github.com", {
+      gh: { executable: fake.executable },
+      reader: () => ({
+        async readSelection() {
+          calls++;
+          return {
+            complete: false,
+            issues: [],
+            reason: "rate-limited",
+            resumeAt: reset,
+          };
+        },
+        async readBlockers() {
+          calls++;
+          return {
+            complete: false,
+            blockers: [],
+            reason: "rate-limited",
+            resumeAt: reset,
+          };
+        },
+        async readIssueStatus() {
+          calls++;
+          return { status: "unknown", reason: "rate-limited", resumeAt: reset };
+        },
+      }),
+    });
+    const scope = new SourceRateLimitPauses();
+    const read = (reader: CredentialGitHubSourceReader) =>
+      kind === "selection"
+        ? reader.readSelection(selection)
+        : kind === "blockers"
+          ? reader.readBlockers(reference)
+          : reader.readIssueStatus(reference);
+    fake.set("signed-in");
+    fake.setToken(`token-A-${kind}`);
+    assert.equal(
+      (await read(base.withRateLimitPauses(scope))).reason,
+      "rate-limited",
+    );
+    await read(base.withRateLimitPauses(scope));
+    assert.equal(calls, 1, "new clones share the same token pause");
+    fake.set("not-signed-in");
+    assert.equal(
+      (await read(base.withRateLimitPauses(scope))).reason,
+      "gh-not-signed-in",
+    );
+    fake.set("signed-in");
+    fake.setToken(`token-B-${kind}`);
+    reset = Date.now() - 1;
+    await read(base.withRateLimitPauses(scope));
+    await read(base.withRateLimitPauses(scope));
+    assert.equal(
+      calls,
+      3,
+      "new token bypasses old pause and expired reset allows next read",
+    );
+    fake.setToken(`token-A-${kind}`);
+    await read(base);
+    assert.equal(
+      calls,
+      4,
+      "unscoped operator previews do not inherit sync pauses",
+    );
+    await read(base.withRateLimitPauses(scope));
+    assert.equal(calls, 4, "preview does not clear sync pause");
+  }
+});
+
+test("an old-token provider result cannot pause a replacement during an in-flight env read", async () => {
+  const environment = { SOURCE: "token-A" };
+  const scope = new SourceRateLimitPauses();
+  let finish!: () => void;
+  let started!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const tokens: string[] = [];
+  const reader = new CredentialGitHubSourceReader("env:SOURCE", {
+    environment,
+    reader: (token) => ({
+      async readSelection() {
+        tokens.push(token);
+        if (token === "token-A") {
+          started();
+          await held;
+          return {
+            complete: false,
+            issues: [],
+            reason: "rate-limited",
+            resumeAt: Date.now() + 60_000,
+          };
+        }
+        return { complete: true, issues: [], reason: null };
+      },
+      async readBlockers() {
+        return { complete: true, blockers: [], reason: null };
+      },
+      async readIssueStatus() {
+        return { status: "open" };
+      },
+    }),
+  }).withRateLimitPauses(scope);
+  const old = reader.readSelection(selection);
+  await entered;
+  environment.SOURCE = "token-B";
+  finish();
+  await old;
+  assert.equal((await reader.readSelection(selection)).complete, true);
+  environment.SOURCE = "token-A";
+  assert.equal((await reader.readSelection(selection)).reason, "rate-limited");
+  environment.SOURCE = "";
+  assert.equal(
+    (await reader.readSelection(selection)).reason,
+    "missing-credential",
+  );
+  assert.deepEqual(tokens, ["token-A", "token-B"]);
+});
+
+test("status shares one equivalent login probe but fresh tokens, isolating snapshots and new scopes", async (t) => {
+  const fake = createFakeGh();
+  t.after(() => fake.close());
+  const environment = { GH_TOKEN: "selected-current" };
+  const scope = new GhLoginScope();
+  const options = { gh: () => ({ executable: fake.executable, environment }) };
+  const statuses = await Promise.all(
+    Array.from({ length: 8 }, () =>
+      gitHubSourceCredentialStatus("gh:github.com", options, scope),
+    ),
+  );
+  assert.ok(statuses.every((status) => status.usable));
+  assert.equal(
+    fake.environments().length,
+    9,
+    "one detector and eight fresh tokens",
+  );
+  await gitHubSourceCredentialStatus(
+    null,
+    { gh: { executable: fake.executable, environment: {} } },
+    scope,
+  );
+  assert.equal(
+    fake.environments().length,
+    10,
+    "stripped null context has its own detector",
+  );
+  fake.set("not-signed-in");
+  assert.equal(
+    (
+      await gitHubSourceCredentialStatus(
+        "gh:github.com",
+        options,
+        new GhLoginScope(),
+      )
+    ).reason,
+    "gh-not-signed-in",
+  );
+  assert.equal(fake.environments().length, 11);
+  environment.GH_TOKEN = "replacement";
+  fake.set("signed-in");
+  assert.equal(
+    (await gitHubSourceCredentialStatus("gh:github.com", options, scope))
+      .usable,
+    true,
+  );
+  assert.equal(
+    fake.environments().length,
+    13,
+    "changed environment cannot reuse a login",
+  );
+  const before = fake.environments().length;
+  const throwing = {
+    gh: () => {
+      throw new Error("private factory failure");
+    },
+    environment: { SOURCE: "available" },
+  };
+  assert.equal(
+    (await gitHubSourceCredentialStatus("gh:github.com", throwing, scope))
+      .reason,
+    "gh-unreadable",
+  );
+  assert.equal(
+    (await gitHubSourceCredentialStatus("env:SOURCE", throwing, scope)).usable,
+    true,
+  );
+  assert.equal(
+    (await gitHubSourceCredentialStatus(null, throwing, scope)).reason,
+    "missing-credential",
+  );
+  assert.equal(fake.environments().length, before);
+});

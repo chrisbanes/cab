@@ -112,6 +112,49 @@ filename; its original sandbox output was overwritten. The private delivery
 record labels that evidence accurately and records the separate overwritten
 initial helper log. Full-check attempt logs are preserved separately.
 
+## Post-qualification rate-limit and observation repair
+
+The later repair changes only credential-aware sync pause handling and status
+request fanout. The live-qualified code remains candidate `9395520` above; the
+repaired candidate has not been live-qualified and the consumed allowance is not
+renewed. The retained live result proves real host credential resolution,
+disposable deployment, operator preview/activation, exact import and cleanup on
+that candidate. These repairs use the same deployment/provider paths, with their
+changed rotation/concurrency behavior covered by controlled fake tests and the
+repaired candidate's required full check.
+
+The original synchronizer regression reproduced a rotated environment token
+remaining suppressed: expected replacement-token provider reads never ran. The
+original observation mapper made eleven detector calls instead of two equivalent
+context probes. The repaired synchronizer owns a memory-only token-fingerprint
+pause scope shared across concrete credential reader instances/projects/refreshes.
+Every public read resolves once, checks that resolved token's pause and uses the
+same token for the provider result and pause update. Rotation recovers immediately;
+an old in-flight result cannot pause the replacement. Missing/unusable credentials
+remain credential failures, operator previews remain unpaused, and legacy injected
+readers retain reference-based pauses. No token or fingerprint is published or
+persisted.
+
+Source observation requests now use four workers and retain project order. A
+request/attempt-local login probe is shared only for identical captured executable,
+timeout and environment snapshots; selected-gh and stripped env/null contexts
+remain separate. Each selected-gh status runs a fresh token command after its
+paired probe. Queued work captures current configuration/options when it starts;
+a version/reference fence retry creates a new scope. This is a request-local
+process bound, not aggregate service or descendant containment.
+
+Focused reader/status tests passed 11/11, including all three public reads,
+rotation/reset/suppression, resolver failures, preview independence, in-flight
+rotation, fresh scopes and factory exceptions. The two new production integration
+cases passed: cross-project sync rotation and multi-project status fanout with
+queued configuration mutation/fenced retry. The observed child peak was four; the
+first request used two separate context detectors and nine fresh token commands,
+and the next request plus fenced retry used fresh scopes. The complete affected
+suite passed 59/59, preserving legacy backoff, exclusion and fence cases. The
+sandbox attempt retained one loopback-listen EPERM failure; the exact host retry
+passed with the private fake gh first on PATH. Full-check results for the repaired
+candidate will be recorded after its immutable candidate check completes.
+
 ## Live boundary and measured outcome
 
 The harness prepare-only interface accepts root-supplied complete one-page Project
