@@ -5,6 +5,7 @@ import { ExecutionState } from "../../src/standalone/state.js";
 import { seedReviewTask } from "./task-review.js";
 import { mixedForm } from "./question-data.js";
 import type { QuestionForm } from "../../src/core/question-forms.js";
+import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
 export async function until(condition: () => boolean, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
@@ -18,8 +19,15 @@ export async function startOwnWork(
   f: Fixture,
   title: string,
   projectName: string,
+  repositories: TaskWorkspaceRepositoryInput[] = [],
 ) {
-  const a = await seedReviewTask(f, projectName, title),
+  const a = await seedReviewTask(
+      f,
+      projectName,
+      title,
+      undefined,
+      repositories,
+    ),
     d = f.service.domain();
   const priorTurns = f.runtime.turns;
   d.execute({
@@ -77,8 +85,9 @@ export async function seedOwnQuestion(
   form: QuestionForm = mixedForm,
   title = "Choose full form",
   projectName = "Question project",
+  repositories: TaskWorkspaceRepositoryInput[] = [],
 ) {
-  const started = await startOwnWork(f, title, projectName),
+  const started = await startOwnWork(f, title, projectName, repositories),
     { a, work } = started;
   const call = await f.runtime.callTool({
     threadId: work.threadId!,

@@ -87,12 +87,15 @@ const turnOmissionSchema = bindingSchema.extend({
   createdAt: z.number().int().nonnegative().safe(),
 });
 
-/** Redacts whole completed text before any persistence or history projection. */
-export function sanitizeConversationText(
-  text: string,
+/** Validated, deduplicated exclusions of each list `prepareExclusions` owns; undefined when invalid. */
+const preparedExclusions = new WeakMap<
+  readonly string[],
+  readonly string[] | undefined
+>();
+
+function validExclusions(
   excludedValues: readonly string[],
-): string | undefined {
-  if (Buffer.byteLength(text, "utf8") > maxHistoryTextBytes) return undefined;
+): string[] | undefined {
   if (excludedValues.length > maxExcludedValues) return undefined;
   let totalBytes = 0;
   const values = new Set<string>();
@@ -108,6 +111,33 @@ export function sanitizeConversationText(
     if (totalBytes > maxExclusionBytes) return undefined;
     values.add(value);
   }
+  return [...values];
+}
+
+/**
+ * A frozen copy of the list (or the list itself when already prepared), validated once:
+ * sanitizing with the returned array reuses that work. Any other array, frozen or not,
+ * is validated afresh on every call.
+ */
+export function prepareExclusions(
+  excludedValues: readonly string[],
+): readonly string[] {
+  if (preparedExclusions.has(excludedValues)) return excludedValues;
+  const owned = Object.freeze([...excludedValues]);
+  preparedExclusions.set(owned, validExclusions(owned));
+  return owned;
+}
+
+/** Redacts whole completed text before any persistence or history projection. */
+export function sanitizeConversationText(
+  text: string,
+  excludedValues: readonly string[],
+): string | undefined {
+  if (Buffer.byteLength(text, "utf8") > maxHistoryTextBytes) return undefined;
+  const values = preparedExclusions.has(excludedValues)
+    ? preparedExclusions.get(excludedValues)
+    : validExclusions(excludedValues);
+  if (!values) return undefined;
 
   // Spans are found on the original text and merged, so neither an exact value nor
   // a pattern can rewrite the other's anchor (an instruction holding `token=…`).
@@ -338,12 +368,14 @@ export class ConversationHistoryStore {
         count: number;
       }
     ).count;
+    const exclusions =
+      currentExclusions && prepareExclusions(currentExclusions);
     const items: ConversationHistoryEntry[] = rawItems.map((item) => {
       if (item.lifecycle !== "completed") return item;
       const text =
-        currentExclusions === undefined
+        exclusions === undefined
           ? undefined
-          : sanitizeConversationText(item.text ?? "", currentExclusions);
+          : sanitizeConversationText(item.text ?? "", exclusions);
       return text === undefined
         ? {
             ...item,

@@ -397,14 +397,33 @@ export async function submitDraft(
   /** Pre-submit field errors: when any is present nothing is sent. */
   errors: Record<string, string> = {},
 ) {
-  const form = e.currentTarget;
   e.preventDefault();
+  await sendDraft(
+    e.currentTarget,
+    d,
+    client,
+    session,
+    command,
+    refresh,
+    errors,
+  );
+}
+/** Send a draft's command from inside `scope`, which receives the focus when a field is rejected. */
+export async function sendDraft(
+  scope: ParentNode,
+  d: ConfigurationDraft,
+  client: OperatorClient,
+  session: Session,
+  command: unknown,
+  refresh: () => void,
+  errors: Record<string, string> = {},
+) {
   if (Object.keys(errors).length) d.reject(errors);
   else await d.submit(client, command, session.csrfToken);
   if (d.phase === "recorded" || d.phase === "conflict") refresh();
   else if (d.phase === "rejected")
     requestAnimationFrame(() =>
-      form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
+      scope.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
     );
 }
 export const key = () => crypto.randomUUID();

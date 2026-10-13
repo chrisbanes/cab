@@ -24,7 +24,8 @@
   margin: 0;
 }
 
-.setup-row {
+.setup-row,
+.setup-profile {
   display: grid;
   gap: var(--space-12);
   min-width: 0;
@@ -175,4 +176,27 @@
 .setup-submit > [role="status"] {
   flex-basis: 100%;
   order: 2;
+}
+
+.setup-ready,
+.setup-waits {
+  display: grid;
+  gap: var(--space-12);
+  min-width: 0;
+}
+
+.setup-ready:focus,
+.setup-waits:focus {
+  outline: none;
+}
+
+.setup-waits ul {
+  display: grid;
+  gap: var(--space-8, 8px);
+  margin: 0;
+  padding-left: var(--space-16);
+}
+
+.setup-waits li > :is(p, a) {
+  margin: var(--space-4, 4px) 0 0;
 }

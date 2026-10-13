@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SqliteWorkspaceBindingStore } from "../src/standalone/workspaces.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
+import { wrapTaskExclusions } from "./fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 test("curated review API retains historical identities and delivery/context gaps, strips private file paths and explicit viewing survives refresh", async (t) => {
@@ -131,12 +132,11 @@ test("exact review and paginated history fail closed when visibility/material re
     let release!: () => void, entered!: () => void;
     const pending = new Promise<void>((r) => (release = r)),
       entry = new Promise<void>((r) => (entered = r)),
-      original = f.service.taskWorkspace.bind(f.service);
-    f.service.taskWorkspace = async (...args) => {
-      entered();
-      await pending;
-      return original(...args);
-    };
+      restoreExclusions = wrapTaskExclusions(api, async (_id, run) => {
+        entered();
+        await pending;
+        return run();
+      });
     const read =
       kind === "review"
         ? api.readReview(task.taskId)
@@ -153,7 +153,7 @@ test("exact review and paginated history fail closed when visibility/material re
     });
     release();
     await assert.rejects(read, /unavailable/);
-    f.service.taskWorkspace = original;
+    restoreExclusions();
   }
 });
 
@@ -590,7 +590,6 @@ test("all curated task entry points reject same-version workspace binding change
           ),
       );
       const version = f.service.domain().task(a.taskId).version;
-      const original = f.service.taskWorkspace.bind(f.service);
       let release!: () => void, entered!: () => void;
       const gate = new Promise<void>((resolve) => {
         release = resolve;
@@ -599,13 +598,13 @@ test("all curated task entry points reject same-version workspace binding change
         entered = resolve;
       });
       let calls = 0;
-      f.service.taskWorkspace = async (id) => {
+      const restoreExclusions = wrapTaskExclusions(api, async (id, run) => {
         if (id === a.taskId && ++calls === (kind === "recovery" ? 2 : 1)) {
           entered();
           await gate;
         }
-        return binding;
-      };
+        return run();
+      });
       const pending = read();
       await entry;
       f.seedPersistedState((db) =>
@@ -619,7 +618,7 @@ test("all curated task entry points reject same-version workspace binding change
       assert.equal(f.service.domain().task(a.taskId).version, version);
       release();
       await assert.rejects(pending, /unavailable/, kind);
-      f.service.taskWorkspace = original;
+      restoreExclusions();
       t.diagnostic(
         `${kind}: unchanged binding passed; same-version binding change rejected`,
       );
@@ -676,11 +675,10 @@ test("workspace-backed reads retry instruction changes and redact newly private 
         const canary = `New private ${kind} ${scope} material`,
           task = await seedReviewTask(f, "Race project", canary),
           api = new OperatorApi(f.service, [f.directory]),
-          d = f.service.domain(),
-          original = f.service.taskWorkspace.bind(f.service);
+          d = f.service.domain();
         let calls = 0;
-        f.service.taskWorkspace = async (...args) => {
-          const workspace = await original(...args);
+        wrapTaskExclusions(api, async (_id, run) => {
+          const excluded = await run();
           if (++calls === 1) {
             if (scope === "project")
               d.execute({
@@ -701,8 +699,8 @@ test("workspace-backed reads retry instruction changes and redact newly private 
                 instructions: canary,
               });
           }
-          return workspace;
-        };
+          return excluded;
+        });
         const response = await {
           project: () => api.readProject(task.projectId),
           list: () => api.readTaskListPage(),
@@ -722,11 +720,10 @@ test("instruction read retries are bounded and fail closed under repeated change
   t.after(() => f.close());
   const task = await seedReviewTask(f),
     api = new OperatorApi(f.service, [f.directory]),
-    original = f.service.taskWorkspace.bind(f.service),
     d = f.service.domain();
   let changes = 0;
-  f.service.taskWorkspace = async (...args) => {
-    const workspace = await original(...args);
+  wrapTaskExclusions(api, async (_id, run) => {
+    const excluded = await run();
     d.execute({
       type: "project.configure",
       actor: "operator",
@@ -735,8 +732,8 @@ test("instruction read retries are bounded and fail closed under repeated change
       expectedVersion: Number(d.project(task.projectId).version),
       instructions: `Private instruction revision ${++changes}`,
     });
-    return workspace;
-  };
+    return excluded;
+  });
   await assert.rejects(api.readTaskListPage(), { status: 503 });
   assert.equal(changes, 2);
 });

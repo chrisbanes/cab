@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  mkdirSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -27,6 +29,9 @@ import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "./fixtures/operator-web.js";
+import { controlledGit } from "./fixtures/controlled-git.js";
+import { mixedForm } from "./fixtures/question-data.js";
+import { seedOwnQuestion } from "./fixtures/questions.js";
 import { tmpdir } from "./temp.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
@@ -1661,6 +1666,76 @@ test("project task summaries share task workspace and repository exclusions", as
   assert.equal(project, task);
   assert.ok(!String(project).includes(workspace.path));
   assert.doesNotMatch(String(project), /synthetic/);
+});
+
+test("polled task list, project and Inbox reads redact stored workspace paths without launching Git", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-polled-redaction-")),
+    source = join(root, "source");
+  mkdirSync(source);
+  for (const args of [
+    ["init", "--quiet", source],
+    ["-C", source, "config", "user.name", "Polled Test"],
+    ["-C", source, "config", "user.email", "polled@example.invalid"],
+    ["-C", source, "commit", "--quiet", "--allow-empty", "-m", "fixture"],
+  ])
+    execFileSync("git", args);
+  const controlled = controlledGit();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    { workspaceManager: { gitExecutable: controlled.executable } },
+  );
+  t.after(async () => {
+    await f.close();
+    await controlled.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const ids = await seedOwnQuestion(f, mixedForm, "Polled", "Polled project", [
+    { repositoryId: "repo", path: source },
+  ]);
+  const workspace = await f.service.taskWorkspace(ids.taskId);
+  assert.ok(workspace?.repositories[0]?.gitCommonDir);
+  const paths = [
+    workspace.path,
+    ...workspace.repositories.flatMap((r) => [
+      r.sourcePath,
+      r.workspacePath,
+      r.gitCommonDir ?? "",
+    ]),
+  ];
+  assert.deepEqual(
+    [...f.service.taskWorkspaceRedactionPaths(ids.taskId)].sort(),
+    [...new Set(paths)].sort(),
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    expectedVersion: Number(d.task(ids.taskId).version),
+    title: `Safe title ${paths.join(" ")}`,
+  });
+  const starts = () =>
+    controlled.events().filter((e) => e.event === "start").length;
+  const baseline = starts();
+  assert.ok(baseline > 0);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const reads = [
+    await api.readTaskListPage(),
+    await api.readProject(ids.projectId),
+    await api.readInbox(),
+  ].map((read) => JSON.stringify(read));
+  assert.equal(starts(), baseline);
+  for (const read of reads) {
+    assert.match(read, /Safe title/);
+    for (const path of paths) assert.ok(!read.includes(path), path);
+  }
+  assert.match(reads[2]!, new RegExp(ids.interactionId));
 });
 
 test("history supplements captured privacy with external auth and GitHub values while retaining omissions and revisions", async (t) => {

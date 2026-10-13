@@ -5,6 +5,7 @@ import { cliCapabilities } from "../src/operator/contracts.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import { operatorRouteAuthority } from "../src/standalone/operator-credentials.js";
 import { databaseDigest } from "./fixtures/database-digest.js";
+import { wrapTaskExclusions } from "./fixtures/exclusions-hook.js";
 import {
   instructionSecret,
   seedInstructionHistory,
@@ -313,8 +314,8 @@ test("instruction views fail closed without exclusions and fence concurrent revi
   assert.equal(long.data.selected.text, null);
 
   // A revision created while exclusions are computed fails the read.
-  const original = s.f.service.taskWorkspace.bind(s.f.service);
-  s.f.service.taskWorkspace = async (taskId: string) => {
+  const restoreExclusions = wrapTaskExclusions(api, async (_id, run) => {
+    restoreExclusions();
     d.execute({
       type: "profile.configure",
       actor: "operator",
@@ -323,9 +324,8 @@ test("instruction views fail closed without exclusions and fence concurrent revi
       expectedVersion: Number(d.profile(seed.profileId).version),
       instructions: "Concurrent revision",
     });
-    s.f.service.taskWorkspace = original;
-    return original(taskId);
-  };
+    return run();
+  });
   await assert.rejects(api.readAssignmentInstructions(seed.assignmentA), {
     status: 503,
   });

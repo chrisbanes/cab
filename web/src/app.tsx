@@ -536,6 +536,8 @@ export function App() {
         href = anchor?.getAttribute("href");
       if (
         href?.startsWith("/app") &&
+        // A link that asks for a new tab keeps this page as it is.
+        anchor?.target !== "_blank" &&
         !e.ctrlKey &&
         !e.metaKey &&
         !e.shiftKey &&
@@ -868,11 +870,14 @@ export function App() {
             />
           ) : pathname === "/app/settings/projects/new" ? (
             <ProjectSetup
+              // Choosing New project again remounts, so a recorded create starts clean.
+              key={navigationVersion}
               client={client}
               session={session}
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
+              navigate={navigate}
             />
           ) : pathname === "/app/settings/profiles/new" ? (
             <ProfileCreate

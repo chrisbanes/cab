@@ -44,10 +44,7 @@ import {
   type SupportedRuntimeSettings,
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
-import {
-  GitHubSourceStore,
-  verifiedRepository,
-} from "../core/github-source.js";
+import { GitHubSourceStore } from "../core/github-source.js";
 import { Store } from "../core/store.js";
 import { reviewMetadataSchema } from "../core/task-review.js";
 import type { HarnessStatus } from "../operator/contracts.js";
@@ -154,6 +151,7 @@ import {
   retainedReviewAnchorMaterialHash,
   retainedReviewAnchorStageRequestSchema,
 } from "./retained-evidence.js";
+import { verifiedRepository } from "./repository-verification.js";
 import {
   RoutingAttemptStore,
   type RoutingChoiceClient,
@@ -577,10 +575,13 @@ export class StandaloneService {
         // Diagnostics are additive; without the store executions run uncaptured.
         this.diagnosticsStore = undefined;
       }
-      const domain = new DomainStore(db, () =>
-        this.observeBackgroundFailure(generation, "domain-wake", () =>
-          this.wakeScheduler(0, generation),
-        ),
+      const domain = new DomainStore(
+        db,
+        () =>
+          this.observeBackgroundFailure(generation, "domain-wake", () =>
+            this.wakeScheduler(0, generation),
+          ),
+        verifiedRepository,
       );
       domain.migrate();
       this.domainState = domain;
@@ -2652,6 +2653,26 @@ export class StandaloneService {
         ),
       )
       .digest("hex");
+  }
+  /**
+   * Stored workspace, source and Git paths for redaction only. Reads the persisted binding
+   * without identity or Git validation, so polled reads reflect last-known state.
+   */
+  taskWorkspaceRedactionPaths(taskId: string): string[] {
+    this.domain().task(taskId);
+    if (!this.workspaceBindings) throw Error("Service not started");
+    const binding = this.workspaceBindings.get(taskId);
+    if (!binding) return [];
+    return [
+      ...new Set([
+        binding.path,
+        ...binding.repositories.flatMap((r) => [
+          r.sourcePath,
+          r.workspacePath,
+          ...(r.gitCommonDir ? [r.gitCommonDir] : []),
+        ]),
+      ]),
+    ];
   }
   taskWorkspace(taskId: string, options?: { reuseRecentIdentity?: boolean }) {
     this.domain().task(taskId);

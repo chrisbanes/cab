@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   type CheckoutVerification,
   type DiscoveryUnavailableReason,
@@ -9,13 +16,22 @@ import {
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
+import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
+import { ReadyCheck } from "./ready-check.js";
+import {
+  claudeSettings,
+  emptyProfile,
+  profileCreateCommand,
+  RuntimeFields,
+} from "./profile-config.js";
 import {
   DraftField,
   DraftMessage,
   DraftOutcome,
   key,
   locked,
+  sendDraft,
   type SettingsProps,
   submitDraft,
   useDraft,
@@ -67,9 +83,38 @@ const repoOf = (r: SetupRow) =>
 const verificationKey = (r: SetupRow) => `${r.path}\n${repoOf(r)}\n${r.ref}`;
 
 /** Frames 115–117b: guided setup recorded by one `project.create`. */
-export function ProjectSetup(p: SettingsProps) {
+export function ProjectSetup(
+  p: SettingsProps & { navigate: (href: string) => void },
+) {
   const d = useDraft(p.drafts, "project.create");
-  useEffect(() => d.initialize(blank()), [d]);
+  // The lead profile created inline when none exists; its own draft never meets Settings'.
+  const inline = useDraft(p.drafts, "profile.create:setup");
+  // A create already recorded on arrival belongs to the earlier visit: this one starts
+  // clean, without showing its ready check. Unsaved input from an earlier visit is kept.
+  const earlier = useRef(d.phase === "recorded");
+  // Before paint, so the earlier visit's values never show.
+  useLayoutEffect(() => {
+    if (d.phase === "recorded") {
+      earlier.current = false;
+      d.startOperation(blank());
+      inline.startOperation(emptyProfile());
+    } else {
+      d.initialize(blank());
+      inline.initialize(emptyProfile());
+    }
+  }, [d, inline]);
+  // The browser's leave prompt, while anything entered would be lost.
+  const unsaved = (d.dirty || inline.dirty) && d.phase !== "recorded";
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsaved]);
+  const profileBox = useRef<HTMLFieldSetElement>(null);
   const csrf = p.session.csrfToken;
   const rows = rowsFromDraft(d.values.rows);
   const setRows = (next: SetupRow[]) => d.set("rows", rowsToDraft(next));
@@ -323,9 +368,32 @@ export function ProjectSetup(p: SettingsProps) {
     else if (k >= 0) d.clearErrors(`repositories.${k}.`);
     setRows(rows.map((r, j) => (j === i ? row : r)));
   };
-  const recorded = d.phase === "recorded" ? d.frozen : null;
+  const recorded = d.phase === "recorded" && !earlier.current ? d.frozen : null;
   const profiles = p.workspace?.data.profiles.filter((r) => !r.revoked) ?? [];
   const firstRun = p.workspace?.data.projects.length === 0;
+  // A stale lead (revoked since) keeps the select, which names it; an inline profile
+  // stays until the re-read lists it.
+  const inlineProfile =
+    Boolean(p.workspace) &&
+    profiles.length === 0 &&
+    (!values.leadProfileId || inline.phase === "recorded");
+  /** The created profile becomes the lead; every other setup value stays as entered. */
+  const adoptProfile = () => {
+    if (inline.phase === "recorded")
+      d.set("leadProfileId", String(inline.values.profileId));
+    p.refresh();
+  };
+  // Not a nested form: Enter and the button create the profile and never the project.
+  const createProfile = () =>
+    sendDraft(
+      profileBox.current ?? document,
+      inline,
+      p.client,
+      p.session,
+      profileCreateCommand(inline.values),
+      adoptProfile,
+      runtimeErrors(inline.values, claudeSettings(p.workspace)),
+    );
 
   return (
     <section className="settings-page setup-page">
@@ -340,7 +408,7 @@ export function ProjectSetup(p: SettingsProps) {
             <h2 className="settings-panel-title">1 · Project and lead</h2>
             <div className="settings-fields">
               <DraftField draft={d} field="name" label="Project name" />
-              <div className="setup-field-stack">
+              {!inlineProfile && (
                 <DraftField
                   draft={d}
                   field="leadProfileId"
@@ -362,24 +430,79 @@ export function ProjectSetup(p: SettingsProps) {
                       </option>
                     )}
                 </DraftField>
-                {profiles.length === 0 && (
-                  <p className="metadata muted">
-                    No lead profiles yet. Leave the lead unconfigured or create
-                    one; tasks wait for a lead before starting.
-                  </p>
-                )}
-              </div>
+              )}
             </div>
-            {profiles.length === 0 && (
-              <div>
-                <ActionLink
-                  variant="secondary"
-                  href="/app/settings/profiles/new"
-                >
-                  Create a lead profile
-                </ActionLink>
-              </div>
+            {inlineProfile && (
+              <fieldset
+                ref={profileBox}
+                className="setup-profile"
+                aria-label="New lead profile"
+                disabled={disabled}
+                onKeyDown={(e) => {
+                  if (
+                    e.key === "Enter" &&
+                    !e.nativeEvent.isComposing &&
+                    e.target instanceof HTMLInputElement
+                  ) {
+                    e.preventDefault();
+                    void createProfile();
+                  }
+                }}
+              >
+                <p className="metadata muted">
+                  No lead profiles yet. Create one here, or leave this blank and
+                  choose a lead later; tasks wait for a lead before starting.
+                </p>
+                <div className="settings-fields">
+                  <DraftField
+                    draft={inline}
+                    field="name"
+                    label="Profile name"
+                  />
+                  <DraftField draft={inline} field="summary" label="Summary" />
+                </div>
+                <DraftField
+                  draft={inline}
+                  field="instructions"
+                  label="Profile instructions"
+                  multiline
+                />
+                <RuntimeFields draft={inline} workspace={p.workspace} />
+                {inline.phase !== "unknown" && (
+                  <div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={
+                        inline.phase === "pending" ||
+                        inline.phase === "recorded"
+                      }
+                      onClick={() => void createProfile()}
+                    >
+                      {inline.phase === "pending"
+                        ? "Creating…"
+                        : "Create profile"}
+                    </Button>
+                  </div>
+                )}
+              </fieldset>
             )}
+            {/* The project's own outcome replaces this message, so one message shows. */}
+            {d.phase !== "recorded" &&
+              (inline.phase !== "recorded" || d.phase === "editing") && (
+                <DraftMessage
+                  draft={inline}
+                  success="Profile created. Other setup values kept."
+                  check={async () => {
+                    await inline.reconcile(p.client, csrf);
+                    if (
+                      inline.phase === "recorded" ||
+                      inline.phase === "conflict"
+                    )
+                      adoptProfile();
+                  }}
+                />
+              )}
           </section>
           <section className="settings-panel">
             <div>
@@ -402,7 +525,10 @@ export function ProjectSetup(p: SettingsProps) {
               <li>
                 The project starts Paused. Creating it starts no execution.
               </li>
-              <li>Resume is a separate decision in project configuration.</li>
+              <li>
+                Resume is a separate step after creation; nothing runs until you
+                choose it.
+              </li>
               <li>
                 Routing, GitHub discovery, credential references and capacity
                 overrides are configured after creation.
@@ -422,6 +548,9 @@ export function ProjectSetup(p: SettingsProps) {
               label="Create paused project"
               refresh={p.refresh}
               success={null}
+              saveDisabled={
+                inline.phase === "pending" || inline.phase === "unknown"
+              }
             />
             {!recorded && (
               <ActionLink
@@ -831,46 +960,12 @@ export function ProjectSetup(p: SettingsProps) {
         </section>
       </form>
       {recorded?.type === "project.create" && (
-        <DraftMessage
+        <ReadyCheck
+          settings={p}
           draft={d}
-          success={`Created ${recorded.name}. It's paused.`}
-        >
-          <ul className="body setup-recorded">
-            <li>
-              {recorded.instructions
-                ? "Instructions saved."
-                : "No instructions yet."}
-            </li>
-            <li>
-              Repository access:{" "}
-              {recorded.repositories?.length
-                ? recorded.repositories
-                    .map((r) => `${r.owner}/${r.name} (${r.ref})`)
-                    .join(", ")
-                : "none · repository-free"}
-              .
-            </li>
-            {recorded.githubProject && (
-              <li>GitHub Project linked as an inactive discovery source.</li>
-            )}
-          </ul>
-          <div className="setup-inline-actions">
-            <ActionLink href={`/app/projects/${recorded.projectId}/settings`}>
-              Open project configuration
-            </ActionLink>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setVerifications({});
-                projectChoiceTouched.current = "";
-                d.startOperation(blank());
-              }}
-            >
-              Create another project
-            </Button>
-          </div>
-        </DraftMessage>
+          created={recorded}
+          navigate={p.navigate}
+        />
       )}
     </section>
   );

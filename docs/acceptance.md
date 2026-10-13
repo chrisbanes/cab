@@ -63,7 +63,7 @@ capability.
 | A14 | Pause project A while B has work | Current turns in A may finish; no new turns or follow-ups in A; B continues; results retained; resume revalidates | Service + UI |
 | A15 | Stop a task with active lead and worker turns; supervisor loses contact or reports a writer still active | All active task execution, including its lead turn, receives best-effort cancellation requests; bounded observation never releases holds; effects may continue; Stop/writer/capacity holds survive restart until independently resolved; explicit resume alone cannot release ownership; files/history retained and uncertainty visible | Runtime fault injection |
 | A16 | Two writers target one task workspace | One admission succeeds; others wait. Bound successful terminal status, ended Ensemble callbacks and no other hold/known unfinished execution permit one successor. Incomplete tool observation and unobserved-writer overlap are accepted. Crash, Stop, failure, missing/conflicting terminal identity/status and known survivors retain holds; independent tasks may proceed | Service + Git |
-| A17 | Complete/archive work in each cleanup mode | Retain until archive by default; automatic cleanup waits for confirmed delivery and preservation checks; conversations cannot silently delete workspaces; missing workspace holds execution | Service + Git |
+| A17 | Complete/archive work in each cleanup mode | Retain until archive by default; automatic cleanup waits for confirmed delivery and preservation checks; conversations cannot silently delete workspaces; missing or replaced workspaces are held at startup recovery, before execution and explicit workspace inspection (uncertain Git stays held); polled list, project and Inbox reads redact from the stored last-known binding without refreshing it or launching Git | Service + Git |
 | A18 | Runtime cannot resume a conversation | Resolve old ownership independently or use qualified normal-success handoff before replacement; reconstruct context in a new generation; late result cannot override; historical resume is not live reattachment | Service + runtime |
 | A19 | Repository and Project sources return same issue | One task with two memberships; deleting one membership preserves other and history | Adapter + SQLite |
 | A20 | Pagination, missed observation, duplicate event or partial outage | Full selection converges; no false withdrawal from partial data; no duplicate task execution | Adapter |
@@ -390,7 +390,9 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   `fetch` for the discovery reader (`github-discovery`), and Chromium journeys for
   setup, picker and the credential row with WebKit smokes for setup and the picker
   (`operator-setup-browser`, `operator-setup-picker-browser`,
-  `operator-discovery-credential-browser`). Live
+  `operator-discovery-credential-browser`), including the inline lead profile, the
+  leave prompt and the ready check's Resume, Keep paused, blocked, full-capacity and
+  unknown-outcome journeys (`operator-setup-model` covers its wait items). Live
   evidence is bounded to one read-only discovery probe against api.github.com and
   one real home-folder listing, recorded as counts in
   [project setup evidence](evidence/ui07-project-setup.md). Limits: typed repositories carry

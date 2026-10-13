@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { chromium, webkit, type Browser, type Page } from "playwright";
 import type { BrowserJourney } from "./browser-diagnostics.js";
-import { createOperatorFixture } from "./operator-web.js";
+import {
+  ClaudeShapedFixtureRuntime,
+  createOperatorFixture,
+  OperatorFixtureRuntime,
+} from "./operator-web.js";
 import { createSetupHome, fakeDiscovery } from "./setup-home.js";
 
 /** A signed-in setup journey over a temporary home and a fake discovery reader. */
@@ -18,12 +22,31 @@ export async function setupJourney(
     truncated?: boolean;
     /** A fake `gh` executable; without one the service finds no gh. */
     ghExecutable?: string;
+    /** Enable the Claude runtime beside Codex, with a Claude-shaped fake. */
+    claude?: boolean;
   } = {},
 ) {
   const home = await createSetupHome();
   journey.cleanup(() => home.close(), "setup-home.close");
   const f = await journey.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    options.claude
+      ? createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+          (_context, harness) =>
+            harness === "claude"
+              ? new ClaudeShapedFixtureRuntime()
+              : new OperatorFixtureRuntime(),
+          { runtimeHarnesses: ["codex", "claude"] },
+        )
+      : createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+        ),
   );
   let browser: Browser | undefined;
   journey.cleanup(
