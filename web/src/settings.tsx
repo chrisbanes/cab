@@ -8,12 +8,11 @@ import {
 } from "react";
 import type { Workspace, Session } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionOutcome, type OutcomeField } from "./action-feedback.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
 import {
   outcomeCopy,
   type ConfigurationDraft,
   type ConfigurationDrafts,
-  type DraftDetails,
 } from "./settings-state.js";
 import type { Values } from "./settings-changes.js";
 import { Button } from "./components.js";
@@ -147,19 +146,6 @@ export function DraftCheck({
     </label>
   );
 }
-const detailRows = (d: DraftDetails): OutcomeField[] =>
-  (
-    [
-      ["Command", d.command],
-      ["Resource", d.resource],
-      ["Version", d.version],
-      ["Request key", d.requestKey],
-      ["Code", d.code],
-    ] as const
-  ).flatMap(([label, value]) =>
-    value === undefined ? [] : [[label, String(value)] as const],
-  );
-
 /**
  * The one message a draft leaves behind, chosen by its phase. In progress shows nothing
  * here (the button says "Saving…"); a save stays confirmed until the next edit.

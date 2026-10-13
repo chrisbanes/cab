@@ -6,6 +6,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
+import type { ReceiptDetails } from "./outcome-copy.js";
 /** The plain outcome copy of a configuration save. Details, not these lines, carry the codes. */
 export const outcomeCopy = {
   saved: "Saved.",
@@ -18,15 +19,6 @@ export const outcomeCopy = {
   unknown: "We couldn't confirm the save.",
   adopted: "Loaded the latest version. Your changes are still here.",
 };
-
-/** The receipt fields behind an outcome, shown only in its collapsed Details. */
-export interface DraftDetails {
-  command?: string | undefined;
-  resource?: string | undefined;
-  version?: number | undefined;
-  requestKey?: string | undefined;
-  code?: string | undefined;
-}
 
 /** The resource a command names, or null for installation-wide commands. */
 function commandResource(c: OperatorCommand) {
@@ -99,7 +91,7 @@ export class ConfigurationDraft {
   notice = "";
   /** Set while the last save is confirmed; the next edit or new operation clears it. */
   savedAt: number | null = null;
-  details: DraftDetails = {};
+  details: ReceiptDetails = {};
   /** A source credential refusal is a failure to fix, not a newer version to review. */
   credentialRefusal = false;
   errors: Record<string, string> = {};
