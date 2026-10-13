@@ -19,7 +19,7 @@ import { tmpdir } from "./temp.js";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { Store } from "../src/core/store.js";
+import { type Database, Store } from "../src/core/store.js";
 import { StandaloneDataDirectory } from "../src/standalone/data-directory.js";
 import {
   StandaloneService,
@@ -88,6 +88,7 @@ class FakeRuntime implements Runtime {
 
 type ServiceShutdownAccess = {
   db?: DatabaseSync;
+  cache?: Database;
   state?: ExecutionState;
   githubSynchronizer?: { stop(): Promise<void> };
   deliveryCoordinator?: { stop(): Promise<void> };
@@ -1095,7 +1096,10 @@ test("service shutdown retains an open database owner and can retry close", asyn
   try {
     await service.start();
     const db = shutdownAccess(service).db;
-    assert.ok(db?.isOpen);
+    const facade = shutdownAccess(service).cache;
+    assert.ok(db?.isOpen && facade);
+    const wrapper = facade.prepare("SELECT 1 AS one");
+    assert.deepEqual({ ...(wrapper.get() as object) }, { one: 1 });
     const originalClose = db.close.bind(db);
     const closeFailure = new Error("injected service database close failure");
     let failOnce = true;
@@ -1118,6 +1122,11 @@ test("service shutdown retains an open database owner and can retry close", asyn
     assert.equal(result.error, closeFailure);
     assert.match(closeFailure.message, /database close/);
     assert.equal(db.isOpen, true);
+    // The facade is invalidated even though the raw handle is still open.
+    assert.throws(() => wrapper.get(), /closed/i);
+    assert.throws(() => facade.prepare("SELECT 1"), /closed/i);
+    assert.equal(shutdownAccess(service).db, db);
+    await assert.rejects(service.start(), /shutdown is incomplete/);
     assert.throws(
       () => StandaloneDataDirectory.openExclusive(data),
       /already owned/,
@@ -1129,9 +1138,93 @@ test("service shutdown retains an open database owner and can retry close", asyn
     });
     await service.stop();
     assert.equal(db.isOpen, false);
+    assert.equal(shutdownAccess(service).cache, undefined);
     const owner = StandaloneDataDirectory.openExclusive(data);
     owner.close();
+
+    await service.start();
+    const restarted = shutdownAccess(service).cache;
+    assert.ok(restarted && restarted !== facade);
+    assert.deepEqual(
+      { ...(restarted.prepare("SELECT 2 AS two").get() as object) },
+      {
+        two: 2,
+      },
+    );
+    assert.throws(() => wrapper.get(), /closed/i);
   } finally {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("failed startup keeps an open database owner until a later stop closes it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-880-start-db-close-"));
+  const data = join(root, "data");
+  const startupFailure = new Error("injected startup failure");
+  const closeFailure = new Error(
+    "injected failed-start database close failure",
+  );
+  let access: ServiceShutdownAccess | undefined;
+  let patched: { db: DatabaseSync; originalClose: () => void } | undefined;
+  const service = new StandaloneService(data, () => {
+    access = shutdownAccess(service);
+    const db = access.db;
+    assert.ok(db?.isOpen);
+    const originalClose = db.close.bind(db);
+    patched = { db, originalClose };
+    let failOnce = true;
+    Object.defineProperty(db, "close", {
+      configurable: true,
+      value: () => {
+        if (failOnce) {
+          failOnce = false;
+          throw closeFailure;
+        }
+        originalClose();
+      },
+    });
+    throw startupFailure;
+  });
+  try {
+    await assert.rejects(service.start(), (error) => error === closeFailure);
+    assert.ok(access && patched);
+    const { db, originalClose } = patched;
+    const facade = access.cache;
+    assert.ok(facade);
+    assert.equal(db.isOpen, true);
+    assert.equal(access.db, db);
+    assert.throws(() => facade.prepare("SELECT 1"), /closed/i);
+    await assert.rejects(service.start(), /shutdown is incomplete/);
+    assert.throws(
+      () => StandaloneDataDirectory.openExclusive(data),
+      /already owned/,
+    );
+
+    Object.defineProperty(db, "close", {
+      configurable: true,
+      value: originalClose,
+    });
+    await service.stop();
+    assert.equal(db.isOpen, false);
+    assert.equal(access.db, undefined);
+    assert.equal(access.cache, undefined);
+    StandaloneDataDirectory.openExclusive(data).close();
+    const reopened = new DatabaseSync(join(data, "standalone.sqlite"));
+    try {
+      assert.deepEqual(
+        { ...(reopened.prepare("PRAGMA integrity_check").get() as object) },
+        { integrity_check: "ok" },
+      );
+    } finally {
+      reopened.close();
+    }
+  } finally {
+    if (patched)
+      Object.defineProperty(patched.db, "close", {
+        configurable: true,
+        value: patched.originalClose,
+      });
     await service.stop().catch(() => {});
     rmSync(root, { recursive: true, force: true });
   }

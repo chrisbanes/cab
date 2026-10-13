@@ -19,6 +19,7 @@ import {
   type InboxDelivery,
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
+import { CachedDatabase } from "../core/database-cache.js";
 import {
   canonicalMaterial,
   type DeliveryActionRecord,
@@ -170,6 +171,7 @@ import {
   type TurnRequest,
   TurnScheduler,
 } from "./scheduler.js";
+import { SchedulerWakeQueries } from "./scheduler-wake-queries.js";
 import {
   type CoordinationExecutionBinding,
   type ExecutionIntent,
@@ -411,6 +413,8 @@ export interface RoutingAvailability {
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
+  /** Statement-caching facade over `db` for this generation; `db` stays the lifecycle handle. */
+  private cache: CachedDatabase | undefined;
   private state: ExecutionState | undefined;
   private domainState: DomainStore | undefined;
   private githubSourceStore: GitHubSourceStore | undefined;
@@ -426,6 +430,7 @@ export class StandaloneService {
   private workspaceComparisons: SqliteWorkspaceComparisonStore | undefined;
   private operatorCredentialStore: OperatorCredentialStore | undefined;
   private schedulerStore: SchedulerStore | undefined;
+  private wakeQueries: SchedulerWakeQueries | undefined;
   private inboxStartup: InboxStartupReconciliation | undefined;
   private scheduler: TurnScheduler | undefined;
   private supervisor: ExecutionSupervisor | undefined;
@@ -540,9 +545,16 @@ export class StandaloneService {
     this.stopPromise = undefined;
     const { databasePath: database, workspacePath } = dataDirectory;
     try {
-      const db = new DatabaseSync(database);
-      this.db = db;
-      db.exec(
+      const rawDb = new DatabaseSync(database);
+      this.db = rawDb;
+      // Created before the pragmas so every close path goes through the facade.
+      const db = new CachedDatabase(rawDb, {
+        close: () => {
+          if (rawDb.isOpen) rawDb.close();
+        },
+      });
+      this.cache = db;
+      rawDb.exec(
         "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL",
       );
       new Store(db).ensureHost("standalone-codex");
@@ -631,6 +643,10 @@ export class StandaloneService {
             : undefined,
       );
       coordination.migrate();
+      // After every table the wake queries read has migrated.
+      const wakeQueries = new SchedulerWakeQueries(db);
+      wakeQueries.ensureIndexes();
+      this.wakeQueries = wakeQueries;
       coordination.localReviews().purgeEditableDrafts();
       this.inboxStartup = new InboxStartupReconciliation(db, domain);
       coordination.invalidateRuntimeQuestions(
@@ -1111,6 +1127,7 @@ export class StandaloneService {
           this.routingAttempts = undefined;
           this.routingCoordinators.clear();
           this.schedulerStore = undefined;
+          this.wakeQueries = undefined;
           this.scheduler = undefined;
           this.workspaces = undefined;
           this.workspaceBindings = undefined;
@@ -1120,12 +1137,17 @@ export class StandaloneService {
           this.conversationHistory = undefined;
           this.state = undefined;
           try {
-            this.db?.close();
+            this.closeDatabase();
           } finally {
-            this.db = undefined;
-            dataDirectory.close();
-            this.owner = undefined;
-            if (this.generation === generation) this.generation = undefined;
+            // A failed close leaves the raw handle open: keep it and the owner
+            // so an explicit stop() can retry; start() rejects meanwhile.
+            if (!this.db?.isOpen) {
+              this.db = undefined;
+              this.cache = undefined;
+              dataDirectory.close();
+              this.owner = undefined;
+              if (this.generation === generation) this.generation = undefined;
+            }
           }
         }
       }
@@ -1435,6 +1457,12 @@ export class StandaloneService {
     return stopping;
   }
 
+  /** Clears the statement cache, then closes the raw handle; safe to retry after a failure. */
+  private closeDatabase(): void {
+    if (this.cache) this.cache.close();
+    else this.db?.close();
+  }
+
   private async stopOwned(): Promise<void> {
     const scheduler = this.scheduler;
     const supervisor = this.supervisor;
@@ -1481,7 +1509,7 @@ export class StandaloneService {
     await attempt("GitHub synchronization stop", () => synchronizer?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
-      if (this.db?.isOpen)
+      if (this.db?.isOpen && this.cache?.isOpen)
         this.coordination?.invalidateRuntimeQuestions(
           "Service stopped; native endpoints lost",
         );
@@ -1513,9 +1541,13 @@ export class StandaloneService {
     });
     await attempt("supervisor settlement", () => supervisor?.settle());
 
-    if (db?.isOpen) await attempt("service database close", () => db.close());
+    if (db?.isOpen)
+      await attempt("service database close", () => this.closeDatabase());
     if (!db?.isOpen) {
-      if (this.db === db) this.db = undefined;
+      if (this.db === db) {
+        this.db = undefined;
+        this.cache = undefined;
+      }
       const owner = this.owner;
       if (owner) {
         let released = false;
@@ -1538,6 +1570,7 @@ export class StandaloneService {
       this.routingAttempts = undefined;
       this.routingCoordinators.clear();
       this.schedulerStore = undefined;
+      this.wakeQueries = undefined;
       this.scheduler = undefined;
       this.supervisor = undefined;
       this.power = undefined;
@@ -3575,13 +3608,15 @@ export class StandaloneService {
     const state = this.state;
     const coordination = this.coordination;
     const routingAttempts = this.routingAttempts;
+    const queries = this.wakeQueries;
     if (
       !scheduler ||
       !store ||
       !domain ||
       !state ||
       !coordination ||
-      !routingAttempts
+      !routingAttempts ||
+      !queries
     )
       return;
     this.flushRuntimeAnswers();
@@ -3609,8 +3644,7 @@ export class StandaloneService {
     };
     withdrawStaleRefusedDeliveries();
 
-    for (const completion of coordination.completionRequests()) {
-      if (completion.status !== "pending") continue;
+    for (const completion of queries.pendingCompletionIdentities()) {
       const intent = state.byWorkId(completion.leadWorkId);
       const binding = state.taskBinding(completion.leadWorkId);
       if (
@@ -3628,9 +3662,9 @@ export class StandaloneService {
     for (const workId of coordination.completedWorkNeedingDisposition())
       coordination.recordSuccessfulTerminal(workId);
 
-    for (const operation of domain.routingOperations()) {
+    for (const operationId of queries.missingRoutingFallbackOperationIds()) {
+      const operation = domain.routingOperation(operationId);
       const disposition = String(operation.disposition);
-      if (!disposition.startsWith("lead-review:")) continue;
       const taskId = String(operation.taskId);
       const leadAssignment = domain.ensureLeadAssignment(taskId);
       if (!leadAssignment) continue;
@@ -3644,13 +3678,16 @@ export class StandaloneService {
       });
     }
 
-    const committedRoutingIds = new Set(
-      domain.routingOperations().map((operation) => String(operation.id)),
-    );
-    for (const operation of routingAttempts.operations()) {
+    for (const identity of queries.uncommittedRoutingAttemptIdentities()) {
+      const operation = routingAttempts.operation(
+        identity.projectId,
+        identity.taskId,
+        identity.taskVersion,
+      );
       if (
-        operation.status === "stale" ||
-        committedRoutingIds.has(operation.operationId)
+        !operation ||
+        operation.operationId !== identity.operationId ||
+        operation.status === "stale"
       )
         continue;
       const staleReason = this.routingStaleReason(
@@ -3839,7 +3876,7 @@ export class StandaloneService {
       if (Number(task.ready) !== 1 || task.state !== "open") continue;
       const assignmentId = String(assignment.id);
       const initialWorkId = `assignment:${assignmentId}:initial`;
-      if (store.list().some((item) => item.workId === initialWorkId)) continue;
+      if (queries.hasWork(initialWorkId)) continue;
       const queued = coordination
         .queuedDeliveries()
         .find((item) => item.recipientAssignmentId === assignmentId);
@@ -3871,25 +3908,21 @@ export class StandaloneService {
             : undefined,
         );
       } catch (error) {
-        const existing = store
-          .list()
-          .find((item) => item.assignmentId === assignment.id);
+        const existing = queries.oldestAssignmentWorkId(assignmentId);
         if (existing)
           store.hold(
-            existing.workId,
+            existing,
             `Assignment request became obsolete: ${String(error)}`,
           );
       }
     }
 
-    const requests = store.list();
     for (const delivery of coordination.queuedDeliveries()) {
       if (deliveryWorkCompleted(delivery)) {
         coordination.completeDeliveryBatch(delivery.deliveryWorkId);
         continue;
       }
-      if (requests.some((item) => item.workId === delivery.deliveryWorkId))
-        continue;
+      if (queries.hasWork(delivery.deliveryWorkId)) continue;
       let assignment: ReturnType<DomainStore["assignment"]>;
       try {
         assignment = domain.assignment(delivery.recipientAssignmentId);
@@ -3977,16 +4010,9 @@ export class StandaloneService {
         task.state !== "open" ||
         state.taskHold(String(assignment.taskId)) !== undefined ||
         state.assignmentHasUnfinishedExecution(recipientAssignmentId) ||
-        store
-          .list()
-          .some(
-            (item) =>
-              item.assignmentId === recipientAssignmentId &&
-              (item.state === "queued" ||
-                item.state === "active" ||
-                item.state === "held") &&
-              !coordination.isHistoricalWorkResolved(item.workId),
-          )
+        queries
+          .unsettledAssignmentWorkIds(recipientAssignmentId)
+          .some((workId) => !coordination.isHistoricalWorkResolved(workId))
       )
         continue;
       const pending = coordination.pendingEvents(recipientAssignmentId);
@@ -4031,8 +4057,7 @@ export class StandaloneService {
 
     for (const repair of coordination.reportingRepairs()) {
       if (repair.state !== "queued") continue;
-      if (store.list().some((item) => item.workId === repair.repairWorkId))
-        continue;
+      if (queries.hasWork(repair.repairWorkId)) continue;
       let assignment: ReturnType<DomainStore["assignment"]>;
       try {
         assignment = domain.assignment(repair.assignmentId);
