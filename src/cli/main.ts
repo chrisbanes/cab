@@ -297,8 +297,9 @@ async function run(
   const config = new ConnectionConfig(configDirectory(deps.env));
   const [area, action, argument] = positionals;
   const requested = values.connection ?? deps.env.ENSEMBLE_CONNECTION;
-  // `logs` is the only single-word command.
-  const key = area === "logs" ? "logs" : `${area} ${action}`;
+  // `logs` and `doctor` are the only single-word commands.
+  const singleWord = area === "logs" || area === "doctor";
+  const key = singleWord ? area : `${area} ${action}`;
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
@@ -445,7 +446,7 @@ async function run(
   }
   const command = browseCommands.get(key);
   if (!command) throw new CliError("usage", `Unknown command.\n\n${USAGE}`);
-  expectArgs(positionals, (key === "logs" ? 1 : 2) + command.positionals);
+  expectArgs(positionals, (singleWord ? 1 : 2) + command.positionals);
   rejectManaged(deps.env);
   let session: Awaited<ReturnType<typeof connect>> | undefined;
   const output = await command.run({

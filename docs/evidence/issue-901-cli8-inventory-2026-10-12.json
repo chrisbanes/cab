@@ -1065,6 +1065,23 @@
       "gap": "Real host journey at the CLI8 candidate: installed from npm pack outside the checkout, loopback HTTP, live Codex (2 turns), scripted external client; other denial/revision/retry cases from the cited deterministic suites. Not run from a second machine over private HTTPS: prerequisite unavailable (no second trusted machine was granted)."
     },
     {
+      "id": "doctor",
+      "kind": "command",
+      "area": "execution/logs",
+      "scenarios": ["CLI05"],
+      "evidence": [
+        "test/operator-cli-doctor.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Reads the service-side readiness checks (Codex executable and login, git, GitHub discovery, Claude token, runtime harness, data and auth paths); JSON data equals the bearer GET of /api/operator/readiness and carries no secret value or path.",
+      "denial": "n/a: read-only; unsupported service exits 7 after identity only, managed-assignment context exits 3 with no request, and a failing check still exits 0.",
+      "revision": "n/a: read; no version or revision check",
+      "retry": "n/a: idempotent read; no receipt",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Exercised through the in-process CLI against a loopback service with fixture runtimes; the live launchd qualification is pending under #948."
+    },
+    {
       "id": "recovery get",
       "kind": "command",
       "area": "recovery",
