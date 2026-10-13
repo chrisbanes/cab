@@ -15,7 +15,7 @@ import {
 import {
   type SourceCredentialReason,
   sourceCredentialExplanation,
-} from "../standalone/github-source-credential.js";
+} from "../operator/source-credential.js";
 import {
   type BrowseCommand,
   browseOutput,
