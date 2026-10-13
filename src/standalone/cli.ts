@@ -143,9 +143,10 @@ export async function main(
       const ui = new LocalOperatorHttp(
         new LocalOperatorUi(
           service.domain(),
-          undefined,
+          (reference) => service.gitHubSourceReader(reference),
           service.githubSources(),
           () => service.refreshGitHub(),
+          (projectId) => service.gitHubSourceCredentialStatus(projectId),
         ),
         operatorAuth,
         {

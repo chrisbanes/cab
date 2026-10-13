@@ -3,14 +3,15 @@ import {
   type GitHubSourceStore,
 } from "../core/github-source.js";
 import type { DomainStore } from "../core/domain.js";
-import {
-  GitHubHttpSourceReader,
-  type BlockerSnapshot,
-  type GitHubSourceReader,
-  type IssueReference,
-  type IssueSnapshot,
-  type IssueStatus,
-  type SelectionSnapshot,
+import { CredentialGitHubSourceReader } from "./github-source-credential.js";
+import { ghEnvironment } from "./gh-credential.js";
+import type {
+  BlockerSnapshot,
+  GitHubSourceReader,
+  IssueReference,
+  IssueSnapshot,
+  IssueStatus,
+  SelectionSnapshot,
 } from "./github-source.js";
 
 export type GitHubReaderFactory = (credentialRef: string) => GitHubSourceReader;
@@ -26,7 +27,9 @@ export class GitHubSynchronizer {
     private readonly domain: DomainStore,
     private readonly sources: GitHubSourceStore,
     private readonly readerFactory: GitHubReaderFactory = (reference) =>
-      new GitHubHttpSourceReader(process.env[reference.slice(4)]),
+      new CredentialGitHubSourceReader(reference, {
+        gh: () => ({ environment: ghEnvironment(domain, { reference }) }),
+      }),
   ) {}
 
   refresh(): Promise<void> {

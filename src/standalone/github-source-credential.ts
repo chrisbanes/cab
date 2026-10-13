@@ -18,7 +18,7 @@ export interface SourceCredentialOptions {
   /** Defaults to the current service environment on each read. */
   environment?: NodeJS.ProcessEnv;
   /** Supply an explicitly source-scoped `ghEnvironment`, independent of discovery. */
-  gh?: GhOptions;
+  gh?: GhOptions | (() => GhOptions);
 }
 
 /** Resolve only the selected source reference; discovery is never a fallback. */
@@ -33,7 +33,8 @@ export async function resolveGitHubSourceCredential(
     const token = (options.environment ?? process.env)[parsed.data.slice(4)];
     return token ? { token } : { reason: "missing-credential" };
   }
-  const resolved = await ghToken(options.gh);
+  const gh = typeof options.gh === "function" ? options.gh() : options.gh;
+  const resolved = await ghToken(gh);
   return "token" in resolved ? resolved : { reason: `gh-${resolved.state}` };
 }
 
@@ -60,9 +61,15 @@ export async function gitHubSourceCredentialStatus(
   reference: string | null,
   options: SourceCredentialOptions = {},
 ) {
+  const ghOptions =
+    typeof options.gh === "function" ? options.gh() : options.gh;
+  const current: SourceCredentialOptions = {
+    ...(options.environment ? { environment: options.environment } : {}),
+    ...(ghOptions ? { gh: ghOptions } : {}),
+  };
   const [gh, resolved] = await Promise.all([
-    detectGh(options.gh),
-    resolveGitHubSourceCredential(reference, options),
+    detectGh(ghOptions),
+    resolveGitHubSourceCredential(reference, current),
   ]);
   return {
     configured: reference !== null,

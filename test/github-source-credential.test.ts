@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { ghEnvironment } from "../src/standalone/gh-credential.js";
 import {
   envCredentialReference,
   sourceCredentialReference,
@@ -222,4 +223,73 @@ test("provider failure remains incomplete with credentials excluded from the fai
   assert.equal((snapshots[0] as { complete: boolean }).complete, false);
   assert.equal((snapshots[1] as { complete: boolean }).complete, false);
   assert.equal((snapshots[2] as { status: string }).status, "unknown");
+});
+
+test("a cached reader evaluates source gh environment freshly for rotation and Clear", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  let current = "chosen-A";
+  let discovery: string | null = "env:DISCOVERY";
+  const received: string[] = [];
+  const domain = {
+    claudeTokenReference: () => null,
+    projects: () => [],
+    deliveryCredentialReference: () => null,
+    discoveryCredentialReference: () => discovery,
+  };
+  let factories = 0;
+  const options = {
+    gh: () => {
+      factories++;
+      return {
+        executable: gh.executable,
+        environment: ghEnvironment(domain, {
+          reference: "gh:github.com",
+          environment: {
+            GH_TOKEN: current,
+            CHOSEN_ALIAS: current,
+            DISCOVERY: "other-login",
+          },
+        }),
+      };
+    },
+    reader: (token: string) => ({
+      async readSelection() {
+        received.push(token);
+        return { complete: true as const, issues: [], reason: null };
+      },
+      async readBlockers() {
+        received.push(token);
+        return { complete: true, blockers: [], reason: null };
+      },
+      async readIssueStatus() {
+        received.push(token);
+        return { status: "open" as const };
+      },
+    }),
+  };
+  const reader = new CredentialGitHubSourceReader("gh:github.com", options);
+  gh.setToken("resolved-A");
+  await reader.readSelection(selection);
+  current = "chosen-B";
+  discovery = null;
+  gh.setToken("resolved-B");
+  await reader.readBlockers(reference);
+  current = "chosen-C";
+  gh.setToken("resolved-C");
+  await reader.readIssueStatus(reference);
+  assert.deepEqual(received, ["resolved-A", "resolved-B", "resolved-C"]);
+  assert.equal(factories, 3);
+  const envs = gh.environments();
+  assert.deepEqual(
+    envs.map((e) => e.GH_TOKEN),
+    ["chosen-A", "chosen-A", "chosen-B", "chosen-B", "chosen-C", "chosen-C"],
+  );
+  assert.ok(envs.every((e) => e.CHOSEN_ALIAS === undefined));
+  await gitHubSourceCredentialStatus("gh:github.com", options);
+  assert.equal(factories, 4, "one fresh options snapshot per status operation");
+  const cleared = new CredentialGitHubSourceReader(null, options);
+  const before = gh.environments().length;
+  assert.equal((await cleared.readSelection(selection)).complete, false);
+  assert.equal(gh.environments().length, before);
 });

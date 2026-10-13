@@ -104,7 +104,14 @@ export async function serveCli<F extends Fixture>(
     const routes = new OperatorRouteRegistry();
     routes.registerSlot("runtime", runtimeOperatorRoutes(f.service));
     return new LocalOperatorHttp(
-      new LocalOperatorUi(f.service.domain()),
+      new LocalOperatorUi(
+        f.service.domain(),
+        options.previewReader ??
+          ((reference) => f.service.gitHubSourceReader(reference)),
+        f.service.githubSources(),
+        () => f.service.refreshGitHub(),
+        (projectId) => f.service.gitHubSourceCredentialStatus(projectId),
+      ),
       auth,
       {
         routes,

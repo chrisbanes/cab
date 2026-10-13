@@ -2432,6 +2432,37 @@ export const recoveryOptionsSchema = envelope(
     })
     .strict(),
 );
+/** The GitHub CLI login for github.com, detected on every status read. Never the token. */
+export const ghLoginStateSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("signed-in"),
+      login: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.enum(["not-installed", "not-signed-in", "unreadable"]),
+    })
+    .strict(),
+]);
+export const sourceCredentialReasonSchema = z.enum([
+  "missing-credential",
+  "invalid-credential-reference",
+  "gh-not-installed",
+  "gh-not-signed-in",
+  "gh-unreadable",
+]);
+export const sourceCredentialStatusSchema = z
+  .object({
+    configured: z.boolean(),
+    source: z.enum(["env", "gh"]).nullable(),
+    usable: z.boolean(),
+    reason: sourceCredentialReasonSchema.nullable(),
+    gh: ghLoginStateSchema,
+  })
+  .strict();
+
 export const sourceObservationSchema = envelope(
   z
     .object({
@@ -2439,6 +2470,7 @@ export const sourceObservationSchema = envelope(
         z
           .object({
             projectId: uuid,
+            credential: sourceCredentialStatusSchema.optional(),
             selections: z.array(
               z
                 .object({
@@ -2449,6 +2481,9 @@ export const sourceObservationSchema = envelope(
                     "never",
                     "unavailable",
                   ]),
+                  credentialReason: sourceCredentialReasonSchema
+                    .nullable()
+                    .optional(),
                   lastAttemptAt: z.string().nullable(),
                   lastSuccessfulAt: z.string().nullable(),
                 })
@@ -2509,6 +2544,7 @@ export const projectConfigurationSchema = envelope(
         .object({
           version: revision,
           credentialConfigured: z.boolean(),
+          credential: sourceCredentialStatusSchema.optional(),
           selections: z.array(
             z
               .object({
@@ -2818,6 +2854,7 @@ export const apiErrorSchema = z
         ]),
         message: z.string().max(256),
         fieldPaths: z.array(z.string().max(128)).optional(),
+        credentialReason: sourceCredentialReasonSchema.optional(),
       })
       .strict(),
   })
@@ -2851,20 +2888,6 @@ export const claudeTokenStatusSchema = envelope(
     })
     .strict(),
 );
-/** The GitHub CLI login for github.com, detected on every status read. Never the token. */
-export const ghLoginStateSchema = z.discriminatedUnion("state", [
-  z
-    .object({
-      state: z.literal("signed-in"),
-      login: z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/),
-    })
-    .strict(),
-  z
-    .object({
-      state: z.enum(["not-installed", "not-signed-in", "unreadable"]),
-    })
-    .strict(),
-]);
 /**
  * Installation discovery credential: whether a reference is set, its kind and whether it
  * resolves, plus the detected GitHub CLI login. Never the variable name or a token.

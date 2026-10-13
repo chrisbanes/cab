@@ -96,10 +96,8 @@ import {
   sanitizeConversationText,
 } from "./conversation-history.js";
 import type { CoordinationView } from "./coordination-view.js";
-import {
-  GitHubHttpSourceReader,
-  type GitHubSourceReader,
-} from "./github-source.js";
+import type { GitHubSourceReader } from "./github-source.js";
+import type { SourceCredentialReason } from "./github-source-credential.js";
 import {
   DiscoveryFailure,
   type DiscoveryReader,
@@ -328,6 +326,7 @@ export class OperatorApiError extends Error {
       | "local-review-recipient-unavailable"
       | "local-review-comment-anchor-required",
     readonly fieldPaths?: readonly string[],
+    readonly credentialReason?: SourceCredentialReason,
   ) {
     super(code);
   }
@@ -383,7 +382,7 @@ export class OperatorApi {
     private readonly previewReader: (
       credentialRef: string,
     ) => Pick<GitHubSourceReader, "readSelection"> = (ref) =>
-      new GitHubHttpSourceReader(process.env[ref.slice(4)]),
+      service.gitHubSourceReader(ref),
     private readonly setup: OperatorSetupSeams = {},
   ) {
     this.commands = new DomainCommands(service.domain());
@@ -425,7 +424,8 @@ export class OperatorApi {
     const claudeRead = claude && readClaudeToken(claudeTokenSource(claude));
     const discovery = d.discoveryCredentialReference();
     return JSON.stringify([
-      // Every value the discovery exclusions hold, including resolved gh tokens.
+      digest(this.service.gitHubCredentialExclusions().values.join("\0")),
+      // Discovery reference also fences identity.
       discovery
         ? [
             discovery,
@@ -451,7 +451,14 @@ export class OperatorApi {
             d.deliveryCredentialReference(String(p.id)),
           ]),
       ].map((ref) =>
-        ref ? [ref, digest(process.env[ref.slice(4)] ?? "")] : null,
+        ref
+          ? [
+              ref,
+              digest(
+                ref.startsWith("env:") ? (process.env[ref.slice(4)] ?? "") : "",
+              ),
+            ]
+          : null,
       ),
     ]);
   }
@@ -506,10 +513,8 @@ export class OperatorApi {
         projects = d.projects();
       const values = [...this.controlPaths],
         covered = new Set<string>();
-      const discovery = d.discoveryCredentialReference(),
-        claude = d.claudeTokenReference();
-      if (discovery)
-        values.push(...discoveryCredentialExclusions(discovery).redactions);
+      const claude = d.claudeTokenReference();
+      values.push(...this.service.gitHubCredentialExclusions().redactions);
       if (claude) values.push(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining = 128;
@@ -543,7 +548,6 @@ export class OperatorApi {
         const g = d.githubConfiguration(id);
         for (const ref of [
           d.routingCredentialReference(id),
-          g.credentialRef,
           d.deliveryCredentialReference(id),
         ])
           if (ref) {
@@ -1932,6 +1936,39 @@ export class OperatorApi {
         )
           throw error;
       }
+    }
+    throw new OperatorApiError(503, "unavailable");
+  }
+  private sourceFence(projectId?: string) {
+    const d = this.domain();
+    const ids =
+      projectId === undefined
+        ? d
+            .projects()
+            .map((p) => String(p.id))
+            .sort()
+        : [projectId];
+    return JSON.stringify(
+      ids.map((id) => {
+        const configuration = d.githubConfiguration(id);
+        return [
+          id,
+          configuration.version,
+          configuration.credentialRef,
+          d.githubActiveSelectionIds(id).sort(),
+        ];
+      }),
+    );
+  }
+  /** Rebuild once when source identity or activation changes across a credential check. */
+  private async readWithSourceFence<T>(
+    read: () => Promise<T>,
+    projectId?: string,
+  ): Promise<T> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const source = this.sourceFence(projectId);
+      const response = await read();
+      if (source === this.sourceFence(projectId)) return response;
     }
     throw new OperatorApiError(503, "unavailable");
   }
@@ -4345,10 +4382,17 @@ export class OperatorApi {
     });
   }
   async readProjectConfiguration(projectId: string) {
+    return this.readWithSourceFence(
+      () => this.readProjectConfigurationOnce(projectId),
+      projectId,
+    );
+  }
+  private async readProjectConfigurationOnce(projectId: string) {
     const p = this.requireProject(projectId),
       d = this.domain(),
-      excluded = await this.exclusions(projectId),
       g = d.githubConfiguration(projectId),
+      credential = await this.service.gitHubSourceCredentialStatus(projectId),
+      excluded = await this.exclusions(projectId),
       r = d.routing(projectId),
       active = d.githubActiveSelectionIds(projectId);
     return projectConfigurationSchema.parse({
@@ -4389,6 +4433,7 @@ export class OperatorApi {
         source: {
           version: g.version,
           credentialConfigured: g.credentialRef !== null,
+          credential,
           selections: g.selections.map((s) => ({
             id: this.exact(s.id, excluded),
             kind: s.kind,
@@ -4638,38 +4683,46 @@ export class OperatorApi {
     });
   }
   async readSourceObservations() {
-    const excluded = await this.exclusions(),
-      d = this.domain();
+    return this.readWithSourceFence(() => this.readSourceObservationsOnce());
+  }
+  private async readSourceObservationsOnce() {
+    const d = this.domain();
+    const projects = await Promise.all(
+      d.projects().map(async (p) => ({
+        projectId: String(p.id),
+        credential: await this.service.gitHubSourceCredentialStatus(
+          String(p.id),
+        ),
+      })),
+    );
+    const excluded = await this.exclusions();
     return sourceObservationSchema.parse({
       data: {
-        projects: d.projects().map((p) => {
-          const projectId = String(p.id);
-          return {
-            projectId,
-            selections: d.githubConfiguration(projectId).selections.map((s) => {
-              const sync = this.service
-                .githubSources()
-                .syncState(projectId, s.id);
-              const at =
-                sync?.refreshedAt === undefined
-                  ? null
-                  : String(sync.refreshedAt);
-              return {
-                selectionId: this.safe(s.id, excluded),
-                state:
-                  excluded === undefined
-                    ? "unavailable"
-                    : sync
-                      ? sync.complete
-                        ? "complete"
-                        : "partial"
-                      : "never",
-                lastAttemptAt: at,
-                lastSuccessfulAt: sync?.complete ? at : null,
-              };
-            }),
-          };
-        }),
+        projects: projects.map(({ projectId, credential }) => ({
+          projectId,
+          credential,
+          selections: d.githubConfiguration(projectId).selections.map((s) => {
+            const sync = this.service
+              .githubSources()
+              .syncState(projectId, s.id);
+            const at =
+              sync?.refreshedAt === undefined ? null : String(sync.refreshedAt);
+            return {
+              selectionId: this.safe(s.id, excluded),
+              state:
+                excluded === undefined || !credential.usable
+                  ? "unavailable"
+                  : sync
+                    ? sync.complete
+                      ? "complete"
+                      : "partial"
+                    : "never",
+              credentialReason: credential.reason,
+              lastAttemptAt: at,
+              lastSuccessfulAt: sync?.complete && credential.usable ? at : null,
+            };
+          }),
+        })),
       },
       observedAt: Date.now(),
     });
@@ -4692,15 +4745,56 @@ export class OperatorApi {
     let raw = this.domain().recordedCommand(command);
     if (raw === undefined) {
       const config = this.domain().githubConfiguration(c.projectId);
-      if (config.version !== c.expectedVersion || !config.credentialRef)
+      if (config.version !== c.expectedVersion)
         throw new DomainConflictError("Preview configuration conflict");
+      if (!config.credentialRef) {
+        this.service.githubSources().invalidateCredentialFailure(
+          {
+            projectId: c.projectId,
+            configVersion: config.version,
+            credentialRef: config.credentialRef,
+          },
+          "missing-credential",
+        );
+        throw new OperatorApiError(
+          409,
+          "conflict",
+          ["credentialRef"],
+          "missing-credential",
+        );
+      }
       const selection = config.selections.find((s) => s.id === c.selectionId);
       if (!selection) throw new DomainConflictError("Unknown GitHub selection");
       const preview = await this.previewReader(
         config.credentialRef,
       ).readSelection(selection);
-      if (!preview.complete)
+      if (!preview.complete) {
+        if (
+          [
+            "missing-credential",
+            "invalid-credential-reference",
+            "gh-not-installed",
+            "gh-not-signed-in",
+            "gh-unreadable",
+          ].includes(preview.reason)
+        ) {
+          this.service.githubSources().invalidateCredentialFailure(
+            {
+              projectId: c.projectId,
+              configVersion: config.version,
+              credentialRef: config.credentialRef,
+            },
+            preview.reason as SourceCredentialReason,
+          );
+          throw new OperatorApiError(
+            409,
+            "conflict",
+            ["credentialRef"],
+            preview.reason as SourceCredentialReason,
+          );
+        }
         throw new DomainConflictError("Preview incomplete");
+      }
       raw = await this.executeDomain(command);
     }
     const excluded = await this.exclusions(c.projectId);

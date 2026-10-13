@@ -37,10 +37,14 @@ import {
   type DomainStore,
 } from "../core/domain.js";
 import type { OperatorAuth, OperatorSession } from "./operator-auth.js";
+import type { GitHubSourceReader } from "./github-source.js";
 import {
-  GitHubHttpSourceReader,
-  type GitHubSourceReader,
-} from "./github-source.js";
+  CredentialGitHubSourceReader,
+  gitHubSourceCredentialStatus,
+  sourceCredentialExplanation,
+  type SourceCredentialReason,
+} from "./github-source-credential.js";
+import { ghEnvironment } from "./gh-credential.js";
 import {
   selectionSchema,
   type GitHubSourceStore,
@@ -90,6 +94,15 @@ function form(
 }
 
 /** Local operator surface for the authenticated UI foundation to mount. */
+class SourceCredentialConflictError extends DomainConflictError {
+  constructor(
+    readonly reason: SourceCredentialReason,
+    readonly projectId: string,
+  ) {
+    super(sourceCredentialExplanation(reason));
+  }
+}
+
 export class LocalOperatorUi {
   private readonly commands: DomainCommands;
 
@@ -98,9 +111,33 @@ export class LocalOperatorUi {
     private readonly githubPreviewReader: (
       credentialRef: string,
     ) => Pick<GitHubSourceReader, "readSelection"> = (credentialRef) =>
-      new GitHubHttpSourceReader(process.env[credentialRef.slice(4)]),
+      new CredentialGitHubSourceReader(credentialRef, {
+        gh: () => ({
+          environment: ghEnvironment(store, { reference: credentialRef }),
+        }),
+      }),
     private readonly githubSources?: GitHubSourceStore,
     private readonly githubRefresh?: () => Promise<void>,
+    private readonly credentialStatus = async (projectId: string) => {
+      const config = store.githubConfiguration(projectId);
+      const status = await gitHubSourceCredentialStatus(config.credentialRef, {
+        gh: () => ({
+          environment: ghEnvironment(store, {
+            reference: config.credentialRef,
+          }),
+        }),
+      });
+      if (status.reason)
+        githubSources?.invalidateCredentialFailure(
+          {
+            projectId,
+            configVersion: config.version,
+            credentialRef: config.credentialRef,
+          },
+          status.reason,
+        );
+      return status;
+    },
   ) {
     this.commands = new DomainCommands(store);
   }
@@ -130,7 +167,31 @@ export class LocalOperatorUi {
     return `<main><h1>Ensemble</h1><h2>Projects</h2><ul>${projects}</ul>${form("project.create", field("name") + selectField("leadProfileId", [{ value: "", label: "Unconfigured" }, ...leadProfiles], ""), "projectId", csrfToken)}<h2>Profiles</h2><ul>${profiles}</ul>${form("profile.create", field("name") + textarea("instructions") + textarea("capabilities"), "profileId", csrfToken)}</main>`;
   }
 
-  project(projectId: string, csrfToken = ""): string {
+  async projectWithCredentialStatus(projectId: string, csrfToken = "") {
+    const fence = () => {
+      const configuration = this.store.githubConfiguration(projectId);
+      return JSON.stringify([
+        configuration.version,
+        configuration.credentialRef,
+        this.store.githubActiveSelectionIds(projectId).sort(),
+      ]);
+    };
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const source = fence();
+      const credential = await this.credentialStatus(projectId);
+      if (source === fence())
+        return this.project(projectId, csrfToken, credential);
+    }
+    throw new DomainConflictError(
+      "Source configuration changed during read; reload the project.",
+    );
+  }
+
+  project(
+    projectId: string,
+    csrfToken = "",
+    credential?: Awaited<ReturnType<typeof gitHubSourceCredentialStatus>>,
+  ): string {
     const project = this.store.project(projectId);
     const routing = this.store.routing(projectId);
     const github = this.store.githubConfiguration(projectId);
@@ -141,12 +202,19 @@ export class LocalOperatorUi {
       .map((raw) => {
         const selection = selectionSchema.parse(raw);
         const sync = this.githubSources?.syncState(projectId, selection.id);
-        const status = !sync
-          ? "never synced"
-          : Number(sync.complete) === 1
-            ? "complete"
-            : `partial: ${escapeHtml(sync.reason)}`;
-        return `<li>${escapeHtml(selection.id)} (${escapeHtml(selection.kind)}; ${activeGithub.has(selection.id) ? "active" : "inactive"}; ${status}; ${escapeHtml(sync?.refreshedAt ?? "never")})${form("github.preview", field("projectId", projectId, "hidden") + field("selectionId", selection.id, "hidden") + field("expectedVersion", String(github.version), "hidden"), undefined, csrfToken)}</li>`;
+        const status =
+          credential?.usable === false
+            ? escapeHtml(
+                sourceCredentialExplanation(
+                  credential.reason ?? "missing-credential",
+                ),
+              )
+            : !sync
+              ? "never synced"
+              : Number(sync.complete) === 1
+                ? "complete"
+                : `partial: ${escapeHtml(sync.reason)}`;
+        return `<li>${escapeHtml(selection.id)} (${escapeHtml(selection.kind)}; ${activeGithub.has(selection.id) ? "active" : "inactive"}; ${status}; ${escapeHtml(sync?.refreshedAt ?? "never")})${credential?.usable === false ? '<a href="#github-source-credential">Set or change source credential</a>' : ""}${form("github.preview", field("projectId", projectId, "hidden") + field("selectionId", selection.id, "hidden") + field("expectedVersion", String(github.version), "hidden"), undefined, csrfToken)}</li>`;
       })
       .join("");
     const conflicts =
@@ -229,11 +297,27 @@ export class LocalOperatorUi {
         ),
       undefined,
       csrfToken,
-    )}<h2>GitHub discovery</h2><p>${github.credentialRef ? "Credential reference configured" : "Credential reference not configured"}. Selections require preview before activation.</p>${form(
+    )}<h2 id="github-source-credential">GitHub source</h2><p>${github.credentialRef ? "Credential reference configured" : "Credential reference not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}; choosing it is explicit.` : ""} Selections require preview before activation at the current source version.</p>${form(
       "github.configure",
       field("projectId", projectId, "hidden") +
         field("expectedVersion", String(github.version), "hidden") +
-        field("credentialRef") +
+        selectField(
+          "sourceCredentialMode",
+          [
+            { value: "keep", label: "Keep current" },
+            { value: "gh", label: "GitHub CLI" },
+            { value: "env", label: "Environment variable" },
+            { value: "clear", label: "Clear" },
+          ],
+          "keep",
+        ) +
+        field(
+          "credentialRef",
+          "",
+          "text",
+          false,
+          "Environment reference (env:NAME); values stay private",
+        ) +
         field("clearCredentialRef", "1", "checkbox") +
         textarea("selections", JSON.stringify(github.selections, null, 2)) +
         textarea("readiness", JSON.stringify(github.readiness, null, 2)) +
@@ -465,16 +549,33 @@ export class LocalOperatorUi {
         break;
       }
       case "github.configure": {
+        const mode =
+          fields.sourceCredentialMode === undefined
+            ? undefined
+            : z
+                .enum(["keep", "gh", "env", "clear"])
+                .parse(fields.sourceCredentialMode);
         command = {
           ...common,
           type: "github.configure",
           projectId: required("projectId"),
           expectedVersion: version(),
-          ...(fields.clearCredentialRef === "1"
+          ...(fields.clearCredentialRef === "1" || mode === "clear"
             ? { credentialRef: null }
-            : fields.credentialRef
-              ? { credentialRef: fields.credentialRef }
-              : {}),
+            : mode === "gh"
+              ? { credentialRef: "gh:github.com" }
+              : mode === "env"
+                ? {
+                    credentialRef: z
+                      .string()
+                      .regex(/^env:[A-Z][A-Z0-9_]*$/)
+                      .parse(required("credentialRef")),
+                  }
+                : mode === "keep"
+                  ? {}
+                  : fields.credentialRef
+                    ? { credentialRef: fields.credentialRef }
+                    : {}),
           selections: JSON.parse(required("selections")),
           readiness: JSON.parse(required("readiness")),
           repositories: JSON.parse(required("repositories")),
@@ -483,6 +584,15 @@ export class LocalOperatorUi {
       }
       case "github.preview": {
         const projectId = required("projectId");
+        command = {
+          ...common,
+          type: "github.activate",
+          projectId,
+          selectionId: required("selectionId"),
+          expectedVersion: version(),
+        };
+        const recorded = this.store.recordedCommand(command);
+        if (recorded !== undefined) return recorded;
         const config = this.store.githubConfiguration(projectId);
         if (config.version !== version())
           throw new DomainConflictError("Version conflict");
@@ -491,22 +601,48 @@ export class LocalOperatorUi {
           .find((item) => item.id === required("selectionId"));
         if (!selection)
           throw new DomainConflictError("Unknown GitHub selection");
-        if (!config.credentialRef)
-          throw new DomainConflictError("GitHub credential reference required");
+        if (!config.credentialRef) {
+          this.githubSources?.invalidateCredentialFailure(
+            {
+              projectId,
+              configVersion: config.version,
+              credentialRef: config.credentialRef,
+            },
+            "missing-credential",
+          );
+          throw new SourceCredentialConflictError(
+            "missing-credential",
+            projectId,
+          );
+        }
         const preview = await this.githubPreviewReader(
           config.credentialRef,
         ).readSelection(selection);
-        if (!preview.complete)
-          throw new DomainConflictError(
-            `GitHub preview incomplete: ${preview.reason}`,
-          );
-        command = {
-          ...common,
-          type: "github.activate",
-          projectId,
-          selectionId: selection.id,
-          expectedVersion: config.version,
-        };
+        if (!preview.complete) {
+          if (
+            [
+              "missing-credential",
+              "invalid-credential-reference",
+              "gh-not-installed",
+              "gh-not-signed-in",
+              "gh-unreadable",
+            ].includes(preview.reason)
+          ) {
+            this.githubSources?.invalidateCredentialFailure(
+              {
+                projectId,
+                configVersion: config.version,
+                credentialRef: config.credentialRef,
+              },
+              preview.reason as SourceCredentialReason,
+            );
+            throw new SourceCredentialConflictError(
+              preview.reason as SourceCredentialReason,
+              projectId,
+            );
+          }
+          throw new DomainConflictError("GitHub preview incomplete");
+        }
         break;
       }
       case "source.review":
@@ -749,7 +885,13 @@ function apiFailure(
         ...(error instanceof OperatorApiError && error.fieldPaths
           ? { fieldPaths: error.fieldPaths }
           : {}),
-        message: publicMessage(code),
+        ...(error instanceof OperatorApiError && error.credentialReason
+          ? { credentialReason: error.credentialReason }
+          : {}),
+        message:
+          error instanceof OperatorApiError && error.credentialReason
+            ? sourceCredentialExplanation(error.credentialReason)
+            : publicMessage(code),
         ...(error instanceof z.ZodError
           ? {
               fieldPaths: [
@@ -1176,7 +1318,10 @@ export class LocalOperatorHttp {
           }
           let html: string | undefined;
           if (kind === "project" && value)
-            html = this.ui.project(value, authorized.csrfToken);
+            html = await this.ui.projectWithCredentialStatus(
+              value,
+              authorized.csrfToken,
+            );
           else if (kind === "task" && value)
             html = this.ui.task(value, authorized.csrfToken);
           else if (kind === "profile" && value)
@@ -1272,9 +1417,11 @@ export class LocalOperatorHttp {
                 ? 409
                 : 400;
           const body =
-            error instanceof DomainConflictError
-              ? "<main><h1>Change conflict</h1><p>Saved state or a prior command conflicts with this request. Reload the page and review before retrying.</p></main>"
-              : "<main><h1>Request rejected</h1></main>";
+            error instanceof SourceCredentialConflictError
+              ? `<main><h1>GitHub source credential unavailable</h1><p>${escapeHtml(sourceCredentialExplanation(error.reason))}</p><a href="/project/${encodeURIComponent(error.projectId)}#github-source-credential">Set or change source credential</a></main>`
+              : error instanceof DomainConflictError
+                ? "<main><h1>Change conflict</h1><p>Saved state or a prior command conflicts with this request. Reload the page and review before retrying.</p></main>"
+                : "<main><h1>Request rejected</h1></main>";
           writeHtml(response, status, body);
         } else if (!response.writableEnded) response.end();
       }
