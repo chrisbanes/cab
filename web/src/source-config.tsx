@@ -22,7 +22,6 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
-  SavedNotice,
   key,
   locked,
   reloadDraft,
@@ -76,6 +75,14 @@ export function SourceTab(p: TabProps) {
       (v.referenceMode === "gh" &&
         data.source.credential?.gh.state !== "signed-in") ||
       (removesAll && !v.removeAll);
+  const adopt = () => {
+    d.adoptLatest(data.source.version, initial, [["mode", "conditions"]]);
+    const rows = adoptSourceRows(data.source, d.values);
+    if (rows.dropped.length)
+      d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
+    d.set("selections", rows.selections);
+    d.set("repositories", rows.repositories);
+  };
   const setRows = (field: string, rows: SourceRow[]) => {
     d.set(field, JSON.stringify(rows));
     if (field === "repositories" && rows.some((r) => !r.removed))
@@ -139,8 +146,13 @@ export function SourceTab(p: TabProps) {
       {stale.length > 0 && (
         <Alert variant="destructive" role="alert">
           {stale.join(", ")} {stale.length === 1 ? "is" : "are"} no longer
-          saved. Review the latest source revision, or discard changes, before
+          saved. Review the changes made elsewhere, or discard yours, before
           saving.
+          {d.phase !== "conflict" && (
+            <Button type="button" variant="secondary" onClick={adopt}>
+              Review changes
+            </Button>
+          )}
         </Alert>
       )}
       {duplicates.length > 0 && (
@@ -555,19 +567,22 @@ export function SourceTab(p: TabProps) {
               </div>
             </fieldset>
           </Panel>
-          <ChangeList lines={lines}>
+          <ChangeList
+            lines={
+              removesAll
+                ? [
+                    ...lines,
+                    `Removes every repository from ${data.project.name ?? "this project"}.`,
+                  ]
+                : lines
+            }
+          >
             {removesAll && (
-              <>
-                <Alert variant="destructive" role="alert">
-                  Saving removes every linked repository from{" "}
-                  {data.project.name ?? "this project"}. Confirm to save.
-                </Alert>
-                <DraftCheck
-                  draft={d}
-                  field="removeAll"
-                  label="Remove all repository access"
-                />
-              </>
+              <DraftCheck
+                draft={d}
+                field="removeAll"
+                label="Remove all repository access"
+              />
             )}
             <p className="metadata muted">
               Saving imports no tasks and activates nothing. Afterwards every
@@ -596,28 +611,7 @@ export function SourceTab(p: TabProps) {
         saveDisabled={blocked}
         discard={() => reloadDraft(d, initial)}
         onRecorded={p.refreshConfiguration}
-      />
-      {(d.phase === "conflict" || stale.length > 0) && (
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            d.adoptLatest(data.source.version, initial, [
-              ["mode", "conditions"],
-            ]);
-            const rows = adoptSourceRows(data.source, d.values);
-            if (rows.dropped.length)
-              d.notice = `Latest revision adopted. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
-            d.set("selections", rows.selections);
-            d.set("repositories", rows.repositories);
-          }}
-        >
-          Review latest source revision
-        </Button>
-      )}
-      <SavedNotice
-        saved={p.drafts.saved(draftKey)}
-        label="Saved GitHub source"
+        review={adopt}
       />
     </form>
   );

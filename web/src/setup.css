@@ -83,8 +83,7 @@
   gap: var(--space-8, 8px);
 }
 
-.setup-alert p,
-.setup-recorded ul {
+.setup-recorded {
   margin: 0;
 }
 

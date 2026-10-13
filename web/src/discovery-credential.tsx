@@ -6,10 +6,10 @@ import {
   type ghLoginStateSchema,
 } from "../../src/operator/contracts.js";
 import { Button } from "./components.js";
-import { Alert } from "./ui/alert.js";
 import { useOperatorResource } from "./resource.js";
 import {
   DraftField,
+  DraftMessage,
   DraftOutcome,
   key,
   locked,
@@ -71,7 +71,8 @@ function ReferenceRow({
   const settled = () => {
     status.refresh();
     setOpen(false);
-    d.startOperation(blank());
+    // The closed row confirms the save until the next edit.
+    d.startOperation(blank(), true);
   };
   const send = (credentialRef: string | null) => ({
     type,
@@ -94,6 +95,7 @@ function ReferenceRow({
           </Button>
         )}
       </div>
+      {!shown && <DraftMessage draft={d} />}
       {shown && (
         <form
           className="settings-discovery-form"
@@ -116,6 +118,7 @@ function ReferenceRow({
             session={p.session}
             label="Save reference"
             onRecorded={settled}
+            success={null}
           />
           {d.phase !== "unknown" && d.phase !== "pending" && (
             <div className="settings-actions">
@@ -206,7 +209,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
   const settled = () => {
     status.refresh();
     setOpen(false);
-    d.startOperation(fresh());
+    d.startOperation(fresh(), true);
   };
   const send = (credentialRef: string | null) => ({
     type: "discovery.configure",
@@ -252,11 +255,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
           </div>
         )}
       </div>
-      {!shown && d.notice && (
-        <Alert variant="destructive" role="alert">
-          {d.notice}
-        </Alert>
-      )}
+      {!shown && <DraftMessage draft={d} />}
       {shown && (
         <form
           className="settings-discovery-form"
@@ -324,6 +323,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
             label={source === "gh" ? "Use this login" : "Save reference"}
             saveDisabled={source === "gh" && gh?.state !== "signed-in"}
             onRecorded={settled}
+            success={null}
           />
           {!busy && (
             <div className="settings-actions">

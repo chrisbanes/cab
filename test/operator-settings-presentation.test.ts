@@ -1,6 +1,7 @@
 import { sourceCredentialExplanation } from "../src/standalone/github-source-credential.js";
 import { sourceCredentialCopy } from "../web/src/settings-view.js";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
@@ -24,6 +25,7 @@ import {
 import {
   holdPills,
   projectStateSummary,
+  joinNames,
   savedLine,
   settingsHeader,
 } from "../web/src/settings-view.js";
@@ -396,15 +398,16 @@ test("settings headers, saved lines, state cards and hold pills", () => {
       version: 3,
     },
   } as never;
-  assert.equal(savedLine("General", 3, undefined), "General version 3");
+  assert.equal(savedLine(3, undefined), null);
   assert.match(
-    savedLine("General", 3, { at: Date.now(), receipt }),
-    /^General saved \d\d:\d\d$/,
+    savedLine(3, { at: Date.now(), receipt }) ?? "",
+    /^Saved \d\d:\d\d$/,
   );
-  assert.equal(
-    savedLine("General", 4, { at: Date.now(), receipt }),
-    "General version 4",
-  );
+  // A save at another version never reads as the current one, and no version is shown.
+  assert.equal(savedLine(4, { at: Date.now(), receipt }), null);
+  assert.equal(joinNames(["Ada"]), "Ada");
+  assert.equal(joinNames(["Ada", "Eli"]), "Ada and Eli");
+  assert.equal(joinNames(["Ada", "Eli", "Bo"]), "Ada, Eli and Bo");
   const summary = projectStateSummary(c, null, []);
   assert.equal(summary.state[0], "Lead: Mira · repository access: acme/atlas");
   assert.equal(summary.next, "Nothing needs attention here.");
@@ -590,4 +593,37 @@ test("source failure copy matches JSON and advanced HTML without provider detail
       sourceCredentialCopy(reason),
       sourceCredentialExplanation(reason),
     );
+});
+
+test("the warning colours stay legible on the page and on a warning alert", () => {
+  const css = readFileSync(
+    new URL("../../web/src/tokens.css", import.meta.url),
+    "utf8",
+  );
+  const token = (name: string) =>
+    new RegExp(`${name}:\\s*#([0-9a-f]{6})([0-9a-f]{2})?;`, "i").exec(css);
+  const rgb = (hex: string) =>
+    [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
+  const luminance = ([r, g, b]: number[]) => {
+    const [lr, lg, lb] = [r, g, b].map((v) => {
+      const c = (v ?? 0) / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * (lr ?? 0) + 0.7152 * (lg ?? 0) + 0.0722 * (lb ?? 0);
+  };
+  const contrast = (a: number[], b: number[]) => {
+    const [hi = 0, lo = 0] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  const fg = token("--nova-warning-fg"),
+    bg = token("--nova-warning-bg"),
+    page = token("--background"),
+    card = token("--card");
+  assert.ok(fg?.[1] && bg?.[1] && bg[2] && page?.[1] && card?.[1]);
+  const alpha = Number.parseInt(bg[2], 16) / 255;
+  const surface = rgb(card[1]).map((c, i) =>
+    Math.round(alpha * (rgb(bg[1] as string)[i] ?? 0) + (1 - alpha) * c),
+  );
+  assert.ok(contrast(rgb(fg[1]), rgb(page[1])) >= 4.5, "text on the page");
+  assert.ok(contrast(rgb(fg[1]), surface) >= 4.5, "text on a warning alert");
 });

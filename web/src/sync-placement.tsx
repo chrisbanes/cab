@@ -9,11 +9,13 @@ import type { ProjectConfigurationData } from "./settings-changes.js";
 import { observationLabel, sourceCredentialCopy } from "./settings-view.js";
 import {
   DraftField,
+  DraftMessage,
   DraftOutcome,
   Panel,
   key,
   submitDraft,
   useDraft,
+  useLoadedDraft,
   type SettingsProps,
 } from "./settings.js";
 
@@ -26,15 +28,14 @@ interface ObservationResource {
 export function SyncTab(p: TabProps & { observations: ObservationResource }) {
   const { data } = p,
     preview = useDraft(p.drafts, `github.preview:${p.projectId}`);
-  useEffect(
-    () =>
-      preview.initialize({
-        key: key(),
-        expectedVersion: String(data.source.version),
-        selectionId:
-          data.source.selections.find((s) => s.id !== null)?.id ?? "",
-      }),
-    [preview, data.source.version, data.source.selections],
+  // After a preview is recorded the next read starts a new one, so the form never stays locked.
+  useLoadedDraft(
+    preview,
+    {
+      expectedVersion: String(data.source.version),
+      selectionId: data.source.selections.find((s) => s.id !== null)?.id ?? "",
+    },
+    p.loadedAt,
   );
   const unsettled = p.drafts
     .unsettledPlacements(p.projectId)
@@ -92,20 +93,12 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
               session={p.session}
               label="Preview and activate selection"
               saveDisabled={data.source.credential?.usable === false}
+              review={() => preview.adoptVersion(data.source.version)}
             />
             {preview.phase === "conflict" && preview.errors.credentialRef && (
               <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
                 Set or change source credential
               </a>
-            )}
-            {(preview.phase === "recorded" || preview.phase === "conflict") && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => preview.adoptVersion(data.source.version)}
-              >
-                Review latest preview revision
-              </Button>
             )}
           </form>
         </Panel>
@@ -118,18 +111,8 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
         {unsettled.map((command) => (
           <UnsettledPlacement key={command.taskId} {...p} command={command} />
         ))}
-        {p.drafts.placementReceipts(p.projectId).map((receipt) => (
-          <p key={receipt.key} className="body" role="status">
-            {`Recorded placement outcome: task ${receipt.result.resourceId}; project `}
-            {receipt.result.commandType === "github.place"
-              ? receipt.result.projectId
-              : "Unavailable"}
-            ; version{" "}
-            {"version" in receipt.result
-              ? receipt.result.version
-              : "Unavailable"}
-            . Latest observations may differ from this original receipt.
-          </p>
+        {p.drafts.recordedPlacements(p.projectId).map((placed) => (
+          <DraftMessage key={placed.receipt?.key} draft={placed} />
         ))}
         {data.placements.length === 0 && unsettled.length === 0 && (
           <Panel
@@ -230,6 +213,7 @@ function SourceObservations(
 function UnsettledPlacement(
   p: SettingsProps & {
     command: Extract<OperatorCommand, { type: "github.place" }>;
+    refreshConfiguration: () => void;
   },
 ) {
   const d = useDraft(p.drafts, `github.place:${p.command.taskId}`);
@@ -246,6 +230,7 @@ function UnsettledPlacement(
         client={p.client}
         session={p.session}
         label="Placement pending"
+        onRecorded={p.refreshConfiguration}
       />
     </Panel>
   );
@@ -313,17 +298,10 @@ function PlacementConfiguration(
           client={p.client}
           session={p.session}
           label="Record placement"
+          review={() => d.adoptVersion(c.version)}
+          success={null}
         />
         <a href={`/task/${c.taskId}`}>Advanced source review controls</a>
-        {d.phase === "conflict" && (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => d.adoptVersion(c.version)}
-          >
-            Review latest placement revision
-          </Button>
-        )}
       </form>
       <p className="metadata muted">
         Recording a placement does not start work or grant repository access;

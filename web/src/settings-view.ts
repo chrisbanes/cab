@@ -115,16 +115,18 @@ const receiptVersion = (receipt: CommandReceipt) =>
     ? receipt.result.version
     : null;
 
-/** "General saved 10:52" for a save this session recorded at the current version, else the version. */
-export function savedLine(
-  label: string,
-  version: number,
-  saved: SavedRecord | undefined,
-) {
+/** "Saved 10:52" for a save this session recorded at the current version, else nothing: a version is never shown. */
+export function savedLine(version: number, saved: SavedRecord | undefined) {
   return saved && receiptVersion(saved.receipt) === version
-    ? `${label} saved ${clock(saved.at)}`
-    : `${label} version ${version}`;
+    ? `Saved ${clock(saved.at)}`
+    : null;
 }
+
+/** "Ada", "Ada and Eli", "Ada, Eli and Bo". */
+export const joinNames = (names: string[]) =>
+  names.length > 1
+    ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+    : (names[0] ?? "");
 
 export const plural = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;

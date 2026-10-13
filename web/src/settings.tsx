@@ -6,21 +6,17 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import type {
-  CommandReceipt,
-  Workspace,
-  Session,
-} from "../../src/operator/contracts.js";
+import type { Workspace, Session } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import type {
-  ConfigurationDraft,
-  ConfigurationDrafts,
-  SavedRecord,
+import { ActionOutcome, type OutcomeField } from "./action-feedback.js";
+import {
+  outcomeCopy,
+  type ConfigurationDraft,
+  type ConfigurationDrafts,
+  type DraftDetails,
 } from "./settings-state.js";
 import type { Values } from "./settings-changes.js";
-import { clock } from "./settings-view.js";
 import { Button } from "./components.js";
-import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
@@ -59,7 +55,7 @@ export function useLoadedDraft(
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run only when a read completes or the loaded values change.
   useEffect(() => {
     if (!values) return;
-    if (d.phase === "recorded") d.startOperation(fresh(values));
+    if (d.phase === "recorded") d.startOperation(fresh(values), true);
     else d.initialize(fresh(values));
   }, [d, serialized, loadedAt]);
 }
@@ -151,6 +147,88 @@ export function DraftCheck({
     </label>
   );
 }
+const detailRows = (d: DraftDetails): OutcomeField[] =>
+  (
+    [
+      ["Command", d.command],
+      ["Resource", d.resource],
+      ["Version", d.version],
+      ["Request key", d.requestKey],
+      ["Code", d.code],
+    ] as const
+  ).flatMap(([label, value]) =>
+    value === undefined ? [] : [[label, String(value)] as const],
+  );
+
+/**
+ * The one message a draft leaves behind, chosen by its phase. In progress shows nothing
+ * here (the button says "Saving…"); a save stays confirmed until the next edit.
+ */
+export function DraftMessage({
+  draft,
+  check,
+  review,
+  success,
+  children,
+}: {
+  draft: ConfigurationDraft;
+  /** The single action of an unknown outcome: resend the exact original request. */
+  check?: (() => void | Promise<void>) | undefined;
+  /** The single action of a newer version saved elsewhere. */
+  review?: (() => void) | undefined;
+  /** One plain sentence that replaces "Saved."; `null` leaves the confirmation to the caller. */
+  success?: string | null | undefined;
+  /** More under the success line, such as what was created and where to go next. */
+  children?: ReactNode;
+}) {
+  const details = detailRows(draft.details);
+  switch (draft.phase) {
+    case "pending":
+      return null;
+    case "rejected":
+      return (
+        <ActionOutcome tone="error" message={draft.notice} details={details} />
+      );
+    case "conflict":
+      return draft.credentialRefusal ? (
+        <ActionOutcome tone="error" message={draft.notice} details={details} />
+      ) : (
+        <ActionOutcome
+          tone="warning"
+          message={draft.notice}
+          action={review && { label: "Review changes", onClick: review }}
+          details={details}
+        />
+      );
+    case "unknown":
+      return (
+        <ActionOutcome
+          tone="warning"
+          message={draft.notice}
+          action={check && { label: "Check whether it saved", onClick: check }}
+          details={details}
+        />
+      );
+    default: {
+      // Recorded, or re-read after a save: confirmed until the operator edits again.
+      if (draft.phase === "recorded" || draft.savedAt !== null)
+        return success === null ? null : (
+          <ActionOutcome
+            tone="success"
+            message={success ?? outcomeCopy.saved}
+            details={details}
+          >
+            {children}
+          </ActionOutcome>
+        );
+      // Otherwise only the note left by loading the latest version.
+      return draft.notice ? (
+        <ActionOutcome tone="success" message={draft.notice} />
+      ) : null;
+    }
+  }
+}
+
 export function DraftOutcome({
   draft,
   client,
@@ -159,6 +237,8 @@ export function DraftOutcome({
   saveDisabled = false,
   discard,
   onRecorded,
+  review,
+  success,
 }: {
   draft: ConfigurationDraft;
   client: OperatorClient;
@@ -170,21 +250,16 @@ export function DraftOutcome({
   discard?: () => void;
   /** Re-read after a reconciled submission is recorded, as `submitDraft` does after a save. */
   onRecorded?: () => void;
+  /** Adopts the newer saved version; offered in the alert when one was saved elsewhere. */
+  review?: (() => void) | undefined;
+  /** A plain sentence for the success line, or `null` when the caller shows its own. */
+  success?: string | null | undefined;
 }) {
+  const idle = draft.phase !== "unknown";
   return (
     <>
-      <div className="settings-actions">
-        {draft.phase === "unknown" ? (
-          <Button
-            type="button"
-            onClick={async () => {
-              await draft.reconcile(client, session.csrfToken);
-              if (draft.phase === "recorded") onRecorded?.();
-            }}
-          >
-            Reconcile exact submission
-          </Button>
-        ) : (
+      {idle && (
+        <div className="settings-actions">
           <Button
             type="submit"
             disabled={
@@ -195,95 +270,27 @@ export function DraftOutcome({
           >
             {draft.phase === "pending" ? "Saving…" : label}
           </Button>
-        )}
-        {discard &&
-          draft.dirty &&
-          draft.phase !== "pending" &&
-          draft.phase !== "unknown" &&
-          draft.phase !== "recorded" && (
-            <Button type="button" variant="secondary" onClick={discard}>
-              Discard changes
-            </Button>
-          )}
-      </div>
-      {draft.notice && (
-        <Alert
-          variant={
-            draft.phase === "unknown" ||
-            draft.phase === "rejected" ||
-            draft.phase === "conflict"
-              ? "destructive"
-              : "default"
-          }
-          role={
-            draft.phase === "unknown" ||
-            draft.phase === "rejected" ||
-            draft.phase === "conflict"
-              ? "alert"
-              : "status"
-          }
-        >
-          {draft.notice}
-        </Alert>
+          {discard &&
+            draft.dirty &&
+            draft.phase !== "pending" &&
+            draft.phase !== "recorded" && (
+              <Button type="button" variant="secondary" onClick={discard}>
+                Discard changes
+              </Button>
+            )}
+        </div>
       )}
-      {draft.receipt && (
-        <Alert role="status">
-          <ReceiptText receipt={draft.receipt} />
-        </Alert>
-      )}
+      <DraftMessage
+        draft={draft}
+        review={review}
+        success={success}
+        check={async () => {
+          await draft.reconcile(client, session.csrfToken);
+          if (draft.phase === "recorded") onRecorded?.();
+        }}
+      />
     </>
   );
-}
-function ReceiptText({ receipt }: { receipt: CommandReceipt }) {
-  if (receipt.kind !== "configuration") return null;
-  const r = receipt.result;
-  if (r.commandType === "claude-token.configure")
-    return (
-      <>
-        Recorded Claude token reference:{" "}
-        {r.configured ? "configured" : "cleared"}.
-      </>
-    );
-  if (r.commandType === "discovery.configure")
-    return (
-      <>
-        Recorded discovery credential reference:{" "}
-        {r.configured ? "configured" : "cleared"}.
-      </>
-    );
-  return r.commandType === "capacity.configure" ? (
-    <>
-      Recorded capacity limits: global {r.globalLimit}; default project{" "}
-      {r.defaultProjectLimit}; project overrides{" "}
-      {Object.entries(r.projectOverrides)
-        .map(([id, limit]) => `${id}: ${limit}`)
-        .join(", ") || "none"}
-      .
-    </>
-  ) : (
-    <>
-      Recorded {r.commandType}: {r.resourceId}; version{" "}
-      {"version" in r ? r.version : r.configVersion}.
-    </>
-  );
-}
-/** Persistent confirmation of a save this browser session recorded, from its original receipt. */
-export function SavedNotice({
-  saved,
-  label,
-}: {
-  saved: SavedRecord | undefined;
-  label: string;
-}) {
-  return saved ? (
-    <Alert role="status" className="settings-saved">
-      <strong>
-        {label} · {clock(saved.at)}.
-      </strong>{" "}
-      <ReceiptText receipt={saved.receipt} /> Latest observations may differ
-      from this original receipt.
-    </Alert>
-  ) : null;
 }
 /** The "Changes to save" panel: one line per change, never a private value. */
 export function ChangeList({

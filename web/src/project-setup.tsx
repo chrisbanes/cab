@@ -12,6 +12,7 @@ import { ActionLink, Button } from "./components.js";
 import { FolderPicker } from "./folder-picker.js";
 import {
   DraftField,
+  DraftMessage,
   DraftOutcome,
   key,
   locked,
@@ -33,7 +34,6 @@ import {
   verificationCopy,
 } from "./setup-model.js";
 import type { GhLogin } from "./discovery-credential.js";
-import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import "./setup.css";
@@ -308,8 +308,6 @@ export function ProjectSetup(p: SettingsProps) {
     return k >= 0 && fields.some((f) => d.errors[`repositories.${k}.${f}`]);
   };
   const duplicates = duplicateRows(rows);
-  const rejectedFields =
-    d.phase === "rejected" && Object.keys(d.errors).length > 0;
   const update = (i: number, edited: SetupRow) => {
     // A row without a chosen repository keeps the form it was edited in, so a folder or
     // ref typed while discovery was unavailable stays visible when the list returns.
@@ -330,12 +328,6 @@ export function ProjectSetup(p: SettingsProps) {
 
   return (
     <section className="settings-page setup-page">
-      {rejectedFields && (
-        <Alert variant="destructive" role="alert" className="setup-alert">
-          <strong>Project not created</strong>
-          <p>Fix the highlighted field. Every other value is kept.</p>
-        </Alert>
-      )}
       <form
         className="setup-grid"
         onSubmit={(e) =>
@@ -428,6 +420,7 @@ export function ProjectSetup(p: SettingsProps) {
               session={p.session}
               label="Create paused project"
               onRecorded={p.refresh}
+              success={null}
             />
             {!recorded && (
               <ActionLink
@@ -511,30 +504,17 @@ export function ProjectSetup(p: SettingsProps) {
                 and never passes it to agents.
               </p>
             )}
-          {ghDraft.notice && (
-            <Alert
-              variant={ghDraft.phase === "recorded" ? "default" : "destructive"}
-              role="alert"
-            >
-              {ghDraft.notice}
-            </Alert>
-          )}
-          {ghDraft.phase === "unknown" && (
-            <div className="setup-inline-actions">
-              <Button
-                type="button"
-                onClick={async () => {
-                  await ghDraft.reconcile(p.client, csrf);
-                  if (ghDraft.phase === "recorded") {
-                    ghDraft.startOperation({ key: key() });
-                    retry();
-                  }
-                }}
-              >
-                Reconcile exact submission
-              </Button>
-            </div>
-          )}
+          <DraftMessage
+            draft={ghDraft}
+            success={null}
+            check={async () => {
+              await ghDraft.reconcile(p.client, csrf);
+              if (ghDraft.phase === "recorded") {
+                ghDraft.startOperation({ key: key() });
+                retry();
+              }
+            }}
+          />
           {rows.map((row, i) => {
             const source = sourceOf(row);
             const expected = row.owner && row.name ? row : null;
@@ -851,12 +831,14 @@ export function ProjectSetup(p: SettingsProps) {
         </section>
       </form>
       {recorded?.type === "project.create" && (
-        <Alert role="status" className="setup-recorded">
-          <strong>Recorded {recorded.name} as a paused project.</strong>
-          <ul className="body">
+        <DraftMessage
+          draft={d}
+          success={`Created ${recorded.name}. It's paused.`}
+        >
+          <ul className="body setup-recorded">
             <li>
               {recorded.instructions
-                ? "Instructions saved as revision 1."
+                ? "Instructions saved."
                 : "No instructions yet."}
             </li>
             <li>
@@ -888,7 +870,7 @@ export function ProjectSetup(p: SettingsProps) {
               Create another project
             </Button>
           </div>
-        </Alert>
+        </DraftMessage>
       )}
     </section>
   );

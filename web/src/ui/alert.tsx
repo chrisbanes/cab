@@ -9,6 +9,8 @@ const alertVariants = cva(
       variant: {
         default: "",
         destructive: "border-destructive/60",
+        warning:
+          "border-(--nova-warning-fg)/60 bg-(--nova-warning-bg) text-(--nova-warning-fg)",
       },
     },
     defaultVariants: { variant: "default" },

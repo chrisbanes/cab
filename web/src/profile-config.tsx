@@ -30,7 +30,6 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
-  SavedNotice,
   key,
   locked,
   reloadDraft,
@@ -437,24 +436,12 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                       p.refresh();
                       resource.refresh();
                     }}
+                    review={() =>
+                      initial && d.adoptLatest(data.profile.version, initial)
+                    }
                   />
-                  {d.phase === "conflict" && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() =>
-                        initial && d.adoptLatest(data.profile.version, initial)
-                      }
-                    >
-                      Review latest profile revision
-                    </Button>
-                  )}
                 </form>
               </Panel>
-              <SavedNotice
-                saved={p.drafts.saved(draftKey)}
-                label={`Saved ${data.profile.name ?? "profile"}`}
-              />
             </div>
             <div className="settings-column">
               <Aside

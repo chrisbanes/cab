@@ -12,8 +12,11 @@ import {
   setupJourney,
 } from "./fixtures/setup-browser.js";
 import { git } from "./fixtures/setup-home.js";
+import { outcomeMessages, savedOutcome } from "./fixtures/operator-settings.js";
 const test = browserSuite("ui06-setup");
 
+const fixFields =
+  "Couldn't save: check the highlighted fields. Your changes are still here.";
 const mismatch =
   "This folder is a checkout of acme/relay, not acme/atlas. Choose another folder or change the repository.";
 
@@ -120,7 +123,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
     },
   ]);
   assert.deepEqual(body.githubProject, { projectNodeId: "PVT_atlas" });
-  await page.getByText("Recorded Atlas as a paused project.").waitFor();
+  await savedOutcome(page, /^Created Atlas\. It's paused\./);
   const d = f.service.domain();
   const project = d.project(body.projectId);
   assert.equal(project.paused, 1);
@@ -174,7 +177,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
   assert.notEqual(free.key, (body as unknown as { key: string }).key);
   assert.equal("repositories" in free, false);
   assert.equal("githubProject" in free, false);
-  await page.getByText("Recorded Fieldnotes as a paused project.").waitFor();
+  await savedOutcome(page, /^Created Fieldnotes\. It's paused\./);
 });
 
 test("Setup keeps every value on a checkout mismatch and rechecks on create", async (_t, journey) => {
@@ -193,13 +196,10 @@ test("Setup keeps every value on a checkout mismatch and rechecks on create", as
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
     .click();
-  await page
-    .getByRole("alert")
-    .filter({ hasText: "Project not created" })
-    .waitFor();
-  await page
-    .getByText("Fix the highlighted field. Every other value is kept.")
-    .waitFor();
+  await page.getByText(fixFields).waitFor();
+  // One alert says the input is safe; the field error names the fix.
+  assert.equal(await outcomeMessages(page).count(), 1);
+  assert.equal(await page.getByRole("alert").count(), 1);
   await page.waitForFunction(
     () =>
       document.activeElement?.getAttribute("aria-invalid") === "true" &&
@@ -309,7 +309,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
     repositories: { repositoryId: string }[];
   };
   assert.equal(body.repositories[0]?.repositoryId, "github.com/acme/atlas");
-  await page.getByText("Recorded Atlas as a paused project.").waitFor();
+  await savedOutcome(page, /^Created Atlas\. It's paused\./);
   assert.equal(
     f.service.domain().githubConfiguration(body.projectId).repositories[0]
       ?.repositoryId,
@@ -352,7 +352,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
   );
 });
 
-test("Setup reconciles an unknown create outcome by replaying the exact submission", async (_t, journey) => {
+test("Setup checks an unknown create outcome by replaying the exact request", async (_t, journey) => {
   const { f, page } = await setupJourney(journey);
   await page.getByLabel("Project name", { exact: true }).fill("Unknown");
   let aborted = 0;
@@ -367,23 +367,23 @@ test("Setup reconciles an unknown create outcome by replaying the exact submissi
       .click();
     const first = (await sent).postDataJSON() as { key: string };
     await page
-      .getByRole("button", { name: "Reconcile exact submission" })
+      .getByRole("button", { name: "Check whether it saved" })
       .waitFor();
     assert.equal(aborted, 1);
+    assert.equal(await outcomeMessages(page).count(), 1);
+    assert.equal(await outcomeMessages(page).getAttribute("role"), "alert");
     assert.equal(
       await page.getByLabel("Project name", { exact: true }).isDisabled(),
       true,
     );
     await page.unroute("**/api/operator/commands");
     const replay = commandRequest(page);
-    await page
-      .getByRole("button", { name: "Reconcile exact submission" })
-      .click();
+    await page.getByRole("button", { name: "Check whether it saved" }).click();
     assert.equal(
       ((await replay).postDataJSON() as { key: string }).key,
       first.key,
     );
-    await page.getByText("Recorded Unknown as a paused project.").waitFor();
+    await savedOutcome(page, /^Created Unknown\. It's paused\./);
     assert.equal(f.service.domain().projects().length, 1);
   } finally {
     await page.unroute("**/api/operator/commands");
@@ -425,7 +425,7 @@ test("Setup creates a repository-free project in WebKit", async (_t, journey) =>
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
     .click();
-  await page.getByText("Recorded WebKit as a paused project.").waitFor();
+  await savedOutcome(page, /^Created WebKit\. It's paused\./);
   assert.equal(f.service.domain().projects().length, 1);
 });
 
@@ -519,7 +519,7 @@ test("Setup submitted with Enter records a typed listed repository by node ID", 
     if (r.url().endsWith("/api/operator/commands")) sentCount++;
   });
   await typed.press("Enter");
-  await page.getByText("Check the highlighted fields.").waitFor();
+  await page.getByText(fixFields).waitFor();
   assert.equal(sentCount, 0);
   // The rejection moves focus to the invalid Ref, so the typed field's blur adopts the
   // listed repository and visibly fills its default branch.
@@ -573,7 +573,7 @@ test("Setup clears a row's folder and ref when its repository is removed", async
     .click();
   const body = (await sent).postDataJSON() as Record<string, unknown>;
   assert.equal("repositories" in body, false);
-  await page.getByText("Recorded Cleared as a paused project.").waitFor();
+  await savedOutcome(page, /^Created Cleared\. It's paused\./);
 });
 
 test("Setup lists GitHub Projects linked to every chosen repository once", async (_t, journey) => {
@@ -656,7 +656,7 @@ test("Setup validates a typed row holding only a ref instead of dropping it", as
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
     .click();
-  await page.getByText("Check the highlighted fields.").waitFor();
+  await page.getByText(fixFields).waitFor();
   assert.equal(sent, 0);
   assert.equal(f.service.domain().projects().length, 0);
   assert.equal(

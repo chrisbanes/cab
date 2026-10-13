@@ -7,7 +7,9 @@ import {
 import type { Page } from "playwright";
 import {
   noPageOverflow,
+  outcomeMessages,
   phone,
+  savedOutcome,
   startSettings,
   trail,
 } from "./fixtures/operator-settings.js";
@@ -15,7 +17,7 @@ import { commandRequest } from "./fixtures/setup-browser.js";
 
 const test = browserSuite("ui08-settings-profiles");
 
-test("Create profile records revision 1 with a breadcrumb, boundary aside and Cancel", async (_t, journey) => {
+test("Create profile saves with one message, a breadcrumb, boundary aside and Cancel", async (_t, journey) => {
   const { f, page } = await startSettings(
     journey,
     "/app/settings/profiles/new",
@@ -41,7 +43,7 @@ test("Create profile records revision 1 with a breadcrumb, boundary aside and Ca
   await page
     .getByRole("button", { name: "Create profile", exact: true })
     .click();
-  await page.getByText("Recorded profile.create", { exact: false }).waitFor();
+  await savedOutcome(page);
   const created = f.service
     .domain()
     .profiles()
@@ -104,7 +106,7 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
     "Reviews diffs and screenshots",
   );
   await page.getByRole("button", { name: "Revoke profile" }).waitFor();
-  await page.getByText("Saved Reviewer ·", { exact: false }).waitFor();
+  await savedOutcome(page);
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
       (b) => b.textContent === "Save profile" && b.disabled,
@@ -137,7 +139,7 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
   assert.equal((await page.content()).includes("PRIVATE"), false);
 });
 
-test("a profile conflict keeps typed input until the latest revision is adopted", async (_t, journey) => {
+test("a profile conflict keeps typed input until the newer version is reviewed", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/app/profiles/:reviewer/settings",
@@ -154,24 +156,29 @@ test("a profile conflict keeps typed input until the latest revision is adopted"
     capabilities: "Changed elsewhere",
   });
   await page.getByRole("button", { name: "Save profile", exact: true }).click();
-  await page.getByText("Configuration changed.", { exact: false }).waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  // One warning holds the only way forward, and the typed input is kept.
+  const warning = outcomeMessages(page);
+  assert.equal(await warning.count(), 1);
+  assert.equal(await warning.getAttribute("role"), "alert");
+  assert.equal(await warning.getByRole("button").count(), 1);
+  assert.equal(
+    await page.getByRole("button", { name: "Review changes" }).count(),
+    1,
+  );
   assert.equal(
     await page.getByLabel("Summary", { exact: true }).inputValue(),
     "Typed summary",
   );
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page.getByText("Current revision 3.").waitFor();
-  await page
-    .getByRole("button", { name: "Review latest profile revision" })
-    .click();
+  await warning.getByRole("button", { name: "Review changes" }).click();
   assert.equal(
     await page.getByLabel("Summary", { exact: true }).inputValue(),
     "Typed summary",
   );
   await page.getByRole("button", { name: "Save profile", exact: true }).click();
-  await page.waitForFunction(
-    () => document.querySelector(".settings-saved") !== null,
-  );
+  await savedOutcome(page);
   assert.equal(f.service.domain().profile(reviewer).summary, "Typed summary");
 });
 
@@ -255,7 +262,7 @@ test("Create profile chooses Claude with model and effort, rejecting invalid val
     model: "sonnet",
     reasoningEffort: "high",
   });
-  await page.getByText("Recorded profile.create", { exact: false }).waitFor();
+  await savedOutcome(page);
   const created = f.service
     .domain()
     .profiles()
@@ -297,6 +304,7 @@ test("Profile configuration switches Codex to Claude and back as new revisions",
   await changes.getByText("Runtime: Codex → Claude · sonnet · high").waitFor();
   await page.getByRole("button", { name: "Save profile", exact: true }).click();
   await page.getByText("Current revision 2.").waitFor();
+  await savedOutcome(page);
   assert.deepEqual(d.profileRuntime(builder), {
     harness: "claude",
     model: "sonnet",

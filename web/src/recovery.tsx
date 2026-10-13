@@ -18,7 +18,6 @@ import {
   DraftCheck,
   DraftOutcome,
   Panel,
-  SavedNotice,
   reloadDraft,
   useDraft,
   useHeaderRefresh,
@@ -148,10 +147,6 @@ export function RuntimeSettings(p: SettingsProps) {
                   />
                 </form>
               </Panel>
-              <SavedNotice
-                saved={p.drafts.saved("capacity.configure")}
-                label="Saved capacity"
-              />
               <Panel
                 title="Execution runtimes"
                 description="Work for a runtime that is not enabled or unavailable waits; it never falls back to another runtime."

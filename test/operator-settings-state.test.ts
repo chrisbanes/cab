@@ -5,6 +5,7 @@ import { OperatorClient } from "../web/src/api.js";
 import {
   ConfigurationDraft,
   ConfigurationDrafts,
+  outcomeCopy,
 } from "../web/src/settings-state.js";
 test("unknown private configuration remains frozen after later rejection and deliberate reconciliation uses original bytes", async () => {
   const calls: string[] = [];
@@ -252,15 +253,14 @@ test("one task placement keeps its initiating project separate from the immutabl
   await draft.reconcile(client, "csrf");
   assert.deepEqual(JSON.parse(sent[0] ?? "null"), command);
   assert.deepEqual(sent, [sent[0], sent[0]]);
-  assert.equal(drafts.placementReceipts(origin).length, 1);
-  assert.equal(drafts.placementReceipts(owner).length, 0);
-  assert.equal(
-    drafts.placementReceipts(origin)[0]?.result.commandType,
-    "github.place",
-  );
+  assert.deepEqual(drafts.recordedPlacements(origin), [draft]);
+  assert.equal(drafts.recordedPlacements(owner).length, 0);
+  assert.equal(draft.notice, "Saved.");
+  assert.equal(draft.details.command, "github.place");
+  assert.equal(draft.details.resource, taskId);
   drafts.purge();
   assert.deepEqual(draft.values, {});
-  assert.equal(drafts.placementReceipts(origin).length, 0);
+  assert.equal(drafts.recordedPlacements(origin).length, 0);
 });
 
 test("placement adopts a loaded revision explicitly after definite conflict but never after unknown", async () => {
@@ -693,7 +693,7 @@ test("source credential refusal is actionable only after a definite lifecycle di
   const bytes = unknown.bytes;
   await unknown.reconcile(fail, "csrf");
   assert.equal(unknown.phase, "unknown");
-  assert.match(unknown.notice, /Outcome unknown/);
+  assert.equal(unknown.notice, outcomeCopy.unknown);
   assert.equal(unknown.bytes, bytes);
   const unrelated = new ConfigurationDraft();
   await unrelated.submit(
@@ -707,8 +707,132 @@ test("source credential refusal is actionable only after a definite lifecycle di
     },
     "csrf",
   );
-  assert.equal(
-    unrelated.notice,
-    "Configuration changed. Review the loaded revision before a new submission.",
+  assert.equal(unrelated.notice, outcomeCopy.conflict);
+  assert.equal(unrelated.credentialRefusal, false);
+  assert.equal(definite.credentialRefusal, true);
+});
+
+test("every outcome reads in plain words and keeps the receipt fields for Details", async () => {
+  const plain =
+    /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
+  const projectId = randomUUID();
+  const command = () => ({
+    type: "project.configure" as const,
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 2,
+    name: "Atlas",
+  });
+  const answer = (respond: (c: { key: string }) => Response) =>
+    new OperatorClient(async (_url, init) =>
+      respond(JSON.parse(String(init?.body))),
+    );
+  const run = async (client: OperatorClient, input: object = command()) => {
+    const draft = new ConfigurationDraft();
+    draft.set("name", "Atlas");
+    await draft.submit(client, input, "csrf");
+    return draft;
+  };
+
+  const saved = await run(
+    answer((c) =>
+      Response.json({
+        kind: "configuration",
+        key: c.key,
+        recorded: true,
+        result: {
+          commandType: "project.configure",
+          resourceId: projectId,
+          version: 3,
+          paused: false,
+          leadProfileId: null,
+          instructionsRevision: 1,
+        },
+      }),
+    ),
   );
+  assert.equal(saved.phase, "recorded");
+  assert.equal(saved.notice, "Saved.");
+  assert.equal(typeof saved.savedAt, "number");
+  assert.deepEqual(saved.details, {
+    command: "project.configure",
+    requestKey: saved.receipt?.key,
+    resource: projectId,
+    version: 3,
+  });
+  // A re-read keeps the confirmation and its Details; the next edit retires both.
+  saved.startOperation({ name: "Atlas" }, true);
+  assert.equal(saved.phase, "editing");
+  assert.equal(typeof saved.savedAt, "number");
+  assert.equal(saved.details.version, 3);
+  saved.set("name", "Atlas 2");
+  assert.equal(saved.savedAt, null);
+  saved.startOperation({ name: "Atlas" });
+  assert.deepEqual(saved.details, {});
+
+  const rejected = await run(
+    answer(() =>
+      Response.json(
+        { error: { code: "invalid-input", message: "Bad", fieldPaths: [] } },
+        { status: 400 },
+      ),
+    ),
+  );
+  assert.equal(rejected.phase, "rejected");
+  assert.equal(rejected.notice, "Couldn't save. Your changes are still here.");
+  assert.equal(rejected.details.code, "invalid-input");
+
+  const highlighted = await run(
+    answer(() =>
+      Response.json(
+        {
+          error: {
+            code: "invalid-input",
+            message: "Bad",
+            fieldPaths: ["name"],
+          },
+        },
+        { status: 400 },
+      ),
+    ),
+  );
+  assert.equal(highlighted.notice, outcomeCopy.fields);
+
+  const preflight = new ConfigurationDraft();
+  await preflight.submit(
+    new OperatorClient(async () => assert.fail("nothing is sent")),
+    { type: "project.configure" },
+    "csrf",
+  );
+  assert.equal(preflight.notice, outcomeCopy.fields);
+
+  const conflict = await run(
+    answer(() =>
+      Response.json(
+        { error: { code: "conflict", message: "C" } },
+        { status: 409 },
+      ),
+    ),
+  );
+  assert.equal(conflict.phase, "conflict");
+  assert.equal(conflict.notice, "A newer version was saved elsewhere.");
+  assert.equal(conflict.details.code, "conflict");
+  assert.equal(conflict.details.command, "project.configure");
+
+  const lost = await run(
+    new OperatorClient(async () => {
+      throw Error("lost");
+    }),
+  );
+  assert.equal(lost.phase, "unknown");
+  assert.equal(lost.notice, "We couldn't confirm the save.");
+  assert.equal(lost.details.code, "command-outcome-unknown");
+
+  // The copy names no command, ID, key, number or service term; those live in Details.
+  for (const draft of [saved, rejected, highlighted, preflight, conflict, lost])
+    assert.doesNotMatch(draft.notice, plain, draft.notice);
+  for (const draft of [rejected, highlighted, preflight])
+    assert.match(draft.notice, /Your changes are still here\.$/);
+  for (const text of Object.values(outcomeCopy))
+    assert.ok(text.split(/(?<=\.)\s/).length <= 2, text);
 });
