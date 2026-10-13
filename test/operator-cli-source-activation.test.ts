@@ -1,22 +1,33 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { dirname } from "node:path";
 import { test } from "node:test";
 import { databaseDigest } from "./fixtures/database-digest.js";
+import { createFakeGh } from "./fixtures/fake-gh.js";
 import { startCliOperator } from "./fixtures/operator-cli.js";
 import {
   seedImportedConflict,
   seedSettingsWorld,
 } from "./fixtures/operator-settings.js";
 
+process.env.FIXTURE_GITHUB = "test-only-github-source-token";
+
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
 
-async function world(t: Parameters<typeof startCliOperator>[0]) {
+async function world(
+  t: Parameters<typeof startCliOperator>[0],
+  ghExecutable?: string,
+) {
   const reader = {
     mode: "complete" as "complete" | "incomplete" | "throw",
     reads: 0,
   };
   const o = await startCliOperator(t, {
+    service: {
+      supervisor: { observationMs: 50 },
+      ...(ghExecutable ? { ghExecutable } : {}),
+    },
     previewReader: () => ({
       async readSelection() {
         reader.reads++;
@@ -43,6 +54,119 @@ async function world(t: Parameters<typeof startCliOperator>[0]) {
   };
   return { ...o, ids, config, ok, reader };
 }
+
+test("service and advanced HTML source status use only the configured fake gh executable", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const originalPath = process.env.PATH;
+  process.env.PATH = [dirname(gh.executable), originalPath]
+    .filter(Boolean)
+    .join(":");
+  t.after(() => {
+    if (originalPath === undefined) delete process.env.PATH;
+    else process.env.PATH = originalPath;
+  });
+
+  const defaultWorld = await world(t);
+  await defaultWorld.config();
+  assert.equal(
+    gh.environments().length,
+    0,
+    "the default absent executable must not fall through to the fake PATH entry",
+  );
+
+  const explicitWorld = await world(t, gh.executable);
+  const source = (await explicitWorld.config()).source;
+  assert.equal(
+    explicitWorld.s.f.service.domain().discoveryCredentialReference(),
+    null,
+  );
+  assert.equal(source.credential.source, "env");
+  assert.equal(source.credential.usable, true);
+  assert.equal(source.credential.gh.state, "signed-in");
+  assert.equal(source.credential.gh.login, "octo");
+  const html = await explicitWorld.s.sessionGet(
+    `/project/${explicitWorld.ids.atlas}`,
+  );
+  assert.equal(html.status, 200);
+  assert.match(await html.text(), /Detected GitHub CLI account @octo/);
+  assert.ok(
+    gh.environments().length > 0,
+    "explicit fake gh must serve the source status",
+  );
+  const configure = await explicitWorld.s.sessionPost(
+    "/api/operator/commands",
+    {
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: explicitWorld.ids.atlas,
+      expectedVersion: source.version,
+      credentialRef: "gh:github.com",
+      selections: source.selections.map((selection: Json) => ({
+        id: selection.id,
+        keep: true,
+      })),
+      readiness: source.readiness,
+      repositories: source.repositories,
+    },
+  );
+  assert.equal(configure.status, 200);
+  const ghSource = (await explicitWorld.config()).source;
+  assert.equal(ghSource.credential.source, "gh");
+  assert.equal(ghSource.credential.usable, true);
+  const preview = await explicitWorld.ok("rw", [
+    "project",
+    "preview-source",
+    explicitWorld.ids.atlas,
+    "--selection",
+    "S-1",
+    "--expected-version",
+    String(ghSource.version),
+  ]);
+  assert.equal(preview.data.receipt.result.active, true);
+});
+
+test("preview reports each unusable GitHub CLI credential with actionable safe guidance", async (t) => {
+  for (const [state, expected] of [
+    ["not-signed-in", /GitHub CLI is not signed in/],
+    ["unreadable", /cannot read the GitHub CLI login/],
+  ] as const) {
+    await t.test(state, async (subtest) => {
+      const gh = createFakeGh(state);
+      subtest.after(() => gh.close());
+      const w = await world(subtest, gh.executable);
+      const source = (await w.config()).source;
+      const configured = await w.s.sessionPost("/api/operator/commands", {
+        type: "github.configure",
+        key: randomUUID(),
+        projectId: w.ids.atlas,
+        expectedVersion: source.version,
+        credentialRef: "gh:github.com",
+        selections: source.selections.map((selection: Json) => ({
+          id: selection.id,
+          keep: true,
+        })),
+        readiness: source.readiness,
+        repositories: source.repositories,
+      });
+      assert.equal(configured.status, 200);
+      const current = (await w.config()).source;
+      const result = await w.cli("rw", [
+        "project",
+        "preview-source",
+        w.ids.atlas,
+        "--selection",
+        "S-1",
+        "--expected-version",
+        String(current.version),
+      ]);
+      assert.equal(result.code, 4, result.out);
+      assert.match(result.json().error.message, expected);
+      assert.equal(w.reader.reads, 0);
+      assert.ok(!result.out.includes("gho_fake-canary-942"));
+    });
+  }
+});
 
 test("preview-source activates after a complete read and reports the live state", async (t) => {
   const w = await world(t);
@@ -111,7 +235,41 @@ test("preview-source activates after a complete read and reports the live state"
     String((await w.config(noCredential)).source.version),
   ]);
   assert.equal(unconfigured.code, 4, unconfigured.out);
+  assert.match(
+    unconfigured.json().error.message,
+    /GitHub source credential required/,
+  );
   assert.equal(w.reader.reads, 1);
+  const noCredentialSource = (await w.config(noCredential)).source;
+  assert.equal(w.s.f.service.domain().discoveryCredentialReference(), null);
+  const ghConfigured = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: noCredential,
+    expectedVersion: noCredentialSource.version,
+    credentialRef: "gh:github.com",
+    selections: [{ id: "S-1", keep: true }],
+    readiness: noCredentialSource.readiness,
+    repositories: [],
+  });
+  assert.equal(ghConfigured.status, 200);
+  const ghVersion = (await w.config(noCredential)).source.version;
+  const unusable = await w.cli("rw", [
+    "project",
+    "preview-source",
+    noCredential,
+    "--selection",
+    "S-1",
+    "--expected-version",
+    String(ghVersion),
+  ]);
+  assert.equal(unusable.code, 4, unusable.out);
+  assert.match(unusable.json().error.message, /GitHub CLI is not installed/);
+  assert.equal(
+    w.reader.reads,
+    1,
+    "unusable source credentials never reach the provider reader",
+  );
 
   // An incomplete read activates nothing; a failed read is an unknown outcome.
   w.reader.mode = "incomplete";
@@ -156,11 +314,31 @@ test("preview-source activates after a complete read and reports the live state"
   });
   assert.equal(lost.code, 6, lost.out);
   assert.match(lost.json().error.message, /operation get/);
+  const current = await w.config();
+  const clear = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: atlas,
+    expectedVersion: current.source.version,
+    credentialRef: null,
+    selections: current.source.selections.map((s: Json) => ({
+      id: s.id,
+      keep: true,
+    })),
+    readiness: current.source.readiness,
+    repositories: current.source.repositories,
+  });
+  assert.equal(clear.status, 200);
+  const beforeReplayReads = w.reader.reads;
   await w.s.restart();
   const settled = await w.ok("rw", preview("S-3", version + 1));
   assert.equal(settled.request.key, lost.json().error.request.key);
-  assert.equal(settled.data.current.active, true);
-  assert.equal(w.reader.reads, reads + 1);
+  assert.equal(settled.data.current.active, false);
+  assert.equal(
+    w.reader.reads,
+    beforeReplayReads,
+    "replay after Clear does not reread the provider",
+  );
   const read = await w.ok("rw", [
     "operation",
     "get",

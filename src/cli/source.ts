@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
+import { sourceCredentialReference } from "../core/credential-reference.js";
 import {
   readinessSchema,
   repositoryLinkSchema,
@@ -11,6 +12,10 @@ import {
   sourceObservationSchema,
   taskSchema,
 } from "../operator/contracts.js";
+import {
+  type SourceCredentialReason,
+  sourceCredentialExplanation,
+} from "../standalone/github-source-credential.js";
 import {
   type BrowseCommand,
   browseOutput,
@@ -50,6 +55,13 @@ const kindLabel = (kind: string) =>
 const conditions = (n: number) => `${n} condition${n === 1 ? "" : "s"}`;
 const readinessText = (r: Source["readiness"]) =>
   r ? `${r.mode} of ${conditions(r.conditions.length)}` : "(unavailable)";
+const sourceCredentialReasons: SourceCredentialReason[] = [
+  "missing-credential",
+  "invalid-credential-reference",
+  "gh-not-installed",
+  "gh-not-signed-in",
+  "gh-unreadable",
+];
 
 const readObservations = (client: ServiceClient, projectId: string) =>
   client
@@ -59,6 +71,14 @@ const readObservations = (client: ServiceClient, projectId: string) =>
         r.data.projects.find((p) => p.projectId === projectId)?.selections ??
         [],
     );
+
+const requireWriteScope = (session: Session) => {
+  if (session.identity.credential.scope !== "read-write")
+    throw new CliError(
+      "insufficient-scope",
+      "This connection's credential is read-only.",
+    );
+};
 
 /** Saved rows this read cannot name; a CLI edit could not keep them. */
 const unnamed = (source: Source) =>
@@ -98,10 +118,40 @@ const sourcesCommand: BrowseCommand = {
           ["Source version", String(source.version)],
           [
             "Credential",
-            source.credentialConfigured ? "configured" : "not configured",
+            source.credential?.source === "gh"
+              ? "GitHub CLI"
+              : source.credential?.source === "env"
+                ? "environment variable"
+                : source.credentialConfigured
+                  ? "configured"
+                  : "not configured",
           ],
+          ...(source.credential
+            ? [
+                [
+                  "Credential usable",
+                  source.credential.usable ? "yes" : "no",
+                ] as [string, string],
+                ...(source.credential.reason
+                  ? [
+                      [
+                        "Credential reason",
+                        sourceCredentialExplanation(source.credential.reason),
+                      ] as [string, string],
+                    ]
+                  : []),
+                ...(source.credential.gh.state === "signed-in"
+                  ? [
+                      [
+                        "Detected GitHub CLI account",
+                        `@${source.credential.gh.login}`,
+                      ] as [string, string],
+                    ]
+                  : []),
+              ]
+            : []),
           ["Readiness", readinessText(source.readiness)],
-        ]),
+        ] as [string, string][]),
         "",
         source.selections.length
           ? table(
@@ -171,11 +221,7 @@ const editSchema = z
     linkRepositories: z.array(repositoryLinkSchema).max(20).optional(),
     unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
     setRefs: z.record(z.string(), z.string().trim().min(1).max(512)).optional(),
-    credentialRef: z
-      .string()
-      .regex(/^env:[A-Z][A-Z0-9_]*$/)
-      .nullable()
-      .optional(),
+    credentialRef: sourceCredentialReference.nullable().optional(),
     confirmUnlinkAll: z.literal(true).optional(),
   })
   .strict();
@@ -354,7 +400,7 @@ export function sourceEditCommand(
     diff.push(
       edit.credentialRef === null
         ? "Credential reference: cleared"
-        : "Credential reference: set new environment reference",
+        : `Credential reference: set new ${edit.credentialRef.startsWith("gh:") ? "GitHub CLI" : "environment variable"} reference`,
     );
 
   const ids = (list: { id: string }[]) =>
@@ -477,6 +523,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
           "workspace.read",
           "source.write",
         ]);
+        requireWriteScope(session);
         const identity = {
           scope: `project:${projectId}`,
           type: "github.preview",
@@ -496,11 +543,13 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
               "invalid-input",
               `--selection ${selectionId} is not a saved selection of this project.`,
             );
-          if (!source.credentialConfigured)
-            throw new CliError(
-              "conflict",
-              "The project has no GitHub credential reference, so the selection cannot be read. Nothing was sent.",
-            );
+          if (
+            !source.credentialConfigured ||
+            source.credential?.usable === false
+          ) {
+            const reason = source.credential?.reason ?? "missing-credential";
+            throw new CliError("conflict", sourceCredentialExplanation(reason));
+          }
         }
         const { receipt, request } = await sendCommand(ctx, session, {
           ...identity,
@@ -515,6 +564,14 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
             expectedVersion: expected,
           },
         }).catch((error: unknown) => {
+          if (
+            error instanceof CliError &&
+            error.code === "conflict" &&
+            sourceCredentialReasons.some(
+              (reason) => error.message === sourceCredentialExplanation(reason),
+            )
+          )
+            throw error;
           if (error instanceof CliError && error.code === "conflict")
             throw new CliError(
               "conflict",
@@ -577,6 +634,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
           "task.read",
           "source.write",
         ]);
+        requireWriteScope(session);
         const task = async () =>
           (
             await session.client.get(
