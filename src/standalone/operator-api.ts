@@ -1,21 +1,34 @@
-import { GhLoginScope } from "./gh-credential.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
+import {
+  CommandResultValidationError,
+  type DomainCommandResultMap,
+  parseDomainCommandOutcome,
+} from "../core/command-results.js";
 import type {
   CoordinationInteraction,
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
+import { materialDigest } from "../core/delivery.js";
 import {
+  type DomainCommand,
   DomainCommands,
   DomainConflictError,
   DomainNotFoundError,
   DomainOperationError,
   DomainPolicyError,
 } from "../core/domain.js";
+import {
+  LocalReviewAnchorRequiredError,
+  LocalReviewBatchTooLargeError,
+  LocalReviewRecipientUnavailableError,
+  type LocalReviewRequest,
+  type LocalReviewSyncIdentity,
+} from "../core/local-review.js";
 import {
   nativeQuestionForm,
   type QuestionAnswers,
@@ -24,66 +37,77 @@ import {
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
+  assignmentDetailSchema,
   assignmentHistorySchema,
+  assignmentInstructionsSchema,
   assignmentRecoverySchema,
   checkoutVerificationSchema,
   checkoutVerifyRequestSchema,
+  claudeTokenStatusSchema,
   commandReceiptSchema,
+  composerOptionsSchema,
+  configurationImpactSchema,
+  deliveryReadSchema,
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
-  claudeTokenStatusSchema,
   discoveryStatusSchema,
-  unsupportedRuntimeField,
+  type Execution,
   executionDetailSchema,
   executionEventsSchema,
   executionInputsSchema,
   executionListSchema,
   folderListingSchema,
   folderListRequestSchema,
-  composerOptionsSchema,
-  deliveryReadSchema,
-  type Execution,
   type InboxItem,
   inboxReadSchema,
+  instructionProvenance,
   materialSchema,
-  operatorCommandSchema,
-  configurationImpactSchema,
   operationReadSchema,
   operationScopeSchema,
   operationTypeSchema,
+  operatorCommandSchema,
   profileConfigurationSchema,
+  profileInstructionsSchema,
   projectConfigurationSchema,
+  projectInstructionsSchema,
   projectSchema,
   questionReadSchema,
   recoveryObservationSchema,
-  reviewReadSchema,
-  runtimeSettingsSchema,
   retainedEvidenceItemContentReadSchema,
   retainedResultEvidenceReadSchema,
   retainedReviewAnchorReadSchema,
+  reviewReadSchema,
+  runtimeSettingsSchema,
   searchQuerySchema,
   searchReadSchema,
   sourceObservationSchema,
   taskListPageSchema,
   taskListQuerySchema,
-  assignmentDetailSchema,
-  assignmentInstructionsSchema,
-  instructionProvenance,
-  profileInstructionsSchema,
-  projectInstructionsSchema,
   taskMessagePageSchema,
   taskRecordQuerySchema,
   taskResultPageSchema,
   taskSchema,
+  unsupportedRuntimeField,
   uuid,
+  workIdSchema,
   workspaceComparisonReadRequestSchema,
   workspaceComparisonReadSchema,
   workspaceDirectoryReadSchema,
   workspacePreviewReadSchema,
   workspaceSchema,
-  workIdSchema,
 } from "../operator/contracts.js";
+import {
+  claudeTokenExclusions,
+  claudeTokenSource,
+  readClaudeToken,
+} from "./claude-token.js";
+import {
+  type ConversationHistoryBinding,
+  isDisclosable,
+  sanitizeConversationText,
+} from "./conversation-history.js";
+import type { CoordinationView } from "./coordination-view.js";
 import {
   boundDetail,
   DiagnosticCursorError,
@@ -92,49 +116,21 @@ import {
   type ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
-  type ConversationHistoryBinding,
-  isDisclosable,
-  sanitizeConversationText,
-} from "./conversation-history.js";
-import type { CoordinationView } from "./coordination-view.js";
-import type { GitHubSourceReader } from "./github-source.js";
-import type { SourceCredentialReason } from "./github-source-credential.js";
+  detectGh,
+  discoveryCredentialExclusions,
+  GhLoginScope,
+  type GhOptions,
+  ghEnvironment,
+  ghToken,
+} from "./gh-credential.js";
 import {
   DiscoveryFailure,
   type DiscoveryReader,
   GitHubDiscoveryReader,
 } from "./github-discovery.js";
-import {
-  detectGh,
-  discoveryCredentialExclusions,
-  ghEnvironment,
-  type GhOptions,
-  ghToken,
-} from "./gh-credential.js";
-import {
-  FolderAccessError,
-  listHomeFolders,
-  type OperatorSetupSeams,
-  resolveHomePath,
-  verifyCheckout,
-} from "./operator-setup.js";
-import { selectAssignmentExecution } from "./operator-runtime.js";
-import {
-  claudeTokenExclusions,
-  claudeTokenSource,
-  readClaudeToken,
-} from "./claude-token.js";
-import type { StandaloneService } from "./service.js";
-import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
-import { materialDigest } from "../core/delivery.js";
-import {
-  LocalReviewAnchorRequiredError,
-  LocalReviewBatchTooLargeError,
-  LocalReviewRecipientUnavailableError,
-  type LocalReviewRequest,
-  type LocalReviewSyncIdentity,
-} from "../core/local-review.js";
-import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import type { GitHubSourceReader } from "./github-source.js";
+import type { SourceCredentialReason } from "./github-source-credential.js";
+import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   executeRecovery,
   isRecoveryCommand,
@@ -142,8 +138,18 @@ import {
   readRecoveryOperation,
   recoveryOptions,
 } from "./operator-recovery.js";
+import { selectAssignmentExecution } from "./operator-runtime.js";
+import {
+  FolderAccessError,
+  listHomeFolders,
+  type OperatorSetupSeams,
+  resolveHomePath,
+  verifyCheckout,
+} from "./operator-setup.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
-import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
+import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
+import type { StandaloneService } from "./service.js";
+import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
 import {
   compareRepository,
   type WorkspaceComparisonSideContent,
@@ -155,11 +161,11 @@ import {
   previewRetainedBytes,
   previewWorkspaceFile,
   retainedPathExcluded,
-  workspaceInspectionBindingIdentity,
   type WorkspaceInspectionCurrent,
   WorkspaceInspectionInputError,
   type WorkspaceInspectionPathReference,
   type WorkspaceInspectionRequest,
+  workspaceInspectionBindingIdentity,
   workspaceInspectionPathsExcluded,
 } from "./workspace-inspection.js";
 
@@ -334,6 +340,8 @@ export class OperatorApiError extends Error {
 }
 
 function domainApiError(error: unknown): OperatorApiError | undefined {
+  if (error instanceof CommandResultValidationError)
+    return new OperatorApiError(503, "unavailable");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainConflictError)
@@ -4334,14 +4342,17 @@ export class OperatorApi {
           : "project";
     if (kind !== expected) throw new OperatorApiError(400, "invalid-input");
     // Domain receipt scopes: the bare project ID, `profile:<id>`, `system:capacity`.
-    const raw = this.domain().recordedResult(
-      kind === "project" ? id : scope.data,
-      key.data,
-    );
+    const receiptType =
+      type.data === "github.preview" ? "github.activate" : type.data;
     let data: unknown = { state: "not-recorded" };
-    if (raw !== undefined)
-      try {
-        const receipt = commandReceipt(type.data, key.data, id, raw);
+    try {
+      const raw = this.domain().recordedResult(
+        kind === "project" ? id : scope.data,
+        key.data,
+        receiptType,
+      );
+      if (raw !== undefined) {
+        const receipt = commandReceipt(raw, key.data, id);
         // A selection ID is operator text; disclose it only as the POST receipt does.
         if (
           receipt.kind === "configuration" &&
@@ -4353,11 +4364,15 @@ export class OperatorApi {
         )
           throw new OperatorApiError(503, "unavailable");
         data = { state: "recorded", receipt };
-      } catch (error) {
-        if (error instanceof ReceiptShapeError)
-          throw new OperatorApiError(409, "conflict");
-        throw error;
       }
+    } catch (error) {
+      if (
+        error instanceof ReceiptShapeError ||
+        error instanceof CommandResultValidationError
+      )
+        throw new OperatorApiError(409, "conflict");
+      throw error;
+    }
     return operationReadSchema.parse({ data, observedAt: Date.now() });
   }
   async readProfileConfiguration(profileId: string) {
@@ -4818,7 +4833,11 @@ export class OperatorApi {
     const excluded = await this.exclusions(c.projectId);
     if (!this.disclosable(c.selectionId, excluded))
       throw new Error("Receipt unavailable");
-    return commandReceipt(c.type, c.key, c.projectId, raw);
+    return commandReceipt(
+      parseDomainCommandOutcome("github.activate", raw),
+      c.key,
+      c.projectId,
+    );
   }
   private home() {
     return this.setup.home ?? homedir();
@@ -4975,7 +4994,9 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  private async executeDomain(c: Parameters<typeof this.commands.execute>[0]) {
+  private async executeDomain<C extends DomainCommand>(
+    c: C,
+  ): Promise<DomainCommandResultMap[C["type"]]> {
     try {
       return await this.commands.execute(c);
     } catch (error) {
@@ -5706,37 +5727,27 @@ export class OperatorApi {
               : {}),
           });
         }
-        return commandReceipt(c.type, c.key, "system:capacity", raw);
+        return commandReceipt(
+          parseDomainCommandOutcome("capacity.configure", raw),
+          c.key,
+          "system:capacity",
+        );
       }
       if (c.type === "claude-token.configure") {
-        const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
-          configured: boolean;
-        };
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: "system:claude-token",
-            configured: raw.configured,
-          },
-        });
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("claude-token.configure", outcome),
+          c.key,
+          "system:claude-token",
+        );
       }
       if (c.type === "discovery.configure") {
-        const raw = (await this.executeDomain({ ...c, actor: "operator" })) as {
-          configured: boolean;
-        };
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: "system:discovery",
-            configured: raw.configured,
-          },
-        });
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("discovery.configure", outcome),
+          c.key,
+          "system:discovery",
+        );
       }
       if (c.type === "github.preview")
         return await this.previewGitHubSelection(c);
@@ -5777,27 +5788,13 @@ export class OperatorApi {
               }
             : c;
         const raw = await this.executeDomain({ ...command, actor: "operator" });
-        if (c.type !== "github.place")
-          return commandReceipt(
-            c.type,
-            c.key,
-            c.type === "routing.configure" || c.type === "github.configure"
-              ? c.projectId
-              : "",
-            raw,
-          );
-        const r = raw as Row;
-        return commandReceiptSchema.parse({
-          kind: "configuration",
-          key: c.key,
-          recorded: true,
-          result: {
-            commandType: c.type,
-            resourceId: String(r.id),
-            projectId: String(r.projectId),
-            version: Number(r.version),
-          },
-        });
+        return commandReceipt(
+          parseDomainCommandOutcome(c.type, raw),
+          c.key,
+          c.type === "routing.configure" || c.type === "github.configure"
+            ? c.projectId
+            : "",
+        );
       }
       if (isRecoveryCommand(c)) {
         this.requireAssignment(c.assignmentId);
@@ -5817,22 +5814,11 @@ export class OperatorApi {
       if ("projectId" in c) {
         this.requireProject(c.projectId);
         const raw = await this.executeDomain({ ...c, actor: "operator" });
-        if (c.type === "assignment.apply")
-          return commandReceipt(c.type, c.key, c.projectId, raw);
-        const r = raw as Row;
-        const result = {
-          id: String(r.id),
-          projectId: String(r.projectId),
-          version: Number(r.version),
-          state: r.state,
-          ready: Boolean(r.ready),
-        };
-        return commandReceiptSchema.parse({
-          kind: "domain",
-          key: c.key,
-          recorded: true,
-          result,
-        });
+        return commandReceipt(
+          parseDomainCommandOutcome(c.type, raw),
+          c.key,
+          c.projectId,
+        );
       }
       this.requireTask(c.taskId);
       const view = this.coordination();

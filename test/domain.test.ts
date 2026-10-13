@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { CommandResultValidationError } from "../src/core/command-results.js";
 import {
+  type DomainCommand,
   DomainCommands,
   DomainConflictError,
   DomainPolicyError,
   DomainStaleDispositionError,
   DomainStore,
-  type DomainCommand,
 } from "../src/core/domain.js";
 import { Store } from "../src/core/store.js";
 import { ExecutionState } from "../src/standalone/state.js";
@@ -319,6 +320,316 @@ test("profile summary is optional, edited in place and added to older databases"
   }
 });
 
+test("legacy profile receipts replay unchanged after summary migration", () => {
+  const f = fixture();
+  try {
+    const command = {
+      type: "profile.create" as const,
+      actor: "operator" as const,
+      key: key(),
+      profileId: profile,
+      name: "Legacy profile",
+      instructions: "Keep the returned shape",
+      capabilities: "review",
+    };
+    const current = f.domain.execute(command);
+    const expected = { ...current };
+    delete expected.summary;
+    const stored = f.db
+      .prepare(
+        "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+      )
+      .get(`profile:${profile}`, command.key) as {
+      payloadHash: string;
+      result: string;
+    };
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run(JSON.stringify(expected), `profile:${profile}`, command.key);
+    f.db.exec("ALTER TABLE profiles DROP COLUMN summary");
+
+    f.reopen();
+    assert.equal(f.domain.profile(profile).summary, "");
+    assert.deepEqual(f.domain.execute(command), expected);
+    assert.deepEqual(f.domain.recordedCommand(command), expected);
+    assert.deepEqual(
+      f.domain.recordedResult(
+        `profile:${profile}`,
+        command.key,
+        "profile.create",
+      ),
+      { type: "profile.create", result: expected },
+    );
+    const reopenedReceipt = f.db
+      .prepare(
+        "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+      )
+      .get(`profile:${profile}`, command.key) as typeof stored;
+    assert.equal(reopenedReceipt.payloadHash, stored.payloadHash);
+    assert.equal(reopenedReceipt.result, JSON.stringify(expected));
+
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run(
+        JSON.stringify({ ...expected, summary: 1 }),
+        `profile:${profile}`,
+        command.key,
+      );
+    assert.throws(
+      () =>
+        f.domain.recordedResult(
+          `profile:${profile}`,
+          command.key,
+          "profile.create",
+        ),
+      CommandResultValidationError,
+    );
+    assert.throws(
+      () => f.domain.execute({ ...command, name: "Different payload" }),
+      DomainConflictError,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("legacy assignment receipts replay without migrated recipient fields", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Lead",
+      instructions: "Coordinate",
+      capabilities: "assign",
+    });
+    run(f.domain, {
+      type: "project.create",
+      actor: "operator",
+      projectId: p,
+      name: "Project",
+      leadProfileId: profile,
+    });
+    run(f.domain, {
+      type: "task.create",
+      actor: "operator",
+      projectId: p,
+      taskId: a,
+      title: "Task",
+      outcome: "Ship",
+      ready: true,
+    });
+    const create = {
+      type: "assignment.create" as const,
+      actor: "agent" as const,
+      key: key(),
+      projectId: p,
+      taskId: a,
+      assignmentId: assignment,
+      profileId: profile,
+      brief: "Coordinate the task",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    };
+    const currentCreated = f.domain.execute(create);
+    const expectedCreated = { ...currentCreated };
+    delete expectedCreated.resultRecipientAssignmentId;
+    delete expectedCreated.resultRecipientDisposition;
+    const apply = {
+      type: "assignment.apply" as const,
+      actor: "operator" as const,
+      key: key(),
+      projectId: p,
+      assignmentId: assignment,
+      expectedVersion: 1,
+    };
+    const currentApplied = f.domain.execute(apply);
+    const expectedApplied = { ...currentApplied };
+    delete expectedApplied.resultRecipientAssignmentId;
+    delete expectedApplied.resultRecipientDisposition;
+
+    const stored = f.db
+      .prepare(
+        "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+      )
+      .get(p, create.key) as { payloadHash: string; result: string };
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run(JSON.stringify(expectedCreated), p, create.key);
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run(JSON.stringify(expectedApplied), p, apply.key);
+    f.db.exec(
+      "ALTER TABLE domain_assignments DROP COLUMN resultRecipientDisposition; " +
+        "ALTER TABLE domain_assignments DROP COLUMN resultRecipientAssignmentId;",
+    );
+
+    f.reopen();
+    assert.equal(
+      f.domain.assignment(assignment).resultRecipientDisposition,
+      "unresolved",
+    );
+    assert.deepEqual(f.domain.execute(create), expectedCreated);
+    assert.deepEqual(
+      f.domain.recordedResult(p, create.key, "assignment.create"),
+      { type: "assignment.create", result: expectedCreated },
+    );
+    assert.deepEqual(f.domain.execute(apply), expectedApplied);
+    assert.deepEqual(
+      f.domain.recordedResult(p, apply.key, "assignment.apply"),
+      { type: "assignment.apply", result: expectedApplied },
+    );
+    const reopenedReceipt = f.db
+      .prepare(
+        "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
+      )
+      .get(p, create.key) as typeof stored;
+    assert.equal(reopenedReceipt.payloadHash, stored.payloadHash);
+    assert.equal(reopenedReceipt.result, JSON.stringify(expectedCreated));
+
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run(
+        JSON.stringify({
+          ...expectedApplied,
+          resultRecipientDisposition: "unknown",
+        }),
+        p,
+        apply.key,
+      );
+    assert.throws(
+      () => f.domain.recordedResult(p, apply.key, "assignment.apply"),
+      CommandResultValidationError,
+    );
+    assert.throws(
+      () => f.domain.execute({ ...apply, expectedVersion: 2 }),
+      DomainConflictError,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("fresh profile and assignment results require current migrated fields before receipt", () => {
+  const f = fixture();
+  try {
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Lead",
+      instructions: "Coordinate",
+      capabilities: "assign",
+    });
+    const originalProfile = f.domain.profile.bind(f.domain);
+    Object.defineProperty(f.domain, "profile", {
+      value: (profileId: string) => {
+        const { summary: _summary, ...legacy } = originalProfile(profileId);
+        return legacy;
+      },
+      configurable: true,
+    });
+    const profileConfigure = {
+      type: "profile.configure" as const,
+      actor: "operator" as const,
+      key: key(),
+      profileId: profile,
+      expectedVersion: 1,
+      summary: "Fresh summary",
+      instructions: "Must roll back",
+    };
+    assert.throws(
+      () => f.domain.execute(profileConfigure),
+      CommandResultValidationError,
+    );
+    assert.equal(
+      f.db.prepare("SELECT version FROM profiles WHERE id = ?").get(profile)
+        ?.version,
+      1,
+    );
+    assert.equal(
+      f.domain.recordedResult(`profile:${profile}`, profileConfigure.key),
+      undefined,
+    );
+    Object.defineProperty(f.domain, "profile", {
+      value: originalProfile,
+      configurable: true,
+    });
+
+    run(f.domain, {
+      type: "project.create",
+      actor: "operator",
+      projectId: p,
+      name: "Project",
+      leadProfileId: profile,
+    });
+    run(f.domain, {
+      type: "task.create",
+      actor: "operator",
+      projectId: p,
+      taskId: a,
+      title: "Task",
+      outcome: "Ship",
+      ready: true,
+    });
+    run(f.domain, {
+      type: "assignment.create",
+      actor: "agent",
+      projectId: p,
+      taskId: a,
+      assignmentId: assignment,
+      profileId: profile,
+      brief: "Coordinate",
+      resultDestination: "lead",
+      requesterAssignmentId: null,
+    });
+    const originalAssignment = f.domain.assignment.bind(f.domain);
+    Object.defineProperty(f.domain, "assignment", {
+      value: (assignmentId: string) => {
+        const {
+          resultRecipientAssignmentId: _recipient,
+          resultRecipientDisposition: _disposition,
+          ...legacy
+        } = originalAssignment(assignmentId);
+        return legacy;
+      },
+      configurable: true,
+    });
+    const assignmentApply = {
+      type: "assignment.apply" as const,
+      actor: "operator" as const,
+      key: key(),
+      projectId: p,
+      assignmentId: assignment,
+      expectedVersion: 1,
+    };
+    assert.throws(
+      () => f.domain.execute(assignmentApply),
+      CommandResultValidationError,
+    );
+    assert.equal(
+      f.db
+        .prepare("SELECT version FROM domain_assignments WHERE id = ?")
+        .get(assignment)?.version,
+      1,
+    );
+    assert.equal(f.domain.recordedResult(p, assignmentApply.key), undefined);
+  } finally {
+    f.close();
+  }
+});
+
 test("in-flight command duplicates share one promise", async () => {
   const f = fixture();
   try {
@@ -339,6 +650,100 @@ test("in-flight command duplicates share one promise", async () => {
       /different payload/,
     );
     assert.deepEqual(await one, await two);
+  } finally {
+    f.close();
+  }
+});
+
+test("invalid fresh results roll back the domain mutation and receipt", () => {
+  const f = fixture();
+  try {
+    f.domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: key(),
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    f.domain.execute({
+      type: "task.create",
+      actor: "operator",
+      key: key(),
+      projectId: p,
+      taskId: a,
+      title: "Task",
+      outcome: "Before",
+    });
+    const originalTask = f.domain.task.bind(f.domain);
+    f.domain.task = (taskId) => ({ ...originalTask(taskId), id: "invalid" });
+    const command = {
+      type: "task.configure" as const,
+      actor: "operator" as const,
+      key: key(),
+      projectId: p,
+      taskId: a,
+      expectedVersion: 1,
+      outcome: "After",
+    };
+
+    assert.throws(
+      () => f.domain.execute(command),
+      CommandResultValidationError,
+    );
+    f.domain.task = originalTask;
+    assert.equal(f.domain.task(a).outcome, "Before");
+    assert.equal(f.domain.task(a).version, 1);
+    assert.equal(f.domain.recordedResult(p, command.key), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("corrupt stored results fail replay validation without reapplying", () => {
+  const f = fixture();
+  try {
+    const command = {
+      type: "project.create" as const,
+      actor: "operator" as const,
+      key: key(),
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    };
+    const original = f.domain.execute(command);
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run("{", p, command.key);
+    assert.throws(
+      () => f.domain.execute(command),
+      CommandResultValidationError,
+    );
+    assert.equal(f.domain.project(p).version, 1);
+    assert.throws(
+      () => f.domain.recordedResult(p, command.key, "project.create"),
+      CommandResultValidationError,
+    );
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run("{}", p, command.key);
+    assert.throws(
+      () => f.domain.execute(command),
+      CommandResultValidationError,
+    );
+    assert.deepEqual(original, {
+      id: p,
+      name: "Alpha",
+      version: 1,
+      paused: 1,
+      leadProfileId: null,
+      instructionsRevision: 1,
+      instructions: "",
+    });
   } finally {
     f.close();
   }
