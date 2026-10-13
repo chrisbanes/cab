@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { recoveryOptionsSchema } from "../src/operator/contracts.js";
+import {
+  assignmentRecoverySchema,
+  recoveryOptionsSchema,
+} from "../src/operator/contracts.js";
 import { seedOperatorRecovery } from "./fixtures/operator-web.js";
 import {
   type GenerationMode,
@@ -10,8 +13,12 @@ import {
 
 type World = Awaited<ReturnType<typeof servedGeneration>>;
 
-async function options(w: World, token?: string) {
-  const path = `/api/operator/assignments/${w.g.assignmentId}/recovery-options`;
+async function options(
+  w: World,
+  token?: string,
+  assignmentId = w.g.assignmentId,
+) {
+  const path = `/api/operator/assignments/${assignmentId}/recovery-options`;
   const response = token
     ? await w.s.bearer(token, path)
     : await w.s.sessionGet(path);
@@ -247,7 +254,7 @@ test("recovery options are bounded, validated and fail closed", async (t) => {
   );
 });
 
-test("a sibling assignment's newer generations neither displace nor count against this assignment's", async (t) => {
+test("assignment recovery caps each assignment while retaining task-wide sibling holds", async (t) => {
   const w = await world(t, "no-turn");
   const sibling = randomUUID();
   w.s.f.service.domain().execute({
@@ -267,7 +274,7 @@ test("a sibling assignment's newer generations neither displace nor count agains
     for (let n = 0; n < 21; n++) {
       const workId = `sibling-generation-${n}`;
       db.prepare(
-        "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,?,'p','/w','held','r',NULL,NULL,'chatgpt','workspaceWrite','never')",
+        "INSERT INTO execution_intents (id,workId,prompt,workspace,state,reason,threadId,turnId,accountType,sandbox,approval) VALUES (?,?,'p','/w','completed','r',NULL,NULL,'chatgpt','workspaceWrite','never')",
       ).run(randomUUID(), workId);
       db.prepare(
         "INSERT INTO execution_recovery_identities (workId,workRevision,requestSequence,processId,processStartedAt,bootId,threadId,turnId) VALUES (?,1,?,'p','s','b',NULL,NULL)",
@@ -277,7 +284,53 @@ test("a sibling assignment's newer generations neither displace nor count agains
       ).run(workId, w.g.taskId, sibling);
     }
   });
+  const aPath = `/api/operator/assignments/${w.g.assignmentId}/recovery`,
+    aResponse = await w.s.bearer(w.read, aPath);
+  assert.equal(aResponse.status, 200, await aResponse.clone().text());
+  const a = assignmentRecoverySchema.parse(await aResponse.json()).data;
+  assert.deepEqual(
+    a.records.map((r) => r.workId),
+    [w.g.workId],
+  );
+  assert.equal(a.evidenceAvailable, true);
+  assert.equal(a.omittedCount, 0);
+
+  const bResponse = await w.s.bearer(
+    w.read,
+    `/api/operator/assignments/${sibling}/recovery`,
+  );
+  assert.equal(bResponse.status, 200, await bResponse.clone().text());
+  const b = assignmentRecoverySchema.parse(await bResponse.json()).data;
+  assert.equal(b.records.length, 20);
+  assert.equal(
+    b.records.some((r) => r.workId === w.g.workId),
+    false,
+  );
+  assert.equal(b.omittedCount, 1);
+  assert.equal(b.evidenceAvailable, true);
+  assert.equal(b.holds.writer, true);
+  assert.equal(b.holds.capacity, true);
+  assert.equal(b.holds.uncertainty, true);
+
+  const siblingOptions = await options(w, w.read, sibling);
+  assert.equal(siblingOptions.held, false);
+  assert.deepEqual(siblingOptions.holds, {
+    stop: false,
+    writer: false,
+    capacity: false,
+    uncertainty: false,
+    task: false,
+  });
+
   const data = await options(w, w.read);
+  assert.equal(data.held, true);
+  assert.deepEqual(data.holds, {
+    stop: false,
+    writer: true,
+    capacity: true,
+    uncertainty: true,
+    task: false,
+  });
   assert.deepEqual(
     data.records.map((r) => r.workId),
     [w.g.workId],

@@ -2820,6 +2820,10 @@ export class StandaloneService {
     return this.requireState().taskHold(taskId);
   }
 
+  hasNonStopTaskHold(taskId: string): boolean {
+    return this.requireState().hasNonStopTaskHold(taskId);
+  }
+
   isTaskStopped(taskId: string): boolean {
     return this.requireState().isTaskStopped(taskId);
   }

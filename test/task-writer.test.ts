@@ -909,7 +909,7 @@ test("legacy held work is ambiguous and preserves Stop independently", async () 
         (
           held
             .prepare(
-              "SELECT COUNT(*) AS count FROM task_writer_holds WHERE taskId = ? AND reason = 'Task stopped'",
+              "SELECT COUNT(*) AS count FROM task_writer_holds WHERE taskId = ? AND holdKind = 'operator-stop'",
             )
             .get(f.taskId) as { count: number }
         ).count,

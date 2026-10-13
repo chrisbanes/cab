@@ -677,6 +677,85 @@ async function seed(
   }
   return { profileId, projectId, taskId };
 }
+
+test("task summaries classify Stop and independent holds by type, not display reason", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const stopOnly = await seed(f);
+  const withAmbiguity = await seed(f);
+  const withArchival = await seed(f);
+  const withWriterHold = await seed(f);
+  for (const { taskId } of [
+    stopOnly,
+    withAmbiguity,
+    withArchival,
+    withWriterHold,
+  ])
+    await f.service.stopTask(taskId);
+
+  f.seedPersistedState((db) => {
+    db.prepare("UPDATE task_writer_holds SET reason = ? WHERE taskId = ?").run(
+      "Operator chose to stop this task",
+      stopOnly.taskId,
+    );
+    db.prepare(
+      "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, ?)",
+    ).run(withAmbiguity.taskId, "Writer ownership is unclear");
+    db.prepare(
+      "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)",
+    ).run(withArchival.taskId, "Archival is awaiting review");
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, '')",
+    ).run(withWriterHold.taskId);
+  });
+
+  const taskSummary = async (taskId: string) => {
+    const read = await api.readTask(taskId);
+    const listed = (await api.readTaskListPage()).data.tasks.find(
+      (task) => task.id === taskId,
+    );
+    assert.ok(listed);
+    return { execution: read.data.execution, codes: listed.attention.codes };
+  };
+  const stop = await taskSummary(stopOnly.taskId);
+  assert.equal(stop.execution.state, "stopping");
+  assert.equal(stop.execution.holds.stop, true);
+  assert.equal(stop.codes.includes("execution-uncertain"), false);
+
+  const writerHold = await taskSummary(withWriterHold.taskId);
+  assert.equal(writerHold.execution.state, "stopping");
+  assert.equal(writerHold.execution.holds.stop, true);
+  assert.ok(writerHold.codes.includes("execution-uncertain"));
+  assert.equal(f.service.taskHold(withWriterHold.taskId), "Task held");
+
+  const ambiguityBefore = await taskSummary(withAmbiguity.taskId);
+  assert.equal(ambiguityBefore.execution.state, "stopping");
+  assert.equal(ambiguityBefore.execution.holds.stop, true);
+  assert.ok(ambiguityBefore.codes.includes("execution-uncertain"));
+  const archivalBefore = await taskSummary(withArchival.taskId);
+  assert.equal(archivalBefore.execution.state, "stopping");
+  assert.equal(archivalBefore.execution.holds.stop, true);
+  assert.ok(archivalBefore.codes.includes("execution-uncertain"));
+
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE task_writer_ambiguity_holds SET reason = ? WHERE taskId = ?",
+    ).run("Ownership review remains unresolved", withAmbiguity.taskId);
+    db.prepare(
+      "UPDATE task_archival_holds SET reason = ? WHERE taskId = ?",
+    ).run("Archival review still pending", withArchival.taskId);
+  });
+  const ambiguityAfter = await taskSummary(withAmbiguity.taskId);
+  assert.equal(ambiguityAfter.execution.state, "stopping");
+  assert.equal(ambiguityAfter.execution.holds.stop, true);
+  assert.ok(ambiguityAfter.codes.includes("execution-uncertain"));
+  const archivalAfter = await taskSummary(withArchival.taskId);
+  assert.equal(archivalAfter.execution.state, "stopping");
+  assert.equal(archivalAfter.execution.holds.stop, true);
+  assert.ok(archivalAfter.codes.includes("execution-uncertain"));
+});
+
 async function until(predicate: () => boolean) {
   const deadline = Date.now() + 4000;
   while (!predicate()) {
