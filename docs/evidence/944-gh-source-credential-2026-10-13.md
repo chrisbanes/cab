@@ -174,18 +174,21 @@ an offered gh login using the current null/env source environment. Choosing gh
 restored its token variables and could select a different account. Separate
 controlled substitutions of the original `6e835266` service and HTML modules
 reproduced that mismatch. The two repaired factories detect the offer using the
-same explicit candidate-gh environment as a selected gh source. The actual source
-reference still controls usability, credential resolution and fenced failure
-invalidation. Detection grants no selection, activation or repository access.
+same explicit candidate-gh environment as a selected gh source. The actual
+source reference still controls usability, credential resolution and fenced
+failure invalidation. Detection grants no selection, activation or repository
+access.
 
 The environment-sensitive fake models `GH_TOKEN` before `GITHUB_TOKEN`, then the
 stored account, and refuses an invalid overriding token without stored fallback.
-Tests cover unset/env/current-gh sources, Clear, env-to-gh changes, discovery unset
-or different, name/value collisions and lifetime old-token aliases. Only the two
-current gh variables survive candidate detection; configured source/discovery/
-delivery/Claude names and aliases remain excluded. Null/env offers run status
-only, with zero token or source-provider reads and no configuration/activation
-mutation. An available env source remains usable when the candidate gh login fails.
+Tests cover unset/env/current-gh sources, Clear, env-to-gh changes, discovery
+unset or different, name/value collisions and lifetime old-token aliases. Only
+the two current gh variables survive candidate detection; configured
+source/discovery/ delivery/Claude names and aliases remain excluded. Null/env
+offers run status only and do not run `gh auth token` or source-provider reads;
+they make no configuration/activation mutation. Status uses the candidate
+environment credentials to identify the offered account. An available env source
+remains usable when the candidate gh login fails.
 
 JSON configuration/observations, service-bound and direct default advanced HTML,
 CLI source readbacks and the React choice/Change/Clear journey expose the same
@@ -196,9 +199,16 @@ probe and nine fresh token commands; next requests and fenced retries still use
 fresh scopes. Generic distinct-context scope tests remain unchanged.
 
 The account-offer repair has not received a live run. The qualified `9395520`
-live result and consumed allowance remain unchanged. Its clean repaired candidate
-requires the mandatory full check and renewed independent affected review before
-publication; results will be recorded after those gates complete.
+live result and consumed allowance remain unchanged. The repaired candidate
+`33a2a44df706a84a3dab38c05acb2f94c049e73c` (tree
+`5858ec90ead4f19b3319288e59715d3255c1ee3e`) passed the mandatory full `npm run
+check` on Node 24.21.0 and npm 12.2.0: exit 0, type checking, lint, formatting
+and build passed; 1,858 tests ran with 1,857 passes, zero failures and one skip
+(235,053.664541 ms). The complete private log is
+`944-identity-fullcheck-host-attempt1.log` in the delivery run directory. The
+fresh auditor returned SHIP for all three contracts with no actionable findings;
+combined prior unaffected coverage remains applicable. This is controlled-test
+and review evidence for the repair, not a new real-host live qualification.
 
 ## Live boundary and measured outcome
 
