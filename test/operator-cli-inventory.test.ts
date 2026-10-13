@@ -34,6 +34,7 @@ const documented = [
   "execution get",
   "execution inputs",
   "logs",
+  "doctor",
   "inbox list",
   "question get",
   "approval get",
@@ -183,6 +184,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
   args["execution get"] = [workId];
   args["execution inputs"] = [workId, "--compare-current"];
   args.logs = ["--execution", workId];
+  args.doctor = [];
   const question = await seedOwnQuestion(s.f);
   const approval = await seedOwnApproval(s.f);
   args["inbox list"] = [];

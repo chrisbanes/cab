@@ -12,6 +12,7 @@ import {
 } from "./discovery-credential.js";
 import { runtimeSummary } from "./execution-runtime.js";
 import { OperatorCredentialsSection } from "./operator-credentials.js";
+import { ReadinessPanel } from "./readiness.js";
 import { useOperatorResource } from "./resource.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
@@ -250,6 +251,7 @@ export function SettingsWorkspace(p: SettingsProps) {
           </Panel>
         </div>
         <div className="settings-column">
+          <ReadinessPanel {...p} />
           <Panel
             title="Profiles"
             description={`${plural(profiles.length, "profile")} · ${revoked} revoked`}

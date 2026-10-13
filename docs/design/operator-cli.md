@@ -117,6 +117,9 @@ and sessions, gated by the capabilities `execution.read` and, for `logs`,
 `diagnostics.read`. A work id identifies an execution; direct runs and unknown or
 invisible work read as not found. Every read reports capture health:
 `toolObservation: "incomplete"` and `reasoning: "not-collected"`.
+`GET /api/operator/readiness` (the `doctor` command) is a read route for both
+credential scopes and sessions, gated by `diagnostics.read`; its checks are
+read-only and value-free.
 
 Capture records are `input`, `setting`, `runtime`, `tool` and `service` items.
 Settings carry a source: `service-admitted`, `runtime-reported` or `unknown`.
@@ -273,7 +276,7 @@ Node.js version and package tooling; publish/distribution is a delivery decision
 | `task` | List/search/get/create/configure; dependencies; existing task controls, messages and follow-up |
 | `assignment` | Get/history; compare bound/current instructions; explicit current-revision adoption |
 | `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material |
-| `execution`, `logs` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow |
+| `execution`, `logs`, `doctor` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow; the service readiness checks |
 | `recovery` | Inspect eligibility/holds; prepare and submit the existing evidence-bearing operations |
 | `result`, `artifact`, `delivery` | Inspect results/retained evidence and existing delivery state; existing refresh and staged comment operations |
 | `operation` | Read an existing mutation receipt and reconcile an uncertain command outcome |
@@ -292,6 +295,7 @@ ensemble --connection home task get TASK --output json
 ensemble --connection home execution list --task TASK --output json
 ensemble --connection home execution inputs EXECUTION --compare-current --output json
 ensemble --connection home logs --execution EXECUTION --cursor CURSOR --output json
+ensemble --connection home doctor --output json
 ensemble --connection home profile prepare PROFILE --instructions-file instructions.md --expected-version 4 --out change.json
 ensemble --connection home profile apply --file change.json --request-id REQUEST
 ensemble --connection home assignment apply-current ASSIGNMENT --expected-version 7 --request-id REQUEST

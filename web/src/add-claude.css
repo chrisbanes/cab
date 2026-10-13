@@ -1,0 +1,8 @@
+/* Add Claude: the copyable token-file commands. */
+
+.token-commands {
+  margin: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}

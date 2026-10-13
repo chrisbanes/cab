@@ -82,6 +82,12 @@ whose Codex installation is outside this fixed PATH needs a reviewed renderer
 change; do not patch launchctl's shared environment or add arbitrary plist
 variables locally.
 
+After the service starts, run `ensemble doctor` or open Settings → Readiness. Both
+show what the running service sees: Codex executable and login, git, GitHub
+discovery, the Claude token, runtime harness and data and auth paths, each as Pass,
+Fail or Not configured with one fix line and no token value or path. The checks
+change nothing and request no model turn; re-run them after any fix.
+
 The service uses the logged-in user's existing Codex login; it does not copy,
 read, or alter Codex credentials. The separate Ensemble auth file is not that
 login. The launchd proof starts App Server and verifies authentication/config
@@ -219,19 +225,30 @@ and a fresh bound preparation.
 
 Claude profiles need the operator's own subscription token from
 `claude setup-token`. The installed service reads it from an owner-only file, so
-the plist and its environment need no Claude variable. Create a private real
-directory (not a symbolic link) and an empty mode `0600` file, then put the token
-in it without shell history or argv, for example from the clipboard:
+the plist and its environment need no Claude variable. Settings → Runtime → Add
+Claude shows these commands and a suggested path. Create a private real directory
+(not a symbolic link) and an empty mode `0600` file:
 
 ```sh
-mkdir -m 700 /absolute/private/claude
-install -m 600 /dev/null /absolute/private/claude/claude-token
-pbpaste > /absolute/private/claude/claude-token
-stat -f '%Su %Lp' /absolute/private/claude/claude-token
+mkdir -m 700 -p "$HOME/.ensemble/claude"
+install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"
 ```
 
-`stat` must show the service user and `600`. In Settings, set the Claude token
-reference to `file:/absolute/private/claude/claude-token`. The file is checked
+Then copy the token printed by `claude setup-token` and write it from the clipboard
+without shell history or argv. Type these two lines; do not copy them with the
+commands above, because `pbpaste` reads the clipboard and a copied command replaces
+the token:
+
+```sh
+pbpaste > "$HOME/.ensemble/claude/claude-token"
+stat -f '%Su %Lp' "$HOME/.ensemble/claude/claude-token"
+```
+
+`stat` must show the service user and `600`. In Add Claude (or the Claude token
+row in Settings), set the reference to `file:` followed by the absolute path, for
+example `file:/Users/you/.ensemble/claude/claude-token`, and save; the Token
+readable row then shows Pass, or the unsafe-file reason without the path or value.
+The file is checked
 whenever a Claude turn needs it: a symbolic link, a file owned by another user, any
 group or other permission bit, more than 4096 bytes, a missing or empty file, or
 content other than one token makes Claude work wait with a visible reason, and

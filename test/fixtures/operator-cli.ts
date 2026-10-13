@@ -3,6 +3,7 @@ import { writeFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { serviceReadiness } from "../../src/standalone/readiness.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
@@ -103,6 +104,12 @@ export async function serveCli<F extends Fixture>(
     // The retained keyless Stop and Resume forms, for entry-point parity.
     const routes = new OperatorRouteRegistry();
     routes.registerSlot("runtime", runtimeOperatorRoutes(f.service));
+    const api = new OperatorApi(
+      f.service,
+      options.controlPaths ?? [f.directory],
+      undefined,
+      options.previewReader,
+    );
     return new LocalOperatorHttp(
       new LocalOperatorUi(
         f.service.domain(),
@@ -118,12 +125,11 @@ export async function serveCli<F extends Fixture>(
         credentials: f.service.operatorCredentials(),
         web: new OperatorWebBoundary(
           bundle,
-          new OperatorApi(
-            f.service,
-            options.controlPaths ?? [f.directory],
-            undefined,
-            options.previewReader,
-          ),
+          api,
+          serviceReadiness(f.service, api, {
+            dataDir: join(f.directory, "data"),
+            authFile,
+          }),
         ),
       },
     );

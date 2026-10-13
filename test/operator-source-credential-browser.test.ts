@@ -137,6 +137,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     .click();
   await page
     .getByText("GitHub CLI is not signed in.", { exact: false })
+    .first()
     .waitFor();
   await page
     .getByRole("link", { name: "Set or change source credential" })

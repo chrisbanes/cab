@@ -22,6 +22,7 @@ import {
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import { serviceReadiness } from "../../src/standalone/readiness.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
@@ -59,7 +60,12 @@ export class OperatorFixtureRuntime implements Runtime {
     | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
     | undefined;
   private failureListener: ((error: Error) => void) | undefined;
+  loginVerifications = 0;
   async start() {}
+  /** The Codex login check reuses this on the running runtime; no model turn. */
+  async verifyLoginAndPolicy() {
+    this.loginVerifications += 1;
+  }
   async stop() {
     for (const done of this.outcomes.values()) done("completed");
   }
@@ -440,6 +446,17 @@ export async function createOperatorFixture<
             fileURLToPath(new URL("../../operator", import.meta.url)),
           );
         });
+        const api = new OperatorApi(
+          service,
+          controlPaths,
+          undefined,
+          readerFactory,
+          {
+            ...setup,
+            // Fixtures never run the host's real gh unless a test provides one.
+            ghExecutable: setup?.ghExecutable ?? join(directory, "no-gh", "gh"),
+          },
+        );
         const http = new LocalOperatorHttp(
           new LocalOperatorUi(
             service.domain(),
@@ -455,11 +472,10 @@ export async function createOperatorFixture<
             credentials: service.operatorCredentials(),
             web: new OperatorWebBoundary(
               bundle,
-              new OperatorApi(service, controlPaths, undefined, readerFactory, {
-                ...setup,
-                // Fixtures never run the host's real gh unless a test provides one.
-                ghExecutable:
-                  setup?.ghExecutable ?? join(directory, "no-gh", "gh"),
+              api,
+              serviceReadiness(service, api, {
+                dataDir: join(directory, "data"),
+                authFile,
               }),
             ),
           },

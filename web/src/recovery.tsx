@@ -4,6 +4,7 @@ import {
   runtimeSettingsSchema,
   assignmentRecoverySchema,
 } from "../../src/operator/contracts.js";
+import { AddClaudePanel } from "./add-claude.js";
 import { executionSummary, harnessStateLabel } from "./execution-runtime.js";
 import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
 import { useOperatorResource } from "./resource.js";
@@ -66,6 +67,7 @@ export function RuntimeSettings(p: SettingsProps) {
           </p>
           <div className="settings-split">
             <div className="settings-column">
+              <AddClaudePanel {...p} />
               <Panel
                 title="Capacity"
                 description="Waiting for workers, people or feedback releases a slot."

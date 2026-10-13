@@ -207,6 +207,11 @@ or run `node dist/src/cli/main.js` directly.
      consecutive unavailable polls exit 5 with the resume cursor. `--output jsonl`
      (logs only) writes one `ensemble.cli/v1` record per line: `item`, `gap`, `end`
      or `error`.
+   - `doctor` reads the service's readiness checks (the same read as Settings →
+     Readiness) and reports each as Pass, Fail or Not configured with one fix line
+     per problem. It needs `diagnostics.read`, changes nothing, never prints token
+     values or paths, and exits 0 whenever the read succeeds, whatever the checks
+     report. `--output json` returns the unmodified service `data`.
 
    Capture is on by default (`enhanced`) for task-bound executions; `project.configure`
    with `diagnosticCapture: "baseline"` (shown by `project get`) reduces later

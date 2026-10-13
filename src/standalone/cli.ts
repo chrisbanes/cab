@@ -2,6 +2,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { diagnosticLimitsFromEnv } from "./execution-diagnostics.js";
 import { OperatorApi } from "./operator-api.js";
 import { OperatorWebBundle, OperatorWebBoundary } from "./operator-web.js";
+import { serviceReadiness } from "./readiness.js";
 import {
   StandaloneService,
   type BackgroundFailureDiagnostic,
@@ -140,6 +141,9 @@ export async function main(
         await joinFatalBackgroundFailure(failureNotification);
         return;
       }
+      const authFile = process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "";
+      const api = new OperatorApi(service, [dataDir, authFile]);
+      const readiness = serviceReadiness(service, api, { dataDir, authFile });
       const ui = new LocalOperatorHttp(
         new LocalOperatorUi(
           service.domain(),
@@ -152,13 +156,7 @@ export async function main(
         {
           routes,
           credentials: service.operatorCredentials(),
-          web: new OperatorWebBoundary(
-            bundle,
-            new OperatorApi(service, [
-              dataDir,
-              process.env.ENSEMBLE_OPERATOR_AUTH_FILE ?? "",
-            ]),
-          ),
+          web: new OperatorWebBoundary(bundle, api, readiness),
         },
       );
       await ui.start(args[0] ? Number(args[0]) : 8787);
