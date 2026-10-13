@@ -1187,3 +1187,45 @@ test("turn observations report changing, oversized and over-deadline files as ga
   assert.equal(timedObservation.reason, "time-limit");
   assert.equal(timedObservation.truncated, true);
 });
+
+test("stored rows in the lenient persistence shape still read back unchanged", () => {
+  const db = new DatabaseSync(":memory:");
+  const store = new SqliteWorkspaceComparisonStore(db);
+  const comparisonId = "5e2f6a4c-0d1b-4c3e-9a7f-1b2c3d4e5f60";
+  const turnComparisonId = "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d";
+  const sha = digest("abc");
+  // Values only persistence accepts: non-UUID ids, an empty baseline branch,
+  // a negative modifiedAt and a turn comparison recorded without taskVersion.
+  const snapshotJson = `{"comparisonId":"${comparisonId}","taskId":"legacy-task","repositoryId":"legacy-repo","target":"branch","state":"available","observedAt":7,"baseline":{"kind":"head","branch":"","commit":"${"c".repeat(40)}"},"availableBaseBranches":[""],"entries":[{"path":"a.txt","repositoryId":"legacy-repo","change":"modified","state":"text","left":{"sha256":"${sha}","size":3,"lineCount":1,"modifiedAt":-5},"hunks":[{"oldStart":1,"oldLines":1,"newStart":1,"newLines":1,"patch":"@@","leftAnchor":{"taskId":"legacy-task","repositoryId":"legacy-repo","path":"a.txt","comparisonId":"${comparisonId}","context":"branch","side":"left","startLine":1,"endLine":1,"contentSha256":"${sha}"}}]}],"truncated":false}`;
+  const turnJson = `{"comparisonId":"${turnComparisonId}","taskId":"legacy-task","target":"turn","state":"available","outcome":"completed","startedAt":1,"observedAt":2,"workId":"w","workRevision":1,"requestSequence":1,"assignmentId":"legacy-assignment","assignmentVersion":1,"instructionsRevision":1,"profileRevision":1,"profileId":"legacy-profile","threadId":"th","turnId":"tu","entries":[],"truncated":false}`;
+  const captureJson = `{"comparisonId":"${turnComparisonId}","identity":{"taskId":"legacy-task","workId":"w","workRevision":1,"requestSequence":1,"assignmentId":"legacy-assignment","assignmentVersion":1,"instructionsRevision":1,"profileRevision":1,"profileId":"legacy-profile"},"captureState":"finished","outcome":"completed","startedAt":1,"observedAt":2,"threadId":"th","turnId":"tu","comparison":${turnJson}}`;
+  db.prepare(
+    "INSERT INTO workspace_comparison_current (taskId,repositoryId,target,comparisonId,snapshotJson,sidesJson) VALUES (?,?,?,?,?,?)",
+  ).run(
+    "legacy-task",
+    "legacy-repo",
+    "branch",
+    comparisonId,
+    snapshotJson,
+    '[{"entryIndex":0,"leftText":"abc"}]',
+  );
+  db.prepare(
+    "INSERT INTO workspace_turn_captures (comparisonId,taskId,captureState,payloadJson) VALUES (?,?,?,?)",
+  ).run(turnComparisonId, "legacy-task", "finished", captureJson);
+  db.prepare(
+    "INSERT INTO workspace_turn_capture_slots (taskId,latestFinishedId,pendingId) VALUES (?,?,NULL)",
+  ).run("legacy-task", turnComparisonId);
+
+  const expected = {
+    comparison: JSON.parse(snapshotJson),
+    sides: [{ entryIndex: 0, leftText: "abc" }],
+  };
+  assert.deepEqual(
+    store.currentComparison("legacy-task", "legacy-repo", "branch"),
+    expected,
+  );
+  assert.deepEqual(store.comparisonById("legacy-task", comparisonId), expected);
+  assert.deepEqual(store.latestTurnCaptures("legacy-task"), {
+    latestFinished: JSON.parse(captureJson),
+  });
+});

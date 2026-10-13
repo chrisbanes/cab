@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { executionIntentStateSchema } from "../src/core/execution-runtime.js";
 import {
+  assignmentRecoverySchema,
   commandReceiptSchema,
   localReviewOperationReadSchema,
   operatorCommandSchema,
   materialSchema,
+  workspaceComparisonReadSchema,
   workspaceSchema,
   taskSchema,
 } from "../src/operator/contracts.js";
@@ -326,4 +329,344 @@ test("capacity commands accept an optional strict expectedCurrent", () => {
       false,
       JSON.stringify(expectedCurrent),
     );
+});
+
+test("recovery records accept each persisted intent state plus the operator-only unknown", () => {
+  const intentState =
+    assignmentRecoverySchema.shape.data.shape.records.element.shape.intentState;
+  assert.ok(
+    !(executionIntentStateSchema.options as string[]).includes("unknown"),
+  );
+  for (const state of [...executionIntentStateSchema.options, "unknown"])
+    assert.equal(intentState.safeParse(state).success, true, state);
+  assert.equal(intentState.safeParse("bogus").success, false);
+});
+
+test("project.create shares one setup repositories schema with both refinements", () => {
+  const repo = (repositoryId: string, owner: string, name: string) => ({
+    repositoryId,
+    owner,
+    name,
+    path: `/work/${repositoryId}`,
+    ref: "main",
+  });
+  const project = (repositories: unknown[]) => ({
+    type: "project.create",
+    key,
+    projectId: key,
+    name: "Project",
+    leadProfileId: null,
+    repositories,
+  });
+  const messages = (repositories: unknown[]) => {
+    const parsed = operatorCommandSchema.safeParse(project(repositories));
+    return parsed.success ? null : parsed.error.issues.map((i) => i.message);
+  };
+  assert.equal(
+    messages([repo("a", "acme", "app"), repo("b", "acme", "web")]),
+    null,
+  );
+  assert.deepEqual(
+    messages([repo("a", "acme", "app"), repo("a", "acme", "web")]),
+    ["Repository IDs must be unique"],
+  );
+  assert.deepEqual(
+    messages([repo("a", "Acme", "App"), repo("b", "acme", "app")]),
+    ["Repositories must be unique"],
+  );
+  assert.notEqual(
+    messages(
+      Array.from({ length: 21 }, (_, i) => repo(`r${i}`, "acme", `app${i}`)),
+    ),
+    null,
+  );
+});
+
+test("review.anchor.stage types its anchors and keeps every selection rule", () => {
+  const contentSha256 = "a".repeat(64);
+  const file = {
+    taskId: key,
+    repositoryId: null,
+    path: "src/a.ts",
+    sourceKind: "workspace-file",
+    context: "workspace",
+    side: "file",
+    startLine: 1,
+    endLine: 2,
+    contentSha256,
+  };
+  const side = {
+    ...file,
+    sourceKind: "comparison-side",
+    context: "branch",
+    comparisonId: key,
+    side: "left",
+  };
+  const stage = (anchors: unknown[]) => ({
+    type: "review.anchor.stage",
+    key,
+    taskId: key,
+    expectedDraftVersion: 0,
+    anchors,
+  });
+  const accepted = (anchors: unknown[]) =>
+    operatorCommandSchema.safeParse(stage(anchors)).success;
+  assert.equal(accepted([file, side]), true);
+  const { contentSha256: _hash, ...unhashed } = file;
+  for (const [name, anchors] of [
+    ["missing hash", [unhashed]],
+    ["inverted range", [{ ...file, startLine: 3, endLine: 2 }]],
+    ["workspace file on a comparison side", [{ ...file, side: "left" }]],
+    ["turn without thread", [{ ...side, context: "turn", workId: "w" }]],
+    ["unknown key", [{ ...file, extra: true }]],
+    ["no anchors", []],
+  ] as const)
+    assert.equal(accepted([...anchors]), false, name);
+});
+
+test("workspace comparison reads stay stricter than persistence at every nested level", () => {
+  const sha256 = "a".repeat(64);
+  const repositoryComparisonId = "00000000-0000-4000-8000-000000000002";
+  const turnComparisonId = "00000000-0000-4000-8000-000000000003";
+  const content = { sha256, size: 4, lineCount: 2, modifiedAt: 5 };
+  const anchor = (
+    comparisonId: string,
+    side: "left" | "right",
+    over: object,
+  ) => ({
+    taskId: key,
+    repositoryId: "repo",
+    path: "a.txt",
+    comparisonId,
+    context: "branch",
+    side,
+    startLine: 1,
+    endLine: 2,
+    contentSha256: sha256,
+    ...over,
+  });
+  const entry = (comparisonId: string, over: object, anchorOver: object) => ({
+    path: "a.txt",
+    change: "modified",
+    state: "text",
+    left: content,
+    right: content,
+    hunks: [
+      {
+        oldStart: 1,
+        oldLines: 2,
+        newStart: 1,
+        newLines: 2,
+        patch: "@@",
+        leftAnchor: anchor(comparisonId, "left", anchorOver),
+        rightAnchor: anchor(comparisonId, "right", anchorOver),
+      },
+    ],
+    ...over,
+  });
+  const repository = (over: object = {}) => ({
+    comparisonId: repositoryComparisonId,
+    taskId: key,
+    repositoryId: "repo",
+    target: "branch",
+    state: "available",
+    observedAt: 7,
+    baseline: { kind: "merge-base", branch: "main", commit: "c".repeat(40) },
+    availableBaseBranches: ["main"],
+    entries: [entry(repositoryComparisonId, {}, {})],
+    truncated: false,
+    ...over,
+  });
+  const turn = (
+    over: object = {},
+    entryOver: object = {},
+    anchorOver = {},
+  ) => ({
+    comparisonId: turnComparisonId,
+    taskId: key,
+    target: "turn",
+    state: "available",
+    outcome: "completed",
+    startedAt: 1,
+    observedAt: 2,
+    workId: "w",
+    workRevision: 1,
+    requestSequence: 1,
+    assignmentId: "a",
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    profileId: key,
+    threadId: "th",
+    turnId: "tu",
+    entries: [
+      entry(
+        turnComparisonId,
+        { repositoryId: null, ...entryOver },
+        {
+          context: "turn",
+          repositoryId: null,
+          workId: "w",
+          threadId: "th",
+          turnId: "tu",
+          ...anchorOver,
+        },
+      ),
+    ],
+    truncated: false,
+    ...over,
+  });
+  const read = (comparison: unknown) => ({
+    data: {
+      taskId: key,
+      target: "branch",
+      state: "available",
+      comparisonId: repositoryComparisonId,
+      comparison,
+    },
+    observedAt: 1,
+  });
+  const identity = (over: object = {}) => ({
+    taskId: key,
+    workId: "w",
+    workRevision: 1,
+    requestSequence: 1,
+    assignmentId: "a",
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    profileId: key,
+    ...over,
+  });
+  const unsettled = (over: object = {}) => ({
+    data: {
+      taskId: key,
+      target: "last-turn",
+      state: "unsettled",
+      pending: {
+        comparisonId: turnComparisonId,
+        identity: identity(),
+        captureState: "pending",
+        outcome: "running",
+        startedAt: 1,
+        observedAt: 2,
+        reason: "capture-store-failed",
+        ...over,
+      },
+    },
+    observedAt: 1,
+  });
+  const accepts = (value: unknown) =>
+    workspaceComparisonReadSchema.safeParse(value).success;
+  const long = (length: number) => "p".repeat(length);
+
+  // Every valid baseline must be accepted, so each rejection below is caused by
+  // exactly the one field it changes. Field-bound cases use documents without
+  // hunks: the anchor cross-check would otherwise reject them first and hide a
+  // missing override.
+  assert.equal(accepts(read(repository())), true);
+  assert.equal(accepts(read(turn())), true);
+  assert.equal(accepts(unsettled()), true);
+
+  const snapshot = (over: object) => read(repository({ entries: [], ...over }));
+  const repoEntry = (over: object) =>
+    read(
+      repository({
+        entries: [entry(repositoryComparisonId, { hunks: [], ...over }, {})],
+      }),
+    );
+  const turnSnapshot = (over: object) => read(turn({ entries: [], ...over }));
+  const turnEntry = (over: object) => read(turn({}, { hunks: [], ...over }));
+
+  for (const [name, doc] of [
+    // snapshot and baseline
+    ["snapshot taskId", snapshot({ taskId: "legacy-task" })],
+    ["snapshot repositoryId", snapshot({ repositoryId: long(513) })],
+    [
+      "baseline branch",
+      snapshot({
+        baseline: { kind: "head", branch: "", commit: "c".repeat(40) },
+      }),
+    ],
+    [
+      "branch name length",
+      snapshot({ availableBaseBranches: ["b".repeat(256)] }),
+    ],
+    ["unknown snapshot key", snapshot({ extra: true })],
+    // entry and content
+    ["entry path", repoEntry({ path: long(2049) })],
+    ["entry previousPath", repoEntry({ previousPath: long(2049) })],
+    ["entry repositoryId", repoEntry({ repositoryId: long(513) })],
+    [
+      "left content modifiedAt",
+      repoEntry({ left: { ...content, modifiedAt: -1 } }),
+    ],
+    [
+      "right content modifiedAt",
+      repoEntry({ right: { ...content, modifiedAt: -1 } }),
+    ],
+    // anchors, on both sides. Their taskId, path and repositoryId are also
+    // forced equal to the bounded snapshot and entry values, so only the
+    // cross-check (not the anchor's own bound) is observable for those.
+    ...(["leftAnchor", "rightAnchor"] as const).flatMap((side) => {
+      const withAnchor = (over: object) => {
+        const e = entry(repositoryComparisonId, {}, {});
+        e.hunks[0] = {
+          ...e.hunks[0]!,
+          [side]: { ...e.hunks[0]![side], ...over },
+        };
+        return read(repository({ entries: [e] }));
+      };
+      return [
+        [`${side} taskId mismatch`, withAnchor({ taskId: "legacy-task" })],
+        [`${side} path mismatch`, withAnchor({ path: long(2049) })],
+        [`${side} resultId`, withAnchor({ resultId: long(513) })],
+        [`${side} workId`, withAnchor({ workId: long(513) })],
+        [`${side} threadId`, withAnchor({ threadId: long(513) })],
+        [`${side} turnId`, withAnchor({ turnId: long(513) })],
+        [`${side} range`, withAnchor({ startLine: 2, endLine: 1 })],
+        [`${side} unknown key`, withAnchor({ extra: true })],
+      ] as const;
+    }),
+    // turn comparison and its nested entries
+    ["turn taskId", turnSnapshot({ taskId: "legacy-task" })],
+    ["turn profileId", turnSnapshot({ profileId: "legacy-profile" })],
+    ["turn workId", turnSnapshot({ workId: long(513) })],
+    ["turn assignmentId", turnSnapshot({ assignmentId: long(513) })],
+    ["turn threadId", turnSnapshot({ threadId: long(513) })],
+    ["turn turnId", turnSnapshot({ turnId: long(513) })],
+    ["turn entry path", turnEntry({ path: long(2049) })],
+    [
+      "turn entry modifiedAt",
+      turnEntry({ right: { ...content, modifiedAt: -1 } }),
+    ],
+    ["turn anchor range", read(turn({}, {}, { startLine: 2, endLine: 1 }))],
+    [
+      "turn anchor taskId mismatch",
+      read(turn({}, {}, { taskId: "legacy-task" })),
+    ],
+    // pending capture identity and reason
+    [
+      "identity taskId",
+      unsettled({ identity: identity({ taskId: "legacy-task" }) }),
+    ],
+    [
+      "identity profileId",
+      unsettled({ identity: identity({ profileId: "legacy-profile" }) }),
+    ],
+    [
+      "identity workId",
+      unsettled({ identity: identity({ workId: long(513) }) }),
+    ],
+    [
+      "identity assignmentId",
+      unsettled({ identity: identity({ assignmentId: long(513) }) }),
+    ],
+    ["pending reason", unsettled({ reason: "not-a-reason" })],
+    [
+      "pending comparison entries",
+      unsettled({ comparison: turn({}, { hunks: [], path: long(2049) }) }),
+    ],
+  ] as const)
+    assert.equal(accepts(doc), false, name);
 });

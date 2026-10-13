@@ -13,6 +13,7 @@ import {
   type RetainedReviewAnchorCandidate,
   type RetainedEvidenceSourceObservation,
 } from "../core/retained-evidence.js";
+import { reviewAnchorSelectionSchema } from "../core/review-anchor-contracts.js";
 import { isDisclosable } from "./conversation-history.js";
 import type {
   WorkspaceComparisonEntry,
@@ -30,76 +31,6 @@ import {
 } from "./workspace-inspection.js";
 import type { TaskWorkspaceBinding } from "./workspaces.js";
 import { z } from "zod";
-
-const reviewAnchorSelectionSchema = z
-  .object({
-    taskId: z.string().uuid(),
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048),
-    sourceKind: z.enum([
-      "workspace-file",
-      "comparison-side",
-      "result-evidence",
-    ]),
-    context: z.enum(["workspace", "branch", "uncommitted", "turn", "result"]),
-    comparisonId: z.string().uuid().optional(),
-    resultId: z.string().uuid().optional(),
-    resultItemId: z.string().uuid().optional(),
-    workId: z.string().min(1).max(512).optional(),
-    threadId: z.string().min(1).max(512).optional(),
-    turnId: z.string().min(1).max(512).optional(),
-    side: z.enum(["file", "left", "right"]),
-    startLine: z.number().int().positive().safe(),
-    endLine: z.number().int().positive().safe(),
-    contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  })
-  .strict()
-  .superRefine((selection, ctx) => {
-    if (selection.endLine < selection.startLine)
-      ctx.addIssue({ code: "custom", message: "invalid-anchor-range" });
-    if (
-      (selection.sourceKind === "workspace-file" &&
-        (selection.context !== "workspace" ||
-          selection.side !== "file" ||
-          selection.comparisonId !== undefined ||
-          selection.resultItemId !== undefined)) ||
-      (selection.sourceKind === "comparison-side" &&
-        (!(["branch", "uncommitted", "turn"] as const).includes(
-          selection.context as "branch" | "uncommitted" | "turn",
-        ) ||
-          selection.side === "file" ||
-          selection.comparisonId === undefined ||
-          selection.resultItemId !== undefined)) ||
-      (selection.sourceKind === "result-evidence" &&
-        (selection.context !== "result" ||
-          selection.side !== "file" ||
-          selection.resultId === undefined ||
-          selection.resultItemId === undefined ||
-          selection.comparisonId !== undefined ||
-          selection.workId === undefined))
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "anchor-source-context-mismatch",
-      });
-    if (
-      selection.context === "turn" &&
-      (!selection.workId || !selection.threadId || !selection.turnId)
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "turn-anchor-identity-required",
-      });
-    if (
-      selection.resultId !== undefined &&
-      selection.sourceKind !== "result-evidence" &&
-      !selection.workId
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "result-anchor-work-identity-required",
-      });
-  });
 
 export const retainedReviewAnchorStageRequestSchema = z
   .object({

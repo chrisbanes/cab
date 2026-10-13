@@ -33,7 +33,7 @@ import {
   readinessSchema,
   selectionSchema,
 } from "./github-source.js";
-import { setupRepositorySchema } from "./github-source-contracts.js";
+import { setupRepositoriesSchema } from "./github-source-contracts.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -72,25 +72,7 @@ const commandSchema = z.discriminatedUnion("type", [
       leadProfileId: id.nullable(),
       // Guided setup: recorded with the project in one transaction, after verification.
       instructions: prose.optional(),
-      repositories: z
-        .array(setupRepositorySchema)
-        .max(20)
-        .refine(
-          (values) =>
-            new Set(values.map((value) => value.repositoryId)).size ===
-            values.length,
-          "Repository IDs must be unique",
-        )
-        .refine(
-          (values) =>
-            new Set(
-              values.map((value) =>
-                `${value.owner}/${value.name}`.toLowerCase(),
-              ),
-            ).size === values.length,
-          "Repositories must be unique",
-        )
-        .optional(),
+      repositories: setupRepositoriesSchema.optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
     })
     .strict(),

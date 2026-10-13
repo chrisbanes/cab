@@ -1,6 +1,11 @@
 import { DomainConflictError } from "./domain.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
+import {
+  retainedEvidenceIdentitySchema,
+  retainedEvidenceSourceObservationSchema,
+  reviewAnchorRecordBaseSchema,
+} from "./review-anchor-contracts.js";
 import { transaction, type Database } from "./store.js";
 
 export const retainedEvidenceLimits = Object.freeze({
@@ -33,36 +38,6 @@ const retainedMime = z.union([
     .max(128)
     .regex(/^(text\/[a-z0-9.+-]+|application\/(json|sql)); charset=utf-8$/),
 ]);
-const identitySchema = z
-  .object({
-    taskId: uuid,
-    // taskVersion is the request's admitted revision. Capture safety uses the
-    // separately revalidated revision observed while reading workspace bytes.
-    taskVersion: revision,
-    captureTaskVersion: revision,
-    assignmentId: uuid,
-    assignmentVersion: revision,
-    workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
-    conversationRevision: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
-    profileId: uuid,
-    threadId: z.string().min(1).max(512),
-    turnId: z.string().min(1).max(512),
-  })
-  .strict();
-
-const sourceObservationSchema = z
-  .object({
-    comparisonId: uuid.nullable(),
-    captureState: z.enum(["missing", "pending", "unsettled", "finished"]),
-    outcome: z.enum(["running", "completed", "failed", "unknown"]).nullable(),
-    observedAt: z.number().int().nonnegative().nullable(),
-  })
-  .strict();
-
 const scalar = z.union([
   z.string().max(4096),
   z.number(),
@@ -161,53 +136,16 @@ const candidateSchema = z
     version: z.literal(1),
     evidenceId: uuid,
     capturedAt: z.number().int().nonnegative(),
-    identity: identitySchema,
-    sourceObservation: sourceObservationSchema,
+    identity: retainedEvidenceIdentitySchema,
+    sourceObservation: retainedEvidenceSourceObservationSchema,
     items: z.array(itemSchema).max(320),
   })
   .strict();
 
-const reviewAnchorCandidateSchema = z
-  .object({
-    anchorId: uuid,
-    taskId: uuid,
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048),
+/** The stored record plus store-only fields: the origin root and the excerpt bytes. */
+const reviewAnchorCandidateSchema = reviewAnchorRecordBaseSchema
+  .extend({
     originRoot: z.string().min(1).max(4096).optional(),
-    sourceKind: z.enum([
-      "workspace-file",
-      "comparison-side",
-      "result-evidence",
-    ]),
-    context: z.enum(["workspace", "branch", "uncommitted", "turn", "result"]),
-    comparisonId: uuid.optional(),
-    resultId: uuid.optional(),
-    resultItemId: uuid.optional(),
-    workId: z.string().min(1).max(512).optional(),
-    threadId: z.string().min(1).max(512).optional(),
-    turnId: z.string().min(1).max(512).optional(),
-    side: z.enum(["file", "left", "right"]),
-    startLine: revision,
-    endLine: revision,
-    sourceSha256: hash.optional(),
-    claimedSha256: hash.optional(),
-    excerptSha256: hash.optional(),
-    byteStart: z.number().int().nonnegative().safe().optional(),
-    byteEnd: z.number().int().nonnegative().safe().optional(),
-    mime: z.string().min(1).max(128).optional(),
-    state: z.enum(["available", "gap"]),
-    reason: z
-      .enum([
-        "missing",
-        "unavailable",
-        "comparison-unavailable",
-        "comparison-unsettled",
-        "quota",
-      ])
-      .optional(),
-    size: z.number().int().nonnegative().safe(),
-    capturedAt: z.number().int().nonnegative().safe(),
-    observedAt: z.number().int().nonnegative().safe().nullable(),
     bytes: z.instanceof(Uint8Array).optional(),
   })
   .strict()
@@ -346,40 +284,9 @@ export type RetainedReviewAnchorSealResponse = z.infer<
 export type RetainedReviewAnchorDiscardResponse = z.infer<
   typeof retainedReviewAnchorDiscardResponseSchema
 >;
-export type RetainedReviewAnchorState = "available" | "gap";
-export interface RetainedReviewAnchorRecord {
-  anchorId: string;
-  taskId: string;
-  repositoryId: string | null;
-  path: string;
-  sourceKind: "workspace-file" | "comparison-side" | "result-evidence";
-  context: "workspace" | "branch" | "uncommitted" | "turn" | "result";
-  comparisonId?: string;
-  resultId?: string;
-  resultItemId?: string;
-  workId?: string;
-  threadId?: string;
-  turnId?: string;
-  side: "file" | "left" | "right";
-  startLine: number;
-  endLine: number;
-  sourceSha256?: string;
-  claimedSha256?: string;
-  excerptSha256?: string;
-  byteStart?: number;
-  byteEnd?: number;
-  mime?: string;
-  state: RetainedReviewAnchorState;
-  reason?:
-    | "missing"
-    | "unavailable"
-    | "comparison-unavailable"
-    | "comparison-unsettled"
-    | "quota";
-  size: number;
-  capturedAt: number;
-  observedAt: number | null;
-}
+export type RetainedReviewAnchorRecord = z.infer<
+  typeof reviewAnchorRecordBaseSchema
+>;
 export interface RetainedReviewAnchorContent {
   anchor: RetainedReviewAnchorRecord;
   bytes?: Buffer;
@@ -439,9 +346,11 @@ export const retainedEvidenceItemRecordSchema = z
       ctx.addIssue({ code: "custom", message: "gap-evidence-is-invalid" });
   });
 
-export type RetainedEvidenceIdentity = z.infer<typeof identitySchema>;
+export type RetainedEvidenceIdentity = z.infer<
+  typeof retainedEvidenceIdentitySchema
+>;
 export type RetainedEvidenceSourceObservation = z.infer<
-  typeof sourceObservationSchema
+  typeof retainedEvidenceSourceObservationSchema
 >;
 export type RetainedEvidenceCandidate = z.input<typeof candidateSchema>;
 export type RetainedEvidenceItemInput = z.input<typeof itemSchema>;
@@ -526,7 +435,7 @@ export const retainedEvidenceManifestSchema = z
     threadId: z.string().min(1).max(512),
     turnId: z.string().min(1).max(512),
     capturedAt: z.number().int().nonnegative(),
-    sourceObservation: sourceObservationSchema,
+    sourceObservation: retainedEvidenceSourceObservationSchema,
     state: z.enum(["empty", "available", "partial", "gap"]),
     payloadBytes: z.number().int().nonnegative(),
     items: z.array(retainedEvidenceItemRecordSchema),
@@ -795,7 +704,7 @@ export class RetainedEvidenceStore {
         "Retained result evidence requires the result transaction",
       );
     const candidate = candidateSchema.parse(input);
-    const identity = identitySchema.parse(currentIdentity);
+    const identity = retainedEvidenceIdentitySchema.parse(currentIdentity);
     if (!identityMatches(candidate.identity, identity))
       throw new Error("Retained result evidence binding changed");
     const preparedItems = candidate.items.map((item) => itemSchema.parse(item));
