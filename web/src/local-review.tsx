@@ -228,6 +228,7 @@ function useLocalReviewController({
     refreshWhenRecorded = true,
   ) => {
     state.pending = true;
+    changed();
     const result = await execute(command);
     state.unconfirmed = result.state === "unknown" ? { command, settle } : null;
     if (refreshWhenRecorded || result.state !== "recorded")
@@ -438,15 +439,11 @@ function useLocalReviewController({
       state.unconfirmed = null;
       state.notice = null;
       if (state.composer) state.composer.error = null;
-      changed();
       await write(unconfirmed.command, unconfirmed.settle);
-      changed();
     },
     /** Drafts saved before the anchor rule can only be sent once these are gone. */
     async removeUnanchoredComments() {
-      if (!draft) return;
-      state.pending = true;
-      changed();
+      if (!draft || state.pending) return;
       const command = saveCommand(
         {
           summary: draft.draft.summary,
@@ -478,12 +475,10 @@ function useLocalReviewController({
       });
     },
     async updateComment(commentId: string, body: string | null) {
-      if (!draft) return;
+      if (!draft || state.pending) return;
       const comments = draft.draft.comments;
       const index = comments.findIndex((c) => c.commentId === commentId);
       const neighbour = comments[index + 1] ?? comments[index - 1];
-      state.pending = true;
-      changed();
       const command = saveCommand(
         {
           summary: draft.draft.summary,
@@ -530,9 +525,7 @@ function useLocalReviewController({
       focusLater(`[data-review-edit="${CSS.escape(commentId)}"]`);
     },
     async saveSummary() {
-      if (!draft || state.summary === null) return;
-      state.pending = true;
-      changed();
+      if (!draft || state.summary === null || state.pending) return;
       const command = saveCommand(
         { summary: state.summary.trim(), comments: draft.draft.comments },
         draft.version,
@@ -551,7 +544,8 @@ function useLocalReviewController({
       });
     },
     async send() {
-      if (!draft || !lead || !leadAccepts(lead) || state.send) return;
+      if (!draft || !lead || !leadAccepts(lead) || state.send || state.pending)
+        return;
       state.notice = null;
       const send: LocalReviewSend = {
         key: crypto.randomUUID(),
@@ -595,9 +589,7 @@ function useLocalReviewController({
       changed();
     },
     async startNew() {
-      if (!draft) return;
-      state.pending = true;
-      changed();
+      if (!draft || state.pending) return;
       const command = {
         type: "review.draft.discard" as const,
         key: crypto.randomUUID(),

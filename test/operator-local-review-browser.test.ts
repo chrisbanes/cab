@@ -581,7 +581,11 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
   await review.getByText("Edited note", { exact: true }).waitFor();
   assert.equal(saves.length, 2);
   assert.equal(saves[0], saves[1]);
-  assert.equal(await warning.count(), 0);
+  // The checked edit settles to one success line, with no check left to press.
+  await warning.getByText("Comment updated.", { exact: true }).waitFor();
+  assert.equal(await warning.count(), 1);
+  assert.equal(await warning.getAttribute("data-tone"), "success");
+  assert.equal(await warning.getByRole("button").count(), 0);
   await files
     .locator("button:not([disabled])", { hasText: "Add review comment" })
     .waitFor();
@@ -674,6 +678,59 @@ test("the review controls stay off until the refresh after a draft write has fin
     .getByRole("button", { name: "Edit" })
     .and(page.locator(":enabled"))
     .waitFor();
+});
+
+test("the review controls are off from the first request of a new comment until it has settled", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Second note");
+  let entered!: () => void;
+  let release!: () => void;
+  const stageEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.anchor.stage") return route.continue();
+    entered();
+    await gate;
+    await route.continue();
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  await stageEntered;
+  // The first request is in flight and nothing has been re-read yet: no other write may start.
+  await page.waitForTimeout(200);
+  assert.equal(
+    await review.getByRole("button", { name: "Edit" }).first().isDisabled(),
+    true,
+  );
+  assert.equal(
+    await review
+      .getByRole("button", { name: "Remove", exact: true })
+      .first()
+      .isDisabled(),
+    true,
+  );
+  release();
+  await review.getByText("Second note").waitFor();
+  await page.unroute("**/api/operator/commands");
 });
 
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
