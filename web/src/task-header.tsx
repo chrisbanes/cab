@@ -53,12 +53,6 @@ export function taskHeaderReport(
   };
 }
 
-const consequences = [
-  "Holds queued and new turns for the lead and every delegated assignment.",
-  "Requests cancellation of active turns. Effects may continue after the observation window.",
-  "Stop, writer and capacity holds stay until termination is verified. Resume clears only Stop.",
-];
-
 /** Execution and Stop… (frame 46a). Stop confirms first, then posts the retained Stop form. */
 export function TaskHeaderActions({
   report,
@@ -113,14 +107,9 @@ export function TaskHeaderActions({
             <DialogDescription className="body">
               {report.stop.affected}
             </DialogDescription>
-            <ul className="body">
-              {consequences.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-            <p className="metadata muted">
-              Stop is not cancellation or completion. Files, history and results
-              are kept.
+            <p className="body">
+              Stops new work and asks running turns to end; some effects may
+              still finish, and files, history and results are kept.
             </p>
             {/* The retained Stop control; it answers with the Execution page. */}
             <form
