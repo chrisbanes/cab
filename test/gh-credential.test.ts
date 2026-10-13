@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { credentialFreeEnvironment } from "../src/core/child-environment.js";
 import {
+  credentialReferenceExclusions,
   detectGh,
   ghEnvironment,
   ghToken,
@@ -46,6 +48,121 @@ test("gh detection and token resolution map every state without revealing the to
   for (const environment of gh.environments()) {
     assert.equal(environment.GH_PROMPT_DISABLED, "1");
     assert.equal(environment.GH_NO_UPDATE_NOTIFIER, "1");
+  }
+});
+
+test("source gh environment ignores discovery choice and removes unrelated credential aliases", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const environment = {
+    PATH: process.env.PATH,
+    SOURCE: "source-canary",
+    SOURCE_ALIAS: "source-canary",
+    DISCOVERY: "discovery-canary",
+    DISCOVERY_ALIAS: "discovery-canary",
+    DELIVERY: "delivery-canary",
+    DELIVERY_ALIAS: "delivery-canary",
+    CLAUDE: "claude-canary",
+    CLAUDE_ALIAS: "claude-canary",
+    GH_TOKEN: "chosen-gh-canary",
+    GITHUB_TOKEN: "chosen-github-canary",
+    GH_ALIAS: "chosen-gh-canary",
+    SAFE: "safe-value",
+  };
+  for (const discovery of [null, "env:DISCOVERY"]) {
+    const domain = {
+      claudeTokenReference: () => "env:CLAUDE",
+      projects: () => [{ id: "p" }] as never,
+      deliveryCredentialReference: () => "env:DELIVERY",
+      discoveryCredentialReference: () => discovery,
+      githubConfiguration: () => ({ credentialRef: "env:SOURCE" }) as never,
+    };
+    const child = ghEnvironment(domain, {
+      reference: "gh:github.com",
+      environment,
+    });
+    assert.equal(child.GH_TOKEN, environment.GH_TOKEN);
+    assert.equal(child.GITHUB_TOKEN, environment.GITHUB_TOKEN);
+    assert.equal(child.SAFE, "safe-value");
+    assert.equal(child.GH_ALIAS, undefined);
+    for (const name of [
+      "SOURCE",
+      "SOURCE_ALIAS",
+      "DELIVERY",
+      "DELIVERY_ALIAS",
+      "CLAUDE",
+      "CLAUDE_ALIAS",
+      ...(discovery ? ["DISCOVERY", "DISCOVERY_ALIAS"] : []),
+    ])
+      assert.equal(child[name], undefined, name);
+    await ghToken({ executable: gh.executable, environment: child });
+    const received = gh.environments().at(-1);
+    assert.ok(received);
+    assert.equal(received.GH_TOKEN, environment.GH_TOKEN);
+    assert.equal(received.SOURCE_ALIAS, undefined);
+    const detection = ghEnvironment(domain, { reference: null, environment });
+    assert.equal(detection.GH_TOKEN, undefined);
+    assert.equal(detection.GITHUB_TOKEN, undefined);
+  }
+});
+
+test("resolved values survive more than eight rotations and Clear for exclusion only", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const options = { executable: gh.executable };
+  const tokens = Array.from(
+    { length: 12 },
+    (_, i) => `gho_lifetime-rotation-${i}`,
+  );
+  for (const token of tokens) {
+    gh.setToken(token);
+    assert.deepEqual(await ghToken(options), { token });
+  }
+  const environment = {
+    OLD_ALIAS: tokens[0],
+    NEW_ALIAS: tokens.at(-1),
+    KEEP: "safe",
+  };
+  for (const ref of ["gh:github.com", "env:OTHER", null]) {
+    const excluded = credentialReferenceExclusions(ref, environment);
+    for (const token of tokens) {
+      assert.ok(excluded.values.includes(token));
+      assert.ok(excluded.redactions.includes(token));
+    }
+    const child = credentialFreeEnvironment(
+      environment,
+      excluded.names,
+      environment,
+      excluded.values,
+    );
+    assert.deepEqual(child, { KEEP: "safe" });
+  }
+  gh.set("not-signed-in");
+  assert.deepEqual(await ghToken(options), { state: "not-signed-in" });
+});
+
+test("gh token values have a 512-byte bound and invalid output is not remembered", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const valid = "x".repeat(512);
+  gh.setToken(valid);
+  assert.deepEqual(await ghToken({ executable: gh.executable }), {
+    token: valid,
+  });
+  for (const invalid of [
+    "x".repeat(513),
+    "bad token",
+    "token\nsecond-line",
+    "",
+  ]) {
+    gh.setToken(invalid);
+    assert.deepEqual(await ghToken({ executable: gh.executable }), {
+      state: "unreadable",
+    });
+    assert.equal(
+      credentialReferenceExclusions(null).values.includes(invalid),
+      false,
+    );
   }
 });
 

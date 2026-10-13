@@ -24,6 +24,8 @@ export interface FakeGh {
   /** A path where no executable exists, for the not-installed state. */
   missing: string;
   set(state: FakeGhState): void;
+  /** Change only the successful token output, preserving the fake login. */
+  setToken(token: string): void;
   /** The environment of every invocation, oldest first. */
   environments(): Record<string, string>[];
   close(): void;
@@ -51,7 +53,7 @@ else if (group === "auth" && command === "status") {
     process.exitCode = 1;
   } else process.stdout.write(account("success") + "\\n");
 } else if (group === "auth" && command === "token") {
-  if (state === "signed-in") process.stdout.write(${JSON.stringify(fakeGhToken)} + "\\n");
+  if (state === "signed-in") process.stdout.write(fs.readFileSync(path.join(dir, "token"), "utf8") + "\\n");
   else if (state === "invalid-token") process.stdout.write("not a token\\nsecond line\\n");
   else {
     process.stderr.write("no oauth token found for github.com ${fakeGhToken}\\n");
@@ -68,10 +70,13 @@ export function createFakeGh(state: FakeGhState = "signed-in"): FakeGh {
   chmodSync(executable, 0o700);
   const set = (next: FakeGhState) => writeFileSync(join(dir, "state"), next);
   set(state);
+  const setToken = (token: string) => writeFileSync(join(dir, "token"), token);
+  setToken(fakeGhToken);
   return {
     executable,
     missing: join(dir, "absent", "gh"),
     set,
+    setToken,
     environments: () => {
       try {
         return readFileSync(join(dir, "env.jsonl"), "utf8")
