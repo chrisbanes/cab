@@ -520,9 +520,13 @@ test("production workspace retains literal history, pending request, focused rep
       .getByRole("button", { name: "Set viewing reference", exact: true })
       .click(),
   ]);
-  // A different action's outcome never replaces an unknown reply outcome.
+  // A different action's outcome never replaces an unknown reply outcome, or takes the focus.
   await outcome.waitFor();
   assert.equal(await outcome.count(), 1);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Set viewing reference",
+  );
   assert.ok(
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -543,6 +547,10 @@ test("production workspace retains literal history, pending request, focused rep
   ]);
   await outcome.waitFor();
   assert.equal(await outcome.count(), 1);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Refresh delivery observation",
+  );
   assert.ok(
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })

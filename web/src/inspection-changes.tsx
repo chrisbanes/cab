@@ -5,7 +5,7 @@ import {
   type Session,
   type WorkspaceComparisonRead,
 } from "../../src/operator/contracts.js";
-import type { OperatorClient } from "./api.js";
+import { ClientError, type OperatorClient } from "./api.js";
 import {
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
@@ -433,7 +433,7 @@ export function TaskWorkspaceChanges({
         setRequest({
           key,
           pending: false,
-          error: error instanceof Error ? error.message : "unavailable",
+          error: error instanceof ClientError ? error.code : "unavailable",
         });
       });
     return () => controller.abort();

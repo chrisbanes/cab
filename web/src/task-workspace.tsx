@@ -205,9 +205,9 @@ export function TaskWorkspace({
   onHeader?: (report: TaskHeaderReport | null) => void;
 }) {
   const [aux, setAux] = useState<ReplyOutcome | null>(null);
-  // The message that follows a send replaces the control the operator used, so it takes focus.
-  // That holds for a check of an unknown outcome and for an unknown outcome itself, whose
-  // Send button gives way to the check; never for the Results and Changes actions.
+  // The message that follows a reply replaces the control the operator used, so it takes
+  // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
+  // that check. Results and Changes actions never take it.
   const sent = useRef(false);
   const checking = useRef(false);
   const setSourceObservation = (value: "known" | "pending" | "unknown") => {
@@ -312,9 +312,12 @@ export function TaskWorkspace({
     if (headerReport) onHeader?.(JSON.parse(headerReport));
   }, [headerReport, onHeader]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
-  // The answer to a check has had its turn at the focus.
+  // The answer to a send or a check has had its turn at the focus.
   useEffect(() => {
-    if (!pending) checking.current = false;
+    if (!pending) {
+      sent.current = false;
+      checking.current = false;
+    }
   });
   const completeSourceObservation =
     !data?.source ||
@@ -762,7 +765,6 @@ export function TaskWorkspace({
       ...more,
     ];
     setPending(true);
-    sent.current = true;
     const current = client.captureAuthenticationScope();
     const reviewIntent =
       input.type === "comment.review" || input.type === "comment.confirm";
@@ -777,6 +779,7 @@ export function TaskWorkspace({
     }
     if (reply) {
       replyInFlight.current = input.key;
+      sent.current = true;
       setAux(null);
     }
     const outcome = await client.command(input, session.csrfToken);

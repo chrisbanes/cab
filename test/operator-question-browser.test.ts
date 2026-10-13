@@ -218,12 +218,10 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     // Opened Details scrolls inside the footer rather than covering the form.
     const details = form.locator(".question-submit summary");
     await details.click();
-    const open = await form
-      .locator(".question-submit")
-      .evaluate((el) => ({
-        footer: el.getBoundingClientRect().height,
-        view: innerHeight,
-      }));
+    const open = await form.locator(".question-submit").evaluate((el) => ({
+      footer: el.getBoundingClientRect().height,
+      view: innerHeight,
+    }));
     assert.ok(open.footer <= open.view * 0.75, JSON.stringify(open));
     await details.click();
     assert.equal(
