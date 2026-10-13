@@ -4,6 +4,7 @@ import {
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
 import { createFakeGh, fakeGhToken } from "./fixtures/fake-gh.js";
+import { outcomeMessages, savedOutcome } from "./fixtures/operator-settings.js";
 import { commandRequest, setupJourney } from "./fixtures/setup-browser.js";
 const test = browserSuite("ui06-discovery-credential");
 
@@ -40,6 +41,13 @@ test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) =
       "GitHub discovery credential · GitHub CLI · @octo · read-only use",
     )
     .waitFor();
+  // The form closes on save and the row it returns to confirms it.
+  await savedOutcome(page);
+  assert.equal(await row.locator('[data-slot="action-outcome"]').count(), 1);
+  assert.equal(
+    await row.getByRole("button", { name: "Use this login" }).count(),
+    0,
+  );
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",
@@ -62,6 +70,7 @@ test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) =
   await row.getByRole("button", { name: "Clear", exact: true }).click();
   assert.equal((await clear).postDataJSON().credentialRef, null);
   await row.getByText("GitHub discovery credential · not configured").waitFor();
+  await savedOutcome(page);
   assert.equal(f.service.domain().discoveryCredentialReference(), null);
 });
 
@@ -138,6 +147,7 @@ test("Settings sets an environment variable by name and reconciles an unknown cl
       exact: false,
     })
     .waitFor();
+  await savedOutcome(page);
   const status = await page.evaluate(async () =>
     (await fetch("/api/operator/discovery")).text(),
   );
@@ -147,18 +157,26 @@ test("Settings sets an environment variable by name and reconciles an unknown cl
     (await page.locator("body").innerText()).includes("FIXTURE_DISCOVERY"),
     false,
   );
-  // An unknown outcome keeps the attempt until the exact submission is reconciled.
+  // An unknown outcome keeps the attempt until the exact request is checked.
   await page.route("**/api/operator/commands", (route) => route.abort());
+  const attempt = commandRequest(page);
   try {
     await row.getByRole("button", { name: "Clear", exact: true }).click();
-    await row
-      .getByRole("button", { name: "Reconcile exact submission" })
-      .waitFor();
+    await row.getByRole("button", { name: "Check whether it saved" }).waitFor();
+    assert.equal(await outcomeMessages(page).count(), 1);
+    assert.equal(await outcomeMessages(page).getAttribute("role"), "alert");
+    assert.equal(await outcomeMessages(page).getByRole("button").count(), 1);
   } finally {
     await page.unroute("**/api/operator/commands");
   }
-  await row.getByRole("button", { name: "Reconcile exact submission" }).click();
+  const replay = commandRequest(page);
+  await row.getByRole("button", { name: "Check whether it saved" }).click();
+  assert.equal(
+    (await replay).postDataJSON().key,
+    (await attempt).postDataJSON().key,
+  );
   await row.getByText("GitHub discovery credential · not configured").waitFor();
+  await savedOutcome(page);
   assert.equal(f.service.domain().discoveryCredentialReference(), null);
 });
 
@@ -193,6 +211,8 @@ test("Setup offers the detected GitHub CLI login in one step", async (_t, journe
       "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
+  // The save is confirmed like the Settings row, not left to the list reappearing.
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",
@@ -218,7 +238,7 @@ test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey)
   try {
     await use.click();
     await page
-      .getByRole("button", { name: "Reconcile exact submission" })
+      .getByRole("button", { name: "Check whether it saved" })
       .waitFor();
     assert.equal(await use.count(), 0);
     // Leaving and returning re-reads discovery as configured; reconciliation stays offered.
@@ -231,19 +251,18 @@ test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey)
       )
       .waitFor();
     await page
-      .getByRole("button", { name: "Reconcile exact submission" })
+      .getByRole("button", { name: "Check whether it saved" })
       .waitFor();
   } finally {
     await page.unroute("**/api/operator/commands");
   }
-  await page
-    .getByRole("button", { name: "Reconcile exact submission" })
-    .click();
+  await page.getByRole("button", { name: "Check whether it saved" }).click();
   await page
     .getByText(
       "Discovered from GitHub · 3 repositories visible to the credential",
     )
     .waitFor();
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",

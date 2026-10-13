@@ -13,7 +13,9 @@ import {
 } from "./fixtures/browser-diagnostics.js";
 import {
   noPageOverflow,
+  outcomeMessages,
   phone,
+  savedOutcome,
   startSettings,
 } from "./fixtures/operator-settings.js";
 import { commandRequest } from "./fixtures/setup-browser.js";
@@ -63,6 +65,10 @@ test("Settings sets, shows and clears the Claude token reference without showing
       "Claude subscription token · reference configured · token unavailable",
     )
     .waitFor();
+  // The form closes on save and the row it returns to confirms it.
+  await savedOutcome(page);
+  assert.equal(await row.locator('[data-slot="action-outcome"]').count(), 1);
+  assert.equal(await input.count(), 0);
   assert.equal(f.service.domain().claudeTokenReference(), `env:${NAME}`);
   // A value set after the service started is available to the next turn.
   process.env[NAME] = VALUE;
@@ -82,17 +88,25 @@ test("Settings sets, shows and clears the Claude token reference without showing
   // Unknown outcome freezes the form until the exact submission is reconciled.
   await row.getByRole("button", { name: "Change", exact: true }).click();
   await page.route("**/api/operator/commands", (route) => route.abort());
+  const attempt = commandRequest(page);
   try {
     await row.getByRole("button", { name: "Clear reference" }).click();
-    await row
-      .getByRole("button", { name: "Reconcile exact submission" })
-      .waitFor();
+    await row.getByRole("button", { name: "Check whether it saved" }).waitFor();
     assert.equal(await input.isDisabled(), true);
+    assert.equal(await outcomeMessages(page).count(), 1);
+    assert.equal(await outcomeMessages(page).getAttribute("role"), "alert");
+    assert.equal(await outcomeMessages(page).getByRole("button").count(), 1);
   } finally {
     await page.unroute("**/api/operator/commands");
   }
-  await row.getByRole("button", { name: "Reconcile exact submission" }).click();
+  const replay = commandRequest(page);
+  await row.getByRole("button", { name: "Check whether it saved" }).click();
+  assert.equal(
+    (await replay).postDataJSON().key,
+    (await attempt).postDataJSON().key,
+  );
   await row.getByText("Claude subscription token · not configured").waitFor();
+  await savedOutcome(page);
   assert.equal(f.service.domain().claudeTokenReference(), null);
   await page.goto(`${web.origin}/app/settings`);
   await row.getByText("Claude subscription token · not configured").waitFor();

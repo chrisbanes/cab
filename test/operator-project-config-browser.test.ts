@@ -10,7 +10,9 @@ import {
 import {
   createCheckout,
   noPageOverflow,
+  outcomeMessages,
   phone,
+  savedOutcome,
   startSettings,
   trail,
 } from "./fixtures/operator-settings.js";
@@ -18,6 +20,17 @@ import {
 const test = browserSuite("ui08-settings-project");
 const changes = (page: Page) =>
   page.getByRole("region", { name: "Changes to save" });
+/** Press the header Refresh and wait until the re-read has rendered. */
+const refresh = async (page: Page) => {
+  const read = page.waitForResponse(
+    (r) => r.request().method() === "GET" && /configuration$/.test(r.url()),
+  );
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await read;
+  await page.getByText("Refreshing.", { exact: false }).waitFor({
+    state: "hidden",
+  });
+};
 const commandBody = (page: Page) =>
   page
     .waitForRequest(
@@ -38,7 +51,8 @@ test("General tab edits in place with a change list, saved line and tabs that ke
   assert.equal(await trail(page), "Settings / Projects / Atlas");
   const status = page.locator(".settings-status");
   await status.getByText("Enabled").waitFor();
-  await status.getByText(/General version \d+/).waitFor();
+  await status.getByText("Existing admission rules still apply.").waitFor();
+  assert.doesNotMatch(await status.innerText(), /version|\d\d:\d\d/);
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
   });
@@ -105,7 +119,9 @@ test("General tab edits in place with a change list, saved line and tabs that ke
   await changes(page).getByText("Project name: Atlas → Atlas II").waitFor();
   const version = Number(d.project(ids.atlas).version);
   await save.click();
-  await status.getByText(/General saved \d\d:\d\d/).waitFor();
+  await status.getByText(/Saved \d\d:\d\d/).waitFor();
+  await savedOutcome(page);
+  assert.equal((await status.innerText()).match(/Saved \d\d:\d\d/g)?.length, 1);
   assert.equal(Number(d.project(ids.atlas).version), version + 1);
   assert.equal(d.project(ids.atlas).name, "Atlas II");
   await page.waitForFunction(() =>
@@ -156,12 +172,13 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
     paused: true,
   });
   await page.getByRole("button", { name: "Save project", exact: true }).click();
-  await page.getByText("Configuration changed.", { exact: false }).waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
   assert.equal(await name.inputValue(), "Atlas typed");
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  // The conflict re-reads on its own; no manual Refresh is needed before Review.
   await page.locator(".settings-status").getByText("Paused").waitFor();
-  await page
-    .getByRole("button", { name: "Review latest project revision" })
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
     .click();
   assert.equal(await name.inputValue(), "Atlas typed");
   // The untouched pause takes the newer revision instead of undoing it.
@@ -186,9 +203,8 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
     .getByLabel("Lead profile", { exact: true })
     .selectOption({ label: "Jonas" });
   await page.getByRole("button", { name: "Save project", exact: true }).click();
-  await page
-    .getByText("Submission rejected. Your input is retained.")
-    .waitFor();
+  await page.getByText("Couldn't save. Your changes are still here.").waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
   assert.equal(await name.inputValue(), "Atlas typed");
 });
 
@@ -208,20 +224,25 @@ test("an unknown save freezes the form until the exact submission is reconciled"
       .getByRole("button", { name: "Save project", exact: true })
       .click();
     key = (await body).key;
-    await page.getByText("Outcome unknown.", { exact: false }).waitFor();
+    await page.getByText("We couldn't confirm the save.").waitFor();
+    assert.equal(await outcomeMessages(page).count(), 1);
     assert.equal(await name.isDisabled(), true);
+    // The Save button is gone, so focus moves to the one action instead of the page body.
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent),
+      "Check whether it saved",
+    );
   } finally {
     await page.unroute("**/api/operator/commands");
   }
   const replay = commandBody(page);
-  await page
-    .getByRole("button", { name: "Reconcile exact submission" })
-    .click();
+  await page.getByRole("button", { name: "Check whether it saved" }).click();
   assert.equal((await replay).key, key);
   await page
     .locator(".settings-status")
-    .getByText(/General saved/)
+    .getByText(/Saved \d\d:\d\d/)
     .waitFor();
+  await savedOutcome(page);
   assert.equal(f.service.domain().project(ids.atlas).name, "Atlas unknown");
 });
 
@@ -291,11 +312,25 @@ test("Routing saves candidates in place without sending guidance, and replaces g
   const sent = await body;
   assert.equal("guidance" in sent, false);
   assert.equal((sent.candidateProfileIds as string[]).length, 4);
-  await page.getByText("Saved routing for Relay ·", { exact: false }).waitFor();
+  const saved = await savedOutcome(page);
+  await saved
+    .getByText(
+      /^Saved\. Routing now uses (?=.*Mira)(?=.*Eli)(?=.*Builder)(?=.*Worker)/,
+    )
+    .waitFor();
+  assert.equal(
+    (
+      (await page.locator(".settings-status").innerText()).match(
+        /Saved \d\d:\d\d/g,
+      ) ?? []
+    ).length,
+    1,
+  );
   assert.equal(Number(d.routing(ids.relay).version), version + 1);
   assert.equal(d.routing(ids.relay).guidance, "PRIVATE ROUTING GUIDANCE");
   const aside = page.getByRole("region", { name: "Saved routing" });
-  await aside.getByText(/Saved · \d\d:\d\d/).waitFor();
+  await aside.getByRole("heading", { name: "Saved routing" }).waitFor();
+  assert.doesNotMatch(await aside.innerText(), /\d\d:\d\d|version/);
   await aside
     .getByText(/^Candidates: (?=.*Mira)(?=.*Eli)(?=.*Builder)(?=.*Worker)/)
     .waitFor();
@@ -343,7 +378,7 @@ test("Routing saves candidates in place without sending guidance, and replaces g
   }
 });
 
-test("Routing conflict keeps the checked candidates until the latest revision is adopted", async (_t, journey) => {
+test("Routing conflict keeps the checked candidates until the newer version is reviewed", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/app/projects/:relay/settings?tab=routing",
@@ -360,18 +395,15 @@ test("Routing conflict keeps the checked candidates until the latest revision is
     candidateProfileIds: [ids.profiles.Eli as string],
   });
   await page.getByRole("button", { name: "Save routing", exact: true }).click();
-  await page.getByText("Configuration changed.", { exact: false }).waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
   assert.equal(
     await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
     true,
   );
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await page
-    .locator(".settings-status")
-    .getByText("Routing version 3")
-    .waitFor();
-  await page
-    .getByRole("button", { name: "Review latest routing revision" })
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
     .click();
   assert.equal(
     await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
@@ -436,9 +468,7 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
   ]);
   await page
     .locator(".settings-status")
-    .getByText(
-      /GitHub source saved \d\d:\d\d · Environment reference · unavailable/,
-    )
+    .getByText(/Saved \d\d:\d\d · Environment reference · unavailable/)
     .waitFor();
   const saved = d.githubConfiguration(ids.atlas);
   assert.deepEqual(
@@ -466,6 +496,12 @@ test("removing all repository access needs confirmation and Discard restores the
   await confirm.waitFor();
   assert.equal(await confirm.isChecked(), false);
   assert.equal(await save.isDisabled(), true);
+  // The checkbox is the only confirmation: the consequence is a change-list line, never an alert.
+  await changes(page)
+    .getByText("Removes every repository from Atlas.", { exact: true })
+    .waitFor();
+  assert.equal(await changes(page).getByRole("alert").count(), 0);
+  assert.equal(await outcomeMessages(page).count(), 0);
   await confirm.check();
   assert.equal(await save.isEnabled(), true);
   await captureBrowserEvidence(page, "1366-source-remove-all");
@@ -477,7 +513,7 @@ test("removing all repository access needs confirmation and Discard restores the
     .click();
   await confirm.check();
   await save.click();
-  await page.getByText("Saved GitHub source ·", { exact: false }).waitFor();
+  await savedOutcome(page);
   assert.deepEqual(
     f.service.domain().githubConfiguration(ids.atlas).repositories,
     [],
@@ -522,7 +558,7 @@ test("GitHub source repository and readiness errors focus the exact row without 
     .last()
     .fill("HEAD");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await page.getByText("Saved GitHub source ·", { exact: false }).waitFor();
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().githubConfiguration(ids.atlas).repositories.length,
     2,
@@ -544,7 +580,7 @@ test("GitHub source repository and readiness errors focus the exact row without 
     .waitFor();
 });
 
-test("GitHub source conflict keeps rows and an unknown save reconciles once", async (_t, journey) => {
+test("GitHub source conflict keeps rows and an unknown save is checked once", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/app/projects/:atlas/settings?tab=github",
@@ -566,15 +602,12 @@ test("GitHub source conflict keeps rows and an unknown save reconciles once", as
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await page.getByText("Configuration changed.", { exact: false }).waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
   await page.getByText("Will be removed").waitFor();
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await page
-    .locator(".settings-status")
-    .getByText("GitHub source version 3", { exact: false })
-    .waitFor();
-  await page
-    .getByRole("button", { name: "Review latest source revision" })
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
     .click();
   await page.getByText("Will be removed").waitFor();
   // The source saved elsewhere joins the form as a kept row instead of being dropped.
@@ -589,20 +622,146 @@ test("GitHub source conflict keeps rows and an unknown save reconciles once", as
       .getByRole("button", { name: "Save changes", exact: true })
       .click();
     first = await body;
-    await page.getByText("Outcome unknown.", { exact: false }).waitFor();
+    await page.getByText("We couldn't confirm the save.").waitFor();
+    assert.equal(await outcomeMessages(page).count(), 1);
   } finally {
     await page.unroute("**/api/operator/commands");
   }
   const replay = commandBody(page);
-  await page
-    .getByRole("button", { name: "Reconcile exact submission" })
-    .click();
+  await page.getByRole("button", { name: "Check whether it saved" }).click();
   assert.deepEqual(await replay, first);
-  await page.getByText("Saved GitHub source ·", { exact: false }).waitFor();
+  await savedOutcome(page);
   assert.equal(d.githubConfiguration(ids.atlas).version, version + 1);
   assert.deepEqual(
     d.githubConfiguration(ids.atlas).selections.map((s) => s.id),
     ["S-1", "S-2", "S-5"],
+  );
+});
+
+test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page.route("**/api/operator/commands", (r) => r.abort());
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByText("We couldn't confirm the save.").waitFor();
+  // S-2 is removed elsewhere while the save is unsettled; the form keeps its kept row.
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  await refresh(page);
+  await page.getByText("S-2 is no longer saved", { exact: false }).waitFor();
+  // Exactly one action: the unknown outcome's check, never a second way to review.
+  assert.equal(
+    await page.getByRole("button", { name: "Review changes" }).count(),
+    0,
+  );
+  const unknown = outcomeMessages(page);
+  assert.equal(await unknown.count(), 1);
+  assert.equal(await unknown.getByRole("button").count(), 1);
+  await unknown
+    .getByRole("button", { name: "Check whether it saved" })
+    .waitFor();
+  assert.equal(
+    (await unknown.locator("p").innerText()).trim(),
+    "We couldn't confirm the save.",
+  );
+});
+
+test("a re-read of another writer's routing retires the saved line", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  const saved = await savedOutcome(page);
+  await saved.getByText(/^Saved\. Routing now uses .*Nora/).waitFor();
+  // A plain re-read of the same version keeps the confirmation.
+  await refresh(page);
+  await savedOutcome(page, /^Saved\. Routing now uses .*Nora/);
+  // Another writer saves routing, and the next re-read must not describe it as this save.
+  const d = f.service.domain();
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  await refresh(page);
+  await page
+    .getByRole("region", { name: "Saved routing" })
+    .getByText("Candidates: Eli", { exact: true })
+    .waitFor();
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.doesNotMatch(
+    await page.locator(".settings-status").innerText(),
+    /Saved \d\d:\d\d/,
+  );
+});
+
+test("another writer committing between a routing save and its re-read is not described as saved", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
+  // Hold the re-read that follows the save until another writer has committed.
+  let held!: () => void, release!: () => void;
+  const reread = new Promise<void>((resolve) => (held = resolve));
+  const writer = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    "**/api/operator/projects/*/configuration",
+    async (route) => {
+      held();
+      await writer;
+      await route.continue();
+    },
+  );
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  await reread;
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  release();
+  await page
+    .getByRole("region", { name: "Saved routing" })
+    .getByText("Candidates: Eli", { exact: true })
+    .waitFor();
+  // The form shows the other writer's version, so nothing claims it was this save.
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.doesNotMatch(
+    await page.locator(".settings-status").innerText(),
+    /Saved \d\d:\d\d/,
+  );
+  await page
+    .getByRole("button", { name: "Save routing", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
+    false,
   );
 });
 
@@ -658,14 +817,10 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
   });
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   await save.click();
-  await page.getByText("Configuration changed.", { exact: false }).waitFor();
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
-  await page
-    .locator(".settings-status")
-    .getByText("GitHub source version 3", { exact: false })
-    .waitFor();
-  await page
-    .getByRole("button", { name: "Review latest source revision" })
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
     .click();
   await page.getByText("acme/new is linked twice", { exact: false }).waitFor();
   assert.equal(await save.isDisabled(), true);

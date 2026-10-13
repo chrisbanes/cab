@@ -24,7 +24,11 @@ import {
   signOutFromSidebar,
 } from "./fixtures/operator-account.js";
 import { chromium, type Browser, type Page } from "playwright";
-import { seedImportedConflict } from "./fixtures/operator-settings.js";
+import {
+  outcomeMessages,
+  savedOutcome,
+  seedImportedConflict,
+} from "./fixtures/operator-settings.js";
 import {
   seedOperatorRecovery,
   seedOperatorDelivery,
@@ -65,7 +69,7 @@ test("Settings guides empty workspace through profile and paused project creatio
   await page
     .getByRole("button", { name: "Create profile", exact: true })
     .click();
-  await page.getByText("Recorded.", { exact: false }).waitFor();
+  await savedOutcome(page);
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
     .getByRole("link", { name: "Settings", exact: true })
@@ -78,7 +82,7 @@ test("Settings guides empty workspace through profile and paused project creatio
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
     .click();
-  await page.getByText("Recorded.", { exact: false }).waitFor();
+  await savedOutcome(page, /^Created Setup project\. It's paused\./);
   assert.equal(f.service.domain().projects().length, 1);
   assert.equal(f.service.domain().projects()[0]?.paused, 1);
   assert.equal(f.runtime.turns, 0);
@@ -351,7 +355,7 @@ test("unknown configuration survives scope navigation and exact reconciliation w
   });
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   await page
     .getByRole("navigation", { name: "Breadcrumb" })
@@ -364,7 +368,7 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(posts.length, 1);
   assert.equal(
@@ -392,10 +396,10 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     });
   });
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(
     await page.getByLabel("Project name", { exact: true }).isDisabled(),
@@ -407,13 +411,10 @@ test("unknown configuration survives scope navigation and exact reconciliation w
       posts.push(r.postData() ?? "");
   });
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   // A reconciled save re-reads the configuration and reloads the form.
-  await page
-    .locator(".settings-saved")
-    .getByText("Recorded project.configure", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   assert.deepEqual(posts, [posts[0], posts[0], posts[0]]);
   assert.equal(f.service.domain().project(ids.projectId).version, 3);
   assert.ok(readBodies.every((s) => !s.includes("PRIVATE")));
@@ -493,9 +494,7 @@ test("configuration inline validation stale revision and revoked lead failures r
     name: "External change",
   });
   await page.getByRole("button", { name: "Save project", exact: true }).click();
-  await page
-    .getByText("Configuration changed. Review", { exact: false })
-    .waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
   assert.equal(
     await page.getByLabel("Project name", { exact: true }).inputValue(),
     "Retained edited name",
@@ -533,7 +532,7 @@ test("configuration inline validation stale revision and revoked lead failures r
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   assert.equal((await response).status(), 403);
   await page
-    .getByText("Submission rejected. Your input is retained.", { exact: true })
+    .getByText("Couldn't save. Your changes are still here.", { exact: true })
     .waitFor();
   assert.equal(
     await page.getByLabel("Project name", { exact: true }).inputValue(),
@@ -737,10 +736,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
     .fill(repositoryPath);
   await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await page
-    .locator(".settings-saved")
-    .getByText("Recorded github.configure:", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().githubConfiguration(ids.projectId).version,
     3,
@@ -762,10 +758,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
     .click();
   await page.getByLabel("Remove all repository access").check();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await page
-    .locator(".settings-saved")
-    .getByText("version 4", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   assert.equal(
     f.service.domain().githubConfiguration(ids.projectId).repositories.length,
     0,
@@ -989,14 +982,7 @@ test("Runtime Settings records lowered capacity separately from usage and retain
       exact: false,
     })
     .waitFor();
-  const recordedCapacity = page.locator(".settings-saved");
-  await recordedCapacity
-    .getByText(
-      "Recorded capacity limits: global 1; default project 2; project overrides none.",
-      { exact: false },
-    )
-    .waitFor();
-  assert.equal((await recordedCapacity.innerText()).includes("version"), false);
+  await savedOutcome(page);
   assert.equal(
     f.service.capacityLimits([ids.projectId]).currentUsage.global,
     2,
@@ -1087,9 +1073,12 @@ test("actual source placement retains its original receipt after transfer remove
     submitted = JSON.parse(response.request().postData() ?? "{}"),
     original = await response.json();
   assert.equal(response.status(), 200);
-  await page
-    .getByText("Recorded placement outcome", { exact: false })
-    .waitFor();
+  // The line names the task and project in plain words, with no IDs or versions.
+  const placed = await savedOutcome(page);
+  assert.equal(
+    (await placed.locator("p").innerText()).trim(),
+    "Saved. Conflicting imported task now belongs to Actual membership target.",
+  );
   assert.equal(d.task(taskId).projectId, target);
   d.execute({
     type: "task.configure",
@@ -1148,7 +1137,7 @@ test("unknown committed placement stays reachable after conflict disappearance a
     .getByRole("button", { name: "Record placement", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(d.task(taskId).projectId, target);
   assert.equal(d.task(taskId).version, 2);
@@ -1168,7 +1157,7 @@ test("unknown committed placement stays reachable after conflict disappearance a
     .getByRole("link", { name: "Sync & placement" })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   await capture(page, "1366-unknown-placement-after-navigation");
   for (const status of [400, 403, 409]) {
@@ -1192,10 +1181,10 @@ test("unknown committed placement stays reachable after conflict disappearance a
       });
     });
     await page
-      .getByRole("button", { name: "Reconcile exact submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "Reconcile exact submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .waitFor();
     assert.equal(posts.length, 1 + [400, 403, 409].indexOf(status) + 1);
   }
@@ -1208,12 +1197,10 @@ test("unknown committed placement stays reachable after conflict disappearance a
       posts.push(r.postData() ?? "");
   });
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   assert.deepEqual(await (await response).json(), original);
-  await page
-    .getByText("Recorded. Latest observations", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   assert.deepEqual(posts, Array(5).fill(posts[0]));
   assert.equal(d.task(taskId).version, 2);
   assert.equal(f.runtime.turns, 0);
@@ -1345,6 +1332,26 @@ test("mounted reference and placement fields have unique associated controls", a
   await placements.nth(1).selectOption(ids.projectId);
   assert.equal(await placements.nth(0).inputValue(), target);
   await capture(page, "1366-unique-reference-placement-controls");
+  // Each recorded placement leaves its own line, and the lines say which task they are.
+  const record = page.getByRole("button", {
+    name: "Record placement",
+    exact: true,
+  });
+  await record.nth(0).click();
+  await outcomeMessages(page)
+    .filter({ hasText: /^Saved\. Conflicting imported task now belongs to / })
+    .waitFor();
+  await record.first().click();
+  await outcomeMessages(page)
+    .filter({ hasText: /^Saved\. Second placement now belongs to / })
+    .waitFor();
+  const lines = await outcomeMessages(page).locator("p").allInnerTexts();
+  assert.equal(lines.length, 2);
+  assert.equal(new Set(lines).size, 2);
+  assert.doesNotMatch(
+    lines.join(" "),
+    /[0-9a-f]{8}-[0-9a-f]{4}-|version \d|recorded/i,
+  );
   assert.equal(f.runtime.turns, 0);
 });
 
@@ -1670,7 +1677,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
     .getByRole("button", { name: "Record placement", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   const command = JSON.parse(posts[0] ?? "null");
   assert.equal(
@@ -1698,13 +1705,13 @@ test("non-owner project keeps one unknown placement and its original receipt aft
   );
   assert.equal(
     await page
-      .getByRole("button", { name: "Reconcile exact submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .count(),
     0,
   );
   await openSync(page, "Actual membership target");
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   await capture(page, "1366-non-owner-unknown-placement");
   assert.equal(
@@ -1728,17 +1735,17 @@ test("non-owner project keeps one unknown placement and its original receipt aft
       });
     });
     await page
-      .getByRole("button", { name: "Reconcile exact submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "Reconcile exact submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .waitFor();
     await page.unroute("**/api/operator/commands");
   }
   assert.equal(
     await page
       .getByRole("button", {
-        name: "Review latest placement revision",
+        name: "Review changes",
         exact: true,
       })
       .count(),
@@ -1753,7 +1760,7 @@ test("non-owner project keeps one unknown placement and its original receipt aft
   const observed = await (await read).json();
   assert.equal(observed.data.placements.length, 0);
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(
     posts.length,
@@ -1761,15 +1768,15 @@ test("non-owner project keeps one unknown placement and its original receipt aft
     "reload is an observation, never reconciliation or rekey",
   );
   assert.equal(
-    await page
-      .getByText("Recorded placement outcome", { exact: false })
+    await outcomeMessages(page)
+      .filter({ hasText: /^Saved\./ })
       .count(),
     0,
   );
   assert.equal(
     await page
       .getByRole("button", {
-        name: "Review latest placement revision",
+        name: "Review changes",
         exact: true,
       })
       .count(),
@@ -1793,14 +1800,14 @@ test("non-owner project keeps one unknown placement and its original receipt aft
     });
   });
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(
-    await page
-      .getByText("Recorded. Latest observations", { exact: false })
+    await outcomeMessages(page)
+      .filter({ hasText: /^Saved\./ })
       .count(),
     0,
   );
@@ -1813,34 +1820,28 @@ test("non-owner project keeps one unknown placement and its original receipt aft
     await route.fulfill({ response });
   });
   await page
-    .getByRole("button", { name: "Reconcile exact submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
-  await page
-    .getByText("Recorded. Latest observations", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   assert.deepEqual(posts, Array(6).fill(posts[0]));
   assert.equal(original?.key, command.key);
   assert.equal(original?.result.projectId, destination);
   assert.equal(original?.result.version, 2);
   assert.equal(d.task(taskId).version, 2);
   await openSync(page, "Actual membership target");
-  await page
-    .getByText("Recorded placement outcome", { exact: false })
-    .waitFor();
+  const placed = await savedOutcome(page);
   assert.equal(
     await page
-      .getByRole("button", { name: "Reconcile exact submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .count(),
     0,
   );
-  assert.equal(
-    (
-      await page
-        .getByText("Recorded placement outcome", { exact: false })
-        .innerText()
-    ).includes(`project ${destination}; version 2`),
-    true,
-  );
+  // The receipt fields live in the collapsed Details, not in the message.
+  await placed.getByText("Details", { exact: true }).click();
+  const receipt = await placed.locator("dl").innerText();
+  assert.match(receipt, /Command\s+github\.place/);
+  assert.match(receipt, new RegExp(`Resource\\s+${taskId}`));
+  assert.match(receipt, /Version\s+2/);
   assert.equal(posts.length, 6);
   assert.equal(f.runtime.turns, 0);
   await capture(page, "1366-non-owner-recorded-placement");
@@ -1890,9 +1891,7 @@ test("initial placement conflict requires explicit loaded revision adoption whil
     .getByRole("button", { name: "Record placement", exact: true })
     .click();
   assert.equal((await response).status(), 409);
-  await page
-    .getByText("Configuration changed. Review", { exact: false })
-    .waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
   const first = JSON.parse(posts[0] ?? "null");
   assert.equal(first.expectedVersion, 1);
   assert.equal(first.projectId, ids.projectId);
@@ -1921,21 +1920,19 @@ test("initial placement conflict requires explicit loaded revision adoption whil
   );
   await page
     .getByRole("button", {
-      name: "Review latest placement revision",
+      name: "Review changes",
       exact: true,
     })
     .waitFor();
   await capture(page, "1366-placement-initial-conflict-loaded-revision");
   await page
     .getByRole("button", {
-      name: "Review latest placement revision",
+      name: "Review changes",
       exact: true,
     })
     .click();
   await page
-    .getByText("Latest revision explicitly adopted; input retained.", {
-      exact: true,
-    })
+    .getByText("Loaded the latest version. Your changes are still here.")
     .waitFor();
   assert.equal(
     await page.getByLabel("Placement project", { exact: true }).inputValue(),
@@ -1963,9 +1960,7 @@ test("initial placement conflict requires explicit loaded revision adoption whil
   assert.equal(receipt.key, second.key);
   assert.equal(receipt.result.projectId, target);
   assert.equal(receipt.result.version, 3);
-  await page
-    .getByText("Recorded placement outcome", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   assert.equal(d.task(taskId).projectId, target);
   assert.equal(d.task(taskId).version, 3);
   assert.equal(f.service.githubSources().conflicts().length, 0);
@@ -2020,9 +2015,7 @@ test("profile configuration reload observes its current revision without replaci
   );
   await page.getByRole("button", { name: "Save profile", exact: true }).click();
   assert.equal((await rejected).status(), 409);
-  await page
-    .getByText("Configuration changed. Review", { exact: false })
-    .waitFor();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
   const original = JSON.parse(posts[0] ?? "null");
   assert.equal(
     original.expectedVersion,
@@ -2033,14 +2026,12 @@ test("profile configuration reload observes its current revision without replaci
   await capture(page, "1366-profile-in-place-reload-retained-draft");
   await page
     .getByRole("button", {
-      name: "Review latest profile revision",
+      name: "Review changes",
       exact: true,
     })
     .click();
   await page
-    .getByText("Latest revision explicitly adopted; input retained.", {
-      exact: true,
-    })
+    .getByText("Loaded the latest version. Your changes are still here.")
     .waitFor();
   const saved = page.waitForResponse((r) =>
     r.url().endsWith("/api/operator/commands"),
@@ -2186,15 +2177,15 @@ test("new private input survives a detached receipt and old-session 401 after sa
     assert.equal(
       await page
         .getByRole("button", {
-          name: "Reconcile exact submission",
+          name: "Check whether it saved",
           exact: true,
         })
         .count(),
       0,
     );
     assert.equal(
-      await page
-        .getByText("Recorded. Latest observations", { exact: false })
+      await outcomeMessages(page)
+        .filter({ hasText: /^Saved\./ })
         .count(),
       0,
     );

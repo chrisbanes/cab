@@ -168,9 +168,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
   });
   await page.getByRole("button", { name: "Clear source credential" }).click();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await page
-    .getByRole("button", { name: "Reconcile exact submission" })
-    .waitFor();
+  await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
   assert.equal(d.githubConfiguration(projectId).credentialRef, null);
   assert.equal(
     await page.getByLabel("Source credential choice").isDisabled(),
@@ -183,9 +181,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     true,
   );
   await captureBrowserEvidence(page, "1366-source-unknown-clear");
-  await page
-    .getByRole("button", { name: "Reconcile exact submission" })
-    .click();
+  await page.getByRole("button", { name: "Check whether it saved" }).click();
   await page.getByRole("button", { name: "Set source credential" }).waitFor();
   assert.equal(bodies.length, 2);
   assert.equal(bodies[0], bodies[1]);
@@ -217,7 +213,10 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
   await page.getByLabel("New environment reference").fill("env:lower");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
-    .getByText("Check the highlighted fields.", { exact: true })
+    .getByText(
+      "Couldn't save: check the highlighted fields. Your changes are still here.",
+      { exact: true },
+    )
     .waitFor();
   assert.equal(
     await page.getByLabel("New environment reference").inputValue(),

@@ -4,12 +4,7 @@ import {
   projectConfigurationSchema,
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
-import {
-  ActionLink,
-  Button,
-  ResourceStatus,
-  StatusBadge,
-} from "./components.js";
+import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
 import {
@@ -32,7 +27,6 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
-  SavedNotice,
   reloadDraft,
   submitDraft,
   useDraft,
@@ -171,19 +165,32 @@ function statusLine(
   p: SettingsProps & { projectId: string },
   unknownPlacements: number,
 ) {
-  const saved = (key: string) => p.drafts.saved(`${key}:${p.projectId}`);
+  const saved = (key: string, version: number) =>
+    savedLine(version, p.drafts.saved(`${key}:${p.projectId}`));
   const admission = data.project.paused
     ? "Paused: new admission is held."
     : "Existing admission rules still apply.";
+  const withSaved = (line: string, savedAt: string | null) =>
+    savedAt ? `${line} ${savedAt}.` : line;
   if (tab === "routing")
-    return `${data.project.paused ? `Paused: new admission is held. Routing changes do not resume ${data.project.name ?? "this project"}.` : admission} ${savedLine("Routing", data.routing.version, saved("routing.configure"))}.`;
+    return withSaved(
+      data.project.paused
+        ? `Paused: new admission is held. Routing changes do not resume ${data.project.name ?? "this project"}.`
+        : admission,
+      saved("routing.configure", data.routing.version),
+    );
   if (tab === "github")
-    return `${savedLine("GitHub source", data.source.version, saved("github.configure"))} · ${sourceCredentialSummary(data.source)}`;
+    return [
+      saved("github.configure", data.source.version),
+      sourceCredentialSummary(data.source),
+    ]
+      .filter(Boolean)
+      .join(" · ");
   if (tab === "sync")
     return data.placements.length || unknownPlacements
       ? `${plural(data.placements.length, "conflicting placement")} · ${plural(unknownPlacements, "placement outcome")} to check`
       : "No placement conflicts.";
-  return `${admission} ${savedLine("General", data.project.version, saved("project.configure"))}.`;
+  return withSaved(admission, saved("project.configure", data.project.version));
 }
 
 /** Phone-first summary (frame 121): what is true now and the next step. Hidden on desktop. */
@@ -313,23 +320,11 @@ function GeneralTab(p: TabProps) {
               label="Save project"
               saveDisabled={lines.length === 0}
               discard={() => reloadDraft(d, initial)}
-              onRecorded={p.refreshConfiguration}
+              refresh={p.refreshConfiguration}
+              review={() => d.adoptLatest(data.project.version, initial)}
             />
-            {d.phase === "conflict" && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => d.adoptLatest(data.project.version, initial)}
-              >
-                Review latest project revision
-              </Button>
-            )}
           </form>
         </Panel>
-        <SavedNotice
-          saved={p.drafts.saved(draftKey)}
-          label={`Saved ${data.project.name ?? "project"}`}
-        />
         <CredentialReferences projectId={projectId} data={data} />
       </div>
       <div className="settings-column">

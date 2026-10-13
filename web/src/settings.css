@@ -256,10 +256,6 @@
   width: 100%;
 }
 
-.settings-saved strong {
-  font-weight: var(--weight-medium);
-}
-
 /* Native checkbox drawn as a switch; it stays a checkbox for forms and `check()`. */
 .native-check.settings-switch {
   appearance: none;
