@@ -314,6 +314,11 @@ export interface CoordinationReceipt {
   response: CoordinationToolResponse;
 }
 
+type ReceiptIdentity = Pick<
+  CoordinationReceipt,
+  "taskId" | "assignmentId" | "workId" | "workRevision"
+>;
+
 export interface AssignmentResult {
   resultId: string;
   taskId: string;
@@ -1206,23 +1211,7 @@ export class CoordinationStore {
         text: `Result recorded: ${result.resultId}`,
         success: true,
       };
-      this.db
-        .prepare(`INSERT INTO coordination_receipts
-        (threadId, turnId, callId, tool, payloadHash, taskId, assignmentId,
-          workId, workRevision, response)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(
-          call.threadId,
-          call.turnId,
-          call.callId,
-          call.tool,
-          callHash,
-          result.taskId,
-          result.assignmentId,
-          result.workId,
-          result.workRevision,
-          JSON.stringify(response),
-        );
+      this.insertReceipt(call, result, response);
       return { result, response, replayed: false };
     });
   }
@@ -3955,6 +3944,23 @@ export class CoordinationStore {
     binding: Row,
     response: CoordinationToolResponse,
   ): void {
+    this.insertReceipt(
+      call,
+      {
+        taskId: String(binding.taskId),
+        assignmentId: String(binding.assignmentId),
+        workId: String(binding.workId),
+        workRevision: Number(binding.workRevision),
+      },
+      response,
+    );
+  }
+
+  private insertReceipt(
+    call: CoordinationCall,
+    identity: ReceiptIdentity,
+    response: CoordinationToolResponse,
+  ): void {
     this.db
       .prepare(`INSERT INTO coordination_receipts
       (threadId, turnId, callId, tool, payloadHash, taskId, assignmentId,
@@ -3966,10 +3972,10 @@ export class CoordinationStore {
         call.callId,
         call.tool,
         materialDigest({ tool: call.tool, arguments: call.arguments }),
-        String(binding.taskId),
-        String(binding.assignmentId),
-        String(binding.workId),
-        Number(binding.workRevision),
+        identity.taskId,
+        identity.assignmentId,
+        identity.workId,
+        identity.workRevision,
         JSON.stringify(response),
       );
   }

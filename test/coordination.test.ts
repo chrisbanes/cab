@@ -1791,6 +1791,16 @@ function resultEffectCounts(f: ReturnType<typeof fixture>, lead: string) {
   };
 }
 
+function receiptIdentity(f: ReturnType<typeof fixture>, callId: string) {
+  return {
+    ...(f.db
+      .prepare(
+        "SELECT taskId, assignmentId, workId, workRevision FROM coordination_receipts WHERE callId = ?",
+      )
+      .get(callId) as object),
+  };
+}
+
 test("replacement conversations at the same work revision record their own results", () => {
   for (const summary of ["Completed work", "Different work"]) {
     const f = fixture();
@@ -1819,16 +1829,12 @@ test("replacement conversations at the same work revision record their own resul
           .length,
         2,
       );
-      assert.deepEqual(
-        {
-          ...(f.db
-            .prepare(
-              "SELECT workId, workRevision FROM coordination_receipts WHERE callId = 'call-lead-new'",
-            )
-            .get() as object),
-        },
-        { workId: "work-lead-new", workRevision: 1 },
-      );
+      assert.deepEqual(receiptIdentity(f, "call-lead-new"), {
+        taskId: taskA,
+        assignmentId: lead,
+        workId: "work-lead-new",
+        workRevision: 1,
+      });
       assert.equal(
         (
           f.db
@@ -1914,6 +1920,138 @@ test("same-work retries reuse the exact work result", () => {
       /Result already recorded with different content/,
     );
     assert.deepEqual(resultEffectCounts(f, lead), after);
+  } finally {
+    f.close();
+  }
+});
+
+test("a stored-result retry records the selected result's receipt identity", () => {
+  const f = fixture();
+  try {
+    f.coordination.recordResult(
+      report("thread-nested-a", "turn-nested-a", "call-retry-nested"),
+    );
+    assert.ok(f.coordination.bindDeliveryBatch(childA, "work-child-a"));
+    const lead = String(f.leadAssignment(taskA)?.id);
+    const first = f.coordination.recordResult(
+      report("thread-child-a", "turn-child-a", "call-child-first"),
+    );
+    const expectedFirst = {
+      taskId: taskA,
+      assignmentId: childA,
+      workId: "work-child-a",
+      workRevision: 1,
+    };
+    assert.deepEqual(receiptIdentity(f, "call-child-first"), expectedFirst);
+
+    f.db
+      .prepare("UPDATE domain_assignments SET state = 'running' WHERE id = ?")
+      .run(childA);
+    // Writer-level attribution fixture: diverge the stored result from the
+    // caller's binding so the receipt shows which identity the writer used.
+    // This is not a product contract that results and bindings may differ.
+    f.db
+      .prepare(
+        "UPDATE coordination_results SET taskId = ?, assignmentId = ?, workRevision = 7 WHERE workId = 'work-child-a'",
+      )
+      .run(taskB, childB);
+    const effect = () =>
+      (
+        f.db
+          .prepare(
+            "SELECT state FROM execution_pending_effects WHERE workId = 'work-child-a' AND effectKey = 'assignment-result'",
+          )
+          .get() as { state: string }
+      ).state;
+    f.db
+      .prepare(
+        "UPDATE execution_pending_effects SET state = 'pending' WHERE workId = 'work-child-a' AND effectKey = 'assignment-result'",
+      )
+      .run();
+    const before = resultEffectCounts(f, lead);
+    const retryCall = report(
+      "thread-child-a",
+      "turn-child-a",
+      "call-child-retry",
+    );
+
+    f.db.exec(
+      "CREATE TRIGGER fail_receipt BEFORE INSERT ON coordination_receipts BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END",
+    );
+    assert.throws(
+      () => f.coordination.recordResult(retryCall),
+      /injected receipt failure/,
+    );
+    assert.deepEqual(resultEffectCounts(f, lead), before);
+    assert.equal(f.coordination.receipt(retryCall), undefined);
+    assert.equal(effect(), "pending");
+    f.db.exec("DROP TRIGGER fail_receipt");
+
+    const retry = f.coordination.recordResult(retryCall);
+    assert.equal(retry.replayed, false);
+    assert.equal(retry.result.resultId, first.result.resultId);
+    assert.deepEqual(receiptIdentity(f, "call-child-retry"), {
+      taskId: taskB,
+      assignmentId: childB,
+      workId: "work-child-a",
+      workRevision: 7,
+    });
+    assert.equal(effect(), "settled");
+    const after = { ...before, receipts: before.receipts + 1 };
+    assert.deepEqual(resultEffectCounts(f, lead), after);
+
+    f.reopen();
+    const replay = f.coordination.recordResult(retryCall);
+    assert.equal(replay.replayed, true);
+    assert.equal(replay.result.resultId, first.result.resultId);
+    assert.deepEqual(replay.response, retry.response);
+    assert.throws(
+      () =>
+        f.coordination.recordResult(
+          report(
+            "thread-child-a",
+            "turn-child-a",
+            "call-child-retry",
+            "Different work",
+          ),
+        ),
+      /different content/,
+    );
+    assert.deepEqual(resultEffectCounts(f, lead), after);
+  } finally {
+    f.close();
+  }
+});
+
+test("binding-sourced tool receipts record the caller's binding identity", () => {
+  const f = fixture();
+  try {
+    f.coordination.delegate({
+      threadId: "thread-child-a",
+      turnId: "turn-child-a",
+      callId: "call-del",
+      tool: "ensemble_delegate",
+      arguments: { profileId: workerProfile, brief: "Sub" },
+    });
+    f.coordination.requestQuestion({
+      threadId: "thread-nested-a",
+      turnId: "turn-nested-a",
+      callId: "call-q",
+      tool: "ensemble_ask_question",
+      arguments: { question: "Which?" },
+    });
+    assert.deepEqual(receiptIdentity(f, "call-del"), {
+      taskId: taskA,
+      assignmentId: childA,
+      workId: "work-child-a",
+      workRevision: 1,
+    });
+    assert.deepEqual(receiptIdentity(f, "call-q"), {
+      taskId: taskA,
+      assignmentId: nestedA,
+      workId: "work-nested-a",
+      workRevision: 1,
+    });
   } finally {
     f.close();
   }

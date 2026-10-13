@@ -544,6 +544,29 @@ test("a receipt commit failure rolls back the result and complete retained evide
       "pending",
     );
     assert.equal(f.domain.assignment(assignmentId).state, "running");
+    const lead = String(f.domain.ensureLeadAssignment(taskId)?.id);
+    assert.equal(f.coordination.inboxEvents(lead).length, 0);
+
+    f.db.exec("DROP TRIGGER fail_coordination_receipt");
+    const retry = f.coordination.recordResult(call, value);
+    assert.equal(retry.replayed, false);
+    assert.equal(f.coordination.inboxEvents(lead).length, 1);
+    assert.equal(
+      (
+        f.db
+          .prepare("SELECT COUNT(*) AS count FROM retained_result_evidence")
+          .get() as { count: number }
+      ).count,
+      1,
+    );
+    assert.equal(
+      (
+        f.db
+          .prepare("SELECT state FROM execution_pending_effects WHERE workId=?")
+          .get(workId) as { state: string }
+      ).state,
+      "settled",
+    );
   } finally {
     f.close();
   }
