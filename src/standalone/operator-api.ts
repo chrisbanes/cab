@@ -105,6 +105,7 @@ import {
 import {
   type ConversationHistoryBinding,
   isDisclosable,
+  prepareExclusions,
   sanitizeConversationText,
 } from "./conversation-history.js";
 import type { CoordinationView } from "./coordination-view.js";
@@ -379,6 +380,12 @@ function githubIssueUrl(repositoryName: string | null, number: number | null) {
     : null;
 }
 
+/** See `OperatorApi.exclusionBase`; one read attempt owns it. */
+type ExclusionBase = {
+  readonly values: readonly (readonly [tag: string | null, value: string])[];
+  readonly covered: ReadonlySet<string>;
+} | null;
+
 export class OperatorApi {
   private readonly commands: DomainCommands;
   private readonly activeReviewSends = new Map<string, string>();
@@ -509,37 +516,40 @@ export class OperatorApi {
       throw new OperatorApiError(404, "not-found");
     return task;
   }
-  private async exclusions(
-    projectId?: string,
-    taskId?: string,
-    historyBindings: readonly ConversationHistoryBinding[] = [],
-    /** Only for dedicated instruction views: `profile:ID`/`project:ID` texts to leave unredacted. */
-    disclose: readonly string[] = [],
-  ): Promise<string[] | undefined> {
+  /**
+   * One read's global exclusion inputs: instruction revisions tagged for dedicated
+   * disclosure, credentials and repository paths, read once and null past a bound.
+   * Pass it to every `exclusions` call of the read; post-await fences stay live.
+   */
+  private exclusionBase(): ExclusionBase {
     try {
       const d = this.domain(),
         profiles = d.profiles(),
         projects = d.projects();
-      const values = [...this.controlPaths],
-        covered = new Set<string>();
+      const values: [tag: string | null, value: string][] = [],
+        covered = new Set<string>(),
+        add = (...items: string[]) => {
+          for (const value of items) values.push([null, value]);
+        };
+      add(...this.controlPaths);
       const claude = d.claudeTokenReference();
-      values.push(...this.service.gitHubCredentialExclusions().redactions);
-      if (claude) values.push(...claudeTokenExclusions(claude).redactions);
+      add(...this.service.gitHubCredentialExclusions().redactions);
+      if (claude) add(...claudeTokenExclusions(claude).redactions);
       // Bound retained-revision lookups before iterating persisted counters.
       let remaining = 128;
-      if (profiles.length + projects.length > remaining) return undefined;
+      if (profiles.length + projects.length > remaining) return null;
       for (const profile of profiles) {
         const count = Number(profile.version);
         if (!Number.isSafeInteger(count) || count < 1 || count > remaining)
-          return undefined;
+          return null;
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
-          if (!disclose.includes(`profile:${profile.id}`))
-            values.push(
-              String(
-                d.profileRevision(String(profile.id), revision).instructions,
-              ),
-            );
+          values.push([
+            `profile:${profile.id}`,
+            String(
+              d.profileRevision(String(profile.id), revision).instructions,
+            ),
+          ]);
           covered.add(`profile:${profile.id}:${revision}`);
         }
       }
@@ -547,11 +557,10 @@ export class OperatorApi {
         const id = String(project.id),
           count = Number(project.instructionsRevision);
         if (!Number.isSafeInteger(count) || count < 1 || count > remaining)
-          return undefined;
+          return null;
         remaining -= count;
         for (let revision = 1; revision <= count; revision++) {
-          if (!disclose.includes(`project:${id}`))
-            values.push(d.instructionRevision(id, revision));
+          values.push([`project:${id}`, d.instructionRevision(id, revision)]);
           covered.add(`project:${id}:${revision}`);
         }
         const g = d.githubConfiguration(id);
@@ -561,14 +570,35 @@ export class OperatorApi {
         ])
           if (ref) {
             const envKey = ref.slice(4);
-            values.push(ref, envKey);
+            add(ref, envKey);
             const value = process.env[envKey];
-            if (value) values.push(value);
+            if (value) add(value);
           }
-        if (g.repositories.length > 128) return undefined;
+        if (g.repositories.length > 128) return null;
         for (const repo of g.repositories)
-          values.push(repo.path, repo.gitCommonDirectory);
+          add(repo.path, repo.gitCommonDirectory);
       }
+      return { values, covered };
+    } catch {
+      return null;
+    }
+  }
+  /** A prepared list from `base` plus the task's own captured-revision checks and paths. */
+  private async exclusions(
+    projectId?: string,
+    taskId?: string,
+    historyBindings: readonly ConversationHistoryBinding[] = [],
+    /** Only for dedicated instruction views: `profile:ID`/`project:ID` texts to leave unredacted. */
+    disclose: readonly string[] = [],
+    base: ExclusionBase = this.exclusionBase(),
+  ): Promise<readonly string[] | undefined> {
+    if (!base) return undefined;
+    try {
+      const d = this.domain(),
+        { covered } = base;
+      const values = base.values.flatMap(([tag, value]) =>
+        tag !== null && disclose.includes(tag) ? [] : [value],
+      );
       if (taskId) {
         // The 128-row bound is this task's own retained rows, counted before any row is read.
         if (this.service.taskRetainedRowsExceed(taskId, 128)) return undefined;
@@ -609,7 +639,7 @@ export class OperatorApi {
         // execution and explicit inspection.
         values.push(...this.service.taskWorkspaceRedactionPaths(taskId));
       }
-      return [...new Set(values.filter(Boolean))];
+      return prepareExclusions([...new Set(values.filter(Boolean))]);
     } catch {
       return undefined;
     }
@@ -2001,7 +2031,8 @@ export class OperatorApi {
     const p = this.requireProject(projectId),
       rows = this.domain().tasks(projectId),
       snapshot = this.workspaceSnapshot(rows.map((t) => String(t.id))),
-      excluded = await this.exclusions(projectId);
+      base = this.exclusionBase(),
+      excluded = await this.exclusions(projectId, undefined, [], [], base);
     const response = {
       data: {
         project: this.project(p, excluded),
@@ -2012,7 +2043,7 @@ export class OperatorApi {
             projectId,
             title: this.safe(
               t.title,
-              await this.exclusions(projectId, String(t.id)),
+              await this.exclusions(projectId, String(t.id), [], [], base),
             ),
             version: Number(t.version),
             state: t.state,
@@ -2105,15 +2136,15 @@ export class OperatorApi {
       state: issue?.observedState ?? null,
     };
   }
-  private async taskSummary(taskId: string) {
-    return (await this.taskSummaryRead(taskId)).summary;
+  private async taskSummary(taskId: string, base?: ExclusionBase) {
+    return (await this.taskSummaryRead(taskId, base)).summary;
   }
   /** The summary plus the coordination view and exclusions it was derived from. */
-  private async taskSummaryRead(taskId: string) {
+  private async taskSummaryRead(taskId: string, base?: ExclusionBase) {
     const d = this.domain(),
       task = d.task(taskId),
       projectId = String(task.projectId),
-      excluded = await this.exclusions(projectId, taskId),
+      excluded = await this.exclusions(projectId, taskId, [], [], base),
       view = this.coordination().readTask(taskId),
       execution = this.execution(task),
       assignments = d.assignments(taskId);
@@ -2219,7 +2250,8 @@ export class OperatorApi {
     if (query.cursor && index < 0) throw new OperatorApiError(409, "conflict");
     const page = catalog.slice(index + 1, index + 1 + query.limit),
       snapshot = this.workspaceSnapshot(page.map((t) => t.id)),
-      tasks = await Promise.all(page.map((t) => this.taskSummary(t.id)));
+      base = this.exclusionBase(),
+      tasks = await Promise.all(page.map((t) => this.taskSummary(t.id, base)));
     this.requireWorkspaceSnapshot(snapshot);
     return taskListPageSchema.parse({
       data: {
@@ -2245,7 +2277,8 @@ export class OperatorApi {
     const snapshot = this.workspaceSnapshot(
       catalog.filter((t) => t.projectId === projectId).map((t) => t.id),
     );
-    const excluded = await this.exclusions(projectId);
+    const base = this.exclusionBase(),
+      excluded = await this.exclusions(projectId, undefined, [], [], base);
     const permitted = new Set(
       d.routingCandidates(projectId).map((p) => String(p.profileId)),
     );
@@ -2264,7 +2297,7 @@ export class OperatorApi {
         .filter((t) => t.projectId === projectId)
         .map(async (t) => {
           const row = d.task(t.id),
-            safe = await this.exclusions(projectId, t.id);
+            safe = await this.exclusions(projectId, t.id, [], [], base);
           return {
             id: t.id,
             title: this.safe(row.title, safe),
@@ -2430,13 +2463,17 @@ export class OperatorApi {
       items: InboxItem[] = [];
     const catalog = this.catalog();
     const tasks = catalog.map((t) => this.requireTask(t.id)),
-      snapshot = this.workspaceSnapshot(catalog.map((t) => t.id));
+      snapshot = this.workspaceSnapshot(catalog.map((t) => t.id)),
+      exclusionBase = this.exclusionBase();
     let unavailable = false;
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]!;
       const taskId = String(task.id);
       try {
-        const { summary, view, excluded } = await this.taskSummaryRead(taskId);
+        const { summary, view, excluded } = await this.taskSummaryRead(
+          taskId,
+          exclusionBase,
+        );
         if (!excluded) unavailable = true;
         const base = {
           taskId,
@@ -2990,9 +3027,16 @@ export class OperatorApi {
     disclose: string[],
     projectId?: string,
     taskId?: string,
+    base?: ExclusionBase,
   ) {
     const visibility = this.visibilityToken();
-    const excluded = await this.exclusions(projectId, taskId, [], disclose);
+    const excluded = await this.exclusions(
+      projectId,
+      taskId,
+      [],
+      disclose,
+      base,
+    );
     if (visibility !== this.visibilityToken())
       throw new OperatorApiError(503, "unavailable");
     return excluded;
@@ -3302,13 +3346,17 @@ export class OperatorApi {
       );
       const page = rows.slice(0, limit);
       const store = this.service.executionDiagnostics();
-      const excludedByTask = new Map<string, readonly string[] | undefined>();
+      const excludedByTask = new Map<string, readonly string[] | undefined>(),
+        base = this.exclusionBase();
       const executions = [];
       for (const request of page) {
         const taskId = String(request.taskId);
         const projectId = String(this.requireTask(taskId).projectId);
         if (!excludedByTask.has(taskId))
-          excludedByTask.set(taskId, await this.exclusions(projectId, taskId));
+          excludedByTask.set(
+            taskId,
+            await this.exclusions(projectId, taskId, [], [], base),
+          );
         executions.push(
           this.executionSummary(
             request,
@@ -3397,11 +3445,13 @@ export class OperatorApi {
         this.requireExecution(workId);
       const d = this.domain(),
         profileId = String(d.assignment(assignmentId).profileId);
-      const general = await this.exclusions(projectId, taskId);
+      const base = this.exclusionBase(),
+        general = await this.exclusions(projectId, taskId, [], [], base);
       const disclosing = await this.instructionExclusions(
         [`profile:${profileId}`, `project:${projectId}`],
         projectId,
         taskId,
+        base,
       );
       const items = record
         ? (this.service.executionDiagnostics()?.inputs(workId) ?? [])
@@ -4007,7 +4057,8 @@ export class OperatorApi {
     const page = rows.slice(0, query.limit),
       matches = [],
       versions = new Map<string, number>(),
-      workspaceVisibilities = new Map<string, string>();
+      workspaceVisibilities = new Map<string, string>(),
+      base = this.exclusionBase();
     let omittedCount = 0;
     for (const row of page) {
       try {
@@ -4017,7 +4068,13 @@ export class OperatorApi {
           workspaceVisibility = this.service.taskWorkspaceVisibility(taskId),
           snapshot = workspaceVisibilities.get(taskId) ?? workspaceVisibility;
         workspaceVisibilities.set(taskId, snapshot);
-        const excluded = await this.exclusions(String(t.projectId), taskId),
+        const excluded = await this.exclusions(
+            String(t.projectId),
+            taskId,
+            [],
+            [],
+            base,
+          ),
           view = this.coordination().readTask(taskId),
           resultId = row.resultId === null ? null : String(row.resultId),
           sourceId = row.sourceId === null ? null : String(row.sourceId),
@@ -4482,7 +4539,8 @@ export class OperatorApi {
       snapshot = this.workspaceSnapshot(
         [...taskRows.values()].flatMap((rows) => rows.map((t) => String(t.id))),
       ),
-      excluded = await this.exclusions(),
+      base = this.exclusionBase(),
+      excluded = await this.exclusions(undefined, undefined, [], [], base),
       limits = this.service.capacityLimits(projects.map((p) => String(p.id)));
     const response = {
       data: {
@@ -4502,7 +4560,13 @@ export class OperatorApi {
                   const taskId = String(t.id),
                     assignments = d.assignments(taskId),
                     known = new Set(assignments.map((a) => String(a.id))),
-                    taskExcluded = await this.exclusions(id, taskId);
+                    taskExcluded = await this.exclusions(
+                      id,
+                      taskId,
+                      [],
+                      [],
+                      base,
+                    );
                   const records = this.service
                     .recoveryForTask(taskId)
                     .filter(
