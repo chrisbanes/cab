@@ -23680,7 +23680,7 @@
                       "enabled": false
                     },
                     "X:8tnXG": {
-                      "content": "Retry submission",
+                      "content": "Retry answer",
                       "textGrowth": "auto",
                       "fill": "$X:--primary-foreground",
                       "fontFamily": "$font-sans"
@@ -91051,7 +91051,7 @@
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Submission RV-42 · original payload",
+              "content": "Your review · 2 comments and summary",
               "lineHeight": 1.4,
               "fontFamily": "$font-mono",
               "fontSize": 12,
