@@ -1,8 +1,11 @@
 # GitHub source credentials — 2026-10-13
 
-Live qualification is pending. This record describes offline implementation and
-validation; it does not demonstrate that a launchd service can read the selected
-real source credential, preview the real Project selection or import its issue.
+Bounded live qualification passed on candidate
+`9395520e1cb23937f0e7f399b5c3d7bef67c4d89` (tree
+`243d835681bece8b72c22ab3c6ffcc37efc11cb5`). The disposable launchd service
+read the explicitly selected real gh source credential, previewed and activated
+the captured Project selection, then imported its one issue. This evidence is
+candidate-scoped; it is not production deployment or general process containment.
 
 ## Candidate and surfaces
 
@@ -96,8 +99,11 @@ review then identified unsafe unconditional bootout after failed/ambiguous
 bootstrap. The repair requires exact private job metadata and observed PID command
 proof before any stop. Offline cases prove foreign-label and unknown bootstrap
 outcomes receive zero bootout/removal, while an exact owned job can stop and clean
-up even without startup PID capture. The final full check and renewed review on
-this ownership repair are pending.
+up even without startup PID capture. The final full `npm run check` on
+`9395520e1cb23937f0e7f399b5c3d7bef67c4d89` exited 0: type checking, lint,
+formatting and build passed; 1,851 tests ran with 1,850 passes, zero failures and
+one skip (227,103.758 ms). The renewed independent review returned SHIP for all
+three reviewed contracts; both findings were resolved.
 Complete private command
 logs remain in the delivery run directory, not in the repository. Initial loopback
 sandbox failures required exact host retries. The retained
@@ -106,7 +112,7 @@ filename; its original sandbox output was overwritten. The private delivery
 record labels that evidence accurately and records the separate overwritten
 initial helper log. Full-check attempt logs are preserved separately.
 
-## Live boundary and remaining evidence
+## Live boundary and measured outcome
 
 The harness prepare-only interface accepts root-supplied complete one-page Project
 metadata and exact private root/label/Node/CLI/port paths. It performs no provider,
@@ -120,15 +126,45 @@ and exclusive private marker guard the first and only bootstrap. The harness
 never edits or resets the lead's allowance. The outer monotonic limit is 300
 seconds, startup/authentication 60 seconds, preview 60 seconds, optional same-key
 unknown-reply reconciliation 30 seconds, refresh 90 seconds and cleanup reserve
-30 seconds. Cleanup first proves the exact private plist/program/arguments and observed PID
-command bindings. Bootstrap rejection, ambiguous completion, label presence or
-preflight absence never implies ownership. Unproved or foreign ownership receives
+30 seconds. Cleanup first proves the exact private plist/program/arguments and
+observed PID command bindings. Bootstrap rejection, ambiguous completion, label
+presence or preflight absence never implies ownership. Unproved or foreign ownership receives
 no bootout or signals. Deleting its exact root then requires label absence,
 recorded owned PID exit, a closed loopback port and safe terminal log inspection.
 Uncertainty retains private state and reports a hold.
 
-The single live allowance remains unspent. Before execution, the lead must inspect
-the final candidate, full checks and independent integrated review, then supply
-fresh exact metadata and prepared paths, and record consumption immediately before
-bootstrap. Completion requires separate real preview/activation/import evidence,
-zero model turns/provider writes and proved cleanup. No live success is claimed.
+The lead consumed the single allowance at `2026-10-13T04:47:42.229546Z`;
+remaining attempts are zero. Preparation passed actual `plutil` lint and private
+mode checks (0700 root; 0600 plist, auth and password files). The lead refreshed
+complete one-page Project 6 metadata for the exact filter
+`is:issue repo:chrisbanes/ensemble label:ready-for-agent status:"In progress" priority:P2`,
+which returned only issue #886.
+
+The created GUI 501 job was `com.ensemble.source944.20261013`, using loopback port
+43844. Its authenticated production operator path used real SQLite and local
+project `06477398-2846-4b4a-ad13-d8df6a9695d0`, selection `qualification-944`,
+source version 2. Preview and receipt/readback activation succeeded while imported
+count was still zero. A separate explicit refresh then imported exactly issue
+#886, node `I_kwDORzdwYM8AAAABWbBmBQ`, repository `R_kgDORzdwYA`; readiness label
+`ready-for-agent` was true and source observations were complete. The project
+remained paused, routing disabled and repository placements empty. Real SQLite
+assertions found zero assignments and zero delivery attempts; the run used zero
+model turns and zero GitHub writes.
+
+The owned execution exited 0. The sanitized receipt reported cleanup `removed`,
+exact ownership proved, label absent, port closed and owned PID exited, with no
+ownership uncertainty. Both owned terminal logs passed token-pattern/canary
+inspection before deletion (`safe:true`, two files inspected). The lead then
+independently confirmed the exact label absent, port closed and private fixture
+absent. Service data, raw logs and auth artifacts were removed only after those
+proofs. The sanitized receipt retains no numeric PID, so none is asserted here;
+this does not prove complete descendant containment. Production and Haze were
+unchanged by this qualification.
+
+The sanitized output was written at `2026-10-13T04:47:52.105516Z`, about 9.876
+seconds after allowance consumption using file timestamps. This is a coarse run
+interval, not a per-phase performance measurement. Safe output, the zero-byte
+stderr file and the consumed record remain outside the deleted fixture in the
+private delivery directory. No raw token output or matched secret bytes are
+included in this record. The earlier host-status/lost-log gap above remains
+unresolved and is not superseded by this successful controlled qualification.

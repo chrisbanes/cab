@@ -177,17 +177,21 @@ before its first PID capture. Foreign or unproved ownership retains the fixture
 without bootout or signals; label presence or preflight absence is insufficient.
 
 Only proved ownership permits stopping the exact created GUI job. After label
-absence, recorded owned process exit and closed loopback port are proved, inspect only the two owned
-stdout/stderr logs for standard GitHub token prefixes and fixed qualification
-canaries. A failed inspection returns controlled metadata and retains the private
+absence, recorded owned process exit and closed loopback port are proved, inspect
+only the two owned stdout/stderr logs for standard GitHub token prefixes and fixed
+qualification canaries. A failed inspection returns controlled metadata and retains the private
 fixture and original protected logs for recovery; matched content is never
 extracted, copied, printed or included in public evidence. Delete the exact
 disposable root only after that inspection passes within the cleanup deadline.
 Uncertain ownership or an exhausted cleanup deadline retains private state and
 reports an unknown hold. Never kill a process by name or infer stopped
 provider reads from synchronizer shutdown. Production and Haze installations
-remain separate. Live qualification is pending until dated evidence records the
-actual preview, import and cleanup outcome.
+remain separate. The bounded source qualification passed on candidate
+`9395520e1cb23937f0e7f399b5c3d7bef67c4d89`: real preview and activation preceded
+the separate import, with zero model turns/GitHub writes and proved cleanup. See
+[the dated evidence](../evidence/944-gh-source-credential-2026-10-13.md) for exact
+results and limits. Its single allowance is consumed; rerunning requires separate
+authorization and a fresh bound preparation.
 
 ### Claude subscription token
 
