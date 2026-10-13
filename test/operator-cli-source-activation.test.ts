@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 import { test } from "node:test";
+import type { SourceCredentialReason } from "../src/standalone/github-source-credential.js";
 import { databaseDigest } from "./fixtures/database-digest.js";
 import { createFakeGh } from "./fixtures/fake-gh.js";
 import { startCliOperator } from "./fixtures/operator-cli.js";
@@ -21,6 +22,7 @@ async function world(
 ) {
   const reader = {
     mode: "complete" as "complete" | "incomplete" | "throw",
+    reason: "rate-limited" as "rate-limited" | SourceCredentialReason,
     reads: 0,
   };
   const o = await startCliOperator(t, {
@@ -34,7 +36,7 @@ async function world(
         if (reader.mode === "throw") throw new Error("provider unavailable");
         return reader.mode === "complete"
           ? { complete: true, issues: [], reason: null }
-          : { complete: false, issues: [], reason: "rate-limited" };
+          : { complete: false, issues: [], reason: reader.reason };
       },
     }),
   });
@@ -166,6 +168,45 @@ test("preview reports each unusable GitHub CLI credential with actionable safe g
       assert.ok(!result.out.includes("gho_fake-canary-942"));
     });
   }
+});
+
+test("preview preserves a credential refusal returned after a usable preflight", async (t) => {
+  const w = await world(t);
+  const current = (await w.config()).source;
+  assert.equal(current.credential.usable, true);
+  w.reader.mode = "incomplete";
+  w.reader.reason = "gh-not-signed-in";
+  const refused = await w.cli("rw", [
+    "project",
+    "preview-source",
+    w.ids.atlas,
+    "--selection",
+    "S-1",
+    "--expected-version",
+    String(current.version),
+  ]);
+  assert.equal(refused.code, 4, refused.out);
+  const error = refused.json().error;
+  assert.equal(
+    error.message,
+    "GitHub CLI is not signed in. Run gh auth login on the service host or change the credential in GitHub source settings, then retry preview.",
+  );
+  assert.deepEqual(
+    {
+      service: error.request.service,
+      scope: error.request.scope,
+      type: error.request.type,
+      key: error.request.key,
+    },
+    {
+      service: w.s.f.service.operatorCredentials().installationId(),
+      scope: `project:${w.ids.atlas}`,
+      type: "github.preview",
+      key: error.request.key,
+    },
+  );
+  assert.match(error.request.key, /^[0-9a-f-]{36}$/);
+  assert.equal(w.reader.reads, 1);
 });
 
 test("preview-source activates after a complete read and reports the live state", async (t) => {

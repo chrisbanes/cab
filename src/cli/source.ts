@@ -567,11 +567,14 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
           if (
             error instanceof CliError &&
             error.code === "conflict" &&
-            sourceCredentialReasons.some(
-              (reason) => error.message === sourceCredentialExplanation(reason),
-            )
+            error.extra.credentialReason &&
+            sourceCredentialReasons.includes(error.extra.credentialReason)
           )
-            throw error;
+            throw new CliError(
+              "conflict",
+              sourceCredentialExplanation(error.extra.credentialReason),
+              error.extra,
+            );
           if (error instanceof CliError && error.code === "conflict")
             throw new CliError(
               "conflict",

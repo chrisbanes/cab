@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { constants } from "node:fs";
 import { chmod, mkdir, open, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { constants } from "node:fs";
 import { z } from "zod";
-import { operatorCredentialTokenSchema } from "../operator/contracts.js";
+import {
+  operatorCredentialTokenSchema,
+  type sourceCredentialReasonSchema,
+} from "../operator/contracts.js";
 import type { RequestIdentity } from "./types.js";
 
 export class CliError extends Error {
@@ -16,6 +19,8 @@ export class CliError extends Error {
       requestId?: string;
       retryable?: boolean;
       status?: number;
+      /** Validated source-credential refusal metadata from the service API. */
+      credentialReason?: z.infer<typeof sourceCredentialReasonSchema>;
       /** Set on write failures so the envelope carries the receipt identity. */
       request?: RequestIdentity;
     } = {},

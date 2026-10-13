@@ -116,16 +116,30 @@ test("sources and delivery journey through the CLI, read back as the operator UI
       ["S-1", false],
     ],
   );
+  const activated = await w.ok("rw", [
+    "project",
+    "preview-source",
+    projectId,
+    "--selection",
+    "repo",
+    "--expected-version",
+    String(saved.source.version),
+  ]);
+  assert.equal(activated.data.current.active, true);
+  const activatedConfiguration = await configuration();
+  assert.equal(activatedConfiguration.source.selections[0].active, true);
   const clearCredential = await w.s.sessionPost("/api/operator/commands", {
     type: "github.configure",
     key: randomUUID(),
     projectId,
-    expectedVersion: saved.source.version,
+    expectedVersion: activatedConfiguration.source.version,
     credentialRef: null,
-    selections: saved.source.selections.map((selection: Json) => ({
-      id: selection.id,
-      keep: true,
-    })),
+    selections: activatedConfiguration.source.selections.map(
+      (selection: Json) => ({
+        id: selection.id,
+        keep: true,
+      }),
+    ),
     readiness: saved.source.readiness,
     repositories: saved.source.repositories,
   });

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
+import { CliError } from "../src/cli/connections.js";
+import { ServiceClient } from "../src/cli/transport.js";
 import { cliCapabilities } from "../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../src/standalone/operator-credentials.js";
 import { OperatorWebBoundary } from "../src/standalone/operator-web.js";
@@ -8,6 +10,83 @@ import { databaseDigest } from "./fixtures/database-digest.js";
 import { startCliService } from "./fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
+
+test("command transport retains only validated source credential refusal metadata", async () => {
+  const command = JSON.stringify({ type: "github.preview" });
+  const client = (status: number, body: unknown) =>
+    new ServiceClient(
+      "https://service.test",
+      "test-only-bearer",
+      async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+  const rejected = (promise: Promise<unknown>) =>
+    promise.then(
+      () => {
+        throw new Error("Expected the command to be rejected.");
+      },
+      (error: unknown) => error,
+    );
+  const denied = await rejected(
+    client(409, {
+      error: {
+        code: "conflict",
+        message: "Actionable source guidance.",
+        fieldPaths: ["credentialRef"],
+        credentialReason: "gh-not-signed-in",
+      },
+    }).command(command, 1000),
+  );
+  assert.ok(denied instanceof CliError);
+  assert.equal(denied.extra.status, 409);
+  assert.equal(denied.extra.retryable, false);
+  assert.equal(denied.extra.credentialReason, "gh-not-signed-in");
+  assert.match(
+    denied.message,
+    /Actionable source guidance.*Fields: credentialRef/,
+  );
+
+  for (const [status, body, code, expectedReason] of [
+    [
+      409,
+      {
+        error: {
+          code: "conflict",
+          message: "Malformed metadata.",
+          credentialReason: "gh-from-somewhere-else",
+        },
+      },
+      "rejected",
+      undefined,
+    ],
+    [
+      409,
+      { error: { code: "conflict", message: "Ordinary conflict." } },
+      "conflict",
+      undefined,
+    ],
+    [
+      503,
+      {
+        error: {
+          code: "conflict",
+          message: "Ignored on server failure.",
+          credentialReason: "gh-not-signed-in",
+        },
+      },
+      "command-outcome-unknown",
+      undefined,
+    ],
+  ] as const) {
+    const error = await rejected(client(status, body).command(command, 1000));
+    assert.ok(error instanceof CliError);
+    assert.equal(error.code, code);
+    assert.equal(error.extra.credentialReason, expectedReason);
+  }
+});
 
 test("bearer credentials read through the service under server-side route authority", async (t) => {
   const s = await startCliService(t);
