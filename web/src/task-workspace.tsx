@@ -180,6 +180,24 @@ const unknownMessage = (type: OperatorCommand["type"]) =>
   `We couldn't confirm ${writeCopy(type).unknown}. Your draft is kept.`;
 const rejectedMessage = (type: OperatorCommand["type"], code: string) =>
   `${writeCopy(type).failed}: ${failureCause(code)}. Your draft is kept.`;
+/** A Results or Changes write whose response was lost: its exact request and the warning. */
+const unconfirmedOf = (
+  taskId: string,
+  input: OperatorCommand,
+  code?: string,
+) => ({
+  input: structuredClone(input),
+  outcome: {
+    tone: "warning" as const,
+    message: unknownMessage(input.type),
+    details: detailRows({
+      command: input.type,
+      resource: taskId,
+      requestKey: input.key,
+      ...(code ? { code } : {}),
+    }),
+  },
+});
 const changedMessage =
   "This task changed since you opened it. Your draft is kept.";
 export function TaskWorkspace({
@@ -211,19 +229,7 @@ export function TaskWorkspace({
   // from the current selection, even after the page is left and reopened.
   const unconfirmed = state.unconfirmed;
   const auxInFlight = useRef<OperatorCommand | null>(null);
-  const unconfirmedOf = (input: OperatorCommand, code?: string) => ({
-    input: structuredClone(input),
-    outcome: {
-      tone: "warning" as const,
-      message: unknownMessage(input.type),
-      details: detailRows({
-        command: input.type,
-        resource: taskId,
-        requestKey: input.key,
-        ...(code ? { code } : {}),
-      }),
-    },
-  });
+
   const focusUnconfirmed = useRef(false);
   // The message that follows a reply replaces the control the operator used, so it takes
   // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
@@ -484,7 +490,7 @@ export function TaskWorkspace({
         };
       }
       if (auxInFlight.current)
-        state.unconfirmed = unconfirmedOf(auxInFlight.current);
+        state.unconfirmed = unconfirmedOf(taskId, auxInFlight.current);
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -823,7 +829,7 @@ export function TaskWorkspace({
         setAux(null);
         // The control is off now, so the check takes the focus it held.
         focusUnconfirmed.current = true;
-        state.unconfirmed = unconfirmedOf(input, outcome.code);
+        state.unconfirmed = unconfirmedOf(taskId, input, outcome.code);
       } else {
         state.unconfirmed = null;
         if (replayed)
