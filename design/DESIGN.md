@@ -479,7 +479,7 @@ use the desktop copy.
 | Empty, with the create form | 133 `rX5TO` | — |
 | List: active read-only, active read-write never used with Replaces, revoked, expired | 134 `b6P8Z3` | 140 `XTiZ6` |
 | Name validation error | 135 `vlG3U` | — |
-| Unknown request outcome; list unavailable with Retry | 136 `LJKCn` | — |
+| Unconfirmed create with Check the list; list unavailable with Retry | 136 `LJKCn` | — |
 | One-time token after create (copy failed) | 137 `JEKrc` | 141 `B3XyJr` (copied) |
 | Rotation: replacement token; the old credential is still Active | 138 `CcimU` | — |
 | Revoke confirmation with a failed or unknown request | 139 `PnQRM` | 142 `MaR6q` |
@@ -505,8 +505,17 @@ use the desktop copy.
   leaked active token is rotated (then the old credential revoked) or replaced by
   a new credential; a revoked or expired credential can only be replaced by
   issuing a new one.
-- A failed or unknown request re-reads the list and says "Check the list below
-  before retrying"; in the revoke dialog the message appears inside the dialog.
+- A refused request names the cause in plain words and says the list below is
+  reloading ("Couldn't create the credential: you don't have permission. Your
+  entries are still here; we're reloading the list below."), with the code in
+  Details. An unconfirmed create or rotate is one warning, "We couldn't confirm the
+  credential was created.", with **Check the list** (136 `LJKCn`). Create and rotate
+  have no request key, so that action only re-reads the credentials and never
+  resubmits. Revoke is by id: a failed or unconfirmed revoke stays inside the
+  dialog as text without a button (139 `PnQRM`, 142 `MaR6q`).
+- Rotate and Revoke each leave one success line on the panel: "Rotated <name>. The
+  old credential stays active until you revoke it." and "Revoked <name>." (165
+  `TGj4A`). Create's confirmation is the one-time token dialog.
 - Settings (account menu → `/app/settings`) is the only entry point, and the
   page-title Refresh re-reads the list (the phone frames draw only the top-level
   header). No deep link, context menu, extension or notification surface
@@ -553,22 +562,41 @@ the open decisions.
 Section 12 (frames 154–166c, review notes 167) sets one message per action, sized
 to the outcome. Frames 1–153 were swept to the same rules; 167 lists each change.
 
-- **In progress:** the button label only ("Saving…", "Sending…").
+- **In progress:** the button label only ("Saving…", "Sending…"). An action with no
+  button shows one status line instead ("Sending review to Mira…", 94 `OHIOZ`).
 - **Success:** one quiet inline line beside the action: muted check, muted text,
   no Alert (component `ugjxZ`).
 - **Rejected:** one destructive Alert naming the cause (`NaPr2`), plus any field
   error.
 - **Changed elsewhere or unknown outcome:** one warning Alert with a single button
-  (`TsFAB`). An unknown outcome locks the other fields.
+  (`TsFAB`). An unknown outcome locks the other fields. The button is **Check
+  whether it saved** and resends the exact original request; CLI credential create
+  and rotate have no request key, so theirs is **Check the list**, a re-read (136).
 - **Copy:** at most two short sentences. Message text never uses recorded,
   receipt, observation, admission, reconcile, submission or revision, and never
   shows command names, IDs, versions, hashes or raw codes. Every failure says the
   input is safe ("Your changes are still here.").
 - **Details:** every outcome has a collapsed Details disclosure (`Q5Ff9`).
   Expanded, it shows a Geist Mono key/value list (Command, Resource, Version,
-  Request key, Code) with Copy (`kUOab`).
+  Request key, Code, and Kind where a receipt carries one) with Copy (`kUOab`).
+  Sign-out has no receipt and no Details.
 - **Consequences** go in the Changes to save list before Save (159), never in the
   success line.
+- **Task-side copy as built:** a created task reads "Task created." and a draft
+  "Draft saved."; an answer "Answer sent. It reaches the requester on its next
+  turn." (162 `zxH2a`, 30 `o6O3M`) and, on failure, "Couldn't send the answer: the
+  service is unavailable. Your answer is still here." with the code in Details (162b
+  `Gi4zR`, 28 `uJVe2`); a reply "Sent to Ada." (163 `o6kBCw`, 61 `AVuFr`); a review
+  "Review sent to Mira." (97 `CACzF`, 104 `u0YEF`), or "We couldn't confirm the
+  review reached Mira." with **Check whether it saved** (96 `X3wI8B`). Stop
+  confirmation is the affected-assignments sentence plus one sentence on what Stop
+  does, with Stop task and Keep running (132 `uQrNE`, 164 `h0FyJW`). An unconfirmed
+  sign-out re-reads the session: signed out is success and shows nothing; a session
+  that survived shows one warning, "We couldn't sign you out. You're still signed
+  in.", in the shell only (130 `DuF5u`).
+- **Drawn ahead of the build:** 39 `Z6U3T4`, 161 `thtaf` and 166c `N7QIqz` draw "It
+  will wait: …" in the success line beside the Resume project Fix. The build shows
+  the wait reason on its own line below "Task created." until the Fix actions ship.
 
 Warning colours are the local `nova-warning-fg` and `nova-warning-bg` tokens;
 shadcn has no warning variant.
