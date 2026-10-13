@@ -1,4 +1,11 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   type CheckoutVerification,
   type DiscoveryUnavailableReason,
@@ -82,10 +89,13 @@ export function ProjectSetup(
   const d = useDraft(p.drafts, "project.create");
   // The lead profile created inline when none exists; its own draft never meets Settings'.
   const inline = useDraft(p.drafts, "profile.create:setup");
-  // A recorded create belongs to the earlier visit, so this one starts clean; unsaved
-  // input from an earlier visit is kept.
-  useEffect(() => {
+  // A create already recorded on arrival belongs to the earlier visit: this one starts
+  // clean, without showing its ready check. Unsaved input from an earlier visit is kept.
+  const earlier = useRef(d.phase === "recorded");
+  // Before paint, so the earlier visit's values never show.
+  useLayoutEffect(() => {
     if (d.phase === "recorded") {
+      earlier.current = false;
       d.startOperation(blank());
       inline.startOperation(emptyProfile());
     } else {
@@ -358,7 +368,7 @@ export function ProjectSetup(
     else if (k >= 0) d.clearErrors(`repositories.${k}.`);
     setRows(rows.map((r, j) => (j === i ? row : r)));
   };
-  const recorded = d.phase === "recorded" ? d.frozen : null;
+  const recorded = d.phase === "recorded" && !earlier.current ? d.frozen : null;
   const profiles = p.workspace?.data.profiles.filter((r) => !r.revoked) ?? [];
   const firstRun = p.workspace?.data.projects.length === 0;
   // A stale lead (revoked since) keeps the select, which names it; an inline profile
@@ -367,6 +377,12 @@ export function ProjectSetup(
     Boolean(p.workspace) &&
     profiles.length === 0 &&
     (!values.leadProfileId || inline.phase === "recorded");
+  /** The created profile becomes the lead; every other setup value stays as entered. */
+  const adoptProfile = () => {
+    if (inline.phase === "recorded")
+      d.set("leadProfileId", String(inline.values.profileId));
+    p.refresh();
+  };
   // Not a nested form: Enter and the button create the profile and never the project.
   const createProfile = () =>
     sendDraft(
@@ -375,11 +391,7 @@ export function ProjectSetup(
       p.client,
       p.session,
       profileCreateCommand(inline.values),
-      () => {
-        if (inline.phase === "recorded")
-          d.set("leadProfileId", String(inline.values.profileId));
-        p.refresh();
-      },
+      adoptProfile,
       runtimeErrors(inline.values, claudeSettings(p.workspace)),
     );
 
@@ -429,6 +441,7 @@ export function ProjectSetup(
                 onKeyDown={(e) => {
                   if (
                     e.key === "Enter" &&
+                    !e.nativeEvent.isComposing &&
                     e.target instanceof HTMLInputElement
                   ) {
                     e.preventDefault();
@@ -474,20 +487,22 @@ export function ProjectSetup(
                 )}
               </fieldset>
             )}
-            {/* The project's own outcome replaces this confirmation, so one message shows. */}
-            {(inline.phase !== "recorded" || d.phase === "editing") && (
-              <DraftMessage
-                draft={inline}
-                success="Profile created. Other setup values kept."
-                check={async () => {
-                  await inline.reconcile(p.client, csrf);
-                  if (inline.phase === "recorded") {
-                    d.set("leadProfileId", String(inline.values.profileId));
-                    p.refresh();
-                  }
-                }}
-              />
-            )}
+            {/* The project's own outcome replaces this message, so one message shows. */}
+            {d.phase !== "recorded" &&
+              (inline.phase !== "recorded" || d.phase === "editing") && (
+                <DraftMessage
+                  draft={inline}
+                  success="Profile created. Other setup values kept."
+                  check={async () => {
+                    await inline.reconcile(p.client, csrf);
+                    if (
+                      inline.phase === "recorded" ||
+                      inline.phase === "conflict"
+                    )
+                      adoptProfile();
+                  }}
+                />
+              )}
           </section>
           <section className="settings-panel">
             <div>

@@ -785,7 +785,8 @@ test("Setup keeps its input when the inline profile is rejected", async (_t, jou
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
     .click();
-  await page.getByText(/^Created Atlas\./).waitFor();
+  // The inline error does not linger beside the project's own outcome.
+  await savedOutcome(page, /^Created Atlas\./);
   assert.equal(sent.at(-1)?.leadProfileId, null);
 });
 
@@ -814,6 +815,23 @@ test("Setup warns before leaving only while it holds changed input", async (_t, 
 });
 
 /** A schema-valid readiness read: everything passes except the named checks. */
+const readinessBody = (
+  failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
+) =>
+  JSON.stringify(
+    readinessSchema.parse({
+      data: {
+        checks: readinessCheckIds.map((id) => ({
+          id,
+          label: id,
+          status: failing[id] ?? "pass",
+          reason: failing[id] ? `${id} reason` : null,
+          fix: failing[id] ? `${id} fix` : null,
+        })),
+      },
+      observedAt: Date.now(),
+    }),
+  );
 const stubReadiness = (
   page: Page,
   failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
@@ -821,20 +839,7 @@ const stubReadiness = (
   page.route("**/api/operator/readiness", (route) =>
     route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify(
-        readinessSchema.parse({
-          data: {
-            checks: readinessCheckIds.map((id) => ({
-              id,
-              label: id,
-              status: failing[id] ?? "pass",
-              reason: failing[id] ? `${id} reason` : null,
-              fix: failing[id] ? `${id} fix` : null,
-            })),
-          },
-          observedAt: Date.now(),
-        }),
-      ),
+      body: readinessBody(failing),
     }),
   );
 const resumeLabel = "Resume and create first task";
@@ -1084,4 +1089,118 @@ test("Setup's ready check stays usable on a phone", async (_t, journey) => {
     );
   assert.deepEqual(small, []);
   await captureBrowserEvidence(page, "390-setup-ready-check");
+});
+
+test("Setup fails closed when readiness cannot be read and recovers on Retry", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  let readable = false;
+  await page.route("**/api/operator/readiness", (route) =>
+    readable
+      ? route.fulfill({
+          contentType: "application/json",
+          body: readinessBody(),
+        })
+      : route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "unavailable", message: "x" },
+          }),
+        }),
+  );
+  const { ready, resume } = await createProject(page, sentCommands(page));
+  await ready.getByText("Readiness couldn't be checked.").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  readable = true;
+  await ready.getByRole("button", { name: "Retry", exact: true }).click();
+  await ready
+    .getByText("Readiness couldn't be checked.")
+    .waitFor({ state: "detached" });
+  await resume.click({ trial: true });
+  // Retry leaves while it reads, so the focus moves to the result, not to the page.
+  await page.waitForFunction(() =>
+    document.activeElement?.classList.contains("setup-waits"),
+  );
+});
+
+test("Setup blocks Resume for a project created without a lead", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  const { ready, resume } = await createProject(page, sent, "Unconfigured");
+  await ready
+    .getByText("No lead profile. Tasks wait for a lead before starting.")
+    .waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  assert.equal(
+    sent.some((c) => c.type === "project.configure"),
+    false,
+  );
+});
+
+test("Setup shows the ready check once and a later visit starts clean without reading", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const { ready } = await createProject(page, sentCommands(page));
+  await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
+  await ready.getByRole("link", { name: "Keep paused", exact: true }).click();
+  await page
+    .locator(".settings-status")
+    .getByText("Paused", { exact: true })
+    .waitFor();
+  const reads: string[] = [];
+  page.on("request", (r) => {
+    const { pathname } = new URL(r.url());
+    if (/\/(readiness|composer-options)$/.test(pathname)) reads.push(pathname);
+  });
+  await page.getByRole("link", { name: "New project", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "",
+  );
+  assert.equal(
+    await page.getByRole("region", { name: "Ready check" }).count(),
+    0,
+  );
+  // Reads start in effects; give a stale ready check the chance to have started them.
+  await page.evaluate(() => new Promise((done) => setTimeout(done, 200)));
+  assert.deepEqual(reads, []);
+});
+
+test("Setup keeps an unsettled Resume apart from the project's General tab", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  const { ready, projectId, resume } = await createProject(page, sent);
+  await page.route("**/api/operator/commands", (route) =>
+    route.request().postDataJSON().type === "project.configure"
+      ? route.abort()
+      : route.continue(),
+  );
+  try {
+    await resume.click();
+    await ready
+      .getByRole("button", { name: "Check whether it saved" })
+      .waitFor();
+    await page.unroute("**/api/operator/commands");
+    await ready.getByRole("link", { name: "Keep paused", exact: true }).click();
+    const pause = page.getByRole("switch", { name: "Pause project" });
+    await pause.waitFor();
+    assert.equal(await pause.isChecked(), true);
+    assert.equal(await pause.isEnabled(), true);
+    assert.equal(await outcomeMessages(page).count(), 0);
+    await pause.click();
+    await page.getByRole("button", { name: "Save project" }).click();
+    await savedOutcome(page);
+    const configure = sent.filter((c) => c.type === "project.configure");
+    assert.equal(configure.length, 2);
+    // The Settings save is its own request, never a replay of the unsettled Resume.
+    assert.notEqual(configure[1]?.key, configure[0]?.key);
+    assert.equal(f.service.domain().project(projectId).paused, 0);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
 });

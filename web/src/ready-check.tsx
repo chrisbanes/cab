@@ -56,6 +56,7 @@ export function ReadyCheck({
   );
   const root = useRef<HTMLElement>(null);
   useEffect(() => root.current?.focus(), []);
+  const waitsRoot = useRef<HTMLDivElement>(null);
   const waits = useId();
 
   const read: ReadinessRead = readiness.state.error
@@ -140,7 +141,7 @@ export function ReadyCheck({
           Keep paused
         </ActionLink>
       </div>
-      <div id={waits} className="setup-waits">
+      <div ref={waitsRoot} id={waits} tabIndex={-1} className="setup-waits">
         {checking && <p className="metadata muted">Checking readiness…</p>}
         {items.length > 0 && (
           <ul className="body">
@@ -158,7 +159,15 @@ export function ReadyCheck({
           </ul>
         )}
         {read.state === "unavailable" && (
-          <Button type="button" variant="secondary" onClick={readiness.refresh}>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              void readiness.refresh();
+              // Retry leaves while it reads, so the focus moves to the result.
+              waitsRoot.current?.focus();
+            }}
+          >
             Retry
           </Button>
         )}

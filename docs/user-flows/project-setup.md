@@ -55,7 +55,8 @@ The operator never leaves setup to create a prerequisite.
 
 ## Recovery
 
-- Resume is reversible through Pause project in project configuration.
+- The ready check is shown once, right after creation. Later, Resume is the Pause
+  project switch in project configuration, and Resume is reversible there.
 - A profile created inline is an ordinary profile, edited or kept in Settings →
   Profiles. Setup never deletes it, even when setup is abandoned.
 

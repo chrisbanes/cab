@@ -185,7 +185,8 @@
   min-width: 0;
 }
 
-.setup-ready:focus {
+.setup-ready:focus,
+.setup-waits:focus {
   outline: none;
 }
 
