@@ -77,6 +77,45 @@ test("configuration receipts preserve original creation after later configuratio
   assert.deepEqual(await reopened.execute(project), created);
 });
 
+test("profile operation lookup returns an unchanged legacy receipt after SQLite migration", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const command = {
+    type: "profile.create" as const,
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Legacy profile",
+    instructions: "Private instructions",
+    capabilities: "review",
+  };
+  const receipt = await api.execute(command);
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare(
+        "SELECT result FROM command_receipts WHERE scope = ? AND key = ?",
+      )
+      .get(`profile:${command.profileId}`, command.key) as { result: string };
+    const legacy = JSON.parse(row.result) as Record<string, unknown>;
+    delete legacy.summary;
+    db.prepare(
+      "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+    ).run(JSON.stringify(legacy), `profile:${command.profileId}`, command.key);
+    db.exec("ALTER TABLE profiles DROP COLUMN summary");
+  });
+  await f.reopen();
+  const reopened = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(await reopened.execute(command), receipt);
+  const readback = await reopened.readOperation(
+    new URLSearchParams({
+      scope: `profile:${command.profileId}`,
+      type: "profile.create",
+      key: command.key,
+    }),
+  );
+  assert.deepEqual(readback.data, { state: "recorded", receipt });
+});
+
 test("GitHub omitted reference is preserved at apply and its original receipt replays after later changes", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

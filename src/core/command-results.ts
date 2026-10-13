@@ -64,6 +64,26 @@ export const assignmentCommandResultSchema = z
   })
   .strict();
 
+const legacyProfileCommandResultSchema = profileCommandResultSchema
+  .extend({ summary: z.string().optional() })
+  .strict();
+const legacyAssignmentCommandResultSchema = assignmentCommandResultSchema
+  .extend({
+    resultRecipientAssignmentId: id.nullable().optional(),
+    resultRecipientDisposition: z.enum(["resolved", "unresolved"]).optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      Object.hasOwn(value, "resultRecipientAssignmentId") !==
+      Object.hasOwn(value, "resultRecipientDisposition")
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Assignment recipient fields must be present together",
+      });
+  });
+
 const candidateProfileIdsJson = z.string().superRefine((value, context) => {
   let parsed: unknown;
   try {
@@ -147,15 +167,15 @@ export interface DomainCommandResultMap {
   "project.configure": z.output<typeof projectCommandResultSchema>;
   "task.create": z.output<typeof taskCommandResultSchema>;
   "task.configure": z.output<typeof taskCommandResultSchema>;
-  "profile.create": z.output<typeof profileCommandResultSchema>;
-  "profile.configure": z.output<typeof profileCommandResultSchema>;
+  "profile.create": z.output<typeof legacyProfileCommandResultSchema>;
+  "profile.configure": z.output<typeof legacyProfileCommandResultSchema>;
   "routing.configure": z.output<typeof routingCommandResultSchema>;
   "github.configure": z.output<typeof githubConfigurationCommandResultSchema>;
   "github.activate": z.output<typeof githubActivationCommandResultSchema>;
   "github.place": z.output<typeof taskCommandResultSchema>;
   "source.review": z.output<typeof taskCommandResultSchema>;
-  "assignment.create": z.output<typeof assignmentCommandResultSchema>;
-  "assignment.apply": z.output<typeof assignmentCommandResultSchema>;
+  "assignment.create": z.output<typeof legacyAssignmentCommandResultSchema>;
+  "assignment.apply": z.output<typeof legacyAssignmentCommandResultSchema>;
   "dependency.add": z.output<typeof taskCommandResultSchema>;
   "dependency.remove": z.output<typeof taskCommandResultSchema>;
   "imported-blockers.set": z.output<typeof taskCommandResultSchema>;
@@ -209,6 +229,26 @@ export function parseDomainCommandOutcome(
   type: DomainCommandType,
   value: unknown,
 ): DomainCommandOutcome {
+  return parseCommandOutcome(type, value, false);
+}
+
+/** Validate a newly applied result with the current required result shape. */
+export function parseFreshDomainCommandOutcome<K extends DomainCommandType>(
+  type: K,
+  value: unknown,
+): Extract<DomainCommandOutcome, { type: K }>;
+export function parseFreshDomainCommandOutcome(
+  type: DomainCommandType,
+  value: unknown,
+): DomainCommandOutcome {
+  return parseCommandOutcome(type, value, true);
+}
+
+function parseCommandOutcome(
+  type: DomainCommandType,
+  value: unknown,
+  fresh: boolean,
+): DomainCommandOutcome {
   switch (type) {
     case "delivery.configure":
       return {
@@ -233,7 +273,10 @@ export function parseDomainCommandOutcome(
     case "profile.configure":
       return {
         type,
-        result: parseUnchanged(profileCommandResultSchema, value),
+        result: parseUnchanged(
+          fresh ? profileCommandResultSchema : legacyProfileCommandResultSchema,
+          value,
+        ),
       };
     case "routing.configure":
       return {
@@ -254,7 +297,12 @@ export function parseDomainCommandOutcome(
     case "assignment.apply":
       return {
         type,
-        result: parseUnchanged(assignmentCommandResultSchema, value),
+        result: parseUnchanged(
+          fresh
+            ? assignmentCommandResultSchema
+            : legacyAssignmentCommandResultSchema,
+          value,
+        ),
       };
     case "capacity.configure":
       return {

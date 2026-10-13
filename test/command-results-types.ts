@@ -36,6 +36,14 @@ void mismatched;
 declare const store: DomainStore;
 declare const commands: DomainCommands;
 declare const taskCommand: Extract<DomainCommand, { type: "task.configure" }>;
+declare const profileCommand: Extract<
+  DomainCommand,
+  { type: "profile.create" }
+>;
+declare const assignmentCommand: Extract<
+  DomainCommand,
+  { type: "assignment.create" }
+>;
 const synchronousTask = store.execute(taskCommand);
 const taskState: "open" | "done" | "cancelled" = synchronousTask.state;
 void taskState;
@@ -43,6 +51,14 @@ void taskState;
 const synchronousProject: DomainCommandResultMap["project.configure"] =
   synchronousTask;
 void synchronousProject;
+
+const synchronousProfile = store.execute(profileCommand);
+const possiblyLegacySummary: string | undefined = synchronousProfile.summary;
+void possiblyLegacySummary;
+// @ts-expect-error A profile command result cannot be assigned to an assignment result.
+const synchronousAssignment: DomainCommandResultMap["assignment.create"] =
+  synchronousProfile;
+void synchronousAssignment;
 
 const replayedTask = store.recordedCommand(taskCommand);
 if (replayedTask !== undefined) {
@@ -52,11 +68,37 @@ if (replayedTask !== undefined) {
   replayedTask.instructions;
 }
 
+const replayedProfile = store.recordedCommand(profileCommand);
+if (replayedProfile !== undefined) {
+  const replayedSummary: string | undefined = replayedProfile.summary;
+  void replayedSummary;
+  // @ts-expect-error A profile replay has no assignment task identifier.
+  replayedProfile.taskId;
+}
+const replayedAssignment = store.recordedCommand(assignmentCommand);
+if (replayedAssignment !== undefined) {
+  const recipient: string | null | undefined =
+    replayedAssignment.resultRecipientAssignmentId;
+  void recipient;
+  // @ts-expect-error An assignment replay has no profile instructions.
+  replayedAssignment.instructions;
+}
+
 const typedReceipt = store.recordedResult("scope", "key", "task.configure");
 if (typedReceipt !== undefined) {
   const receiptType: "task.configure" = typedReceipt.type;
   const receiptState: "open" | "done" | "cancelled" = typedReceipt.result.state;
   void [receiptType, receiptState];
+}
+const typedProfileReceipt = store.recordedResult(
+  "scope",
+  "key",
+  "profile.create",
+);
+if (typedProfileReceipt !== undefined) {
+  const receiptType: "profile.create" = typedProfileReceipt.type;
+  const summary: string | undefined = typedProfileReceipt.result.summary;
+  void [receiptType, summary];
 }
 
 async function asynchronousCorrelation() {
@@ -68,6 +110,17 @@ async function asynchronousCorrelation() {
   void project;
 }
 void asynchronousCorrelation;
+
+async function asynchronousLegacyCorrelation() {
+  const profileResult = await commands.execute(profileCommand);
+  const summary: string | undefined = profileResult.summary;
+  void summary;
+  // @ts-expect-error An async profile result cannot be assigned to an assignment result.
+  const assignmentResult: DomainCommandResultMap["assignment.create"] =
+    profileResult;
+  void assignmentResult;
+}
+void asynchronousLegacyCorrelation;
 
 function exhaustive(outcome: DomainCommandOutcome): string {
   switch (outcome.type) {

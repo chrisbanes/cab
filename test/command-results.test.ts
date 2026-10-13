@@ -4,6 +4,7 @@ import {
   type DomainCommandOutcome,
   type DomainCommandResultMap,
   parseDomainCommandOutcome,
+  parseFreshDomainCommandOutcome,
 } from "../src/core/command-results.js";
 import type { DomainCommand } from "../src/core/domain.js";
 
@@ -386,6 +387,54 @@ test("rejects malformed result fields rather than coercing them", () => {
       () => parseDomainCommandOutcome(type, result),
       `${type}: ${JSON.stringify(result)}`,
     );
+});
+
+test("legacy receipt validation preserves only the known migrated omissions", () => {
+  const { summary: _summary, ...legacyProfile } = profile;
+  assert.deepEqual(
+    parseDomainCommandOutcome("profile.create", legacyProfile).result,
+    legacyProfile,
+  );
+  assert.throws(() =>
+    parseFreshDomainCommandOutcome("profile.create", legacyProfile),
+  );
+  assert.throws(() =>
+    parseDomainCommandOutcome("profile.create", {
+      ...legacyProfile,
+      summary: 1,
+    }),
+  );
+
+  const {
+    resultRecipientAssignmentId: _recipient,
+    resultRecipientDisposition: _disposition,
+    ...legacyAssignment
+  } = assignment;
+  assert.deepEqual(
+    parseDomainCommandOutcome("assignment.create", legacyAssignment).result,
+    legacyAssignment,
+  );
+  assert.throws(() =>
+    parseFreshDomainCommandOutcome("assignment.create", legacyAssignment),
+  );
+  assert.throws(() =>
+    parseDomainCommandOutcome("assignment.create", {
+      ...legacyAssignment,
+      resultRecipientAssignmentId: "invalid",
+    }),
+  );
+  assert.throws(() =>
+    parseDomainCommandOutcome("assignment.create", {
+      ...legacyAssignment,
+      resultRecipientDisposition: "unresolved",
+    }),
+  );
+  assert.throws(() =>
+    parseDomainCommandOutcome("assignment.create", {
+      ...legacyAssignment,
+      resultRecipientDisposition: "unknown",
+    }),
+  );
 });
 
 test("keeps result variants correlated with their command key", () => {

@@ -5,6 +5,7 @@ import {
   type DomainCommandOutcome,
   type DomainCommandResultMap,
   parseDomainCommandOutcome,
+  parseFreshDomainCommandOutcome,
   parseLinkedRepositoryResult,
 } from "./command-results.js";
 import { discoveryCredentialReference } from "./credential-reference.js";
@@ -863,7 +864,7 @@ export class DomainStore {
     const outcome = transaction(this.db, () => {
       const prior = this.replayed(scope, command.key, hash, command.type);
       if (prior !== undefined) return { outcome: prior, recorded: false };
-      const result = parseDomainCommandOutcome(
+      const result = parseFreshDomainCommandOutcome(
         command.type,
         this.apply(command, verifiedRepositories),
       );
