@@ -24,9 +24,12 @@ const test = browserSuite("add-claude");
 const CANARY = "add-claude-canary-token-8821";
 const ENV_NAME = "ADD_CLAUDE_UNSET_VARIABLE_8821";
 /** The commands the panel copies; the operations guide must carry the same lines. */
-const claudeTokenCommands = [
+const claudeTokenSetup = [
   'mkdir -m 700 -p "$HOME/.ensemble/claude"',
   'install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"',
+].join("\n");
+/** Typed after copying the token: reads the clipboard, so it is never copied. */
+const claudeTokenWrite = [
   'pbpaste > "$HOME/.ensemble/claude/claude-token"',
   "stat -f '%Su %Lp' \"$HOME/.ensemble/claude/claude-token\"",
 ].join("\n");
@@ -98,15 +101,24 @@ test("Add Claude copies the runbook commands and checks a saved file: reference 
     origin: new URL(page.url()).origin,
   });
   assert.equal(
-    await panel.locator("pre.token-commands").innerText(),
-    claudeTokenCommands,
+    await panel.locator("pre.token-commands:not(.token-write)").innerText(),
+    claudeTokenSetup,
+  );
+  assert.equal(
+    await panel.locator("pre.token-write").innerText(),
+    claudeTokenWrite,
   );
   await panel.getByRole("button", { name: "Copy commands" }).click();
   await panel.getByRole("status").filter({ hasText: "Copied" }).waitFor();
-  assert.equal(
-    await page.evaluate(() => navigator.clipboard.readText()),
-    claudeTokenCommands,
+  const copied = await page.evaluate(() => navigator.clipboard.readText());
+  assert.equal(copied, claudeTokenSetup);
+  // The copied block never reads the clipboard, so the token copied next stays intact.
+  assert.doesNotMatch(
+    copied,
+    /pbpaste|pbcopy|wl-paste|xclip|xsel|Get-Clipboard|clipboard/i,
   );
+  for (const line of claudeTokenWrite.split("\n"))
+    assert.equal(copied.includes(line), false, line);
   assert.equal(
     await panel.getByRole("status").filter({ hasText: "Copied" }).count(),
     1,
@@ -116,7 +128,10 @@ test("Add Claude copies the runbook commands and checks a saved file: reference 
     join(import.meta.dirname, "../../docs/operations/standalone-macos.md"),
     "utf8",
   );
-  for (const line of claudeTokenCommands.split("\n"))
+  for (const line of [
+    ...claudeTokenSetup.split("\n"),
+    ...claudeTokenWrite.split("\n"),
+  ])
     assert.ok(guide.includes(line), line);
 
   // Saving a safe file shows Pass without a reload and re-checks exactly once.

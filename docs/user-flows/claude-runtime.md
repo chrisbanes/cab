@@ -19,9 +19,13 @@ works without reading the operations guide.
 ## Steps
 
 1. The panel shows the token-file commands from
-   [operations](../operations/standalone-macos.md#claude-subscription-token) with a
-   Copy action and a suggested path `$HOME/.ensemble/claude/claude-token`.
-2. The operator runs them in a terminal; the token never passes through the web UI.
+   [operations](../operations/standalone-macos.md#claude-subscription-token) and a
+   suggested path `$HOME/.ensemble/claude/claude-token`. Copy puts only the commands
+   that create the private empty file on the clipboard.
+2. The operator runs them in a terminal, copies the token from `claude setup-token`
+   and types the `pbpaste` line shown below them. That line is never copied: it reads
+   the clipboard, so copying it would replace the token. The token never passes
+   through the web UI.
 3. The operator enters `file:/absolute/path` (or `env:NAME`) and saves.
 4. A live **Token readable** check runs immediately and shows pass, or the unsafe-file
    reason without the path or value.

@@ -226,13 +226,20 @@ and a fresh bound preparation.
 Claude profiles need the operator's own subscription token from
 `claude setup-token`. The installed service reads it from an owner-only file, so
 the plist and its environment need no Claude variable. Settings → Runtime → Add
-Claude shows these commands with a Copy action and a suggested path. Create a
-private real directory (not a symbolic link) and an empty mode `0600` file, then
-put the token in it without shell history or argv, for example from the clipboard:
+Claude shows these commands and a suggested path. Create a private real directory
+(not a symbolic link) and an empty mode `0600` file:
 
 ```sh
 mkdir -m 700 -p "$HOME/.ensemble/claude"
 install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"
+```
+
+Then copy the token printed by `claude setup-token` and write it from the clipboard
+without shell history or argv. Type these two lines; do not copy them with the
+commands above, because `pbpaste` reads the clipboard and a copied command replaces
+the token:
+
+```sh
 pbpaste > "$HOME/.ensemble/claude/claude-token"
 stat -f '%Su %Lp' "$HOME/.ensemble/claude/claude-token"
 ```

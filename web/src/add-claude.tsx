@@ -10,12 +10,15 @@ import "./add-claude.css";
 
 /**
  * The token-file commands of docs/operations/standalone-macos.md#claude-subscription-token,
- * with the suggested private path. The token is pasted from the clipboard in a terminal and
- * never passes through this page.
+ * with the suggested private path. Only the setup commands are copied: the `pbpaste` line
+ * reads the clipboard, so copying it would replace the token with the commands. The operator
+ * types it after copying the token. The token never passes through this page.
  */
-const claudeTokenCommands = [
+const claudeTokenSetup = [
   'mkdir -m 700 -p "$HOME/.ensemble/claude"',
   'install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"',
+].join("\n");
+const claudeTokenWrite = [
   'pbpaste > "$HOME/.ensemble/claude/claude-token"',
   "stat -f '%Su %Lp' \"$HOME/.ensemble/claude/claude-token\"",
 ].join("\n");
@@ -52,7 +55,7 @@ function Commands() {
   const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(claudeTokenCommands);
+      await navigator.clipboard.writeText(claudeTokenSetup);
       setCopied("copied");
     } catch {
       setCopied("failed");
@@ -61,11 +64,10 @@ function Commands() {
   return (
     <div className="settings-row">
       <p className="body">
-        1. In a terminal, create a private token file and paste the token from{" "}
-        <code>claude setup-token</code> into it. The token never passes through
-        this page.
+        1. In a terminal, create a private, empty token file. The token never
+        passes through this page.
       </p>
-      <pre className="identifier token-commands">{claudeTokenCommands}</pre>
+      <pre className="identifier token-commands">{claudeTokenSetup}</pre>
       <div>
         <Button type="button" variant="secondary" onClick={copy}>
           Copy commands
@@ -78,8 +80,17 @@ function Commands() {
           message="Copy unavailable. Select the commands and copy them by hand."
         />
       )}
+      <p className="body">
+        2. Copy the token printed by <code>claude setup-token</code>, then type
+        these lines yourself. Do not copy them: <code>pbpaste</code> reads the
+        clipboard, and copying would replace the token. <code>stat</code> must
+        show your user and <code>600</code>.
+      </p>
+      <pre className="identifier token-commands token-write">
+        {claudeTokenWrite}
+      </pre>
       <p className="metadata muted">
-        2. Enter the reference below as <code>file:</code> followed by the
+        3. Enter the reference below as <code>file:</code> followed by the
         absolute path, with <code>$HOME</code> replaced by your home directory,
         or <code>env:NAME</code>, and save.
       </p>
