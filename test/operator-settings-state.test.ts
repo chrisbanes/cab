@@ -761,7 +761,7 @@ test("every outcome reads in plain words and keeps the receipt fields for Detail
     version: 3,
   });
   // A re-read keeps the confirmation and its Details; the next edit retires both.
-  saved.startOperation({ name: "Atlas" }, true);
+  saved.startOperation({ name: "Atlas", expectedVersion: "3" }, true);
   assert.equal(saved.phase, "editing");
   assert.equal(typeof saved.savedAt, "number");
   assert.equal(saved.details.version, 3);
@@ -881,4 +881,64 @@ test("a save stays confirmed across a re-read of the same version, not across an
   assert.equal(draft.savedAt, null);
   assert.deepEqual(draft.details, {});
   assert.equal(draft.values.name, "Theirs");
+});
+
+test("another writer committing before the first re-read means the save is not confirmed", async () => {
+  const projectId = randomUUID();
+  const saveAt = async (result: object, command: object) => {
+    const client = new OperatorClient(async (_url, init) => {
+      const c = JSON.parse(String(init?.body));
+      return Response.json({
+        kind: "configuration",
+        key: c.key,
+        recorded: true,
+        result,
+      });
+    });
+    const draft = new ConfigurationDraft();
+    await draft.submit(client, { key: randomUUID(), ...command }, "csrf");
+    assert.equal(draft.phase, "recorded");
+    return draft;
+  };
+  const project = (version: number) =>
+    saveAt(
+      {
+        commandType: "project.configure",
+        resourceId: projectId,
+        version,
+        paused: false,
+        leadProfileId: null,
+        instructionsRevision: 1,
+      },
+      { type: "project.configure", projectId, expectedVersion: 2, name: "A" },
+    );
+
+  // The save produced version 3, but the first re-read already shows 4 from another writer.
+  const raced = await project(3);
+  raced.startOperation({ name: "Theirs", expectedVersion: "4" }, true);
+  assert.equal(raced.phase, "editing");
+  assert.equal(raced.savedAt, null);
+  assert.deepEqual(raced.details, {});
+  assert.equal(raced.values.name, "Theirs");
+  // A later read of that version cannot bring the confirmation back.
+  raced.initialize({ name: "Theirs", expectedVersion: "4", key: "later" });
+  assert.equal(raced.savedAt, null);
+
+  // The re-read of the version the save produced keeps it.
+  const kept = await project(3);
+  kept.startOperation({ name: "A", expectedVersion: "3" }, true);
+  assert.equal(typeof kept.savedAt, "number");
+  assert.equal(kept.details.version, 3);
+
+  // A save without a version (a credential reference) cannot tell: the accepted limit.
+  const credential = await saveAt(
+    {
+      commandType: "discovery.configure",
+      resourceId: "system:discovery",
+      configured: true,
+    },
+    { type: "discovery.configure", credentialRef: "gh:github.com" },
+  );
+  credential.startOperation({ key: "next" }, true);
+  assert.equal(typeof credential.savedAt, "number");
 });

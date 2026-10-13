@@ -715,6 +715,56 @@ test("a re-read of another writer's routing retires the saved line", async (_t, 
   );
 });
 
+test("another writer committing between a routing save and its re-read is not described as saved", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
+  // Hold the re-read that follows the save until another writer has committed.
+  let held!: () => void, release!: () => void;
+  const reread = new Promise<void>((resolve) => (held = resolve));
+  const writer = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    "**/api/operator/projects/*/configuration",
+    async (route) => {
+      held();
+      await writer;
+      await route.continue();
+    },
+  );
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  await reread;
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  release();
+  await page
+    .getByRole("region", { name: "Saved routing" })
+    .getByText("Candidates: Eli", { exact: true })
+    .waitFor();
+  // The form shows the other writer's version, so nothing claims it was this save.
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.doesNotMatch(
+    await page.locator(".settings-status").innerText(),
+    /Saved \d\d:\d\d/,
+  );
+  await page
+    .getByRole("button", { name: "Save routing", exact: true })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
+    false,
+  );
+});
+
 test("Sync & placement shows preview, observations and the placement status line", async (_t, journey) => {
   const { page } = await startSettings(
     journey,

@@ -203,7 +203,10 @@ export class ConfigurationDraft {
   }
   /**
    * Begin a new operation from `values`. A re-read after a save keeps that save's
-   * confirmation (`keepSaved`); any other new operation starts without one.
+   * confirmation (`keepSaved`) only when it loaded the version the save produced; if
+   * another writer committed first the page shows their version, so the confirmation is
+   * dropped. Saves without a version (capacity, credential references) cannot tell.
+   * Any other new operation starts without a confirmation.
    */
   startOperation(
     values: Record<string, string | boolean | string[]>,
@@ -213,7 +216,11 @@ export class ConfigurationDraft {
     const { savedAt, details } = this;
     this.purge();
     this.initialize(values);
-    if (keepSaved) {
+    if (
+      keepSaved &&
+      (details.version === undefined ||
+        String(details.version) === values.expectedVersion)
+    ) {
       this.savedAt = savedAt;
       this.details = details;
     }
