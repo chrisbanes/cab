@@ -34,7 +34,7 @@ test("frozen recovery persistence is a prerequisite to every task creation POST"
   assert.equal(state.phase, "editable");
   assert.equal(state.input.title, "Newer unsaved edit");
   assert.equal(saved.get(storageKey), last);
-  assert.match(state.notice, /not sent|recovery unavailable/i);
+  assert.match(state.notice, /nothing was sent/);
   const restored = new ComposerState(storage);
   assert.equal(restored.input.title, "Last saved");
 });
@@ -707,7 +707,7 @@ test("savedOnDevice follows every recovery write around a submission", async () 
   failUnfinished = true;
   await state.submit(rejecting, "csrf", true);
   assert.equal(state.phase, "editable");
-  assert.match(state.notice, /Recovery unavailable\.$/);
+  assert.match(state.notice, /reloading may lose it\.$/);
   assert.equal(state.savedOnDevice, false);
   // A rejected submission whose recovery write succeeds restores it.
   failUnfinished = false;
@@ -717,6 +717,75 @@ test("savedOnDevice follows every recovery write around a submission", async () 
   // A failed frozen write sends nothing and claims nothing.
   failUnknown = true;
   await state.submit(rejecting, "csrf", true);
-  assert.match(state.notice, /^Submission not sent/);
+  assert.match(state.notice, /nothing was sent/);
   assert.equal(state.savedOnDevice, false);
+});
+
+test("every creation outcome reads in plain words and keeps the receipt fields for Details", async () => {
+  const plain =
+    /recorded|receipt|observation|admission|reconcile|submission|revision|\d|task\.create|conflict|invalid/i;
+  const projectId = randomUUID();
+  const run = async (
+    ready: boolean,
+    respond: (command: { key: string; taskId: string }) => Response,
+  ) => {
+    const state = new ComposerState(memoryStorage());
+    state.edit({ projectId, title: "Task", outcome: "Finish" });
+    await state.submit(
+      new OperatorClient(async (_url, init) =>
+        respond(JSON.parse(String(init?.body))),
+      ),
+      "csrf",
+      ready,
+    );
+    return state;
+  };
+  const created = (ready: boolean) => (c: { key: string; taskId: string }) =>
+    Response.json({
+      kind: "domain",
+      key: c.key,
+      recorded: true,
+      result: { id: c.taskId, projectId, version: 1, state: "open", ready },
+    });
+  const ready = await run(true, created(true));
+  assert.equal(ready.phase, "recorded");
+  assert.equal(ready.notice, "Task created.");
+  assert.equal(ready.details.command, "task.create");
+  assert.equal(ready.details.version, 1);
+  assert.equal(ready.details.requestKey, ready.frozen?.key);
+  assert.equal(ready.details.resource, ready.frozen?.taskId);
+  const draft = await run(false, created(false));
+  assert.equal(draft.notice, "Draft saved.");
+  const refused = await run(true, () =>
+    Response.json(
+      { error: { code: "forbidden", message: "Safe failure" } },
+      { status: 403 },
+    ),
+  );
+  assert.equal(refused.phase, "editable");
+  assert.equal(refused.failed, true);
+  assert.equal(
+    refused.notice,
+    "Couldn't create the task: you don't have permission. Your input is still here.",
+  );
+  assert.equal(refused.details.code, "forbidden");
+  const unknown = await run(false, () => Response.error());
+  assert.equal(unknown.phase, "unknown");
+  assert.equal(
+    unknown.notice,
+    "We couldn't confirm the draft was saved. Your input is kept until you check.",
+  );
+  assert.equal(unknown.details.code, "command-outcome-unknown");
+  assert.equal(unknown.details.requestKey, unknown.frozen?.key);
+  for (const state of [ready, draft, refused, unknown]) {
+    assert.doesNotMatch(state.notice, plain, state.notice);
+    assert.doesNotMatch(
+      state.notice,
+      new RegExp(state.details.requestKey ?? "no-key"),
+    );
+  }
+  // A failed attempt says whether the input is kept, and an edit clears it.
+  refused.edit({ title: "Again" });
+  assert.equal(refused.failed, false);
+  assert.equal(refused.notice, "");
 });

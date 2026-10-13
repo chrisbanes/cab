@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   composerOptionsSchema,
@@ -14,6 +14,7 @@ import {
   ResourceStatus,
   StatusBadge,
 } from "./components.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -62,6 +63,9 @@ export function TaskComposer({
     [optionalOpen, setOptionalOpen] = useState(false);
   const input = state.input,
     locked = state.phase !== "editable";
+  // The message that follows a send replaces the button the operator used, so it takes focus.
+  const sent = useRef(false);
+  if (state.phase === "pending") sent.current = true;
   const optionsLoader = useCallback(
     (signal: AbortSignal) =>
       client.read(
@@ -121,9 +125,7 @@ export function TaskComposer({
       input.projectId &&
       (!options.state.data || options.state.status !== "fresh")
     ) {
-      state.notice =
-        "Project options are unavailable. Refresh options before submitting.";
-      render((n) => n + 1);
+      state.refuse(ready, "the project's options haven't loaded");
       return;
     }
     const blocked = Object.keys(unavailable)[0];
@@ -170,19 +172,22 @@ export function TaskComposer({
     );
   if (state.phase === "recorded")
     return (
-      <section className="composer" aria-label="Creation receipt">
-        <h2 className="section-heading">
-          {state.frozen?.ready ? "Task Ready" : "Draft saved"}
-        </h2>
-        <p className="body" role="status">
-          {state.notice}
-        </p>
-        <ActionLink
-          variant="primary"
-          href={`/app/tasks/${state.frozen?.taskId}`}
+      <section
+        className="composer"
+        aria-label={state.frozen?.ready ? "Task created" : "Draft saved"}
+      >
+        <ActionOutcome
+          tone="success"
+          message={state.notice}
+          details={detailRows(state.details)}
         >
-          Open task
-        </ActionLink>
+          <ActionLink
+            variant="primary"
+            href={`/app/tasks/${state.frozen?.taskId}`}
+          >
+            Open task
+          </ActionLink>
+        </ActionOutcome>
         <h3 className="small-heading">Current execution</h3>
         <Button
           variant="secondary"
@@ -194,9 +199,9 @@ export function TaskComposer({
         <ResourceStatus
           state={current.state}
           retry={current.refresh}
-          label="Execution observations"
+          label="Execution updates"
         />
-        {current.state.data ? (
+        {current.state.data && (
           <>
             <p className="body">
               <StatusBadge>
@@ -209,11 +214,6 @@ export function TaskComposer({
               </p>
             ))}
           </>
-        ) : (
-          <p className="body muted">
-            Execution status unavailable. The original creation receipt remains
-            confirmed.
-          </p>
         )}
         <a className="control" href="/app/tasks">
           Back to tasks
@@ -235,6 +235,8 @@ export function TaskComposer({
     ? workspace?.data.profiles.find((p) => p.id === o.lead?.profileId)
     : undefined;
   const optional = optionalSummary(input, o, unavailable, state.errors);
+  // A refused or unconfirmed creation sits beside the action that made it.
+  const outcomeShown = state.failed || state.phase === "unknown";
   const optionalError = Object.keys(optionalFields).some(
     (f) => state.errors[f],
   );
@@ -245,24 +247,10 @@ export function TaskComposer({
           Unfinished input saved on this device
         </p>
       )}
-      {state.notice && (
-        <Alert
-          className="resource-status"
-          role={state.phase === "unknown" ? "alert" : "status"}
-        >
+      {state.notice && !outcomeShown && (
+        <Alert className="resource-status" role="status">
           {state.notice}
         </Alert>
-      )}
-      {state.phase === "unknown" && (
-        <div className="task-actions">
-          <Button onClick={() => void submit(state.frozen?.ready ?? false)}>
-            Reconcile submission
-          </Button>
-          <p className="body muted">
-            Original task and command IDs are retained. No automatic replay or
-            alternate creation is available.
-          </p>
-        </div>
       )}
       <form
         noValidate
@@ -328,8 +316,7 @@ export function TaskComposer({
                   </p>
                   {o.project.paused && (
                     <p className="body">
-                      Project paused: Ready is recorded, but new turns remain
-                      held.
+                      This project is paused, so the task will wait.
                     </p>
                   )}
                   {!o.lead && (
@@ -341,7 +328,7 @@ export function TaskComposer({
                     Capacity: {o.capacity.projectUsage}/
                     {o.capacity.projectLimit} project · {o.capacity.globalUsage}
                     /{o.capacity.globalLimit} global. Dependencies, Stop and
-                    ownership are rechecked at admission.
+                    ownership are checked again when work starts.
                   </p>
                   <a
                     className="body"
@@ -448,9 +435,8 @@ export function TaskComposer({
                 ))}
               </NativeSelect>
               <span className="metadata muted">
-                An explicit permitted assignee bypasses routing, while all
-                admission holds still apply. The project lead remains
-                accountable.
+                An explicit assignee skips routing, but every hold still
+                applies. The project lead remains accountable.
               </span>
               {error("profileId")}
             </label>
@@ -524,27 +510,49 @@ export function TaskComposer({
             </div>
           )}
         </fieldset>
-        {!locked && (
+        {state.phase === "pending" ? (
           <div className="composer-actions">
-            <Button type="submit">Create and start</Button>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => void submit(false)}
-            >
-              Save draft
+            <Button type="button" disabled>
+              {state.frozen?.ready ? "Creating…" : "Saving…"}
             </Button>
-            <p className="metadata muted">
-              {optionalError
-                ? "Not created. Values retained. Review optional settings to continue."
-                : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
-            </p>
           </div>
+        ) : (
+          !locked && (
+            <div className="composer-actions">
+              <Button type="submit">Create and start</Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => void submit(false)}
+              >
+                Save draft
+              </Button>
+              <p className="metadata muted">
+                {optionalError
+                  ? "Check the optional settings to continue. Your input is still here."
+                  : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
+              </p>
+            </div>
+          )
         )}
-        {state.phase === "pending" && (
-          <p className="body" role="status">
-            Waiting for the command outcome. Input is frozen.
-          </p>
+        {state.failed && (
+          <ActionOutcome
+            tone="error"
+            message={state.notice}
+            details={detailRows(state.details)}
+          />
+        )}
+        {state.phase === "unknown" && (
+          <ActionOutcome
+            tone="warning"
+            message={state.notice}
+            action={{
+              label: "Check whether it saved",
+              onClick: () => submit(state.frozen?.ready ?? false),
+            }}
+            focus={sent.current}
+            details={detailRows(state.details)}
+          />
         )}
       </form>
     </section>
