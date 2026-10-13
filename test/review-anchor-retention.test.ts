@@ -762,3 +762,92 @@ test("a comparison owned by another task is rejected without creating a draft", 
     );
   });
 });
+
+test("stored anchor rows in today's shape still read back through the derived schema", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const task = await seedReviewTask(f, "Stored rows", "Read legacy rows");
+  const workspace = await f.service.taskWorkspace(task.taskId);
+  assert.equal(workspace?.state, "ready");
+  if (workspace?.state !== "ready") throw new Error("Workspace missing");
+  const bytes = Buffer.from("stored line\n");
+  await writeFile(join(workspace.path, "stored.txt"), bytes);
+  const selection = (path: string, contentSha256: string) => ({
+    taskId: task.taskId,
+    repositoryId: null,
+    path,
+    sourceKind: "workspace-file" as const,
+    context: "workspace" as const,
+    side: "file" as const,
+    startLine: 1,
+    endLine: 1,
+    contentSha256,
+  });
+  const staged = await f.service.stageReviewAnchorDraft({
+    taskId: task.taskId,
+    operationId: randomUUID(),
+    anchors: [
+      selection("stored.txt", digest(bytes)),
+      selection("absent.txt", digest("absent")),
+    ],
+  });
+  const [availableId, gapId] = staged.anchorIds as [string, string];
+  assert.deepEqual(
+    staged.anchorStates.map((state) => state.state),
+    ["available", "gap"],
+  );
+  // Rows as persisted before the shared schema: originRoot after path, closed gap reason.
+  const available = {
+    anchorId: availableId,
+    taskId: task.taskId,
+    repositoryId: null,
+    path: "stored.txt",
+    originRoot: workspace.path,
+    sourceKind: "workspace-file",
+    context: "workspace",
+    side: "file",
+    startLine: 1,
+    endLine: 1,
+    sourceSha256: digest(bytes),
+    excerptSha256: digest(bytes),
+    byteStart: 0,
+    byteEnd: bytes.byteLength,
+    mime: "text/plain; charset=utf-8",
+    state: "available",
+    size: bytes.byteLength,
+    capturedAt: 1_700_000_000_000,
+    observedAt: 1_700_000_000_001,
+  };
+  const gap = {
+    anchorId: gapId,
+    taskId: task.taskId,
+    repositoryId: null,
+    path: "absent.txt",
+    sourceKind: "workspace-file",
+    context: "workspace",
+    side: "file",
+    startLine: 1,
+    endLine: 1,
+    claimedSha256: digest("absent"),
+    state: "gap",
+    reason: "comparison-unsettled",
+    size: 0,
+    capturedAt: 1_700_000_000_000,
+    observedAt: null,
+  };
+  f.seedPersistedState((db: DatabaseSync) => {
+    const update = db.prepare(
+      "UPDATE retained_review_anchor_contexts SET recordJson=?, originRoot=? WHERE anchorId=?",
+    );
+    update.run(JSON.stringify(available), workspace.path, availableId);
+    update.run(JSON.stringify(gap), null, gapId);
+  });
+  const store = f.service.retainedEvidence();
+  const { originRoot, ...availableRecord } = available;
+  assert.deepEqual(store.reviewAnchor(task.taskId, availableId), {
+    anchor: availableRecord,
+    bytes,
+    originRoot,
+  });
+  assert.deepEqual(store.reviewAnchor(task.taskId, gapId), { anchor: gap });
+});

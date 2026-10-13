@@ -16,10 +16,6 @@ import {
   LocalOperatorUi,
 } from "../src/standalone/operator.js";
 import { OperatorWebBundle } from "../src/standalone/operator-web.js";
-import type {
-  TurnScheduler,
-  SchedulerStore,
-} from "../src/standalone/scheduler.js";
 import {
   StandaloneService,
   type BackgroundFailureDiagnostic,
@@ -32,6 +28,7 @@ import {
   waitForServiceExit,
 } from "../src/standalone/cli.js";
 import { tmpdir } from "./temp.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 function deferred<T = void>(): {
   promise: Promise<T>;
@@ -147,11 +144,6 @@ function serviceAccess(service: StandaloneService) {
   return service as unknown as {
     generation?: unknown;
     backgroundRuns: Set<Promise<void>>;
-    githubPollTimer?: NodeJS.Timeout;
-    powerPollTimer?: NodeJS.Timeout;
-    power?: { poll(): Promise<void> };
-    scheduler?: TurnScheduler;
-    schedulerStore?: SchedulerStore;
     db?: DatabaseSync;
     stopPromise?: Promise<void>;
     stopOwned(): Promise<void>;
@@ -322,9 +314,9 @@ test("power polling failures are fatal while known incomplete power history rema
     });
     try {
       await service.start();
-      const access = serviceAccess(service);
-      assert.ok(access.power);
-      access.power.poll = async () => {
+      const { power } = startedOf(service);
+      assert.ok(power);
+      power.poll = async () => {
         throw new Error("private power reader failure");
       };
       const notification = service.waitForBackgroundFailure();
@@ -502,7 +494,7 @@ test("replacement scheduler drain failures use the production service observer o
     try {
       await service.start();
       const access = serviceAccess(service);
-      const store = access.schedulerStore!;
+      const store = startedOf(service).schedulerStore;
       store.ensure({
         requestKey: "fixture:first",
         workId: "fixture:first",
@@ -553,15 +545,19 @@ test("replacement scheduler drain failures use the production service observer o
         throw replacementError;
       };
       const notification = service.waitForBackgroundFailure();
-      const firstWake = access.scheduler!.wake().then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const firstWake = startedOf(service)
+        .scheduler.wake()
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
       await firstEntered.promise;
-      const overlap = access.scheduler!.wake().then(
-        () => undefined,
-        (error: unknown) => error,
-      );
+      const overlap = startedOf(service)
+        .scheduler.wake()
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
       firstGate.resolve();
       await replacementEntered.promise;
       assert.equal(await firstWake, firstError);
@@ -622,7 +618,7 @@ test("GitHub reader failures remain durable incomplete-source evidence and direc
       );
       assert.equal(diagnostics.length, 0);
       const wake = access.wakeScheduler.bind(service);
-      access.scheduler!.wake = async () => {
+      startedOf(service).scheduler.wake = async () => {
         throw new Error("direct wake caller owns this rejection");
       };
       await assert.rejects(wake(), /direct wake caller owns this rejection/);

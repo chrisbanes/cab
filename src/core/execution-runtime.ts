@@ -5,6 +5,18 @@ export const executionHarnessSchema = z.enum(["codex", "claude"]);
 export type ExecutionHarness = z.infer<typeof executionHarnessSchema>;
 export const defaultExecutionHarness: ExecutionHarness = "codex";
 
+/** Persisted execution-intent lifecycle; the operator contract adds "unknown". */
+export const executionIntentStateSchema = z.enum([
+  "ready",
+  "capacity-waiting",
+  "held",
+  "submitting",
+  "running",
+  "completed",
+  "reconciled",
+  "resolved-failed",
+]);
+
 /** Shape only; the installed Claude integration narrows supported values (C3). */
 const runtimeSetting = z
   .string()

@@ -1,6 +1,15 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { type Database, transaction } from "../core/store.js";
+import {
+  workspaceComparisonAnchorBase,
+  workspaceComparisonEntryBase,
+  workspaceComparisonHunkBase,
+  workspaceComparisonSidesBase,
+  workspaceComparisonSnapshotBase,
+  workspaceTurnCaptureBase,
+  workspaceTurnComparisonBase,
+} from "../core/workspace-comparison-contracts.js";
 import type {
   WorkspaceComparisonExport,
   WorkspaceComparisonSideContent,
@@ -10,248 +19,35 @@ import type {
 } from "./workspace-comparison.js";
 
 const maxComparisonRecordBytes = 20 * 1024 * 1024;
-const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
-const objectIdSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
-const contentSchema = z
-  .object({
-    sha256: sha256Schema.optional(),
-    objectId: objectIdSchema.optional(),
-    size: z.number().int().nonnegative().nullable(),
-    lineCount: z.number().int().nonnegative().nullable(),
-    modifiedAt: z.number().int().nullable().optional(),
-  })
-  .strict();
-
-const anchorSchema = z
-  .object({
-    taskId: z.string().min(1),
-    repositoryId: z.string().min(1).nullable(),
-    path: z.string().min(1),
-    comparisonId: z.string().uuid(),
-    context: z.enum(["branch", "uncommitted", "turn", "result"]),
-    workId: z.string().min(1).optional(),
-    resultId: z.string().min(1).optional(),
-    threadId: z.string().min(1).optional(),
-    turnId: z.string().min(1).optional(),
-    side: z.enum(["left", "right"]),
-    startLine: z.number().int().positive(),
-    endLine: z.number().int().positive(),
-    contentSha256: sha256Schema,
-  })
-  .strict()
-  .refine((anchor) => anchor.endLine >= anchor.startLine, {
+const anchorSchema = workspaceComparisonAnchorBase.refine(
+  (anchor) => anchor.endLine >= anchor.startLine,
+  {
     message: "invalid-anchor-range",
-  });
+  },
+);
 
-const hunkSchema = z
-  .object({
-    oldStart: z.number().int().nonnegative(),
-    oldLines: z.number().int().nonnegative(),
-    newStart: z.number().int().nonnegative(),
-    newLines: z.number().int().nonnegative(),
-    patch: z.string().max(1024 * 1024),
+const hunkSchema = workspaceComparisonHunkBase
+  .extend({
     leftAnchor: anchorSchema.optional(),
     rightAnchor: anchorSchema.optional(),
   })
   .strict();
 
-const entrySchema = z
-  .object({
-    path: z.string().min(1),
-    repositoryId: z.string().min(1).nullable().optional(),
-    previousPath: z.string().min(1).optional(),
-    change: z.enum(["added", "modified", "deleted", "renamed", "type-changed"]),
-    changeSet: z.enum(["branch", "staged", "unstaged"]).optional(),
-    state: z.enum(["text", "binary", "unsupported", "gap"]),
-    diff: z
-      .string()
-      .max(1024 * 1024)
-      .optional(),
-    left: contentSchema.optional(),
-    right: contentSchema.optional(),
-    hunks: z.array(hunkSchema).max(2048),
-    reason: z
-      .enum([
-        "too-large",
-        "invalid-text",
-        "unsupported-format",
-        "changing",
-        "unavailable",
-        "output-limit",
-        "time-limit",
-      ])
-      .optional(),
-  })
+const entrySchema = workspaceComparisonEntryBase
+  .extend({ hunks: z.array(hunkSchema).max(2048) })
   .strict();
 
-const comparisonSnapshotSchema = z
-  .object({
-    comparisonId: z.string().uuid(),
-    taskId: z.string().min(1),
-    repositoryId: z.string().min(1),
-    target: z.enum(["branch", "uncommitted"]),
-    changeSet: z.enum(["all", "staged", "unstaged"]).optional(),
-    state: z.enum(["available", "unavailable", "gap"]),
-    observedAt: z.number().int().nonnegative(),
-    baseline: z
-      .object({
-        kind: z.enum(["merge-base", "head"]),
-        branch: z.string().optional(),
-        commit: objectIdSchema,
-      })
-      .strict()
-      .optional(),
-    availableBaseBranches: z.array(z.string()).max(4096),
-    entries: z.array(entrySchema).max(256),
-    truncated: z.boolean(),
-    reason: z
-      .enum([
-        "workspace-unavailable",
-        "repository-unavailable",
-        "base-branch-required",
-        "base-branch-unavailable",
-        "no-merge-base",
-        "head-unavailable",
-        "git-failed",
-        "time-limit",
-        "output-limit",
-        "unsafe-path",
-        "workspace-changed",
-      ])
-      .optional(),
-  })
+const comparisonSnapshotSchema = workspaceComparisonSnapshotBase
+  .extend({ entries: z.array(entrySchema).max(256) })
   .strict();
 
-const turnComparisonSchema = z
-  .object({
-    comparisonId: z.string().uuid(),
-    taskId: z.string().min(1),
-    target: z.literal("turn"),
-    state: z.enum(["available", "gap", "unavailable"]),
-    outcome: z.enum(["completed", "failed", "unknown"]),
-    startedAt: z.number().int().nonnegative(),
-    beforeObservedAt: z.number().int().nonnegative().optional(),
-    observedAt: z.number().int().nonnegative(),
-    taskVersion: z.number().int().positive().optional(),
-    workId: z.string().min(1),
-    workRevision: z.number().int().positive(),
-    requestSequence: z.number().int().positive(),
-    assignmentId: z.string().min(1),
-    assignmentVersion: z.number().int().positive(),
-    instructionsRevision: z.number().int().positive(),
-    profileRevision: z.number().int().positive(),
-    profileId: z.string().min(1),
-    threadId: z.string().min(1).optional(),
-    turnId: z.string().min(1).optional(),
-    entries: z.array(entrySchema).max(256),
-    truncated: z.boolean(),
-    reason: z
-      .enum([
-        "workspace-unavailable",
-        "repository-unavailable",
-        "base-branch-required",
-        "base-branch-unavailable",
-        "no-merge-base",
-        "head-unavailable",
-        "git-failed",
-        "time-limit",
-        "output-limit",
-        "unsafe-path",
-        "workspace-changed",
-        "unsupported-content",
-      ])
-      .optional(),
-  })
+const turnComparisonSchema = workspaceTurnComparisonBase
+  .extend({ entries: z.array(entrySchema).max(256) })
   .strict();
 
-const observationFileSchema = z
-  .object({
-    repositoryId: z.string().min(1).nullable(),
-    path: z.string().min(1),
-    state: z.enum(["text", "binary", "unsupported", "gap"]),
-    content: contentSchema,
-    text: z
-      .string()
-      .max(1024 * 1024)
-      .optional(),
-    reason: entrySchema.shape.reason,
-    kind: z.enum(["file", "symlink", "other"]),
-  })
-  .strict();
-
-const observationSchema = z
-  .object({
-    observedAt: z.number().int().nonnegative(),
-    state: z.enum(["available", "gap"]),
-    reason: turnComparisonSchema.shape.reason,
-    files: z.array(observationFileSchema).max(256),
-    truncated: z.boolean(),
-  })
-  .strict();
-
-const sideContentSchema = z
-  .object({
-    entryIndex: z.number().int().nonnegative(),
-    leftText: z
-      .string()
-      .max(1024 * 1024)
-      .optional(),
-    rightText: z
-      .string()
-      .max(1024 * 1024)
-      .optional(),
-  })
-  .strict();
-
-const turnCaptureSchema = z
-  .object({
-    comparisonId: z.string().uuid(),
-    identity: z
-      .object({
-        taskId: z.string().min(1),
-        taskVersion: z.number().int().positive().optional(),
-        workId: z.string().min(1),
-        workRevision: z.number().int().positive(),
-        requestSequence: z.number().int().positive(),
-        assignmentId: z.string().min(1),
-        assignmentVersion: z.number().int().positive(),
-        instructionsRevision: z.number().int().positive(),
-        profileRevision: z.number().int().positive(),
-        profileId: z.string().min(1),
-      })
-      .strict(),
-    captureState: z.enum(["pending", "unsettled", "finished"]),
-    outcome: z.enum(["running", "completed", "failed", "unknown"]),
-    startedAt: z.number().int().nonnegative(),
-    observedAt: z.number().int().nonnegative(),
-    threadId: z.string().min(1).optional(),
-    turnId: z.string().min(1).optional(),
-    before: observationSchema.optional(),
-    after: observationSchema.optional(),
-    comparison: turnComparisonSchema.optional(),
-    sides: z.array(sideContentSchema).max(256).optional(),
-    reason: z
-      .enum([
-        "workspace-unavailable",
-        "repository-unavailable",
-        "base-branch-required",
-        "base-branch-unavailable",
-        "no-merge-base",
-        "head-unavailable",
-        "git-failed",
-        "time-limit",
-        "output-limit",
-        "unsafe-path",
-        "workspace-changed",
-        "unsupported-content",
-        "runtime-uncertain",
-        "turn-unbound",
-        "callback-unfinished",
-        "capture-store-failed",
-      ])
-      .optional(),
-  })
+const turnCaptureSchema = workspaceTurnCaptureBase
+  .extend({ comparison: turnComparisonSchema.optional() })
   .strict()
   .superRefine((capture, context) => {
     if (
@@ -308,12 +104,11 @@ function parseJson<T>(text: string, schema: z.ZodType<T>): T {
 }
 
 const parseComparison = (text: string) =>
-  parseJson(text, comparisonSnapshotSchema) as WorkspaceComparisonSnapshot;
+  parseJson(text, comparisonSnapshotSchema);
 const parseSides = (text: string) =>
-  parseJson(
-    text,
-    z.array(sideContentSchema).max(256),
-  ) as WorkspaceComparisonSideContent[];
+  parseJson(text, workspaceComparisonSidesBase);
+// Rows recorded before the task revision was captured lack `taskVersion`; the
+// in-memory record requires it, so every turn-capture parse casts back to it.
 const parseTurnCapture = (text: string) =>
   parseJson(text, turnCaptureSchema) as WorkspaceTurnCaptureRecord;
 
@@ -465,11 +260,8 @@ export class SqliteWorkspaceComparisonStore {
     sides: readonly WorkspaceComparisonSideContent[] = [],
   ): void {
     const parsed = comparisonSnapshotSchema.parse(comparison);
-    const parsedSides = z.array(sideContentSchema).max(256).parse(sides);
-    validateComparisonExport(
-      parsed as WorkspaceComparisonSnapshot,
-      parsedSides as WorkspaceComparisonSideContent[],
-    );
+    const parsedSides = workspaceComparisonSidesBase.parse(sides);
+    validateComparisonExport(parsed, parsedSides);
     if (
       parsed.entries.some((entry) =>
         entry.hunks.some((hunk) =>

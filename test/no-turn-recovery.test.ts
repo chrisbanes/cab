@@ -16,6 +16,7 @@ import { runtimeOperatorRoutes } from "../src/standalone/operator-runtime.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import type { NoTurnRecoveryCommand } from "../src/standalone/pre-turn-recovery.js";
 import type { RuntimeProcessIdentity } from "../src/standalone/recovery-types.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 class NoTurnRuntime implements Runtime {
   rejectStart = true;
@@ -852,11 +853,7 @@ test("R4 current external completion actions and terminal completion reject inva
     let checked = false;
     f.runtime.onTurn = (threadId, turnId) => {
       before = snapshot(f.service, f.old.workId);
-      const coordination = (
-        f.service as unknown as {
-          coordination: import("../src/core/coordination.js").CoordinationStore;
-        }
-      ).coordination;
+      const coordination = startedOf(f.service).coordination;
       const call = {
         threadId,
         turnId,

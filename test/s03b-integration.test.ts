@@ -19,6 +19,11 @@ import type {
   RuntimeProcessIdentity,
   TerminationVerifier,
 } from "../src/standalone/recovery-types.js";
+import {
+  acquiredOf,
+  publishedOf,
+  unpublish,
+} from "./fixtures/service-internals.js";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -227,12 +232,14 @@ function createAssignment(
 
 function crash(service: StandaloneService): void {
   const internals = service as unknown as {
-    scheduler: { stop(): void } | undefined;
     db: { close(): void } | undefined;
     owner: { close(): void } | undefined;
   };
-  internals.scheduler?.stop();
-  internals.scheduler = undefined;
+  publishedOf(service)?.scheduler.stop();
+  // Unpublished, so the crashed service's wakes cannot admit work.
+  unpublish(service);
+  const acquired = acquiredOf(service);
+  if (acquired) delete acquired.scheduler;
   internals.db?.close();
   internals.db = undefined;
   internals.owner?.close();

@@ -4,8 +4,25 @@ import {
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
   readinessSchema,
+  setupRepositoriesSchema,
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
+import {
+  retainedEvidenceIdentitySchema,
+  retainedEvidenceSourceObservationSchema,
+  reviewAnchorRecordBaseSchema,
+  reviewAnchorSelectionSchema,
+} from "../core/review-anchor-contracts.js";
+import {
+  workspaceComparisonAnchorBase,
+  workspaceComparisonContentBase,
+  workspaceComparisonEntryBase,
+  workspaceComparisonHunkBase,
+  workspaceComparisonSnapshotBase,
+  workspaceTurnCaptureReasonSchema,
+  workspaceTurnComparisonBase,
+  workspaceTurnIdentityBase,
+} from "../core/workspace-comparison-contracts.js";
 import {
   questionAnswersSchema,
   questionFormSchema,
@@ -25,6 +42,7 @@ import {
 } from "../core/recovery-contracts.js";
 import {
   executionHarnessSchema,
+  executionIntentStateSchema,
   profileRuntimeSchema,
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
@@ -322,31 +340,6 @@ export const workspacePreviewReadSchema = envelope(
         });
     }),
 );
-const retainedEvidenceIdentitySchema = z
-  .object({
-    taskVersion: revision,
-    captureTaskVersion: revision,
-    assignmentId: uuid,
-    assignmentVersion: revision,
-    workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
-    conversationRevision: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
-    profileId: uuid,
-    threadId: z.string().min(1).max(512),
-    turnId: z.string().min(1).max(512),
-  })
-  .strict();
-const retainedEvidenceSourceObservationSchema = z
-  .object({
-    comparisonId: uuid.nullable(),
-    captureState: z.enum(["missing", "pending", "unsettled", "finished"]),
-    outcome: z.enum(["running", "completed", "failed", "unknown"]).nullable(),
-    observedAt: time.nullable(),
-  })
-  .strict();
 const retainedEvidenceAvailableItemSchema = z
   .object({
     itemId: uuid,
@@ -391,7 +384,8 @@ export const retainedResultEvidenceReadSchema = envelope(
         resultId: uuid,
         state: z.enum(["empty", "available", "partial", "gap"]),
         evidenceId: uuid,
-        identity: retainedEvidenceIdentitySchema,
+        // The result route supplies the task; the identity does not repeat it.
+        identity: retainedEvidenceIdentitySchema.omit({ taskId: true }),
         capturedAt: time,
         sourceObservation: retainedEvidenceSourceObservationSchema,
         items: z.array(retainedEvidenceItemReadSchema).max(320),
@@ -439,39 +433,9 @@ export const retainedEvidenceItemContentReadSchema = envelope(
       .strict(),
   ]),
 );
-const retainedReviewAnchorRecordSchema = z
-  .object({
-    anchorId: uuid,
-    taskId: uuid,
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048),
-    sourceKind: z.enum([
-      "workspace-file",
-      "comparison-side",
-      "result-evidence",
-    ]),
-    context: z.enum(["workspace", "branch", "uncommitted", "turn", "result"]),
-    comparisonId: uuid.optional(),
-    resultId: uuid.optional(),
-    resultItemId: uuid.optional(),
-    workId: z.string().min(1).max(512).optional(),
-    threadId: z.string().min(1).max(512).optional(),
-    turnId: z.string().min(1).max(512).optional(),
-    side: z.enum(["file", "left", "right"]),
-    startLine: revision,
-    endLine: revision,
-    sourceSha256: hash.optional(),
-    claimedSha256: hash.optional(),
-    excerptSha256: hash.optional(),
-    byteStart: z.number().int().nonnegative().safe().optional(),
-    byteEnd: z.number().int().nonnegative().safe().optional(),
-    mime: z.string().min(1).max(128).optional(),
-    state: z.enum(["available", "gap"]),
-    reason: z.string().min(1).max(80).optional(),
-    size: z.number().int().nonnegative().safe(),
-    capturedAt: time,
-    observedAt: time.nullable(),
-  })
+// Reads stay open-ended on `reason`; the store records the closed gap-reason enum.
+const retainedReviewAnchorRecordSchema = reviewAnchorRecordBaseSchema
+  .extend({ reason: z.string().min(1).max(80).optional() })
   .strict();
 export const retainedReviewAnchorReadSchema = envelope(
   z.discriminatedUnion("state", [
@@ -508,73 +472,38 @@ export const retainedReviewAnchorReadSchema = envelope(
       .strict(),
   ]),
 );
-const workspaceComparisonContentSchema = z
-  .object({
-    sha256: hash.optional(),
-    objectId: z
-      .string()
-      .regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/)
-      .optional(),
-    size: z.number().int().nonnegative().safe().nullable(),
-    lineCount: z.number().int().nonnegative().safe().nullable(),
-    modifiedAt: time.nullable().optional(),
-  })
+// Each schema below extends its shared lenient base with this layer's stricter
+// rules (UUIDs, bounds, non-negative times). An `.extend` does not reach into
+// child schemas, so every tightened child is re-declared one level up.
+const workspaceComparisonContentSchema = workspaceComparisonContentBase
+  .extend({ modifiedAt: time.nullable().optional() })
   .strict();
-const workspaceComparisonAnchorSchema = z
-  .object({
+const workspaceComparisonAnchorSchema = workspaceComparisonAnchorBase
+  .extend({
     taskId: uuid,
     repositoryId: z.string().min(1).max(512).nullable(),
     path: z.string().min(1).max(2048),
-    comparisonId: uuid,
-    context: z.enum(["branch", "uncommitted", "turn", "result"]),
     workId: z.string().min(1).max(512).optional(),
     resultId: z.string().min(1).max(512).optional(),
     threadId: z.string().min(1).max(512).optional(),
     turnId: z.string().min(1).max(512).optional(),
-    side: z.enum(["left", "right"]),
-    startLine: revision,
-    endLine: revision,
-    contentSha256: hash,
   })
   .strict()
   .refine((anchor) => anchor.endLine >= anchor.startLine);
-const workspaceComparisonHunkSchema = z
-  .object({
-    oldStart: z.number().int().nonnegative().safe(),
-    oldLines: z.number().int().nonnegative().safe(),
-    newStart: z.number().int().nonnegative().safe(),
-    newLines: z.number().int().nonnegative().safe(),
-    patch: z.string().max(1024 * 1024),
+const workspaceComparisonHunkSchema = workspaceComparisonHunkBase
+  .extend({
     leftAnchor: workspaceComparisonAnchorSchema.optional(),
     rightAnchor: workspaceComparisonAnchorSchema.optional(),
   })
   .strict();
-const workspaceComparisonEntrySchema = z
-  .object({
+const workspaceComparisonEntrySchema = workspaceComparisonEntryBase
+  .extend({
     path: z.string().min(1).max(2048),
     repositoryId: z.string().min(1).max(512).nullable().optional(),
     previousPath: z.string().min(1).max(2048).optional(),
-    change: z.enum(["added", "modified", "deleted", "renamed", "type-changed"]),
-    changeSet: z.enum(["branch", "staged", "unstaged"]).optional(),
-    state: z.enum(["text", "binary", "unsupported", "gap"]),
-    diff: z
-      .string()
-      .max(1024 * 1024)
-      .optional(),
     left: workspaceComparisonContentSchema.optional(),
     right: workspaceComparisonContentSchema.optional(),
     hunks: z.array(workspaceComparisonHunkSchema).max(2048),
-    reason: z
-      .enum([
-        "too-large",
-        "invalid-text",
-        "unsupported-format",
-        "changing",
-        "unavailable",
-        "output-limit",
-        "time-limit",
-      ])
-      .optional(),
   })
   .strict();
 const workspaceComparisonEntriesSchema = z
@@ -633,83 +562,29 @@ function validateWorkspaceComparisonAnchors(
     }
   }
 }
-const workspaceRepositoryComparisonSchema = z
-  .object({
-    comparisonId: uuid,
+const workspaceRepositoryComparisonSchema = workspaceComparisonSnapshotBase
+  .extend({
     taskId: uuid,
     repositoryId: z.string().min(1).max(512),
-    target: z.enum(["branch", "uncommitted"]),
-    changeSet: z.enum(["all", "staged", "unstaged"]).optional(),
-    state: z.enum(["available", "unavailable", "gap"]),
-    observedAt: time,
-    baseline: z
-      .object({
-        kind: z.enum(["merge-base", "head"]),
-        branch: z.string().min(1).max(255).optional(),
-        commit: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
-      })
+    baseline: workspaceComparisonSnapshotBase.shape.baseline
+      .unwrap()
+      .extend({ branch: z.string().min(1).max(255).optional() })
       .strict()
       .optional(),
     availableBaseBranches: z.array(z.string().min(1).max(255)).max(4096),
     entries: workspaceComparisonEntriesSchema,
-    truncated: z.boolean(),
-    reason: z
-      .enum([
-        "workspace-unavailable",
-        "repository-unavailable",
-        "base-branch-required",
-        "base-branch-unavailable",
-        "no-merge-base",
-        "head-unavailable",
-        "git-failed",
-        "time-limit",
-        "output-limit",
-        "unsafe-path",
-        "workspace-changed",
-      ])
-      .optional(),
   })
   .strict()
   .superRefine(validateWorkspaceComparisonAnchors);
-const workspaceTurnComparisonSchema = z
-  .object({
-    comparisonId: uuid,
+const workspaceTurnComparisonSchema = workspaceTurnComparisonBase
+  .extend({
     taskId: uuid,
-    target: z.literal("turn"),
-    state: z.enum(["available", "gap", "unavailable"]),
-    outcome: z.enum(["completed", "failed", "unknown"]),
-    startedAt: time,
-    beforeObservedAt: time.optional(),
-    observedAt: time,
-    taskVersion: revision.optional(),
     workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
     assignmentId: z.string().min(1).max(512),
-    assignmentVersion: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
     profileId: uuid,
     threadId: z.string().min(1).max(512).optional(),
     turnId: z.string().min(1).max(512).optional(),
     entries: workspaceComparisonEntriesSchema,
-    truncated: z.boolean(),
-    reason: z
-      .enum([
-        "workspace-unavailable",
-        "repository-unavailable",
-        "base-branch-required",
-        "base-branch-unavailable",
-        "no-merge-base",
-        "head-unavailable",
-        "git-failed",
-        "time-limit",
-        "output-limit",
-        "unsafe-path",
-        "workspace-changed",
-        "unsupported-content",
-      ])
-      .optional(),
   })
   .strict()
   .superRefine(validateWorkspaceComparisonAnchors);
@@ -717,17 +592,11 @@ const workspaceComparisonSnapshotSchema = z.union([
   workspaceRepositoryComparisonSchema,
   workspaceTurnComparisonSchema,
 ]);
-const workspaceTurnCaptureIdentitySchema = z
-  .object({
+const workspaceTurnCaptureIdentitySchema = workspaceTurnIdentityBase
+  .extend({
     taskId: uuid,
-    taskVersion: revision.optional(),
     workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
     assignmentId: z.string().min(1).max(512),
-    assignmentVersion: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
     profileId: uuid,
   })
   .strict();
@@ -746,26 +615,7 @@ const workspacePendingTurnSchema = z
     afterState: z.enum(["available", "gap"]).optional(),
     afterObservedAt: time.optional(),
     comparison: workspaceTurnComparisonSchema.optional(),
-    reason: z
-      .enum([
-        "workspace-unavailable",
-        "repository-unavailable",
-        "base-branch-required",
-        "base-branch-unavailable",
-        "no-merge-base",
-        "head-unavailable",
-        "git-failed",
-        "time-limit",
-        "output-limit",
-        "unsafe-path",
-        "workspace-changed",
-        "unsupported-content",
-        "runtime-uncertain",
-        "turn-unbound",
-        "callback-unfinished",
-        "capture-store-failed",
-      ])
-      .optional(),
+    reason: workspaceTurnCaptureReasonSchema.optional(),
   })
   .strict();
 export const workspaceComparisonReadRequestSchema = z.union([
@@ -1758,7 +1608,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("review.anchor.stage"),
       taskId: uuid,
       expectedDraftVersion: z.number().int().nonnegative().safe(),
-      anchors: z.array(z.unknown()).min(1).max(32),
+      anchors: z.array(reviewAnchorSelectionSchema).min(1).max(32),
     })
     .strict(),
   z
@@ -1876,25 +1726,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       name: z.string().trim().min(1).max(512),
       leadProfileId: uuid.nullable(),
       instructions: text.optional(),
-      repositories: z
-        .array(setupRepositorySchema)
-        .max(20)
-        .refine(
-          (values) =>
-            new Set(values.map((value) => value.repositoryId)).size ===
-            values.length,
-          "Repository IDs must be unique",
-        )
-        .refine(
-          (values) =>
-            new Set(
-              values.map((value) =>
-                `${value.owner}/${value.name}`.toLowerCase(),
-              ),
-            ).size === values.length,
-          "Repositories must be unique",
-        )
-        .optional(),
+      repositories: setupRepositoriesSchema.optional(),
       githubProject: z
         .object({ projectNodeId: z.string().trim().min(1).max(512) })
         .strict()
@@ -2280,17 +2112,8 @@ const assignmentRecoveryRecordSchema = z
       })
       .strict()
       .nullable(),
-    intentState: z.enum([
-      "ready",
-      "capacity-waiting",
-      "held",
-      "submitting",
-      "running",
-      "completed",
-      "reconciled",
-      "resolved-failed",
-      "unknown",
-    ]),
+    // "unknown" is operator-only: the API reports it for an unrecognised stored state.
+    intentState: z.enum([...executionIntentStateSchema.options, "unknown"]),
     requestState: z
       .enum(["queued", "active", "completed", "held", "unknown"])
       .nullable(),
@@ -2860,6 +2683,8 @@ export const apiErrorSchema = z
   })
   .strict();
 export type OperatorCommand = z.infer<typeof operatorCommandSchema>;
+/** Exact source passed to `review.anchor.stage`; never a specimen or a later match. */
+export type ReviewAnchorCandidate = z.infer<typeof reviewAnchorSelectionSchema>;
 export type CommandReceipt = z.infer<typeof commandReceiptSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type WorkspaceComparisonRead = z.infer<

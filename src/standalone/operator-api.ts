@@ -34,6 +34,7 @@ import {
   type QuestionAnswers,
   questionFormSchema,
 } from "../core/question-forms.js";
+import { executionIntentStateSchema } from "../core/execution-runtime.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
@@ -4682,16 +4683,7 @@ export class OperatorApi {
         taskRecords.some((r) => r.holds.task !== null),
     };
     const visible = records.slice(-20);
-    const intentStates = new Set([
-        "ready",
-        "capacity-waiting",
-        "held",
-        "submitting",
-        "running",
-        "completed",
-        "reconciled",
-        "resolved-failed",
-      ]),
+    const intentStates = new Set<string>(executionIntentStateSchema.options),
       requestStates = new Set(["queued", "active", "completed", "held"]);
     this.requireWorkspaceSnapshot(snapshot);
     return assignmentRecoverySchema.parse({

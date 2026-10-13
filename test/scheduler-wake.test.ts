@@ -17,6 +17,7 @@ import { RoutingAttemptStore } from "../src/standalone/routing.js";
 import { SchedulerStore } from "../src/standalone/scheduler.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import { tmpdir } from "./temp.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 class FakeRuntime implements Runtime {
   turns = 0;
@@ -74,11 +75,6 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5000) {
 
 type Access = {
   db: DatabaseSync;
-  coordination: CoordinationStore;
-  state: {
-    byWorkId(workId: string): unknown;
-    taskBinding(workId: string): unknown;
-  };
   wakeScheduler(...args: unknown[]): Promise<void>;
   finalizeDeliveryCompletion(requestId: string, workId: string): Promise<void>;
 };
@@ -616,7 +612,11 @@ function stubLeadWork(
     { state: string; taskId: string; assignmentId: string } | undefined
   >,
 ) {
-  const state = access(fixture.service).state;
+  // Partial rows stand in for the fields the wake reads.
+  const state = startedOf(fixture.service).state as unknown as {
+    byWorkId(workId: string): unknown;
+    taskBinding(workId: string): unknown;
+  };
   const byWorkId = state.byWorkId.bind(state);
   const taskBinding = state.taskBinding.bind(state);
   state.byWorkId = (workId) =>
@@ -836,7 +836,7 @@ test("inbox delivery waits on unresolved held work and sees holds added while a 
     // Historical resolution is still decided by the coordination store.
     insertFallbackOperation(fixture, taskId, 100, "missing-context");
     fixture.insertRequest("blocker-2", lead, "held", { taskId });
-    const coordination = access(fixture.service).coordination;
+    const { coordination } = startedOf(fixture.service);
     const resolve = coordination.isHistoricalWorkResolved.bind(coordination);
     const consulted: string[] = [];
     coordination.isHistoricalWorkResolved = (workId: string) => {

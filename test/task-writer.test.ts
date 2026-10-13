@@ -26,6 +26,7 @@ import type {
   WorkspaceManagerOptions,
 } from "../src/standalone/workspaces.js";
 import { WorkspaceManager } from "../src/standalone/workspaces.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 class RuntimeFixture implements Runtime {
   resultReports: Array<{
@@ -234,7 +235,7 @@ async function fixture(
   );
   if (reportTaskLeadResult) {
     runtime.reportResultForTurn = (threadId, turnId) => {
-      const state = (service as unknown as { state: ExecutionState }).state;
+      const { state } = startedOf(service);
       const binding = state.coordinationBinding(threadId, turnId);
       if (
         !binding ||
@@ -351,11 +352,7 @@ test("eligibility changes during workspace admission prevent execution", async (
     const f = await fixture();
     const release = deferred();
     try {
-      const manager = (
-        f.service as unknown as {
-          workspaces: { forExecution(taskId: string): Promise<unknown> };
-        }
-      ).workspaces;
+      const manager = startedOf(f.service).workspaces;
       const original = manager.forExecution.bind(manager);
       const entered = deferred();
       manager.forExecution = async (taskId) => {
@@ -1307,19 +1304,11 @@ test("stale queued assignment work is refused without admission and needs a fres
       "completed",
     );
     assert.equal(
-      (
-        f.service as unknown as {
-          state: ExecutionState;
-        }
-      ).state.taskBinding("ready")?.assignmentVersion,
+      startedOf(f.service).state.taskBinding("ready")?.assignmentVersion,
       1,
     );
     assert.equal(
-      (
-        f.service as unknown as {
-          state: ExecutionState;
-        }
-      ).state.taskBinding("fresh")?.assignmentVersion,
+      startedOf(f.service).state.taskBinding("fresh")?.assignmentVersion,
       2,
     );
     assert.equal(f.runtime.starts, 1);
@@ -1334,8 +1323,7 @@ test("archival hold prevents writer admission after workspace validation", async
   try {
     const cleanupGate = deferred();
     const cleanupEntered = deferred();
-    const manager = (f.service as unknown as { workspaces: WorkspaceManager })
-      .workspaces;
+    const manager = startedOf(f.service).workspaces;
     const archiveAndCleanup = manager.archiveAndCleanup.bind(manager);
     manager.archiveAndCleanup = async (...args) => {
       cleanupEntered.resolve();
@@ -2601,8 +2589,7 @@ test("archival rechecks writer ownership after cleanup validation", async () => 
       (await f.service.submitTask("completed", f.assignmentId, "write")).state,
       "completed",
     );
-    const manager = (f.service as unknown as { workspaces: WorkspaceManager })
-      .workspaces;
+    const manager = startedOf(f.service).workspaces;
     const archiveAndCleanup = manager.archiveAndCleanup.bind(manager);
     manager.archiveAndCleanup = async (...args) => {
       f.service.registerExecutionCallback("completed", callback.promise);
@@ -2947,6 +2934,31 @@ test("late conflicting terminal report retracts completion and holds an active s
     });
     gate.resolve();
     assert.equal((await successor).state, "held");
+    assert.equal(
+      f.service.list().find((item) => item.workId === "first")?.state,
+      "held",
+    );
+    assert.equal(f.service.isCurrentResult("first"), false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("a terminal anomaly reported while the runtime starts retracts prior-generation work", async () => {
+  const f = await fixture();
+  try {
+    assert.equal(
+      (await f.service.submitTask("first", f.assignmentId, "write")).state,
+      "completed",
+    );
+    await f.service.stop();
+    f.runtime.start = async () =>
+      f.runtime.anomaly?.({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        reason: "Conflicting terminal status",
+      });
+    await f.service.start();
     assert.equal(
       f.service.list().find((item) => item.workId === "first")?.state,
       "held",

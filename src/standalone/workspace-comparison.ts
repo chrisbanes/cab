@@ -1,5 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { extname } from "node:path";
+import type { z } from "zod";
+import type {
+  workspaceComparisonAnchorBase,
+  workspaceComparisonContentBase,
+  workspaceComparisonEntryBase,
+  workspaceComparisonHunkBase,
+  workspaceComparisonSideContentBase,
+  workspaceComparisonSnapshotBase,
+  workspaceTurnCaptureBase,
+  workspaceTurnCaptureReasonSchema,
+  workspaceTurnComparisonBase,
+  workspaceTurnFileBase,
+  workspaceTurnIdentityBase,
+  workspaceTurnObservationBase,
+} from "../core/workspace-comparison-contracts.js";
 import { runGit } from "./git-process.js";
 import {
   inspectionLimits,
@@ -28,110 +43,29 @@ const maxFilterDriverNames = 64;
 const maxFilterDriverNameBytes = 64;
 const maxFilterConfigBytes = 16 * 1024;
 
-export type WorkspaceComparisonTarget = "branch" | "uncommitted";
-export type WorkspaceComparisonContext =
-  | "branch"
-  | "uncommitted"
-  | "turn"
-  | "result";
-export type WorkspaceComparisonSide = "left" | "right";
-
-export interface WorkspaceComparisonAnchor {
-  taskId: string;
-  repositoryId: string | null;
-  path: string;
-  comparisonId: string;
-  context: WorkspaceComparisonContext;
-  workId?: string;
-  resultId?: string;
-  threadId?: string;
-  turnId?: string;
-  side: WorkspaceComparisonSide;
-  startLine: number;
-  endLine: number;
-  contentSha256: string;
-}
-
-export interface WorkspaceComparisonHunk {
-  oldStart: number;
-  oldLines: number;
-  newStart: number;
-  newLines: number;
-  patch: string;
-  leftAnchor?: WorkspaceComparisonAnchor;
-  rightAnchor?: WorkspaceComparisonAnchor;
-}
-
-export interface WorkspaceComparisonContent {
-  sha256?: string;
-  objectId?: string;
-  size: number | null;
-  lineCount: number | null;
-  modifiedAt?: number | null;
-}
-
-export type WorkspaceComparisonEntryState =
-  | "text"
-  | "binary"
-  | "unsupported"
-  | "gap";
-
-export interface WorkspaceComparisonEntry {
-  path: string;
-  repositoryId?: string | null;
-  previousPath?: string;
-  change: "added" | "modified" | "deleted" | "renamed" | "type-changed";
-  changeSet?: "branch" | "staged" | "unstaged";
-  state: WorkspaceComparisonEntryState;
-  diff?: string;
-  left?: WorkspaceComparisonContent;
-  right?: WorkspaceComparisonContent;
-  hunks: WorkspaceComparisonHunk[];
-  reason?:
-    | "too-large"
-    | "invalid-text"
-    | "unsupported-format"
-    | "changing"
-    | "unavailable"
-    | "output-limit"
-    | "time-limit";
-}
-
-export interface WorkspaceComparisonSnapshot {
-  comparisonId: string;
-  taskId: string;
-  repositoryId: string;
-  target: WorkspaceComparisonTarget;
-  changeSet?: "all" | "staged" | "unstaged";
-  state: "available" | "unavailable" | "gap";
-  observedAt: number;
-  baseline?: {
-    kind: "merge-base" | "head";
-    branch?: string;
-    commit: string;
-  };
-  availableBaseBranches: string[];
-  entries: WorkspaceComparisonEntry[];
-  truncated: boolean;
-  reason?:
-    | "workspace-unavailable"
-    | "repository-unavailable"
-    | "base-branch-required"
-    | "base-branch-unavailable"
-    | "no-merge-base"
-    | "head-unavailable"
-    | "git-failed"
-    | "time-limit"
-    | "output-limit"
-    | "unsafe-path"
-    | "workspace-changed";
-}
-
-export interface WorkspaceComparisonSideContent {
-  entryIndex: number;
-  leftText?: string;
-  rightText?: string;
-}
+// Inferred from the shared lenient bases in core/workspace-comparison-contracts.
+export type WorkspaceComparisonAnchor = z.infer<
+  typeof workspaceComparisonAnchorBase
+>;
+export type WorkspaceComparisonHunk = z.infer<
+  typeof workspaceComparisonHunkBase
+>;
+export type WorkspaceComparisonContent = z.infer<
+  typeof workspaceComparisonContentBase
+>;
+export type WorkspaceComparisonEntry = z.infer<
+  typeof workspaceComparisonEntryBase
+>;
+export type WorkspaceComparisonSnapshot = z.infer<
+  typeof workspaceComparisonSnapshotBase
+>;
+export type WorkspaceComparisonSideContent = z.infer<
+  typeof workspaceComparisonSideContentBase
+>;
+export type WorkspaceComparisonTarget = WorkspaceComparisonSnapshot["target"];
+export type WorkspaceComparisonContext = WorkspaceComparisonAnchor["context"];
+export type WorkspaceComparisonSide = WorkspaceComparisonAnchor["side"];
+export type WorkspaceComparisonEntryState = WorkspaceComparisonEntry["state"];
 
 export interface WorkspaceComparisonExport {
   comparison: WorkspaceComparisonSnapshot | WorkspaceTurnComparisonSnapshot;
@@ -139,85 +73,33 @@ export interface WorkspaceComparisonExport {
   captureState?: "pending" | "unsettled" | "finished";
 }
 
-export interface WorkspaceTurnWorkIdentity {
-  taskId: string;
-  /** Task revision admitted by this exact turn request. */
-  taskVersion: number;
-  workId: string;
-  workRevision: number;
-  requestSequence: number;
-  assignmentId: string;
-  assignmentVersion: number;
-  instructionsRevision: number;
-  profileRevision: number;
-  profileId: string;
-}
-
-export interface WorkspaceTurnFileSnapshot {
-  repositoryId: string | null;
-  path: string;
-  state: "text" | "binary" | "unsupported" | "gap";
-  content: WorkspaceComparisonContent;
-  text?: string;
-  reason?: WorkspaceComparisonEntry["reason"];
-  kind: "file" | "symlink" | "other";
-}
-
-export interface WorkspaceTurnObservation {
-  observedAt: number;
-  state: "available" | "gap";
-  reason?: WorkspaceComparisonSnapshot["reason"] | "unsupported-content";
-  files: WorkspaceTurnFileSnapshot[];
-  truncated: boolean;
-}
-
-export interface WorkspaceTurnComparisonSnapshot {
-  comparisonId: string;
-  taskId: string;
-  target: "turn";
-  state: "available" | "gap" | "unavailable";
-  outcome: "completed" | "failed" | "unknown";
-  startedAt: number;
-  beforeObservedAt?: number;
-  observedAt: number;
-  taskVersion: number;
-  workId: string;
-  workRevision: number;
-  requestSequence: number;
-  assignmentId: string;
-  assignmentVersion: number;
-  instructionsRevision: number;
-  profileRevision: number;
-  profileId: string;
-  threadId?: string;
-  turnId?: string;
-  entries: WorkspaceComparisonEntry[];
-  truncated: boolean;
-  reason?: WorkspaceTurnObservation["reason"];
-}
-
-export interface WorkspaceTurnCaptureRecord {
-  comparisonId: string;
+/**
+ * `taskVersion` is the task revision admitted by this exact turn request. Rows
+ * recorded before it existed lack it, so the stored schemas keep it optional
+ * and these in-memory types require it.
+ */
+export type WorkspaceTurnWorkIdentity = Omit<
+  z.infer<typeof workspaceTurnIdentityBase>,
+  "taskVersion"
+> & { taskVersion: number };
+export type WorkspaceTurnFileSnapshot = z.infer<typeof workspaceTurnFileBase>;
+export type WorkspaceTurnObservation = z.infer<
+  typeof workspaceTurnObservationBase
+>;
+export type WorkspaceTurnComparisonSnapshot = Omit<
+  z.infer<typeof workspaceTurnComparisonBase>,
+  "taskVersion"
+> & { taskVersion: number };
+export type WorkspaceTurnCaptureReason = z.infer<
+  typeof workspaceTurnCaptureReasonSchema
+>;
+export type WorkspaceTurnCaptureRecord = Omit<
+  z.infer<typeof workspaceTurnCaptureBase>,
+  "identity" | "comparison"
+> & {
   identity: WorkspaceTurnWorkIdentity;
-  captureState: "pending" | "unsettled" | "finished";
-  outcome: "running" | "completed" | "failed" | "unknown";
-  startedAt: number;
-  observedAt: number;
-  threadId?: string;
-  turnId?: string;
-  before?: WorkspaceTurnObservation;
-  after?: WorkspaceTurnObservation;
   comparison?: WorkspaceTurnComparisonSnapshot;
-  sides?: WorkspaceComparisonSideContent[];
-  reason?: WorkspaceTurnCaptureReason;
-}
-
-export type WorkspaceTurnCaptureReason =
-  | WorkspaceTurnObservation["reason"]
-  | "runtime-uncertain"
-  | "turn-unbound"
-  | "callback-unfinished"
-  | "capture-store-failed";
+};
 
 export interface CompareRepositoryRequest {
   taskId: string;

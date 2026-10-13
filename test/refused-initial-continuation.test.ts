@@ -11,6 +11,7 @@ import type {
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
 import { StandaloneService } from "../src/standalone/service.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 type ToolListener = (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
 
@@ -155,11 +156,7 @@ async function refusedInitial(initialBatch = false) {
   assert.match(old.reason ?? "", /task-revision-changed/);
   assert.equal(runtime.turns, 0);
   if (initialBatch) {
-    const coordination = (
-      service as unknown as {
-        coordination: import("../src/core/coordination.js").CoordinationStore;
-      }
-    ).coordination;
+    const coordination = startedOf(service).coordination;
     coordination.postOperatorMessage({
       actor: "operator",
       key: randomUUID(),
@@ -317,11 +314,7 @@ test("fresh operator message continues a refused canonical initial with exact cu
 });
 
 function proof(service: StandaloneService, workId: string) {
-  return (
-    service as unknown as {
-      state: { isNeverAdmittedRefusedAssignmentWork(id: string): boolean };
-    }
-  ).state.isNeverAdmittedRefusedAssignmentWork(workId);
+  return startedOf(service).state.isNeverAdmittedRefusedAssignmentWork(workId);
 }
 
 test("canonical initial refusal proof rejects altered identity and every admission witness", async (t) => {
@@ -552,11 +545,7 @@ test("refused initial exemption feeds external completion actions and preserves 
   const f = await refusedInitial();
   try {
     f.runtime.handleTurn = async (threadId, turnId) => {
-      const coordination = (
-        f.service as unknown as {
-          coordination: import("../src/core/coordination.js").CoordinationStore;
-        }
-      ).coordination;
+      const coordination = startedOf(f.service).coordination;
       const call = {
         threadId,
         turnId,
