@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
-import { operatorCommandSchema } from "../src/operator/contracts.js";
+import {
+  operatorCommandSchema,
+  type Workspace,
+} from "../src/operator/contracts.js";
+import {
+  readinessCheckIds,
+  readinessSchema,
+} from "../src/operator/readiness.js";
 import { ClientError, OperatorClient } from "../web/src/api.js";
 import { ConfigurationDraft } from "../web/src/settings-state.js";
 import { settingsHeader } from "../web/src/settings-view.js";
@@ -14,6 +21,8 @@ import {
   listedProject,
   parseTypedRepository,
   pickerStart,
+  type ReadinessRead,
+  readyCheckItems,
   rowsFromDraft,
   rowsToDraft,
   typedRepositoryId,
@@ -260,4 +269,186 @@ test("a visible ref alone makes a row count", () => {
     "",
   );
   assert.deepEqual(rowIndex, [0]);
+});
+
+const leadId = randomUUID();
+const harness = (
+  name: "codex" | "claude",
+  state: "available" | "not-configured" | "unavailable" = "available",
+) =>
+  state === "unavailable"
+    ? { harness: name, state, since: 1, policy: null, settings: null }
+    : { harness: name, state, policy: null, settings: null };
+const workspace = (
+  lead: "codex" | "claude" | null,
+  patch: Partial<Workspace["data"]> = {},
+): Workspace["data"] => ({
+  projects: [],
+  profiles: lead
+    ? [
+        {
+          id: leadId,
+          name: "Mira Private",
+          summary: "",
+          version: 1,
+          revoked: false,
+          runtime:
+            lead === "claude"
+              ? { harness: "claude", model: null, reasoningEffort: null }
+              : { harness: "codex" },
+        },
+      ]
+    : [],
+  runtime: { state: "available" },
+  harnesses: [harness("codex"), harness("claude", "not-configured")],
+  ...patch,
+});
+/** A schema-valid readiness read: everything passes except the named checks. */
+const readiness = (
+  failing: Partial<Record<(typeof readinessCheckIds)[number], string>> = {},
+): ReadinessRead => {
+  const checks = readinessCheckIds.map((id) => {
+    const status = failing[id];
+    return {
+      id,
+      label: id,
+      status: (status ?? "pass") as "pass" | "fail" | "not-configured",
+      reason: status ? `${id} reason` : null,
+      fix: status ? `${id} fix` : null,
+    };
+  });
+  readinessSchema.parse({ data: { checks }, observedAt: 1 });
+  return { state: "ready", checks };
+};
+const free = {
+  globalUsage: 0,
+  globalLimit: 4,
+  projectUsage: 0,
+  projectLimit: 2,
+};
+const input = (
+  patch: Partial<Parameters<typeof readyCheckItems>[0]> = {},
+): Parameters<typeof readyCheckItems>[0] => ({
+  leadProfileId: leadId,
+  workspace: workspace("codex"),
+  readiness: readiness(),
+  capacity: free,
+  ...patch,
+});
+
+test("the ready check lists only what would make this lead's work wait", () => {
+  assert.deepEqual(readyCheckItems(input()), {
+    items: [],
+    checking: false,
+    blocked: false,
+    capacityFull: false,
+  });
+  // No lead, or one revoked since creation.
+  for (const missing of [
+    input({ leadProfileId: null }),
+    input({
+      workspace: {
+        ...workspace("codex"),
+        profiles: workspace("codex").profiles.map((p) => ({
+          ...p,
+          revoked: true,
+        })),
+      },
+    }),
+  ]) {
+    const result = readyCheckItems(missing);
+    assert.deepEqual(
+      result.items.map((i) => i.text),
+      ["No lead profile. Tasks wait for a lead before starting."],
+    );
+    assert.equal(result.blocked, true);
+  }
+  // A Codex lead reads the Codex checks and ignores the others.
+  const login = readyCheckItems(
+    input({ readiness: readiness({ "codex-login": "fail", git: "fail" }) }),
+  );
+  assert.deepEqual(login.items, [
+    { text: "codex-login reason", fix: "codex-login fix" },
+  ]);
+  assert.equal(login.blocked, true);
+  // A Claude lead reads the token check, and its fix is Add Claude.
+  const token = readyCheckItems(
+    input({
+      workspace: workspace("claude", {
+        harnesses: [harness("codex"), harness("claude")],
+      }),
+      readiness: readiness({
+        "claude-token": "not-configured",
+        "codex-login": "fail",
+      }),
+    }),
+  );
+  assert.deepEqual(token.items, [
+    {
+      text: "claude-token reason",
+      fix: "claude-token fix",
+      link: { label: "Add Claude", href: "/app/settings/runtime" },
+    },
+  ]);
+  assert.equal(token.blocked, true);
+});
+
+test("the ready check names a runtime that cannot run the lead's work in fixed words", () => {
+  const plain =
+    /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid|Mira/i;
+  const cases = [
+    [
+      input({ workspace: workspace("claude") }),
+      "Claude runtime isn't enabled for this service.",
+    ],
+    [
+      input({
+        workspace: workspace("codex", {
+          runtime: { state: "unavailable", since: 1 },
+        }),
+      }),
+      "Codex runtime unavailable — restart the service",
+    ],
+    [
+      input({
+        workspace: workspace("claude", {
+          harnesses: [harness("codex"), harness("claude", "unavailable")],
+        }),
+      }),
+      "Claude runtime unavailable — restart the service",
+    ],
+    [
+      input({ readiness: { state: "unavailable" } }),
+      "Readiness couldn't be checked.",
+    ],
+  ] as const;
+  for (const [given, text] of cases) {
+    const result = readyCheckItems(given);
+    assert.deepEqual(
+      result.items.map((i) => i.text),
+      [text],
+    );
+    assert.equal(result.blocked, true);
+    assert.doesNotMatch(text, plain);
+  }
+});
+
+test("the ready check fails closed while loading and never blocks on capacity", () => {
+  const loading = readyCheckItems(input({ readiness: { state: "loading" } }));
+  assert.deepEqual(loading, {
+    items: [],
+    checking: true,
+    blocked: true,
+    capacityFull: false,
+  });
+  assert.equal(readyCheckItems(input({ workspace: null })).checking, true);
+  for (const capacity of [
+    { ...free, projectUsage: 2 },
+    { ...free, globalUsage: 4 },
+  ]) {
+    const full = readyCheckItems(input({ capacity }));
+    assert.equal(full.capacityFull, true);
+    assert.equal(full.blocked, false);
+  }
+  assert.equal(readyCheckItems(input({ capacity: null })).capacityFull, false);
 });

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { Page } from "playwright";
+import {
+  type ReadinessCheckId,
+  readinessCheckIds,
+  readinessSchema,
+} from "../src/operator/readiness.js";
 import { DiscoveryFailure } from "../src/standalone/github-discovery.js";
 import {
   browserSuite,
@@ -143,9 +149,16 @@ test("Setup creates a paused project from discovered repositories and Projects",
     (await page.locator("body").innerText()).includes("PRIVATE SETUP SENTINEL"),
     false,
   );
+  const ready = page.getByRole("region", { name: "Ready check" });
+  for (const line of [
+    "Instructions saved.",
+    "Repository access: acme/atlas (main), checked on this Mac.",
+    "GitHub Project linked as an inactive discovery source.",
+  ])
+    await ready.getByText(line, { exact: true }).waitFor();
   assert.equal(
-    await page
-      .getByRole("link", { name: "Open project configuration" })
+    await ready
+      .getByRole("link", { name: "Keep paused", exact: true })
       .getAttribute("href"),
     `/app/projects/${body.projectId}/settings`,
   );
@@ -154,9 +167,8 @@ test("Setup creates a paused project from discovered repositories and Projects",
     .locator(`a[href="/app/projects/${body.projectId}"]`)
     .first()
     .waitFor();
-  await page
-    .getByRole("button", { name: "Create another project", exact: true })
-    .click();
+  // Choosing New project again starts a clean form.
+  await page.getByRole("link", { name: "New project", exact: true }).click();
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
     .waitFor();
@@ -324,9 +336,6 @@ test("Setup falls back to typed entry without discovery and on first run", async
     credentialRef: "env:FIXTURE_DISCOVERY",
   });
   discoveryState.failure = new DiscoveryFailure("unauthorized");
-  await page
-    .getByRole("button", { name: "Create another project", exact: true })
-    .click();
   await page.reload();
   await page.locator("main.page h1").waitFor();
   await page
@@ -695,6 +704,7 @@ test("Setup creates the lead profile inline and keeps every other setup value", 
   for (const field of ["Profile name", "Summary", "Profile instructions"])
     await inline.getByLabel(field, { exact: true }).waitFor();
   assert.equal(await inline.getByLabel("Runtime").inputValue(), "codex");
+  await captureBrowserEvidence(page, "1366-setup-inline-profile");
   const sent = sentCommands(page);
   // Enter with the name empty checks the profile only; it never submits the project.
   await inline.getByLabel("Profile name", { exact: true }).press("Enter");
@@ -801,4 +811,277 @@ test("Setup warns before leaving only while it holds changed input", async (_t, 
     .click();
   await page.getByText(/^Created Atlas\./).waitFor();
   await becomes(false);
+});
+
+/** A schema-valid readiness read: everything passes except the named checks. */
+const stubReadiness = (
+  page: Page,
+  failing: Partial<Record<ReadinessCheckId, "fail" | "not-configured">> = {},
+) =>
+  page.route("**/api/operator/readiness", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(
+        readinessSchema.parse({
+          data: {
+            checks: readinessCheckIds.map((id) => ({
+              id,
+              label: id,
+              status: failing[id] ?? "pass",
+              reason: failing[id] ? `${id} reason` : null,
+              fix: failing[id] ? `${id} fix` : null,
+            })),
+          },
+          observedAt: Date.now(),
+        }),
+      ),
+    }),
+  );
+const resumeLabel = "Resume and create first task";
+/** Create a repository-free project and wait for its ready check. */
+async function createProject(
+  page: Page,
+  sent: ReturnType<typeof sentCommands>,
+  lead = "Mira",
+) {
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page
+    .getByLabel("Lead profile", { exact: true })
+    .selectOption({ label: lead });
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  const ready = page.getByRole("region", { name: "Ready check" });
+  await ready.waitFor();
+  const projectId = String(
+    sent.find((c) => c.type === "project.create")?.projectId,
+  );
+  return {
+    ready,
+    projectId,
+    resume: ready.getByRole("button", { name: resumeLabel, exact: true }),
+    composer: (id = projectId) =>
+      page.waitForURL(
+        (url) =>
+          url.pathname === "/app/tasks/new" &&
+          url.searchParams.get("project") === id,
+      ),
+  };
+}
+
+test("Setup resumes the new project through its command and opens the composer with it", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  const { ready, projectId, resume, composer } = await createProject(
+    page,
+    sent,
+  );
+  await ready.getByText("Nothing has run.", { exact: true }).waitFor();
+  await ready.getByText("No instructions yet.").waitFor();
+  await ready.getByText("Repository access: none · repository-free.").waitFor();
+  await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
+  await captureBrowserEvidence(page, "1366-setup-ready-check");
+  const domain = f.service.domain();
+  assert.equal(domain.project(projectId).paused, 1);
+  // Nothing resumes until the click.
+  assert.deepEqual(
+    sent.map((c) => c.type),
+    ["project.create"],
+  );
+  await resume.click();
+  await composer();
+  assert.deepEqual(
+    sent.slice(1).map(({ type, paused, expectedVersion }) => ({
+      type,
+      paused,
+      expectedVersion,
+    })),
+    [{ type: "project.configure", paused: false, expectedVersion: 1 }],
+  );
+  await page.waitForFunction(
+    (id) =>
+      document.querySelector<HTMLSelectElement>('select[aria-label="Project"]')
+        ?.value === id,
+    projectId,
+  );
+  assert.equal(domain.project(projectId).paused, 0);
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("Setup disables Resume with the reason and Add Claude for a Claude lead without a token", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, {
+    profiles: false,
+    claude: true,
+  });
+  f.service.domain().execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Claude lead",
+    instructions: "Lead",
+    capabilities: "Coordinate",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  } as never);
+  await stubReadiness(page, { "claude-token": "not-configured" });
+  await page.reload();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  const sent = sentCommands(page);
+  const { ready, projectId, resume } = await createProject(
+    page,
+    sent,
+    "Claude lead",
+  );
+  await ready.getByText("claude-token reason").waitFor();
+  await ready.getByText("claude-token fix").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  await captureBrowserEvidence(page, "1366-setup-ready-check-blocked");
+  // The reason sits beneath the primary and describes it.
+  assert.equal(
+    await resume.getAttribute("aria-describedby"),
+    await ready.locator(".setup-waits").getAttribute("id"),
+  );
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "Add Claude", exact: true })
+      .getAttribute("href"),
+    "/app/settings/runtime",
+  );
+  assert.equal(
+    sent.some((c) => c.type === "project.configure"),
+    false,
+  );
+  assert.equal(f.service.domain().project(projectId).paused, 1);
+});
+
+test("Setup keeps the project paused when the operator chooses Keep paused", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  const { ready, projectId } = await createProject(page, sent);
+  const keep = ready.getByRole("link", { name: "Keep paused", exact: true });
+  assert.equal(
+    await keep.getAttribute("href"),
+    `/app/projects/${projectId}/settings`,
+  );
+  await keep.click();
+  await page
+    .locator(".settings-status")
+    .getByText("Paused", { exact: true })
+    .waitFor();
+  assert.deepEqual(
+    sent.map((c) => c.type),
+    ["project.create"],
+  );
+  assert.equal(f.service.domain().project(projectId).paused, 1);
+});
+
+test("Setup reports full capacity without disabling Resume", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  await stubReadiness(page);
+  await page.route("**/composer-options", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.capacity.projectUsage = body.data.capacity.projectLimit;
+    await route.fulfill({ response, json: body });
+  });
+  const { ready, resume } = await createProject(page, sentCommands(page));
+  await ready
+    .getByText(
+      "Capacity is full now, so the first task will wait for capacity.",
+    )
+    .waitFor();
+  assert.equal(await resume.isEnabled(), true);
+});
+
+test("Setup blocks a second Resume until an unknown outcome is checked", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  const { ready, projectId, resume, composer } = await createProject(
+    page,
+    sent,
+  );
+  await resume.waitFor();
+  await page.route("**/api/operator/commands", (route) =>
+    route.request().postDataJSON().type === "project.configure"
+      ? route.abort()
+      : route.continue(),
+  );
+  try {
+    await resume.click();
+    await ready
+      .getByRole("button", { name: "Check whether it saved" })
+      .waitFor();
+    assert.equal(await page.getByRole("alert").count(), 1);
+    assert.equal(await resume.count(), 0);
+    assert.equal(f.service.domain().project(projectId).paused, 1);
+    await page.unroute("**/api/operator/commands");
+    await ready.getByRole("button", { name: "Check whether it saved" }).click();
+    await composer();
+    const resumes = sent.filter((c) => c.type === "project.configure");
+    assert.equal(resumes.length, 2);
+    assert.equal(resumes[1]?.key, resumes[0]?.key);
+    assert.equal(f.service.domain().project(projectId).paused, 0);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+});
+
+test("Setup reviews a project changed elsewhere before Resume is sent again", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  const { ready, projectId, resume, composer } = await createProject(
+    page,
+    sent,
+  );
+  f.service.domain().execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    name: "Renamed",
+  } as never);
+  await resume.click();
+  await ready.getByText("A newer version was saved elsewhere.").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  await ready.getByRole("button", { name: "Review changes" }).click();
+  // Resume is available again once the latest version is loaded.
+  await resume.click();
+  await composer();
+  const resumes = sent.filter((c) => c.type === "project.configure");
+  assert.deepEqual(
+    resumes.map((c) => c.expectedVersion),
+    [1, 2],
+  );
+  assert.equal(f.service.domain().project(projectId).paused, 0);
+});
+
+test("Setup's ready check stays usable on a phone", async (_t, journey) => {
+  const { page } = await setupJourney(journey, {
+    viewport: { width: 390, height: 844 },
+  });
+  await stubReadiness(page, { "codex-login": "fail" });
+  const { ready } = await createProject(page, sentCommands(page));
+  await ready.getByText("codex-login fix").waitFor();
+  await page.waitForFunction(
+    () =>
+      document.documentElement.scrollWidth <=
+      document.documentElement.clientWidth,
+  );
+  const small = await ready
+    .locator(":is(button, a[data-slot='button'])")
+    .evaluateAll((els) =>
+      els
+        .map((el) => ({
+          name: el.textContent,
+          height: el.getBoundingClientRect().height,
+        }))
+        .filter((e) => e.height < 44),
+    );
+  assert.deepEqual(small, []);
+  await captureBrowserEvidence(page, "390-setup-ready-check");
 });

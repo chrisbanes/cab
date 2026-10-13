@@ -11,6 +11,7 @@ import type { z } from "zod";
 import { ActionLink, Button } from "./components.js";
 import { runtimeErrors } from "./execution-runtime.js";
 import { FolderPicker } from "./folder-picker.js";
+import { ReadyCheck } from "./ready-check.js";
 import {
   claudeSettings,
   emptyProfile,
@@ -75,7 +76,9 @@ const repoOf = (r: SetupRow) =>
 const verificationKey = (r: SetupRow) => `${r.path}\n${repoOf(r)}\n${r.ref}`;
 
 /** Frames 115–117b: guided setup recorded by one `project.create`. */
-export function ProjectSetup(p: SettingsProps) {
+export function ProjectSetup(
+  p: SettingsProps & { navigate: (href: string) => void },
+) {
   const d = useDraft(p.drafts, "project.create");
   // The lead profile created inline when none exists; its own draft never meets Settings'.
   const inline = useDraft(p.drafts, "profile.create:setup");
@@ -507,7 +510,10 @@ export function ProjectSetup(p: SettingsProps) {
               <li>
                 The project starts Paused. Creating it starts no execution.
               </li>
-              <li>Resume is a separate decision in project configuration.</li>
+              <li>
+                Resume is a separate step after creation; nothing runs until you
+                choose it.
+              </li>
               <li>
                 Routing, GitHub discovery, credential references and capacity
                 overrides are configured after creation.
@@ -939,46 +945,12 @@ export function ProjectSetup(p: SettingsProps) {
         </section>
       </form>
       {recorded?.type === "project.create" && (
-        <DraftMessage
+        <ReadyCheck
+          settings={p}
           draft={d}
-          success={`Created ${recorded.name}. It's paused.`}
-        >
-          <ul className="body setup-recorded">
-            <li>
-              {recorded.instructions
-                ? "Instructions saved."
-                : "No instructions yet."}
-            </li>
-            <li>
-              Repository access:{" "}
-              {recorded.repositories?.length
-                ? recorded.repositories
-                    .map((r) => `${r.owner}/${r.name} (${r.ref})`)
-                    .join(", ")
-                : "none · repository-free"}
-              .
-            </li>
-            {recorded.githubProject && (
-              <li>GitHub Project linked as an inactive discovery source.</li>
-            )}
-          </ul>
-          <div className="setup-inline-actions">
-            <ActionLink href={`/app/projects/${recorded.projectId}/settings`}>
-              Open project configuration
-            </ActionLink>
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={() => {
-                setVerifications({});
-                projectChoiceTouched.current = "";
-                d.startOperation(blank());
-              }}
-            >
-              Create another project
-            </Button>
-          </div>
-        </DraftMessage>
+          created={recorded}
+          navigate={p.navigate}
+        />
       )}
     </section>
   );

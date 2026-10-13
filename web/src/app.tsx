@@ -867,11 +867,14 @@ export function App() {
             />
           ) : pathname === "/app/settings/projects/new" ? (
             <ProjectSetup
+              // Choosing New project again starts a clean form.
+              key={navigationVersion}
               client={client}
               session={session}
               drafts={drafts.current}
               workspace={workspace.state.data}
               refresh={workspace.refresh}
+              navigate={navigate}
             />
           ) : pathname === "/app/settings/profiles/new" ? (
             <ProfileCreate

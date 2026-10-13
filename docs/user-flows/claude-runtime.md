@@ -1,7 +1,8 @@
 # Add Claude
 
-**Status:** implemented on the runtime page (Settings → Runtime). The Getting
-started row, profile-form and first-task entry points are planned.
+**Status:** implemented on the runtime page (Settings → Runtime) and as the Fix in
+the [project setup](project-setup.md) ready check. The Getting started row,
+profile-form and first-task entry points are planned.
 
 ## Goal
 
@@ -11,6 +12,8 @@ works without reading the operations guide.
 ## Entry points
 
 - Settings → Runtime → Add Claude (implemented).
+- [Project setup](project-setup.md) ready check, for a Claude lead whose token is
+  unavailable (implemented).
 - [Getting started](getting-started.md) optional Claude row (planned).
 - Profile form, when Claude is chosen as the runtime and no token is readable
   (planned).

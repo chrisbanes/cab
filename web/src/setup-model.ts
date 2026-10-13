@@ -1,10 +1,15 @@
 /** Pure model for guided project setup: rows, the create command and fixed copy. */
-import type {
-  CheckoutVerification,
-  DiscoveryUnavailableReason,
-  FolderListing,
-  OperatorCommand,
+import {
+  type CheckoutVerification,
+  type ComposerOptions,
+  type DiscoveryUnavailableReason,
+  executionHarnessLabels,
+  type FolderListing,
+  type OperatorCommand,
+  type Workspace,
 } from "../../src/operator/contracts.js";
+import type { ReadinessCheck } from "../../src/operator/readiness.js";
+import { unavailableAlert } from "./execution-runtime.js";
 
 /** One repository row. A typed row keeps its raw `text`; a discovered row carries the node ID. */
 export interface SetupRow {
@@ -221,4 +226,84 @@ export function listedProject(
     [...list.linked, ...list.owned].some((p) => p.projectNodeId === id)
     ? id
     : "";
+}
+
+/** One thing that would make the first task wait, with the fix a readiness check gives for it. */
+export interface WaitItem {
+  text: string;
+  fix?: string;
+  link?: { label: string; href: string };
+}
+export type ReadinessRead =
+  | { state: "loading" }
+  | { state: "unavailable" }
+  | { state: "ready"; checks: readonly ReadinessCheck[] };
+
+/**
+ * What the ready check says would make work wait, from reads already loaded. Every item
+ * blocks Resume, and so does a readiness read that is loading or failed. Capacity never
+ * blocks: it changes as other work runs, so it is only reported. Texts are fixed strings
+ * (readiness reasons and fixes are privacy-safe); no profile name or path appears.
+ */
+export function readyCheckItems(input: {
+  leadProfileId: string | null;
+  workspace: Workspace["data"] | null;
+  readiness: ReadinessRead;
+  capacity: ComposerOptions["data"]["capacity"] | null;
+}) {
+  const { workspace, readiness, capacity } = input;
+  const items: WaitItem[] = [];
+  if (workspace) {
+    const lead = workspace.profiles.find(
+      (profile) => profile.id === input.leadProfileId && !profile.revoked,
+    );
+    if (!lead)
+      items.push({
+        text: "No lead profile. Tasks wait for a lead before starting.",
+      });
+    else {
+      const harness = lead.runtime.harness;
+      const status = workspace.harnesses.find((h) => h.harness === harness);
+      if (
+        status?.state === "unavailable" ||
+        (harness === "codex" && workspace.runtime.state === "unavailable")
+      )
+        items.push({ text: unavailableAlert({ harness }) });
+      else if (status?.state === "not-configured")
+        items.push({
+          text: `${executionHarnessLabels[harness]} runtime isn't enabled for this service.`,
+        });
+      const own: readonly string[] =
+        harness === "claude"
+          ? ["claude-token"]
+          : ["codex-executable", "codex-login"];
+      if (readiness.state === "ready")
+        for (const c of readiness.checks)
+          if (own.includes(c.id) && c.reason && c.fix)
+            items.push({
+              text: c.reason,
+              fix: c.fix,
+              ...(c.id === "claude-token"
+                ? {
+                    link: {
+                      label: "Add Claude",
+                      href: "/app/settings/runtime",
+                    },
+                  }
+                : {}),
+            });
+    }
+  }
+  if (readiness.state === "unavailable")
+    items.push({ text: "Readiness couldn't be checked." });
+  const checking = !workspace || readiness.state === "loading";
+  return {
+    items,
+    checking,
+    blocked: checking || items.length > 0,
+    capacityFull:
+      capacity !== null &&
+      (capacity.projectUsage >= capacity.projectLimit ||
+        capacity.globalUsage >= capacity.globalLimit),
+  };
 }
