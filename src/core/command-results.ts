@@ -102,7 +102,15 @@ export const deliveryCommandResultSchema = deliveryPolicySchema
 export const githubConfigurationCommandResultSchema = githubConfigurationSchema
   .extend({
     version: positiveInteger,
-    repositories: z.array(linkedRepositorySchema).max(20),
+    repositories: z
+      .array(linkedRepositorySchema)
+      .max(20)
+      .refine(
+        (values) =>
+          new Set(values.map((value) => value.repositoryId)).size ===
+          values.length,
+        "Repository IDs must be unique",
+      ),
   })
   .strict();
 

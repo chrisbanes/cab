@@ -331,6 +331,36 @@ test("rejects malformed result fields rather than coercing them", () => {
         }),
       },
     ],
+    [
+      "github.configure",
+      {
+        ...github,
+        repositories: [
+          {
+            repositoryId: "R_DUP",
+            path: "/first",
+            ref: "main",
+            gitCommonDirectory: "/first/.git",
+          },
+          {
+            repositoryId: "R_DUP",
+            path: "/second",
+            ref: "main",
+            gitCommonDirectory: "/second/.git",
+          },
+        ],
+      },
+    ],
+    [
+      "github.configure",
+      {
+        ...github,
+        selections: [
+          { id: "same", kind: "search", query: "one" },
+          { id: "same", kind: "search", query: "two" },
+        ],
+      },
+    ],
     ["capacity.configure", { ...capacity, globalLimit: 0 }],
     ["capacity.configure", { ...capacity, globalLimit: 1.5 }],
     [

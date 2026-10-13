@@ -803,6 +803,100 @@ test("malformed repository verification output fails as an internal result error
   }
 });
 
+test("duplicate verified repository identities roll back and corrupt receipts fail closed", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-duplicate-result-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  let duplicate = true;
+  let verificationCount = 0;
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db, undefined, async (link) => {
+      verificationCount++;
+      return {
+        ...link,
+        repositoryId: duplicate ? "R_DUP" : link.repositoryId,
+        gitCommonDirectory: root,
+      };
+    });
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    const command = {
+      type: "github.configure" as const,
+      actor: "operator" as const,
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "all" as const,
+        conditions: [{ kind: "label" as const, name: "ready" }],
+      },
+      repositories: [
+        { repositoryId: "R_1", path: root, ref: "main" },
+        { repositoryId: "R_2", path: root, ref: "main" },
+      ],
+    };
+    const commands = new DomainCommands(domain);
+
+    await assert.rejects(
+      commands.execute(command),
+      CommandResultValidationError,
+    );
+    assert.equal(verificationCount, 2);
+    assert.equal(domain.githubConfiguration(projectId).version, 1);
+    assert.deepEqual(domain.githubConfiguration(projectId).repositories, []);
+    assert.equal(domain.recordedResult(projectId, command.key), undefined);
+
+    duplicate = false;
+    const result = await commands.execute(command);
+    assert.equal(verificationCount, 4);
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      result.repositories.map((repository) => repository.repositoryId),
+      ["R_1", "R_2"],
+    );
+
+    const corrupted = {
+      ...result,
+      repositories: result.repositories.map((repository) => ({
+        ...repository,
+        repositoryId: "R_DUP",
+      })),
+    };
+    db.prepare(
+      "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+    ).run(JSON.stringify(corrupted), projectId, command.key);
+    await assert.rejects(
+      domain.configureGitHub(command),
+      CommandResultValidationError,
+    );
+    assert.throws(
+      () => domain.recordedResult(projectId, command.key, "github.configure"),
+      CommandResultValidationError,
+    );
+    assert.equal(verificationCount, 4);
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.deepEqual(
+      domain
+        .githubConfiguration(projectId)
+        .repositories.map((repository) => repository.repositoryId),
+      ["R_1", "R_2"],
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("verified GitHub command duplicates share correlation and replay without rechecking", async () => {
   const root = mkdtempSync(
     join(tmpdir(), "ensemble-github-correlated-replay-"),
