@@ -8,7 +8,10 @@ import type {
   workspaceDirectoryReadSchema,
   workspacePreviewReadSchema,
 } from "../../src/operator/contracts.js";
-import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
+import type {
+  ReviewAnchorCandidate,
+  WorkspaceComparisonRead,
+} from "../../src/operator/contracts.js";
 type FeedbackReference = z.infer<typeof feedbackReferenceSchema>;
 type WorkspaceDirectory = z.infer<typeof workspaceDirectoryReadSchema>["data"];
 type WorkspacePreview = z.infer<typeof workspacePreviewReadSchema>["data"];
@@ -171,24 +174,7 @@ class TaskReplyState {
   }
   uncertain = false;
 }
-/** Exact source passed to `review.anchor.stage`; never a specimen or a later match. */
-export type ReviewAnchorCandidate = {
-  taskId: string;
-  repositoryId: string | null;
-  path: string;
-  sourceKind: "workspace-file" | "comparison-side" | "result-evidence";
-  context: "workspace" | "branch" | "uncommitted" | "turn" | "result";
-  comparisonId?: string;
-  resultId?: string;
-  resultItemId?: string;
-  workId?: string;
-  threadId?: string;
-  turnId?: string;
-  side: "file" | "left" | "right";
-  startLine: number;
-  endLine: number;
-  contentSha256: string;
-};
+export type { ReviewAnchorCandidate };
 
 export type LocalReviewSend = {
   key: string;

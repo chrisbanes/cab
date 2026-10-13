@@ -380,3 +380,45 @@ test("project.create shares one setup repositories schema with both refinements"
     null,
   );
 });
+
+test("review.anchor.stage types its anchors and keeps every selection rule", () => {
+  const contentSha256 = "a".repeat(64);
+  const file = {
+    taskId: key,
+    repositoryId: null,
+    path: "src/a.ts",
+    sourceKind: "workspace-file",
+    context: "workspace",
+    side: "file",
+    startLine: 1,
+    endLine: 2,
+    contentSha256,
+  };
+  const side = {
+    ...file,
+    sourceKind: "comparison-side",
+    context: "branch",
+    comparisonId: key,
+    side: "left",
+  };
+  const stage = (anchors: unknown[]) => ({
+    type: "review.anchor.stage",
+    key,
+    taskId: key,
+    expectedDraftVersion: 0,
+    anchors,
+  });
+  const accepted = (anchors: unknown[]) =>
+    operatorCommandSchema.safeParse(stage(anchors)).success;
+  assert.equal(accepted([file, side]), true);
+  const { contentSha256: _hash, ...unhashed } = file;
+  for (const [name, anchors] of [
+    ["missing hash", [unhashed]],
+    ["inverted range", [{ ...file, startLine: 3, endLine: 2 }]],
+    ["workspace file on a comparison side", [{ ...file, side: "left" }]],
+    ["turn without thread", [{ ...side, context: "turn", workId: "w" }]],
+    ["unknown key", [{ ...file, extra: true }]],
+    ["no anchors", []],
+  ] as const)
+    assert.equal(accepted([...anchors]), false, name);
+});

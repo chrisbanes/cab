@@ -8,6 +8,12 @@ import {
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
+  retainedEvidenceIdentitySchema,
+  retainedEvidenceSourceObservationSchema,
+  reviewAnchorRecordBaseSchema,
+  reviewAnchorSelectionSchema,
+} from "../core/review-anchor-contracts.js";
+import {
   questionAnswersSchema,
   questionFormSchema,
   questionPayloadLimit,
@@ -324,31 +330,6 @@ export const workspacePreviewReadSchema = envelope(
         });
     }),
 );
-const retainedEvidenceIdentitySchema = z
-  .object({
-    taskVersion: revision,
-    captureTaskVersion: revision,
-    assignmentId: uuid,
-    assignmentVersion: revision,
-    workId: z.string().min(1).max(512),
-    workRevision: revision,
-    requestSequence: revision,
-    conversationRevision: revision,
-    instructionsRevision: revision,
-    profileRevision: revision,
-    profileId: uuid,
-    threadId: z.string().min(1).max(512),
-    turnId: z.string().min(1).max(512),
-  })
-  .strict();
-const retainedEvidenceSourceObservationSchema = z
-  .object({
-    comparisonId: uuid.nullable(),
-    captureState: z.enum(["missing", "pending", "unsettled", "finished"]),
-    outcome: z.enum(["running", "completed", "failed", "unknown"]).nullable(),
-    observedAt: time.nullable(),
-  })
-  .strict();
 const retainedEvidenceAvailableItemSchema = z
   .object({
     itemId: uuid,
@@ -393,7 +374,8 @@ export const retainedResultEvidenceReadSchema = envelope(
         resultId: uuid,
         state: z.enum(["empty", "available", "partial", "gap"]),
         evidenceId: uuid,
-        identity: retainedEvidenceIdentitySchema,
+        // The result route supplies the task; the identity does not repeat it.
+        identity: retainedEvidenceIdentitySchema.omit({ taskId: true }),
         capturedAt: time,
         sourceObservation: retainedEvidenceSourceObservationSchema,
         items: z.array(retainedEvidenceItemReadSchema).max(320),
@@ -441,40 +423,10 @@ export const retainedEvidenceItemContentReadSchema = envelope(
       .strict(),
   ]),
 );
-const retainedReviewAnchorRecordSchema = z
-  .object({
-    anchorId: uuid,
-    taskId: uuid,
-    repositoryId: z.string().min(1).max(512).nullable(),
-    path: z.string().min(1).max(2048),
-    sourceKind: z.enum([
-      "workspace-file",
-      "comparison-side",
-      "result-evidence",
-    ]),
-    context: z.enum(["workspace", "branch", "uncommitted", "turn", "result"]),
-    comparisonId: uuid.optional(),
-    resultId: uuid.optional(),
-    resultItemId: uuid.optional(),
-    workId: z.string().min(1).max(512).optional(),
-    threadId: z.string().min(1).max(512).optional(),
-    turnId: z.string().min(1).max(512).optional(),
-    side: z.enum(["file", "left", "right"]),
-    startLine: revision,
-    endLine: revision,
-    sourceSha256: hash.optional(),
-    claimedSha256: hash.optional(),
-    excerptSha256: hash.optional(),
-    byteStart: z.number().int().nonnegative().safe().optional(),
-    byteEnd: z.number().int().nonnegative().safe().optional(),
-    mime: z.string().min(1).max(128).optional(),
-    state: z.enum(["available", "gap"]),
-    reason: z.string().min(1).max(80).optional(),
-    size: z.number().int().nonnegative().safe(),
-    capturedAt: time,
-    observedAt: time.nullable(),
-  })
-  .strict();
+// Reads stay open-ended on `reason`; the store records the closed gap-reason enum.
+const retainedReviewAnchorRecordSchema = reviewAnchorRecordBaseSchema.extend({
+  reason: z.string().min(1).max(80).optional(),
+});
 export const retainedReviewAnchorReadSchema = envelope(
   z.discriminatedUnion("state", [
     z
@@ -1760,7 +1712,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("review.anchor.stage"),
       taskId: uuid,
       expectedDraftVersion: z.number().int().nonnegative().safe(),
-      anchors: z.array(z.unknown()).min(1).max(32),
+      anchors: z.array(reviewAnchorSelectionSchema).min(1).max(32),
     })
     .strict(),
   z
@@ -2835,6 +2787,8 @@ export const apiErrorSchema = z
   })
   .strict();
 export type OperatorCommand = z.infer<typeof operatorCommandSchema>;
+/** Exact source passed to `review.anchor.stage`; never a specimen or a later match. */
+export type ReviewAnchorCandidate = z.infer<typeof reviewAnchorSelectionSchema>;
 export type CommandReceipt = z.infer<typeof commandReceiptSchema>;
 export type Workspace = z.infer<typeof workspaceSchema>;
 export type WorkspaceComparisonRead = z.infer<
