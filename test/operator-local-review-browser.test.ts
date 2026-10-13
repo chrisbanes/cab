@@ -587,6 +587,95 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
     .waitFor();
 });
 
+test("every draft write reports one plain success line with its receipt, cleared when the operator types", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const review = page.locator("#local-review");
+  const success = review.locator("[data-slot=action-outcome]");
+  const expectSuccess = async (message: string) => {
+    await success.getByText(message, { exact: true }).waitFor();
+    assert.equal(await success.count(), 1);
+    assert.equal(await success.getAttribute("data-tone"), "success");
+    assert.doesNotMatch(await success.locator("p").innerText(), serviceWords);
+    await success.getByText("Details", { exact: true }).click();
+    const fields = await success.locator("dl").innerText();
+    assert.match(fields, /Command\s+review\.draft\.save/);
+    assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
+    assert.match(fields, /Kind\s+local-review-draft/);
+  };
+  await commentOnLine(page, "Line 1: first", "First note");
+  await expectSuccess("Comment added.");
+  await review.getByRole("button", { name: "Edit" }).click();
+  await review.getByLabel("Edit comment").fill("Edited note");
+  assert.equal(await success.count(), 0, "typing clears the success line");
+  await review.getByRole("button", { name: "Save edit" }).click();
+  await expectSuccess("Comment updated.");
+  await review.getByLabel("Summary (optional)").fill("A summary");
+  await review.getByRole("button", { name: "Save summary" }).click();
+  await expectSuccess("Summary saved.");
+  await review.getByRole("button", { name: "Remove", exact: true }).click();
+  await expectSuccess("Comment removed.");
+});
+
+test("the review controls stay off until the refresh after a draft write has finished", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const review = page.locator("#local-review");
+  await review.getByRole("button", { name: "Edit" }).click();
+  await review.getByLabel("Edit comment").fill("Edited note");
+  let entered!: () => void;
+  let release!: () => void;
+  const readEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/tasks/*/review-draft", async (route) => {
+    entered();
+    await gate;
+    await route.continue();
+  });
+  await review.getByRole("button", { name: "Save edit" }).click();
+  await readEntered;
+  // The write is recorded and the draft read is still on its way: nothing may start.
+  await page.waitForTimeout(200);
+  assert.equal(
+    await review.getByRole("button", { name: "Save edit" }).isDisabled(),
+    true,
+  );
+  assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+  assert.equal(
+    await review.getByRole("button", { name: "Cancel edit" }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await review.getByLabel("Summary (optional)").isDisabled(),
+    true,
+  );
+  release();
+  await review
+    .locator("[data-slot=action-outcome]")
+    .getByText("Comment updated.", { exact: true })
+    .waitFor();
+  await page.unroute("**/api/operator/tasks/*/review-draft");
+  await review
+    .getByRole("button", { name: "Edit" })
+    .and(page.locator(":enabled"))
+    .waitFor();
+});
+
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
   const { web, task, page, pageErrors } = await startReview(j);
   await signIn(
