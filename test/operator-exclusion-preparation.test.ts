@@ -184,4 +184,32 @@ test("a repository linked while a shared-base read is held is redacted in every 
       restore();
     }
   }
+
+  // The execution list has no workspace snapshot: its own reference fence rejects a
+  // credential value rotated after the base was captured.
+  const envKey = d.routingCredentialReference(projectId)?.slice(4) ?? "",
+    rotated = "rotated-routing-value-877";
+  assert.ok(process.env[envKey]);
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE turn_requests SET reason=? WHERE workId=?")
+      .run(`Failed with ${rotated}`, seed.captured),
+  );
+  let rotatedOnce = false;
+  const restore = wrapTaskExclusions(api, async (_id, run) => {
+    if (!rotatedOnce) {
+      rotatedOnce = true;
+      process.env[envKey] = rotated;
+    }
+    return run();
+  });
+  try {
+    await assert.rejects(
+      api.readExecutionList(new URLSearchParams({ project: projectId })),
+      { status: 503 },
+    );
+    assert.ok(rotatedOnce);
+  } finally {
+    restore();
+  }
 });

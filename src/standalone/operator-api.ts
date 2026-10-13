@@ -1958,20 +1958,18 @@ export class OperatorApi {
     });
   }
   /** Rebuild projections once if their instruction or repository exclusions changed across an await. */
-  private async readWithInstructionFence<T>(
-    read: () => Promise<T>,
-  ): Promise<T> {
+  private async readWithExclusionFence<T>(read: () => Promise<T>): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const instructions = this.exclusionFence();
+      const fence = this.exclusionFence();
       try {
         const response = await read();
-        if (instructions === this.exclusionFence()) return response;
+        if (fence === this.exclusionFence()) return response;
       } catch (error) {
-        // Nested reads can reject the same instruction race before we reach the fence.
+        // Nested reads can reject the same instruction or repository race before we reach the fence.
         if (
           !(error instanceof OperatorApiError) ||
           error.status !== 503 ||
-          instructions === this.exclusionFence()
+          fence === this.exclusionFence()
         )
           throw error;
       }
@@ -2015,7 +2013,7 @@ export class OperatorApi {
   /** Workspace fences per task plus the credential reference fence, checked before a read returns. */
   private workspaceSnapshot(taskIds: readonly string[]) {
     return {
-      // Instruction revisions are fenced by readWithInstructionFence.
+      // Instruction revisions are fenced by readWithExclusionFence.
       references: this.referenceFence(),
       workspaces: new Map(
         taskIds.map((id) => [id, this.service.taskWorkspaceVisibility(id)]),
@@ -2032,7 +2030,7 @@ export class OperatorApi {
         throw new OperatorApiError(503, "unavailable");
   }
   async readProject(projectId: string) {
-    return this.readWithInstructionFence(() => this.readProjectOnce(projectId));
+    return this.readWithExclusionFence(() => this.readProjectOnce(projectId));
   }
   private async readProjectOnce(projectId: string) {
     const p = this.requireProject(projectId),
@@ -2230,9 +2228,7 @@ export class OperatorApi {
     return { summary, view, excluded };
   }
   async readTaskListPage(params = new URLSearchParams()) {
-    return this.readWithInstructionFence(() =>
-      this.readTaskListPageOnce(params),
-    );
+    return this.readWithExclusionFence(() => this.readTaskListPageOnce(params));
   }
   private async readTaskListPageOnce(params = new URLSearchParams()) {
     const values: Record<string, string> = {};
@@ -2273,7 +2269,7 @@ export class OperatorApi {
     });
   }
   async readComposerOptions(projectId: string) {
-    return this.readWithInstructionFence(() =>
+    return this.readWithExclusionFence(() =>
       this.readComposerOptionsOnce(projectId),
     );
   }
@@ -3337,7 +3333,7 @@ export class OperatorApi {
       1,
       Number.MAX_SAFE_INTEGER,
     );
-    return this.readWithInstructionFence(async () => {
+    return this.readWithExclusionFence(async () => {
       if (scope === "task") this.requireTask(id);
       else if (scope === "assignment") this.requireAssignment(id);
       else this.requireProject(id);
@@ -3388,7 +3384,7 @@ export class OperatorApi {
     });
   }
   async readExecution(workId: string) {
-    return this.readWithInstructionFence(async () => {
+    return this.readWithExclusionFence(async () => {
       const { request, taskId, projectId, record } =
         this.requireExecution(workId);
       const excluded = await this.exclusions(projectId, taskId);
@@ -3451,7 +3447,7 @@ export class OperatorApi {
     const compare = query.get("compare");
     if (compare !== null && compare !== "current")
       throw new OperatorApiError(400, "invalid-input");
-    return this.readWithInstructionFence(async () => {
+    return this.readWithExclusionFence(async () => {
       const { request, taskId, projectId, assignmentId, record } =
         this.requireExecution(workId);
       const d = this.domain(),
@@ -3627,7 +3623,7 @@ export class OperatorApi {
       (severity !== null && !["info", "warn", "error"].includes(severity))
     )
       throw new OperatorApiError(400, "invalid-input");
-    return this.readWithInstructionFence(async () => {
+    return this.readWithExclusionFence(async () => {
       const { taskId, projectId, record } = this.requireExecution(workId);
       const excluded = await this.exclusions(projectId, taskId);
       const store = this.service.executionDiagnostics();
@@ -4329,7 +4325,7 @@ export class OperatorApi {
       throw new OperatorApiError(400, "invalid-input");
     if (!uuid.safeParse(targetId).success)
       throw new OperatorApiError(400, "invalid-input");
-    return this.readWithInstructionFence(async () => {
+    return this.readWithExclusionFence(async () => {
       const d = this.domain();
       if (kind === "project") this.requireProject(targetId);
       else if (!d.profiles().some((p) => p.id === targetId))
@@ -4543,7 +4539,7 @@ export class OperatorApi {
     });
   }
   async readRuntimeSettings() {
-    return this.readWithInstructionFence(() => this.readRuntimeSettingsOnce());
+    return this.readWithExclusionFence(() => this.readRuntimeSettingsOnce());
   }
   private async readRuntimeSettingsOnce() {
     const d = this.domain(),
@@ -4623,13 +4619,13 @@ export class OperatorApi {
     return runtimeSettingsSchema.parse(response);
   }
   async readAssignmentRecovery(assignmentId: string) {
-    return this.readWithInstructionFence(() =>
+    return this.readWithExclusionFence(() =>
       this.readAssignmentRecoveryOnce(assignmentId, "task-wide"),
     );
   }
   /** The exact identity and advisory eligibility each recovery command needs. */
   async readRecoveryOptions(assignmentId: string) {
-    return this.readWithInstructionFence(async () => {
+    return this.readWithExclusionFence(async () => {
       const base = await this.readAssignmentRecoveryOnce(
         assignmentId,
         "selected-assignment",
