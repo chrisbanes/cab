@@ -7,6 +7,7 @@ import {
   operatorCredentialSchema,
   sourceObservationSchema,
   apiErrorSchema,
+  type sourceCredentialReasonSchema,
   commandReceiptSchema,
   operatorCommandSchema,
   sessionSchema,
@@ -18,6 +19,7 @@ export class ClientError extends Error {
     readonly code: string,
     readonly status: number,
     readonly fieldPaths: readonly string[] = [],
+    readonly credentialReason?: z.infer<typeof sourceCredentialReasonSchema>,
   ) {
     super(code);
   }
@@ -29,6 +31,7 @@ export type CommandState =
       command: OperatorCommand;
       code: string;
       fieldPaths?: readonly string[];
+      credentialReason?: z.infer<typeof sourceCredentialReasonSchema>;
     };
 export class OperatorClient {
   private authenticationGeneration = 0;
@@ -89,6 +92,7 @@ export class OperatorClient {
             : "unavailable",
         response.status,
         error.success ? (error.data.error.fieldPaths ?? []) : [],
+        error.success ? error.data.error.credentialReason : undefined,
       );
     }
     const value = schema.safeParse(body);
@@ -254,6 +258,7 @@ export class OperatorClient {
         command,
         code: e.code,
         fieldPaths: e.fieldPaths,
+        ...(e.credentialReason ? { credentialReason: e.credentialReason } : {}),
       };
     }
   }

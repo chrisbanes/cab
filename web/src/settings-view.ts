@@ -206,7 +206,9 @@ export function projectStateSummary(
     ? "Check what was saved for the unknown placement in Sync & placement."
     : c.placements.length
       ? `Choose the project for ${c.placements[0]?.title ?? "the conflicting task"} in Sync & placement.`
-      : "Nothing needs attention here.";
+      : c.source.selections.length && c.source.credential?.usable === false
+        ? "Set or change the credential in GitHub source settings, then preview this source version."
+        : "Nothing needs attention here.";
   return { state, next };
 }
 
@@ -231,4 +233,31 @@ export function holdPills(h: {
     pill("Capacity", h.capacity, "Held", "None reported"),
     pill("Uncertainty", h.uncertainty, "Active", "None reported"),
   ];
+}
+
+/** Controlled source failures contain no provider output or private reference names. */
+export function sourceCredentialCopy(reason: string | null | undefined) {
+  switch (reason) {
+    case "missing-credential":
+      return "GitHub source credential required. Choose GitHub CLI or an available service environment variable in GitHub source settings, then preview this source version.";
+    case "invalid-credential-reference":
+      return "GitHub source credential is invalid. Choose GitHub CLI or an environment variable in GitHub source settings.";
+    case "gh-not-installed":
+      return "GitHub CLI is not installed on the service host. Install gh or change the credential in GitHub source settings, then retry preview.";
+    case "gh-not-signed-in":
+      return "GitHub CLI is not signed in. Run gh auth login on the service host or change the credential in GitHub source settings, then retry preview.";
+    case "gh-unreadable":
+      return "The service cannot read the GitHub CLI login. Check the service's access to gh or change the credential in GitHub source settings, then retry preview.";
+    default:
+      return "Source credential status is unavailable. Reload before previewing.";
+  }
+}
+export function sourceCredentialSummary(
+  source: ProjectConfigurationData["source"],
+) {
+  const status = source.credential;
+  if (!source.credentialConfigured) return "Unconfigured";
+  if (!status) return "Configured · status unavailable";
+  const kind = status.source === "gh" ? "GitHub CLI" : "Environment reference";
+  return `${kind} · ${status.usable ? "usable" : "unavailable"}`;
 }

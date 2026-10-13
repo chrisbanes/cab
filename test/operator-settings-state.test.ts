@@ -659,3 +659,56 @@ test("adopting a newer revision keeps edited fields and takes the latest for unt
   // Reordering a set is not an edit, so the latest list is taken.
   assert.deepEqual(readiness.values.ids, ["a", "b", "c"]);
 });
+
+test("source credential refusal is actionable only after a definite lifecycle disposition", async () => {
+  const command = {
+    type: "github.preview" as const,
+    key: randomUUID(),
+    projectId: randomUUID(),
+    selectionId: "S-1",
+    expectedVersion: 2,
+  };
+  const fail = new OperatorClient(async () =>
+    Response.json(
+      {
+        error: {
+          code: "conflict",
+          message: "private provider stderr",
+          credentialReason: "gh-not-signed-in",
+        },
+      },
+      { status: 409 },
+    ),
+  );
+  const definite = new ConfigurationDraft();
+  await definite.submit(fail, command, "csrf");
+  assert.equal(definite.phase, "conflict");
+  assert.match(definite.notice, /GitHub CLI is not signed in/);
+  assert.ok(!definite.notice.includes("private provider stderr"));
+  const unknown = new ConfigurationDraft();
+  const lost = new OperatorClient(async () => {
+    throw new Error("lost");
+  });
+  await unknown.submit(lost, command, "csrf");
+  const bytes = unknown.bytes;
+  await unknown.reconcile(fail, "csrf");
+  assert.equal(unknown.phase, "unknown");
+  assert.match(unknown.notice, /Outcome unknown/);
+  assert.equal(unknown.bytes, bytes);
+  const unrelated = new ConfigurationDraft();
+  await unrelated.submit(
+    fail,
+    {
+      type: "project.configure",
+      key: randomUUID(),
+      projectId: command.projectId,
+      expectedVersion: 1,
+      name: "Unrelated",
+    },
+    "csrf",
+  );
+  assert.equal(
+    unrelated.notice,
+    "Configuration changed. Review the loaded revision before a new submission.",
+  );
+});

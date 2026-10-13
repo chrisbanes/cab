@@ -4,6 +4,7 @@ import {
   type CommandReceipt,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
 function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
   if (r.key !== c.key || r.kind !== "configuration") return false;
@@ -250,9 +251,13 @@ export class ConfigurationDraft {
     } else {
       this.phase = disposition;
       this.notice =
-        disposition === "conflict"
-          ? "Configuration changed. Review the loaded revision before a new submission."
-          : "Submission rejected. Your input is retained.";
+        result.state !== "recorded" &&
+        result.credentialReason &&
+        (c.type === "github.preview" || c.type === "github.configure")
+          ? sourceCredentialCopy(result.credentialReason)
+          : disposition === "conflict"
+            ? "Configuration changed. Review the loaded revision before a new submission."
+            : "Submission rejected. Your input is retained.";
       this.errors = Object.fromEntries(
         (result.state === "recorded" ? [] : (result.fieldPaths ?? [])).map(
           (p) => [p, "Check this field."],

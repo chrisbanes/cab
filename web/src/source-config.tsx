@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -22,7 +22,6 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
-  ReferenceInput,
   SavedNotice,
   key,
   locked,
@@ -31,6 +30,11 @@ import {
   useDraft,
   useLoadedDraft,
 } from "./settings.js";
+import { ghLoginCopy } from "./discovery-credential.js";
+import {
+  sourceCredentialCopy,
+  sourceCredentialSummary,
+} from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -69,6 +73,8 @@ export function SourceTab(p: TabProps) {
       stale.length > 0 ||
       duplicates.length > 0 ||
       lines.length === 0 ||
+      (v.referenceMode === "gh" &&
+        data.source.credential?.gh.state !== "signed-in") ||
       (removesAll && !v.removeAll);
   const setRows = (field: string, rows: SourceRow[]) => {
     d.set(field, JSON.stringify(rows));
@@ -152,6 +158,7 @@ export function SourceTab(p: TabProps) {
       )}
       <div className="settings-split">
         <div className="settings-column">
+          <SourceCredential draft={d} source={data.source} />
           <Panel
             title="1 · Discovery sources"
             description="Private search queries and filters stay hidden; remove a source and add a new one to change it. New sources are added inactive."
@@ -420,7 +427,6 @@ export function SourceTab(p: TabProps) {
                 "Check linked repository IDs, paths and refs.",
               )}
             </fieldset>
-            <ReferenceInput draft={d} />
           </Panel>
         </div>
         <div className="settings-column">
@@ -614,5 +620,120 @@ export function SourceTab(p: TabProps) {
         label="Saved GitHub source"
       />
     </form>
+  );
+}
+
+function SourceCredential({
+  draft: d,
+  source,
+}: {
+  draft: ReturnType<typeof useDraft>;
+  source: TabProps["data"]["source"];
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (d.phase === "recorded") setOpen(false);
+  }, [d.phase]);
+  const shown = open || d.values.referenceMode !== "preserve";
+  const status = source.credential;
+  const busy = locked(d);
+  return (
+    <Panel
+      title="GitHub source credential"
+      description="Choose explicitly for this project. Discovery credentials are configured separately."
+    >
+      <div className="settings-discovery-line">
+        <p className="metadata">
+          {sourceCredentialSummary(source)}
+          {status?.source === "gh" && status.gh.state === "signed-in"
+            ? ` · @${status.gh.login}`
+            : ""}
+        </p>
+        {!shown && (
+          <div className="settings-discovery-actions">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                d.set("referenceMode", "gh");
+                setOpen(true);
+              }}
+            >
+              {source.credentialConfigured ? "Change" : "Set"} source credential
+            </Button>
+            {source.credentialConfigured && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => {
+                  d.set("referenceMode", "clear");
+                  d.set("credentialRef", "");
+                }}
+              >
+                Clear source credential
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+      {status && !status.usable && (
+        <Alert role="alert">{sourceCredentialCopy(status.reason)}</Alert>
+      )}
+      {shown && (
+        <fieldset disabled={busy} className="settings-rows">
+          <legend className="sr-only">Source credential choice</legend>
+          <DraftField
+            draft={d}
+            field="referenceMode"
+            label="Source credential choice"
+          >
+            <option value="gh">GitHub CLI login</option>
+            <option value="set">Environment reference</option>
+            <option value="clear">Clear credential</option>
+          </DraftField>
+          {d.values.referenceMode === "gh" && (
+            <p className="body">
+              {status
+                ? ghLoginCopy(status.gh)
+                : "GitHub CLI status unavailable"}
+              . Detection does not select this login; save to choose it.
+            </p>
+          )}
+          {d.values.referenceMode === "set" && (
+            <DraftField
+              draft={d}
+              field="credentialRef"
+              label="New environment reference"
+            />
+          )}
+          {d.values.referenceMode === "clear" && (
+            <p className="body">
+              Clear keeps source definitions and task history. Source knowledge
+              becomes incomplete until a credential is set and fresh reads
+              succeed.
+            </p>
+          )}
+          <p className="metadata muted">
+            Use env:NAME for an environment reference. Values stay server-side.
+            Agent spawn environments need a service restart after configuration
+            changes. Agents with access to this Mac's keychain can run gh
+            themselves.
+          </p>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => {
+              d.set("referenceMode", "preserve");
+              d.set("credentialRef", "");
+              setOpen(false);
+            }}
+          >
+            Cancel credential change
+          </Button>
+        </fieldset>
+      )}
+    </Panel>
   );
 }
