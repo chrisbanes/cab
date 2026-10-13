@@ -1943,28 +1943,35 @@ export class OperatorApi {
         }
       : null;
   }
-  private instructionFence() {
+  /** Instruction revisions and linked repositories: the exclusion base inputs no other fence covers. */
+  private exclusionFence() {
     const d = this.domain();
     return JSON.stringify({
       profiles: d.profiles().map((p) => [p.id, p.version]),
-      projects: d.projects().map((p) => [p.id, p.instructionsRevision]),
+      projects: d
+        .projects()
+        .map((p) => [
+          p.id,
+          p.instructionsRevision,
+          d.githubConfiguration(String(p.id)).version,
+        ]),
     });
   }
-  /** Rebuild projections once if their instruction exclusions changed across an await. */
+  /** Rebuild projections once if their instruction or repository exclusions changed across an await. */
   private async readWithInstructionFence<T>(
     read: () => Promise<T>,
   ): Promise<T> {
     for (let attempt = 0; attempt < 2; attempt++) {
-      const instructions = this.instructionFence();
+      const instructions = this.exclusionFence();
       try {
         const response = await read();
-        if (instructions === this.instructionFence()) return response;
+        if (instructions === this.exclusionFence()) return response;
       } catch (error) {
         // Nested reads can reject the same instruction race before we reach the fence.
         if (
           !(error instanceof OperatorApiError) ||
           error.status !== 503 ||
-          instructions === this.instructionFence()
+          instructions === this.exclusionFence()
         )
           throw error;
       }
@@ -3347,6 +3354,7 @@ export class OperatorApi {
       const page = rows.slice(0, limit);
       const store = this.service.executionDiagnostics();
       const excludedByTask = new Map<string, readonly string[] | undefined>(),
+        references = this.referenceFence(),
         base = this.exclusionBase();
       const executions = [];
       for (const request of page) {
@@ -3366,6 +3374,9 @@ export class OperatorApi {
           ),
         );
       }
+      // Credential references and values fence the shared base here; no workspace snapshot does.
+      if (references !== this.referenceFence())
+        throw new OperatorApiError(503, "unavailable");
       return executionListSchema.parse({
         data: {
           executions,
