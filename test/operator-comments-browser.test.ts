@@ -10,6 +10,12 @@ import { signOutFromSidebar } from "./fixtures/operator-account.js";
 
 const test = browserSuite("ui04-comments");
 test("approval-mode exact operator review and unknown remote comment retain original intent through viewing and provider read reconciliation", async (_t, j) => {
+  const previousSource = process.env.FIXTURE_SOURCE;
+  process.env.FIXTURE_SOURCE = "offline-comment-source-value";
+  _t.after(() => {
+    if (previousSource === undefined) delete process.env.FIXTURE_SOURCE;
+    else process.env.FIXTURE_SOURCE = previousSource;
+  });
   const issue = {
     providerInstance: "github.com" as const,
     nodeId: "I1",

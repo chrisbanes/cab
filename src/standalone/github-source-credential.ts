@@ -7,12 +7,11 @@ import {
   type GitHubSourceReader,
 } from "./github-source.js";
 
-export type SourceCredentialReason =
-  | "missing-credential"
-  | "invalid-credential-reference"
-  | "gh-not-installed"
-  | "gh-not-signed-in"
-  | "gh-unreadable";
+import type { SourceCredentialReason } from "../operator/source-credential.js";
+export {
+  type SourceCredentialReason,
+  sourceCredentialExplanation,
+} from "../operator/source-credential.js";
 
 export interface SourceCredentialOptions {
   /** Defaults to the current service environment on each read. */
@@ -33,26 +32,13 @@ export async function resolveGitHubSourceCredential(
     const token = (options.environment ?? process.env)[parsed.data.slice(4)];
     return token ? { token } : { reason: "missing-credential" };
   }
-  const gh = typeof options.gh === "function" ? options.gh() : options.gh;
-  const resolved = await ghToken(gh);
-  return "token" in resolved ? resolved : { reason: `gh-${resolved.state}` };
-}
-
-/** Consistent safe guidance for source settings, sync observations and preview refusals. */
-export function sourceCredentialExplanation(
-  reason: SourceCredentialReason,
-): string {
-  switch (reason) {
-    case "missing-credential":
-      return "GitHub source credential required. Choose GitHub CLI or an available service environment variable in GitHub source settings, then preview this source version.";
-    case "invalid-credential-reference":
-      return "GitHub source credential is invalid. Choose GitHub CLI or an environment variable in GitHub source settings.";
-    case "gh-not-installed":
-      return "GitHub CLI is not installed on the service host. Install gh or change the credential in GitHub source settings, then retry preview.";
-    case "gh-not-signed-in":
-      return "GitHub CLI is not signed in. Run gh auth login on the service host or change the credential in GitHub source settings, then retry preview.";
-    case "gh-unreadable":
-      return "The service cannot read the GitHub CLI login. Check the service's access to gh or change the credential in GitHub source settings, then retry preview.";
+  try {
+    const gh = typeof options.gh === "function" ? options.gh() : options.gh;
+    const resolved = await ghToken(gh);
+    return "token" in resolved ? resolved : { reason: `gh-${resolved.state}` };
+  } catch {
+    // A failed source-scoped environment must never fall back to host gh.
+    return { reason: "gh-unreadable" };
   }
 }
 
@@ -61,15 +47,22 @@ export async function gitHubSourceCredentialStatus(
   reference: string | null,
   options: SourceCredentialOptions = {},
 ) {
-  const ghOptions =
-    typeof options.gh === "function" ? options.gh() : options.gh;
+  let ghOptions: GhOptions | undefined;
+  let captureFailed = false;
+  try {
+    ghOptions = typeof options.gh === "function" ? options.gh() : options.gh;
+  } catch {
+    captureFailed = true;
+  }
   const current: SourceCredentialOptions = {
     ...(options.environment ? { environment: options.environment } : {}),
     ...(ghOptions ? { gh: ghOptions } : {}),
   };
   const [gh, resolved] = await Promise.all([
-    detectGh(ghOptions),
-    resolveGitHubSourceCredential(reference, current),
+    captureFailed ? { state: "unreadable" as const } : detectGh(ghOptions),
+    captureFailed && reference === "gh:github.com"
+      ? { reason: "gh-unreadable" as const }
+      : resolveGitHubSourceCredential(reference, current),
   ]);
   return {
     configured: reference !== null,

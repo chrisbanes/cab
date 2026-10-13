@@ -237,7 +237,9 @@ test("phone project settings lead with state and next step and keep the form usa
   await state.getByText("GitHub S-1 inactive", { exact: false }).waitFor();
   await page
     .getByRole("region", { name: "Next step" })
-    .getByText("Nothing needs attention here.")
+    .getByText(
+      "Set or change the credential in GitHub source settings, then preview this source version.",
+    )
     .waitFor();
   await page.getByLabel("Project name", { exact: true }).fill("Atlas phone");
   await changes(page).getByText("Project name: Atlas → Atlas phone").waitFor();
@@ -396,11 +398,12 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
   );
   assert.equal((await read.text()).includes("PRIVATE"), false);
   assert.equal(
-    await page
-      .getByLabel("Credential reference change", { exact: true })
-      .inputValue(),
-    "preserve",
+    await page.getByLabel("Source credential choice", { exact: true }).count(),
+    0,
   );
+  await page
+    .getByRole("button", { name: "Change source credential" })
+    .waitFor();
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   assert.equal(await save.isDisabled(), true);
   await page.getByRole("button", { name: "Remove S-3" }).click();
@@ -433,7 +436,9 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
   ]);
   await page
     .locator(".settings-status")
-    .getByText(/GitHub source saved \d\d:\d\d · credential configured/)
+    .getByText(
+      /GitHub source saved \d\d:\d\d · Environment reference · unavailable/,
+    )
     .waitFor();
   const saved = d.githubConfiguration(ids.atlas);
   assert.deepEqual(

@@ -1,4 +1,5 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
+import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { z } from "zod";
 import type {
   CommandReceipt,
@@ -239,15 +240,11 @@ export function holdPills(h: {
 export function sourceCredentialCopy(reason: string | null | undefined) {
   switch (reason) {
     case "missing-credential":
-      return "GitHub source credential required. Choose GitHub CLI or an available service environment variable in GitHub source settings, then preview this source version.";
     case "invalid-credential-reference":
-      return "GitHub source credential is invalid. Choose GitHub CLI or an environment variable in GitHub source settings.";
     case "gh-not-installed":
-      return "GitHub CLI is not installed on the service host. Install gh or change the credential in GitHub source settings, then retry preview.";
     case "gh-not-signed-in":
-      return "GitHub CLI is not signed in. Run gh auth login on the service host or change the credential in GitHub source settings, then retry preview.";
     case "gh-unreadable":
-      return "The service cannot read the GitHub CLI login. Check the service's access to gh or change the credential in GitHub source settings, then retry preview.";
+      return sourceCredentialExplanation(reason);
     default:
       return "Source credential status is unavailable. Reload before previewing.";
   }

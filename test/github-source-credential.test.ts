@@ -293,3 +293,61 @@ test("a cached reader evaluates source gh environment freshly for rotation and C
   assert.equal((await cleared.readSelection(selection)).complete, false);
   assert.equal(gh.environments().length, before);
 });
+
+test("a failed gh options factory never invokes host gh and preserves independent env/null results", async (t) => {
+  const gh = createFakeGh(),
+    previousPath = process.env.PATH;
+  process.env.PATH = `${gh.executable.slice(0, gh.executable.lastIndexOf("/"))}:${previousPath ?? ""}`;
+  t.after(() => {
+    gh.close();
+    if (previousPath === undefined) delete process.env.PATH;
+    else process.env.PATH = previousPath;
+  });
+  let factories = 0,
+    providers = 0;
+  const options = {
+    gh: () => {
+      factories++;
+      throw new Error("PRIVATE environment lookup failure");
+    },
+    environment: { SOURCE: "env-own-value" },
+  };
+  const reader = new CredentialGitHubSourceReader("gh:github.com", {
+    ...options,
+    reader: () => {
+      providers++;
+      throw new Error("provider must not run");
+    },
+  });
+  assert.equal((await reader.readSelection(selection)).reason, "gh-unreadable");
+  assert.equal((await reader.readBlockers(reference)).reason, "gh-unreadable");
+  assert.equal(
+    (await reader.readIssueStatus(reference)).reason,
+    "gh-unreadable",
+  );
+  assert.equal(factories, 3);
+  for (const [ref, usable, reason] of [
+    ["gh:github.com", false, "gh-unreadable"],
+    ["env:SOURCE", true, null],
+    ["env:ABSENT", false, "missing-credential"],
+    [null, false, "missing-credential"],
+  ] as const) {
+    const before: number = factories;
+    const status = await gitHubSourceCredentialStatus(ref, options);
+    assert.equal(status.usable, usable);
+    assert.equal(status.reason, reason);
+    assert.deepEqual(status.gh, { state: "unreadable" });
+    assert.ok(!JSON.stringify(status).includes("PRIVATE"));
+    assert.ok(!JSON.stringify(status).includes("env-own-value"));
+    assert.equal(factories, before + 1, "one fresh paired capture, no retry");
+  }
+  assert.equal(providers, 0);
+  assert.equal(
+    gh.environments().length,
+    0,
+    "no fallback to available host-path fake gh",
+  );
+  assert.deepEqual(await resolveGitHubSourceCredential("env:SOURCE", options), {
+    token: "env-own-value",
+  });
+});

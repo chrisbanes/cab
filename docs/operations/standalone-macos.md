@@ -105,6 +105,83 @@ The service removes the discovery credential from the Codex runtime, Claude turn
 and helper processes. A reference configured while the service runs is excluded
 from the Codex runtime after the next restart.
 
+### GitHub source credential
+
+Each project's GitHub source configuration chooses its own `gh:github.com` or
+`env:NAME` reference. Discovery configuration does not select a source credential
+or provide a fallback. Configure the source in project settings, preview its
+current version to activate it, then refresh observations to import tasks.
+Preview activation and successful import are separate evidence.
+
+Missing or unusable credentials make source knowledge incomplete. Change or
+Clear retains source definitions and task history; a fresh preview and successful
+provider reads are needed for the new source version. Exact recorded commands
+can still be reconciled under their original keys after Clear.
+
+Source values and aliases are excluded from Codex spawn environments, both Claude
+credential branches, helper environments and public diagnostics. Codex retains
+its existing spawn snapshot until service restart after configuration changes.
+Successfully resolved gh values are remembered for process-lifetime exclusion
+and redaction only, never reused for credential reads or persisted. Each value is
+bounded to 512 bytes; distinct rotations grow this in-memory exclusion set until
+restart. Agents able to reach the host keychain can run gh independently; this
+is not a separate Ensemble execution sandbox.
+
+Before reverting to older env-only source-reader code, Clear gh source references
+or change them to available environment references using the current operator
+surface. Older code cannot consume a persisted gh source reference; this is a
+reader compatibility limitation, not a demonstrated startup schema failure.
+Take the normal verified snapshot before reverting.
+
+### Disposable source qualification
+
+`test/944/live-source-credential.mjs` supports preparation separately from launch.
+The lead supplies exact private root/label/Node/compiled-CLI/port and already-read
+complete one-page Project metadata: one issue identity, narrow repository/issue/
+ready-for-agent filter, readiness label and candidate SHA. Preparation performs
+no provider, gh, model or launchctl calls:
+
+```sh
+/absolute/pinned/node test/944/live-source-credential.mjs --prepare-only /absolute/private/input.json
+```
+
+Preparation creates an exclusive 0700 root with private data/auth/log/plist paths,
+initializes the protected auth verifier and a 0600 temporary password file, and
+renders/lints the exact plist. Password/token/cookie values never enter argv,
+plist, manifest or logs. Review the returned manifest path/digest, candidate,
+label and bound paths before launch. The harness verifies plist/auth/compiled
+tree digests again before execution.
+
+Immediately before the first bootstrap, the lead records the single allowance
+consumed durably and creates a separate private record with `consumed:true`,
+`attempt:1`, `maxSeconds:300`, `maxModelTurns:0`, `maxGitHubWrites:0`, and exact
+`root`, `manifest`, `manifestDigest`, `label` and `candidateSha` bindings. The
+harness never edits or resets the lead's allowance ledger:
+
+```sh
+/absolute/pinned/node test/944/live-source-credential.mjs --live --one-attempt --max-seconds 300 --prepared /absolute/private/prepared.json --consumed-record /absolute/private/root-consumed.json
+```
+
+The outer monotonic 300 second deadline starts before bootstrap. Startup and
+operator authentication have 60 seconds; preview has 60 seconds with at most one
+same-key 30 second reconciliation after an unknown reply; refresh has 90 seconds.
+The final 30 seconds are reserved for cleanup. A private exclusive attempt marker
+prevents a second bootstrap from the same preparation. The exported bootstrap
+boundary also requires a callback, which offline tests exercise without launching.
+
+Cleanup boots out only the exact created GUI job. After label absence, recorded
+owned process exit and closed loopback port are proved, inspect only the two owned
+stdout/stderr logs for standard GitHub token prefixes and fixed qualification
+canaries. A failed inspection returns controlled metadata and retains the private
+fixture and original protected logs for recovery; matched content is never
+extracted, copied, printed or included in public evidence. Delete the exact
+disposable root only after that inspection passes within the cleanup deadline.
+Uncertain ownership or an exhausted cleanup deadline retains private state and
+reports an unknown hold. Never kill a process by name or infer stopped
+provider reads from synchronizer shutdown. Production and Haze installations
+remain separate. Live qualification is pending until dated evidence records the
+actual preview, import and cleanup outcome.
+
 ### Claude subscription token
 
 Claude profiles need the operator's own subscription token from

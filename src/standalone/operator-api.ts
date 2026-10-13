@@ -1940,6 +1940,7 @@ export class OperatorApi {
     throw new OperatorApiError(503, "unavailable");
   }
   private sourceFence(projectId?: string) {
+    if (projectId !== undefined) this.requireProject(projectId);
     const d = this.domain();
     const ids =
       projectId === undefined
