@@ -1061,8 +1061,8 @@ setTimeout(() => {
   const initial = await events();
   assert.equal(
     initial.filter((e) => e.command === "status").length,
-    2,
-    "chosen-gh and stripped env/null contexts are separate",
+    1,
+    "equivalent candidate-gh offers share one detector",
   );
   assert.equal(initial.filter((e) => e.command === "token").length, 9);
   assert.ok(initial.every((e) => e.peak <= 4));
@@ -1081,7 +1081,7 @@ setTimeout(() => {
   assert.equal(scopes.size, 2, "second request gets a fresh login scope");
   assert.equal(
     (await events()).filter((e) => e.command === "status").length,
-    4,
+    2,
   );
   const queued = projects[8]!;
   const before = captures.length;
@@ -1116,7 +1116,7 @@ setTimeout(() => {
   const allEvents = await events();
   assert.ok(allEvents.every((e) => e.peak <= 4));
   t.diagnostic(
-    `Observed child peak ${Math.max(...allEvents.map((e) => e.peak))}; first request detection 2, fresh token commands 9; four independent request/attempt scopes.`,
+    `Observed child peak ${Math.max(...allEvents.map((e) => e.peak))}; first request detection 1, fresh token commands 9; four independent request/attempt scopes.`,
   );
   assert.equal(f.runtime.turns, 0);
 });

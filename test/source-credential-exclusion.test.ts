@@ -1091,3 +1091,174 @@ for (const surface of ["api", "html"] as const)
     assert.equal(f.service.domain().task(taskId).version, before.version);
     assert.deepEqual(sources.syncState(f.projectId, "S-1"), before.sync);
   });
+
+import { ghToken } from "../src/standalone/gh-credential.js";
+
+test("candidate gh offers match selected identity across service/JSON/HTML with precedence and private exclusions", async (t) => {
+  const f = await fixture(t);
+  environment(t, {
+    PATH: `${f.gh.executable.slice(0, f.gh.executable.lastIndexOf("/"))}:${process.env.PATH}`,
+    GH_TOKEN: "candidate-gh-first",
+    GITHUB_TOKEN: "candidate-github-second",
+    FIXTURE_SX_SOURCE: "candidate-gh-first",
+    FIXTURE_SX_ALIAS: "candidate-gh-first",
+    FIXTURE_SX_DISCOVERY: "discovery-canary",
+    FIXTURE_SX_DISCOVERY_ALIAS: "discovery-canary",
+    FIXTURE_SX_CLAUDE: "claude-canary",
+    FIXTURE_SX_CLAUDE_ALIAS: "claude-canary",
+    FIXTURE_SX_DELIVERY: "delivery-canary",
+    FIXTURE_SX_DELIVERY_ALIAS: "delivery-canary",
+    FIXTURE_SX_OLD_NEUTRAL: "identity-old-resolved",
+  });
+  f.gh.setToken("identity-old-resolved");
+  assert.ok(
+    "token" in
+      (await ghToken({ executable: f.gh.executable, environment: {} })),
+  );
+  f.gh.setAccounts({
+    stored: { login: "stored-account", token: "stored-token" },
+    tokens: {
+      "candidate-gh-first": "first-account",
+      "candidate-github-second": "second-account",
+    },
+  });
+  f.execute({
+    type: "claude-token.configure",
+    credentialRef: "env:FIXTURE_SX_CLAUDE",
+  });
+  f.execute({
+    type: "delivery.configure",
+    projectId: f.projectId,
+    expectedVersion: 1,
+    mode: "reviewable-pr",
+    credentialRef: "env:FIXTURE_SX_DELIVERY",
+    grants: [],
+    requiredChecks: [],
+  });
+  const direct = new LocalOperatorUi(
+    f.service.domain(),
+    undefined,
+    f.service.githubSources(),
+  );
+  const provider = globalThis.fetch;
+  let providerReads = 0;
+  globalThis.fetch = async () => {
+    providerReads++;
+    throw new Error("provider read forbidden");
+  };
+  t.after(() => {
+    globalThis.fetch = provider;
+  });
+  for (const discovery of [null, "env:FIXTURE_SX_DISCOVERY"]) {
+    if (discovery) {
+      process.env.FIXTURE_SX_DISCOVERY = "discovery-canary";
+      process.env.FIXTURE_SX_DISCOVERY_ALIAS = "discovery-canary";
+    } else {
+      delete process.env.FIXTURE_SX_DISCOVERY;
+      delete process.env.FIXTURE_SX_DISCOVERY_ALIAS;
+    }
+    f.execute({ type: "discovery.configure", credentialRef: discovery });
+    for (const actual of [null, "env:FIXTURE_SX_SOURCE", "env:GH_TOKEN"]) {
+      f.configure(actual);
+      const config = f.service.domain().githubConfiguration(f.projectId);
+      const start = f.gh.commands().length;
+      const status = await f.service.gitHubSourceCredentialStatus(f.projectId);
+      assert.deepEqual(status.gh, {
+        state: "signed-in",
+        login: "first-account",
+      });
+      assert.equal(status.usable, actual !== null);
+      const json = await f.api.readProjectConfiguration(f.projectId);
+      assert.deepEqual(json.data.source.credential?.gh, status.gh);
+      const observations = await f.api.readSourceObservations();
+      assert.deepEqual(
+        observations.data.projects.find((p) => p.projectId === f.projectId)
+          ?.credential?.gh,
+        status.gh,
+      );
+      assert.match(
+        await f.ui.projectWithCredentialStatus(f.projectId),
+        /Detected GitHub CLI account @first-account/,
+      );
+      assert.match(
+        await direct.projectWithCredentialStatus(f.projectId),
+        /Detected GitHub CLI account @first-account/,
+      );
+      assert.ok(
+        f.gh
+          .commands()
+          .slice(start)
+          .every((command) => command === "status"),
+        "null/env offers never read a gh token",
+      );
+      assert.deepEqual(
+        f.service.domain().githubConfiguration(f.projectId),
+        config,
+      );
+      assert.deepEqual(
+        f.service.domain().githubActiveSelectionIds(f.projectId),
+        [],
+      );
+      for (const env of f.gh.environments().slice(-5)) {
+        assert.equal(env.GH_TOKEN, "candidate-gh-first");
+        assert.equal(env.GITHUB_TOKEN, "candidate-github-second");
+        for (const key of [
+          "FIXTURE_SX_SOURCE",
+          "FIXTURE_SX_ALIAS",
+          "FIXTURE_SX_DISCOVERY",
+          "FIXTURE_SX_DISCOVERY_ALIAS",
+          "FIXTURE_SX_CLAUDE",
+          "FIXTURE_SX_CLAUDE_ALIAS",
+          "FIXTURE_SX_DELIVERY",
+          "FIXTURE_SX_DELIVERY_ALIAS",
+          "FIXTURE_SX_OLD_NEUTRAL",
+        ])
+          assert.equal(env[key], undefined);
+      }
+      f.configure("gh:github.com");
+      assert.deepEqual(
+        (await f.service.gitHubSourceCredentialStatus(f.projectId)).gh,
+        status.gh,
+      );
+      f.configure(null); // Clear retains the same explicit candidate offer, without activation.
+      assert.deepEqual(
+        (await f.service.gitHubSourceCredentialStatus(f.projectId)).gh,
+        status.gh,
+      );
+    }
+  }
+  delete process.env.GH_TOKEN;
+  assert.deepEqual(
+    (await f.service.gitHubSourceCredentialStatus(f.projectId)).gh,
+    { state: "signed-in", login: "second-account" },
+  );
+  delete process.env.GITHUB_TOKEN;
+  assert.deepEqual(
+    (await f.service.gitHubSourceCredentialStatus(f.projectId)).gh,
+    { state: "signed-in", login: "stored-account" },
+  );
+  process.env.GH_TOKEN = "invalid-overriding-token";
+  f.configure("env:FIXTURE_SX_SOURCE");
+  const start = f.gh.commands().length;
+  const independent = await f.service.gitHubSourceCredentialStatus(f.projectId);
+  assert.equal(independent.usable, true);
+  assert.equal(independent.reason, null);
+  assert.equal(independent.gh.state, "unreadable");
+  assert.ok(
+    f.gh
+      .commands()
+      .slice(start)
+      .every((command) => command === "status"),
+  );
+  assert.doesNotMatch(
+    await direct.projectWithCredentialStatus(f.projectId),
+    /@stored-account/,
+  );
+  f.configure("gh:github.com");
+  assert.equal(
+    (await f.service.gitHubSourceCredentialStatus(f.projectId)).reason,
+    "gh-unreadable",
+  );
+  assert.equal(providerReads, 0);
+  assert.equal(f.service.githubSources().issue("I_1"), undefined);
+});

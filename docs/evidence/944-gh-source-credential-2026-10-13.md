@@ -137,8 +137,9 @@ persisted.
 
 Source observation requests now use four workers and retain project order. A
 request/attempt-local login probe is shared only for identical captured executable,
-timeout and environment snapshots; selected-gh and stripped env/null contexts
-remain separate. Each selected-gh status runs a fresh token command after its
+timeout and environment snapshots. Distinct captured contexts remain separate;
+production account offers now use the candidate-gh context for every actual
+source kind, as described below. Each selected-gh status runs a fresh token command after its
 paired probe. Queued work captures current configuration/options when it starts;
 a version/reference fence retry creates a new scope. This is a request-local
 process bound, not aggregate service or descendant containment.
@@ -148,7 +149,8 @@ rotation/reset/suppression, resolver failures, preview independence, in-flight
 rotation, fresh scopes and factory exceptions. The two new production integration
 cases passed: cross-project sync rotation and multi-project status fanout with
 queued configuration mutation/fenced retry. The observed child peak was four; the
-first request used two separate context detectors and nine fresh token commands,
+historical `8f8c938` first request used two separate context detectors and nine
+fresh token commands,
 and the next request plus fenced retry used fresh scopes. The complete affected
 suite passed 59/59, preserving legacy backoff, exclusion and fence cases. The
 sandbox attempt retained one loopback-listen EPERM failure; the exact host retry
@@ -164,6 +166,39 @@ independent reviewer returned SHIP for all three contracts with no actionable
 findings; prior unaffected coverage and the explicit live-evidence scope remained
 applicable. This result qualifies the repaired code through controlled tests;
 the real-host live result remains scoped to `9395520`, with no renewed attempt.
+
+## Candidate account offer repair
+
+The original service and direct default advanced-HTML status factories detected
+an offered gh login using the current null/env source environment. Choosing gh
+restored its token variables and could select a different account. Separate
+controlled substitutions of the original `6e835266` service and HTML modules
+reproduced that mismatch. The two repaired factories detect the offer using the
+same explicit candidate-gh environment as a selected gh source. The actual source
+reference still controls usability, credential resolution and fenced failure
+invalidation. Detection grants no selection, activation or repository access.
+
+The environment-sensitive fake models `GH_TOKEN` before `GITHUB_TOKEN`, then the
+stored account, and refuses an invalid overriding token without stored fallback.
+Tests cover unset/env/current-gh sources, Clear, env-to-gh changes, discovery unset
+or different, name/value collisions and lifetime old-token aliases. Only the two
+current gh variables survive candidate detection; configured source/discovery/
+delivery/Claude names and aliases remain excluded. Null/env offers run status
+only, with zero token or source-provider reads and no configuration/activation
+mutation. An available env source remains usable when the candidate gh login fails.
+
+JSON configuration/observations, service-bound and direct default advanced HTML,
+CLI source readbacks and the React choice/Change/Clear journey expose the same
+candidate account. The renewed affected suite passed 68/68, preserving throwing
+factory isolation and existing configuration/reference/activation fences. The
+service fanout test observed a child peak of four, one equivalent-context login
+probe and nine fresh token commands; next requests and fenced retries still use
+fresh scopes. Generic distinct-context scope tests remain unchanged.
+
+The account-offer repair has not received a live run. The qualified `9395520`
+live result and consumed allowance remain unchanged. Its clean repaired candidate
+requires the mandatory full check and renewed independent affected review before
+publication; results will be recorded after those gates complete.
 
 ## Live boundary and measured outcome
 

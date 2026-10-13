@@ -123,7 +123,7 @@ export class LocalOperatorUi {
       const status = await gitHubSourceCredentialStatus(config.credentialRef, {
         gh: () => ({
           environment: ghEnvironment(store, {
-            reference: config.credentialRef,
+            reference: "gh:github.com",
           }),
         }),
       });

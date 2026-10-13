@@ -113,6 +113,15 @@ or provide a fallback. Configure the source in project settings, preview its
 current version to activate it, then refresh observations to import tasks.
 Preview activation and successful import are separate evidence.
 
+The offered GitHub CLI account uses the same candidate environment as an explicit
+gh source selection: `GH_TOKEN` takes precedence over `GITHUB_TOKEN`, then the
+stored login. An invalid overriding token does not fall back to the stored
+account. This status-only offer does not select credentials or activate a source,
+and reads no gh token for a null/env source. Current env-source usability remains
+independent of an unavailable candidate gh account. Configured unrelated
+credentials, their aliases and lifetime old-token aliases remain excluded; only
+the two current gh token variables are restored for this candidate detection.
+
 Missing or unusable credentials make source knowledge incomplete. Change or
 Clear retains source definitions and task history; a fresh preview and successful
 provider reads are needed for the new source version. Exact recorded commands
@@ -199,7 +208,7 @@ remain separate. The bounded source qualification passed on candidate
 `9395520e1cb23937f0e7f399b5c3d7bef67c4d89`: real preview and activation preceded
 the separate import, with zero model turns/GitHub writes and proved cleanup. See
 [the dated evidence](../evidence/944-gh-source-credential-2026-10-13.md) for exact
-results and limits. Later sync-pause/status-fanout repairs use controlled fake and
+results and limits. Later sync-pause/status-fanout/account-offer repairs use controlled fake and
 full-check evidence; they have not received another live run. Its single allowance
 is consumed; rerunning requires separate authorization and a fresh bound
 preparation.

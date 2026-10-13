@@ -526,3 +526,74 @@ test("a lost source apply reply is reconciled and retried under the same key", a
   assert.deepEqual(again.data.receipt, read.data.receipt);
   assert.equal((await w.config()).source.version, v + 1);
 });
+
+import { createFakeGh } from "./fixtures/fake-gh.js";
+
+test("CLI source readback offers the same environment-precedence account before and after explicit gh choice", async (t) => {
+  const fake = createFakeGh();
+  t.after(() => fake.close());
+  fake.setAccounts({
+    stored: { login: "stored-account", token: "stored-cli-token" },
+    tokens: {
+      "cli-gh-first": "offered-account",
+      "cli-github-second": "other-account",
+    },
+  });
+  const oldGh = process.env.GH_TOKEN,
+    oldGithub = process.env.GITHUB_TOKEN;
+  process.env.GH_TOKEN = "cli-gh-first";
+  process.env.GITHUB_TOKEN = "cli-github-second";
+  t.after(() => {
+    if (oldGh === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = oldGh;
+    if (oldGithub === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = oldGithub;
+  });
+  const o = await startCliOperator(t, {
+    service: { ghExecutable: fake.executable },
+  });
+  const projectId = o.s.projectId;
+  const configure = (credentialRef: string | null) =>
+    o.d.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: o.d.githubConfiguration(projectId).version,
+      credentialRef,
+      selections: [],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
+  configure(null);
+  const before = o.d.githubConfiguration(projectId);
+  const start = fake.commands().length;
+  const offer = await o.cli("ro", ["project", "sources", projectId]);
+  assert.equal(offer.code, 0);
+  assert.equal(offer.json().data.source.credential.gh.login, "offered-account");
+  assert.ok(
+    fake
+      .commands()
+      .slice(start)
+      .every((command) => command === "status"),
+  );
+  assert.deepEqual(o.d.githubConfiguration(projectId), before);
+  configure("gh:github.com");
+  const selected = await o.cli("ro", ["project", "sources", projectId]);
+  assert.equal(selected.code, 0);
+  assert.equal(
+    selected.json().data.source.credential.gh.login,
+    "offered-account",
+  );
+  assert.equal(selected.json().data.source.credential.usable, true);
+  configure(null);
+  assert.equal(
+    (await o.cli("ro", ["project", "sources", projectId])).json().data.source
+      .credential.gh.login,
+    "offered-account",
+  );
+  assert.equal(o.s.f.runtime.turns, 0);
+});

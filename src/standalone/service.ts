@@ -2114,7 +2114,9 @@ export class StandaloneService {
       {
         gh: () => ({
           executable: this.options.ghExecutable,
-          environment: ghEnvironment(this.domain(), { reference }),
+          environment: ghEnvironment(this.domain(), {
+            reference: "gh:github.com",
+          }),
         }),
       },
       scope,

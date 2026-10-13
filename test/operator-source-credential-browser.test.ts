@@ -12,6 +12,24 @@ const test = browserSuite("ui06-source-credential");
 
 test("Source settings choose gh explicitly, cancel, retain an unknown Clear and reconcile exact bytes", async (_t, journey) => {
   const gh = createFakeGh();
+  gh.setAccounts({
+    stored: { login: "stored-account", token: "stored-browser-token" },
+    tokens: {
+      "browser-gh-first": "offered-account",
+      "browser-github-second": "other-account",
+    },
+  });
+  const oldGh = process.env.GH_TOKEN,
+    oldGithub = process.env.GITHUB_TOKEN;
+  process.env.GH_TOKEN = "browser-gh-first";
+  process.env.GITHUB_TOKEN = "browser-github-second";
+  journey.cleanup(async () => {
+    if (oldGh === undefined) delete process.env.GH_TOKEN;
+    else process.env.GH_TOKEN = oldGh;
+    if (oldGithub === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = oldGithub;
+  }, "candidate-environment.restore");
+
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const f = await journey.start("fixture.create", () =>
     createOperatorFixture(
@@ -79,7 +97,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     .selectOption("any");
   await page.getByRole("button", { name: "Set source credential" }).click();
   await page
-    .getByText("Signed in to github.com as @octo", { exact: false })
+    .getByText("Signed in to github.com as @offered-account", { exact: false })
     .waitFor();
   await page.getByRole("button", { name: "Cancel credential change" }).click();
   assert.equal(d.githubConfiguration(projectId).credentialRef, null);
