@@ -824,6 +824,7 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
     state.notify();
     return () => {
       state.composerShown = false;
+      state.notify();
     };
   }, [shown, state]);
   if (!review || !composer || composer.originKey !== originKey) return null;

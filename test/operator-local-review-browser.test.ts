@@ -874,6 +874,11 @@ test("a review send in flight when its page goes away is left for the next page 
     await gate;
     await route.continue();
   });
+  const sendAnswered = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/operator/commands") &&
+      (response.request().postData() ?? "").includes("review.send"),
+  );
   await review
     .getByRole("button", { name: /^Send review \(1 comment\)/ })
     .click();
@@ -885,6 +890,7 @@ test("a review send in flight when its page goes away is left for the next page 
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
   release();
+  await sendAnswered;
   // The old page's answer is not applied to a page that is gone; the new page checks it.
   await review
     .getByRole("button", { name: "Check whether it saved", exact: true })
