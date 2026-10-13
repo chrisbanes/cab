@@ -13,6 +13,7 @@ import {
   DomainStaleDispositionError,
   DomainStore,
 } from "../src/core/domain.js";
+import { materialDigest } from "../src/core/delivery.js";
 import { Store } from "../src/core/store.js";
 import { ExecutionState } from "../src/standalone/state.js";
 
@@ -2027,6 +2028,254 @@ test("configuration command hashes stay byte-identical", () => {
         "9a4def4ed9c1e0cdff521924954021e08fb823d0a8c4fb5e5b76bb50fb1503a5",
       ],
     );
+  } finally {
+    f.close();
+  }
+});
+
+// Persisted receipts and routing operations carry the legacy domain digest: explicit
+// `undefined` hashes as the bare text `undefined`, unlike the delivery contract's
+// `canonicalMaterial` (which emits `null`). These constants pin that, so stored keys keep replaying.
+const legacyHashes = {
+  profileOmitted:
+    "71d7fb0fcfdd1bf5c5290e08b67329be55518df14c0a4b6f9243c3e258a3d98d",
+  profileUndefined:
+    "2b2d87587cd80e63bb245c9f1880d7a8b04bd90944d0ca63b00527317848ebbf",
+  projectNull:
+    "5b532e57fca2ff17f1df1d8b38d89d8fcb54cd8cd268e2b7ad4948d21ee9fe1f",
+  routingOmitted:
+    "631977b5bef1de657f90920acad6516748660ea5c6eb39280745a0a6da5f5642",
+  routingUndefined:
+    "56fb21d3e7a16c060beef904cea0501b5bca948638fbfd7d2b48cff8878cf00e",
+  routingAssigned:
+    "cc20d9bfe10a4d1d5a3d0e7835e35c44e49c4487b35bfe0ac2ba1d02f74f1786",
+};
+const profileOmittedId = "20000000-0000-4000-8000-0000000000a1";
+const profileUndefinedId = "20000000-0000-4000-8000-0000000000a2";
+const pinnedKeys = {
+  profileOmitted: "50000000-0000-4000-8000-0000000000a1",
+  profileUndefined: "50000000-0000-4000-8000-0000000000a2",
+  projectNull: "50000000-0000-4000-8000-0000000000a3",
+  routingOmitted: "60000000-0000-4000-8000-0000000000a1",
+  routingUndefined: "60000000-0000-4000-8000-0000000000a2",
+  routingAssigned: "60000000-0000-4000-8000-0000000000a3",
+};
+
+test("command receipts pin legacy digests and replay after reopen", () => {
+  const f = fixture();
+  try {
+    const profileBase = {
+      type: "profile.create" as const,
+      actor: "operator" as const,
+      name: "Pinned",
+      instructions: "Pin the digest",
+      capabilities: "review",
+    };
+    const omitted: DomainCommand = {
+      ...profileBase,
+      key: pinnedKeys.profileOmitted,
+      profileId: profileOmittedId,
+    };
+    const undefinedSummary: DomainCommand = {
+      ...profileBase,
+      key: pinnedKeys.profileUndefined,
+      profileId: profileUndefinedId,
+      name: "Pinned undefined",
+      summary: undefined,
+    };
+    const nullable: DomainCommand = {
+      type: "project.create",
+      actor: "operator",
+      key: pinnedKeys.projectNull,
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    };
+    const commands = [omitted, undefinedSummary, nullable];
+    const first = commands.map((command) => f.domain.execute(command));
+    const receipts = () =>
+      f.db
+        .prepare("SELECT key, payloadHash FROM command_receipts ORDER BY key")
+        .all() as { key: string; payloadHash: string }[];
+    const expected = [
+      legacyHashes.profileOmitted,
+      legacyHashes.profileUndefined,
+      legacyHashes.projectNull,
+    ];
+    assert.deepEqual(
+      receipts().map((r) => r.payloadHash),
+      expected,
+    );
+    assert.notEqual(
+      legacyHashes.profileUndefined,
+      materialDigest(undefinedSummary),
+    );
+    f.reopen();
+    assert.deepEqual(
+      commands.map((command) => f.domain.execute(command)),
+      first,
+    );
+    assert.deepEqual(
+      receipts().map((r) => r.payloadHash),
+      expected,
+    );
+    const { summary: _summary, ...withoutSummary } = undefinedSummary as {
+      summary?: undefined;
+    } & DomainCommand;
+    assert.throws(
+      () => f.domain.execute(withoutSummary as DomainCommand),
+      /different payload/,
+    );
+    assert.throws(
+      () => f.domain.execute({ ...omitted, name: "Renamed" } as DomainCommand),
+      /different payload/,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("routing operations pin legacy digests and replay after reopen", () => {
+  const f = fixture();
+  try {
+    const d = [a, b, c];
+    run(f.domain, {
+      type: "profile.create",
+      actor: "operator",
+      profileId: profile,
+      name: "Builder",
+      instructions: "Code",
+      capabilities: "code",
+    });
+    run(f.domain, {
+      type: "project.create",
+      actor: "operator",
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: profile,
+    });
+    for (const taskId of d)
+      run(f.domain, {
+        type: "task.create",
+        actor: "operator",
+        projectId: p,
+        taskId,
+        title: "Task",
+        outcome: "Ship",
+        ready: true,
+      });
+    run(f.domain, {
+      type: "routing.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 1,
+      enabled: true,
+      guidance: "Fit",
+      credentialRef: "env:TYPESAFE_KEY",
+      candidateProfileIds: [profile],
+    });
+    run(f.domain, {
+      type: "project.configure",
+      actor: "operator",
+      projectId: p,
+      expectedVersion: 1,
+      paused: false,
+    });
+    const common = {
+      projectId: p,
+      taskVersion: 1,
+      candidateRevisions: { [profile]: 1 },
+      guidanceRevision: 2,
+      model: "deterministic",
+      question: "Choose",
+      judgment: null,
+      resultDestination: "lead:task",
+    };
+    const fallback = {
+      ...common,
+      disposition: "lead-fallback",
+      assignmentId: null,
+    };
+    const omitted = { ...fallback, id: pinnedKeys.routingOmitted, taskId: a };
+    const undefinedBrief = {
+      ...fallback,
+      id: pinnedKeys.routingUndefined,
+      taskId: b,
+      brief: undefined,
+    };
+    const assigned = {
+      ...common,
+      id: pinnedKeys.routingAssigned,
+      taskId: c,
+      disposition: "assigned",
+      assignmentId: assignment,
+      judgment: "Builder",
+      assignment: {
+        profileId: profile,
+        brief: "Ship",
+        requesterAssignmentId: null,
+      },
+    };
+    const inputs = [omitted, undefinedBrief, assigned];
+    const first = inputs.map((input) => f.domain.recordRouting(input));
+    const hashes = () =>
+      f.db
+        .prepare("SELECT payloadHash FROM routing_operations ORDER BY id")
+        .all()
+        .map((row) => (row as { payloadHash: string }).payloadHash);
+    const expected = [
+      legacyHashes.routingOmitted,
+      legacyHashes.routingUndefined,
+      legacyHashes.routingAssigned,
+    ];
+    assert.deepEqual(hashes(), expected);
+    assert.notEqual(
+      legacyHashes.routingUndefined,
+      materialDigest(undefinedBrief),
+    );
+    f.reopen();
+    assert.deepEqual(
+      inputs.map((input) => f.domain.recordRouting(input)),
+      first,
+    );
+    assert.deepEqual(hashes(), expected);
+    const { brief: _brief, ...withoutBrief } = undefinedBrief;
+    assert.throws(
+      () => f.domain.recordRouting(withoutBrief),
+      /Routing operation conflict/,
+    );
+    assert.throws(
+      () => f.domain.recordRouting({ ...assigned, question: "Changed" }),
+      /Routing operation conflict/,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("in-flight dedupe agrees with durable receipts on explicit undefined", async () => {
+  const f = fixture();
+  try {
+    const commands = new DomainCommands(f.domain);
+    const command: DomainCommand = {
+      type: "profile.create",
+      actor: "operator",
+      key: pinnedKeys.profileUndefined,
+      profileId: profileUndefinedId,
+      name: "Pinned undefined",
+      instructions: "Pin the digest",
+      capabilities: "review",
+      summary: undefined,
+    };
+    const one = commands.execute(command);
+    const two = commands.execute({ ...command });
+    const { summary: _summary, ...withoutSummary } = command as {
+      summary?: undefined;
+    } & DomainCommand;
+    const conflict = commands.execute(withoutSummary as DomainCommand);
+    assert.equal(one, two);
+    await assert.rejects(conflict, /different payload/);
+    assert.deepEqual(await one, await two);
   } finally {
     f.close();
   }
