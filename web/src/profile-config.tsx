@@ -216,6 +216,7 @@ export function ProfileCreate(p: SettingsProps) {
               client={p.client}
               session={p.session}
               label="Create profile"
+              refresh={p.refresh}
             />
             <div className="settings-actions">
               {d.phase === "recorded" ? (
@@ -432,7 +433,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     label="Save profile"
                     saveDisabled={lines.length === 0}
                     discard={() => initial && reloadDraft(d, initial)}
-                    onRecorded={() => {
+                    refresh={() => {
                       p.refresh();
                       resource.refresh();
                     }}

@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "./components.js";
 import { Alert } from "./ui/alert.js";
 import "./action-feedback.css";
@@ -17,7 +17,7 @@ export function ActionOutcome({
   tone,
   message,
   action,
-  focusAction = false,
+  focus = false,
   details = [],
   children,
 }: {
@@ -25,12 +25,20 @@ export function ActionOutcome({
   message: ReactNode;
   /** The single thing to do next. */
   action?: { label: string; onClick: () => void | Promise<void> } | undefined;
-  /** Move focus to the action as it appears, when the control the operator used is gone. */
-  focusAction?: boolean | undefined;
+  /**
+   * Take focus as the message appears, when the control the operator used is gone: the
+   * action if there is one, otherwise the message itself.
+   */
+  focus?: boolean | undefined;
   details?: readonly OutcomeField[] | undefined;
   /** Extra content under the message, such as a follow-up link. */
   children?: ReactNode;
 }) {
+  const root = useRef<HTMLDivElement>(null);
+  const hasAction = Boolean(action);
+  useEffect(() => {
+    if (focus && !hasAction) root.current?.focus();
+  }, [focus, hasAction]);
   const body = (
     <>
       <p className="body action-outcome-message">
@@ -43,7 +51,7 @@ export function ActionOutcome({
           type="button"
           variant="secondary"
           onClick={action.onClick}
-          autoFocus={focusAction}
+          autoFocus={focus}
         >
           {action.label}
         </Button>
@@ -53,6 +61,8 @@ export function ActionOutcome({
   );
   return tone === "success" ? (
     <div
+      ref={root}
+      tabIndex={-1}
       role="status"
       data-slot="action-outcome"
       data-tone={tone}
@@ -62,6 +72,8 @@ export function ActionOutcome({
     </div>
   ) : (
     <Alert
+      ref={root}
+      tabIndex={-1}
       role="alert"
       variant={tone === "error" ? "destructive" : "warning"}
       data-slot="action-outcome"

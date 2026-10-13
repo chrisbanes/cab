@@ -320,7 +320,7 @@ function GeneralTab(p: TabProps) {
               label="Save project"
               saveDisabled={lines.length === 0}
               discard={() => reloadDraft(d, initial)}
-              onRecorded={p.refreshConfiguration}
+              refresh={p.refreshConfiguration}
               review={() => d.adoptLatest(data.project.version, initial)}
             />
           </form>

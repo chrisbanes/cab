@@ -6,6 +6,7 @@ import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
+import type { ConfigurationDraft } from "./settings-state.js";
 import { observationLabel, sourceCredentialCopy } from "./settings-view.js";
 import {
   DraftField,
@@ -24,6 +25,10 @@ interface ObservationResource {
   state: ResourceState<Observations>;
   refresh: () => void;
 }
+
+/** The one saved line of a recorded placement, in plain words. */
+const placedLine = (d: ConfigurationDraft) =>
+  `Saved. ${d.values.placementTitle || "The task"} now belongs to ${d.values.placementProject || "the chosen project"}.`;
 
 export function SyncTab(p: TabProps & { observations: ObservationResource }) {
   const { data } = p,
@@ -93,6 +98,7 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
               session={p.session}
               label="Preview and activate selection"
               saveDisabled={data.source.credential?.usable === false}
+              refresh={p.refreshConfiguration}
               review={() => preview.adoptVersion(data.source.version)}
             />
             {preview.phase === "conflict" && preview.errors.credentialRef && (
@@ -111,13 +117,24 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
         {unsettled.map((command) => (
           <UnsettledPlacement key={command.taskId} {...p} command={command} />
         ))}
-        {p.drafts.recordedPlacements(p.projectId).map((placed) => (
-          <DraftMessage
-            key={placed.receipt?.key}
-            draft={placed}
-            success={`Saved. ${placed.values.placementTitle || "The task"} now belongs to ${placed.values.placementProject || "the chosen project"}.`}
-          />
-        ))}
+        {p.drafts
+          .recordedPlacements(p.projectId)
+          // A task still listed here shows its line on its own row, so each saves once.
+          .filter(
+            (placed) =>
+              !data.placements.some(
+                (row) =>
+                  placed.frozen?.type === "github.place" &&
+                  row.taskId === placed.frozen.taskId,
+              ),
+          )
+          .map((placed) => (
+            <DraftMessage
+              key={placed.receipt?.key}
+              draft={placed}
+              success={placedLine(placed)}
+            />
+          ))}
         {data.placements.length === 0 && unsettled.length === 0 && (
           <Panel
             title="Source placement"
@@ -234,7 +251,8 @@ function UnsettledPlacement(
         client={p.client}
         session={p.session}
         label="Placement pending"
-        onRecorded={p.refreshConfiguration}
+        refresh={p.refreshConfiguration}
+        success={placedLine(d)}
       />
     </Panel>
   );
@@ -309,8 +327,9 @@ function PlacementConfiguration(
           client={p.client}
           session={p.session}
           label="Record placement"
+          refresh={p.refreshConfiguration}
           review={() => d.adoptVersion(c.version)}
-          success={null}
+          success={placedLine(d)}
         />
         <a href={`/task/${c.taskId}`}>Advanced source review controls</a>
       </form>

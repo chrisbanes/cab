@@ -420,7 +420,7 @@ export function ProjectSetup(p: SettingsProps) {
               client={p.client}
               session={p.session}
               label="Create paused project"
-              onRecorded={p.refresh}
+              refresh={p.refresh}
               success={null}
             />
             {!recorded && (

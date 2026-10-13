@@ -74,6 +74,8 @@ function ReferenceRow({
     // The closed row confirms the save until the next edit.
     d.startOperation(blank(), true);
   };
+  // A recorded save closes the form; any other answer only re-reads the status.
+  const reread = () => (d.phase === "recorded" ? settled() : status.refresh());
   const send = (credentialRef: string | null) => ({
     type,
     key: d.values.key,
@@ -106,7 +108,7 @@ function ReferenceRow({
               p.client,
               p.session,
               send(String(d.values.credentialRef ?? "")),
-              settled,
+              reread,
             )
           }
         >
@@ -117,7 +119,7 @@ function ReferenceRow({
             client={p.client}
             session={p.session}
             label="Save reference"
-            onRecorded={settled}
+            refresh={reread}
             success={null}
           />
           {d.phase !== "unknown" && d.phase !== "pending" && (
@@ -211,6 +213,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
     setOpen(false);
     d.startOperation(fresh(), true);
   };
+  const reread = () => (d.phase === "recorded" ? settled() : status.refresh());
   const send = (credentialRef: string | null) => ({
     type: "discovery.configure",
     key: d.values.key,
@@ -266,7 +269,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
               p.client,
               p.session,
               send(source === "gh" ? "gh:github.com" : `env:${name}`),
-              settled,
+              reread,
               source === "env" && !envName.test(name)
                 ? {
                     name: "Use upper-case letters, digits and underscores, starting with a letter.",
@@ -322,7 +325,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
             session={p.session}
             label={source === "gh" ? "Use this login" : "Save reference"}
             saveDisabled={source === "gh" && gh?.state !== "signed-in"}
-            onRecorded={settled}
+            refresh={reread}
             success={null}
           />
           {!busy && (

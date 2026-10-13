@@ -183,24 +183,47 @@ export function DraftMessage({
 }) {
   const details = detailRows(draft.details);
   // A message that follows a send replaces the control the operator used, so it takes the
-  // focus; one restored on a later visit does not.
+  // focus; one restored on a later visit does not. Checking removes its own button, so any
+  // answer to a check takes the focus too.
   const sent = useRef(false);
+  const checking = useRef(false);
   if (draft.phase === "pending") sent.current = true;
+  const answersCheck = checking.current;
+  useEffect(() => {
+    if (draft.phase !== "pending") checking.current = false;
+  });
+  const checkAndFocus =
+    check &&
+    (() => {
+      checking.current = true;
+      return check();
+    });
   switch (draft.phase) {
     case "pending":
       return null;
     case "rejected":
       return (
-        <ActionOutcome tone="error" message={draft.notice} details={details} />
+        <ActionOutcome
+          tone="error"
+          message={draft.notice}
+          focus={answersCheck}
+          details={details}
+        />
       );
     case "conflict":
       return draft.credentialRefusal ? (
-        <ActionOutcome tone="error" message={draft.notice} details={details} />
+        <ActionOutcome
+          tone="error"
+          message={draft.notice}
+          focus={answersCheck}
+          details={details}
+        />
       ) : (
         <ActionOutcome
           tone="warning"
           message={draft.notice}
           action={review && { label: "Review changes", onClick: review }}
+          focus={answersCheck}
           details={details}
         />
       );
@@ -209,8 +232,13 @@ export function DraftMessage({
         <ActionOutcome
           tone="warning"
           message={draft.notice}
-          action={check && { label: "Check whether it saved", onClick: check }}
-          focusAction={sent.current}
+          action={
+            checkAndFocus && {
+              label: "Check whether it saved",
+              onClick: checkAndFocus,
+            }
+          }
+          focus={sent.current}
           details={details}
         />
       );
@@ -221,6 +249,7 @@ export function DraftMessage({
           <ActionOutcome
             tone="success"
             message={success ?? outcomeCopy.saved}
+            focus={answersCheck}
             details={details}
           >
             {children}
@@ -241,7 +270,7 @@ export function DraftOutcome({
   label,
   saveDisabled = false,
   discard,
-  onRecorded,
+  refresh,
   review,
   success,
 }: {
@@ -253,8 +282,12 @@ export function DraftOutcome({
   saveDisabled?: boolean;
   /** Restores the loaded values; shown while there is unsaved input. */
   discard?: () => void;
-  /** Re-read after a reconciled submission is recorded, as `submitDraft` does after a save. */
-  onRecorded?: () => void;
+  /**
+   * Re-read what this form saved. Called when a check settles the outcome as recorded or
+   * as changed elsewhere, exactly as `submitDraft` does for a direct save, because the
+   * form unlocks and the message resolves from that re-read.
+   */
+  refresh: () => void;
   /** Adopts the newer saved version; offered in the alert when one was saved elsewhere. */
   review?: (() => void) | undefined;
   /** A plain sentence for the success line, or `null` when the caller shows its own. */
@@ -291,7 +324,8 @@ export function DraftOutcome({
         success={success}
         check={async () => {
           await draft.reconcile(client, session.csrfToken);
-          if (draft.phase === "recorded") onRecorded?.();
+          if (draft.phase === "recorded" || draft.phase === "conflict")
+            refresh();
         }}
       />
     </>
@@ -381,7 +415,7 @@ export async function submitDraft(
   e.preventDefault();
   if (Object.keys(errors).length) d.reject(errors);
   else await d.submit(client, command, session.csrfToken);
-  if (d.phase === "recorded") refresh();
+  if (d.phase === "recorded" || d.phase === "conflict") refresh();
   else if (d.phase === "rejected")
     requestAnimationFrame(() =>
       form.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),

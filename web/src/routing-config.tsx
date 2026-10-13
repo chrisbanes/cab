@@ -129,7 +129,7 @@ export function RoutingTab(p: TabProps) {
               label="Save routing"
               saveDisabled={lines.length === 0}
               discard={() => reloadDraft(d, initial)}
-              onRecorded={p.refreshConfiguration}
+              refresh={p.refreshConfiguration}
               review={() => d.adoptLatest(data.routing.version, initial)}
               success={
                 // After the re-read, say what routing now uses; until then the saved line is plain.

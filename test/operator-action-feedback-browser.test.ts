@@ -2,6 +2,7 @@ import { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { Page } from "playwright";
+import { OperatorApi } from "../src/standalone/operator-api.js";
 import type { GitHubReaderFactory } from "../src/standalone/github-sync.js";
 import {
   browserSuite,
@@ -13,6 +14,7 @@ import {
   outcomeMessages,
   phone,
   savedOutcome,
+  seedImportedConflict,
   startSettings,
   resolve,
 } from "./fixtures/operator-settings.js";
@@ -331,4 +333,198 @@ test("Profile edit, capacity, source preview, Claude token and discovery saves e
   await discovery.getByRole("button", { name: "Save reference" }).click();
   await savedOutcome(discovery);
   assert.equal(await outcomeMessages(page).count(), 2);
+});
+
+/** The first command reaches the service and commits, but the browser never sees the answer. */
+const loseFirstResponse = (page: Page) => {
+  let first = true;
+  return page.route("**/api/operator/commands", async (route) => {
+    if (!first) return route.continue();
+    first = false;
+    await route.fetch();
+    await route.abort();
+  });
+};
+const check = (page: Page) =>
+  page.getByRole("button", { name: "Check whether it saved", exact: true });
+const configurationReads = (page: Page) => {
+  const reads: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "GET" && /configuration$/.test(r.url()))
+      reads.push(r.url());
+  });
+  return reads;
+};
+/** Focus stays on the outcome message, not on the page body. */
+const focusOnOutcome = (page: Page) =>
+  page.evaluate(
+    () =>
+      document.activeElement?.closest('[data-slot="action-outcome"]') !== null,
+  );
+
+test("a source preview recorded through Check re-reads and opens the form again", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  const reads = configurationReads(page);
+  await loseFirstResponse(page);
+  const preview = page.getByRole("button", {
+    name: "Preview and activate selection",
+  });
+  await preview.click();
+  await check(page).waitFor();
+  const before = reads.length;
+  await check(page).click();
+  await savedOutcome(page);
+  // The check re-reads, so the form opens for the next preview, as after a direct save.
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("button")].some(
+      (b) => b.textContent === "Preview and activate selection" && !b.disabled,
+    ),
+  );
+  assert.equal(await page.getByLabel("Selection to preview").isEnabled(), true);
+  assert.ok(reads.length > before, "the check re-read the configuration");
+  // The saved line stays, once, and focus did not fall to the page body.
+  await savedOutcome(page);
+  assert.equal(await focusOnOutcome(page), true);
+});
+
+test("a placement recorded through Check in a mounted row shows one saved line and resolves", async (_t, journey) => {
+  const { f, ids, web, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.fieldnotes,
+    expectedVersion: d.githubConfiguration(ids.fieldnotes).version,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: [],
+    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  });
+  const taskId = randomUUID();
+  seedImportedConflict(f, taskId, [ids.atlas, ids.fieldnotes]);
+  await page.goto(
+    web.origin + resolve("/app/projects/:atlas/settings?tab=sync", ids),
+  );
+  const row = page.getByLabel("Placement project", { exact: true });
+  await row.selectOption({ label: "Fieldnotes" });
+  const reads = configurationReads(page);
+  await loseFirstResponse(page);
+  await page
+    .getByRole("button", { name: "Record placement", exact: true })
+    .click();
+  await check(page).waitFor();
+  assert.equal(String(d.task(taskId).projectId), ids.fieldnotes);
+  const before = reads.length;
+  await check(page).click();
+  // Exactly one line says what happened, whether or not the row is still on the page.
+  const line = outcomeMessages(page).filter({
+    hasText: /^Saved\. Conflicting imported task now belongs to Fieldnotes\./,
+  });
+  await line.waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
+  await row.waitFor({ state: "detached" });
+  assert.ok(reads.length > before, "the check re-read the configuration");
+  assert.equal(await outcomeMessages(page).count(), 1);
+  await line.waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Record placement", exact: true })
+      .count(),
+    0,
+  );
+});
+
+test("Review changes without a manual Refresh loads the newer version, keeps the input and saves", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+    desktop,
+  );
+  const name = page.getByLabel("Project name", { exact: true });
+  await name.fill("Atlas typed");
+  const d = f.service.domain();
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    paused: true,
+  });
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  // The conflict re-reads on its own: the other writer's pause is shown, the typing is kept.
+  await page
+    .locator(".settings-status")
+    .getByText("Paused", { exact: true })
+    .waitFor();
+  assert.equal(await name.inputValue(), "Atlas typed");
+  const warning = outcomeMessages(page);
+  assert.equal(await warning.count(), 1);
+  await warning.getByRole("button", { name: "Review changes" }).click();
+  await page
+    .getByText("Loaded the latest version. Your changes are still here.")
+    .waitFor();
+  // What it says is true: the untouched pause took the newer value, the name stayed.
+  assert.equal(await name.inputValue(), "Atlas typed");
+  assert.equal(
+    await page.getByRole("switch", { name: "Pause project" }).isChecked(),
+    true,
+  );
+  await save.click();
+  await savedOutcome(page);
+  assert.equal(d.project(ids.atlas).name, "Atlas typed");
+  assert.equal(d.project(ids.atlas).paused, 1);
+});
+
+test("a source preview that conflicts re-reads, and the next preview records without a manual Refresh", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  // The source is saved elsewhere after the page loaded, so the preview's version is stale.
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  const preview = page.getByRole("button", {
+    name: "Preview and activate selection",
+  });
+  const reads = configurationReads(page);
+  await preview.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  assert.equal(await outcomeMessages(page).count(), 1);
+  // The conflict re-reads on its own; the untouched form takes the newer version.
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .waitFor();
+  assert.ok(reads.length > 0, "the conflict re-read the configuration");
+  assert.equal(await preview.isEnabled(), true);
+  await preview.click();
+  await savedOutcome(page);
 });

@@ -175,7 +175,7 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
   await page.getByText("A newer version was saved elsewhere.").waitFor();
   assert.equal(await outcomeMessages(page).count(), 1);
   assert.equal(await name.inputValue(), "Atlas typed");
-  await refresh(page);
+  // The conflict re-reads on its own; no manual Refresh is needed before Review.
   await page.locator(".settings-status").getByText("Paused").waitFor();
   await outcomeMessages(page)
     .getByRole("button", { name: "Review changes" })

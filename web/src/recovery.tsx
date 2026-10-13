@@ -143,7 +143,7 @@ export function RuntimeSettings(p: SettingsProps) {
                     label="Save capacity"
                     saveDisabled={lines.length === 0}
                     discard={() => initial && reloadDraft(d, initial)}
-                    onRecorded={resource.refresh}
+                    refresh={resource.refresh}
                   />
                 </form>
               </Panel>

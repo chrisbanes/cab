@@ -612,7 +612,7 @@ export function SourceTab(p: TabProps) {
         label="Save changes"
         saveDisabled={blocked}
         discard={() => reloadDraft(d, initial)}
-        onRecorded={p.refreshConfiguration}
+        refresh={p.refreshConfiguration}
         review={adopt}
       />
     </form>
