@@ -937,6 +937,12 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await page
     .getByText(/source comparison unknown; current observation unavailable/)
     .waitFor({ state: "attached" });
+  // The failed refresh speaks even though an earlier viewing-reference outcome is still set.
+  await page
+    .getByText("Source refresh failed. Last successful source retained.", {
+      exact: true,
+    })
+    .waitFor({ state: "attached" });
   assert.equal(
     await page
       .getByText(/source unchanged|source requirements changed/)

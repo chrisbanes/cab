@@ -238,6 +238,8 @@ function useLocalReviewController({
           ? "unknown"
           : (receipt.state as LocalReviewSend["status"]);
       if (receipt.resumedLead) send.resumedLead = true;
+      // A receipt settles what an earlier unknown outcome left behind.
+      if (send.status !== "unknown") delete send.reason;
     } else if (result.code === "local-review-batch-too-large") {
       // Refused before any operation was recorded.
       send.status = "rejected";

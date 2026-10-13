@@ -301,6 +301,12 @@ test("production local review composes exact multi-origin anchors and sends one 
   await review.getByRole("button", { name: "Check whether it saved" }).click();
   await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1, "reconciliation never sends a second event");
+  // The confirmed send keeps its request key in Details but not the earlier unknown code.
+  const confirmed = review.locator("[data-slot=action-outcome]");
+  await confirmed.getByText("Details", { exact: true }).click();
+  const confirmedFields = await confirmed.locator("dl").innerText();
+  assert.match(confirmedFields, /Request key\s+[0-9a-f-]{36}/);
+  assert.doesNotMatch(confirmedFields, /Code|command-outcome-unknown/);
   const sent = review.getByRole("region", { name: "Sent review", exact: true });
   await sent.getByText("Edited file comment").waitFor();
   await sent.getByText(/diff\.txt · lines 2–3/).waitFor();

@@ -1052,13 +1052,16 @@ export function TaskWorkspace({
       if (!owned()) return;
       state.sourceRefreshFailed = true;
       setSourceObservation("unknown");
-      // An unconfirmed reply keeps its message and its one action.
-      if (!state.uncertain)
+      // An unconfirmed reply keeps its message and its one action; otherwise the failure
+      // replaces an earlier Results or Changes outcome.
+      if (!state.uncertain) {
+        setAux(null);
         state.notice = {
           tone: "warning",
           message: "Source refresh failed. Last successful source retained.",
           details: [],
         };
+      }
       changed();
     }
   }
