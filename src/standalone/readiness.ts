@@ -1,0 +1,400 @@
+import { constants } from "node:fs";
+import { access, lstat, stat } from "node:fs/promises";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
+import type { z } from "zod";
+import {
+  type ExecutionHarness,
+  executionHarnessLabels,
+  type ProfileRuntime,
+  type SupportedRuntimeSettings,
+  unsupportedRuntimeField,
+} from "../core/execution-runtime.js";
+import type {
+  discoveryStatusSchema,
+  HarnessStatus,
+} from "../operator/contracts.js";
+import {
+  type ClaudeTokenCheckResult,
+  claudeTokenCheckSchema,
+  type ReadinessCheck,
+  type ReadinessCheckId,
+  type ReadinessResult,
+  readinessCheckIds,
+  readinessSchema,
+} from "../operator/readiness.js";
+import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
+import { assertCanonicalDirectoryPath } from "./data-directory.js";
+
+type Discovery = z.infer<typeof discoveryStatusSchema>["data"];
+
+/** An active-or-revoked profile with its current execution runtime. */
+export type ReadinessProfile = {
+  name: string;
+  revoked: boolean;
+  runtime: ProfileRuntime;
+};
+
+export type ReadinessDeps = {
+  /** Where `PATH` is read; the service's own environment. */
+  env: NodeJS.ProcessEnv;
+  /** The service user, for ownership rules. */
+  uid: number | undefined;
+  dataDir: string;
+  authFile: string;
+  /** Re-runs the running App Server's authentication initialization; no model turn. */
+  codexLogin: () => Promise<"verified" | "failed" | "unavailable">;
+  discovery: () => Promise<Discovery>;
+  claudeTokenReference: () => string | null;
+  claudeTokenStatus: () => {
+    state:
+      | "not-configured"
+      | "missing-value"
+      | "restart-required"
+      | "available";
+  };
+  harnessStatuses: () => Pick<HarnessStatus, "harness" | "state">[];
+  harnessSettings: (
+    harness: ExecutionHarness,
+  ) => SupportedRuntimeSettings | null;
+  profiles: () => ReadinessProfile[];
+  now?: () => number;
+  /** Bound on the Codex login and GitHub discovery checks; defaults to 10 s. */
+  timeoutMs?: number;
+};
+
+const labels: Record<ReadinessCheckId, string> = {
+  "codex-executable": "Codex executable",
+  "codex-login": "Codex login",
+  git: "Git",
+  "github-discovery": "GitHub discovery",
+  "claude-token": "Claude token",
+  "runtime-harness": "Runtime harness",
+  "data-paths": "Data and auth paths",
+};
+
+const pass = (id: ReadinessCheckId): ReadinessCheck => ({
+  id,
+  label: labels[id],
+  status: "pass",
+  reason: null,
+  fix: null,
+});
+const outcome = (
+  id: ReadinessCheckId,
+  status: "fail" | "not-configured",
+  reason: string,
+  fix: string,
+): ReadinessCheck => ({ id, label: labels[id], status, reason, fix });
+
+const fixes = {
+  codex: "Install Codex into the fixed PATH",
+  codexLogin: "Run `codex login` as the service user",
+  git: "Install git",
+  discovery: "Run `gh auth login`, or Settings → discovery credential",
+  claude: "See Add Claude in Settings",
+  harness:
+    "Restart the service, or edit the profile's model or reasoning effort",
+  harnessSettings:
+    "Run a Claude task; supported models are read before its first turn, then run the check again",
+  unknown: "Run the check again, or restart the service",
+};
+
+class TimedOut extends Error {}
+
+/** Settles with the promise or rejects after `ms`; the timer never outlives the race. */
+function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimedOut()), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+/** The first `PATH` directory holding an executable regular file called `name`. */
+async function onPath(name: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  for (const directory of (env.PATH ?? "").split(delimiter)) {
+    // shortcut: relative and empty entries depend on the cwd; skipped, not resolved.
+    if (!isAbsolute(directory)) continue;
+    const candidate = join(directory, name);
+    try {
+      if (!(await stat(candidate)).isFile()) continue;
+      await access(candidate, constants.X_OK);
+      return true;
+    } catch {
+      // Not here; keep searching.
+    }
+  }
+  return false;
+}
+
+/**
+ * Seven read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
+ * `read()` runs fresh. Reasons and fixes are literals, never a caught error or a path.
+ */
+export class Readiness {
+  constructor(private readonly deps: ReadinessDeps) {}
+
+  async read(): Promise<ReadinessResult> {
+    const checks = await Promise.all(
+      readinessCheckIds.map((id) => this.run(id)),
+    );
+    return readinessSchema.parse({
+      data: { checks },
+      observedAt: this.now(),
+    });
+  }
+
+  /** The Claude token check alone, for the Add Claude panel. */
+  async claudeToken(): Promise<ClaudeTokenCheckResult> {
+    return claudeTokenCheckSchema.parse({
+      data: await this.run("claude-token"),
+      observedAt: this.now(),
+    });
+  }
+
+  private now(): number {
+    return (this.deps.now ?? Date.now)();
+  }
+
+  private async run(id: ReadinessCheckId): Promise<ReadinessCheck> {
+    try {
+      switch (id) {
+        case "codex-executable":
+          return await this.executable(id, "codex", fixes.codex);
+        case "git":
+          return await this.executable(id, "git", fixes.git);
+        case "codex-login":
+          return await this.codexLogin();
+        case "github-discovery":
+          return await this.discovery();
+        case "claude-token":
+          return this.claudeTokenCheck();
+        case "runtime-harness":
+          return this.runtimeHarness();
+        case "data-paths":
+          return await this.dataPaths();
+      }
+    } catch {
+      return outcome(id, "fail", "The check could not complete", fixes.unknown);
+    }
+  }
+
+  private async executable(
+    id: "codex-executable" | "git",
+    name: string,
+    fix: string,
+  ): Promise<ReadinessCheck> {
+    return (await onPath(name, this.deps.env))
+      ? pass(id)
+      : outcome(id, "fail", `${labels[id]} is not on the service PATH`, fix);
+  }
+
+  private async codexLogin(): Promise<ReadinessCheck> {
+    const id = "codex-login";
+    let result: "verified" | "failed" | "unavailable" | "timeout";
+    try {
+      result = await bounded(
+        this.deps.codexLogin(),
+        this.deps.timeoutMs ?? 10_000,
+      );
+    } catch (error) {
+      result = error instanceof TimedOut ? "timeout" : "failed";
+    }
+    if (result === "verified") return pass(id);
+    const reason = {
+      failed: "Codex is not signed in on the running service",
+      unavailable: "The Codex runtime is not running",
+      timeout: "Codex did not answer in time",
+    }[result];
+    return outcome(id, "fail", reason, fixes.codexLogin);
+  }
+
+  private async discovery(): Promise<ReadinessCheck> {
+    const id = "github-discovery";
+    let status: Discovery;
+    try {
+      status = await bounded(
+        this.deps.discovery(),
+        this.deps.timeoutMs ?? 10_000,
+      );
+    } catch {
+      return outcome(
+        id,
+        "fail",
+        "GitHub discovery could not be read",
+        fixes.discovery,
+      );
+    }
+    if (!status.configured)
+      return outcome(
+        id,
+        "not-configured",
+        "No GitHub discovery credential is configured",
+        fixes.discovery,
+      );
+    return status.available
+      ? pass(id)
+      : outcome(
+          id,
+          "fail",
+          "The GitHub discovery credential is not readable",
+          fixes.discovery,
+        );
+  }
+
+  private claudeTokenCheck(): ReadinessCheck {
+    const id = "claude-token";
+    const reference = this.deps.claudeTokenReference();
+    if (reference === null)
+      return outcome(
+        id,
+        "not-configured",
+        "No Claude token reference is configured",
+        fixes.claude,
+      );
+    const { state } = this.deps.claudeTokenStatus();
+    if (state === "available") return pass(id);
+    if (state === "restart-required")
+      return outcome(
+        id,
+        "fail",
+        "Restart the service to use this variable",
+        fixes.claude,
+      );
+    const source = claudeTokenSource(reference);
+    let reason = "Token is unavailable";
+    if (source.kind === "env") reason = "Token variable is unavailable";
+    else {
+      const read = readClaudeToken(source, this.deps.env, this.deps.uid);
+      if ("problem" in read) reason = `Token file ${read.problem}`;
+    }
+    return outcome(id, "fail", reason, fixes.claude);
+  }
+
+  private runtimeHarness(): ReadinessCheck {
+    const id = "runtime-harness";
+    const used = this.deps.profiles().filter((p) => !p.revoked);
+    if (used.length === 0)
+      return outcome(
+        id,
+        "not-configured",
+        "No active profile uses a runtime",
+        "Add a profile in Settings",
+      );
+    const states = new Map(
+      this.deps.harnessStatuses().map((s) => [s.harness, s.state]),
+    );
+    const reasons: string[] = [];
+    let unknownSettings = false;
+    let other = false;
+    for (const harness of new Set(used.map((p) => p.runtime.harness)))
+      if (states.get(harness) !== "available") {
+        other = true;
+        reasons.push(
+          `${executionHarnessLabels[harness]} runtime is not running`,
+        );
+      }
+    const settings =
+      states.get("claude") === "available"
+        ? this.deps.harnessSettings("claude")
+        : null;
+    for (const profile of used) {
+      const { runtime } = profile;
+      if (runtime.harness !== "claude" || states.get("claude") !== "available")
+        continue;
+      if (settings === null) {
+        unknownSettings = true;
+        continue;
+      }
+      const field = unsupportedRuntimeField(runtime, settings);
+      if (field) {
+        other = true;
+        reasons.push(
+          `Profile ${profile.name}: ${field === "runtime.model" ? "model" : "reasoning effort"} is not accepted`,
+        );
+      }
+    }
+    if (unknownSettings)
+      reasons.push("Claude's supported models are not known yet");
+    if (reasons.length === 0) return pass(id);
+    return outcome(
+      id,
+      "fail",
+      reasons.join("; "),
+      unknownSettings && !other ? fixes.harnessSettings : fixes.harness,
+    );
+  }
+
+  private async dataPaths(): Promise<ReadinessCheck> {
+    const id = "data-paths";
+    const { uid, dataDir, authFile } = this.deps;
+    const broken: { reason: string; fix: string }[] = [];
+    const rule = (reason: string, fix: string) => broken.push({ reason, fix });
+
+    const canonical = (path: string) => {
+      try {
+        assertCanonicalDirectoryPath(path, "Path");
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const state = async (path: string) => {
+      try {
+        return await lstat(path);
+      } catch {
+        return null;
+      }
+    };
+
+    const data = canonical(dataDir) ? await state(dataDir) : null;
+    if (!data?.isDirectory())
+      rule(
+        "Data directory must be an absolute, canonical directory",
+        "Set the data directory to a real directory without symlinks",
+      );
+    else {
+      if (uid === undefined || data.uid !== uid)
+        rule(
+          "Data directory must be owned by the service user",
+          "Give the data directory to the service user",
+        );
+      if ((data.mode & 0o077) !== 0)
+        rule(
+          "Data directory must not permit group or other access",
+          "Run chmod 700 on the data directory",
+        );
+    }
+
+    const auth =
+      isAbsolute(authFile) && canonical(dirname(authFile))
+        ? await state(authFile)
+        : null;
+    if (!auth?.isFile())
+      rule(
+        "Operator auth file must be a regular file under a canonical directory",
+        "Create the operator auth file with `npm run operator-auth`",
+      );
+    else {
+      if (uid === undefined || auth.uid !== uid)
+        rule(
+          "Operator auth file must be owned by the service user",
+          "Give the operator auth file to the service user",
+        );
+      if ((auth.mode & 0o777) !== 0o600)
+        rule(
+          "Operator auth file must have mode 600",
+          "Run chmod 600 on the operator auth file",
+        );
+    }
+
+    return broken.length === 0
+      ? pass(id)
+      : outcome(
+          id,
+          "fail",
+          broken.map((b) => b.reason).join("; "),
+          (broken[0] as { fix: string }).fix,
+        );
+  }
+}
