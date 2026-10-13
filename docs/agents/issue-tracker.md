@@ -14,6 +14,7 @@ delivery plan or task briefs in repository documents.
 - **Comment on an issue**: `gh issue comment <number> --body "..."`
 - **Apply / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
 - **Close**: `gh issue close <number> --comment "..."`
+- **Priority**: set only the Project `Priority` field (P0–P3; IDs in [run-github-project.md](run-github-project.md#priority)). Do not create or apply priority labels.
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
