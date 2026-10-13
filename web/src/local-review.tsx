@@ -225,6 +225,7 @@ function useLocalReviewController({
     // The anchor stage skips the refresh: the save that follows refreshes.
     refreshWhenRecorded = true,
   ) => {
+    state.pending = true;
     const result = await execute(command);
     const lost = result.state === "unknown";
     state.unconfirmed = lost ? { command, settle } : null;
@@ -645,6 +646,12 @@ const frozen = (review: Controller) =>
   review.state.send !== null && review.state.send.status !== "rejected";
 
 /** Opens the composer for one exact origin; disabled without a valid selection. */
+/** The one action of an unconfirmed draft write: replay its exact request. */
+const checkAction = (review: { check: () => Promise<void> }) => ({
+  label: "Check whether it saved",
+  onClick: () => review.check(),
+});
+
 export function CommentAction({
   originKey,
   label,
@@ -753,20 +760,15 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
           tone={composer.error.tone}
           message={composer.error.message}
           details={composer.error.details}
-          action={
-            composer.error.check
-              ? {
-                  label: "Check whether it saved",
-                  onClick: () => review.check(),
-                }
-              : undefined
-          }
+          action={composer.error.check ? checkAction(review) : undefined}
         />
       )}
       <div className="task-actions">
         <Button
           type="submit"
-          disabled={composer.saving || !composer.body.trim()}
+          disabled={
+            composer.saving || review.state.pending || !composer.body.trim()
+          }
         >
           {composer.saving && !composer.error?.check
             ? "Saving comment…"
@@ -775,7 +777,7 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
         <Button
           type="button"
           variant="secondary"
-          disabled={composer.saving}
+          disabled={composer.saving || review.state.pending}
           onClick={() => review.close()}
         >
           Cancel
@@ -1069,6 +1071,7 @@ export function LocalReviewPanel() {
                         </Button>
                         <Button
                           variant="secondary"
+                          disabled={state.pending}
                           onClick={() => review.cancelEdit(comment.commentId)}
                         >
                           Cancel edit
@@ -1123,14 +1126,7 @@ export function LocalReviewPanel() {
           tone={state.notice.tone}
           message={state.notice.message}
           details={state.notice.details}
-          action={
-            state.notice.check
-              ? {
-                  label: "Check whether it saved",
-                  onClick: () => review.check(),
-                }
-              : undefined
-          }
+          action={state.notice.check ? checkAction(review) : undefined}
         />
       )}
       {draft && comments.length > 0 && !send && (
