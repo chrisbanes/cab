@@ -578,6 +578,60 @@ test("production workspace retains literal history, pending request, focused rep
     .messages.filter((m) => m.text === "Unfinished contextual reply");
   assert.equal(local.length, 1);
   assert.equal(local[0]?.reference?.resultId, r.resultId);
+  // Results and Changes writes whose response is lost stay one exact request: their control is
+  // off, the check replays the same request, and nothing builds a new one from the selection.
+  for (const [type, control, done] of [
+    ["review.view", "Set viewing reference", "Viewing reference set."],
+    [
+      "delivery.refresh",
+      "Refresh delivery observation",
+      "Delivery status refreshed.",
+    ],
+  ] as const) {
+    const bodies: string[] = [];
+    let lost = true;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = route.request().postDataJSON() as { type?: string };
+      if (body.type !== type) return route.fallback();
+      bodies.push(route.request().postData() ?? "");
+      if (lost) {
+        lost = false;
+        await route.fetch();
+        await route.abort("connectionreset");
+      } else await route.continue();
+    });
+    await page.getByRole("button", { name: control, exact: true }).click();
+    const lostOutcome = page
+      .locator("[data-slot=action-outcome]")
+      .filter({ hasText: "We couldn't confirm" });
+    await lostOutcome.waitFor();
+    assert.equal(await lostOutcome.count(), 1);
+    assert.equal(await lostOutcome.getByRole("button").count(), 1);
+    assert.equal(
+      await page
+        .getByRole("button", { name: control, exact: true })
+        .isDisabled(),
+      true,
+    );
+    await lostOutcome.getByText("Details", { exact: true }).click();
+    assert.match(
+      await lostOutcome.locator("dl").innerText(),
+      /Request key\s+[0-9a-f-]{36}/,
+    );
+    await lostOutcome
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .click();
+    await page.getByText(done, { exact: true }).waitFor();
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0], bodies[1]);
+    assert.equal(
+      await page
+        .getByRole("button", { name: control, exact: true })
+        .isEnabled(),
+      true,
+    );
+    await page.unroute("**/api/operator/commands");
+  }
   // A running lead receives feedback on its next eligible turn (frame 03a).
   assert.equal(
     await page

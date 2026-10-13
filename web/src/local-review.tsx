@@ -94,8 +94,7 @@ function restoredSend(taskId: string): LocalReviewSend | null {
 }
 
 /** Why a draft or send write failed, in plain words; the code itself goes to Details. */
-function causeOf(code: string | undefined, state?: CommandState["state"]) {
-  if (state === "unknown") return "the connection was lost";
+function causeOf(code: string | undefined) {
   switch (code) {
     case "local-review-batch-too-large":
       return "it is too large to send, so shorten or remove comments";
@@ -183,18 +182,17 @@ function useLocalReviewController({
 
   const execute = async (input: Parameters<OperatorClient["command"]>[0]) =>
     client.command(input, session.csrfToken);
-  /** One alert naming the cause and saying the input is kept; the code sits in Details. */
+  /**
+   * One alert naming the cause and saying the input is kept, or, when the response was lost,
+   * one warning whose check replays the exact request. The code sits in Details.
+   */
   const failure = (
     result: CommandState,
     what: string,
+    confirmed: string,
     kept: string,
-  ): ReplyOutcome => ({
-    tone: "error",
-    message: `${what}: ${causeOf(
-      result.state === "recorded" ? undefined : result.code,
-      result.state,
-    )}. ${kept}`,
-    details:
+  ): ReplyOutcome => {
+    const details =
       result.state === "recorded"
         ? []
         : detailRows({
@@ -202,23 +200,49 @@ function useLocalReviewController({
             resource: taskId,
             requestKey: result.command.key,
             code: result.code,
-          }),
-  });
+          });
+    return result.state === "unknown"
+      ? {
+          tone: "warning",
+          message: `We couldn't confirm ${confirmed}. ${kept}`,
+          details,
+          check: true,
+        }
+      : {
+          tone: "error",
+          message: `${what}: ${causeOf(result.state === "recorded" ? undefined : result.code)}. ${kept}`,
+          details,
+        };
+  };
 
-  const saveDraft = async (
+  /**
+   * Run a draft write. When its response is lost the exact request is kept and the controls
+   * stay off until `check` replays it, so an unconfirmed write is never repeated under a new key.
+   */
+  const write = async (
+    command: Parameters<OperatorClient["command"]>[0],
+    settle: (result: CommandState) => Promise<void> | void,
+    refreshWhenRecorded = true,
+  ) => {
+    const result = await execute(command);
+    const lost = result.state === "unknown";
+    state.unconfirmed = lost ? { command, settle } : null;
+    state.pending = lost;
+    if (refreshWhenRecorded || result.state !== "recorded")
+      await resource.refresh();
+    await settle(result);
+  };
+
+  const saveCommand = (
     content: DraftRead["draft"],
     expectedDraftVersion: number,
-  ) => {
-    const result = await execute({
-      type: "review.draft.save",
-      key: crypto.randomUUID(),
-      taskId,
-      expectedDraftVersion,
-      draft: content,
-    });
-    await resource.refresh();
-    return result;
-  };
+  ) => ({
+    type: "review.draft.save" as const,
+    key: crypto.randomUUID(),
+    taskId,
+    expectedDraftVersion,
+    draft: content,
+  });
   const focusLater = (selector: string, fallback?: string) =>
     requestAnimationFrame(() =>
       (
@@ -283,6 +307,8 @@ function useLocalReviewController({
       changed();
     },
     close() {
+      // An unconfirmed write keeps its composer until the check settles it.
+      if (state.unconfirmed) return;
       const composer = state.composer;
       state.composer = null;
       changed();
@@ -309,83 +335,111 @@ function useLocalReviewController({
       composer.saving = true;
       composer.error = null;
       changed();
-      const staged = await execute({
-        type: "review.anchor.stage",
-        key: crypto.randomUUID(),
-        taskId,
-        expectedDraftVersion: draft.version,
-        anchors: [composer.anchor],
-      });
-      if (
-        staged.state !== "recorded" ||
-        staged.receipt.kind !== "local-review-anchor"
-      ) {
-        // Keep the typed text; an unvalidated anchor is never added.
-        composer.saving = false;
-        composer.error = failure(
-          staged,
-          "Couldn't capture the exact lines",
-          "Your comment is kept.",
-        );
-        await resource.refresh();
-        changed();
-        return;
-      }
-      const saved = await saveDraft(
-        {
-          summary: draft.draft.summary,
-          comments: [
-            ...draft.draft.comments,
-            {
-              commentId: crypto.randomUUID(),
-              body: composer.body.trim(),
-              anchorGroupIds: [staged.receipt.groupId],
-            },
-          ],
-        },
-        staged.receipt.draftVersion,
-      );
-      if (saved.state !== "recorded") {
-        composer.saving = false;
+      const onSaved = (saved: CommandState) => {
+        if (saved.state === "recorded") {
+          this.close();
+          return;
+        }
         composer.error = failure(
           saved,
           "Couldn't save the comment",
+          "the comment was saved",
           "Your comment is kept.",
         );
+        // An unconfirmed save keeps the composer locked until it is checked.
+        if (saved.state !== "unknown") composer.saving = false;
         changed();
-        return;
-      }
-      this.close();
+      };
+      const onStaged = async (staged: CommandState) => {
+        if (
+          staged.state === "recorded" &&
+          staged.receipt.kind === "local-review-anchor"
+        ) {
+          await write(
+            saveCommand(
+              {
+                summary: draft.draft.summary,
+                comments: [
+                  ...draft.draft.comments,
+                  {
+                    commentId: crypto.randomUUID(),
+                    body: composer.body.trim(),
+                    anchorGroupIds: [staged.receipt.groupId],
+                  },
+                ],
+              },
+              staged.receipt.draftVersion,
+            ),
+            onSaved,
+          );
+          return;
+        }
+        // Keep the typed text; an unvalidated anchor is never added.
+        composer.error = failure(
+          staged,
+          "Couldn't capture the exact lines",
+          "the exact lines were captured",
+          "Your comment is kept.",
+        );
+        if (staged.state !== "unknown") composer.saving = false;
+        changed();
+      };
+      await write(
+        {
+          type: "review.anchor.stage",
+          key: crypto.randomUUID(),
+          taskId,
+          expectedDraftVersion: draft.version,
+          anchors: [composer.anchor],
+        },
+        onStaged,
+        false,
+      );
+    },
+    /** Replays the exact request of an unconfirmed draft write, never a new one. */
+    async check() {
+      const unconfirmed = state.unconfirmed;
+      if (!unconfirmed) return;
+      state.unconfirmed = null;
+      state.notice = null;
+      if (state.composer) state.composer.error = null;
+      changed();
+      await write(unconfirmed.command, unconfirmed.settle);
+      changed();
     },
     /** Drafts saved before the anchor rule can only be sent once these are gone. */
     async removeUnanchoredComments() {
       if (!draft) return;
       state.pending = true;
       changed();
-      const result = await saveDraft(
-        {
-          summary: draft.draft.summary,
-          comments: draft.draft.comments.filter(
-            (comment) => comment.anchorGroupIds.length > 0,
-          ),
+      await write(
+        saveCommand(
+          {
+            summary: draft.draft.summary,
+            comments: draft.draft.comments.filter(
+              (comment) => comment.anchorGroupIds.length > 0,
+            ),
+          },
+          draft.version,
+        ),
+        (result) => {
+          // Open editors of removed comments would otherwise keep Send disabled.
+          if (result.state === "recorded")
+            for (const comment of draft.draft.comments)
+              if (comment.anchorGroupIds.length === 0)
+                delete state.editing[comment.commentId];
+          state.notice =
+            result.state === "recorded"
+              ? null
+              : failure(
+                  result,
+                  "Couldn't remove the comments",
+                  "the comments were removed",
+                  "Your draft is kept.",
+                );
+          changed();
         },
-        draft.version,
       );
-      state.pending = false;
-      // Open editors of removed comments would otherwise keep Send disabled.
-      if (result.state === "recorded")
-        for (const comment of draft.draft.comments)
-          if (comment.anchorGroupIds.length === 0)
-            delete state.editing[comment.commentId];
-      state.notice =
-        result.state === "recorded"
-          ? null
-          : failure(
-              result,
-              "Couldn't remove the comments",
-              "Your draft is kept.",
-            );
-      changed();
     },
     async updateComment(commentId: string, body: string | null) {
       if (!draft) return;
@@ -394,36 +448,44 @@ function useLocalReviewController({
       const neighbour = comments[index + 1] ?? comments[index - 1];
       state.pending = true;
       changed();
-      const result = await saveDraft(
-        {
-          summary: draft.draft.summary,
-          comments: draft.draft.comments.flatMap((comment) =>
-            comment.commentId !== commentId
-              ? [comment]
-              : body === null
-                ? []
-                : [{ ...comment, body: body.trim() }],
-          ),
+      await write(
+        saveCommand(
+          {
+            summary: draft.draft.summary,
+            comments: draft.draft.comments.flatMap((comment) =>
+              comment.commentId !== commentId
+                ? [comment]
+                : body === null
+                  ? []
+                  : [{ ...comment, body: body.trim() }],
+            ),
+          },
+          draft.version,
+        ),
+        (result) => {
+          if (result.state === "recorded") delete state.editing[commentId];
+          state.notice =
+            result.state === "recorded"
+              ? null
+              : failure(
+                  result,
+                  "Couldn't save the change",
+                  "the change was saved",
+                  "Your text is kept.",
+                );
+          changed();
+          if (result.state !== "recorded") return;
+          if (body !== null)
+            focusLater(`[data-review-edit="${CSS.escape(commentId)}"]`);
+          else
+            focusLater(
+              neighbour
+                ? `[data-comment-id="${CSS.escape(neighbour.commentId)}"]`
+                : "#local-review-heading",
+              "#local-review-heading",
+            );
         },
-        draft.version,
       );
-      state.pending = false;
-      if (result.state === "recorded") delete state.editing[commentId];
-      state.notice =
-        result.state === "recorded"
-          ? null
-          : failure(result, "Couldn't save the change", "Your text is kept.");
-      changed();
-      if (result.state !== "recorded") return;
-      if (body !== null)
-        focusLater(`[data-review-edit="${CSS.escape(commentId)}"]`);
-      else
-        focusLater(
-          neighbour
-            ? `[data-comment-id="${CSS.escape(neighbour.commentId)}"]`
-            : "#local-review-heading",
-          "#local-review-heading",
-        );
     },
     cancelEdit(commentId: string) {
       delete state.editing[commentId];
@@ -434,17 +496,25 @@ function useLocalReviewController({
       if (!draft || state.summary === null) return;
       state.pending = true;
       changed();
-      const result = await saveDraft(
-        { summary: state.summary.trim(), comments: draft.draft.comments },
-        draft.version,
+      await write(
+        saveCommand(
+          { summary: state.summary.trim(), comments: draft.draft.comments },
+          draft.version,
+        ),
+        (result) => {
+          if (result.state === "recorded") state.summary = null;
+          state.notice =
+            result.state === "recorded"
+              ? null
+              : failure(
+                  result,
+                  "Couldn't save the summary",
+                  "the summary was saved",
+                  "Your text is kept.",
+                );
+          changed();
+        },
       );
-      state.pending = false;
-      if (result.state === "recorded") state.summary = null;
-      state.notice =
-        result.state === "recorded"
-          ? null
-          : failure(result, "Couldn't save the summary", "Your text is kept.");
-      changed();
     },
     async send() {
       if (!draft || !lead || !leadAccepts(lead) || state.send) return;
@@ -493,26 +563,33 @@ function useLocalReviewController({
       if (!draft) return;
       state.pending = true;
       changed();
-      const result = await execute({
-        type: "review.draft.discard",
-        key: crypto.randomUUID(),
-        taskId,
-        expectedDraftVersion: draft.version,
-      });
-      state.pending = false;
-      if (result.state === "recorded") {
-        state.send = null;
-        state.inspectKey = null;
-        state.editing = {};
-        state.summary = null;
-        storeSend(taskId, null);
-      }
-      state.notice =
-        result.state === "recorded"
-          ? null
-          : failure(result, "Couldn't clear the draft", "Your draft is kept.");
-      await resource.refresh();
-      changed();
+      await write(
+        {
+          type: "review.draft.discard",
+          key: crypto.randomUUID(),
+          taskId,
+          expectedDraftVersion: draft.version,
+        },
+        (result) => {
+          if (result.state === "recorded") {
+            state.send = null;
+            state.inspectKey = null;
+            state.editing = {};
+            state.summary = null;
+            storeSend(taskId, null);
+          }
+          state.notice =
+            result.state === "recorded"
+              ? null
+              : failure(
+                  result,
+                  "Couldn't clear the draft",
+                  "the draft was cleared",
+                  "Your draft is kept.",
+                );
+          changed();
+        },
+      );
     },
     /** Clears the current send state: after a rejection, or to dismiss a recorded send's banner. */
     clearSend() {
@@ -667,6 +744,14 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
           tone={composer.error.tone}
           message={composer.error.message}
           details={composer.error.details}
+          action={
+            composer.error.check
+              ? {
+                  label: "Check whether it saved",
+                  onClick: () => review.check(),
+                }
+              : undefined
+          }
         />
       )}
       <div className="task-actions">
@@ -674,7 +759,9 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
           type="submit"
           disabled={composer.saving || !composer.body.trim()}
         >
-          {composer.saving ? "Saving comment…" : "Save comment"}
+          {composer.saving && !composer.error?.check
+            ? "Saving comment…"
+            : "Save comment"}
         </Button>
         <Button
           type="button"
@@ -1026,6 +1113,14 @@ export function LocalReviewPanel() {
           tone={state.notice.tone}
           message={state.notice.message}
           details={state.notice.details}
+          action={
+            state.notice.check
+              ? {
+                  label: "Check whether it saved",
+                  onClick: () => review.check(),
+                }
+              : undefined
+          }
         />
       )}
       {draft && comments.length > 0 && !send && (

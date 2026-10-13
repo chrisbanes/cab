@@ -4,6 +4,7 @@ import type {
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
+import type { CommandState } from "./api.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
   workspaceDirectoryReadSchema,
@@ -145,6 +146,8 @@ export type ReplyOutcome = {
   tone: OutcomeTone;
   message: string;
   details: readonly OutcomeField[];
+  /** An unconfirmed write: offer the check that replays the exact request. */
+  check?: boolean;
 };
 
 class TaskReplyState {
@@ -219,6 +222,11 @@ export class LocalReviewState {
   editing: Record<string, string> = {};
   summary: string | null = null;
   pending = false;
+  /** A draft write whose response was lost: the exact request, replayed by the check. */
+  unconfirmed: {
+    command: OperatorCommand;
+    settle: (result: CommandState) => Promise<void> | void;
+  } | null = null;
   notice: ReplyOutcome | null = null;
   send: LocalReviewSend | null = null;
   inspectKey: string | null = null;

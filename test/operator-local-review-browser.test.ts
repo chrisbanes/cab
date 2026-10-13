@@ -459,6 +459,80 @@ test("a refused comment save shows one plain alert, keeps the text and puts the 
   );
 });
 
+test("a comment save whose response is lost stays one exact request until it is checked", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Lost response comment");
+  const stages: string[] = [];
+  const saves: string[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type === "review.anchor.stage")
+      stages.push(route.request().postData() ?? "");
+    if (body.type !== "review.draft.save") return route.continue();
+    saves.push(route.request().postData() ?? "");
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  const warning = files.locator("[data-slot=action-outcome]");
+  await warning
+    .getByText(
+      "We couldn't confirm the comment was saved. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await warning.count(), 1);
+  assert.equal(await warning.getAttribute("data-tone"), "warning");
+  assert.equal(await warning.getByRole("button").count(), 1);
+  assert.equal(
+    await files.getByLabel("Comment", { exact: true }).inputValue(),
+    "Lost response comment",
+  );
+  assert.equal(
+    await files.getByLabel("Comment", { exact: true }).isDisabled(),
+    true,
+  );
+  await warning.getByText("Details", { exact: true }).click();
+  assert.match(
+    await warning.locator("dl").innerText(),
+    /Request key\s+[0-9a-f-]{36}/,
+  );
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  const review = page.locator("#local-review");
+  await review.getByText("Lost response comment").first().waitFor();
+  // The check replayed the same save and the same anchor: one comment, no second request.
+  assert.equal(saves.length, 2);
+  assert.equal(saves[0], saves[1]);
+  assert.equal(stages.length, 1);
+  assert.equal(await review.getByText("Lost response comment").count(), 1);
+  await files
+    .getByLabel("Comment", { exact: true })
+    .waitFor({ state: "detached" });
+});
+
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
   const { web, task, page, pageErrors } = await startReview(j);
   await signIn(

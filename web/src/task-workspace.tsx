@@ -8,6 +8,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
@@ -205,6 +206,12 @@ export function TaskWorkspace({
   onHeader?: (report: TaskHeaderReport | null) => void;
 }) {
   const [aux, setAux] = useState<ReplyOutcome | null>(null);
+  // A Results or Changes write whose response was lost: the exact request, replayed by its
+  // check, so a later click never builds a different request from the current selection.
+  const [unconfirmed, setUnconfirmed] = useState<{
+    input: OperatorCommand;
+    outcome: ReplyOutcome;
+  } | null>(null);
   // The message that follows a reply replaces the control the operator used, so it takes
   // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
   // that check. Results and Changes actions never take it.
@@ -733,6 +740,12 @@ export function TaskWorkspace({
   }, [data, loadHistory, resource.state.pending, resource.state.error]);
   async function command(input: OperatorCommand) {
     if (pending) return;
+    if (
+      unconfirmed &&
+      (input.type === "review.view" || input.type === "delivery.refresh") &&
+      input.key !== unconfirmed.input.key
+    )
+      return;
     const normalized = operatorCommandSchema.safeParse(input);
     if (!normalized.success) {
       if (state.frozen?.key === input.key) state.frozen = null;
@@ -788,35 +801,40 @@ export function TaskWorkspace({
     setPending(false);
     if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (!reply) {
-      if (outcome.state === "recorded") {
-        if (outcome.receipt.kind === "comment-review")
-          state.commentReview = outcome.receipt;
-        setAux({
-          tone: "success",
-          message:
-            input.type === "review.view"
-              ? "Viewing reference set."
-              : "Delivery status refreshed.",
-          details: rows(outcome.receipt),
+      if (outcome.state === "unknown") {
+        setAux(null);
+        setUnconfirmed({
+          input: structuredClone(input),
+          outcome: {
+            tone: "warning",
+            message: unknownMessage(input.type),
+            details: rows(undefined, outcome.code),
+          },
         });
-        refresh();
-      } else
-        setAux(
-          outcome.state === "unknown"
-            ? {
-                tone: "warning",
-                message: unknownMessage(input.type),
-                details: rows(undefined, outcome.code),
-              }
-            : {
-                tone: "error",
-                message:
-                  outcome.state === "conflict"
-                    ? changedMessage
-                    : rejectedMessage(input.type, outcome.code),
-                details: rows(undefined, outcome.code),
-              },
-        );
+      } else {
+        setUnconfirmed(null);
+        if (outcome.state === "recorded") {
+          if (outcome.receipt.kind === "comment-review")
+            state.commentReview = outcome.receipt;
+          setAux({
+            tone: "success",
+            message:
+              input.type === "review.view"
+                ? "Viewing reference set."
+                : "Delivery status refreshed.",
+            details: rows(outcome.receipt),
+          });
+          refresh();
+        } else
+          setAux({
+            tone: "error",
+            message:
+              outcome.state === "conflict"
+                ? changedMessage
+                : rejectedMessage(input.type, outcome.code),
+            details: rows(undefined, outcome.code),
+          });
+      }
       changed();
       return;
     }
@@ -1116,6 +1134,21 @@ export function TaskWorkspace({
         details: [],
       })
     : (aux ?? state.notice);
+  // The check sits beside the control whose response was lost, which stays off meanwhile.
+  const unconfirmedCheck = (type: "review.view" | "delivery.refresh") =>
+    !pending &&
+    unconfirmed?.input.type === type && (
+      <ActionOutcome
+        tone="warning"
+        message={unconfirmed.outcome.message}
+        details={unconfirmed.outcome.details}
+        focus
+        action={{
+          label: "Check whether it saved",
+          onClick: () => command(unconfirmed.input),
+        }}
+      />
+    );
   return (
     <LocalReviewProvider
       client={client}
@@ -1450,11 +1483,13 @@ export function TaskWorkspace({
               }
               disabled={
                 Boolean(state.selectedResult && !selected) ||
-                Boolean(state.selectedSource && !source)
+                Boolean(state.selectedSource && !source) ||
+                Boolean(unconfirmed)
               }
             >
               Set viewing reference
             </Button>
+            {unconfirmedCheck("review.view")}
             <p>
               Viewing records availability only; it does not approve work or
               clear holds. Retained records may be incomplete.
@@ -1538,6 +1573,8 @@ export function TaskWorkspace({
               taskId,
             })
           }
+          refreshDisabled={Boolean(unconfirmed)}
+          unconfirmed={unconfirmedCheck("delivery.refresh")}
         />
         <LocalReviewPanel />
         <section id="context">
@@ -2317,6 +2354,8 @@ function Changes({
   state,
   changed,
   refresh,
+  refreshDisabled,
+  unconfirmed,
 }: {
   data: TaskRead["data"];
   selected:
@@ -2328,6 +2367,9 @@ function Changes({
   state: TaskWorkspaceState;
   changed: () => void;
   refresh: () => void;
+  refreshDisabled: boolean;
+  /** The check for a refresh whose response was lost, shown beside its button. */
+  unconfirmed: ReactNode;
 }) {
   const changes = selected?.metadata.changes,
     d = data.delivery;
@@ -2428,9 +2470,10 @@ function Changes({
       {d?.blockers.map((b) => (
         <p key={b}>{b}</p>
       ))}
-      <Button variant="secondary" onClick={refresh}>
+      <Button variant="secondary" onClick={refresh} disabled={refreshDisabled}>
         Refresh delivery observation
       </Button>
+      {unconfirmed}
       <p>
         Refresh reads provider state; it does not post, approve, merge or clear
         a hold.
