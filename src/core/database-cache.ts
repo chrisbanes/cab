@@ -18,25 +18,23 @@ const schemaCommands = new Set([
   "REINDEX",
   "VACUUM",
 ]);
-const mutatingPragmas = new Set([
-  "ANALYSIS_LIMIT",
-  "APPLICATION_ID",
-  "AUTO_VACUUM",
-  "BUSY_TIMEOUT",
-  "CACHE_SIZE",
-  "DEFER_FOREIGN_KEYS",
-  "FOREIGN_KEYS",
-  "INCREMENTAL_VACUUM",
-  "JOURNAL_MODE",
-  "LOCKING_MODE",
-  "MMAP_SIZE",
-  "OPTIMIZE",
-  "QUERY_ONLY",
-  "SYNCHRONOUS",
-  "SHRINK_MEMORY",
-  "TEMP_STORE",
-  "USER_VERSION",
-  "WAL_CHECKPOINT",
+const readOnlyPragmasWithArguments = new Set([
+  "COLLATION_LIST",
+  "COMPILE_OPTIONS",
+  "FOREIGN_KEY_CHECK",
+  "FOREIGN_KEY_LIST",
+  "FUNCTION_LIST",
+  "INDEX_INFO",
+  "INDEX_LIST",
+  "INDEX_XINFO",
+  "INTEGRITY_CHECK",
+  "MODULE_LIST",
+  "PRAGMA_LIST",
+  "QUICK_CHECK",
+  "STATS",
+  "TABLE_INFO",
+  "TABLE_LIST",
+  "TABLE_XINFO",
 ]);
 const mutatingPragmasWithoutArguments = new Set([
   "INCREMENTAL_VACUUM",
@@ -45,15 +43,30 @@ const mutatingPragmasWithoutArguments = new Set([
   "WAL_CHECKPOINT",
 ]);
 
-function sqlForClassification(sql: string): string {
-  let output = "";
+function statementsForClassification(sql: string): string[] {
+  const statements: string[] = [];
+  let statement = "";
+  let quote: "'" | '"' | "`" | "]" | undefined;
   for (let index = 0; index < sql.length; index += 1) {
     const character = sql[index]!;
     const next = sql[index + 1];
+    if (quote !== undefined) {
+      if (quote === "'") statement += " ";
+      else statement += character;
+      if (character === quote) {
+        if (next === quote) {
+          if (quote !== "'") statement += next;
+          index += 1;
+        } else {
+          quote = undefined;
+        }
+      }
+      continue;
+    }
     if (character === "-" && next === "-") {
       while (index < sql.length && sql[index] !== "\n" && sql[index] !== "\r")
         index += 1;
-      output += " ";
+      statement += " ";
     } else if (character === "/" && next === "*") {
       index += 2;
       while (
@@ -62,49 +75,62 @@ function sqlForClassification(sql: string): string {
       )
         index += 1;
       index += 1;
-      output += " ";
-    } else if (character === "'" || character === '"' || character === "`") {
-      const quote = character;
-      index += 1;
-      while (index < sql.length) {
-        if (sql[index] === quote) {
-          if (sql[index + 1] === quote) index += 1;
-          else break;
-        }
-        index += 1;
-      }
-      output += " ";
+      statement += " ";
+    } else if (character === "'") {
+      quote = "'";
+      statement += " ";
+    } else if (character === '"' || character === "`") {
+      quote = character;
+      statement += character;
     } else if (character === "[") {
-      while (index < sql.length && sql[index] !== "]") index += 1;
-      output += " ";
+      quote = "]";
+      statement += character;
+    } else if (character === ";") {
+      statements.push(statement);
+      statement = "";
     } else {
-      output += character;
+      statement += character;
     }
   }
-  return output;
+  statements.push(statement);
+  return statements;
+}
+
+function unquoteIdentifier(identifier: string): string {
+  if (identifier.startsWith('"'))
+    return identifier.slice(1, -1).replaceAll('""', '"');
+  if (identifier.startsWith("`"))
+    return identifier.slice(1, -1).replaceAll("``", "`");
+  if (identifier.startsWith("["))
+    return identifier.slice(1, -1).replaceAll("]]", "]");
+  return identifier;
 }
 
 function invalidatesStatements(sql: string): boolean {
-  return sqlForClassification(sql)
-    .split(";")
-    .some((statement) => {
-      const command = /^\s*(\w+)/.exec(statement)?.[1]?.toUpperCase();
-      if (command === "ROLLBACK" || (command && schemaCommands.has(command)))
-        return true;
-      if (command !== "PRAGMA") return false;
+  const identifier =
+    '(?:"(?:""|[^"])*"|`(?:``|[^`])*`|\\[(?:\\]\\]|[^\\]])+\\]|[\\w]+)';
+  const pragmaPattern = new RegExp(
+    `^\\s*PRAGMA\\s+(${identifier})(?:\\s*\\.\\s*(${identifier}))?(.*)$`,
+    "i",
+  );
+  return statementsForClassification(sql).some((statement) => {
+    const command = /^\s*(\w+)/.exec(statement)?.[1]?.toUpperCase();
+    if (command === "ROLLBACK" || (command && schemaCommands.has(command)))
+      return true;
+    if (command !== "PRAGMA") return false;
 
-      const pragma = /^\s*PRAGMA\s+([\w.]+)(.*)$/i.exec(statement);
-      if (pragma === null) return false;
-      const name = pragma[1]!.split(".").at(-1)!.toUpperCase();
-      const argumentsOrAssignment = pragma[2]!;
-      return (
-        /^\s*(?:=|\bTO\b)/i.test(argumentsOrAssignment) ||
-        (argumentsOrAssignment.trimStart().startsWith("(") &&
-          mutatingPragmas.has(name)) ||
-        (mutatingPragmasWithoutArguments.has(name) &&
-          argumentsOrAssignment.trim() === "")
-      );
-    });
+    const pragma = pragmaPattern.exec(statement);
+    if (pragma === null) return false;
+    const name = unquoteIdentifier(pragma[2] ?? pragma[1]!).toUpperCase();
+    const argumentsOrAssignment = pragma[3]!;
+    return (
+      /^\s*(?:=|\bTO\b)/i.test(argumentsOrAssignment) ||
+      (argumentsOrAssignment.trimStart().startsWith("(") &&
+        !readOnlyPragmasWithArguments.has(name)) ||
+      (mutatingPragmasWithoutArguments.has(name) &&
+        argumentsOrAssignment.trim() === "")
+    );
+  });
 }
 
 /**
@@ -152,10 +178,11 @@ export class CachedDatabase implements Database {
     }
 
     const rawStatement = this.database.prepare(sql);
+    const invalidatesOnRun = invalidatesStatements(sql);
     const wrapper: PreparedStatement = {
       run: (...parameters: SqlValue[]) => {
         this.assertOpen();
-        if (invalidatesStatements(sql)) this.invalidate();
+        if (invalidatesOnRun) this.invalidate();
         return rawStatement.run(...parameters);
       },
       get: (...parameters: SqlValue[]) => {
@@ -168,14 +195,10 @@ export class CachedDatabase implements Database {
       },
     };
 
-    if (this.capacity > 0) {
-      this.statements.set(sql, wrapper);
-      if (this.statements.size > this.capacity) {
-        const oldestSql = this.statements.keys().next().value as
-          | string
-          | undefined;
-        if (oldestSql !== undefined) this.statements.delete(oldestSql);
-      }
+    this.statements.set(sql, wrapper);
+    if (this.statements.size > this.capacity) {
+      const oldest = this.statements.keys().next();
+      if (!oldest.done) this.statements.delete(oldest.value);
     }
     return wrapper;
   }

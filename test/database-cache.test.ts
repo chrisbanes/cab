@@ -140,6 +140,41 @@ test("exec and prepared DDL invalidate retained statements", () => {
   }
 });
 
+test("quoted and parenthesized PRAGMA settings invalidate retained statements", () => {
+  const raw = new DatabaseSync(":memory:");
+  const counts = counted(raw);
+  const database = new CachedDatabase(counts.database);
+  const select = "SELECT 1 AS value";
+  try {
+    database.prepare(select).get();
+    assert.equal(counts.prepares.get(select), 1);
+
+    database.exec("PRAGMA table_info('entries')");
+    assert.equal(counts.prepares.get(select), 1);
+    database.exec("SELECT 'CREATE TABLE hidden; ROLLBACK' /* ignored */");
+    assert.equal(counts.prepares.get(select), 1);
+
+    database.exec('PRAGMA "user_version" = 7');
+    assert.equal(
+      field(raw.prepare("PRAGMA user_version").get(), "user_version"),
+      7,
+    );
+    database.prepare(select).get();
+    assert.equal(counts.prepares.get(select), 2);
+
+    database.exec("PRAGMA cache_spill(OFF)");
+    assert.equal(
+      field(raw.prepare("PRAGMA cache_spill").get(), "cache_spill"),
+      0,
+    );
+    database.prepare(select).get();
+    assert.equal(counts.prepares.get(select), 3);
+  } finally {
+    database.close();
+    raw.close();
+  }
+});
+
 test("capacity two follows LRU recency and recompiles an evicted statement", () => {
   const raw = new DatabaseSync(":memory:");
   const counts = counted(raw);
