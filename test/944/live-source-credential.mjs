@@ -235,6 +235,89 @@ export function inspectPrivateLogs(paths) {
   }
 }
 
+/** Exact private plist/program/arguments are required in addition to an observed PID. */
+export function ownedJobMetadata(prepared, printed) {
+  const field = (name) =>
+    printed.match(new RegExp(`^\\s*${name} = (.+)$`, "m"))?.[1]?.trim();
+  const argumentsBlock = printed.match(
+    /^\s*arguments = \{\n([\s\S]*?)^\s*\}/m,
+  )?.[1];
+  const argumentsList = argumentsBlock
+    ?.split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const expected = [
+    prepared.configuration.nodePath,
+    prepared.configuration.cliPath,
+    "operator",
+    prepared.configuration.dataDirectory,
+    String(prepared.configuration.port),
+  ];
+  if (
+    field("path") !== prepared.plist ||
+    field("program") !== prepared.configuration.nodePath ||
+    JSON.stringify(argumentsList) !== JSON.stringify(expected)
+  )
+    return null;
+  const pid = Number(field("pid"));
+  return Number.isSafeInteger(pid) && pid > 1
+    ? { pid, command: expected.join(" ") }
+    : null;
+}
+
+/** Reconcile startup failure before any stop; label presence alone is never ownership. */
+export async function reconcileJobOwnership(
+  prepared,
+  { print, commandLine, pidAlive, portClosed },
+  known,
+) {
+  let observed;
+  try {
+    observed = await print();
+  } catch {
+    return { ownershipProven: false, ownershipUnknown: true };
+  }
+  const closed = await portClosed();
+  if (observed.labelAbsent) {
+    const pidExited = Boolean(
+      known.owned && known.pid && !(await pidAlive(known.pid)),
+    );
+    return {
+      labelAbsent: true,
+      portClosed: closed,
+      pidExited,
+      ownershipProven: Boolean(known.owned),
+      ownershipUnknown: !known.owned,
+    };
+  }
+  const metadata = ownedJobMetadata(prepared, observed.stdout);
+  if (!metadata)
+    return {
+      labelAbsent: false,
+      portClosed: closed,
+      pidExited: false,
+      ownershipProven: false,
+      ownershipUnknown: true,
+    };
+  let command;
+  try {
+    command = await commandLine(metadata.pid);
+  } catch {
+    return { ownershipProven: false, ownershipUnknown: true };
+  }
+  if (command.trim() !== metadata.command)
+    return { ownershipProven: false, ownershipUnknown: true };
+  known.pid = metadata.pid;
+  known.owned = true;
+  return {
+    labelAbsent: false,
+    portClosed: closed,
+    pidExited: !(await pidAlive(metadata.pid)),
+    ownershipProven: true,
+    ownershipUnknown: false,
+  };
+}
+
 export async function cleanupOwnedJob(
   {
     bootout,
@@ -245,9 +328,16 @@ export async function cleanupOwnedJob(
   },
   budget,
 ) {
-  await bootout().catch(() => {});
+  let stopAttempted = false;
   while (budget.remaining(true) > 0) {
-    const state = await inspect();
+    let state;
+    try {
+      state = await inspect();
+    } catch {
+      return { disposition: "retained-ownership-unknown" };
+    }
+    if (!state.ownershipProven || state.ownershipUnknown)
+      return { disposition: "retained-ownership-unknown", ...state };
     if (state.labelAbsent && state.portClosed && state.pidExited) {
       const logs = await verifyLogs();
       if (!logs.safe)
@@ -269,8 +359,12 @@ export async function cleanupOwnedJob(
       }
       return { disposition: "removed", logInspection: logs, ...state };
     }
-    if (state.ownershipUnknown)
-      return { disposition: "retained-ownership-unknown", ...state };
+    if (!state.labelAbsent && !stopAttempted) {
+      if (budget.remaining(true) <= 0)
+        return { disposition: "retained-deadline" };
+      stopAttempted = true;
+      await bootout().catch(() => {});
+    }
     await pause(Math.min(100, budget.remaining(true)));
   }
   return { disposition: "retained-deadline" };
@@ -363,10 +457,10 @@ export function verifyPrepared(manifest, consumedRecord) {
   return p;
 }
 
-async function portClosed(port) {
+async function portClosed(port, timeout = 1000) {
   return new Promise((resolve) => {
     const socket = createConnection({ host: "127.0.0.1", port });
-    socket.setTimeout(1000);
+    socket.setTimeout(timeout);
     socket.on("connect", () => {
       socket.destroy();
       resolve(false);
@@ -417,11 +511,10 @@ export async function runPreparedLive(manifest, consumedRecord) {
     return Math.max(1, Math.floor(Math.min(limit, remaining)));
   };
   const job = `gui/${process.getuid()}/${p.configuration.label}`;
-  let launched = false,
-    pid,
-    pidOwned = false,
+  let bootstrapAttempted = false,
     result,
     failure;
+  const known = { pid: undefined, owned: false };
   const launch = async (args, limit = 5000) =>
     execute("/bin/launchctl", args, {
       timeout: budget.timeout(limit, true),
@@ -434,7 +527,7 @@ export async function runPreparedLive(manifest, consumedRecord) {
       consumedRecord,
       async () => verifyPrepared(manifest, consumedRecord),
       async () => {
-        launched = true;
+        bootstrapAttempted = true;
         await launch(
           ["bootstrap", `gui/${process.getuid()}`, p.plist],
           startupTimeout(5000),
@@ -457,20 +550,34 @@ export async function runPreparedLive(manifest, consumedRecord) {
       await new Promise((r) => setTimeout(r, 100));
     }
     if (!ready) throw new Error("qualification-startup-deadline");
-    const printed = await launch(["print", job], startupTimeout(5000));
-    const match = printed.stdout.match(/\bpid = (\d+)/);
-    if (!match) throw new Error("qualification-process-ownership-unknown");
-    pid = Number(match[1]);
-    const commandLine = await execute(
-      "/bin/ps",
-      ["-p", String(pid), "-o", "command="],
-      { timeout: startupTimeout(5000) },
+    const ownership = await reconcileJobOwnership(
+      p,
+      {
+        print: async () => ({
+          stdout: (await launch(["print", job], startupTimeout(5000))).stdout,
+          labelAbsent: false,
+        }),
+        commandLine: async (pid) =>
+          (
+            await execute("/bin/ps", ["-p", String(pid), "-o", "command="], {
+              timeout: startupTimeout(5000),
+            })
+          ).stdout,
+        pidAlive: async (pid) => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch (error) {
+            if (error.code === "ESRCH") return false;
+            throw error;
+          }
+        },
+        portClosed: () =>
+          portClosed(p.configuration.port, startupTimeout(1000)),
+      },
+      known,
     );
-    assert.equal(
-      commandLine.stdout.trim(),
-      `${p.configuration.nodePath} ${p.configuration.cliPath} operator ${p.configuration.dataDirectory} ${p.configuration.port}`,
-    );
-    pidOwned = true;
+    assert.equal(ownership.ownershipProven, true);
     let cookie = "",
       csrf = "",
       authenticated = false;
@@ -587,33 +694,54 @@ export async function runPreparedLive(manifest, consumedRecord) {
     failure = "qualification-failed-or-unknown";
   }
   let cleanup = { disposition: "not-launched" };
-  if (launched)
+  if (bootstrapAttempted)
     cleanup = await cleanupOwnedJob(
       {
         bootout: () => launch(["bootout", job]),
-        inspect: async () => {
-          let labelAbsent = false;
-          try {
-            await launch(["print", job]);
-          } catch (e) {
-            labelAbsent =
-              e.code === 113 && /Could not find service/.test(e.stderr ?? "");
-          }
-          let pidExited = false;
-          if (pid) {
-            try {
-              process.kill(pid, 0);
-            } catch (e) {
-              pidExited = e.code === "ESRCH";
-            }
-          }
-          return {
-            labelAbsent,
-            portClosed: await portClosed(p.configuration.port),
-            pidExited,
-            ownershipUnknown: !pidOwned,
-          };
-        },
+        inspect: () =>
+          reconcileJobOwnership(
+            p,
+            {
+              print: async () => {
+                try {
+                  return {
+                    stdout: (await launch(["print", job])).stdout,
+                    labelAbsent: false,
+                  };
+                } catch (error) {
+                  if (
+                    error.code === 113 &&
+                    /Could not find service/.test(error.stderr ?? "")
+                  )
+                    return { labelAbsent: true };
+                  throw error;
+                }
+              },
+              commandLine: async (pid) =>
+                (
+                  await execute(
+                    "/bin/ps",
+                    ["-p", String(pid), "-o", "command="],
+                    { timeout: budget.timeout(5000, true) },
+                  )
+                ).stdout,
+              pidAlive: async (pid) => {
+                try {
+                  process.kill(pid, 0);
+                  return true;
+                } catch (error) {
+                  if (error.code === "ESRCH") return false;
+                  throw error;
+                }
+              },
+              portClosed: () =>
+                portClosed(
+                  p.configuration.port,
+                  Math.max(1, Math.floor(budget.timeout(1000, true))),
+                ),
+            },
+            known,
+          ),
         verifyLogs: async () =>
           inspectPrivateLogs([
             p.configuration.stdoutPath,

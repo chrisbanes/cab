@@ -59,7 +59,7 @@ production/Haze installation was exercised by the offline qualification harness.
 | State/presentation and source safe-copy parity | 21/21 |
 | Missing source executable and credential-only Cancel browser/state | 14/14 |
 | Accepted CLI + React integrated affected suites | 42/42 |
-| Production SQLite qualification harness | 10/10 including owned log inspection |
+| Production SQLite qualification harness | 11/11 including ownership and owned log inspection |
 
 The qualification harness independently proves complete preview activation and
 subsequent import of the selected external identity, label readiness and source
@@ -91,7 +91,13 @@ move shared safe guidance to a pure operator module, contain source helper optio
 factory failures without host-gh fallback, and update stale fixture/control
 expectations. Renewed affected host tests pass 79/79 and offline
 resolver/state/presentation/qualification tests pass 63/63. A passing full check
-is still required at this draft.
+passed on candidate `b3f4d08`: 1,849 passes, zero failures and one skip. Independent
+review then identified unsafe unconditional bootout after failed/ambiguous
+bootstrap. The repair requires exact private job metadata and observed PID command
+proof before any stop. Offline cases prove foreign-label and unknown bootstrap
+outcomes receive zero bootout/removal, while an exact owned job can stop and clean
+up even without startup PID capture. The final full check and renewed review on
+this ownership repair are pending.
 Complete private command
 logs remain in the delivery run directory, not in the repository. Initial loopback
 sandbox failures required exact host retries. The retained
@@ -114,8 +120,11 @@ and exclusive private marker guard the first and only bootstrap. The harness
 never edits or resets the lead's allowance. The outer monotonic limit is 300
 seconds, startup/authentication 60 seconds, preview 60 seconds, optional same-key
 unknown-reply reconciliation 30 seconds, refresh 90 seconds and cleanup reserve
-30 seconds. Cleanup targets only the recorded GUI job; deleting its exact root
-requires label absence, recorded owned PID exit and a closed loopback port.
+30 seconds. Cleanup first proves the exact private plist/program/arguments and observed PID
+command bindings. Bootstrap rejection, ambiguous completion, label presence or
+preflight absence never implies ownership. Unproved or foreign ownership receives
+no bootout or signals. Deleting its exact root then requires label absence,
+recorded owned PID exit, a closed loopback port and safe terminal log inspection.
 Uncertainty retains private state and reports a hold.
 
 The single live allowance remains unspent. Before execution, the lead must inspect

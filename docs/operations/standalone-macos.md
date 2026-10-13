@@ -169,8 +169,15 @@ The final 30 seconds are reserved for cleanup. A private exclusive attempt marke
 prevents a second bootstrap from the same preparation. The exported bootstrap
 boundary also requires a callback, which offline tests exercise without launching.
 
-Cleanup boots out only the exact created GUI job. After label absence, recorded
-owned process exit and closed loopback port are proved, inspect only the two owned
+A bootstrap rejection or unknown result never establishes job ownership. Before
+any bootout, reconcile the exact job's private plist path, program arguments and
+observed PID's command against the prepared Node/CLI/data/port bindings, within
+the existing deadline. This reconciliation also applies when startup failed
+before its first PID capture. Foreign or unproved ownership retains the fixture
+without bootout or signals; label presence or preflight absence is insufficient.
+
+Only proved ownership permits stopping the exact created GUI job. After label
+absence, recorded owned process exit and closed loopback port are proved, inspect only the two owned
 stdout/stderr logs for standard GitHub token prefixes and fixed qualification
 canaries. A failed inspection returns controlled metadata and retains the private
 fixture and original protected logs for recovery; matched content is never

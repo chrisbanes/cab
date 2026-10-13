@@ -212987,15 +212987,15 @@
                               "id": "SDydx",
                               "type": "ref",
                               "ref": "X:1415a",
-                              "name": "Source variable name",
+                              "name": "Source environment reference",
                               "width": "fill_container",
                               "descendants": {
                                 "X:BX0XX": {
-                                  "content": "Variable name · name only; env: is implied",
+                                  "content": "New environment reference · env:NAME",
                                   "fontFamily": "$font-sans"
                                 },
                                 "X:SDRKn": {
-                                  "content": "GITHUB_SOURCE_TOKEN",
+                                  "content": "env:GITHUB_SOURCE_TOKEN",
                                   "fontFamily": "$font-sans"
                                 }
                               }

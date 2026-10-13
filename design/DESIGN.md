@@ -449,7 +449,7 @@ Frame 119 `w0ozf` shows the configured GitHub CLI account with Change and Clear 
 `b331J`. Frame 119b `xCaEr` opens GitHub CLI and Environment variable choices;
 the detected account is an offer, and selecting a source identity is explicit.
 Cancel abandons only the credential edit, keeping unrelated source draft changes.
-The environment field takes a name only; `env:` is implied and values stay private.
+The environment field takes the full `env:NAME` reference; values stay private.
 Discovery never supplies the source identity.
 
 Frame 119c `PbDkZ` draws an uncertain Clear save with the retained draft and

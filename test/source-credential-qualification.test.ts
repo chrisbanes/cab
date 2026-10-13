@@ -529,6 +529,7 @@ test("outer deadline reserves cleanup and unknown process ownership never delete
       },
       inspect: async () => ({
         ownershipUnknown: false,
+        ownershipProven: true,
         labelAbsent: true,
         pidExited: true,
         portClosed: true,
@@ -541,11 +542,15 @@ test("outer deadline reserves cleanup and unknown process ownership never delete
   );
   assert.equal(absent.disposition, "removed");
   assert.equal(removed, 1);
-  assert.equal(stopped, 2);
+  assert.equal(
+    stopped,
+    0,
+    "unknown and already absent jobs receive no bootout",
+  );
   const late = await harness.cleanupOwnedJob(
     {
       bootout: async () => {},
-      inspect: async () => ({ labelAbsent: false }),
+      inspect: async () => ({ labelAbsent: false, ownershipProven: true }),
       remove: async () => {
         removed++;
       },
@@ -628,6 +633,7 @@ test("owned terminal logs are checked before deletion and credential matches ret
       labelAbsent: true,
       pidExited: true,
       portClosed: true,
+      ownershipProven: true,
     }),
     verifyLogs: async () => {
       inspected++;
@@ -679,4 +685,109 @@ test("owned terminal logs are checked before deletion and credential matches ret
   assert.equal(cleaned.disposition, "removed");
   assert.deepEqual(cleaned.logInspection, { safe: true, inspectedFiles: 2 });
   assert.equal(removed, 1);
+});
+
+test("failed or ambiguous bootstrap never stops a foreign/unknown job; only exact owned reconciliation permits bootout", async () => {
+  const prepared = {
+    plist: "/private/tmp/qualification944/launch-agents/com.example944.plist",
+    configuration: {
+      nodePath: "/offline/node",
+      cliPath: "/offline/dist/src/standalone/cli.js",
+      dataDirectory: "/private/tmp/qualification944/data",
+      port: 18744,
+    },
+  };
+  const args = [
+    prepared.configuration.nodePath,
+    prepared.configuration.cliPath,
+    "operator",
+    prepared.configuration.dataDirectory,
+    String(prepared.configuration.port),
+  ];
+  const printed = (path = prepared.plist) =>
+    `gui/501/com.example944 = {\n path = ${path}\n program = ${args[0]}\n arguments = {\n${args.map((arg) => `  ${arg}`).join("\n")}\n }\n pid = 9440\n}`;
+  for (const scenario of [
+    "failed-bootstrap-foreign-label",
+    "ambiguous-bootstrap-unknown",
+    "matching-plist-foreign-command",
+  ] as const) {
+    let bootouts = 0,
+      removed = 0;
+    const known = { owned: false, pid: undefined };
+    const observed = {
+      print: async () => {
+        if (scenario === "ambiguous-bootstrap-unknown")
+          throw new Error("unknown bootstrap");
+        return {
+          labelAbsent: false,
+          stdout: printed(
+            scenario === "failed-bootstrap-foreign-label"
+              ? "/foreign/job.plist"
+              : prepared.plist,
+          ),
+        };
+      },
+      commandLine: async () => "foreign process",
+      pidAlive: async () => true,
+      portClosed: async () => false,
+    };
+    const result = await harness.cleanupOwnedJob(
+      {
+        bootout: async () => {
+          bootouts++;
+        },
+        inspect: () => harness.reconcileJobOwnership(prepared, observed, known),
+        remove: async () => {
+          removed++;
+        },
+      },
+      harness.deadlineBudget(),
+    );
+    assert.equal(result.disposition, "retained-ownership-unknown", scenario);
+    assert.equal(bootouts, 0, scenario);
+    assert.equal(removed, 0, scenario);
+  }
+  let stopped = false,
+    bootouts = 0,
+    removed = 0;
+  const known = { owned: false, pid: undefined };
+  const observed = {
+    print: async () =>
+      stopped
+        ? { labelAbsent: true }
+        : { labelAbsent: false, stdout: printed() },
+    commandLine: async () => args.join(" "),
+    pidAlive: async () => !stopped,
+    portClosed: async () => stopped,
+  };
+  const result = await harness.cleanupOwnedJob(
+    {
+      bootout: async () => {
+        assert.equal(
+          known.owned,
+          true,
+          "proof precedes stop even without startup PID capture",
+        );
+        bootouts++;
+        stopped = true;
+      },
+      inspect: () => harness.reconcileJobOwnership(prepared, observed, known),
+      remove: async () => {
+        removed++;
+      },
+      pause: async () => {},
+    },
+    harness.deadlineBudget(),
+  );
+  assert.equal(result.disposition, "removed");
+  assert.equal(bootouts, 1);
+  assert.equal(removed, 1);
+  assert.equal(known.pid, 9440);
+  assert.equal(
+    harness.ownedJobMetadata(
+      prepared,
+      printed().replace(prepared.configuration.dataDirectory, "/foreign/data"),
+    ),
+    null,
+  );
 });
