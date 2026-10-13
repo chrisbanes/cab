@@ -7,6 +7,7 @@ import {
   localReviewOperationReadSchema,
   operatorCommandSchema,
   materialSchema,
+  workspaceComparisonReadSchema,
   workspaceSchema,
   taskSchema,
 } from "../src/operator/contracts.js";
@@ -421,4 +422,162 @@ test("review.anchor.stage types its anchors and keeps every selection rule", () 
     ["no anchors", []],
   ] as const)
     assert.equal(accepted([...anchors]), false, name);
+});
+
+test("workspace comparison reads stay stricter than persistence at every nested level", () => {
+  const sha256 = "a".repeat(64);
+  const comparisonId = "00000000-0000-4000-8000-000000000002";
+  const content = { sha256, size: 4, lineCount: 2, modifiedAt: 5 };
+  const anchor = (side: "left" | "right") => ({
+    taskId: key,
+    repositoryId: "repo",
+    path: "a.txt",
+    comparisonId,
+    context: "branch",
+    side,
+    startLine: 1,
+    endLine: 2,
+    contentSha256: sha256,
+  });
+  const repository = {
+    comparisonId,
+    taskId: key,
+    repositoryId: "repo",
+    target: "branch",
+    state: "available",
+    observedAt: 7,
+    baseline: { kind: "merge-base", branch: "main", commit: "c".repeat(40) },
+    availableBaseBranches: ["main"],
+    entries: [
+      {
+        path: "a.txt",
+        change: "modified",
+        state: "text",
+        left: content,
+        right: content,
+        hunks: [
+          {
+            oldStart: 1,
+            oldLines: 2,
+            newStart: 1,
+            newLines: 2,
+            patch: "@@",
+            leftAnchor: anchor("left"),
+            rightAnchor: anchor("right"),
+          },
+        ],
+      },
+    ],
+    truncated: false,
+  };
+  const turn = {
+    comparisonId: "00000000-0000-4000-8000-000000000003",
+    taskId: key,
+    target: "turn",
+    state: "available",
+    outcome: "completed",
+    startedAt: 1,
+    observedAt: 2,
+    workId: "w",
+    workRevision: 1,
+    requestSequence: 1,
+    assignmentId: "a",
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    profileId: key,
+    entries: [],
+    truncated: false,
+  };
+  const read = (comparison: unknown) => ({
+    data: {
+      taskId: key,
+      target: "branch",
+      state: "available",
+      comparisonId,
+      comparison,
+    },
+    observedAt: 1,
+  });
+  const unsettled = (pending: unknown) => ({
+    data: {
+      taskId: key,
+      target: "last-turn",
+      state: "unsettled",
+      pending,
+    },
+    observedAt: 1,
+  });
+  const accepts = (value: unknown) =>
+    workspaceComparisonReadSchema.safeParse(value).success;
+  assert.equal(accepts(read(repository)), true);
+  assert.equal(accepts(read(turn)), true);
+
+  const hunk = repository.entries[0]!.hunks[0]!;
+  const withEntry = (patch: object) => ({
+    ...repository,
+    entries: [{ ...repository.entries[0]!, ...patch }],
+  });
+  const withAnchor = (patch: object) =>
+    withEntry({
+      hunks: [{ ...hunk, leftAnchor: { ...hunk.leftAnchor, ...patch } }],
+    });
+  for (const [name, comparison] of [
+    ["snapshot taskId", { ...repository, taskId: "legacy-task" }],
+    [
+      "baseline branch",
+      {
+        ...repository,
+        baseline: { kind: "head", branch: "", commit: "c".repeat(40) },
+      },
+    ],
+    [
+      "branch name length",
+      { ...repository, availableBaseBranches: ["b".repeat(256)] },
+    ],
+    ["entry path length", withEntry({ path: "p".repeat(2049) })],
+    ["content modifiedAt", withEntry({ left: { ...content, modifiedAt: -1 } })],
+    ["anchor taskId", withAnchor({ taskId: "legacy-task" })],
+    ["anchor path length", withAnchor({ path: "p".repeat(2049) })],
+    ["anchor range", withAnchor({ startLine: 2, endLine: 1 })],
+    ["unknown snapshot key", { ...repository, extra: true }],
+    ["unknown anchor key", withAnchor({ extra: true })],
+    ["turn profileId", { ...turn, profileId: "legacy-profile" }],
+    ["turn workId length", { ...turn, workId: "w".repeat(513) }],
+  ] as const)
+    assert.equal(accepts(read(comparison)), false, name);
+
+  const identity = {
+    taskId: key,
+    workId: "w",
+    workRevision: 1,
+    requestSequence: 1,
+    assignmentId: "a",
+    assignmentVersion: 1,
+    instructionsRevision: 1,
+    profileRevision: 1,
+    profileId: key,
+  };
+  const pending = {
+    comparisonId: turn.comparisonId,
+    identity,
+    captureState: "pending",
+    outcome: "running",
+    startedAt: 1,
+    observedAt: 2,
+    reason: "capture-store-failed",
+  };
+  assert.equal(accepts(unsettled(pending)), true);
+  for (const [name, value] of [
+    [
+      "identity profileId",
+      { ...pending, identity: { ...identity, profileId: "legacy-profile" } },
+    ],
+    [
+      "identity taskId",
+      { ...pending, identity: { ...identity, taskId: "legacy-task" } },
+    ],
+    ["reason", { ...pending, reason: "not-a-reason" }],
+  ] as const)
+    assert.equal(accepts(unsettled(value)), false, name);
 });
