@@ -365,7 +365,7 @@
   margin: 0 0 0 var(--space-24);
 }
 
-/* CLI credentials: no design frame yet (#904); built from the discovery row patterns. */
+/* Frames 133–142: the CLI credentials panel. The form and list follow the discovery form; rows use .settings-row. */
 .settings-credentials-form,
 .settings-credentials-list {
   display: grid;
