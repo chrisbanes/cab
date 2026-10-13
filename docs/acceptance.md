@@ -390,7 +390,9 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   `fetch` for the discovery reader (`github-discovery`), and Chromium journeys for
   setup, picker and the credential row with WebKit smokes for setup and the picker
   (`operator-setup-browser`, `operator-setup-picker-browser`,
-  `operator-discovery-credential-browser`). Live
+  `operator-discovery-credential-browser`), including the inline lead profile, the
+  leave prompt and the ready check's Resume, Keep paused, blocked, full-capacity and
+  unknown-outcome journeys (`operator-setup-model` covers its wait items). Live
   evidence is bounded to one read-only discovery probe against api.github.com and
   one real home-folder listing, recorded as counts in
   [project setup evidence](evidence/ui07-project-setup.md). Limits: typed repositories carry

@@ -17,7 +17,7 @@ export const harnessStateLabel: Record<HarnessStatus["state"], string> = {
 };
 
 /** Exact shell alert copy; Codex wording is retained byte-for-byte. */
-export const unavailableAlert = (status: HarnessStatus) =>
+export const unavailableAlert = (status: Pick<HarnessStatus, "harness">) =>
   `${executionHarnessLabels[status.harness]} runtime unavailable — restart the service`;
 
 /** Draft values of the profile runtime fields. */

@@ -1,7 +1,7 @@
 # Project setup
 
-**Status:** planned changes to the implemented guided setup
-(`/app/settings/projects/new`, design frames 115–117b). Product rules are in
+**Status:** implemented (`/app/settings/projects/new`, design frames 115–117b and
+145–147). Product rules are in
 [SPEC](../SPEC.md#task-creation-and-project-setup).
 
 ## Goal
@@ -26,10 +26,17 @@ The operator never leaves setup to create a prerequisite.
    existing setup alert (117b) configures it in place.
 4. **Create.** Creates the project paused, as today.
 5. **Ready check.** Replaces the "Recorded … as a paused project" alert:
-   - Lists what was recorded (instructions revision, repository access, linked
-     GitHub Project) and any item that would make work wait: runtime unavailable,
-     profile runtime not configured, Claude token unavailable for a Claude lead
-     (Fix opens [Add Claude](claude-runtime.md)), checkout unverified.
+   - Lists what was recorded (instructions, repository access, linked GitHub
+     Project) and states that nothing has run. Repositories were verified before the
+     project was recorded, so no checkout item can follow.
+   - Lists any item that would make the lead's work wait, from the workspace and
+     readiness reads: no lead profile, the lead's runtime unavailable or not enabled,
+     a Claude model or reasoning effort the runtime does not accept (Fix opens the
+     lead profile), Codex executable or sign-in unavailable for a Codex lead, Claude
+     token unavailable for a Claude lead (Fix opens [Add Claude](claude-runtime.md)).
+     An unreadable readiness check counts as a wait item, so the check fails closed.
+     Fix links open in a new tab so the check stays; **Check again** re-reads
+     readiness, the workspace and capacity once the item is fixed.
    - Primary **Resume and create first task**: resumes the project through the
      existing project command, then opens the composer with the project selected.
      Disabled with the blocking reason while a listed item would make work wait.
@@ -41,14 +48,18 @@ The operator never leaves setup to create a prerequisite.
 
 - Profile create fails: the inline form keeps its input and shows the error; setup
   values are untouched.
-- Resume outcome unknown: the ready check blocks a second Resume until the project
-  is re-read, matching other configuration saves.
-- Leaving setup before Create discards the draft; the browser's leave prompt warns
-  when any field has changed.
+- Resume outcome unknown: the ready check blocks a second Resume until its one
+  action replays the exact request, matching other configuration saves. A project
+  changed elsewhere asks for a review before Resume is sent again; the review
+  judges the project's current lead on fresh reads before Resume unlocks.
+- Closing or reloading setup before Create discards the draft; the browser's leave
+  prompt warns when any field has changed. Moving to another page in Ensemble keeps
+  the draft for the session.
 
 ## Recovery
 
-- Resume is reversible through Pause project in project configuration.
+- The ready check is shown once, right after creation. Later, Resume is the Pause
+  project switch in project configuration, and Resume is reversible there.
 - A profile created inline is an ordinary profile, edited or kept in Settings →
   Profiles. Setup never deletes it, even when setup is abandoned.
 
