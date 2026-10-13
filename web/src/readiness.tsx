@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { readinessSchema } from "../../src/operator/readiness.js";
-import { Button, StatusBadge } from "./components.js";
+import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 
@@ -25,38 +25,30 @@ export function ReadinessPanel(p: SettingsProps) {
       title="Readiness"
       description="What the running service can use, with one fix for each problem."
       action={
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={readiness.state.pending}
-          onClick={readiness.refresh}
-        >
+        // Not disabled while reading: a new read cancels the old one, reads change
+        // nothing, and a disabled button would drop keyboard focus.
+        <Button type="button" variant="secondary" onClick={readiness.refresh}>
           Run again
         </Button>
       }
     >
-      {checks ? (
-        checks.map((c) => (
-          <article className="settings-row" key={c.id} aria-label={c.label}>
-            <div className="settings-row-heading">
-              <h3 className="small-heading">{c.label}</h3>
-              <StatusBadge tone={status[c.status].tone}>
-                {status[c.status].label}
-              </StatusBadge>
-            </div>
-            {c.reason && <p className="metadata muted">{c.reason}</p>}
-            {c.status === "fail" && c.fix && (
-              <p className="identifier">{c.fix}</p>
-            )}
-          </article>
-        ))
-      ) : (
-        <p className="metadata muted" role="status">
-          {readiness.state.status === "error"
-            ? "Readiness is unavailable. Run again to retry."
-            : "Loading readiness…"}
-        </p>
-      )}
+      <ResourceStatus
+        label="Readiness checks"
+        state={readiness.state}
+        retry={readiness.refresh}
+      />
+      {checks?.map((c) => (
+        <article className="settings-row" key={c.id} aria-label={c.label}>
+          <div className="settings-row-heading">
+            <h3 className="small-heading">{c.label}</h3>
+            <StatusBadge tone={status[c.status].tone}>
+              {status[c.status].label}
+            </StatusBadge>
+          </div>
+          {c.reason && <p className="metadata muted">{c.reason}</p>}
+          {c.fix && <p className="identifier">{c.fix}</p>}
+        </article>
+      ))}
     </Panel>
   );
 }

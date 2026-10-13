@@ -112,7 +112,9 @@ function TokenReadable(p: SettingsProps & { checkNonce: number }) {
   const check = useOperatorResource(p.session.csrfToken, loader);
   useHeaderRefresh(p.refreshNonce, check.refresh);
   useHeaderRefresh(p.checkNonce, check.refresh);
-  const c = check.state.data?.data;
+  // Only a current read is shown: a pending or failed re-check must not leave an earlier
+  // result looking current.
+  const c = check.state.status === "fresh" ? check.state.data?.data : undefined;
   return (
     <section className="settings-row" aria-label="Token readable">
       <div className="settings-row-heading">
@@ -124,12 +126,10 @@ function TokenReadable(p: SettingsProps & { checkNonce: number }) {
         )}
       </div>
       {c?.reason && <p className="metadata muted">{c.reason}</p>}
-      {c?.status === "fail" && c.fix && <p className="metadata">{c.fix}</p>}
+      {c?.fix && <p className="metadata">{c.fix}</p>}
       {!c && (
         <p className="metadata muted" role="status">
-          {check.state.status === "error"
-            ? "The check is unavailable."
-            : "Checking…"}
+          {check.state.error ? "The check is unavailable." : "Checking…"}
         </p>
       )}
     </section>

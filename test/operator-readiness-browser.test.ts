@@ -79,14 +79,18 @@ for (const [name, viewport] of [
     );
     assert.equal(api.data.checks.length, 7);
     for (const c of api.data.checks) {
-      const row = panel.getByRole("article", { name: c.label });
+      const row = panel.getByRole("article", {
+        name: c.label,
+        exact: true,
+      });
       await row.getByText(LABEL[c.status], { exact: true }).waitFor();
+      // Every non-pass row shows its fix line; a pass has none.
       assert.equal(
         await row.locator(".identifier").count(),
-        c.status === "fail" ? 1 : 0,
+        c.fix ? 1 : 0,
         c.label,
       );
-      if (c.status === "fail")
+      if (c.fix)
         assert.equal(await row.locator(".identifier").innerText(), c.fix);
     }
     const claude = panel.getByRole("article", { name: "Claude token" });
@@ -108,5 +112,63 @@ for (const [name, viewport] of [
     );
     if (viewport === phone) await noPageOverflow(page);
     await captureBrowserEvidence(page, `${viewport.width}-settings-readiness`);
+  });
+}
+
+const unavailable = (route: import("playwright").Route) =>
+  route.fulfill({
+    status: 503,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+  });
+
+for (const [name, viewport] of [
+  ["desktop", desktop],
+  ["phone", phone],
+] as const) {
+  test(`Run again announces the pending read, keeps focus and marks results stale after a failed read on ${name}`, async (_t, journey) => {
+    const { page } = await startSettings(journey, "/app/settings", viewport);
+    const panel = page.locator(".settings-panel", {
+      has: page.getByRole("heading", { name: "Readiness", exact: true }),
+    });
+    await panel.getByRole("article").first().waitFor();
+    const before = await panel.getByRole("article").allInnerTexts();
+    const run = panel.getByRole("button", { name: "Run again" });
+    const focused = () =>
+      page.evaluate(() => document.activeElement?.textContent?.trim());
+
+    // Pending: announced politely, the button keeps focus, and the rows are marked as earlier.
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route("**/api/operator/readiness", async (route) => {
+      await held;
+      await unavailable(route);
+    });
+    await run.focus();
+    await run.click();
+    await panel
+      .getByRole("status")
+      .filter({ hasText: "Refreshing. Showing the last fetched data." })
+      .waitFor();
+    assert.equal(await focused(), "Run again");
+
+    // A failed read: one alert, the last results marked as the last fetched, focus kept.
+    release();
+    const alert = panel.getByRole("alert");
+    await alert
+      .getByText("Refresh failed. Showing the last fetched data.")
+      .waitFor();
+    await alert.getByText(/^Last fetched /).waitFor();
+    assert.equal(await focused(), "Run again");
+    assert.deepEqual(await panel.getByRole("article").allInnerTexts(), before);
+
+    // A later successful read clears the warning.
+    await page.unroute("**/api/operator/readiness");
+    await run.click();
+    await alert.waitFor({ state: "detached" });
+    assert.equal(await focused(), "Run again");
+    if (viewport === phone) await noPageOverflow(page);
   });
 }

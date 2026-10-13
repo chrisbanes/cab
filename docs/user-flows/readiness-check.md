@@ -32,6 +32,9 @@ service sees rather than the operator's interactive shell.
 | Data and auth paths | Private, canonical, owned by the service user                                                      | Named path rule, without the path value in shared output                                                                                                                                                                                                             |
 
 - A check that is not configured is reported as such, not as a failure.
+- Every row that is not a pass shows its fix line, in the CLI and in Settings. A
+  failed re-run keeps the last results visible, marked as the last fetched, with a
+  warning; Run again is never disabled, so keyboard focus stays on it.
 - Output never includes token values; it names references, not secrets.
 - The Claude sandbox self-test needs a task workspace and admits exactly one turn,
   so it runs before each turn and a failure shows on the waiting task, not here.

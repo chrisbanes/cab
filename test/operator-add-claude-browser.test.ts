@@ -178,3 +178,40 @@ test("Add Claude fails an unset env: reference without naming the variable, and 
   await noPageOverflow(page);
   await captureBrowserEvidence(page, "390-settings-add-claude");
 });
+
+test("Token readable shows Checking while pending and never a stale result after a failed check", async (_t, journey) => {
+  const { page, readable, row } = await open(journey, phone);
+  await readable.getByText("Not configured", { exact: true }).waitFor();
+  const badge = readable.getByText(/^(Pass|Fail|Not configured)$/);
+
+  // Pending: the earlier badge is not presented as current.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/readiness/claude-token", async (route) => {
+    await held;
+    await route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+    });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await readable.getByText("Checking…").waitFor();
+  assert.equal(await badge.count(), 0);
+
+  // A failed check says so and shows no badge.
+  release();
+  await readable.getByText("The check is unavailable.").waitFor();
+  assert.equal(await badge.count(), 0);
+
+  // The next successful check shows the result again, with its fix line when not a pass.
+  await page.unroute("**/api/operator/readiness/claude-token");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await readable.getByText("Not configured", { exact: true }).waitFor();
+  await readable
+    .getByText("Add a Claude token in Settings → Add Claude")
+    .waitFor();
+  void row;
+});
