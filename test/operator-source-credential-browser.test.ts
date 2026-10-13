@@ -74,12 +74,30 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     .getByRole("heading", { name: "GitHub source credential", exact: true })
     .waitFor();
   assert.equal(d.githubConfiguration(projectId).credentialRef, null);
+  await page
+    .getByLabel("Readiness matching", { exact: true })
+    .selectOption("any");
   await page.getByRole("button", { name: "Set source credential" }).click();
   await page
     .getByText("Signed in to github.com as @octo", { exact: false })
     .waitFor();
   await page.getByRole("button", { name: "Cancel credential change" }).click();
   assert.equal(d.githubConfiguration(projectId).credentialRef, null);
+  assert.equal(
+    await page.getByLabel("Readiness matching", { exact: true }).inputValue(),
+    "any",
+  );
+  await page
+    .getByText("Readiness: any of 1 condition", { exact: true })
+    .waitFor();
+  assert.equal(await page.getByLabel("Source credential choice").count(), 0);
+  assert.equal(
+    await page
+      .getByText("Credential reference: use GitHub CLI login", { exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(d.githubConfiguration(projectId).readiness.mode, "all");
   await page.getByRole("button", { name: "Set source credential" }).click();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
@@ -212,5 +230,115 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
     })
     .waitFor();
   await captureBrowserEvidence(page, "390-source-missing-credential");
+  assert.equal(f.runtime.turns, 0);
+});
+
+test("Source and sync recover from an explicitly missing GitHub CLI executable", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      journey.fixtureOptions,
+      undefined,
+      { ghExecutable: gh.missing },
+    ),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const projectId = randomUUID(),
+    d = f.service.domain();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Missing source CLI",
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "gh:github.com",
+    selections: [
+      {
+        id: "S-1",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "org",
+        name: "repo",
+      },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(
+    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
+  );
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page
+    .getByText("GitHub CLI is not installed on the service host.", {
+      exact: false,
+    })
+    .waitFor();
+  await page.getByRole("button", { name: "Change source credential" }).click();
+  await page.getByText("gh not installed", { exact: false }).waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Save changes", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await page.getByRole("button", { name: "Cancel credential change" }).click();
+  await captureBrowserEvidence(page, "1366-source-gh-not-installed");
+  await page
+    .getByRole("link", { name: "Sync & placement", exact: true })
+    .click();
+  await page
+    .getByText("GitHub CLI is not installed on the service host.", {
+      exact: false,
+    })
+    .first()
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Preview and activate selection" })
+      .isDisabled(),
+    true,
+  );
+  const recovery = page
+    .getByRole("link", { name: "Set or change source credential" })
+    .first();
+  assert.equal(
+    await recovery.getAttribute("href"),
+    `/app/projects/${projectId}/settings?tab=github`,
+  );
+  await recovery.click();
+  await page
+    .getByRole("heading", { name: "GitHub source credential", exact: true })
+    .waitFor();
+  assert.equal(d.githubConfiguration(projectId).credentialRef, "gh:github.com");
+  assert.equal(
+    gh.environments().length,
+    0,
+    "explicit missing path never runs the available fake or host gh",
+  );
   assert.equal(f.runtime.turns, 0);
 });
