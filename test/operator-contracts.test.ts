@@ -561,119 +561,90 @@ test("workspace comparison reads stay stricter than persistence at every nested 
   const long = (length: number) => "p".repeat(length);
 
   // Every valid baseline must be accepted, so each rejection below is caused by
-  // exactly the one field it changes.
+  // exactly the one field it changes. Field-bound cases use documents without
+  // hunks: the anchor cross-check would otherwise reject them first and hide a
+  // missing override.
   assert.equal(accepts(read(repository())), true);
   assert.equal(accepts(read(turn())), true);
   assert.equal(accepts(unsettled()), true);
 
+  const snapshot = (over: object) => read(repository({ entries: [], ...over }));
+  const repoEntry = (over: object) =>
+    read(
+      repository({
+        entries: [entry(repositoryComparisonId, { hunks: [], ...over }, {})],
+      }),
+    );
+  const turnSnapshot = (over: object) => read(turn({ entries: [], ...over }));
+  const turnEntry = (over: object) => read(turn({}, { hunks: [], ...over }));
+
   for (const [name, doc] of [
-    // snapshot, baseline and entry
-    ["snapshot taskId", read(repository({ taskId: "legacy-task" }))],
-    ["snapshot repositoryId", read(repository({ repositoryId: long(513) }))],
+    // snapshot and baseline
+    ["snapshot taskId", snapshot({ taskId: "legacy-task" })],
+    ["snapshot repositoryId", snapshot({ repositoryId: long(513) })],
     [
       "baseline branch",
-      read(
-        repository({
-          baseline: { kind: "head", branch: "", commit: "c".repeat(40) },
-        }),
-      ),
+      snapshot({
+        baseline: { kind: "head", branch: "", commit: "c".repeat(40) },
+      }),
     ],
     [
       "branch name length",
-      read(repository({ availableBaseBranches: ["b".repeat(256)] })),
+      snapshot({ availableBaseBranches: ["b".repeat(256)] }),
     ],
-    [
-      "entry path",
-      read(
-        repository({
-          entries: [entry(repositoryComparisonId, { path: long(2049) }, {})],
-        }),
-      ),
-    ],
-    [
-      "entry previousPath",
-      read(
-        repository({
-          entries: [
-            entry(repositoryComparisonId, { previousPath: long(2049) }, {}),
-          ],
-        }),
-      ),
-    ],
-    [
-      "entry repositoryId",
-      read(
-        repository({
-          entries: [
-            entry(repositoryComparisonId, { repositoryId: long(513) }, {}),
-          ],
-        }),
-      ),
-    ],
+    ["unknown snapshot key", snapshot({ extra: true })],
+    // entry and content
+    ["entry path", repoEntry({ path: long(2049) })],
+    ["entry previousPath", repoEntry({ previousPath: long(2049) })],
+    ["entry repositoryId", repoEntry({ repositoryId: long(513) })],
     [
       "left content modifiedAt",
-      read(
-        repository({
-          entries: [
-            entry(
-              repositoryComparisonId,
-              { left: { ...content, modifiedAt: -1 } },
-              {},
-            ),
-          ],
-        }),
-      ),
+      repoEntry({ left: { ...content, modifiedAt: -1 } }),
     ],
     [
       "right content modifiedAt",
-      read(
-        repository({
-          entries: [
-            entry(
-              repositoryComparisonId,
-              { right: { ...content, modifiedAt: -1 } },
-              {},
-            ),
-          ],
-        }),
-      ),
+      repoEntry({ right: { ...content, modifiedAt: -1 } }),
     ],
-    ["unknown snapshot key", read(repository({ extra: true }))],
-    // anchors, on both sides
+    // anchors, on both sides. Their taskId, path and repositoryId are also
+    // forced equal to the bounded snapshot and entry values, so only the
+    // cross-check (not the anchor's own bound) is observable for those.
     ...(["leftAnchor", "rightAnchor"] as const).flatMap((side) => {
       const withAnchor = (over: object) => {
         const e = entry(repositoryComparisonId, {}, {});
         e.hunks[0] = {
           ...e.hunks[0]!,
-          [side]: {
-            ...e.hunks[0]![side],
-            ...over,
-          },
+          [side]: { ...e.hunks[0]![side], ...over },
         };
         return read(repository({ entries: [e] }));
       };
       return [
-        [`${side} taskId`, withAnchor({ taskId: "legacy-task" })],
-        [`${side} path`, withAnchor({ path: long(2049) })],
+        [`${side} taskId mismatch`, withAnchor({ taskId: "legacy-task" })],
+        [`${side} path mismatch`, withAnchor({ path: long(2049) })],
         [`${side} resultId`, withAnchor({ resultId: long(513) })],
+        [`${side} workId`, withAnchor({ workId: long(513) })],
+        [`${side} threadId`, withAnchor({ threadId: long(513) })],
+        [`${side} turnId`, withAnchor({ turnId: long(513) })],
         [`${side} range`, withAnchor({ startLine: 2, endLine: 1 })],
         [`${side} unknown key`, withAnchor({ extra: true })],
       ] as const;
     }),
     // turn comparison and its nested entries
-    ["turn taskId", read(turn({ taskId: "legacy-task" }))],
-    ["turn profileId", read(turn({ profileId: "legacy-profile" }))],
-    ["turn workId", read(turn({ workId: long(513) }))],
-    ["turn assignmentId", read(turn({ assignmentId: long(513) }))],
-    ["turn threadId", read(turn({ threadId: long(513) }))],
-    ["turn turnId", read(turn({ turnId: long(513) }))],
-    ["turn entry path", read(turn({}, { path: long(2049) }))],
+    ["turn taskId", turnSnapshot({ taskId: "legacy-task" })],
+    ["turn profileId", turnSnapshot({ profileId: "legacy-profile" })],
+    ["turn workId", turnSnapshot({ workId: long(513) })],
+    ["turn assignmentId", turnSnapshot({ assignmentId: long(513) })],
+    ["turn threadId", turnSnapshot({ threadId: long(513) })],
+    ["turn turnId", turnSnapshot({ turnId: long(513) })],
+    ["turn entry path", turnEntry({ path: long(2049) })],
     [
       "turn entry modifiedAt",
-      read(turn({}, { right: { ...content, modifiedAt: -1 } })),
+      turnEntry({ right: { ...content, modifiedAt: -1 } }),
     ],
-    ["turn anchor taskId", read(turn({}, {}, { taskId: "legacy-task" }))],
     ["turn anchor range", read(turn({}, {}, { startLine: 2, endLine: 1 }))],
+    [
+      "turn anchor taskId mismatch",
+      read(turn({}, {}, { taskId: "legacy-task" })),
+    ],
     // pending capture identity and reason
     [
       "identity taskId",
@@ -694,7 +665,7 @@ test("workspace comparison reads stay stricter than persistence at every nested 
     ["pending reason", unsettled({ reason: "not-a-reason" })],
     [
       "pending comparison entries",
-      unsettled({ comparison: turn({}, { path: long(2049) }) }),
+      unsettled({ comparison: turn({}, { hunks: [], path: long(2049) }) }),
     ],
   ] as const)
     assert.equal(accepts(doc), false, name);
