@@ -605,16 +605,9 @@ export class OperatorApi {
               return undefined;
           }
         }
-        const workspace = await this.service.taskWorkspace(taskId);
-        if (workspace) {
-          values.push(workspace.path);
-          for (const repo of workspace.repositories)
-            values.push(
-              repo.sourcePath,
-              repo.workspacePath,
-              ...(repo.gitCommonDir ? [repo.gitCommonDir] : []),
-            );
-        }
+        // Polled reads use the stored binding; identity validation happens at recovery,
+        // execution and explicit inspection.
+        values.push(...this.service.taskWorkspaceRedactionPaths(taskId));
       }
       return [...new Set(values.filter(Boolean))];
     } catch {

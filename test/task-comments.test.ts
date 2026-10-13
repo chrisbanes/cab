@@ -6,6 +6,7 @@ import { OperatorApi } from "../src/standalone/operator-api.js";
 import { DomainPolicyError } from "../src/core/domain.js";
 import type { DeliveryCaller } from "../src/core/delivery.js";
 import { runtimeDeliveryCallerSchema } from "../src/core/delivery.js";
+import { wrapTaskExclusions } from "./fixtures/exclusions-hook.js";
 const policy = (
   f: Awaited<ReturnType<typeof deliveryFixture>>,
   mode: "allow" | "approval" | null,
@@ -402,7 +403,6 @@ test("comment send receipt fences visibility, task and workspace changes during 
           credentialRef: `env:${envKey}`,
         });
       const api = new OperatorApi(f.service, [f.root]),
-        original = f.service.taskWorkspace.bind(f.service),
         fingerprint = f.service.taskWorkspaceVisibility.bind(f.service);
       let posted = false,
         changed = false;
@@ -418,8 +418,8 @@ test("comment send receipt fences visibility, task and workspace changes during 
           },
         };
       };
-      f.service.taskWorkspace = async (...args) => {
-        const workspace = await original(...args);
+      wrapTaskExclusions(api, async (_id, run) => {
+        const excluded = await run();
         if (posted && !changed) {
           changed = true;
           if (race === "reference") {
@@ -455,8 +455,8 @@ test("comment send receipt fences visibility, task and workspace changes during 
             f.service.taskWorkspaceVisibility = (id) =>
               `${fingerprint(id)}-changed`;
         }
-        return workspace;
-      };
+        return excluded;
+      });
       await assert.rejects(api.execute(send(f)), { status: 409 });
       assert.equal(changed, true);
       assert.equal(

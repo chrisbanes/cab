@@ -3,6 +3,7 @@ import type { Socket } from "node:net";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { wrapTaskExclusions } from "./fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { seedOwnApproval, seedOwnQuestion } from "./fixtures/questions.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
@@ -410,7 +411,7 @@ test("Inbox revalidates earlier workspace and task binding after later row await
       const catalog = f.service.domain().taskCatalog(),
         first = catalog[0]!,
         last = catalog.at(-1)!;
-      const original = f.service.taskWorkspace.bind(f.service);
+      const api = new OperatorApi(f.service, [f.directory]);
       let enter!: () => void, release!: () => void;
       const entered = new Promise<void>((r) => {
           enter = r;
@@ -419,15 +420,15 @@ test("Inbox revalidates earlier workspace and task binding after later row await
           release = r;
         });
       let held = false;
-      f.service.taskWorkspace = async (id, ...rest) => {
+      wrapTaskExclusions(api, async (id, run) => {
         if (id === last.id && !held) {
           held = true;
           enter();
           await barrier;
         }
-        return original(id, ...rest);
-      };
-      const read = new OperatorApi(f.service, [f.directory]).readInbox();
+        return run();
+      });
+      const read = api.readInbox();
       await entered;
       if (mutation === "workspace")
         f.seedPersistedState((db) => {
