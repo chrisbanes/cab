@@ -3082,7 +3082,7 @@ export class StandaloneService {
         );
         if (!snapshot || !state.prebindNativeTurn(snapshot))
           throw new Error("Native callback has no exact admitted binding");
-        this.started().supervisor.turnBound(
+        supervisor.turnBound(
           snapshot.workId,
           call.identity.threadId,
           call.identity.turnId,
@@ -3336,8 +3336,8 @@ export class StandaloneService {
   }
 
   private handleToolCall(call: RuntimeToolCall): Promise<RuntimeToolResult> {
-    const { coordination, state } = this.current ?? {};
-    if (!coordination || !state || !isCoordinationTool(call.tool))
+    const { coordination, state } = this.started();
+    if (!isCoordinationTool(call.tool))
       return Promise.resolve({
         text: "Coordination tool is unavailable for this execution",
         success: false,

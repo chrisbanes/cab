@@ -316,8 +316,16 @@ test("startup waits for complete provider/source revalidation before superseding
       "delayed startup source read",
     );
     assert.equal(f.runtime.turns, 0);
+    // Read from SQLite: the service is unpublished until start-up finishes.
     assert.equal(
-      f.service.turnRequests().find((r) => r.workId === queued.workId)?.state,
+      f.readDb(
+        (db) =>
+          (
+            db
+              .prepare("SELECT state FROM turn_requests WHERE workId = ?")
+              .get(queued.workId) as { state: string } | undefined
+          )?.state,
+      ),
       "queued",
     );
     assert.equal(

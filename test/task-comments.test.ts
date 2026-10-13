@@ -4,9 +4,9 @@ import { test } from "node:test";
 import { deliveryFixture } from "./delivery-fixture.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
 import { DomainPolicyError } from "../src/core/domain.js";
-import type { DeliveryCaller } from "../src/core/delivery.js";
 import { runtimeDeliveryCallerSchema } from "../src/core/delivery.js";
 import { wrapTaskExclusions } from "./fixtures/exclusions-hook.js";
+import { startedOf } from "./fixtures/service-internals.js";
 const policy = (
   f: Awaited<ReturnType<typeof deliveryFixture>>,
   mode: "allow" | "approval" | null,
@@ -49,13 +49,7 @@ test("operator issue.comment uses server-owned imported identity, rejects spoofi
   await assert.rejects(api.execute({ ...send(f), actor: "runtime" }));
   await assert.rejects(api.execute({ ...send(f), target: { nodeId: "I2" } }));
   const caller = f.service.operatorCommentCaller(f.taskId);
-  const coordinator = (
-    f.service as unknown as {
-      requireDeliveryCoordinator: () => {
-        submit: (input: unknown, caller: DeliveryCaller) => Promise<unknown>;
-      };
-    }
-  ).requireDeliveryCoordinator();
+  const coordinator = startedOf(f.service).deliveryCoordinator;
   assert.throws(
     () =>
       coordinator.submit(
