@@ -60,6 +60,7 @@ test("a prepared list reads its source once; other arrays are validated on every
     });
   const prepared = prepareExclusions(counted);
   assert.equal(reads, 1);
+  assert.equal(prepareExclusions(prepared), prepared);
   for (let i = 0; i < 5; i++)
     assert.equal(
       sanitizeConversationText("a secret", prepared),

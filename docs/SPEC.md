@@ -640,9 +640,10 @@ Details disclosure rather than in the message. See
 
 Project, task list, composer, runtime settings and assignment recovery reads
 rebuild once if project or profile instruction revisions change while the read is
-in flight; a second change makes the read unavailable. Each read attempt captures
-its redaction exclusions once and derives every task's list from them; a rebuild
-captures them afresh, and no exclusion list outlives its read. A task's prose is
+in flight; a second change makes the read unavailable. Project, task list,
+composer, runtime settings, Inbox, search and execution list reads capture their
+redaction exclusions once per attempt and derive every task's list from them; a
+rebuild captures them afresh, and no exclusion list outlives its read. A task's prose is
 withheld when its own retained turn requests or recovery identities exceed 128
 (each counted separately); other tasks' history never counts. Credential and workspace
 fences still reject changed access material. Comment send receipts recheck

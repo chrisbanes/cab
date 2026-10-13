@@ -115,12 +115,14 @@ function validExclusions(
 }
 
 /**
- * A frozen copy of the list, validated once: sanitizing with the returned array reuses
- * that work. Any other array, frozen or not, is validated afresh on every call.
+ * A frozen copy of the list (or the list itself when already prepared), validated once:
+ * sanitizing with the returned array reuses that work. Any other array, frozen or not,
+ * is validated afresh on every call.
  */
 export function prepareExclusions(
   excludedValues: readonly string[],
 ): readonly string[] {
+  if (preparedExclusions.has(excludedValues)) return excludedValues;
   const owned = Object.freeze([...excludedValues]);
   preparedExclusions.set(owned, validExclusions(owned));
   return owned;

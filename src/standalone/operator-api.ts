@@ -3445,7 +3445,9 @@ export class OperatorApi {
         this.requireExecution(workId);
       const d = this.domain(),
         profileId = String(d.assignment(assignmentId).profileId);
-      const base = this.exclusionBase(),
+      // The visibility fence must span the shared base, not only the disclosing derivation.
+      const visibility = this.visibilityToken(),
+        base = this.exclusionBase(),
         general = await this.exclusions(projectId, taskId, [], [], base);
       const disclosing = await this.instructionExclusions(
         [`profile:${profileId}`, `project:${projectId}`],
@@ -3453,6 +3455,8 @@ export class OperatorApi {
         taskId,
         base,
       );
+      if (visibility !== this.visibilityToken())
+        throw new OperatorApiError(503, "unavailable");
       const items = record
         ? (this.service.executionDiagnostics()?.inputs(workId) ?? [])
         : [];
