@@ -5,10 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "./temp.js";
 import { test } from "node:test";
-import type {
-  CoordinationStore,
-  RuntimeQuestionRecord,
-} from "../src/core/coordination.js";
+import type { RuntimeQuestionRecord } from "../src/core/coordination.js";
 import { ExecutionState } from "../src/standalone/state.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import type { Runtime, UnexpectedRequest } from "../src/standalone/codex.js";
@@ -19,6 +16,8 @@ import type {
   NativeInputReply,
   RuntimeReplyIntent,
 } from "../src/standalone/native-input.js";
+import { acquiredOf, startedOf } from "./fixtures/service-internals.js";
+
 function required<T>(value: T | null | undefined): T {
   assert.ok(value !== undefined && value !== null);
   return value;
@@ -30,9 +29,7 @@ function runtimeQuestion(
   const projected = required(
     service.coordinationView().readTask(taskId).runtimeQuestions?.[0],
   );
-  const { coordination } = service as unknown as {
-    coordination: CoordinationStore;
-  };
+  const { coordination } = startedOf(service);
   return required(
     coordination.runtimeQuestionByInteractionId(
       projected.interactionId,
@@ -803,10 +800,7 @@ for (const confounder of ["stop", "generation"] as const)
       let unrelatedWorkId: string | undefined,
         unrelatedQuestionId: string | undefined;
       if (confounder === "generation") {
-        const internals = f.service as unknown as {
-          state: ExecutionState;
-          coordination: CoordinationStore;
-        };
+        const internals = startedOf(f.service);
         const unrelatedTaskId = randomUUID();
         command(f.service, {
           type: "task.create",
@@ -890,8 +884,8 @@ for (const confounder of ["stop", "generation"] as const)
             },
           ],
           JSON.stringify({
-            questions: (
-              f.service as unknown as { coordination: CoordinationStore }
+            questions: startedOf(
+              f.service,
             ).coordination.runtimeQuestionsForWork(
               f.service.list()[0]?.workId ?? "",
             ),
@@ -903,10 +897,7 @@ for (const confounder of ["stop", "generation"] as const)
         "unavailable",
       );
       if (unrelatedWorkId && unrelatedQuestionId) {
-        const internals = f.service as unknown as {
-          state: ExecutionState;
-          coordination: CoordinationStore;
-        };
+        const internals = startedOf(f.service);
         const unrelated =
           internals.coordination.runtimeQuestionsForWork(unrelatedWorkId)[0];
         assert.equal(unrelated?.interactionId, unrelatedQuestionId);
@@ -946,8 +937,10 @@ test("native invalidation storage failure still stops owned resources and rethro
     db: { isOpen: boolean; exec(sql: string): void } | undefined;
     runtime: NativeRuntime | undefined;
     owner: unknown;
-    power: { stop(): Promise<void> } | undefined;
-    supervisor: { settle(): Promise<void> } | undefined;
+  };
+  const acquired = required(acquiredOf(f.service)) as {
+    power?: { stop(): Promise<void> };
+    supervisor?: { settle(): Promise<void> };
   };
   const db = required(internals.db);
   let runtimeStops = 0,
@@ -962,9 +955,9 @@ test("native invalidation storage failure still stops owned resources and rethro
     BEFORE UPDATE ON coordination_runtime_questions
     WHEN NEW.reason = 'Service stopped; native endpoints lost'
     BEGIN SELECT RAISE(ABORT, 'native-invalidation-storage-failure'); END`);
-  const power = internals.power ?? { async stop() {} },
-    supervisor = required(internals.supervisor);
-  internals.power = power;
+  const power = acquired.power ?? { async stop() {} },
+    supervisor = required(acquired.supervisor);
+  acquired.power = power;
   const originalPowerStop = power.stop.bind(power),
     originalSettle = supervisor.settle.bind(supervisor);
   power.stop = async () => {

@@ -6,8 +6,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "./temp.js";
 import { test } from "node:test";
-import type { DomainCommand, DomainStore } from "../src/core/domain.js";
-import type { CoordinationStore } from "../src/core/coordination.js";
+import type { DomainCommand } from "../src/core/domain.js";
 import { nativeEndpointKey } from "../src/core/structured-questions.js";
 import type { NativeInputEndpointIdentity } from "../src/core/structured-questions.js";
 import { CodexRuntime } from "../src/standalone/codex.js";
@@ -15,6 +14,7 @@ import type { RuntimeSpawnContext } from "../src/standalone/service.js";
 import { StandaloneService } from "../src/standalone/service.js";
 import { ExecutionState } from "../src/standalone/state.js";
 import type { RuntimeProcessIdentity } from "../src/standalone/recovery-types.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 const generation = "retention-generation";
 const processIdentity: RuntimeProcessIdentity = {
@@ -64,16 +64,12 @@ type RuntimeInternals = {
 
 type ServiceInternals = {
   db: import("node:sqlite").DatabaseSync;
-  state: ExecutionState;
-  domainState: DomainStore;
-  coordination: CoordinationStore;
   nativeWaiters: Map<string, unknown>;
   callbacks: Map<string, Set<Promise<unknown>>>;
   active: Set<Promise<unknown>>;
   activeByWorkId: Map<string, Promise<unknown>>;
   backgroundRuns: Set<Promise<unknown>>;
   conversationCaptures: Map<string, unknown>;
-  scheduler: { stop(): void };
 };
 
 function fixture(root: string, currentGeneration = generation) {
@@ -114,9 +110,9 @@ function fixture(root: string, currentGeneration = generation) {
       const request = requestThreads.get(requestKey);
       if (message.result !== undefined && request) {
         writeIntentObservations++;
-        const row = (
-          service as unknown as ServiceInternals
-        ).coordination.runtimeQuestionByEndpoint(request.identity);
+        const row = startedOf(service).coordination.runtimeQuestionByEndpoint(
+          request.identity,
+        );
         if (!row?.replyIntentId || row.deliveryState !== "sending")
           writeIntentViolations++;
       }
@@ -224,14 +220,17 @@ function fixture(root: string, currentGeneration = generation) {
       assert.ok(safety);
       return safety;
     },
-    internals: () => service as unknown as ServiceInternals,
+    internals: () => ({
+      ...(service as unknown as ServiceInternals),
+      ...startedOf(service),
+    }),
   };
 }
 
 function createTask(service: StandaloneService) {
-  const { domainState } = service as unknown as ServiceInternals;
+  const { domain } = startedOf(service);
   const run = (command: WithoutKey<DomainCommand>) =>
-    domainState.execute({
+    domain.execute({
       ...command,
       key: randomUUID(),
     } as DomainCommand);
@@ -279,7 +278,7 @@ function createTask(service: StandaloneService) {
     expectedVersion: 1,
     paused: false,
   });
-  domainState.ensureLeadAssignment(taskId);
+  domain.ensureLeadAssignment(taskId);
   run({
     type: "routing.configure",
     actor: "operator",
@@ -300,7 +299,7 @@ function createTask(service: StandaloneService) {
     resultDestination: "lead",
     requesterAssignmentId: null,
   });
-  const assignment = domainState.assignment(assignmentId);
+  const assignment = domain.assignment(assignmentId);
   return {
     projectId,
     taskId,

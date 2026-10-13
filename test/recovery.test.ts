@@ -28,6 +28,12 @@ import type {
   TerminationVerifier,
   TerminationVerification,
 } from "../src/standalone/recovery-types.js";
+import {
+  acquiredOf,
+  publishedOf,
+  startedOf,
+  unpublish,
+} from "./fixtures/service-internals.js";
 
 interface RecoveryApi {
   recoveryView(): RecoveryRecord[];
@@ -335,12 +341,14 @@ async function activeFixture(
 
 function crash(service: StandaloneService): void {
   const internals = service as unknown as {
-    scheduler: { stop(): void } | undefined;
     db: { close(): void } | undefined;
     owner: { close(): void } | undefined;
   };
-  internals.scheduler?.stop();
-  internals.scheduler = undefined;
+  publishedOf(service)?.scheduler.stop();
+  // Unpublished, so the crashed service's wakes cannot admit work.
+  unpublish(service);
+  const acquired = acquiredOf(service);
+  if (acquired) delete acquired.scheduler;
   internals.db?.close();
   internals.db = undefined;
   internals.owner?.close();
@@ -676,12 +684,7 @@ test("validated recovery receipt releases only the exact generation and preserve
     assert.equal(persisted?.holds.capacity, false);
     assert.equal(reopenedRuntime.inspections.length, 0);
 
-    const internals = recovered as unknown as {
-      state: {
-        beginArchive(taskId: string): boolean;
-        endArchive(taskId: string): void;
-      };
-    };
+    const internals = startedOf(recovered);
     assert.equal(
       internals.state.beginArchive(old.taskId),
       false,

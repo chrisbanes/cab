@@ -11,6 +11,7 @@ import type {
   UnexpectedRequest,
 } from "../src/standalone/codex.js";
 import { StandaloneService } from "../src/standalone/service.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 interface RetryRuntime extends Runtime {
   failureEvidence(
@@ -442,8 +443,7 @@ test("retry count and queued generation survive restart without duplicating work
   firstRuntime.failureGate = firstFailureGate.promise;
   firstRuntime.failure = { ...transientEvidence(), harnessRetries: 1 };
   const f = await fixture(firstRuntime);
-  const scheduler = (f.service as unknown as { scheduler: { stop(): void } })
-    .scheduler;
+  const { scheduler } = startedOf(f.service);
   try {
     const original = f.service.submit(
       "restart-budget",
@@ -526,8 +526,7 @@ test("failed-generation release is atomic, idempotent, and stale proof cannot re
       f.workspace,
     );
     assert.equal(first.state, "held");
-    const scheduler = (f.service as unknown as { scheduler: { stop(): void } })
-      .scheduler;
+    const { scheduler } = startedOf(f.service);
     scheduler.stop();
     const recovery = f.service
       .recoveryView()
@@ -552,7 +551,7 @@ test("failed-generation release is atomic, idempotent, and stale proof cannot re
       effects: "settled" as const,
       nextEligibleAt: Date.now() + 30_000,
     };
-    const state = (f.service as unknown as { state: unknown }).state as {
+    const state = startedOf(f.service).state as unknown as {
       resolveFailedGeneration(input: typeof proof): unknown;
       begin(id: string, options: unknown): boolean;
     };

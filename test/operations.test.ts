@@ -40,6 +40,7 @@ import {
   restoreSnapshot,
   verifySnapshot,
 } from "../src/standalone/operations.js";
+import { publishedOf } from "./fixtures/service-internals.js";
 
 const digest = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
@@ -230,13 +231,11 @@ function domainCommand(
 async function stopAfterSchedulerDrain(
   service: StandaloneService,
 ): Promise<void> {
-  const scheduler = (
-    service as unknown as {
-      scheduler: { stop(): void; draining?: Promise<void> } | undefined;
-    }
-  ).scheduler;
+  const scheduler = publishedOf(service)?.scheduler;
   scheduler?.stop();
-  await scheduler?.draining?.catch(() => {});
+  await (
+    scheduler as unknown as { draining?: Promise<void> } | undefined
+  )?.draining?.catch(() => {});
   await service.stop();
 }
 

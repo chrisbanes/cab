@@ -12,6 +12,7 @@ import {
 import { seedReviewTask } from "./fixtures/task-review.js";
 import { until } from "./fixtures/questions.js";
 import { StandaloneService } from "../src/standalone/service.js";
+import { startedOf } from "./fixtures/service-internals.js";
 
 test("initial local Ready task automatically binds one repository-free workspace, replay and restart never duplicate initial dispatch", async () => {
   const f = await createOperatorFixture();
@@ -306,11 +307,7 @@ for (const phase of ["workspace", "processIdentity"] as const) {
       f.service
         .domain()
         .execute({ actor: "operator", key: randomUUID(), ...body } as never);
-    const manager = (
-      f.service as unknown as {
-        workspaces: { forExecution(id: string): Promise<unknown> };
-      }
-    ).workspaces;
+    const manager = startedOf(f.service).workspaces;
     const forExecution = manager.forExecution.bind(manager);
     let entered!: () => void, release!: () => void;
     const entering = new Promise<void>((r) => {

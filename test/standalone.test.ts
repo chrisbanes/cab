@@ -34,6 +34,7 @@ import {
   unexpectedRequest,
   type UnexpectedRequest,
 } from "../src/standalone/codex.js";
+import { startedOf, timersOf } from "./fixtures/service-internals.js";
 
 class FakeRuntime implements Runtime {
   onRequest: ((request: UnexpectedRequest) => void) | undefined;
@@ -89,18 +90,6 @@ class FakeRuntime implements Runtime {
 type ServiceShutdownAccess = {
   db?: DatabaseSync;
   cache?: Database;
-  state?: ExecutionState;
-  githubSynchronizer?: { stop(): Promise<void> };
-  deliveryCoordinator?: { stop(): Promise<void> };
-  scheduler?: {
-    stop(): void;
-    settle(): Promise<void>;
-    timer?: NodeJS.Timeout;
-  };
-  supervisor?: { cancelObservations(): void; settle(): Promise<void> };
-  power?: { stop(): Promise<void> };
-  githubPollTimer?: NodeJS.Timeout;
-  powerPollTimer?: NodeJS.Timeout;
 };
 
 function shutdownAccess(service: StandaloneService): ServiceShutdownAccess {
@@ -951,13 +940,14 @@ test("shutdown preserves ordered failures, settles active work, and retains dura
     );
     await turnStarted;
 
-    const access = shutdownAccess(service);
-    const db = access.db;
-    const synchronizer = access.githubSynchronizer;
-    const delivery = access.deliveryCoordinator;
-    const scheduler = access.scheduler;
-    const supervisor = access.supervisor;
-    const power = access.power;
+    const db = shutdownAccess(service).db;
+    const {
+      githubSynchronizer: synchronizer,
+      deliveryCoordinator: delivery,
+      scheduler,
+      supervisor,
+      power,
+    } = startedOf(service);
     assert.ok(db?.isOpen);
     assert.ok(synchronizer && delivery && scheduler && supervisor && power);
 
@@ -1006,9 +996,11 @@ test("shutdown preserves ordered failures, settles active work, and retains dura
       true,
       "SQLite remains open until active work settles",
     );
-    assert.equal(access.githubPollTimer, undefined);
-    assert.equal(access.powerPollTimer, undefined);
-    assert.equal(scheduler.timer, undefined);
+    assert.equal(timersOf(service).size, 0);
+    assert.equal(
+      (scheduler as unknown as { timer?: NodeJS.Timeout }).timer,
+      undefined,
+    );
     assert.throws(
       () => StandaloneDataDirectory.openExclusive(data),
       /already owned/,
@@ -1066,8 +1058,7 @@ test("shutdown preserves an undefined delivery rejection and still releases the 
   let runtimeStopped = false;
   try {
     await service.start();
-    const delivery = shutdownAccess(service).deliveryCoordinator;
-    assert.ok(delivery);
+    const delivery = startedOf(service).deliveryCoordinator;
     delivery.stop = async () => {
       throw undefined;
     };
@@ -1152,6 +1143,34 @@ test("service shutdown retains an open database owner and can retry close", asyn
       },
     );
     assert.throws(() => wrapper.get(), /closed/i);
+  } finally {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a startup failure after admission begins unpublishes the service and releases ownership", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-885-first-wake-"));
+  const data = join(root, "data");
+  const failure = new Error("injected first-wake failure");
+  const service = new StandaloneService(data, () => new FakeRuntime());
+  const wakeable = service as unknown as {
+    wakeScheduler(...args: unknown[]): Promise<void>;
+  };
+  const prototypeWake = wakeable.wakeScheduler;
+  // Only the wake after scheduler start passes no arguments.
+  wakeable.wakeScheduler = function (...args: unknown[]) {
+    if (args.length === 0) throw failure;
+    return prototypeWake.apply(this, args);
+  };
+  try {
+    await assert.rejects(service.start(), (error) => error === failure);
+    assert.throws(() => service.list(), /Service is not started/);
+    StandaloneDataDirectory.openExclusive(data).close();
+    delete (wakeable as { wakeScheduler?: unknown }).wakeScheduler;
+    await service.start();
+    assert.ok(Array.isArray(service.list()));
+    await service.stop();
   } finally {
     await service.stop().catch(() => {});
     rmSync(root, { recursive: true, force: true });
