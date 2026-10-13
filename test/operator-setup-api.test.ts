@@ -12,14 +12,21 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { z } from "zod";
+import { deliveryPolicySchema } from "../src/core/delivery.js";
 import { DomainPolicyError } from "../src/core/domain.js";
+import { githubConfigurationSchema } from "../src/core/github-source-contracts.js";
+import { operatorCommandSchema } from "../src/operator/contracts.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
 import { DiscoveryFailure } from "../src/standalone/github-discovery.js";
-import { OperatorApi } from "../src/standalone/operator-api.js";
+import {
+  OperatorApi,
+  OperatorApiError,
+} from "../src/standalone/operator-api.js";
 import {
   listHomeFolders,
   verifyCheckout,
 } from "../src/standalone/operator-setup.js";
+import { createFakeGh, fakeGhToken } from "./fixtures/fake-gh.js";
 import {
   gitEnvironmentProbe,
   hardenedGitEnvironment,
@@ -27,10 +34,6 @@ import {
 } from "./fixtures/git-environment.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { createSetupHome, fakeDiscovery, git } from "./fixtures/setup-home.js";
-import { createFakeGh, fakeGhToken } from "./fixtures/fake-gh.js";
-import { deliveryPolicySchema } from "../src/core/delivery.js";
-import { githubConfigurationSchema } from "../src/core/github-source-contracts.js";
-import { operatorCommandSchema } from "../src/operator/contracts.js";
 
 const configure = (credentialRef: string | null) => ({
   type: "discovery.configure",
@@ -265,6 +268,43 @@ test("setup probes run with the hardened environment", async (t) => {
     );
   for (const invocation of invocations)
     assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
+});
+
+test("malformed verified repository output is unavailable, not invalid user input", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  Object.defineProperty(f.service.domain(), "verifyRepository", {
+    value: async (link: {
+      repositoryId: string;
+      path: string;
+      ref: string;
+    }) => ({ ...link, gitCommonDirectory: "relative/.git" }),
+  });
+  const api = new OperatorApi(f.service, [f.directory]);
+  const projectId = randomUUID();
+  await assert.rejects(
+    api.execute({
+      type: "project.create",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+      repositories: [
+        {
+          repositoryId: "R_1",
+          owner: "acme",
+          name: "repo",
+          path: "/repo",
+          ref: "main",
+        },
+      ],
+    }),
+    (error: unknown) =>
+      error instanceof OperatorApiError &&
+      error.status === 503 &&
+      error.code === "unavailable",
+  );
+  assert.equal(f.service.domain().projectListed(projectId), false);
 });
 
 test("home folder listing stays inside home, lists names and Git status only and verifies checkouts", async (t) => {

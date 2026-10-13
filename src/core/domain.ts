@@ -1,26 +1,15 @@
-import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { transaction, type Database } from "./store.js";
-import { DeliveryStore, deliveryPolicySchema } from "./delivery.js";
 import {
-  GitHubSourceStore,
-  githubConfigurationSchema,
-  githubConfigurationCommandSchema,
-  linkedRepositorySchema,
-  readinessSchema,
-  selectionSchema,
-  RepositoryVerificationError,
-  verifiedRepository,
-  type LinkedRepository,
-} from "./github-source.js";
-import { setupRepositorySchema } from "./github-source-contracts.js";
+  CommandResultValidationError,
+  type DomainCommandOutcome,
+  type DomainCommandResultMap,
+  parseDomainCommandOutcome,
+  parseFreshDomainCommandOutcome,
+  parseLinkedRepositoryResult,
+} from "./command-results.js";
 import { discoveryCredentialReference } from "./credential-reference.js";
-import {
-  defaultProfileRuntime,
-  profileRuntimeSchema,
-  type ProfileRuntime,
-} from "./execution-runtime.js";
+import { DeliveryStore, deliveryPolicySchema } from "./delivery.js";
 import {
   DomainConflictError,
   DomainNotFoundError,
@@ -28,6 +17,26 @@ import {
   DomainPolicyError,
   DomainStaleDispositionError,
 } from "./domain-errors.js";
+import {
+  defaultProfileRuntime,
+  type ProfileRuntime,
+  profileRuntimeSchema,
+} from "./execution-runtime.js";
+import {
+  GitHubSourceStore,
+  githubConfigurationCommandSchema,
+  githubConfigurationSchema,
+  type LinkedRepository,
+  linkedRepositorySchema,
+  RepositoryVerificationError,
+  readinessSchema,
+  selectionSchema,
+  verifiedRepository,
+} from "./github-source.js";
+import { setupRepositorySchema } from "./github-source-contracts.js";
+import { type Database, transaction } from "./store.js";
+import { TaskReviewStore } from "./task-review.js";
+
 export {
   DomainConflictError,
   DomainNotFoundError,
@@ -614,7 +623,8 @@ export class DomainStore {
     });
   }
 
-  execute(input: DomainCommand): unknown {
+  execute<C extends DomainCommand>(input: C): DomainCommandResultMap[C["type"]];
+  execute(input: DomainCommand): DomainCommandResultMap[DomainCommand["type"]] {
     const command = parseCommand(input);
     if (
       (command.type === "github.configure" ||
@@ -625,18 +635,19 @@ export class DomainStore {
         command.projectId,
         command.key,
         commandHash(command),
+        command.type,
       );
-      if (prior !== undefined) return prior;
+      if (prior !== undefined) return prior.result;
       throw new Error(
         "Linked GitHub configuration requires asynchronous verification",
       );
     }
-    return this.executeParsed(command);
+    return this.executeParsed(command).result;
   }
 
   async configureGitHub(
     input: Extract<DomainCommand, { type: "github.configure" }>,
-  ): Promise<unknown> {
+  ): Promise<DomainCommandResultMap["github.configure"]> {
     const command = parseCommand(input);
     if (command.type !== "github.configure")
       throw new Error("Expected GitHub configuration");
@@ -644,8 +655,15 @@ export class DomainStore {
       command.projectId,
       command.key,
       commandHash(command),
+      command.type,
     );
-    if (prior !== undefined) return prior;
+    if (prior !== undefined) {
+      if (prior.type !== "github.configure")
+        throw new CommandResultValidationError(
+          "Recorded command result does not match GitHub configuration",
+        );
+      return prior.result;
+    }
     this.operator(command);
     this.version(
       { version: this.githubConfiguration(command.projectId).version },
@@ -663,23 +681,31 @@ export class DomainStore {
             link.path ??
             saved.find((item) => item.repositoryId === link.repositoryId)?.path;
           if (path === undefined) throw new Error("No saved repository path");
-          return this.verifyRepository({ ...link, path });
+          return parseLinkedRepositoryResult(
+            await this.verifyRepository({ ...link, path }),
+          );
         }),
       );
-    } catch {
+    } catch (error) {
+      if (error instanceof CommandResultValidationError) throw error;
       throw new DomainPolicyError(
         "invalid-input",
         "Repository verification failed",
         ["repositories"],
       );
     }
-    return this.executeParsed(command, verified);
+    const outcome = this.executeParsed(command, verified);
+    if (outcome.type !== "github.configure")
+      throw new CommandResultValidationError(
+        "GitHub configuration result has the wrong command type",
+      );
+    return outcome.result;
   }
 
   /** Guided setup: verify every repository, then record the whole project in one transaction. */
   async createProject(
     input: Extract<DomainCommand, { type: "project.create" }>,
-  ): Promise<unknown> {
+  ): Promise<DomainCommandResultMap["project.create"]> {
     const command = parseCommand(input);
     if (command.type !== "project.create")
       throw new Error("Expected project creation");
@@ -687,16 +713,25 @@ export class DomainStore {
       command.projectId,
       command.key,
       commandHash(command),
+      command.type,
     );
-    if (prior !== undefined) return prior;
+    if (prior !== undefined) {
+      if (prior.type !== "project.create")
+        throw new CommandResultValidationError(
+          "Recorded command result does not match project creation",
+        );
+      return prior.result;
+    }
     this.operator(command);
     const verified: LinkedRepository[] = [];
     // In order, so the first failing row is the one reported; nothing is recorded on failure.
     for (const [index, link] of (command.repositories ?? []).entries()) {
       try {
-        const repository = await this.verifyRepository(
-          { repositoryId: link.repositoryId, path: link.path, ref: link.ref },
-          { owner: link.owner, name: link.name },
+        const repository = parseLinkedRepositoryResult(
+          await this.verifyRepository(
+            { repositoryId: link.repositoryId, path: link.path, ref: link.ref },
+            { owner: link.owner, name: link.name },
+          ),
         );
         verified.push({
           repositoryId: repository.repositoryId,
@@ -705,6 +740,7 @@ export class DomainStore {
           gitCommonDirectory: repository.gitCommonDirectory,
         });
       } catch (error) {
+        if (error instanceof CommandResultValidationError) throw error;
         const field =
           error instanceof RepositoryVerificationError &&
           error.reason === "ref-unavailable"
@@ -717,7 +753,12 @@ export class DomainStore {
         );
       }
     }
-    return this.executeParsed(command, verified);
+    const outcome = this.executeParsed(command, verified);
+    if (outcome.type !== "project.create")
+      throw new CommandResultValidationError(
+        "Project creation result has the wrong command type",
+      );
+    return outcome.result;
   }
 
   discoveryCredentialReference(): string | null {
@@ -735,24 +776,53 @@ export class DomainStore {
     return row?.credentialRef ? String(row.credentialRef) : null;
   }
 
-  recordedCommand(input: DomainCommand): unknown | undefined {
+  recordedCommand<C extends DomainCommand>(
+    input: C,
+  ): DomainCommandResultMap[C["type"]] | undefined;
+  recordedCommand(
+    input: DomainCommand,
+  ): DomainCommandResultMap[DomainCommand["type"]] | undefined {
     const command = parseCommand(input);
     this.operator(command);
-    return this.replayed(scopeOf(command), command.key, commandHash(command));
+    return this.replayed(
+      scopeOf(command),
+      command.key,
+      commandHash(command),
+      command.type,
+    )?.result;
   }
 
   /** The stored result for a receipt scope and key, or undefined when unused. */
-  recordedResult(scope: string, key: string): unknown {
+  recordedResult(scope: string, key: string): unknown;
+  recordedResult<C extends DomainCommand["type"]>(
+    scope: string,
+    key: string,
+    type: C,
+  ): Extract<DomainCommandOutcome, { type: C }> | undefined;
+  recordedResult(
+    scope: string,
+    key: string,
+    type?: DomainCommand["type"],
+  ): unknown {
     const row = this.one(
       "SELECT result FROM command_receipts WHERE scope = ? AND key = ?",
       scope,
       id.parse(key),
     );
-    return row ? JSON.parse(String(row.result)) : undefined;
+    if (!row) return undefined;
+    const result = this.parseRecordedJson(row.result);
+    return type === undefined
+      ? result
+      : parseDomainCommandOutcome(type, result);
   }
 
   /** The recorded result for a command key, or undefined when the key is unused. */
-  private replayed(scope: string, key: string, hash: string): unknown {
+  private replayed(
+    scope: string,
+    key: string,
+    hash: string,
+    type: DomainCommand["type"],
+  ): DomainCommandOutcome | undefined {
     const receipt = this.one(
       "SELECT payloadHash, result FROM command_receipts WHERE scope = ? AND key = ?",
       scope,
@@ -763,20 +833,41 @@ export class DomainStore {
       throw new DomainConflictError(
         "Command key already used with different payload",
       );
-    return JSON.parse(String(receipt.result));
+    return parseDomainCommandOutcome(
+      type,
+      this.parseRecordedJson(receipt.result),
+    );
+  }
+
+  private parseRecordedJson(value: unknown): unknown {
+    if (typeof value !== "string")
+      throw new CommandResultValidationError(
+        "Recorded command result is not stored as JSON text",
+      );
+    try {
+      return JSON.parse(value);
+    } catch (error) {
+      throw new CommandResultValidationError(
+        "Recorded command result is not valid JSON",
+        { cause: error },
+      );
+    }
   }
 
   private executeParsed(
     command: ParsedCommand,
     verifiedRepositories?: LinkedRepository[],
-  ): unknown {
+  ): DomainCommandOutcome {
     this.preflightOperatorProjectCommand(command);
     const scope = scopeOf(command);
     const hash = commandHash(command);
     const outcome = transaction(this.db, () => {
-      const prior = this.replayed(scope, command.key, hash);
-      if (prior !== undefined) return { result: prior, recorded: false };
-      const result = this.apply(command, verifiedRepositories);
+      const prior = this.replayed(scope, command.key, hash, command.type);
+      if (prior !== undefined) return { outcome: prior, recorded: false };
+      const result = parseFreshDomainCommandOutcome(
+        command.type,
+        this.apply(command, verifiedRepositories),
+      );
       const review = new TaskReviewStore(this.db);
       if (
         command.type === "task.create" ||
@@ -801,8 +892,8 @@ export class DomainStore {
         .prepare(
           "INSERT INTO command_receipts (scope, key, payloadHash, result) VALUES (?, ?, ?, ?)",
         )
-        .run(scope, command.key, hash, JSON.stringify(result));
-      return { result, recorded: true };
+        .run(scope, command.key, hash, JSON.stringify(result.result));
+      return { outcome: result, recorded: true };
     });
     if (outcome.recorded)
       try {
@@ -813,7 +904,7 @@ export class DomainStore {
           { cause: error },
         );
       }
-    return outcome.result;
+    return outcome.outcome;
   }
 
   project(projectId: string): Row {
@@ -2451,12 +2542,21 @@ export class DomainStore {
 export class DomainCommands {
   private readonly inFlight = new Map<
     string,
-    { hash: string; promise: Promise<unknown> }
+    {
+      hash: string;
+      promise: Promise<DomainCommandOutcome>;
+      resultPromise: Promise<DomainCommandResultMap[DomainCommand["type"]]>;
+    }
   >();
 
   constructor(private readonly store: DomainStore) {}
 
-  execute(input: DomainCommand): Promise<unknown> {
+  execute<C extends DomainCommand>(
+    input: C,
+  ): Promise<DomainCommandResultMap[C["type"]]>;
+  execute(
+    input: DomainCommand,
+  ): Promise<DomainCommandResultMap[DomainCommand["type"]]> {
     const command = parseCommand(input);
     if (command.type === "task.configure" || command.actor === "operator") {
       try {
@@ -2476,18 +2576,21 @@ export class DomainCommands {
             "Command key already used with different payload",
           ),
         );
-      return existing.promise;
+      return existing.resultPromise;
     }
-    const promise = Promise.resolve().then(() =>
-      command.type === "github.configure" && command.repositories.length > 0
-        ? this.store.configureGitHub(command)
-        : command.type === "project.create" &&
-            (command.repositories?.length ?? 0) > 0
-          ? this.store.createProject(command)
-          : this.store.execute(command),
-    );
-    this.inFlight.set(key, { hash, promise });
+    const promise = Promise.resolve().then(async () => {
+      const result =
+        command.type === "github.configure" && command.repositories.length > 0
+          ? await this.store.configureGitHub(command)
+          : command.type === "project.create" &&
+              (command.repositories?.length ?? 0) > 0
+            ? await this.store.createProject(command)
+            : this.store.execute(command);
+      return parseDomainCommandOutcome(command.type, result);
+    });
+    const resultPromise = promise.then((outcome) => outcome.result);
+    this.inFlight.set(key, { hash, promise, resultPromise });
     void promise.finally(() => this.inFlight.delete(key)).catch(() => {});
-    return promise;
+    return resultPromise;
   }
 }
