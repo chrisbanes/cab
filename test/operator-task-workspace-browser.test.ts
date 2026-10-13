@@ -580,6 +580,7 @@ test("production workspace retains literal history, pending request, focused rep
   assert.equal(local[0]?.reference?.resultId, r.resultId);
   // Results and Changes writes whose response is lost stay one exact request: their control is
   // off, the check replays the same request, and nothing builds a new one from the selection.
+  await page.setViewportSize({ width: 1366, height: 900 });
   for (const [type, control, done] of [
     ["review.view", "Set viewing reference", "Viewing reference set."],
     [
@@ -618,10 +619,35 @@ test("production workspace retains literal history, pending request, focused rep
       await lostOutcome.locator("dl").innerText(),
       /Request key\s+[0-9a-f-]{36}/,
     );
+    if (type === "review.view") {
+      // The exact request is kept with the task, not the page: leaving and coming back
+      // finds the control still off and the check still there.
+      await page
+        .getByRole("link", { name: "Search", exact: true })
+        .evaluate((el) => (el as HTMLElement).click());
+      await page
+        .getByRole("button", {
+          name: "Back to originating workspace",
+          exact: true,
+        })
+        .click();
+      await page.getByRole("button", { name: control, exact: true }).waitFor();
+      assert.equal(
+        await page
+          .getByRole("button", { name: control, exact: true })
+          .isDisabled(),
+        true,
+      );
+    }
     await lostOutcome
       .getByRole("button", { name: "Check whether it saved", exact: true })
       .click();
     await page.getByText(done, { exact: true }).waitFor();
+    // Focus returns to the control once its request is settled.
+    await page.waitForFunction(
+      (label) => document.activeElement?.textContent === label,
+      control,
+    );
     assert.equal(bodies.length, 2);
     assert.equal(bodies[0], bodies[1]);
     assert.equal(

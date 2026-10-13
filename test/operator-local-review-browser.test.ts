@@ -533,6 +533,60 @@ test("a comment save whose response is lost stays one exact request until it is 
     .waitFor({ state: "detached" });
 });
 
+test("an unconfirmed edit keeps its request and blocks new comments and edits until it is checked", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  const saves: string[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.draft.save") return route.continue();
+    saves.push(route.request().postData() ?? "");
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  await review.getByRole("button", { name: "Edit" }).click();
+  await review.getByLabel("Edit comment").fill("Edited note");
+  await review.getByRole("button", { name: "Save edit" }).click();
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByText("We couldn't confirm the change was saved. Your text is kept.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await warning.getByRole("button").count(), 1);
+  // Other edits stay blocked: the textarea is off and no new comment can start.
+  assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  assert.equal(
+    await files
+      .getByRole("button", { name: "Add review comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Edited note", { exact: true }).waitFor();
+  assert.equal(saves.length, 2);
+  assert.equal(saves[0], saves[1]);
+  assert.equal(await warning.count(), 0);
+  await files
+    .locator("button:not([disabled])", { hasText: "Add review comment" })
+    .waitFor();
+});
+
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
   const { web, task, page, pageErrors } = await startReview(j);
   await signIn(

@@ -206,12 +206,12 @@ export function TaskWorkspace({
   onHeader?: (report: TaskHeaderReport | null) => void;
 }) {
   const [aux, setAux] = useState<ReplyOutcome | null>(null);
-  // A Results or Changes write whose response was lost: the exact request, replayed by its
-  // check, so a later click never builds a different request from the current selection.
-  const [unconfirmed, setUnconfirmed] = useState<{
-    input: OperatorCommand;
-    outcome: ReplyOutcome;
-  } | null>(null);
+  // A Results or Changes write whose response was lost keeps its exact request in the
+  // task's state, replayed by its check, so a later click never builds a different request
+  // from the current selection, even after the page is left and reopened.
+  const unconfirmed = state.unconfirmed;
+  const auxInFlight = useRef<OperatorCommand | null>(null);
+  const focusUnconfirmed = useRef(false);
   // The message that follows a reply replaces the control the operator used, so it takes
   // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
   // that check. Results and Changes actions never take it.
@@ -324,6 +324,7 @@ export function TaskWorkspace({
     if (!pending) {
       sent.current = false;
       checking.current = false;
+      focusUnconfirmed.current = false;
     }
   });
   const completeSourceObservation =
@@ -469,6 +470,19 @@ export function TaskWorkspace({
           }),
         };
       }
+      if (auxInFlight.current)
+        state.unconfirmed = {
+          input: auxInFlight.current,
+          outcome: {
+            tone: "warning",
+            message: unknownMessage(auxInFlight.current.type),
+            details: detailRows({
+              command: auxInFlight.current.type,
+              resource: taskId,
+              requestKey: auxInFlight.current.key,
+            }),
+          },
+        };
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -795,24 +809,36 @@ export function TaskWorkspace({
       replyInFlight.current = input.key;
       sent.current = true;
       setAux(null);
-    }
+    } else auxInFlight.current = structuredClone(input);
+    const replayed = unconfirmed?.input.key === input.key;
     const outcome = await client.command(input, session.csrfToken);
     if (!scope.current || !current()) return;
     setPending(false);
+    auxInFlight.current = null;
     if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (!reply) {
       if (outcome.state === "unknown") {
         setAux(null);
-        setUnconfirmed({
+        // The control is off now, so the check takes the focus it held.
+        focusUnconfirmed.current = true;
+        state.unconfirmed = {
           input: structuredClone(input),
           outcome: {
             tone: "warning",
             message: unknownMessage(input.type),
             details: rows(undefined, outcome.code),
           },
-        });
+        };
       } else {
-        setUnconfirmed(null);
+        state.unconfirmed = null;
+        if (replayed)
+          requestAnimationFrame(() =>
+            document
+              .querySelector<HTMLElement>(
+                `[data-unconfirmed-control="${input.type}"]`,
+              )
+              ?.focus(),
+          );
         if (outcome.state === "recorded") {
           if (outcome.receipt.kind === "comment-review")
             state.commentReview = outcome.receipt;
@@ -1142,7 +1168,7 @@ export function TaskWorkspace({
         tone="warning"
         message={unconfirmed.outcome.message}
         details={unconfirmed.outcome.details}
-        focus
+        focus={focusUnconfirmed.current}
         action={{
           label: "Check whether it saved",
           onClick: () => command(unconfirmed.input),
@@ -1468,6 +1494,7 @@ export function TaskWorkspace({
             <p className="metadata muted">{changes}</p>
             <Button
               variant="secondary"
+              data-unconfirmed-control="review.view"
               onClick={() =>
                 void command({
                   type: "review.view",
@@ -2470,7 +2497,12 @@ function Changes({
       {d?.blockers.map((b) => (
         <p key={b}>{b}</p>
       ))}
-      <Button variant="secondary" onClick={refresh} disabled={refreshDisabled}>
+      <Button
+        variant="secondary"
+        data-unconfirmed-control="delivery.refresh"
+        onClick={refresh}
+        disabled={refreshDisabled}
+      >
         Refresh delivery observation
       </Button>
       {unconfirmed}

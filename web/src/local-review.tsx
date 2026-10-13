@@ -222,6 +222,7 @@ function useLocalReviewController({
   const write = async (
     command: Parameters<OperatorClient["command"]>[0],
     settle: (result: CommandState) => Promise<void> | void,
+    // The anchor stage skips the refresh: the save that follows refreshes.
     refreshWhenRecorded = true,
   ) => {
     const result = await execute(command);
@@ -330,7 +331,14 @@ function useLocalReviewController({
     },
     async saveComposer() {
       const composer = state.composer;
-      if (!composer || !draft || composer.saving || !composer.body.trim())
+      // Another write in flight or awaiting its check keeps its request: no new one starts.
+      if (
+        !composer ||
+        !draft ||
+        composer.saving ||
+        state.pending ||
+        !composer.body.trim()
+      )
         return;
       composer.saving = true;
       composer.error = null;
@@ -657,7 +665,8 @@ export function CommentAction({
         !anchor ||
         !review.draft ||
         review.draft.state !== "editable" ||
-        frozen(review)
+        frozen(review) ||
+        review.state.pending
       }
       aria-disabled={composing || undefined}
       data-review-origin={originKey}
@@ -1017,6 +1026,7 @@ export function LocalReviewPanel() {
                       autoGrow
                       maxLength={4000}
                       value={editing}
+                      disabled={state.pending}
                       onChange={(event) => {
                         state.editing[comment.commentId] = event.target.value;
                         review.changed();
