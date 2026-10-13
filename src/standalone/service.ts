@@ -1801,6 +1801,25 @@ export class StandaloneService {
     });
   }
 
+  /**
+   * Re-runs the running Codex App Server's authentication check (`account/read`, `config/read`);
+   * requests no model turn and leaves the runtime's state untouched whatever the result.
+   */
+  async verifyCodexLogin(): Promise<"verified" | "failed" | "unavailable"> {
+    const runtime = this.runtimes.get("codex") as
+      | (Runtime & { verifyLoginAndPolicy?: () => Promise<void> })
+      | undefined;
+    if (!runtime || this.runtimeUnavailableSince.has("codex"))
+      return "unavailable";
+    if (!runtime.verifyLoginAndPolicy) return "failed";
+    try {
+      await runtime.verifyLoginAndPolicy();
+      return "verified";
+    } catch {
+      return "failed";
+    }
+  }
+
   /** Supported model and effort values from a started runtime that has read them, else null. */
   harnessSettings(harness: ExecutionHarness): SupportedRuntimeSettings | null {
     const runtime = this.runtimes.get(harness) as

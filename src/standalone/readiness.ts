@@ -24,6 +24,8 @@ import {
 } from "../operator/readiness.js";
 import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
 import { assertCanonicalDirectoryPath } from "./data-directory.js";
+import type { OperatorApi } from "./operator-api.js";
+import type { StandaloneService } from "./service.js";
 
 type Discovery = z.infer<typeof discoveryStatusSchema>["data"];
 
@@ -397,4 +399,34 @@ export class Readiness {
           (broken[0] as { fix: string }).fix,
         );
   }
+}
+
+/** Readiness over a running service, reading what the service itself sees. */
+export function serviceReadiness(
+  service: StandaloneService,
+  api: Pick<OperatorApi, "readDiscoveryStatus">,
+  paths: { dataDir: string; authFile: string },
+  overrides: Partial<ReadinessDeps> = {},
+): Readiness {
+  return new Readiness({
+    env: process.env,
+    uid: process.getuid?.(),
+    ...paths,
+    codexLogin: () => service.verifyCodexLogin(),
+    discovery: async () => (await api.readDiscoveryStatus()).data,
+    claudeTokenReference: () => service.domain().claudeTokenReference(),
+    claudeTokenStatus: () => service.claudeTokenStatus(),
+    harnessStatuses: () => service.harnessStatuses(),
+    harnessSettings: (harness) => service.harnessSettings(harness),
+    profiles: () =>
+      service
+        .domain()
+        .profiles()
+        .map((row) => ({
+          name: String(row.name),
+          revoked: Number(row.revoked) !== 0,
+          runtime: service.domain().profileRuntime(String(row.id)),
+        })),
+    ...overrides,
+  });
 }

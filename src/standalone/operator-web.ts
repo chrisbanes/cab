@@ -6,6 +6,7 @@ import {
   type OperatorApi,
   type OperatorReviewSessionContext,
 } from "./operator-api.js";
+import type { Readiness } from "./readiness.js";
 import type { WorkspaceInspectionRequest } from "./workspace-inspection.js";
 import { workspaceComparisonReadRequestSchema } from "../operator/contracts.js";
 const mime: Record<string, string> = {
@@ -157,6 +158,7 @@ export class OperatorWebBoundary {
   constructor(
     readonly bundle: OperatorWebBundle,
     readonly api: OperatorApi,
+    readonly readiness?: Readiness,
   ) {}
   shell(path: string) {
     return (
@@ -393,6 +395,9 @@ export class OperatorWebBoundary {
       return this.api.readDiscoveryStatus();
     if (path === "/api/operator/claude-token")
       return this.api.readClaudeTokenStatus();
+    if (path === "/api/operator/readiness") return this.readiness?.read();
+    if (path === "/api/operator/readiness/claude-token")
+      return this.readiness?.claudeToken();
     if (path === "/api/operator/discovery/repositories")
       return this.api.readDiscoveryRepositories();
     const recovery = path.match(
@@ -444,6 +449,8 @@ export class OperatorWebBoundary {
         "/api/operator/source-observations",
         "/api/operator/discovery",
         "/api/operator/claude-token",
+        "/api/operator/readiness",
+        "/api/operator/readiness/claude-token",
         "/api/operator/discovery/repositories",
         "/api/operator/discovery/branches",
         "/api/operator/discovery/projects",
