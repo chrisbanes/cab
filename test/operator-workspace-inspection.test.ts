@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -14,6 +15,7 @@ import {
   OperatorWebBoundary,
   OperatorWebBundle,
 } from "../src/standalone/operator-web.js";
+import { controlledGit } from "./fixtures/controlled-git.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 
@@ -592,4 +594,62 @@ test("authenticated HTTP reads discard entries when the task binding changes dur
   assert.deepEqual(body.data.entries, []);
   assert.ok(!text.includes("do not return"));
   f.service.taskWorkspace = original;
+});
+
+test("polled reads keep the stored workspace binding and explicit inspection detects a missing worktree", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-passive-workspace-"));
+  const controlled = controlledGit();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    { workspaceManager: { gitExecutable: controlled.executable } },
+  );
+  t.after(async () => {
+    await f.close();
+    await controlled.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const task = await seedReviewTask(
+    f,
+    "Passive reads",
+    "Passive title",
+    undefined,
+    [{ repositoryId: "repo", path: sourceRepository(root, "source") }],
+  );
+  const binding = await f.service.taskWorkspace(task.taskId);
+  assert.equal(binding?.state, "ready");
+  rmSync(binding.repositories[0]!.workspacePath, {
+    recursive: true,
+    force: true,
+  });
+  const starts = () =>
+    controlled.events().filter((e) => e.event === "start").length;
+  const storedState = () => {
+    let state = "";
+    f.seedPersistedState((db) => {
+      state = (
+        db
+          .prepare("SELECT state FROM task_workspace_bindings WHERE taskId=?")
+          .get(task.taskId) as { state: string }
+      ).state;
+    });
+    return state;
+  };
+  const baseline = starts(),
+    api = new OperatorApi(f.service, [f.directory]);
+  await api.readTaskListPage();
+  await api.readProject(task.projectId);
+  await api.readInbox();
+  assert.equal(starts(), baseline);
+  assert.equal(storedState(), "ready");
+
+  const listing = await api.readWorkspaceDirectory(task.taskId, {
+    scope: { kind: "workspace" },
+    showIgnored: false,
+  });
+  assert.equal(listing.data.state, "held");
+  assert.equal(storedState(), "held");
 });

@@ -2653,6 +2653,26 @@ export class StandaloneService {
       )
       .digest("hex");
   }
+  /**
+   * Stored workspace, source and Git paths for redaction only. Reads the persisted binding
+   * without identity or Git validation, so polled reads reflect last-known state.
+   */
+  taskWorkspaceRedactionPaths(taskId: string): string[] {
+    this.domain().task(taskId);
+    if (!this.workspaceBindings) throw Error("Service not started");
+    const binding = this.workspaceBindings.get(taskId);
+    if (!binding) return [];
+    return [
+      ...new Set([
+        binding.path,
+        ...binding.repositories.flatMap((r) => [
+          r.sourcePath,
+          r.workspacePath,
+          ...(r.gitCommonDir ? [r.gitCommonDir] : []),
+        ]),
+      ]),
+    ];
+  }
   taskWorkspace(taskId: string, options?: { reuseRecentIdentity?: boolean }) {
     this.domain().task(taskId);
     return this.requireWorkspaces().get(taskId, options);

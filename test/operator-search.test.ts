@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { TaskReviewStore } from "../src/core/task-review.js";
 import { test } from "node:test";
 import { OperatorApi } from "../src/standalone/operator-api.js";
+import { wrapTaskExclusions } from "./fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 test("bounded retained search attributes same wording across projects and opens exact historical result and decision records", async (t) => {
@@ -204,12 +205,11 @@ test("actual imported state-only configure keeps GitHub source provenance; place
   let release!: () => void, entered!: () => void;
   const barrier = new Promise<void>((r) => (release = r)),
     entry = new Promise<void>((r) => (entered = r));
-  const originalWorkspace = f.service.taskWorkspace.bind(f.service);
-  f.service.taskWorkspace = async (...args) => {
+  const restoreExclusions = wrapTaskExclusions(api, async (_id, run) => {
     entered();
     await barrier;
-    return originalWorkspace(...args);
-  };
+    return run();
+  });
   const delayed = api.readSearch(
     new URLSearchParams({ query: "Transferred", projectId: ids[0]! }),
   );
@@ -226,7 +226,7 @@ test("actual imported state-only configure keeps GitHub source provenance; place
   release();
   const stale = await delayed;
   assert.equal(stale.data.matches.length, 0);
-  f.service.taskWorkspace = originalWorkspace;
+  restoreExclusions();
   assert.equal(
     (
       await api.readSearch(
