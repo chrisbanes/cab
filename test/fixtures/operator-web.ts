@@ -622,7 +622,7 @@ export function seedOperatorRecovery(
         ).run(workId, i + 1);
     }
     db.prepare(
-      "INSERT INTO task_writer_holds (taskId,reason) VALUES (?,'Task stopped')",
+      "INSERT INTO task_writer_holds (taskId,reason,holdKind) VALUES (?,'Task stopped','operator-stop')",
     ).run(ids.taskId);
   });
 }

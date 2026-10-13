@@ -2107,8 +2107,7 @@ export class OperatorApi {
     );
     const uncertain =
       execution.holds.uncertainty ||
-      // A hold other than the operator Stop, which `taskHold` reports first.
-      (this.service.taskHold(taskId) ?? "Task stopped") !== "Task stopped" ||
+      this.service.hasNonStopTaskHold(taskId) ||
       assignments.some((a) => {
         const s = this.selection(a);
         const confirmed =
