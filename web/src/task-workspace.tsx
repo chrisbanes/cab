@@ -736,6 +736,7 @@ export function TaskWorkspace({
     const normalized = operatorCommandSchema.safeParse(input);
     if (!normalized.success) {
       if (state.frozen?.key === input.key) state.frozen = null;
+      setAux(null);
       state.notice = {
         tone: "error",
         message: "That draft can't be sent as written. Your draft is kept.",

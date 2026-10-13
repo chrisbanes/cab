@@ -256,6 +256,11 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   );
   // Lose actual committed review and confirmation responses, retaining normalized
   // immutable commands independently of the editable whitespace in the draft.
+  // An earlier viewing-reference outcome must not hide the refusal of a draft that cannot be sent.
+  await page
+    .getByRole("button", { name: "Set viewing reference", exact: true })
+    .click();
+  await page.getByText("Viewing reference set.", { exact: true }).waitFor();
   await page.getByLabel("Editable reply").fill("x".repeat(16001));
   await page
     .getByRole("button", { name: "Review exact GitHub comment", exact: true })
