@@ -152,8 +152,18 @@ first request used two separate context detectors and nine fresh token commands,
 and the next request plus fenced retry used fresh scopes. The complete affected
 suite passed 59/59, preserving legacy backoff, exclusion and fence cases. The
 sandbox attempt retained one loopback-listen EPERM failure; the exact host retry
-passed with the private fake gh first on PATH. Full-check results for the repaired
-candidate will be recorded after its immutable candidate check completes.
+passed with the private fake gh first on PATH.
+
+The repaired candidate `8f8c9384d19b567fa652f817d27f9954104da48c` (tree
+`b50616d8bcd709ad0f44d70c88fd0e2720c9c006`) passed the mandatory full
+`npm run check` on Node 24.21.0 and npm 12.2.0: exit 0, type checking, lint,
+formatting and build passed; 1,856 tests ran with 1,855 passes, zero failures and
+one skip (229,992.798 ms). The complete private log is
+`944-P2-fullcheck-host-attempt1.log` in the delivery run directory. The retained
+independent reviewer returned SHIP for all three contracts with no actionable
+findings; prior unaffected coverage and the explicit live-evidence scope remained
+applicable. This result qualifies the repaired code through controlled tests;
+the real-host live result remains scoped to `9395520`, with no renewed attempt.
 
 ## Live boundary and measured outcome
 
