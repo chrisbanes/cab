@@ -3,7 +3,13 @@ import {
   operatorCredentialNameSchema,
   type OperatorCredential,
 } from "../../src/operator/contracts.js";
+import {
+  ActionOutcome,
+  detailRows,
+  type OutcomeTone,
+} from "./action-feedback.js";
 import { Button, StatusBadge, TextField } from "./components.js";
+import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 import { useOperatorResource } from "./resource.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 import {
@@ -16,6 +22,14 @@ import {
 import { NativeSelect } from "./ui/native-select.js";
 
 type Scope = OperatorCredential["scope"];
+/** The one message a credential action leaves behind. */
+interface Outcome {
+  tone: OutcomeTone;
+  message: string;
+  details: ReceiptDetails;
+  /** An unconfirmed create or rotate offers a re-read of the list, never a resend. */
+  check?: boolean;
+}
 const lifetimes = [7, 30, 60, 90];
 // A rotation keeps the name, so the short id tells the two apart.
 const shortId = (id: string) => id.slice(0, 8);
@@ -92,30 +106,52 @@ export function OperatorCredentialsSection(p: SettingsProps) {
   const [scope, setScope] = useState<Scope>("read");
   const [days, setDays] = useState(90);
   const [nameError, setNameError] = useState<string | null>(null);
-  const [failure, setFailure] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [busy, setBusy] = useState(false);
   const [revealed, setRevealed] = useState<{
     name: string;
     token: string;
   } | null>(null);
   const [revoking, setRevoking] = useState<OperatorCredential | null>(null);
-  const [revokeFailure, setRevokeFailure] = useState<string | null>(null);
+  const [revokeOutcome, setRevokeOutcome] = useState<Outcome | null>(null);
   const id = useId();
   const credentials = list.state.data?.data.credentials ?? [];
   const nameOf = (credentialId: string) =>
     `${credentials.find((c) => c.id === credentialId)?.name ?? "Unknown"} (${shortId(credentialId)})`;
 
   // A failed or unknown POST may still have recorded a change, so re-read the list.
-  const act = async (run: () => Promise<void>, fail: (m: string) => void) => {
+  // Create and rotate cannot be resent (they have no request key), so their unconfirmed
+  // outcome offers the re-read as its one action; revoke is by id and can simply be retried.
+  const act = async (
+    run: () => Promise<Outcome | null>,
+    show: (outcome: Outcome | null) => void,
+    what: {
+      did: string;
+      confirmed: string;
+      resend: boolean;
+      resource?: string;
+    },
+  ) => {
     setBusy(true);
-    fail("");
+    show(null);
     try {
-      await run();
+      show(await run());
     } catch (error) {
-      fail(
-        error instanceof Error && error.message === "command-outcome-unknown"
-          ? "The outcome is unknown. Check the list below before retrying."
-          : "The request failed. Check the list below before retrying.",
+      const code = error instanceof Error ? error.message : "request-failed";
+      const details = { resource: what.resource, code };
+      show(
+        code === "command-outcome-unknown"
+          ? {
+              tone: "warning",
+              message: `We couldn't confirm ${what.confirmed}. The list below is up to date.`,
+              details,
+              check: !what.resend,
+            }
+          : {
+              tone: "error",
+              message: `Couldn't ${what.did}: ${failureCause(code)}. The list below is up to date.`,
+              details,
+            },
       );
     } finally {
       list.refresh();
@@ -134,14 +170,24 @@ export function OperatorCredentialsSection(p: SettingsProps) {
       return;
     }
     setNameError(null);
-    void act(async () => {
-      const r = await p.client.issueCredential(
-        { name: trimmed, scope, expiresInDays: days },
-        csrf,
-      );
-      reveal(r.credential, r.token);
-      setName("");
-    }, setFailure);
+    void act(
+      async () => {
+        const r = await p.client.issueCredential(
+          { name: trimmed, scope, expiresInDays: days },
+          csrf,
+        );
+        reveal(r.credential, r.token);
+        setName("");
+        // The one-time token dialog is the confirmation.
+        return null;
+      },
+      setOutcome,
+      {
+        did: "create the credential",
+        confirmed: "the credential was created",
+        resend: false,
+      },
+    );
   };
   return (
     <Panel
@@ -193,10 +239,17 @@ export function OperatorCredentialsSection(p: SettingsProps) {
           </Button>
         </div>
       </form>
-      {failure && (
-        <p className="error-text metadata" role="alert">
-          {failure}
-        </p>
+      {outcome && (
+        <ActionOutcome
+          tone={outcome.tone}
+          message={outcome.message}
+          action={
+            outcome.check
+              ? { label: "Check the list", onClick: list.refresh }
+              : undefined
+          }
+          details={detailRows(outcome.details)}
+        />
       )}
       {list.state.status === "error" && (
         <p className="error-text metadata" role="alert">
@@ -229,10 +282,24 @@ export function OperatorCredentialsSection(p: SettingsProps) {
                     disabled={busy}
                     aria-label={`Rotate ${c.name}`}
                     onClick={() =>
-                      void act(async () => {
-                        const r = await p.client.rotateCredential(c.id, csrf);
-                        reveal(r.credential, r.token);
-                      }, setFailure)
+                      void act(
+                        async () => {
+                          const r = await p.client.rotateCredential(c.id, csrf);
+                          reveal(r.credential, r.token);
+                          return {
+                            tone: "success",
+                            message: `Rotated ${c.name}. The old credential stays active until you revoke it.`,
+                            details: { resource: r.credential.id },
+                          };
+                        },
+                        setOutcome,
+                        {
+                          did: `rotate ${c.name}`,
+                          confirmed: `${c.name} was rotated`,
+                          resend: false,
+                          resource: c.id,
+                        },
+                      )
                     }
                   >
                     Rotate
@@ -243,7 +310,8 @@ export function OperatorCredentialsSection(p: SettingsProps) {
                     disabled={busy}
                     aria-label={`Revoke ${c.name}`}
                     onClick={() => {
-                      setRevokeFailure(null);
+                      setOutcome(null);
+                      setRevokeOutcome(null);
                       setRevoking(c);
                     }}
                   >
@@ -314,10 +382,12 @@ export function OperatorCredentialsSection(p: SettingsProps) {
             Revocation is irreversible. Any CLI using this token stops working
             immediately, and it cannot be restored.
           </DialogDescription>
-          {revokeFailure && (
-            <p className="error-text metadata" role="alert">
-              {revokeFailure}
-            </p>
+          {revokeOutcome && (
+            <ActionOutcome
+              tone={revokeOutcome.tone}
+              message={revokeOutcome.message}
+              details={detailRows(revokeOutcome.details)}
+            />
           )}
           <div className="settings-actions">
             <DialogClose asChild>
@@ -332,10 +402,26 @@ export function OperatorCredentialsSection(p: SettingsProps) {
               onClick={() => {
                 const target = revoking;
                 if (!target) return;
-                void act(async () => {
-                  await p.client.revokeCredential(target.id, csrf);
-                  setRevoking(null);
-                }, setRevokeFailure);
+                void act(
+                  async () => {
+                    await p.client.revokeCredential(target.id, csrf);
+                    setRevoking(null);
+                    return {
+                      tone: "success",
+                      message: `Revoked ${target.name}.`,
+                      details: { resource: target.id },
+                    };
+                  },
+                  // Success closes the dialog, so its line belongs to the panel.
+                  (o) =>
+                    o?.tone === "success" ? setOutcome(o) : setRevokeOutcome(o),
+                  {
+                    did: `revoke ${target.name}`,
+                    confirmed: `${target.name} was revoked`,
+                    resend: true,
+                    resource: target.id,
+                  },
+                );
               }}
             >
               Revoke credential
