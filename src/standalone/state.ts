@@ -1,6 +1,7 @@
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
 import { DomainConflictError } from "../core/domain.js";
+import { executionIntentStateSchema } from "../core/execution-runtime.js";
 import type { CommandReceipt } from "../operator/contracts.js";
 import {
   archivedResumeRejectionSchema,
@@ -81,16 +82,7 @@ const intentSchema = z.object({
   workId: z.string().min(1),
   prompt: z.string().min(1),
   workspace: z.string().min(1),
-  state: z.enum([
-    "ready",
-    "capacity-waiting",
-    "held",
-    "submitting",
-    "running",
-    "completed",
-    "reconciled",
-    "resolved-failed",
-  ]),
+  state: executionIntentStateSchema,
   reason: z.string().nullable(),
   threadId: z.string().nullable(),
   turnId: z.string().nullable(),

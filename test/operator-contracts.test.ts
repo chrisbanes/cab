@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { executionIntentStateSchema } from "../src/core/execution-runtime.js";
 import {
+  assignmentRecoverySchema,
   commandReceiptSchema,
   localReviewOperationReadSchema,
   operatorCommandSchema,
@@ -326,4 +328,55 @@ test("capacity commands accept an optional strict expectedCurrent", () => {
       false,
       JSON.stringify(expectedCurrent),
     );
+});
+
+test("recovery records accept each persisted intent state plus the operator-only unknown", () => {
+  const intentState =
+    assignmentRecoverySchema.shape.data.shape.records.element.shape.intentState;
+  assert.ok(
+    !(executionIntentStateSchema.options as string[]).includes("unknown"),
+  );
+  for (const state of [...executionIntentStateSchema.options, "unknown"])
+    assert.equal(intentState.safeParse(state).success, true, state);
+  assert.equal(intentState.safeParse("bogus").success, false);
+});
+
+test("project.create shares one setup repositories schema with both refinements", () => {
+  const repo = (repositoryId: string, owner: string, name: string) => ({
+    repositoryId,
+    owner,
+    name,
+    path: `/work/${repositoryId}`,
+    ref: "main",
+  });
+  const project = (repositories: unknown[]) => ({
+    type: "project.create",
+    key,
+    projectId: key,
+    name: "Project",
+    leadProfileId: null,
+    repositories,
+  });
+  const messages = (repositories: unknown[]) => {
+    const parsed = operatorCommandSchema.safeParse(project(repositories));
+    return parsed.success ? null : parsed.error.issues.map((i) => i.message);
+  };
+  assert.equal(
+    messages([repo("a", "acme", "app"), repo("b", "acme", "web")]),
+    null,
+  );
+  assert.deepEqual(
+    messages([repo("a", "acme", "app"), repo("a", "acme", "web")]),
+    ["Repository IDs must be unique"],
+  );
+  assert.deepEqual(
+    messages([repo("a", "Acme", "App"), repo("b", "acme", "app")]),
+    ["Repositories must be unique"],
+  );
+  assert.notEqual(
+    messages(
+      Array.from({ length: 21 }, (_, i) => repo(`r${i}`, "acme", `app${i}`)),
+    ),
+    null,
+  );
 });

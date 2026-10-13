@@ -4,6 +4,7 @@ import {
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
   readinessSchema,
+  setupRepositoriesSchema,
   setupRepositorySchema,
 } from "../core/github-source-contracts.js";
 import {
@@ -25,6 +26,7 @@ import {
 } from "../core/recovery-contracts.js";
 import {
   executionHarnessSchema,
+  executionIntentStateSchema,
   profileRuntimeSchema,
   supportedRuntimeSettingsSchema,
 } from "../core/execution-runtime.js";
@@ -1876,25 +1878,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       name: z.string().trim().min(1).max(512),
       leadProfileId: uuid.nullable(),
       instructions: text.optional(),
-      repositories: z
-        .array(setupRepositorySchema)
-        .max(20)
-        .refine(
-          (values) =>
-            new Set(values.map((value) => value.repositoryId)).size ===
-            values.length,
-          "Repository IDs must be unique",
-        )
-        .refine(
-          (values) =>
-            new Set(
-              values.map((value) =>
-                `${value.owner}/${value.name}`.toLowerCase(),
-              ),
-            ).size === values.length,
-          "Repositories must be unique",
-        )
-        .optional(),
+      repositories: setupRepositoriesSchema.optional(),
       githubProject: z
         .object({ projectNodeId: z.string().trim().min(1).max(512) })
         .strict()
@@ -2280,17 +2264,8 @@ const assignmentRecoveryRecordSchema = z
       })
       .strict()
       .nullable(),
-    intentState: z.enum([
-      "ready",
-      "capacity-waiting",
-      "held",
-      "submitting",
-      "running",
-      "completed",
-      "reconciled",
-      "resolved-failed",
-      "unknown",
-    ]),
+    // "unknown" is operator-only: the API reports it for an unrecognised stored state.
+    intentState: z.enum([...executionIntentStateSchema.options, "unknown"]),
     requestState: z
       .enum(["queued", "active", "completed", "held", "unknown"])
       .nullable(),
