@@ -379,8 +379,15 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function commandHash(command: ParsedCommand): string {
-  return createHash("sha256").update(canonical(command)).digest("hex");
+/**
+ * Persisted digest for `command_receipts`, `routing_operations` and in-flight command
+ * dedupe. It deliberately differs from the delivery contract's `canonicalMaterial`:
+ * explicit `undefined` hashes as the bare text `undefined`, not `null`. Stored receipts
+ * keep only this hash, so changing it would break replay of existing keys and cannot be
+ * recomputed. Do not swap in `materialDigest`.
+ */
+function legacyDomainPayloadHash(value: unknown): string {
+  return createHash("sha256").update(canonical(value)).digest("hex");
 }
 
 /** Fail closed: the host injects the verifier that touches the filesystem and Git. */
@@ -638,7 +645,7 @@ export class DomainStore {
       const prior = this.replayed(
         command.projectId,
         command.key,
-        commandHash(command),
+        legacyDomainPayloadHash(command),
         command.type,
       );
       if (prior !== undefined) return prior.result;
@@ -658,7 +665,7 @@ export class DomainStore {
     const prior = this.replayed(
       command.projectId,
       command.key,
-      commandHash(command),
+      legacyDomainPayloadHash(command),
       command.type,
     );
     if (prior !== undefined) {
@@ -716,7 +723,7 @@ export class DomainStore {
     const prior = this.replayed(
       command.projectId,
       command.key,
-      commandHash(command),
+      legacyDomainPayloadHash(command),
       command.type,
     );
     if (prior !== undefined) {
@@ -791,7 +798,7 @@ export class DomainStore {
     return this.replayed(
       scopeOf(command),
       command.key,
-      commandHash(command),
+      legacyDomainPayloadHash(command),
       command.type,
     )?.result;
   }
@@ -864,7 +871,7 @@ export class DomainStore {
   ): DomainCommandOutcome {
     this.preflightOperatorProjectCommand(command);
     const scope = scopeOf(command);
-    const hash = commandHash(command);
+    const hash = legacyDomainPayloadHash(command);
     const outcome = transaction(this.db, () => {
       const prior = this.replayed(scope, command.key, hash, command.type);
       if (prior !== undefined) return { outcome: prior, recorded: false };
@@ -1622,7 +1629,7 @@ export class DomainStore {
       })
       .strict()
       .parse(input);
-    const hash = createHash("sha256").update(canonical(data)).digest("hex");
+    const hash = legacyDomainPayloadHash(data);
     const created = transaction(this.db, () => {
       const existing = this.one(
         "SELECT id, payloadHash FROM routing_operations WHERE id = ? OR (projectId = ? AND taskId = ? AND taskVersion = ?)",
@@ -2571,7 +2578,7 @@ export class DomainCommands {
     }
     const scope = scopeOf(command);
     const key = `${scope}:${command.key}`;
-    const hash = createHash("sha256").update(canonical(command)).digest("hex");
+    const hash = legacyDomainPayloadHash(command);
     const existing = this.inFlight.get(key);
     if (existing) {
       if (existing.hash !== hash)
