@@ -1,10 +1,6 @@
-import { gitEnvironment } from "./child-environment.js";
 import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
-import { realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
-import { promisify } from "node:util";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
 
@@ -78,8 +74,6 @@ export const linkedRepositorySchema = repositoryLinkSchema.extend({
 });
 export type LinkedRepository = z.output<typeof linkedRepositorySchema>;
 
-const execFileAsync = promisify(execFile);
-
 export type RepositoryVerificationReason =
   | "path-invalid"
   | "not-checkout"
@@ -141,90 +135,11 @@ export function parseGitHubOrigin(
     return null;
   return { owner, name };
 }
-/** The `owner/name` of a checkout's origin, or the verification reason it fails with. */
-export async function checkoutOrigin(
-  path: string,
-  timeout = 5000,
-): Promise<{ owner: string; name: string }> {
-  let url: string;
-  try {
-    url = (
-      await execFileAsync("git", ["-C", path, "remote", "get-url", "origin"], {
-        encoding: "utf8",
-        timeout,
-        env: gitEnvironment(),
-      })
-    ).stdout.trim();
-  } catch {
-    throw new RepositoryVerificationError("origin-missing");
-  }
-  const origin = parseGitHubOrigin(url);
-  if (!origin) throw new RepositoryVerificationError("origin-provider");
-  return origin;
-}
-
-/**
- * Verify a local checkout. With `expectedOrigin`, its `origin` remote must be that
- * `github.com` repository (case-insensitive). Failures are `RepositoryVerificationError`s.
- */
-export async function verifiedRepository(
+/** Verifies a local checkout; the host supplies the implementation (see `DomainStore`). */
+export type RepositoryVerifier = (
   input: z.output<typeof repositoryLinkSchema>,
   expectedOrigin?: { owner: string; name: string },
-): Promise<LinkedRepository> {
-  if (!isAbsolute(input.path))
-    throw new RepositoryVerificationError("path-invalid");
-  let path: string;
-  try {
-    path = await realpath(input.path);
-  } catch {
-    throw new RepositoryVerificationError("path-invalid");
-  }
-  let common: string;
-  try {
-    common = (
-      await execFileAsync(
-        "git",
-        ["-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        { encoding: "utf8", timeout: 5000, env: gitEnvironment() },
-      )
-    ).stdout.trim();
-  } catch {
-    throw new RepositoryVerificationError("not-checkout");
-  }
-  if (expectedOrigin) {
-    const actual = await checkoutOrigin(path);
-    if (
-      actual.owner.toLowerCase() !== expectedOrigin.owner.toLowerCase() ||
-      actual.name.toLowerCase() !== expectedOrigin.name.toLowerCase()
-    )
-      throw new RepositoryVerificationError(
-        "origin-mismatch",
-        `${actual.owner}/${actual.name}`,
-      );
-  }
-  let ref: string;
-  try {
-    ref = (
-      await execFileAsync(
-        "git",
-        // Setup requires the ref to name a commit; configured links keep their check.
-        [
-          "-C",
-          path,
-          "rev-parse",
-          "--verify",
-          expectedOrigin ? `${input.ref}^{commit}` : input.ref,
-        ],
-        { encoding: "utf8", timeout: 5000, env: gitEnvironment() },
-      )
-    ).stdout.trim();
-  } catch {
-    throw new RepositoryVerificationError("ref-unavailable");
-  }
-  if (!/^[0-9a-f]{40,64}$/.test(ref))
-    throw new RepositoryVerificationError("ref-unavailable");
-  return { ...input, path, gitCommonDirectory: await realpath(common) };
-}
+) => Promise<LinkedRepository>;
 
 type Row = Record<string, string | number | null>;
 

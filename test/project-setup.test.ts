@@ -11,21 +11,16 @@ import {
   DomainStore,
 } from "../src/core/domain.js";
 import {
-  checkoutOrigin,
   parseGitHubOrigin,
-  verifiedRepository,
+  type RepositoryVerifier,
 } from "../src/core/github-source.js";
 import {
   OperatorApi,
   OperatorApiError,
 } from "../src/standalone/operator-api.js";
-import {
-  gitEnvironmentProbe,
-  hardenedGitEnvironment,
-  withHostileGitEnvironment,
-} from "./fixtures/git-environment.js";
+import { verifiedRepository } from "../src/standalone/repository-verification.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
-import { checkout, createSetupHome, git } from "./fixtures/setup-home.js";
+import { checkout, createSetupHome } from "./fixtures/setup-home.js";
 
 async function setupWorld(t: { after(fn: () => unknown): void }) {
   const f = await createOperatorFixture();
@@ -242,99 +237,13 @@ test("origin and ref checks report one field, keep nothing and never echo creden
   assert.deepEqual(counts(), before);
 });
 
-test("the verifier reports typed reasons and keeps the no-origin path for configured links", async (t) => {
-  const home = await createSetupHome();
-  t.after(() => home.close());
-  const src = join(home.home, "src");
-  const reason = (p: Promise<unknown>) =>
-    p.then(
-      () => "verified",
-      (e: { reason?: string; actual?: string }) =>
-        `${e.reason}${e.actual ? `:${e.actual}` : ""}`,
-    );
-  const link = (path: string, ref = "main") => ({
-    repositoryId: "R",
-    path,
-    ref,
-  });
-  const expected = { owner: "acme", name: "atlas" };
-  assert.equal(
-    await reason(verifiedRepository(link(join(src, "relay")), expected)),
-    "origin-mismatch:acme/relay",
-  );
-  assert.equal(
-    await reason(
-      verifiedRepository(link(join(src, "atlas"), "nope"), expected),
-    ),
-    "ref-unavailable",
-  );
-  // Mismatch is reported ahead of a missing ref.
-  assert.equal(
-    await reason(
-      verifiedRepository(link(join(src, "relay"), "nope"), expected),
-    ),
-    "origin-mismatch:acme/relay",
-  );
-  assert.equal(
-    await reason(verifiedRepository(link(join(src, "gitlab")), expected)),
-    "origin-provider",
-  );
-  // Without an expected origin the remote is not consulted (github.configure and admission).
-  assert.equal(
-    await reason(verifiedRepository(link(join(src, "gitlab")))),
-    "verified",
-  );
-  await git(join(src, "atlas"), "remote", "remove", "origin");
-  assert.equal(
-    await reason(verifiedRepository(link(join(src, "atlas")))),
-    "verified",
-  );
-});
-
-test("repository verification ignores inherited GIT_* overrides", async (t) => {
-  const home = await createSetupHome();
-  const probe = gitEnvironmentProbe();
-  t.after(() => {
-    home.close();
-    probe.close();
-  });
-  const path = await realpath(join(home.home, "src", "atlas"));
-  const commonDirectory = await realpath(
-    (
-      await git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    ).stdout.trim(),
-  );
-  const hadGitDirectory = "GIT_DIR" in process.env;
-
-  const [verified, origin] = await withHostileGitEnvironment(() =>
-    probe.withPath(async () => [
-      await verifiedRepository(
-        { repositoryId: "R", path, ref: "main" },
-        { owner: "acme", name: "atlas" },
-      ),
-      await checkoutOrigin(path),
-    ]),
-  );
-
-  assert.equal(
-    (verified as { gitCommonDirectory: string }).gitCommonDirectory,
-    commonDirectory,
-  );
-  assert.deepEqual(origin, { owner: "acme", name: "atlas" });
-  const invocations = probe.invocations();
-  assert.ok(invocations.length >= 4, "every verification call is recorded");
-  for (const invocation of invocations)
-    assert.deepEqual(invocation.env, hardenedGitEnvironment, invocation.args);
-  assert.equal("GIT_DIR" in process.env, hadGitDirectory);
-});
-
 test("unsafe refs, agents and legacy creates keep their existing boundaries", async (t) => {
   const { f, db } = await setupWorld(t);
   let calls = 0;
-  const spy = (async () => {
+  const spy: RepositoryVerifier = async () => {
     calls++;
     throw new Error("unexpected");
-  }) as unknown as typeof verifiedRepository;
+  };
   const commands = new DomainCommands(new DomainStore(db, undefined, spy));
   for (const ref of ["--help", "-x", "a b", "a\u0000b"])
     await assert.rejects(async () =>
@@ -364,12 +273,35 @@ test("unsafe refs, agents and legacy creates keep their existing boundaries", as
   );
 });
 
+test("a store without an injected verifier fails closed on guided create", async (t) => {
+  const { home, db, counts } = await setupWorld(t);
+  const before = counts();
+  await assert.rejects(
+    new DomainCommands(new DomainStore(db)).execute({
+      ...create({
+        instructions: "x",
+        repositories: [atlas(join(home.home, "src", "atlas"))],
+      }),
+      actor: "operator",
+    } as never),
+    (e) =>
+      e instanceof DomainPolicyError &&
+      e.code === "invalid-input" &&
+      JSON.stringify(e.fieldPaths) === '["repositories.0.path"]',
+  );
+  assert.deepEqual(counts(), before);
+});
+
 test("post-commit notification failure of a guided create stays unknown and replays once", async (t) => {
   const { f, home, db } = await setupWorld(t);
   let failure = true;
-  const store = new DomainStore(db, () => {
-    if (failure) throw new DomainPolicyError("invalid-input", "PRIVATE");
-  });
+  const store = new DomainStore(
+    db,
+    () => {
+      if (failure) throw new DomainPolicyError("invalid-input", "PRIVATE");
+    },
+    verifiedRepository,
+  );
   const command = {
     ...create({
       instructions: "x",

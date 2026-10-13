@@ -1,16 +1,16 @@
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
-import {
-  checkoutOrigin,
-  RepositoryVerificationError,
-  verifiedRepository,
-} from "../core/github-source.js";
+import { RepositoryVerificationError } from "../core/github-source.js";
 import type {
   CheckoutVerification,
   FolderListing,
 } from "../operator/contracts.js";
 import { runGit } from "./git-process.js";
 import type { DiscoveryReader } from "./github-discovery.js";
+import {
+  checkoutOrigin,
+  verifiedRepository,
+} from "./repository-verification.js";
 import { isWithin } from "./workspace-inspection.js";
 
 /** Test seams for guided setup: the home folder, the discovery reader factory and `gh`. */
