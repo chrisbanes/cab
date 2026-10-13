@@ -1,3 +1,4 @@
+import type { GhLoginScope } from "./gh-credential.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, lstatSync, realpathSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
@@ -55,10 +56,14 @@ import {
   readClaudeToken,
 } from "./claude-token.js";
 import {
-  discoveryCredentialExclusions,
+  credentialReferenceExclusions,
   ghEnvironment,
   ghToken,
 } from "./gh-credential.js";
+import {
+  CredentialGitHubSourceReader,
+  gitHubSourceCredentialStatus,
+} from "./github-source-credential.js";
 import { SqliteWorkspaceComparisonStore } from "./comparison-store.js";
 import {
   managedAssignmentEnvironment,
@@ -570,7 +575,7 @@ export class StandaloneService {
       this.githubSynchronizer = new GitHubSynchronizer(
         domain,
         githubSources,
-        this.options.github?.readerFactory,
+        (reference) => this.gitHubSourceReader(reference),
       );
       const routingAttempts = new RoutingAttemptStore(db);
       routingAttempts.migrate();
@@ -785,40 +790,41 @@ export class StandaloneService {
       };
       // Resolve a gh login once so its token value is excluded from the spawn snapshot too;
       // a failure does not block start.
-      if (domain.discoveryCredentialReference()?.startsWith("gh:"))
+      const startupGhReferences = [
+        domain.discoveryCredentialReference(),
+        ...domain
+          .projects()
+          .map((p) => domain.githubConfiguration(String(p.id)).credentialRef),
+      ];
+      if (startupGhReferences.includes("gh:github.com"))
         await ghToken({
           executable: this.options.ghExecutable,
-          environment: ghEnvironment(domain),
+          environment: ghEnvironment(domain, { reference: "gh:github.com" }),
         });
-      const discoveryExcluded = () => {
-        const ref = domain.discoveryCredentialReference();
-        return ref
-          ? discoveryCredentialExclusions(ref)
-          : { names: [], values: [] };
-      };
-      // Helper children (git, ps, pmset, …) never inherit the Claude token or discovery credential.
+      const githubExcluded = () => this.gitHubCredentialExclusions();
+      // Helper children exclude configured delivery, Claude and GitHub credentials.
       setChildCredentialExclusions(() => {
         const claude = claudeTokenExcluded(),
-          discovery = discoveryExcluded();
+          github = githubExcluded();
         return {
-          names: [...claude.names, ...discovery.names],
-          values: [...claude.values, ...discovery.values],
+          names: [
+            ...deliveryCredentialNames(),
+            ...claude.names,
+            ...github.names,
+          ],
+          values: [...claude.values, ...github.values],
         };
       });
       const spawnEnvironment = {
         spawnEnvironment: () => {
           const claude = claudeTokenExcluded(),
-            discovery = discoveryExcluded();
+            github = githubExcluded();
           const snapshot = managedAssignmentEnvironment(
             credentialFreeEnvironment(
               process.env,
-              [
-                ...deliveryCredentialNames(),
-                ...claude.names,
-                ...discovery.names,
-              ],
+              [...deliveryCredentialNames(), ...claude.names, ...github.names],
               process.env,
-              [...claude.values, ...discovery.values],
+              [...claude.values, ...github.values],
             ),
           );
           this.runtimeSpawnSnapshot = snapshot;
@@ -843,7 +849,7 @@ export class StandaloneService {
               "not-configured",
             );
           const snapshot = this.runtimeSpawnSnapshot ?? {};
-          const discovery = discoveryExcluded();
+          const github = githubExcluded();
           const source = claudeTokenSource(ref);
           if (source.kind === "file") {
             // Read on every call, never cached: a replaced file applies from the next turn.
@@ -861,9 +867,9 @@ export class StandaloneService {
             return {
               env: credentialFreeEnvironment(
                 snapshot,
-                [...deliveryCredentialNames(), ...discovery.names],
+                [...deliveryCredentialNames(), ...github.names],
                 process.env,
-                [read.value, ...discovery.values],
+                [read.value, ...github.values],
               ),
               token: read.value,
             };
@@ -883,9 +889,9 @@ export class StandaloneService {
           return {
             env: credentialFreeEnvironment(
               snapshot,
-              [...deliveryCredentialNames(), name, ...discovery.names],
+              [...deliveryCredentialNames(), name, ...github.names],
               process.env,
-              discovery.values,
+              github.values,
             ),
             token,
           };
@@ -2085,6 +2091,68 @@ export class StandaloneService {
   domain(): DomainStore {
     if (!this.domainState) throw new Error("Service is not started");
     return this.domainState;
+  }
+
+  /** One source-explicit factory shared by synchronizer and both operator preview surfaces. */
+  gitHubSourceReader(reference: string) {
+    return (
+      this.options.github?.readerFactory?.(reference) ??
+      new CredentialGitHubSourceReader(reference, {
+        gh: () => ({
+          executable: this.options.ghExecutable,
+          environment: ghEnvironment(this.domain(), { reference }),
+        }),
+      })
+    );
+  }
+
+  async gitHubSourceCredentialStatus(projectId: string, scope?: GhLoginScope) {
+    const config = this.domain().githubConfiguration(projectId);
+    const reference = config.credentialRef;
+    const status = await gitHubSourceCredentialStatus(
+      reference,
+      {
+        gh: () => ({
+          executable: this.options.ghExecutable,
+          environment: ghEnvironment(this.domain(), {
+            reference: "gh:github.com",
+          }),
+        }),
+      },
+      scope,
+    );
+    if (status.reason)
+      this.githubSources().invalidateCredentialFailure(
+        {
+          projectId,
+          configVersion: config.version,
+          credentialRef: reference,
+        },
+        status.reason,
+      );
+    return status;
+  }
+
+  /** Includes lifetime gh values even after every source/discovery reference has been cleared. */
+  gitHubCredentialExclusions() {
+    const domain = this.domain();
+    const references = [
+      domain.discoveryCredentialReference(),
+      ...domain
+        .projects()
+        .map(
+          (project) =>
+            domain.githubConfiguration(String(project.id)).credentialRef,
+        ),
+    ];
+    const excluded = references.map((ref) =>
+      credentialReferenceExclusions(ref),
+    );
+    return {
+      names: [...new Set(excluded.flatMap((value) => value.names))],
+      values: [...new Set(excluded.flatMap((value) => value.values))],
+      redactions: [...new Set(excluded.flatMap((value) => value.redactions))],
+    };
   }
 
   operatorCredentials(): OperatorCredentialStore {
@@ -5283,7 +5351,6 @@ export class StandaloneService {
         projectId,
         revisions?.instructionsRevision ?? Number(project.instructionsRevision),
       );
-      const discovery = domain.discoveryCredentialReference();
       const claudeRef = domain.claudeTokenReference();
       const fixtureValues =
         this.options.conversationHistoryExclusions?.() ?? [];
@@ -5313,16 +5380,13 @@ export class StandaloneService {
             ? [value]
             : [],
         ),
-        ...(discovery
-          ? discoveryCredentialExclusions(discovery).redactions
-          : []),
+        ...this.gitHubCredentialExclusions().redactions,
         ...(claudeRef ? claudeTokenExclusions(claudeRef).redactions : []),
         ...fixtureValues,
         ...domain.projects().flatMap((p) => {
           const id = String(p.id);
           return [
             domain.routingCredentialReference(id),
-            domain.githubConfiguration(id).credentialRef,
             this.deliveryStore?.configuration(id).credentialRef,
           ].flatMap((ref) =>
             ref ? [ref, ref.slice(4), process.env[ref.slice(4)] ?? ""] : [],

@@ -6,6 +6,11 @@ import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import type { Browser } from "playwright";
 import { DeliveryStore } from "../../src/core/delivery.js";
+import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
+import {
+  claudePolicyLimits,
+  claudeTemporaryBase,
+} from "../../src/standalone/claude.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -16,26 +21,21 @@ import {
   LocalOperatorHttp,
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
-import {
-  claudePolicyLimits,
-  claudeTemporaryBase,
-} from "../../src/standalone/claude.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
 import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
+import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import {
   OperatorWebBoundary,
   OperatorWebBundle,
 } from "../../src/standalone/operator-web.js";
-import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
 import type { RoutingChoiceClient } from "../../src/standalone/routing.js";
 import {
+  type RuntimeSpawnContext,
   StandaloneService,
   type StandaloneServiceOptions,
-  type RuntimeSpawnContext,
 } from "../../src/standalone/service.js";
 import { tmpdir } from "../temp.js";
 import {
@@ -258,6 +258,8 @@ export async function createOperatorFixture<
       undefined,
       {
         ...serviceOptions,
+        ghExecutable:
+          serviceOptions.ghExecutable ?? join(directory, "no-gh", "gh"),
         power: { enabled: false },
         routingClient,
         ...(delivery ? { delivery } : {}),
@@ -441,9 +443,11 @@ export async function createOperatorFixture<
         const http = new LocalOperatorHttp(
           new LocalOperatorUi(
             service.domain(),
-            undefined,
+            readerFactory ??
+              ((reference) => service.gitHubSourceReader(reference)),
             service.githubSources(),
             () => service.refreshGitHub(),
+            (projectId) => service.gitHubSourceCredentialStatus(projectId),
           ),
           auth,
           {

@@ -507,6 +507,71 @@ export class GitHubSourceStore {
     });
   }
 
+  /** A failed credential check invalidates knowledge, never fabricates a provider attempt. */
+  invalidateCredentialFailure(
+    binding: GitHubObservationBinding,
+    reason:
+      | "missing-credential"
+      | "invalid-credential-reference"
+      | "gh-not-installed"
+      | "gh-not-signed-in"
+      | "gh-unreadable",
+  ): boolean {
+    const controlled = z
+      .enum([
+        "missing-credential",
+        "invalid-credential-reference",
+        "gh-not-installed",
+        "gh-not-signed-in",
+        "gh-unreadable",
+      ])
+      .parse(reason);
+    return transaction(this.db, () => {
+      if (!this.currentBinding(binding)) return false;
+      this.db
+        .prepare(`UPDATE domain_tasks SET importedBlockers = 'unknown', version = version + 1
+        WHERE projectId = ? AND id IN (SELECT taskId FROM github_external_issues) AND importedBlockers != 'unknown'`)
+        .run(binding.projectId);
+      this.db
+        .prepare(`UPDATE domain_tasks SET version = version + 1
+        WHERE id IN (SELECT d.taskId FROM local_dependencies d
+          JOIN github_external_issues e ON e.taskId = d.blockerTaskId
+          JOIN domain_tasks b ON b.id = e.taskId
+          JOIN github_issue_status s ON s.nodeId = e.nodeId
+          WHERE b.projectId = ? AND s.status = 'closed')`)
+        .run(binding.projectId);
+      this.db
+        .prepare(`UPDATE github_issue_status SET status = 'unknown', reason = ?
+        WHERE nodeId IN (SELECT e.nodeId FROM github_external_issues e
+          JOIN domain_tasks t ON t.id = e.taskId WHERE t.projectId = ?)`)
+        .run(controlled, binding.projectId);
+      this.db
+        .prepare(`UPDATE github_dependency_observations SET complete = 0, reason = ?
+        WHERE nodeId IN (SELECT e.nodeId FROM github_external_issues e
+          JOIN domain_tasks t ON t.id = e.taskId WHERE t.projectId = ?)`)
+        .run(controlled, binding.projectId);
+      this.db
+        .prepare(`UPDATE domain_tasks SET version = version + 1
+        WHERE projectId = ? AND id IN (SELECT e.taskId FROM github_external_issues e
+          JOIN github_memberships m ON m.nodeId = e.nodeId
+          JOIN github_sync_state s ON s.projectId = m.projectId AND s.selectionId = m.selectionId
+          JOIN project_github_active a ON a.projectId = m.projectId AND a.selectionId = m.selectionId
+          WHERE m.projectId = ? AND a.configVersion = ? AND s.complete = 1)`)
+        .run(binding.projectId, binding.projectId, binding.configVersion);
+      this.db
+        .prepare(`UPDATE github_sync_state SET complete = 0, reason = ?
+        WHERE projectId = ? AND selectionId IN (SELECT selectionId FROM project_github_active
+          WHERE projectId = ? AND configVersion = ?)`)
+        .run(
+          controlled,
+          binding.projectId,
+          binding.projectId,
+          binding.configVersion,
+        );
+      return true;
+    });
+  }
+
   reconcileBlockers(
     nodeId: string,
     snapshot: BlockerSnapshot,

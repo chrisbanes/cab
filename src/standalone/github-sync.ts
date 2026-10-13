@@ -4,13 +4,17 @@ import {
 } from "../core/github-source.js";
 import type { DomainStore } from "../core/domain.js";
 import {
-  GitHubHttpSourceReader,
-  type BlockerSnapshot,
-  type GitHubSourceReader,
-  type IssueReference,
-  type IssueSnapshot,
-  type IssueStatus,
-  type SelectionSnapshot,
+  CredentialGitHubSourceReader,
+  SourceRateLimitPauses,
+} from "./github-source-credential.js";
+import { ghEnvironment } from "./gh-credential.js";
+import type {
+  BlockerSnapshot,
+  GitHubSourceReader,
+  IssueReference,
+  IssueSnapshot,
+  IssueStatus,
+  SelectionSnapshot,
 } from "./github-source.js";
 
 export type GitHubReaderFactory = (credentialRef: string) => GitHubSourceReader;
@@ -20,13 +24,16 @@ export class GitHubSynchronizer {
   private pending: Promise<void> | undefined;
   private stopped = false;
   // Rate-limit pauses per credential, in memory: after a restart GitHub just answers "rate-limited" again.
+  private readonly tokenPauses = new SourceRateLimitPauses();
   private readonly pausedUntil = new Map<string, number>();
 
   constructor(
     private readonly domain: DomainStore,
     private readonly sources: GitHubSourceStore,
     private readonly readerFactory: GitHubReaderFactory = (reference) =>
-      new GitHubHttpSourceReader(process.env[reference.slice(4)]),
+      new CredentialGitHubSourceReader(reference, {
+        gh: () => ({ environment: ghEnvironment(domain, { reference }) }),
+      }),
   ) {}
 
   refresh(): Promise<void> {
@@ -42,6 +49,13 @@ export class GitHubSynchronizer {
   async stop(): Promise<void> {
     this.stopped = true;
     await this.pending;
+  }
+
+  private reader(reference: string) {
+    const reader = this.readerFactory(reference);
+    return reader instanceof CredentialGitHubSourceReader
+      ? reader.withRateLimitPauses(this.tokenPauses)
+      : reader;
   }
 
   private paused(credentialRef: string): boolean {
@@ -78,20 +92,23 @@ export class GitHubSynchronizer {
       const active = new Set(this.domain.githubActiveSelectionIds(projectId));
       const credentialRef = config.credentialRef;
       if (!credentialRef) continue;
-      const reader = this.readerFactory(credentialRef);
+      const reader = this.reader(credentialRef);
       for (const raw of config.selections) {
         if (this.stopped) return;
         const selection = selectionSchema.parse(raw);
         if (!active.has(selection.id)) continue;
-        const snapshot: SelectionSnapshot = this.paused(credentialRef)
-          ? { complete: false, issues: [], reason: "rate-limited" }
-          : await reader.readSelection(selection).catch(() => ({
-              complete: false as const,
-              issues: [],
-              reason: "reader-error",
-            }));
+        const snapshot: SelectionSnapshot =
+          !(reader instanceof CredentialGitHubSourceReader) &&
+          this.paused(credentialRef)
+            ? { complete: false, issues: [], reason: "rate-limited" }
+            : await reader.readSelection(selection).catch(() => ({
+                complete: false as const,
+                issues: [],
+                reason: "reader-error",
+              }));
         if (this.stopped) return;
-        this.notePause(credentialRef, snapshot);
+        if (!(reader instanceof CredentialGitHubSourceReader))
+          this.notePause(credentialRef, snapshot);
         const committed = this.sources.reconcileSelection(
           projectId,
           selection.id,
@@ -113,15 +130,18 @@ export class GitHubSynchronizer {
             number: issue.number,
           };
           // Paused issues are recorded as unknown, never left with an earlier "clear".
-          const blockers: BlockerSnapshot = this.paused(credentialRef)
-            ? { complete: false, blockers: [], reason: "rate-limited" }
-            : await reader.readBlockers(reference).catch(() => ({
-                complete: false,
-                blockers: [],
-                reason: "reader-error",
-              }));
+          const blockers: BlockerSnapshot =
+            !(reader instanceof CredentialGitHubSourceReader) &&
+            this.paused(credentialRef)
+              ? { complete: false, blockers: [], reason: "rate-limited" }
+              : await reader.readBlockers(reference).catch(() => ({
+                  complete: false,
+                  blockers: [],
+                  reason: "reader-error",
+                }));
           if (this.stopped) return;
-          this.notePause(credentialRef, blockers);
+          if (!(reader instanceof CredentialGitHubSourceReader))
+            this.notePause(credentialRef, blockers);
           this.sources.reconcileBlockers(issue.nodeId, blockers, {
             projectId,
             configVersion: config.version,
@@ -136,11 +156,11 @@ export class GitHubSynchronizer {
       if (this.stopped) return;
       const config = this.domain.githubConfiguration(retained.projectId);
       const credentialRef = config.credentialRef;
-      const paused = credentialRef ? this.paused(credentialRef) : false;
-      const reader =
-        credentialRef && !paused
-          ? this.readerFactory(credentialRef)
-          : undefined;
+      const reader = credentialRef ? this.reader(credentialRef) : undefined;
+      const paused =
+        credentialRef && !(reader instanceof CredentialGitHubSourceReader)
+          ? this.paused(credentialRef)
+          : false;
       // A paused read must not leave an earlier "closed" clearing a local dependent.
       const status: IssueStatus = paused
         ? { status: "unknown", reason: "rate-limited" }
@@ -151,7 +171,8 @@ export class GitHubSynchronizer {
             }))
           : { status: "unknown", reason: "missing-credential" };
       if (this.stopped) return;
-      if (credentialRef) this.notePause(credentialRef, status);
+      if (credentialRef && !(reader instanceof CredentialGitHubSourceReader))
+        this.notePause(credentialRef, status);
       this.sources.recordIssueStatus(retained.reference.nodeId, status, {
         projectId: retained.projectId,
         configVersion: config.version,

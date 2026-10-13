@@ -265,7 +265,12 @@ export function sourceChanges(source: Source, v: Values) {
       lines.push(
         `− Repository access: ${s.repositoryId} (saved since this form loaded)`,
       );
-  return [...lines, ...referenceChange(v)];
+  return [
+    ...lines,
+    ...(v.referenceMode === "gh"
+      ? ["Credential reference: use GitHub CLI login"]
+      : referenceChange(v)),
+  ];
 }
 
 /**
@@ -404,7 +409,9 @@ export function sourceCommand(projectId: string, v: Values) {
           }
         : { repositoryId: r.repositoryId, path: r.path, ref: r.ref },
     ),
-    ...reference(v),
+    ...(v.referenceMode === "gh"
+      ? { credentialRef: "gh:github.com" }
+      : reference(v)),
   };
 }
 

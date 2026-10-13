@@ -6,7 +6,7 @@ import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
-import { observationLabel } from "./settings-view.js";
+import { observationLabel, sourceCredentialCopy } from "./settings-view.js";
 import {
   DraftField,
   DraftOutcome,
@@ -46,6 +46,14 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
           title="Preview and activation"
           description="Previewing a source checks it against GitHub and activates it. Activation doesn't import tasks or prove a successful sync."
         >
+          {data.source.credential && !data.source.credential.usable && (
+            <p className="body" role="alert">
+              {sourceCredentialCopy(data.source.credential.reason)}{" "}
+              <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+                Set or change source credential
+              </a>
+            </p>
+          )}
           <form
             onSubmit={(e) =>
               void submitDraft(
@@ -83,7 +91,13 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
               client={p.client}
               session={p.session}
               label="Preview and activate selection"
+              saveDisabled={data.source.credential?.usable === false}
             />
+            {preview.phase === "conflict" && preview.errors.credentialRef && (
+              <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+                Set or change source credential
+              </a>
+            )}
             {(preview.phase === "recorded" || preview.phase === "conflict") && (
               <Button
                 type="button"
@@ -170,6 +184,14 @@ function SourceObservations(
                 </p>
               </div>
               <StatusBadge>{observationLabel(s)}</StatusBadge>
+              {s.credentialReason && (
+                <p className="body">
+                  {sourceCredentialCopy(s.credentialReason)}{" "}
+                  <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+                    Set or change source credential
+                  </a>
+                </p>
+              )}
             </div>
           </article>
         ))}

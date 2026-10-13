@@ -1,6 +1,6 @@
 import { z } from "zod";
+import { sourceCredentialReference } from "./credential-reference.js";
 export const nonempty = z.string().trim().min(1).max(512);
-const envReference = z.string().regex(/^env:[A-Z][A-Z0-9_]*$/);
 export const projectFieldsSchema = z.array(
   z
     .object({
@@ -86,7 +86,7 @@ export const repositoryLinkInputSchema = repositoryLinkSchema.extend({
 
 export const githubConfigurationSchema = z
   .object({
-    credentialRef: envReference.nullable(),
+    credentialRef: sourceCredentialReference.nullable(),
     selections: z
       .array(selectionSchema)
       .max(30)

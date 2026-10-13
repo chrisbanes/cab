@@ -25,8 +25,10 @@ lists through REST GETs and Projects through one fixed GraphQL query. The refere
 is `env:NAME` or `gh:github.com`, the GitHub CLI's login for github.com. The service
 resolves a `gh:` reference for each read with non-interactive `gh auth token
 --hostname github.com` under a bounded timeout, and caches nothing for reads. The
-keyed `discovery.configure` command sets or clears the reference; delivery,
-routing and project source credentials do not accept `gh:`.
+keyed `discovery.configure` command sets or clears the reference. Each project
+source independently accepts `env:NAME` or exactly `gh:github.com` through its
+versioned source-save command. Delivery and routing remain env-only. Discovery
+never supplies a missing source credential or changes a source's identity.
 
 The discovery status read reports:
 
@@ -38,14 +40,16 @@ It never reports the reference name or token. Detection only offers the login.
 Ensemble reads with it only after the operator chooses it in Settings or the setup
 alert, and never falls back to it implicitly.
 
-The discovery credential is removed, by name and value, from the Codex runtime
+Discovery and project source credentials are removed, by name and value, from the Codex runtime
 spawn environment, from each Claude turn and from helper child processes, as
 delivery credentials and the Claude token are:
 
 - an `env:` reference by its variable and value;
 - a `gh:` reference by `GH_TOKEN`, `GITHUB_TOKEN` and every token value the
-  service has resolved. Those values are held in memory only for exclusion and
-  redaction.
+  service has resolved. Those values are held for the process lifetime only for
+  exclusion and redaction, including after Clear and token rotation. They are never
+  reused for reads or persisted. Each resolved token is bounded to 512 bytes;
+  distinct rotations grow this exclusion-only memory until service restart.
 
 A Codex runtime keeps the environment it was spawned with, so a reference set
 while it runs is excluded from it after the next service restart.
@@ -86,6 +90,20 @@ every other value.
 
 Linking a discovered GitHub Project adds an inactive discovery source. Preview,
 readiness and activation stay in project configuration, unchanged.
+
+Source settings offer GitHub CLI with the detected account or a service environment
+variable. Detection alone chooses nothing. Configured settings offer Change and
+Clear; Cancel restores only the credential edit, preserving other source drafts.
+Missing or unusable credentials show the same actionable reason in source settings,
+Sync & placement and preview: configure a source credential, install gh, sign in on
+the service host, or check the service's access to the login. Selection, preview,
+issue-status and blocker reads resolve the chosen reference on each public read.
+An unavailable credential leaves provider knowledge incomplete and blockers unknown.
+
+Change and Clear use the existing keyed source save. They preserve source definitions
+and imported history, invalidate activation and require preview at the new source
+version. An uncertain save retains the draft and reconciles the same request before
+another save. No credential edit activates a selection or resumes work.
 
 ## Unchanged
 

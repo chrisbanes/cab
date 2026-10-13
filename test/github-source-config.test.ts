@@ -327,6 +327,12 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
 browserTest(
   "GitHub source pages and refresh inherit authenticated origin and CSRF guards",
   async (_t, journey) => {
+    const previousSource = process.env.ENSEMBLE_TEST_GITHUB;
+    process.env.ENSEMBLE_TEST_GITHUB = "fixture-source-page-token";
+    _t.after(() => {
+      if (previousSource === undefined) delete process.env.ENSEMBLE_TEST_GITHUB;
+      else process.env.ENSEMBLE_TEST_GITHUB = previousSource;
+    });
     const root = mkdtempSync(join(tmpdir(), "ensemble-github-http-"));
     const db = new DatabaseSync(join(root, "db.sqlite"));
     let http: LocalOperatorHttp | undefined;

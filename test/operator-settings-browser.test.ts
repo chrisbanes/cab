@@ -1,3 +1,4 @@
+import { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -8,6 +9,14 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
+const sourceFixtureValue = process.env.FIXTURE_GITHUB;
+before(() => {
+  process.env.FIXTURE_GITHUB = "offline-settings-source-value";
+});
+after(() => {
+  if (sourceFixtureValue === undefined) delete process.env.FIXTURE_GITHUB;
+  else process.env.FIXTURE_GITHUB = sourceFixtureValue;
+});
 const test = browserSuite("ui06");
 import { actionKinds } from "../src/core/delivery.js";
 import {
@@ -421,6 +430,11 @@ test("unknown configuration survives scope navigation and exact reconciliation w
     ),
     false,
   );
+  const replacement = page.getByLabel("Replace instructions", { exact: true });
+  const loadedDeadline = Date.now() + 5000;
+  while ((await replacement.isDisabled()) && Date.now() < loadedDeadline)
+    await page.waitForTimeout(10);
+  assert.equal(await replacement.isEnabled(), true);
   await page.getByLabel("Replace instructions", { exact: true }).check();
   await page
     .getByLabel("New instructions", { exact: true })
@@ -1023,6 +1037,21 @@ function seedPlacement(f: Awaited<ReturnType<typeof createOperatorFixture>>) {
     name: "Third membership destination",
     leadProfileId: null,
   });
+  for (const projectId of [ids.projectId, target, destination])
+    d.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: d.githubConfiguration(projectId).version,
+      credentialRef: "env:FIXTURE_GITHUB",
+      selections: [],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
   seedImportedConflict(f, taskId, [ids.projectId, target, destination]);
   return { ids, target, destination, taskId, d };
 }
@@ -1283,9 +1312,18 @@ test("mounted reference and placement fields have unique associated controls", a
     ["GitHub source", "env:SOURCE_NEW"],
   ] as const) {
     await sections.getByRole("link", { name: tab, exact: true }).click();
-    const reference = page.getByLabel("Credential reference change", {
-      exact: true,
-    });
+    if (tab === "GitHub source")
+      await page
+        .getByRole("button", { name: /(?:Set|Change) source credential/ })
+        .click();
+    const reference = page.getByLabel(
+      tab === "GitHub source"
+        ? "Source credential choice"
+        : "Credential reference change",
+      {
+        exact: true,
+      },
+    );
     assert.equal(await reference.count(), 1);
     await reference.selectOption("set");
     await page

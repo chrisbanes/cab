@@ -9,3 +9,8 @@ export const discoveryCredentialReference = z.union([
   envCredentialReference,
   ghCredentialReference,
 ]);
+/** A project GitHub source credential, chosen independently of discovery. */
+export const sourceCredentialReference = z.union([
+  envCredentialReference,
+  ghCredentialReference,
+]);

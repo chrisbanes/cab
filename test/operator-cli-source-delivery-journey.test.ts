@@ -6,6 +6,8 @@ import { databaseDigest } from "./fixtures/database-digest.js";
 import { deliveryWorld } from "./fixtures/operator-cli.js";
 import { seedImportedConflict } from "./fixtures/operator-settings.js";
 
+process.env.SYNTHETIC_SOURCE = "test-only-source-token";
+
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
 
@@ -124,7 +126,40 @@ test("sources and delivery journey through the CLI, read back as the operator UI
     String(saved.source.version),
   ]);
   assert.equal(activated.data.current.active, true);
-  assert.equal((await configuration()).source.selections[0].active, true);
+  const activatedConfiguration = await configuration();
+  assert.equal(activatedConfiguration.source.selections[0].active, true);
+  const clearCredential = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: activatedConfiguration.source.version,
+    credentialRef: null,
+    selections: activatedConfiguration.source.selections.map(
+      (selection: Json) => ({
+        id: selection.id,
+        keep: true,
+      }),
+    ),
+    readiness: saved.source.readiness,
+    repositories: saved.source.repositories,
+  });
+  assert.equal(clearCredential.status, 200);
+  const cleared = await configuration();
+  const blocked = await w.cli("rw", [
+    "project",
+    "preview-source",
+    projectId,
+    "--selection",
+    "repo",
+    "--expected-version",
+    String(cleared.source.version),
+  ]);
+  assert.equal(blocked.code, 4, blocked.out);
+  assert.match(
+    blocked.json().error.message,
+    /GitHub source credential required.*GitHub source settings/,
+  );
+  assert.equal((await configuration()).source.selections[0].active, false);
   const observations = await session("/api/operator/source-observations");
   const sources = await w.ok("ro", ["project", "sources", projectId]);
   assert.deepEqual(
