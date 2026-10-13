@@ -72,7 +72,7 @@ form submissions. It reads the committed coordination state after service
 restart, including an unresolved writer hold, and follows the Coordination link
 to task-scoped Runtime controls.
 
-The opt-in [`test/s04d/live-operator.mjs`](../../test/s04d/live-operator.mjs)
+The opt-in [`test/operator/integration-qualification/live-operator.mjs`](../../test/operator/integration-qualification/live-operator.mjs)
 uses a disposable service with the real Codex App Server, generated local
 operator credentials, and Chromium. It observes a real task-scoped question,
 requests Stop through the UI, checks the bounded Stop/known-writer hold, restarts
@@ -81,7 +81,7 @@ process cleanup. It does not use TypeSafe, alter shared Codex configuration,
 delete provider thread records, deploy, or authorize cutover. Evidence is
 recorded in [`s04d-operator-2026-09-30.md`](../evidence/s04d-operator-2026-09-30.md).
 
-The [`test/s04c/private-access.mjs`](../../test/s04c/private-access.mjs) proof
+The [`test/operations/private-access-qualification/private-access.mjs`](../../test/operations/private-access-qualification/private-access.mjs) proof
 also checks the private Runtime/Coordination reads and a same-origin,
 replayed capacity write, restoring the disposable project's original effective
 limit afterward. It requires an explicitly provisioned disposable HTTPS/Tailscale

@@ -99,6 +99,6 @@ proof does not authorize deployment, route replacement, persistent Serve
 configuration or a cutover.
 
 The opt-in second-peer browser proof is
-[`test/s04c/private-access.mjs`](../../test/s04c/private-access.mjs). Current
+[`test/operations/private-access-qualification/private-access.mjs`](../../test/operations/private-access-qualification/private-access.mjs). Current
 automated and unproved live evidence is recorded in
 [`docs/evidence/s04c-operator-ui-2026-09-29.md`](../evidence/s04c-operator-ui-2026-09-29.md).

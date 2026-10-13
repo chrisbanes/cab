@@ -21,7 +21,7 @@ service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and Chromium browser tests. CI
 installs the pinned Chromium engine used by those browser tests. Real App Server
 qualification is separate and runs only when requested explicitly, for example
-`npm run s03b:live` and `npm run s04b:live`, which require their `--live` opt-in
+`npm run recovery:live` and `npm run routing:live`, which require their `--live` opt-in
 (see the other `*:live` scripts in `package.json`). These checks do not prove
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.
@@ -35,7 +35,7 @@ installed LaunchAgent service uses an owner-only token file
 replaced file applies from the next turn. An `env:NAME` variable must be in the
 service process environment when the service starts, and a reference configured
 while the service runs takes effect after a restart.
-`npm run c5:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
+`npm run mixed-runtime:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
 bounded journey against disposable data and prints redacted evidence. It refuses
 any other arguments, a missing `CLAUDE_CODE_OAUTH_TOKEN` (read from the
 environment, then `~/.env`) or a missing ChatGPT.app Codex launcher before creating
@@ -429,12 +429,12 @@ Troubleshooting:
 `npm run check` covers the CLI with injected fakes and a packed offline install
 against a real service over loopback and verified HTTPS. The Keychain test is
 opt-in on macOS: `npm run build && ENSEMBLE_KEYCHAIN_LIVE=1 node --test
-dist/test/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
+dist/test/operations/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
 `ensemble-cli-test-<uuid>` item.
 
-`node test/cli8/live-journey.mjs --fixture` (run by `npm run check`) drives the
+`node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run by `npm run check`) drives the
 installed binary through the assembled journey with a scripted runtime.
-`npm run cli8:live` runs it once against Codex through the ChatGPT.app launcher with
+`npm run operator-cli:live` runs it once against Codex through the ChatGPT.app launcher with
 at most two model turns, a Keychain login and verified cleanup; it prints sanitised
 evidence JSON.
 

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { globSync } from "node:fs";
+import { existsSync, globSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import { constants } from "node:os";
@@ -267,6 +267,17 @@ export async function recordRunnerEvidence(result, name, evidenceRoot) {
   }
 }
 
+export function discoverTestFiles(root = ".") {
+  const files = globSync("test/**/*.test.ts", { cwd: root })
+    .sort()
+    .map((source) => `dist/${source.slice(0, -3)}.js`);
+  if (!files.length) throw Error("No test source files found");
+  for (const file of files)
+    if (!existsSync(resolve(root, file)))
+      throw Error(`Compiled test missing: ${file}; run npm run build first`);
+  return files;
+}
+
 async function main() {
   const mode = process.argv.slice(2);
   if (
@@ -277,10 +288,10 @@ async function main() {
   const preflight = mode.length === 1;
   const files = preflight
     ? [
-        "dist/test/operator-fixture-preflight.test.js",
-        "dist/test/operator-web-browser.test.js",
+        "dist/test/infrastructure/operator-fixture-preflight.test.js",
+        "dist/test/operator/operator-web-browser.test.js",
       ]
-    : globSync("dist/test/*.test.js").sort();
+    : discoverTestFiles();
   if (!files.length) throw Error("No compiled test files found");
   const args = [
     "--test",

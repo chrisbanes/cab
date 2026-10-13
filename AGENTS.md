@@ -89,6 +89,15 @@ authorise dispatch while paused.
 
 ## Validation
 
+Group tests under `test/` by the behavior they protect: coordination, execution,
+sources, delivery, workspaces, operator, operations or infrastructure. Place CLI,
+HTTP and browser tests with the asserted behavior; keep interface-specific tests
+in operator and shared helpers in fixtures. Name tests and qualification harnesses
+for their behavior rather than milestone or issue numbers. Keep historical evidence
+and existing external fixture/grant identifiers intact. When moving tests, update
+imports, executable paths and preflight selection, and verify full-suite discovery
+preserves every test exactly once, including in a checkout with stale build output.
+
 Use Node.js from `.node-version` and the package manager pinned in `package.json`.
 Run `npm ci` then `npm run check` (type checking, lint, formatting, build, tests).
 CI runs the same check. Existing tests use real SQLite and a fake host.

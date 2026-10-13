@@ -15,7 +15,7 @@ import {
   type TestOptions,
 } from "node:test";
 import type { Page } from "playwright";
-import { tmpdir } from "../temp.js";
+import { tmpdir } from "./temp.js";
 import {
   FixtureLifecycle,
   FixtureStartupError,
