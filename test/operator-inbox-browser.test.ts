@@ -535,12 +535,12 @@ test("an approval shows its exact action, target and independent holds, and deci
     .getByText("Create a pull request. No merge or deployment.")
     .waitFor();
   await detail.getByText("acme/atlas · main ← command-menu").waitFor();
-  await detail.getByText(/^revision \d+$/).waitFor();
+  await detail.getByText(/^version \d+$/).waitFor();
   await detail.getByText("Task lead", { exact: true }).waitFor();
   assert.equal(await detail.getByText("Approval", { exact: true }).count(), 1);
   await detail
     .getByText(
-      "Your decision is bound to the action, target and revisions in the exact approval. Changed material requires a new review.",
+      "Your decision is bound to the action, target and version in the exact approval. Changed material requires a new review.",
       { exact: true },
     )
     .waitFor();

@@ -1139,7 +1139,7 @@ for (const viewport of [
     assert.equal(
       await work
         .locator(`[data-task-id="${ids.running.id}"]`)
-        .getByText(/Capacity currently full/)
+        .getByText(/Capacity is full/)
         .count(),
       1,
       "occupied project limit preserves eligible Ready work in its real capacity queue",
@@ -1227,10 +1227,7 @@ for (const viewport of [
           await terminal.getByText("Draft: not Ready", { exact: true }).count(),
           0,
         );
-        assert.equal(
-          await terminal.getByText(/Capacity currently full/).count(),
-          0,
-        );
+        assert.equal(await terminal.getByText(/Capacity is full/).count(), 0);
       }
       await screenshot(page, `${viewport.width}-board-${column.toLowerCase()}`);
     }
@@ -1247,7 +1244,7 @@ for (const viewport of [
     await page.getByRole("button", { name: /^Running · / }).click();
     await page
       .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText("Capacity currently full; admission rechecks usage", {
+      .getByText("Capacity is full; it rechecks as turns finish", {
         exact: true,
       })
       .waitFor({ state: "visible" });
@@ -1255,7 +1252,7 @@ for (const viewport of [
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page
       .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText("Capacity currently full; admission rechecks usage", {
+      .getByText("Capacity is full; it rechecks as turns finish", {
         exact: true,
       })
       .waitFor({ state: "visible" });
@@ -1272,7 +1269,7 @@ for (const viewport of [
       .click();
     await page
       .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText(/Capacity currently full/)
+      .getByText(/Capacity is full/)
       .waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "Board", exact: true }).click();
     await page.getByRole("button", { name: /^Waiting · / }).click();

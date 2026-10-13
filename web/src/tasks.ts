@@ -158,7 +158,7 @@ export const reasonLabels = {
   "imported-blockers-unknown": "GitHub dependencies unavailable",
   "imported-blockers-blocked": "Waiting on a GitHub dependency",
   "source-held": "Source requires review",
-  "admission-blocked": "Admission held",
+  "admission-blocked": "Waiting to start",
   question: "Question needs an answer",
   approval: "Approval needs a decision",
   "unresolved-result": "Result destination needs attention",
@@ -171,7 +171,7 @@ export function taskReasons(task: TaskListSummary) {
   const reasons: string[] = [
     ...task.attention.codes.map((code) => reasonLabels[code]),
     ...(terminal ? [] : task.admission.reasons).map(
-      (r) => reasonLabels[r] ?? "Admission held",
+      (r) => reasonLabels[r] ?? "Waiting to start",
     ),
   ];
   if (task.execution.holds.stop)
@@ -186,7 +186,7 @@ export function taskReasons(task: TaskListSummary) {
     (task.capacity.globalUsage >= task.capacity.globalLimit ||
       task.capacity.projectUsage >= task.capacity.projectLimit)
   )
-    reasons.push("Capacity currently full; admission rechecks usage");
+    reasons.push("Capacity is full; it rechecks as turns finish");
   return [...new Set(reasons)];
 }
 const nextActions = [

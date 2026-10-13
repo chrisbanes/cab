@@ -152,7 +152,11 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
     pills,
     holdPills(read.data.holds).map((h) => `${h.label}${h.value}`),
   );
-  await page.getByText("Revisions and actual admitted generation").waitFor();
+  await page.getByText("Versions and generation in use").waitFor();
+  assert.doesNotMatch(
+    await page.locator("main").innerText(),
+    /admitted generation|instruction revision|profile revision/,
+  );
   await page.getByRole("heading", { name: "Task-wide holds" }).waitFor();
   await page
     .getByRole("heading", { name: "Selected assignment evidence" })

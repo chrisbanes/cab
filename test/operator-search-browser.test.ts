@@ -131,7 +131,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page
     .getByRole("button", { name: "Refresh results", exact: true })
     .click();
-  await page.getByText(/Last successful matches retained/).waitFor();
+  await page.getByText(/Refresh failed\. Showing the last matches/).waitFor();
   assert.equal(
     await page.locator(`[data-search-record="${r.resultId}"]`).count(),
     1,

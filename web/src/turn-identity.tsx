@@ -31,26 +31,34 @@ export function FinishedTurn({
     >
       <h5>Last turn</h5>
       <p>
-        Agent {agentName(assignments, snapshot.assignmentId)} · profile{" "}
-        {snapshot.profileId} · work {snapshot.workId} · assignment{" "}
-        {snapshot.assignmentId}
+        Agent {agentName(assignments, snapshot.assignmentId)} ·{" "}
+        <span className="identifier">
+          profile {snapshot.profileId} · work {snapshot.workId} · assignment{" "}
+          {snapshot.assignmentId}
+        </span>
       </p>
-      <p>
+      <p className="identifier">
         Thread {snapshot.threadId ?? "not retained"} · turn{" "}
         {snapshot.turnId ?? "not retained"} · outcome {snapshot.outcome} ·
         capture {snapshot.state}
       </p>
       <p>
-        Capture started {dateLabel(snapshot.startedAt)} · before observation{" "}
-        {dateLabel(snapshot.beforeObservedAt)} · after observation{" "}
+        Capture started {dateLabel(snapshot.startedAt)} · before the turn{" "}
+        {dateLabel(snapshot.beforeObservedAt)} · after the turn{" "}
         {dateLabel(snapshot.observedAt)}
       </p>
       {(snapshot.state !== "available" || snapshot.reason) && (
         <p role="status">
           Capture incomplete
-          {snapshot.reason ? `: ${snapshot.reason}` : ""}. Unobserved entries
-          stay identified as gaps and this capture does not establish that
-          runtime writes ended.
+          {snapshot.reason && (
+            <>
+              {" ("}
+              <span className="identifier">{snapshot.reason}</span>
+              {")"}
+            </>
+          )}
+          . Some entries are marked as gaps; this capture does not show that the
+          agent stopped writing.
         </p>
       )}
       {snapshot.truncated && (
@@ -76,41 +84,49 @@ export function PendingTurn({
     <section className="changes-pending-turn" aria-label="Current actual turn">
       <h5>Current actual turn</h5>
       <p>
-        Agent {agent} · profile {pending.identity.profileId} · work{" "}
-        {pending.identity.workId} · assignment {pending.identity.assignmentId}
+        Agent {agent} ·{" "}
+        <span className="identifier">
+          profile {pending.identity.profileId} · work {pending.identity.workId}{" "}
+          · assignment {pending.identity.assignmentId}
+        </span>
       </p>
-      <p>
+      <p className="identifier">
         Turn {pending.turnId ?? "not yet bound"} · thread{" "}
         {pending.threadId ?? "not yet bound"} · outcome {pending.outcome} ·{" "}
         capture {pending.captureState}
       </p>
       <p>
-        Capture started {dateLabel(pending.startedAt)} · before observation{" "}
+        Capture started {dateLabel(pending.startedAt)} · before the turn{" "}
         {pending.beforeObservedAt === undefined
           ? (pending.beforeState ?? "not retained")
           : dateLabel(pending.beforeObservedAt)}
-        {" · "}after observation{" "}
+        {" · "}after the turn{" "}
         {pending.afterObservedAt === undefined
           ? (pending.afterState ?? "not observed")
           : dateLabel(pending.afterObservedAt)}
       </p>
-      {pending.reason && <p>Capture limitation: {pending.reason}</p>}
+      {pending.reason && (
+        <p>
+          Capture limitation:{" "}
+          <span className="identifier">{pending.reason}</span>
+        </p>
+      )}
       {data.latestFinished && (
         <p>
           Latest finished capture remains separate: agent {finishedAgent} · work{" "}
           {data.latestFinished.workId} · turn{" "}
           {data.latestFinished.turnId ?? "not retained"} · outcome{" "}
           {data.latestFinished.outcome} · capture started{" "}
-          {dateLabel(data.latestFinished.startedAt)} · before observation{" "}
+          {dateLabel(data.latestFinished.startedAt)} · before the turn{" "}
           {data.latestFinished.beforeObservedAt === undefined
             ? "not retained"
             : dateLabel(data.latestFinished.beforeObservedAt)}{" "}
-          · after observation {dateLabel(data.latestFinished.observedAt)}.
+          · after the turn {dateLabel(data.latestFinished.observedAt)}.
         </p>
       )}
       <p>
-        A partial or unsettled capture does not establish that runtime writes
-        have ended or change a hold.
+        A partial or unsettled capture does not show that the agent stopped
+        writing, and it changes no hold.
       </p>
     </section>
   );

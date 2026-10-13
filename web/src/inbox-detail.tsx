@@ -109,8 +109,8 @@ export function ApprovalDetail({
             <dd className="literal">{approval.action ?? "Unavailable"}</dd>
             <dt>Target</dt>
             <dd className="literal">{approval.target ?? "Unavailable"}</dd>
-            <dt>Revision</dt>
-            <dd>revision {approval.revision}</dd>
+            <dt>Version</dt>
+            <dd>version {approval.revision}</dd>
             <dt>Requester</dt>
             <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
           </dl>
@@ -145,8 +145,8 @@ export function ApprovalDetail({
           </Alert>
         ))}
         <p className="metadata muted">
-          Your decision is bound to the action, target and revisions in the
-          exact approval. Changed material requires a new review.
+          Your decision is bound to the action, target and version in the exact
+          approval. Changed material requires a new review.
         </p>
         <ActionLink href={item.destination}>
           Review material & decide
@@ -161,7 +161,7 @@ export function InterventionDetail({ item }: { item: InboxItem }) {
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
-        <p>Review the exact recorded execution state before acting.</p>
+        <p>Review the exact execution state before acting.</p>
       </div>
       <div className="inbox-decision">
         <ActionLink href={item.destination}>Inspect execution</ActionLink>
