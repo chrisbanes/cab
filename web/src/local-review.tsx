@@ -645,13 +645,13 @@ export function LocalReviewProvider({
 const frozen = (review: Controller) =>
   review.state.send !== null && review.state.send.status !== "rejected";
 
-/** Opens the composer for one exact origin; disabled without a valid selection. */
 /** The one action of an unconfirmed draft write: replay its exact request. */
 const checkAction = (review: { check: () => Promise<void> }) => ({
   label: "Check whether it saved",
   onClick: () => review.check(),
 });
 
+/** Opens the composer for one exact origin; disabled without a valid selection. */
 export function CommentAction({
   originKey,
   label,
