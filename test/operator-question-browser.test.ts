@@ -115,11 +115,18 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     .click();
   await form
     .getByText(
-      "Answer not recorded. Your selection is retained. The request remains unresolved.",
+      "Couldn't send the answer: the service didn't accept it. Your answer is still here.",
       { exact: true },
     )
     .waitFor();
-  await form.getByText("Reason: invalid-input", { exact: true }).waitFor();
+  // One alert; the code is in Details, not in the message.
+  const refused = form.locator("[data-slot=action-outcome]");
+  assert.equal(await refused.count(), 1);
+  assert.equal(await refused.getAttribute("role"), "alert");
+  assert.doesNotMatch(await refused.innerText(), /invalid-input/);
+  await refused.getByText("Details", { exact: true }).click();
+  await refused.getByText("invalid-input", { exact: true }).waitFor();
+  assert.equal(await form.getByText(/^Reason:/).count(), 0);
   assert.equal(
     await form.getByRole("button", { name: "Retry answer" }).count(),
     1,
@@ -141,7 +148,15 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     await route.abort("failed");
   });
   await form.getByRole("button", { name: "Retry answer", exact: true }).click();
-  await form.getByText(/Outcome unknown/).waitFor();
+  await form
+    .getByText(
+      "We couldn't confirm your answer was sent. Your answer is kept until you check.",
+      { exact: true },
+    )
+    .waitFor();
+  const unknown = form.locator("[data-slot=action-outcome]");
+  assert.equal(await unknown.count(), 1);
+  assert.equal(await unknown.getAttribute("data-tone"), "warning");
   const original = commands.at(-1)!;
   assert.equal(
     await form
@@ -154,9 +169,9 @@ test("production mixed form preserves literal schema, keyboard input, field erro
   });
   for (const height of [844, 480]) {
     await page.setViewportSize({ width: 390, height });
-    // The frozen original answer is awaiting reconciliation, so its action is the submit button.
+    // The frozen original answer awaits a check, so the message's one action replaces Submit.
     const action = form.getByRole("button", {
-      name: "Reconcile original answer",
+      name: "Check whether it saved",
       exact: true,
     });
     await action.scrollIntoViewIfNeeded();
@@ -164,31 +179,34 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     assert.ok(rect && rect.height >= 44);
     const footer = await form.locator(".question-submit").evaluate((el) => ({
       viewport: { width: innerWidth, height: innerHeight },
-      buttons: [...el.querySelectorAll("button")].map((b) => {
-        const r = b.getBoundingClientRect();
-        return {
-          text: b.textContent,
-          x: r.x,
-          y: r.y,
-          width: r.width,
-          height: r.height,
-          visible:
-            r.top >= 0 &&
-            r.bottom <= innerHeight &&
-            r.left >= 0 &&
-            r.right <= innerWidth,
-          hit: b.disabled
-            ? el.contains(
-                document.elementFromPoint(
-                  r.x + r.width / 2,
-                  r.y + r.height / 2,
-                ),
-              )
-            : document
-                .elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
-                ?.closest("button") === b,
-        };
-      }),
+      buttons: [...el.querySelectorAll("button")]
+        // A collapsed Details disclosure holds buttons nobody can reach yet.
+        .filter((b) => !b.closest("details:not([open])"))
+        .map((b) => {
+          const r = b.getBoundingClientRect();
+          return {
+            text: b.textContent,
+            x: r.x,
+            y: r.y,
+            width: r.width,
+            height: r.height,
+            visible:
+              r.top >= 0 &&
+              r.bottom <= innerHeight &&
+              r.left >= 0 &&
+              r.right <= innerWidth,
+            hit: b.disabled
+              ? el.contains(
+                  document.elementFromPoint(
+                    r.x + r.width / 2,
+                    r.y + r.height / 2,
+                  ),
+                )
+              : document
+                  .elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+                  ?.closest("button") === b,
+          };
+        }),
     }));
     j.diagnostics.push(
       JSON.stringify({ milestone: `task-footer-${height}`, footer }),
@@ -212,6 +230,8 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     await captureBrowserEvidence(page, `390x${height}-unknown-outcome`, {
       fullPage: false,
     });
+    // The outcome message makes the footer taller, so bring the scroller into view first.
+    await form.locator(".question-content").scrollIntoViewIfNeeded();
     await form
       .getByRole("textbox", { name: "Optional", exact: true })
       .scrollIntoViewIfNeeded();
@@ -243,15 +263,14 @@ test("production mixed form preserves literal schema, keyboard input, field erro
     await route.continue();
   });
   await form
-    .getByRole("button", { name: "Reconcile original answer", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
-  await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
   await form
-    .getByText(
-      "Delivery waits for the requester's next eligible turn; independent holds are unchanged.",
-      { exact: true },
-    )
+    .getByText("Answer sent. It reaches the requester on its next turn.", {
+      exact: true,
+    })
     .waitFor();
+  assert.equal(await form.locator("[data-slot=action-outcome]").count(), 1);
   assert.equal(commands.at(-1), original);
   assert.equal(
     f.service
@@ -853,7 +872,7 @@ test("action Inbox preserves drafts across exact task entry, filter and phone qu
     .getByRole("button", { name: "Submit answers", exact: true })
     .click();
   await form
-    .getByText(/Answer recorded/)
+    .getByText(/Answer sent/)
     .first()
     .waitFor();
   await page
@@ -1054,7 +1073,7 @@ test("collision-shaped literal IDs keep unique DOM controls, label activation an
     .getByRole("button", { name: "Submit answers", exact: true })
     .click();
   await form
-    .getByText(/Answer recorded/)
+    .getByText(/Answer sent/)
     .first()
     .waitFor();
   const saved = f.service

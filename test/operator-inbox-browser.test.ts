@@ -766,7 +766,7 @@ test("an Inbox question in a paused project shows its hold in the footer, record
   });
   await form.getByRole("radio", { name: /^Team owners/ }).check();
   await footer.getByRole("button", { name: "Submit answer" }).click();
-  await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+  await form.locator(".question-recorded").waitFor();
   // The recorded confirmation replaces the footer; the same notices stay on it.
   const recorded = form.locator(".question-recorded");
   await recorded.getByText(pausedHold, { exact: true }).waitFor();
@@ -790,7 +790,7 @@ test("an Inbox question in a paused project shows its hold in the footer, record
     assert.equal(await page.getByText(pausedHold).count(), 0);
     await form.getByRole("radio", { name: /^Team owners/ }).check();
     await footer.getByRole("button", { name: "Submit answer" }).click();
-    await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+    await form.locator(".question-recorded").waitFor();
     assert.equal(await page.getByText(pausedHold).count(), 0);
   } finally {
     await page.unroute(taskUrl);
@@ -858,7 +858,7 @@ test("phone: the question hold sits in the sticky submit area without covering f
     assert.equal(await page.getByText(pausedHold).count(), 0);
     await form.getByRole("radio", { name: /^Team owners/ }).check();
     await submitButton.click();
-    await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+    await form.locator(".question-recorded").waitFor();
   } finally {
     release();
     await page.unroute(taskUrl);

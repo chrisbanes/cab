@@ -537,6 +537,7 @@ export function TaskComposer({
         )}
         {state.failed && (
           <ActionOutcome
+            key={state.details.requestKey}
             tone="error"
             message={state.notice}
             details={detailRows(state.details)}
