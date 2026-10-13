@@ -170,6 +170,109 @@ test("preserves nullable values, zero SQLite flags, and original JSON fields", (
   );
 });
 
+test("rejects schemas that normalize result identities", () => {
+  const untrustedActivation = {
+    projectId,
+    selectionId: " selector ",
+    configVersion: 1,
+    active: true,
+  };
+  assert.throws(
+    () => parseDomainCommandOutcome("github.activate", untrustedActivation),
+    /changed validated material/,
+  );
+
+  const untrustedGithub = {
+    ...github,
+    selections: [
+      {
+        id: " selection ",
+        kind: "project",
+        projectNodeId: " project-node ",
+        filter: "  preserve this filter  ",
+      },
+    ],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", name: " ready " }],
+    },
+    repositories: [
+      {
+        repositoryId: " repo ",
+        path: " /repo ",
+        ref: " main ",
+        gitCommonDirectory: "/repo/.git",
+      },
+    ],
+  };
+  assert.throws(
+    () => parseDomainCommandOutcome("github.configure", untrustedGithub),
+    /changed validated material/,
+  );
+
+  const untrustedDelivery = {
+    mode: "reviewable-pr",
+    grants: [
+      {
+        action: "issue.comment",
+        repositoryId: " repo ",
+        mode: "allow",
+        projectNodeId: " project-node ",
+      },
+    ],
+    requiredChecks: [{ name: " check " }],
+    version: 1,
+    credentialConfigured: false,
+  };
+  assert.throws(
+    () => parseDomainCommandOutcome("delivery.configure", untrustedDelivery),
+    /changed validated material/,
+  );
+});
+
+test("accepts unchanged material with whitespace, reordered keys, and null prototypes", () => {
+  const reorderedNullPrototypeProject = Object.assign(Object.create(null), {
+    instructions: "  preserve these instructions\n",
+    instructionsRevision: 1,
+    leadProfileId: null,
+    paused: 0,
+    version: 1,
+    name: " Project ",
+    id: projectId,
+  });
+  const parsedProject = parseDomainCommandOutcome(
+    "project.create",
+    reorderedNullPrototypeProject,
+  );
+  assert.deepEqual(parsedProject.result, {
+    id: projectId,
+    name: " Project ",
+    version: 1,
+    paused: 0,
+    leadProfileId: null,
+    instructionsRevision: 1,
+    instructions: "  preserve these instructions\n",
+  });
+
+  const projectOverrides = Object.create(null) as Record<string, number>;
+  projectOverrides[projectId] = 3;
+  const realSqliteStyleCapacity = Object.assign(Object.create(null), {
+    effectiveProjectLimits: projectOverrides,
+    currentUsage: Object.assign(Object.create(null), {
+      projects: Object.create(null),
+      global: 0,
+    }),
+    projectOverrides,
+    defaultProjectLimit: 2,
+    globalLimit: 4,
+  });
+  assert.equal(
+    parseDomainCommandOutcome("capacity.configure", realSqliteStyleCapacity)
+      .type,
+    "capacity.configure",
+  );
+});
+
 test("rejects malformed result fields rather than coercing them", () => {
   const invalid: Array<[DomainCommand["type"], unknown]> = [
     ["project.create", { ...project, id: "not-a-uuid" }],

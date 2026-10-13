@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deliveryPolicySchema } from "./delivery.js";
+import { canonicalMaterial, deliveryPolicySchema } from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
 import { linkedRepositorySchema } from "./github-source.js";
 import { githubConfigurationSchema } from "./github-source-contracts.js";
@@ -164,6 +164,13 @@ export type DomainCommandOutcome = {
   [K in DomainCommandType]: { type: K; result: DomainCommandResultMap[K] };
 }[DomainCommandType];
 
+function parseUnchanged<T>(schema: z.ZodType<T>, value: unknown): T {
+  const parsed = schema.parse(value);
+  if (canonicalMaterial(parsed) !== canonicalMaterial(value))
+    throw new Error("Command result schema changed validated material");
+  return parsed;
+}
+
 /** Validate an untrusted apply, receipt, or provider result without changing its shape. */
 export function parseDomainCommandOutcome(
   type: DomainCommandType,
@@ -171,10 +178,16 @@ export function parseDomainCommandOutcome(
 ): DomainCommandOutcome {
   switch (type) {
     case "delivery.configure":
-      return { type, result: deliveryCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(deliveryCommandResultSchema, value),
+      };
     case "project.create":
     case "project.configure":
-      return { type, result: projectCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(projectCommandResultSchema, value),
+      };
     case "task.create":
     case "task.configure":
     case "github.place":
@@ -182,29 +195,44 @@ export function parseDomainCommandOutcome(
     case "dependency.add":
     case "dependency.remove":
     case "imported-blockers.set":
-      return { type, result: taskCommandResultSchema.parse(value) };
+      return { type, result: parseUnchanged(taskCommandResultSchema, value) };
     case "profile.create":
     case "profile.configure":
-      return { type, result: profileCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(profileCommandResultSchema, value),
+      };
     case "routing.configure":
-      return { type, result: routingCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(routingCommandResultSchema, value),
+      };
     case "github.configure":
       return {
         type,
-        result: githubConfigurationCommandResultSchema.parse(value),
+        result: parseUnchanged(githubConfigurationCommandResultSchema, value),
       };
     case "github.activate":
-      return { type, result: githubActivationCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(githubActivationCommandResultSchema, value),
+      };
     case "assignment.create":
     case "assignment.apply":
-      return { type, result: assignmentCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(assignmentCommandResultSchema, value),
+      };
     case "capacity.configure":
-      return { type, result: capacityCommandResultSchema.parse(value) };
+      return {
+        type,
+        result: parseUnchanged(capacityCommandResultSchema, value),
+      };
     case "discovery.configure":
     case "claude-token.configure":
       return {
         type,
-        result: credentialStatusCommandResultSchema.parse(value),
+        result: parseUnchanged(credentialStatusCommandResultSchema, value),
       };
     default: {
       const exhaustive: never = type;
