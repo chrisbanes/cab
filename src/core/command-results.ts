@@ -1,0 +1,214 @@
+import { z } from "zod";
+import { deliveryPolicySchema } from "./delivery.js";
+import type { DomainCommand } from "./domain.js";
+import { linkedRepositorySchema } from "./github-source.js";
+import { githubConfigurationSchema } from "./github-source-contracts.js";
+
+const id = z.string().uuid();
+const positiveInteger = z.number().int().positive();
+const nonnegativeInteger = z.number().int().nonnegative();
+const sqliteFlag = z.union([z.literal(0), z.literal(1)]);
+
+export const projectCommandResultSchema = z
+  .object({
+    id,
+    name: z.string(),
+    version: positiveInteger,
+    paused: sqliteFlag,
+    leadProfileId: id.nullable(),
+    instructionsRevision: positiveInteger,
+    instructions: z.string(),
+  })
+  .strict();
+
+export const taskCommandResultSchema = z
+  .object({
+    id,
+    projectId: id,
+    version: positiveInteger,
+    outcome: z.string(),
+    ready: sqliteFlag,
+    state: z.enum(["open", "done", "cancelled"]),
+    importedBlockers: z.enum(["clear", "blocked", "unknown"]),
+    title: z.string(),
+  })
+  .strict();
+
+export const profileCommandResultSchema = z
+  .object({
+    id,
+    version: positiveInteger,
+    name: z.string(),
+    summary: z.string(),
+    instructions: z.string(),
+    capabilities: z.string(),
+    revoked: sqliteFlag,
+  })
+  .strict();
+
+export const assignmentCommandResultSchema = z
+  .object({
+    id,
+    taskId: id,
+    projectId: id,
+    version: positiveInteger,
+    profileId: id,
+    profileRevision: positiveInteger,
+    instructionsRevision: positiveInteger,
+    brief: z.string(),
+    resultDestination: z.string(),
+    requesterAssignmentId: id.nullable(),
+    resultRecipientAssignmentId: id.nullable(),
+    resultRecipientDisposition: z.enum(["resolved", "unresolved"]),
+    state: z.enum(["pending", "running", "completed", "held"]),
+  })
+  .strict();
+
+const candidateProfileIdsJson = z.string().superRefine((value, context) => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    context.addIssue({
+      code: "custom",
+      message: "Invalid candidate profile JSON",
+    });
+    return;
+  }
+  const result = z.array(id).safeParse(parsed);
+  if (!result.success)
+    context.addIssue({
+      code: "custom",
+      message: "Invalid candidate profile IDs",
+    });
+});
+
+export const routingCommandResultSchema = z
+  .object({
+    projectId: id,
+    version: positiveInteger,
+    enabled: sqliteFlag,
+    guidance: z.string(),
+    credentialAvailable: sqliteFlag,
+    candidateProfileIds: candidateProfileIdsJson,
+  })
+  .strict();
+
+export const deliveryCommandResultSchema = deliveryPolicySchema
+  .omit({ credentialRef: true })
+  .extend({ version: positiveInteger, credentialConfigured: z.boolean() })
+  .strict();
+
+export const githubConfigurationCommandResultSchema = githubConfigurationSchema
+  .extend({
+    version: positiveInteger,
+    repositories: z.array(linkedRepositorySchema).max(20),
+  })
+  .strict();
+
+export const githubActivationCommandResultSchema = z
+  .object({
+    projectId: id,
+    selectionId: z.string().trim().min(1).max(512),
+    configVersion: positiveInteger,
+    active: z.literal(true),
+  })
+  .strict();
+
+const numericRecord = z.record(id, positiveInteger);
+const usageRecord = z.record(id, nonnegativeInteger);
+export const capacityCommandResultSchema = z
+  .object({
+    globalLimit: positiveInteger,
+    defaultProjectLimit: z.literal(2),
+    projectOverrides: numericRecord,
+    currentUsage: z
+      .object({ global: nonnegativeInteger, projects: usageRecord })
+      .strict(),
+    effectiveProjectLimits: numericRecord,
+  })
+  .strict();
+
+export const credentialStatusCommandResultSchema = z
+  .object({ configured: z.boolean() })
+  .strict();
+
+export interface DomainCommandResultMap {
+  "delivery.configure": z.output<typeof deliveryCommandResultSchema>;
+  "project.create": z.output<typeof projectCommandResultSchema>;
+  "project.configure": z.output<typeof projectCommandResultSchema>;
+  "task.create": z.output<typeof taskCommandResultSchema>;
+  "task.configure": z.output<typeof taskCommandResultSchema>;
+  "profile.create": z.output<typeof profileCommandResultSchema>;
+  "profile.configure": z.output<typeof profileCommandResultSchema>;
+  "routing.configure": z.output<typeof routingCommandResultSchema>;
+  "github.configure": z.output<typeof githubConfigurationCommandResultSchema>;
+  "github.activate": z.output<typeof githubActivationCommandResultSchema>;
+  "github.place": z.output<typeof taskCommandResultSchema>;
+  "source.review": z.output<typeof taskCommandResultSchema>;
+  "assignment.create": z.output<typeof assignmentCommandResultSchema>;
+  "assignment.apply": z.output<typeof assignmentCommandResultSchema>;
+  "dependency.add": z.output<typeof taskCommandResultSchema>;
+  "dependency.remove": z.output<typeof taskCommandResultSchema>;
+  "imported-blockers.set": z.output<typeof taskCommandResultSchema>;
+  "capacity.configure": z.output<typeof capacityCommandResultSchema>;
+  "discovery.configure": z.output<typeof credentialStatusCommandResultSchema>;
+  "claude-token.configure": z.output<
+    typeof credentialStatusCommandResultSchema
+  >;
+}
+
+type DomainCommandType = DomainCommand["type"];
+
+export type DomainCommandOutcome = {
+  [K in DomainCommandType]: { type: K; result: DomainCommandResultMap[K] };
+}[DomainCommandType];
+
+/** Validate an untrusted apply, receipt, or provider result without changing its shape. */
+export function parseDomainCommandOutcome(
+  type: DomainCommandType,
+  value: unknown,
+): DomainCommandOutcome {
+  switch (type) {
+    case "delivery.configure":
+      return { type, result: deliveryCommandResultSchema.parse(value) };
+    case "project.create":
+    case "project.configure":
+      return { type, result: projectCommandResultSchema.parse(value) };
+    case "task.create":
+    case "task.configure":
+    case "github.place":
+    case "source.review":
+    case "dependency.add":
+    case "dependency.remove":
+    case "imported-blockers.set":
+      return { type, result: taskCommandResultSchema.parse(value) };
+    case "profile.create":
+    case "profile.configure":
+      return { type, result: profileCommandResultSchema.parse(value) };
+    case "routing.configure":
+      return { type, result: routingCommandResultSchema.parse(value) };
+    case "github.configure":
+      return {
+        type,
+        result: githubConfigurationCommandResultSchema.parse(value),
+      };
+    case "github.activate":
+      return { type, result: githubActivationCommandResultSchema.parse(value) };
+    case "assignment.create":
+    case "assignment.apply":
+      return { type, result: assignmentCommandResultSchema.parse(value) };
+    case "capacity.configure":
+      return { type, result: capacityCommandResultSchema.parse(value) };
+    case "discovery.configure":
+    case "claude-token.configure":
+      return {
+        type,
+        result: credentialStatusCommandResultSchema.parse(value),
+      };
+    default: {
+      const exhaustive: never = type;
+      return exhaustive;
+    }
+  }
+}
