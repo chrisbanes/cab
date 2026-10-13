@@ -257,6 +257,7 @@ test("failed close invalidates wrappers and a later close retries the same handl
     assert.equal(field(retained.get(), "value"), "persisted");
 
     assert.throws(() => database.close(), /injected close failure/);
+    assert.equal(database.isOpen, false);
     assert.throws(() => retained!.get(), /closed/i);
     assert.throws(() => database.prepare("SELECT 1"), /closed/i);
     database.close();

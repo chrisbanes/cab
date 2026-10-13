@@ -19,6 +19,7 @@ import {
   type InboxDelivery,
   type RuntimeQuestionRecord,
 } from "../core/coordination.js";
+import { CachedDatabase } from "../core/database-cache.js";
 import {
   canonicalMaterial,
   type DeliveryActionRecord,
@@ -411,6 +412,8 @@ export interface RoutingAvailability {
 export class StandaloneService {
   private owner: StandaloneDataDirectory | undefined;
   private db: DatabaseSync | undefined;
+  /** Statement-caching facade over `db` for this generation; `db` stays the lifecycle handle. */
+  private cache: CachedDatabase | undefined;
   private state: ExecutionState | undefined;
   private domainState: DomainStore | undefined;
   private githubSourceStore: GitHubSourceStore | undefined;
@@ -540,9 +543,16 @@ export class StandaloneService {
     this.stopPromise = undefined;
     const { databasePath: database, workspacePath } = dataDirectory;
     try {
-      const db = new DatabaseSync(database);
-      this.db = db;
-      db.exec(
+      const rawDb = new DatabaseSync(database);
+      this.db = rawDb;
+      // Created before the pragmas so every close path goes through the facade.
+      const db = new CachedDatabase(rawDb, {
+        close: () => {
+          if (rawDb.isOpen) rawDb.close();
+        },
+      });
+      this.cache = db;
+      rawDb.exec(
         "PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL; PRAGMA synchronous = FULL",
       );
       new Store(db).ensureHost("standalone-codex");
@@ -1120,12 +1130,17 @@ export class StandaloneService {
           this.conversationHistory = undefined;
           this.state = undefined;
           try {
-            this.db?.close();
+            this.closeDatabase();
           } finally {
-            this.db = undefined;
-            dataDirectory.close();
-            this.owner = undefined;
-            if (this.generation === generation) this.generation = undefined;
+            // A failed close leaves the raw handle open: keep it and the owner
+            // so an explicit stop() can retry; start() rejects meanwhile.
+            if (!this.db?.isOpen) {
+              this.db = undefined;
+              this.cache = undefined;
+              dataDirectory.close();
+              this.owner = undefined;
+              if (this.generation === generation) this.generation = undefined;
+            }
           }
         }
       }
@@ -1435,6 +1450,12 @@ export class StandaloneService {
     return stopping;
   }
 
+  /** Clears the statement cache, then closes the raw handle; safe to retry after a failure. */
+  private closeDatabase(): void {
+    if (this.cache) this.cache.close();
+    else this.db?.close();
+  }
+
   private async stopOwned(): Promise<void> {
     const scheduler = this.scheduler;
     const supervisor = this.supervisor;
@@ -1481,7 +1502,7 @@ export class StandaloneService {
     await attempt("GitHub synchronization stop", () => synchronizer?.stop());
     await attempt("delivery stop", () => delivery?.stop());
     await attempt("runtime-question invalidation", () => {
-      if (this.db?.isOpen)
+      if (this.db?.isOpen && this.cache?.isOpen)
         this.coordination?.invalidateRuntimeQuestions(
           "Service stopped; native endpoints lost",
         );
@@ -1513,9 +1534,13 @@ export class StandaloneService {
     });
     await attempt("supervisor settlement", () => supervisor?.settle());
 
-    if (db?.isOpen) await attempt("service database close", () => db.close());
+    if (db?.isOpen)
+      await attempt("service database close", () => this.closeDatabase());
     if (!db?.isOpen) {
-      if (this.db === db) this.db = undefined;
+      if (this.db === db) {
+        this.db = undefined;
+        this.cache = undefined;
+      }
       const owner = this.owner;
       if (owner) {
         let released = false;

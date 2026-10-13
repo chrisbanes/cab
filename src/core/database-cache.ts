@@ -162,6 +162,10 @@ export class CachedDatabase implements Database {
       });
   }
 
+  get isOpen(): boolean {
+    return !this.closed;
+  }
+
   exec(sql: string): unknown {
     this.assertOpen();
     if (invalidatesStatements(sql)) this.invalidate();
