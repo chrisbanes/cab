@@ -168,6 +168,7 @@ type Row =
   ReturnType<StandaloneService["domain"]> extends { task(id: string): infer R }
     ? R
     : never;
+type RecoveryHoldScope = "task-wide" | "selected-assignment";
 type RetainedReadPolicy = {
   taskId: string;
   projectId: string;
@@ -4489,13 +4490,16 @@ export class OperatorApi {
   }
   async readAssignmentRecovery(assignmentId: string) {
     return this.readWithInstructionFence(() =>
-      this.readAssignmentRecoveryOnce(assignmentId),
+      this.readAssignmentRecoveryOnce(assignmentId, "task-wide"),
     );
   }
   /** The exact identity and advisory eligibility each recovery command needs. */
   async readRecoveryOptions(assignmentId: string) {
     return this.readWithInstructionFence(async () => {
-      const base = await this.readAssignmentRecoveryOnce(assignmentId);
+      const base = await this.readAssignmentRecoveryOnce(
+        assignmentId,
+        "selected-assignment",
+      );
       const { projectId } = this.requireAssignment(assignmentId);
       const excluded = await this.exclusions(projectId, base.data.taskId);
       return recoveryOptions(this.service, base, projectId, excluded, (v) =>
@@ -4503,8 +4507,11 @@ export class OperatorApi {
       );
     });
   }
-  /** Task-wide holds and the selected assignment's records before the bound of 20. */
-  private async readAssignmentRecoveryOnce(assignmentId: string) {
+  /** Shared verified record projection with an explicit recovery hold scope. */
+  private async readAssignmentRecoveryOnce(
+    assignmentId: string,
+    holdScope: RecoveryHoldScope,
+  ) {
     const d = this.domain(),
       { taskId, projectId } = this.requireAssignment(assignmentId),
       snapshot = this.workspaceSnapshot([taskId]),
@@ -4531,14 +4538,15 @@ export class OperatorApi {
     const records = taskRecords.filter(
       (r) => !r.binding || r.binding.assignmentId === assignmentId,
     );
+    const holdRecords = holdScope === "task-wide" ? taskRecords : records;
     const taskHold = this.service.taskHold(taskId);
     const holds = {
       stop:
         this.service.isTaskStopped(taskId) ||
         taskRecords.some((r) => r.holds.stop),
-      writer: taskRecords.some((r) => r.holds.writer),
-      capacity: taskRecords.some((r) => r.holds.capacity),
-      uncertainty: taskRecords.some((r) => r.holds.uncertainty),
+      writer: holdRecords.some((r) => r.holds.writer),
+      capacity: holdRecords.some((r) => r.holds.capacity),
+      uncertainty: holdRecords.some((r) => r.holds.uncertainty),
       task:
         taskHold !== undefined ||
         taskRecords.some((r) => r.holds.task !== null),

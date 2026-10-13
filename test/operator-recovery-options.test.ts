@@ -13,8 +13,12 @@ import {
 
 type World = Awaited<ReturnType<typeof servedGeneration>>;
 
-async function options(w: World, token?: string) {
-  const path = `/api/operator/assignments/${w.g.assignmentId}/recovery-options`;
+async function options(
+  w: World,
+  token?: string,
+  assignmentId = w.g.assignmentId,
+) {
+  const path = `/api/operator/assignments/${assignmentId}/recovery-options`;
   const response = token
     ? await w.s.bearer(token, path)
     : await w.s.sessionGet(path);
@@ -308,7 +312,25 @@ test("assignment recovery caps each assignment while retaining task-wide sibling
   assert.equal(b.holds.capacity, true);
   assert.equal(b.holds.uncertainty, true);
 
+  const siblingOptions = await options(w, w.read, sibling);
+  assert.equal(siblingOptions.held, false);
+  assert.deepEqual(siblingOptions.holds, {
+    stop: false,
+    writer: false,
+    capacity: false,
+    uncertainty: false,
+    task: false,
+  });
+
   const data = await options(w, w.read);
+  assert.equal(data.held, true);
+  assert.deepEqual(data.holds, {
+    stop: false,
+    writer: true,
+    capacity: true,
+    uncertainty: true,
+    task: false,
+  });
   assert.deepEqual(
     data.records.map((r) => r.workId),
     [w.g.workId],
