@@ -11,7 +11,7 @@ what the service can and cannot use, with one fix line per problem.
 
 ## Entry points
 
-- `ensemble doctor` in the operator CLI (read credential with `diagnostics.read`).
+- `ensemble doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
 - Settings → Readiness panel.
 - [Getting started](getting-started.md) Runtime row and [first task](first-task.md)
   Fix actions.

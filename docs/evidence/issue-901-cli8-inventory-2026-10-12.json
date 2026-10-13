@@ -1074,7 +1074,7 @@
         "test/operator-cli-inventory.test.ts"
       ],
       "effect": "Reads the service-side readiness checks (Codex executable and login, git, GitHub discovery, Claude token, runtime harness, data and auth paths); JSON data equals the bearer GET of /api/operator/readiness and carries no secret value or path.",
-      "denial": "n/a: read-only; unsupported service exits 7 after identity only, managed-assignment context exits 3 with no request, and a failing check still exits 0.",
+      "denial": "n/a: read-only; a service that does not advertise diagnostics.read exits 7 after identity only (a pre-readiness service that does advertise it answers not-found), managed-assignment context exits 3 with no request, and a failing check still exits 0.",
       "revision": "n/a: read; no version or revision check",
       "retry": "n/a: idempotent read; no receipt",
       "observation": "synthetic",

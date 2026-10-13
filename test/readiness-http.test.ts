@@ -98,15 +98,15 @@ test("verifyCodexLogin asks the App Server for account and config only", async (
   writeFileSync(
     executable,
     String.raw`#!/usr/bin/env node
-import { appendFileSync } from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 for await (const line of createInterface({input: process.stdin})) {
   const message = JSON.parse(line);
   if (message.id === undefined) continue;
   appendFileSync(${JSON.stringify(log)}, message.method + "\n");
   let result = {};
-  if (message.method === "account/read") result = {account: {type: "chatgpt"}};
-  if (message.method === "config/read") result = {config: {approval_policy: "never", sandbox_mode: "workspace-write"}};
+  if (message.method === "account/read") result = existsSync(${JSON.stringify(join(root, "signed-out"))}) ? {account: null} : {account: {type: "chatgpt"}};
+  if (message.method === "config/read") result = {config: {approval_policy: existsSync(${JSON.stringify(join(root, "policy"))}) ? "on-request" : "never", sandbox_mode: "workspace-write"}};
   process.stdout.write(JSON.stringify({id: message.id, result}) + "\n");
 }
 `,
@@ -126,6 +126,15 @@ for await (const line of createInterface({input: process.stdin})) {
     "account/read",
     "config/read",
   ]);
+
+  // A policy mismatch is told apart from a missing login.
+  writeFileSync(join(root, "policy"), "");
+  assert.equal(await service.verifyCodexLogin(), "policy");
+  rmSync(join(root, "policy"));
+  writeFileSync(join(root, "signed-out"), "");
+  assert.equal(await service.verifyCodexLogin(), "failed");
+  rmSync(join(root, "signed-out"));
+  assert.equal(await service.verifyCodexLogin(), "verified");
 
   // The runtime's own state is untouched by a failed read.
   const runtime = (

@@ -68,7 +68,10 @@ test("doctor reports the service's readiness checks, equal to the API read and w
     human.out,
     /Claude token\s+Fail\s+Token file permits group or other access/,
   );
-  assert.match(human.out, /Fix Claude token: See Add Claude/);
+  assert.match(
+    human.out,
+    /Fix Claude token: Make the token file a private regular file/,
+  );
   assert.match(human.out, /GitHub discovery\s+Not configured/);
 
   const everything = [json.out, json.err, human.out, human.err].join("\n");

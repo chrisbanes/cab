@@ -13,7 +13,7 @@ import "./add-claude.css";
  * with the suggested private path. The token is pasted from the clipboard in a terminal and
  * never passes through this page.
  */
-export const claudeTokenCommands = [
+const claudeTokenCommands = [
   'mkdir -m 700 -p "$HOME/.ensemble/claude"',
   'install -m 600 /dev/null "$HOME/.ensemble/claude/claude-token"',
   'pbpaste > "$HOME/.ensemble/claude/claude-token"',
@@ -113,11 +113,7 @@ function TokenReadable(p: SettingsProps & { checkNonce: number }) {
         )}
       </div>
       {c?.reason && <p className="metadata muted">{c.reason}</p>}
-      {c?.status === "fail" && (
-        <p className="metadata">
-          Fix the file and reload this page, or clear the reference above.
-        </p>
-      )}
+      {c?.status === "fail" && c.fix && <p className="metadata">{c.fix}</p>}
       {!c && (
         <p className="metadata muted" role="status">
           {check.state.status === "error"

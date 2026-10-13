@@ -149,6 +149,19 @@ test("codex login passes when verified and fails otherwise with the login fix", 
   }
 });
 
+test("a Codex policy mismatch is not reported as a missing login", async (t) => {
+  const f = fixture(t);
+  const result = await check(f, "codex-login", {
+    codexLogin: async () => "policy",
+  });
+  assert.equal(result.status, "fail");
+  assert.doesNotMatch(
+    `${result.reason} ${result.fix}`,
+    /signed in|codex login/i,
+  );
+  assert.match(result.fix ?? "", /approval policy/);
+});
+
 test("github discovery is not configured, readable or failing", async (t) => {
   const f = fixture(t);
   const discovery = (configured: boolean, available: boolean) => async () => ({
@@ -244,8 +257,14 @@ test("the Claude token check reports each reference state without path or value"
     claudeTokenStatus: () => ({ state: "restart-required" }),
   });
   assert.equal(restart.reason, "Restart the service to use this variable");
+  assert.equal(restart.fix, "Restart the service");
+  const fileRestart = await check(f, "claude-token", {
+    claudeTokenReference: () => `file:${tokenPath}`,
+    claudeTokenStatus: () => ({ state: "restart-required" }),
+  });
+  assert.equal(fileRestart.reason, "Restart the service to use this token");
 
-  for (const result of [open, missing, link, unset, restart]) {
+  for (const result of [open, missing, link, unset, restart, fileRestart]) {
     const text = JSON.stringify(result);
     for (const secret of [TOKEN, ENV_NAME, tokenPath, f.root])
       assert.ok(!text.includes(secret), secret);
@@ -408,6 +427,58 @@ test("read returns all seven checks in fixed order and parses with the shared sc
   const token = await new Readiness(deps(f)).claudeToken();
   assert.equal(token.data.id, "claude-token");
   assert.deepEqual(claudeTokenCheckSchema.parse(token), token);
+});
+
+test("many or long failing profiles keep the reason inside the schema", async (t) => {
+  const f = fixture(t);
+  const claudeUp = [
+    { harness: "codex", state: "available" },
+    { harness: "claude", state: "available" },
+  ] as const;
+  const wrong = (name: string): ReadinessProfile => ({
+    name,
+    revoked: false,
+    runtime: claude("not-a-model"),
+  });
+  const run = async (names: string[]) => {
+    const { data } = await new Readiness(
+      deps(f, {
+        harnessStatuses: () => [...claudeUp],
+        harnessSettings: () => claudeSettings,
+        profiles: () => names.map(wrong),
+      }),
+    ).read();
+    return data.checks;
+  };
+
+  const long = await run(["N".repeat(512)]);
+  const longHarness = long.find((c) => c.id === "runtime-harness");
+  assert.equal(longHarness?.status, "fail");
+  assert.match(
+    longHarness?.reason ?? "",
+    /^Profile N+…: model is not accepted$/,
+  );
+
+  const many = await run(Array.from({ length: 20 }, (_, i) => `Reviewer ${i}`));
+  const manyHarness = many.find((c) => c.id === "runtime-harness");
+  assert.equal(manyHarness?.status, "fail");
+  assert.match(manyHarness?.reason ?? "", /and 17 more$/);
+  assert.equal(many.length, 7, "the other checks are unaffected");
+
+  const worst = await run(Array.from({ length: 20 }, () => "W".repeat(512)));
+  assert.equal(worst.length, 7);
+});
+
+test("an invalid check result degrades to that check's failure, not a failed read", async (t) => {
+  const f = fixture(t);
+  const { data } = await new Readiness(
+    deps(f, { codexLogin: async () => "weird" as never }),
+  ).read();
+  assert.equal(data.checks.length, 7);
+  assert.equal(
+    data.checks.filter((c) => c.status === "pass").length >= 3,
+    true,
+  );
 });
 
 test("a throwing dependency fails that check only, without its message", async (t) => {

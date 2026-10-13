@@ -1805,7 +1805,9 @@ export class StandaloneService {
    * Re-runs the running Codex App Server's authentication check (`account/read`, `config/read`);
    * requests no model turn and leaves the runtime's state untouched whatever the result.
    */
-  async verifyCodexLogin(): Promise<"verified" | "failed" | "unavailable"> {
+  async verifyCodexLogin(): Promise<
+    "verified" | "policy" | "failed" | "unavailable"
+  > {
     const runtime = this.runtimes.get("codex") as
       | (Runtime & { verifyLoginAndPolicy?: () => Promise<void> })
       | undefined;
@@ -1815,8 +1817,10 @@ export class StandaloneService {
     try {
       await runtime.verifyLoginAndPolicy();
       return "verified";
-    } catch {
-      return "failed";
+    } catch (error) {
+      // A rejected `config/read` shape is a policy mismatch, not a missing login.
+      const issues = (error as { issues?: { path?: unknown[] }[] }).issues;
+      return issues?.[0]?.path?.[0] === "config" ? "policy" : "failed";
     }
   }
 

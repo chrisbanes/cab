@@ -16,6 +16,7 @@ import type {
 import {
   type ClaudeTokenCheckResult,
   claudeTokenCheckSchema,
+  readinessCheckSchema,
   type ReadinessCheck,
   type ReadinessCheckId,
   type ReadinessResult,
@@ -44,7 +45,7 @@ export type ReadinessDeps = {
   dataDir: string;
   authFile: string;
   /** Re-runs the running App Server's authentication initialization; no model turn. */
-  codexLogin: () => Promise<"verified" | "failed" | "unavailable">;
+  codexLogin: () => Promise<"verified" | "policy" | "failed" | "unavailable">;
   discovery: () => Promise<Discovery>;
   claudeTokenReference: () => string | null;
   claudeTokenStatus: () => {
@@ -86,14 +87,28 @@ const outcome = (
   status: "fail" | "not-configured",
   reason: string,
   fix: string,
-): ReadinessCheck => ({ id, label: labels[id], status, reason, fix });
+): ReadinessCheck => ({
+  id,
+  label: labels[id],
+  status,
+  // A reason that outgrew the schema would otherwise invalidate the whole read.
+  reason: reason.length > 500 ? `${reason.slice(0, 499)}…` : reason,
+  fix,
+});
 
 const fixes = {
   codex: "Install Codex into the fixed PATH",
   codexLogin: "Run `codex login` as the service user",
   git: "Install git",
   discovery: "Run `gh auth login`, or Settings → discovery credential",
-  claude: "See Add Claude in Settings",
+  claudeAdd: "Add a Claude token in Settings → Add Claude",
+  claudeRestart: "Restart the service",
+  claudeVariable:
+    "Set the variable in the service environment and restart the service, or clear the reference in Add Claude",
+  claudeFile:
+    "Make the token file a private regular file you own (mode 600), or clear the reference in Add Claude",
+  codexPolicy:
+    "Set Codex's approval policy to never and its sandbox mode to workspace-write, then restart the service",
   harness:
     "Restart the service, or edit the profile's model or reasoning effort",
   harnessSettings:
@@ -158,26 +173,31 @@ export class Readiness {
     return (this.deps.now ?? Date.now)();
   }
 
+  /** One check; a throw or an invalid result degrades to that check's fixed failure. */
   private async run(id: ReadinessCheckId): Promise<ReadinessCheck> {
     try {
-      switch (id) {
-        case "codex-executable":
-          return await this.executable(id, "codex", fixes.codex);
-        case "git":
-          return await this.executable(id, "git", fixes.git);
-        case "codex-login":
-          return await this.codexLogin();
-        case "github-discovery":
-          return await this.discovery();
-        case "claude-token":
-          return this.claudeTokenCheck();
-        case "runtime-harness":
-          return this.runtimeHarness();
-        case "data-paths":
-          return await this.dataPaths();
-      }
+      return readinessCheckSchema.parse(await this.check(id));
     } catch {
       return outcome(id, "fail", "The check could not complete", fixes.unknown);
+    }
+  }
+
+  private async check(id: ReadinessCheckId): Promise<ReadinessCheck> {
+    switch (id) {
+      case "codex-executable":
+        return this.executable(id, "codex", fixes.codex);
+      case "git":
+        return this.executable(id, "git", fixes.git);
+      case "codex-login":
+        return this.codexLogin();
+      case "github-discovery":
+        return this.discovery();
+      case "claude-token":
+        return this.claudeTokenCheck();
+      case "runtime-harness":
+        return this.runtimeHarness();
+      case "data-paths":
+        return this.dataPaths();
     }
   }
 
@@ -193,7 +213,7 @@ export class Readiness {
 
   private async codexLogin(): Promise<ReadinessCheck> {
     const id = "codex-login";
-    let result: "verified" | "failed" | "unavailable" | "timeout";
+    let result: "verified" | "policy" | "failed" | "unavailable" | "timeout";
     try {
       result = await bounded(
         this.deps.codexLogin(),
@@ -203,6 +223,13 @@ export class Readiness {
       result = error instanceof TimedOut ? "timeout" : "failed";
     }
     if (result === "verified") return pass(id);
+    if (result === "policy")
+      return outcome(
+        id,
+        "fail",
+        "Codex's approval policy or sandbox mode is not the one Ensemble requires",
+        fixes.codexPolicy,
+      );
     const reason = {
       failed: "Codex is not signed in on the running service",
       unavailable: "The Codex runtime is not running",
@@ -252,25 +279,34 @@ export class Readiness {
         id,
         "not-configured",
         "No Claude token reference is configured",
-        fixes.claude,
+        fixes.claudeAdd,
       );
     const { state } = this.deps.claudeTokenStatus();
     if (state === "available") return pass(id);
+    const source = claudeTokenSource(reference);
     if (state === "restart-required")
       return outcome(
         id,
         "fail",
-        "Restart the service to use this variable",
-        fixes.claude,
+        source.kind === "env"
+          ? "Restart the service to use this variable"
+          : "Restart the service to use this token",
+        fixes.claudeRestart,
       );
-    const source = claudeTokenSource(reference);
-    let reason = "Token is unavailable";
-    if (source.kind === "env") reason = "Token variable is unavailable";
-    else {
-      const read = readClaudeToken(source, this.deps.env, this.deps.uid);
-      if ("problem" in read) reason = `Token file ${read.problem}`;
-    }
-    return outcome(id, "fail", reason, fixes.claude);
+    if (source.kind === "env")
+      return outcome(
+        id,
+        "fail",
+        "Token variable is unavailable",
+        fixes.claudeVariable,
+      );
+    const read = readClaudeToken(source, this.deps.env, this.deps.uid);
+    return outcome(
+      id,
+      "fail",
+      "problem" in read ? `Token file ${read.problem}` : "Token is unavailable",
+      fixes.claudeFile,
+    );
   }
 
   private runtimeHarness(): ReadinessCheck {
@@ -287,6 +323,7 @@ export class Readiness {
       this.deps.harnessStatuses().map((s) => [s.harness, s.state]),
     );
     const reasons: string[] = [];
+    const rejected: string[] = [];
     let unknownSettings = false;
     let other = false;
     for (const harness of new Set(used.map((p) => p.runtime.harness)))
@@ -311,11 +348,18 @@ export class Readiness {
       const field = unsupportedRuntimeField(runtime, settings);
       if (field) {
         other = true;
-        reasons.push(
-          `Profile ${profile.name}: ${field === "runtime.model" ? "model" : "reasoning effort"} is not accepted`,
+        const name =
+          profile.name.length > 40
+            ? `${profile.name.slice(0, 39)}…`
+            : profile.name;
+        rejected.push(
+          `Profile ${name}: ${field === "runtime.model" ? "model" : "reasoning effort"} is not accepted`,
         );
       }
     }
+    // A few profiles, then a count, so the reason stays inside the schema bound.
+    reasons.push(...rejected.slice(0, 3));
+    if (rejected.length > 3) reasons.push(`and ${rejected.length - 3} more`);
     if (unknownSettings)
       reasons.push("Claude's supported models are not known yet");
     if (reasons.length === 0) return pass(id);
@@ -406,7 +450,6 @@ export function serviceReadiness(
   service: StandaloneService,
   api: Pick<OperatorApi, "readDiscoveryStatus">,
   paths: { dataDir: string; authFile: string },
-  overrides: Partial<ReadinessDeps> = {},
 ): Readiness {
   return new Readiness({
     env: process.env,
@@ -427,6 +470,5 @@ export function serviceReadiness(
           revoked: Number(row.revoked) !== 0,
           runtime: service.domain().profileRuntime(String(row.id)),
         })),
-    ...overrides,
   });
 }
