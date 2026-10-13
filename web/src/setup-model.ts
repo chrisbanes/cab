@@ -6,6 +6,7 @@ import {
   executionHarnessLabels,
   type FolderListing,
   type OperatorCommand,
+  unsupportedRuntimeField,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import type { ReadinessCheck } from "../../src/operator/readiness.js";
@@ -272,6 +273,20 @@ export function readyCheckItems(input: {
       else if (status?.state === "not-configured")
         items.push({
           text: `${executionHarnessLabels[harness]} runtime isn't enabled for this service.`,
+        });
+      // The readiness check for this is a count over every profile, so it cannot speak for
+      // this lead. The service applies the same rule to the settings the workspace carries;
+      // while those are unknown (before the first Claude turn) nothing can be judged.
+      else if (
+        status?.settings &&
+        unsupportedRuntimeField(lead.runtime, status.settings)
+      )
+        items.push({
+          text: `${executionHarnessLabels[harness]} runtime doesn't accept the lead profile's model or reasoning effort.`,
+          link: {
+            label: "Edit profile",
+            href: `/app/profiles/${lead.id}/settings`,
+          },
         });
       const own: readonly string[] =
         harness === "claude"

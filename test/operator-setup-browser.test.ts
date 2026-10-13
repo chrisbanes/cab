@@ -947,17 +947,93 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
     await resume.getAttribute("aria-describedby"),
     await ready.locator(".setup-waits").getAttribute("id"),
   );
-  assert.equal(
-    await ready
-      .getByRole("link", { name: "Add Claude", exact: true })
-      .getAttribute("href"),
-    "/app/settings/runtime",
-  );
+  const addClaude = ready.getByRole("link", {
+    name: "Add Claude",
+    exact: true,
+  });
+  assert.equal(await addClaude.getAttribute("href"), "/app/settings/runtime");
+  // The fix opens in a new tab, so this ready check is still here afterwards.
+  assert.equal(await addClaude.getAttribute("target"), "_blank");
+  const tab = page.context().waitForEvent("page");
+  await addClaude.click();
+  const fix = await tab;
+  await fix.getByRole("heading", { name: "Add Claude", exact: true }).waitFor();
+  assert.equal(new URL(page.url()).pathname, "/app/settings/projects/new");
+  assert.equal(await ready.count(), 1);
+  assert.equal(await resume.isDisabled(), true);
   assert.equal(
     sent.some((c) => c.type === "project.configure"),
     false,
   );
   assert.equal(f.service.domain().project(projectId).paused, 1);
+});
+
+test("Setup lets the operator check again after fixing a failed item", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  let failing: Parameters<typeof readinessBody>[0] = { "codex-login": "fail" };
+  await page.route("**/api/operator/readiness", (route) =>
+    route.fulfill({
+      contentType: "application/json",
+      body: readinessBody(failing),
+    }),
+  );
+  const sent = sentCommands(page);
+  const { ready, projectId, resume, composer } = await createProject(
+    page,
+    sent,
+  );
+  await ready.getByText("codex-login fix").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  // The operator fixes it outside this page; nothing here re-reads on its own.
+  failing = {};
+  const check = ready.getByRole("button", { name: "Check again", exact: true });
+  await check.click();
+  await ready.getByText("codex-login fix").waitFor({ state: "detached" });
+  await check.waitFor({ state: "detached" });
+  await resume.click();
+  await composer();
+  assert.equal(f.service.domain().project(projectId).paused, 0);
+});
+
+test("Setup blocks Resume for a Claude lead whose model or effort the runtime rejects", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, {
+    profiles: false,
+    claude: true,
+  });
+  const profileId = randomUUID();
+  f.service.domain().execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Claude lead",
+    instructions: "Lead",
+    capabilities: "Coordinate",
+    // The fixture runtime accepts `high` for sonnet, not `low`.
+    runtime: { harness: "claude", model: "sonnet", reasoningEffort: "low" },
+  } as never);
+  // The token is readable, so only the lead's own settings can block.
+  await stubReadiness(page);
+  await page.reload();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  const sent = sentCommands(page);
+  const { ready, resume } = await createProject(page, sent, "Claude lead");
+  await ready
+    .getByText(
+      "Claude runtime doesn't accept the lead profile's model or reasoning effort.",
+    )
+    .waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "Edit profile", exact: true })
+      .getAttribute("href"),
+    `/app/profiles/${profileId}/settings`,
+  );
+  assert.equal(
+    sent.some((c) => c.type === "project.configure"),
+    false,
+  );
 });
 
 test("Setup keeps the project paused when the operator chooses Keep paused", async (_t, journey) => {
@@ -1091,7 +1167,7 @@ test("Setup's ready check stays usable on a phone", async (_t, journey) => {
   await captureBrowserEvidence(page, "390-setup-ready-check");
 });
 
-test("Setup fails closed when readiness cannot be read and recovers on Retry", async (_t, journey) => {
+test("Setup fails closed when readiness cannot be read and recovers on Check again", async (_t, journey) => {
   const { page } = await setupJourney(journey);
   let readable = false;
   await page.route("**/api/operator/readiness", (route) =>
@@ -1112,12 +1188,12 @@ test("Setup fails closed when readiness cannot be read and recovers on Retry", a
   await ready.getByText("Readiness couldn't be checked.").waitFor();
   assert.equal(await resume.isDisabled(), true);
   readable = true;
-  await ready.getByRole("button", { name: "Retry", exact: true }).click();
+  await ready.getByRole("button", { name: "Check again", exact: true }).click();
   await ready
     .getByText("Readiness couldn't be checked.")
     .waitFor({ state: "detached" });
   await resume.click({ trial: true });
-  // Retry leaves while it reads, so the focus moves to the result, not to the page.
+  // The button leaves while the read starts again, so the focus moves to the result.
   await page.waitForFunction(() =>
     document.activeElement?.classList.contains("setup-waits"),
   );

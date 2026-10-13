@@ -142,34 +142,51 @@ export function ReadyCheck({
         </ActionLink>
       </div>
       <div ref={waitsRoot} id={waits} tabIndex={-1} className="setup-waits">
-        {checking && <p className="metadata muted">Checking readiness…</p>}
-        {items.length > 0 && (
-          <ul className="body">
-            {items.map((item) => (
-              <li key={item.text}>
-                {item.text}
-                {item.fix && <p className="identifier">{item.fix}</p>}
-                {item.link && (
-                  <ActionLink variant="secondary" href={item.link.href}>
-                    {item.link.label}
-                  </ActionLink>
-                )}
-              </li>
-            ))}
-          </ul>
+        {(checking || readiness.state.pending) && (
+          <p className="metadata muted">Checking readiness…</p>
         )}
-        {read.state === "unavailable" && (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => {
-              void readiness.refresh();
-              // Retry leaves while it reads, so the focus moves to the result.
-              waitsRoot.current?.focus();
-            }}
-          >
-            Retry
-          </Button>
+        {items.length > 0 && (
+          <>
+            <ul className="body">
+              {items.map((item) => (
+                <li key={item.text}>
+                  {item.text}
+                  {item.fix && <p className="identifier">{item.fix}</p>}
+                  {item.link && (
+                    // A new tab, so this check is still here to check again.
+                    <ActionLink
+                      variant="secondary"
+                      href={item.link.href}
+                      target="_blank"
+                      rel="noopener"
+                    >
+                      {item.link.label}
+                    </ActionLink>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="metadata muted">
+              Links open in a new tab. Fix the item, then check again here. If
+              you leave this page, resume later with the Pause project switch in
+              project configuration.
+            </p>
+            <div>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void readiness.refresh();
+                  void options.refresh();
+                  p.refresh();
+                  // The button leaves while a failed read starts again, so focus moves to the result.
+                  waitsRoot.current?.focus();
+                }}
+              >
+                Check again
+              </Button>
+            </div>
+          </>
         )}
         {capacityFull && (
           <p className="metadata muted">

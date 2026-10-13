@@ -30,11 +30,13 @@ The operator never leaves setup to create a prerequisite.
      Project) and states that nothing has run. Repositories were verified before the
      project was recorded, so no checkout item can follow.
    - Lists any item that would make the lead's work wait, from the workspace and
-     readiness reads: no lead profile, the
-     lead's runtime unavailable or not enabled, Codex executable or sign-in
-     unavailable for a Codex lead, Claude token unavailable for a Claude lead (Fix
-     opens [Add Claude](claude-runtime.md)). An unreadable readiness check counts as
-     a wait item, so the check fails closed.
+     readiness reads: no lead profile, the lead's runtime unavailable or not enabled,
+     a Claude model or reasoning effort the runtime does not accept (Fix opens the
+     lead profile), Codex executable or sign-in unavailable for a Codex lead, Claude
+     token unavailable for a Claude lead (Fix opens [Add Claude](claude-runtime.md)).
+     An unreadable readiness check counts as a wait item, so the check fails closed.
+     Fix links open in a new tab so the check stays; **Check again** re-reads
+     readiness, the workspace and capacity once the item is fixed.
    - Primary **Resume and create first task**: resumes the project through the
      existing project command, then opens the composer with the project selected.
      Disabled with the blocking reason while a listed item would make work wait.

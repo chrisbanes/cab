@@ -452,3 +452,72 @@ test("the ready check fails closed while loading and never blocks on capacity", 
   }
   assert.equal(readyCheckItems(input({ capacity: null })).capacityFull, false);
 });
+
+test("the ready check judges the lead's own model and effort against the supported settings", () => {
+  const supported = { models: [{ model: "sonnet", efforts: ["high"] }] };
+  const claude = (runtime: { model: string | null; effort: string | null }) => {
+    const base = workspace("claude");
+    return input({
+      workspace: {
+        ...base,
+        profiles: base.profiles.map((p) => ({
+          ...p,
+          runtime: {
+            harness: "claude" as const,
+            model: runtime.model,
+            reasoningEffort: runtime.effort,
+          },
+        })),
+        harnesses: [
+          harness("codex"),
+          { ...harness("claude"), settings: supported },
+        ],
+      },
+    });
+  };
+  const edit = {
+    text: "Claude runtime doesn't accept the lead profile's model or reasoning effort.",
+    link: { label: "Edit profile", href: `/app/profiles/${leadId}/settings` },
+  };
+  // A model the runtime lacks, and an effort its model lacks: the lead cannot run.
+  for (const rejected of [
+    { model: "gone", effort: null },
+    { model: "sonnet", effort: "low" },
+    // The default model is missing from these settings too.
+    { model: null, effort: null },
+  ]) {
+    const result = readyCheckItems(claude(rejected));
+    assert.deepEqual(result.items, [edit], JSON.stringify(rejected));
+    assert.equal(result.blocked, true);
+  }
+  assert.deepEqual(
+    readyCheckItems(claude({ model: "sonnet", effort: "high" })).items,
+    [],
+  );
+  // The settings are unknown before the first Claude turn: nothing can be judged, and
+  // blocking would stop the first task that reads them.
+  const unknown = claude({ model: "gone", effort: null });
+  const harnesses = [harness("codex"), harness("claude")];
+  assert.deepEqual(
+    readyCheckItems({
+      ...unknown,
+      workspace: unknown.workspace && { ...unknown.workspace, harnesses },
+    }).items,
+    [],
+  );
+  // A runtime that is not running is named by its own item, not by this one.
+  const down = readyCheckItems({
+    ...unknown,
+    workspace: unknown.workspace && {
+      ...unknown.workspace,
+      harnesses: [
+        harness("codex"),
+        { ...harness("claude", "unavailable"), settings: supported },
+      ],
+    },
+  });
+  assert.deepEqual(
+    down.items.map((i) => i.text),
+    ["Claude runtime unavailable — restart the service"],
+  );
+});

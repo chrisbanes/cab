@@ -527,6 +527,8 @@ export function App() {
         href = anchor?.getAttribute("href");
       if (
         href?.startsWith("/app") &&
+        // A link that asks for a new tab keeps this page as it is.
+        anchor?.target !== "_blank" &&
         !e.ctrlKey &&
         !e.metaKey &&
         !e.shiftKey &&
