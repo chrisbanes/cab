@@ -2957,6 +2957,31 @@ test("late conflicting terminal report retracts completion and holds an active s
   }
 });
 
+test("a terminal anomaly reported while the runtime starts retracts prior-generation work", async () => {
+  const f = await fixture();
+  try {
+    assert.equal(
+      (await f.service.submitTask("first", f.assignmentId, "write")).state,
+      "completed",
+    );
+    await f.service.stop();
+    f.runtime.start = async () =>
+      f.runtime.anomaly?.({
+        threadId: "thread-1",
+        turnId: "turn-1",
+        reason: "Conflicting terminal status",
+      });
+    await f.service.start();
+    assert.equal(
+      f.service.list().find((item) => item.workId === "first")?.state,
+      "held",
+    );
+    assert.equal(f.service.isCurrentResult("first"), false);
+  } finally {
+    await f.close();
+  }
+});
+
 test("identity-free terminal report retracts the recent writer and active successor", async () => {
   const f = await fixture();
   try {

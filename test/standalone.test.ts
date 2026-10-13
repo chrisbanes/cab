@@ -1158,6 +1158,34 @@ test("service shutdown retains an open database owner and can retry close", asyn
   }
 });
 
+test("a startup failure after admission begins unpublishes the service and releases ownership", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-885-first-wake-"));
+  const data = join(root, "data");
+  const failure = new Error("injected first-wake failure");
+  const service = new StandaloneService(data, () => new FakeRuntime());
+  const wakeable = service as unknown as {
+    wakeScheduler(...args: unknown[]): Promise<void>;
+  };
+  const prototypeWake = wakeable.wakeScheduler;
+  // Only the wake after scheduler start passes no arguments.
+  wakeable.wakeScheduler = function (...args: unknown[]) {
+    if (args.length === 0) throw failure;
+    return prototypeWake.apply(this, args);
+  };
+  try {
+    await assert.rejects(service.start(), (error) => error === failure);
+    assert.throws(() => service.list(), /Service is not started/);
+    StandaloneDataDirectory.openExclusive(data).close();
+    delete (wakeable as { wakeScheduler?: unknown }).wakeScheduler;
+    await service.start();
+    assert.ok(Array.isArray(service.list()));
+    await service.stop();
+  } finally {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("failed startup keeps an open database owner until a later stop closes it", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-880-start-db-close-"));
   const data = join(root, "data");
