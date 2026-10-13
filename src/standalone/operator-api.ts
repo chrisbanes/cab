@@ -1,14 +1,15 @@
-import { GhLoginScope } from "./gh-credential.js";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
+import { CommandResultValidationError } from "../core/command-results.js";
 import type {
   CoordinationInteraction,
   TaskCompletionRequest,
 } from "../core/coordination.js";
 import type { OperatorCommentReview } from "../core/delivery.js";
+import { materialDigest } from "../core/delivery.js";
 import {
   DomainCommands,
   DomainConflictError,
@@ -17,6 +18,13 @@ import {
   DomainPolicyError,
 } from "../core/domain.js";
 import {
+  LocalReviewAnchorRequiredError,
+  LocalReviewBatchTooLargeError,
+  LocalReviewRecipientUnavailableError,
+  type LocalReviewRequest,
+  type LocalReviewSyncIdentity,
+} from "../core/local-review.js";
+import {
   nativeQuestionForm,
   type QuestionAnswers,
   questionFormSchema,
@@ -24,66 +32,77 @@ import {
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
+  assignmentDetailSchema,
   assignmentHistorySchema,
+  assignmentInstructionsSchema,
   assignmentRecoverySchema,
   checkoutVerificationSchema,
   checkoutVerifyRequestSchema,
+  claudeTokenStatusSchema,
   commandReceiptSchema,
+  composerOptionsSchema,
+  configurationImpactSchema,
+  deliveryReadSchema,
   discoveryBranchesSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
-  claudeTokenStatusSchema,
   discoveryStatusSchema,
-  unsupportedRuntimeField,
+  type Execution,
   executionDetailSchema,
   executionEventsSchema,
   executionInputsSchema,
   executionListSchema,
   folderListingSchema,
   folderListRequestSchema,
-  composerOptionsSchema,
-  deliveryReadSchema,
-  type Execution,
   type InboxItem,
   inboxReadSchema,
+  instructionProvenance,
   materialSchema,
-  operatorCommandSchema,
-  configurationImpactSchema,
   operationReadSchema,
   operationScopeSchema,
   operationTypeSchema,
+  operatorCommandSchema,
   profileConfigurationSchema,
+  profileInstructionsSchema,
   projectConfigurationSchema,
+  projectInstructionsSchema,
   projectSchema,
   questionReadSchema,
   recoveryObservationSchema,
-  reviewReadSchema,
-  runtimeSettingsSchema,
   retainedEvidenceItemContentReadSchema,
   retainedResultEvidenceReadSchema,
   retainedReviewAnchorReadSchema,
+  reviewReadSchema,
+  runtimeSettingsSchema,
   searchQuerySchema,
   searchReadSchema,
   sourceObservationSchema,
   taskListPageSchema,
   taskListQuerySchema,
-  assignmentDetailSchema,
-  assignmentInstructionsSchema,
-  instructionProvenance,
-  profileInstructionsSchema,
-  projectInstructionsSchema,
   taskMessagePageSchema,
   taskRecordQuerySchema,
   taskResultPageSchema,
   taskSchema,
+  unsupportedRuntimeField,
   uuid,
+  workIdSchema,
   workspaceComparisonReadRequestSchema,
   workspaceComparisonReadSchema,
   workspaceDirectoryReadSchema,
   workspacePreviewReadSchema,
   workspaceSchema,
-  workIdSchema,
 } from "../operator/contracts.js";
+import {
+  claudeTokenExclusions,
+  claudeTokenSource,
+  readClaudeToken,
+} from "./claude-token.js";
+import {
+  type ConversationHistoryBinding,
+  isDisclosable,
+  sanitizeConversationText,
+} from "./conversation-history.js";
+import type { CoordinationView } from "./coordination-view.js";
 import {
   boundDetail,
   DiagnosticCursorError,
@@ -92,49 +111,21 @@ import {
   type ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
-  type ConversationHistoryBinding,
-  isDisclosable,
-  sanitizeConversationText,
-} from "./conversation-history.js";
-import type { CoordinationView } from "./coordination-view.js";
-import type { GitHubSourceReader } from "./github-source.js";
-import type { SourceCredentialReason } from "./github-source-credential.js";
+  detectGh,
+  discoveryCredentialExclusions,
+  GhLoginScope,
+  type GhOptions,
+  ghEnvironment,
+  ghToken,
+} from "./gh-credential.js";
 import {
   DiscoveryFailure,
   type DiscoveryReader,
   GitHubDiscoveryReader,
 } from "./github-discovery.js";
-import {
-  detectGh,
-  discoveryCredentialExclusions,
-  ghEnvironment,
-  type GhOptions,
-  ghToken,
-} from "./gh-credential.js";
-import {
-  FolderAccessError,
-  listHomeFolders,
-  type OperatorSetupSeams,
-  resolveHomePath,
-  verifyCheckout,
-} from "./operator-setup.js";
-import { selectAssignmentExecution } from "./operator-runtime.js";
-import {
-  claudeTokenExclusions,
-  claudeTokenSource,
-  readClaudeToken,
-} from "./claude-token.js";
-import type { StandaloneService } from "./service.js";
-import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
-import { materialDigest } from "../core/delivery.js";
-import {
-  LocalReviewAnchorRequiredError,
-  LocalReviewBatchTooLargeError,
-  LocalReviewRecipientUnavailableError,
-  type LocalReviewRequest,
-  type LocalReviewSyncIdentity,
-} from "../core/local-review.js";
-import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
+import type { GitHubSourceReader } from "./github-source.js";
+import type { SourceCredentialReason } from "./github-source-credential.js";
+import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
 import {
   executeRecovery,
   isRecoveryCommand,
@@ -142,8 +133,18 @@ import {
   readRecoveryOperation,
   recoveryOptions,
 } from "./operator-recovery.js";
+import { selectAssignmentExecution } from "./operator-runtime.js";
+import {
+  FolderAccessError,
+  listHomeFolders,
+  type OperatorSetupSeams,
+  resolveHomePath,
+  verifyCheckout,
+} from "./operator-setup.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
-import { commandReceipt, ReceiptShapeError } from "./operator-receipts.js";
+import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
+import type { StandaloneService } from "./service.js";
+import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
 import {
   compareRepository,
   type WorkspaceComparisonSideContent,
@@ -155,11 +156,11 @@ import {
   previewRetainedBytes,
   previewWorkspaceFile,
   retainedPathExcluded,
-  workspaceInspectionBindingIdentity,
   type WorkspaceInspectionCurrent,
   WorkspaceInspectionInputError,
   type WorkspaceInspectionPathReference,
   type WorkspaceInspectionRequest,
+  workspaceInspectionBindingIdentity,
   workspaceInspectionPathsExcluded,
 } from "./workspace-inspection.js";
 
@@ -334,6 +335,8 @@ export class OperatorApiError extends Error {
 }
 
 function domainApiError(error: unknown): OperatorApiError | undefined {
+  if (error instanceof CommandResultValidationError)
+    return new OperatorApiError(503, "unavailable");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainConflictError)
@@ -4354,7 +4357,10 @@ export class OperatorApi {
           throw new OperatorApiError(503, "unavailable");
         data = { state: "recorded", receipt };
       } catch (error) {
-        if (error instanceof ReceiptShapeError)
+        if (
+          error instanceof ReceiptShapeError ||
+          error instanceof CommandResultValidationError
+        )
           throw new OperatorApiError(409, "conflict");
         throw error;
       }
@@ -4760,7 +4766,7 @@ export class OperatorApi {
       type: "github.activate" as const,
       actor: "operator" as const,
     };
-    let raw = this.domain().recordedCommand(command);
+    let raw: unknown = this.domain().recordedCommand(command);
     if (raw === undefined) {
       const config = this.domain().githubConfiguration(c.projectId);
       if (config.version !== c.expectedVersion)
@@ -4975,7 +4981,9 @@ export class OperatorApi {
       observedAt: Date.now(),
     });
   }
-  private async executeDomain(c: Parameters<typeof this.commands.execute>[0]) {
+  private async executeDomain(
+    c: Parameters<typeof this.commands.execute>[0],
+  ): Promise<unknown> {
     try {
       return await this.commands.execute(c);
     } catch (error) {
@@ -5693,7 +5701,7 @@ export class OperatorApi {
       }
       if (c.type === "capacity.configure") {
         const command = { ...c, actor: "operator" as const };
-        let raw = this.domain().recordedCommand(command);
+        let raw: unknown = this.domain().recordedCommand(command);
         if (raw === undefined) {
           for (const id of Object.keys(c.projectOverrides))
             this.requireProject(id);

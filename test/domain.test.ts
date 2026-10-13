@@ -4,13 +4,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
+import { CommandResultValidationError } from "../src/core/command-results.js";
 import {
+  type DomainCommand,
   DomainCommands,
   DomainConflictError,
   DomainPolicyError,
   DomainStaleDispositionError,
   DomainStore,
-  type DomainCommand,
 } from "../src/core/domain.js";
 import { Store } from "../src/core/store.js";
 import { ExecutionState } from "../src/standalone/state.js";
@@ -339,6 +340,100 @@ test("in-flight command duplicates share one promise", async () => {
       /different payload/,
     );
     assert.deepEqual(await one, await two);
+  } finally {
+    f.close();
+  }
+});
+
+test("invalid fresh results roll back the domain mutation and receipt", () => {
+  const f = fixture();
+  try {
+    f.domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: key(),
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    f.domain.execute({
+      type: "task.create",
+      actor: "operator",
+      key: key(),
+      projectId: p,
+      taskId: a,
+      title: "Task",
+      outcome: "Before",
+    });
+    const originalTask = f.domain.task.bind(f.domain);
+    f.domain.task = (taskId) => ({ ...originalTask(taskId), id: "invalid" });
+    const command = {
+      type: "task.configure" as const,
+      actor: "operator" as const,
+      key: key(),
+      projectId: p,
+      taskId: a,
+      expectedVersion: 1,
+      outcome: "After",
+    };
+
+    assert.throws(
+      () => f.domain.execute(command),
+      CommandResultValidationError,
+    );
+    f.domain.task = originalTask;
+    assert.equal(f.domain.task(a).outcome, "Before");
+    assert.equal(f.domain.task(a).version, 1);
+    assert.equal(f.domain.recordedResult(p, command.key), undefined);
+  } finally {
+    f.close();
+  }
+});
+
+test("corrupt stored results fail replay validation without reapplying", () => {
+  const f = fixture();
+  try {
+    const command = {
+      type: "project.create" as const,
+      actor: "operator" as const,
+      key: key(),
+      projectId: p,
+      name: "Alpha",
+      leadProfileId: null,
+    };
+    const original = f.domain.execute(command);
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run("{", p, command.key);
+    assert.throws(
+      () => f.domain.execute(command),
+      CommandResultValidationError,
+    );
+    assert.equal(f.domain.project(p).version, 1);
+    assert.throws(
+      () => f.domain.recordedResult(p, command.key, "project.create"),
+      CommandResultValidationError,
+    );
+    f.db
+      .prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      )
+      .run("{}", p, command.key);
+    assert.throws(
+      () => f.domain.execute(command),
+      CommandResultValidationError,
+    );
+    assert.deepEqual(original, {
+      id: p,
+      name: "Alpha",
+      version: 1,
+      paused: 1,
+      leadProfileId: null,
+      instructionsRevision: 1,
+      instructions: "",
+    });
   } finally {
     f.close();
   }

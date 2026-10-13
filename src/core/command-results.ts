@@ -164,11 +164,32 @@ export type DomainCommandOutcome = {
   [K in DomainCommandType]: { type: K; result: DomainCommandResultMap[K] };
 }[DomainCommandType];
 
+export class CommandResultValidationError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "CommandResultValidationError";
+  }
+}
+
 function parseUnchanged<T>(schema: z.ZodType<T>, value: unknown): T {
-  const parsed = schema.parse(value);
-  if (canonicalMaterial(parsed) !== canonicalMaterial(value))
-    throw new Error("Command result schema changed validated material");
-  return parsed;
+  try {
+    const parsed = schema.parse(value);
+    if (canonicalMaterial(parsed) !== canonicalMaterial(value))
+      throw new CommandResultValidationError(
+        "Command result schema changed validated material",
+      );
+    return parsed;
+  } catch (error) {
+    if (error instanceof CommandResultValidationError) throw error;
+    throw new CommandResultValidationError(
+      "Command result failed runtime validation",
+      { cause: error },
+    );
+  }
+}
+
+export function parseLinkedRepositoryResult(value: unknown) {
+  return parseUnchanged(linkedRepositorySchema, value);
 }
 
 /** Validate an untrusted apply, receipt, or provider result without changing its shape. */
