@@ -1294,3 +1294,133 @@ test("Setup keeps an unsettled Resume apart from the project's General tab", asy
     await page.unroute("**/api/operator/commands");
   }
 });
+
+/**
+ * Create a project with Mira as lead, then let another tab change its lead (still paused)
+ * so Resume conflicts. Reviewing the conflict is left to the caller; `gate` holds readiness
+ * responses while it is set.
+ */
+async function leadChangedElsewhere(
+  journey: Parameters<typeof setupJourney>[0],
+  change: (ids: { claude: string; nora: string }) => string | null,
+) {
+  const { f, page, profiles } = await setupJourney(journey, { claude: true });
+  const claude = randomUUID();
+  const domain = f.service.domain();
+  domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude,
+    name: "Claude lead",
+    instructions: "Lead",
+    capabilities: "Coordinate",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  } as never);
+  // Mira (Codex) is ready; the Claude token is not.
+  const gate: { hold: Promise<void> | null } = { hold: null };
+  await page.route("**/api/operator/readiness", async (route) => {
+    await gate.hold;
+    await route.fulfill({
+      contentType: "application/json",
+      body: readinessBody({ "claude-token": "not-configured" }),
+    });
+  });
+  await page.reload();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  const sent = sentCommands(page);
+  const created = await createProject(page, sent);
+  await created.ready
+    .getByText("Checking readiness…")
+    .waitFor({ state: "detached" });
+  assert.equal(await created.resume.isEnabled(), true);
+  domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: created.projectId,
+    expectedVersion: 1,
+    leadProfileId: change({ claude, nora: String(profiles.Nora) }),
+  } as never);
+  await created.resume.click();
+  await created.ready
+    .getByText("A newer version was saved elsewhere.")
+    .waitFor();
+  return {
+    ...created,
+    page,
+    sent,
+    domain,
+    gate,
+    review: () =>
+      created.ready.getByRole("button", { name: "Review changes" }).click(),
+  };
+}
+
+test("Setup judges the project's current lead after a conflict review, not the original one", async (_t, journey) => {
+  const { ready, resume, sent, domain, projectId, review } =
+    await leadChangedElsewhere(journey, ({ claude }) => claude);
+  await review();
+  // The new lead is a Claude profile without a readable token.
+  await ready.getByText("claude-token reason").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  assert.deepEqual(
+    sent
+      .filter((c) => c.type === "project.configure")
+      .map((c) => c.expectedVersion),
+    [1],
+  );
+  assert.equal(domain.project(projectId).paused, 1);
+});
+
+test("Setup blocks Resume after a conflict review finds the lead removed", async (_t, journey) => {
+  const { ready, resume, domain, projectId, review } =
+    await leadChangedElsewhere(journey, () => null);
+  await review();
+  await ready
+    .getByText("No lead profile. Tasks wait for a lead before starting.")
+    .waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  assert.equal(domain.project(projectId).paused, 1);
+});
+
+test("Setup keeps Resume locked until reads made after the review land, then sends it again", async (_t, journey) => {
+  const { ready, resume, sent, domain, projectId, gate, review, composer } =
+    await leadChangedElsewhere(journey, ({ nora }) => nora);
+  let release: () => void = () => {};
+  gate.hold = new Promise<void>((done) => {
+    release = done;
+  });
+  await review();
+  // The old readiness still shows, but it predates the review: nothing is judged yet.
+  await ready.getByText("Checking readiness…").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  release();
+  await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
+  assert.equal(await resume.isEnabled(), true);
+  await resume.click();
+  await composer();
+  assert.deepEqual(
+    sent
+      .filter((c) => c.type === "project.configure")
+      .map((c) => c.expectedVersion),
+    [1, 2],
+  );
+  assert.equal(domain.project(projectId).paused, 0);
+});
+
+test("Setup does not unlock Resume on a workspace that was not re-read after the review", async (_t, journey) => {
+  const { ready, resume, page, review } = await leadChangedElsewhere(
+    journey,
+    ({ nora }) => nora,
+  );
+  await page.route("**/api/operator/workspace", (route) => route.abort());
+  await review();
+  await ready.getByText("Checking readiness…").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  // The header Refresh re-reads the workspace; only then is the lead judged.
+  await page.unroute("**/api/operator/workspace");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
+  assert.equal(await resume.isEnabled(), true);
+});

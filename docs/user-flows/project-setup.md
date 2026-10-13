@@ -50,7 +50,8 @@ The operator never leaves setup to create a prerequisite.
   values are untouched.
 - Resume outcome unknown: the ready check blocks a second Resume until its one
   action replays the exact request, matching other configuration saves. A project
-  changed elsewhere asks for a review before Resume is sent again.
+  changed elsewhere asks for a review before Resume is sent again; the review
+  judges the project's current lead on fresh reads before Resume unlocks.
 - Closing or reloading setup before Create discards the draft; the browser's leave
   prompt warns when any field has changed. Moving to another page in Ensemble keeps
   the draft for the session.

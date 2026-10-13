@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   composerOptionsSchema,
   type OperatorCommand,
@@ -25,6 +25,10 @@ export function ReadyCheck({
   navigate: (href: string) => void;
 }) {
   const { projectId } = created;
+  // The project's current lead, which another tab may change while this check is open.
+  const [lead, setLead] = useState(created.leadProfileId ?? null);
+  // Server time of the last conflict review: nothing read before it may unlock Resume.
+  const [since, setSince] = useState(0);
   const csrf = p.session.csrfToken;
   const scope = `${csrf}:${projectId}`;
   const readiness = useOperatorResource(
@@ -59,14 +63,17 @@ export function ReadyCheck({
   const waitsRoot = useRef<HTMLDivElement>(null);
   const waits = useId();
 
+  // A read from before the last review counts as not read yet, so a failed or superseded
+  // re-read keeps the check waiting instead of judging the current lead on old data.
   const read: ReadinessRead = readiness.state.error
     ? { state: "unavailable" }
-    : readiness.state.data
+    : readiness.state.data && readiness.state.data.observedAt >= since
       ? { state: "ready", checks: readiness.state.data.data.checks }
       : { state: "loading" };
   const { items, checking, blocked, capacityFull } = readyCheckItems({
-    leadProfileId: created.leadProfileId ?? null,
-    workspace: p.workspace?.data ?? null,
+    leadProfileId: lead,
+    workspace:
+      p.workspace && p.workspace.observedAt >= since ? p.workspace.data : null,
     readiness: read,
     capacity: options.state.data?.data.capacity ?? null,
   });
@@ -211,9 +218,15 @@ export function ReadyCheck({
             )
             .catch(() => null);
           if (!latest) return;
-          if (latest.data.project.paused)
-            resume.adoptVersion(latest.data.project.version);
-          else open();
+          const { project } = latest.data;
+          if (!project.paused) return open();
+          // The lead may have changed too: judge the current one on reads made after this.
+          setSince(latest.observedAt);
+          setLead(project.leadProfileId);
+          void readiness.refresh();
+          void options.refresh();
+          p.refresh();
+          resume.adoptVersion(project.version);
         }}
       />
     </section>
