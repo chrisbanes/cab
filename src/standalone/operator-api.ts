@@ -12,6 +12,7 @@ import {
   DomainCommands,
   DomainConflictError,
   DomainNotFoundError,
+  DomainOperationError,
   DomainPolicyError,
 } from "../core/domain.js";
 import {
@@ -331,6 +332,22 @@ export class OperatorApiError extends Error {
   }
 }
 
+function domainApiError(error: unknown): OperatorApiError | undefined {
+  if (error instanceof DomainOperationError)
+    return new OperatorApiError(503, "command-outcome-unknown");
+  if (error instanceof DomainConflictError)
+    return new OperatorApiError(409, "conflict");
+  if (error instanceof DomainNotFoundError)
+    return new OperatorApiError(404, "not-found");
+  if (error instanceof DomainPolicyError)
+    return new OperatorApiError(
+      error.code === "forbidden" ? 403 : 400,
+      error.code,
+      error.fieldPaths,
+    );
+  return undefined;
+}
+
 export type OperatorReviewSessionContext = {
   ownerKey: string;
   current: () => boolean;
@@ -347,35 +364,6 @@ type LocalReviewCommand = Extract<
       | "review.send.reconcile";
   }
 >;
-const conflicts = new Set([
-  "Question requesting work is stale, cancelled or ambiguous",
-  "Structured question unavailable or already answered",
-  "Native question unavailable, already answered or stale",
-  "Native requesting work is stale",
-  "Operator command key reused with different content",
-  "Interaction is not open for this response",
-  "Interaction revision conflict",
-  "Approval material does not match the requested revision",
-  "Legacy approval material is unavailable and cannot be approved",
-  "Message recipient assignment version conflict",
-  "Message recipient must be pending or running",
-  "Follow-up unavailable: task is not open",
-  "Follow-up unavailable: latest result is not the newest unambiguous work",
-  "Follow-up unavailable: latest result already has a follow-up",
-  "Result destination is already reconciled",
-  "Result destination revision conflict",
-  // Operator comment rejections, all thrown before any provider effect.
-  "Operator review key reused with different material",
-  "Operator review material mismatch",
-  "Operator confirmation key reused with different material",
-  "Operator confirmation revision/material mismatch",
-  "Operator task revision conflict",
-  "Operation key used with different material or caller",
-  "Operator delivery authority changed",
-  "Task admission is held",
-  "Imported task source unavailable",
-  "Imported task issue unavailable",
-]);
 function githubIssueUrl(repositoryName: string | null, number: number | null) {
   return repositoryName && number
     ? `https://github.com/${repositoryName}/issues/${number}`
@@ -4868,24 +4856,8 @@ export class OperatorApi {
     try {
       return await this.commands.execute(c);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        /Operator (?:review|confirmation|delivery|task)|Operation key used|Feedback (?:source|result|work|criterion|artifact)|Imported task source unavailable/.test(
-          error.message,
-        )
-      )
-        throw new OperatorApiError(409, "conflict");
-      if (error instanceof DomainPolicyError)
-        throw new OperatorApiError(
-          error.code === "forbidden" ? 403 : 400,
-          error.code,
-          error.fieldPaths ??
-            (c.type === "github.configure" &&
-            error.code === "invalid-input" &&
-            error.message === "Repository verification failed"
-              ? ["repositories"]
-              : undefined),
-        );
+      const mapped = domainApiError(error);
+      if (mapped) throw mapped;
       throw error;
     }
   }
@@ -5721,33 +5693,7 @@ export class OperatorApi {
       }
       if ("projectId" in c) {
         this.requireProject(c.projectId);
-        if (c.type !== "task.create") {
-          const task =
-            c.type === "assignment.apply"
-              ? this.domain().assignment(c.assignmentId)
-              : this.requireTask(c.taskId);
-          if (task.projectId !== c.projectId)
-            throw new OperatorApiError(403, "forbidden");
-          if (
-            c.type === "task.configure" &&
-            this.domain().importedTask(c.taskId) &&
-            (c.title !== undefined || c.outcome !== undefined)
-          )
-            throw new OperatorApiError(403, "forbidden");
-        }
-        let raw: unknown;
-        try {
-          raw = await this.commands.execute({ ...c, actor: "operator" });
-        } catch (error) {
-          // DomainStore wraps post-commit callbacks; only a rolled-back apply
-          // can preserve this definite policy error from the domain command.
-          if (error instanceof DomainPolicyError)
-            throw new OperatorApiError(
-              error.code === "forbidden" ? 403 : 400,
-              error.code,
-            );
-          throw error;
-        }
+        const raw = await this.executeDomain({ ...c, actor: "operator" });
         if (c.type === "assignment.apply")
           return commandReceipt(c.type, c.key, c.projectId, raw);
         const r = raw as Row;
@@ -5892,33 +5838,8 @@ export class OperatorApi {
         throw new OperatorApiError(400, "local-review-batch-too-large");
       if (error instanceof LocalReviewRecipientUnavailableError)
         throw new OperatorApiError(409, "local-review-recipient-unavailable");
-      if (
-        error instanceof Error &&
-        /^(?:Feedback (?:source|result|work|criterion|artifact)|Local review|Review anchor)/.test(
-          error.message,
-        )
-      )
-        throw new OperatorApiError(409, "conflict");
-      if (error instanceof DomainPolicyError)
-        throw new OperatorApiError(503, "command-outcome-unknown");
-      if (
-        error instanceof DomainConflictError ||
-        (error instanceof Error && conflicts.has(error.message))
-      )
-        throw new OperatorApiError(409, "conflict");
-      if (
-        error instanceof Error &&
-        [
-          "Recipient is not permitted by the assignment",
-          "Message recipient is not in this task",
-          "Question is not in this task",
-          "Approval is not in this task",
-          "Result is not in this task",
-          "Contextual feedback must target the accountable lead",
-          "External action denied by project policy",
-        ].includes(error.message)
-      )
-        throw new OperatorApiError(403, "forbidden");
+      const mapped = domainApiError(error);
+      if (mapped) throw mapped;
       throw new OperatorApiError(503, "command-outcome-unknown");
     }
   }

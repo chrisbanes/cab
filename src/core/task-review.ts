@@ -1,3 +1,4 @@
+import { DomainConflictError } from "./domain-errors.js";
 import { createHash, randomUUID } from "node:crypto";
 import { setImmediate } from "node:timers/promises";
 import type { z } from "zod";
@@ -922,18 +923,18 @@ export class TaskReviewStore {
   validateReference(taskId: string, input: unknown) {
     const ref = feedbackReferenceSchema.parse(input);
     if (ref.sourceId && !this.source(taskId, ref.sourceId))
-      throw Error("Feedback source unavailable");
+      throw new DomainConflictError("Feedback source unavailable");
     const artifactOwner = ref.artifactId
       ? this.artifactOwner(taskId, ref.artifactId)
       : undefined;
     if (ref.artifactId && !artifactOwner)
-      throw Error("Feedback artifact unavailable");
+      throw new DomainConflictError("Feedback artifact unavailable");
     if (
       ref.resultId &&
       artifactOwner &&
       artifactOwner.resultId !== ref.resultId
     )
-      throw Error("Feedback artifact does not match result");
+      throw new DomainConflictError("Feedback artifact does not match result");
     const ownerId = ref.resultId ?? artifactOwner?.resultId;
     const actual = ownerId
       ? (this.db
@@ -943,30 +944,33 @@ export class TaskReviewStore {
           .get(ownerId) as Row | undefined)
       : undefined;
     if (ownerId && actual?.taskId !== taskId)
-      throw Error("Feedback result unavailable");
+      throw new DomainConflictError("Feedback result unavailable");
     const linked = ownerId ? this.result(taskId, ownerId) : undefined;
     if (ownerId && ref.sourceId && linked?.metadata.sourceId !== ref.sourceId)
-      throw Error("Feedback source does not match result");
+      throw new DomainConflictError("Feedback source does not match result");
     if (ref.workId && (!actual || actual.workId !== ref.workId))
-      throw Error("Feedback work unavailable");
+      throw new DomainConflictError("Feedback work unavailable");
     if (ref.criterionId) {
       const sources = this.db
         .prepare(
           "SELECT DISTINCT s.sourceId FROM task_review_sources s, json_each(s.recordJson,'$.criteria') c WHERE s.taskId=? AND json_extract(c.value,'$.criterionId')=? LIMIT 2",
         )
         .all(taskId, ref.criterionId) as Row[];
-      if (sources.length !== 1) throw Error("Feedback criterion unavailable");
+      if (sources.length !== 1)
+        throw new DomainConflictError("Feedback criterion unavailable");
       const criterionSourceId = String(sources[0]?.sourceId);
       if (ref.sourceId && criterionSourceId !== ref.sourceId)
-        throw Error("Feedback criterion unavailable");
+        throw new DomainConflictError("Feedback criterion unavailable");
       if (ownerId && criterionSourceId !== linked?.metadata.sourceId)
-        throw Error("Feedback criterion does not match result");
+        throw new DomainConflictError(
+          "Feedback criterion does not match result",
+        );
       if (
         !this.source(taskId, criterionSourceId)?.criteria.some(
           (c) => c.criterionId === ref.criterionId,
         )
       )
-        throw Error("Feedback criterion unavailable");
+        throw new DomainConflictError("Feedback criterion unavailable");
     }
     return ref;
   }

@@ -1,5 +1,6 @@
 import { credentialFreeEnvironment } from "../core/child-environment.js";
 import { isOperatorDeliveryCaller } from "../core/delivery.js";
+import { DomainPolicyError } from "../core/domain.js";
 import type { z } from "zod";
 import {
   type DeliveryStore,
@@ -106,7 +107,10 @@ export class DeliveryCoordinator {
       isOperatorDeliveryCaller(caller) &&
       (request.action.kind !== "issue.comment" || request.approval)
     )
-      throw Error("Operator delivery only permits issue.comment");
+      throw new DomainPolicyError(
+        "forbidden",
+        "Operator delivery only permits issue.comment",
+      );
     return this.serialize(
       actionKeys({ binding: caller, request }),
       async () => {

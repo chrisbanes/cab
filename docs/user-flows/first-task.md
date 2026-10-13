@@ -1,0 +1,48 @@
+# First task
+
+**Status:** planned changes to the implemented composer and task detail.
+
+## Goal
+
+From **Create and start**, the operator either sees the task running or sees why it
+waits, led by the reason to clear first and a link that fixes it.
+
+## Entry points
+
+- [Project setup](project-setup.md) ready check → **Resume and create first task**.
+- [Getting started](getting-started.md) First task row.
+- Home and project page **New task**.
+
+## Steps
+
+1. Composer opens with the project selected. Before submission it states whether
+   the project would start now or wait, using the same reasons as step 3.
+2. **Create and start** opens the new task's detail page.
+3. Task detail shows the current state. A waiting task shows its reasons in the
+   table's order: the first is primary and carries its **Fix**, and the rest are
+   listed beneath it with their own Fix or link. Inbox and CLI use the same order.
+
+   | Wait reason                         | Fix                                                      |
+   | ----------------------------------- | -------------------------------------------------------- |
+   | Project paused                      | Resume project (confirmation, then the existing command) |
+   | Project has no lead                 | Open project configuration to choose a lead              |
+   | Project lead revoked                | Open project configuration to choose another lead        |
+   | Runtime unavailable                 | Open [readiness check](readiness-check.md)               |
+   | Claude token unavailable            | Open [Add Claude](claude-runtime.md)                     |
+   | Lead profile runtime not configured | Open the profile                                         |
+   | Dependency, approval or source hold | No Fix; link to the blocking task, request or source     |
+   | Capacity                            | No Fix; shows what is using capacity                     |
+
+4. Once the first turn starts, Home drops the getting-started checklist.
+
+## Recovery
+
+- Stop and Resume on the task are unchanged.
+- **Save draft** remains the way to keep a task without starting it.
+- A Fix action never clears holds or grants access by implication; it performs only
+  the named command.
+
+## Other entry points to keep consistent
+
+Inbox items and the operator CLI's task reads show the same wait reasons; the CLI
+prints the matching command or Settings path instead of a link.

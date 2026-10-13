@@ -1,3 +1,4 @@
+import { DomainConflictError } from "./domain.js";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
@@ -1049,7 +1050,7 @@ export class RetainedEvidenceStore {
       operation.kind !== kind ||
       operation.materialHash !== materialHash
     )
-      throw new Error(
+      throw new DomainConflictError(
         "Review anchor operation ID reused with different material",
       );
     const response = JSON.parse(operation.responseJson) as unknown;
@@ -1070,7 +1071,9 @@ export class RetainedEvidenceStore {
     uuid.parse(operationId);
     hash.parse(materialHash);
     if (candidates.length > 32)
-      throw new Error("Review anchor operation exceeds its selection limit");
+      throw new DomainConflictError(
+        "Review anchor operation exceeds its selection limit",
+      );
     const checked = candidates.map((candidate) =>
       reviewAnchorCandidateSchema.parse(candidate),
     );
@@ -1079,7 +1082,7 @@ export class RetainedEvidenceStore {
       new Set(checked.map((candidate) => candidate.anchorId)).size !==
         checked.length
     )
-      throw new Error("Review anchor task or identity mismatch");
+      throw new DomainConflictError("Review anchor task or identity mismatch");
     const stage = () => {
       const prior = this.reviewAnchorOperation(
         taskId,
@@ -1097,7 +1100,7 @@ export class RetainedEvidenceStore {
         Number(countRow.count) + checked.length >
         retainedEvidenceLimits.maxReviewAnchorsPerTask
       )
-        throw new Error("Review anchor count quota exceeded");
+        throw new DomainConflictError("Review anchor count quota exceeded");
 
       const draftId = randomUUID();
       const now = Date.now();
@@ -1177,7 +1180,7 @@ export class RetainedEvidenceStore {
     candidates: readonly RetainedReviewAnchorCandidate[],
   ): RetainedReviewAnchorStageResponse {
     if (this.db.isTransaction === false)
-      throw new Error(
+      throw new DomainConflictError(
         "Review anchor staging requires the coordination transaction",
       );
     return this.stageReviewAnchorDraft(
@@ -1218,7 +1221,7 @@ export class RetainedEvidenceStore {
         FROM retained_review_anchor_drafts WHERE draftId=?`)
         .get(draftId) as Row | undefined;
       if (!draft || draft.taskId !== taskId)
-        throw new Error("Review anchor draft is unavailable");
+        throw new DomainConflictError("Review anchor draft is unavailable");
       const refs = this.db
         .prepare(
           "SELECT anchorId FROM retained_review_anchor_draft_refs WHERE draftId=? ORDER BY position",
@@ -1229,7 +1232,7 @@ export class RetainedEvidenceStore {
         refs.length !== checkedIds.length ||
         refs.some((anchorId, index) => anchorId !== checkedIds[index])
       )
-        throw new Error("Review anchor draft references changed");
+        throw new DomainConflictError("Review anchor draft references changed");
       if (draft.state === "discarded" && draft.submittedContextId === null)
         throw new Error("Discarded review anchor draft cannot be sealed");
 
@@ -1302,7 +1305,7 @@ export class RetainedEvidenceStore {
     anchorIds: readonly string[],
   ): RetainedReviewAnchorSealResponse {
     if (this.db.isTransaction === false)
-      throw new Error(
+      throw new DomainConflictError(
         "Review anchor sealing requires the coordination transaction",
       );
     return this.sealReviewAnchorDraft(
@@ -1337,7 +1340,7 @@ export class RetainedEvidenceStore {
         FROM retained_review_anchor_drafts WHERE draftId=?`)
         .get(draftId) as Row | undefined;
       if (!draft || draft.taskId !== taskId)
-        throw new Error("Review anchor draft is unavailable");
+        throw new DomainConflictError("Review anchor draft is unavailable");
       const preserved = draft.submittedContextId !== null;
       const orphanIds = this.db
         .prepare(
@@ -1393,7 +1396,7 @@ export class RetainedEvidenceStore {
     materialHash: string,
   ): RetainedReviewAnchorDiscardResponse {
     if (this.db.isTransaction === false)
-      throw new Error(
+      throw new DomainConflictError(
         "Review anchor discard requires the coordination transaction",
       );
     return this.discardReviewAnchorDraft(

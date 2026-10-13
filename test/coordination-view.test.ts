@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { DomainPolicyError } from "../src/core/domain.js";
 import type {
   Runtime,
   RuntimeToolCall,
@@ -451,7 +452,26 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
         expectedRevision: question.revision,
         answer: "Not in this task",
       }),
-      /Question is not in this task/,
+      (error) =>
+        error instanceof DomainPolicyError &&
+        error.code === "forbidden" &&
+        error.message === "Question is not in this task",
+    );
+    await assert.rejects(
+      view.decideApproval({
+        taskId: f.otherTaskId,
+        key: randomUUID(),
+        interactionId: approval.interactionId,
+        expectedRevision: approval.revision,
+        decision: "approved",
+        action: approval.action ?? "",
+        ...(approval.target === null ? {} : { target: approval.target }),
+        material: { version: "changed" },
+      }),
+      (error) =>
+        error instanceof DomainPolicyError &&
+        error.code === "forbidden" &&
+        error.message === "Approval is not in this task",
     );
     const eventsBeforeStale = reopened.messages.length;
     await assert.rejects(

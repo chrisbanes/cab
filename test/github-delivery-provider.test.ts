@@ -62,6 +62,7 @@ test("actual classic queue, strict status, deployments and app identity hold mer
 import { randomUUID } from "node:crypto";
 import { GitHubHttpDeliveryProvider } from "../src/standalone/github-delivery.js";
 import type { DeliveryActionRecord } from "../src/core/delivery.js";
+import { DomainPolicyError } from "../src/core/domain.js";
 function commentRecord(): DeliveryActionRecord {
   const projectId = randomUUID(),
     taskId = randomUUID(),
@@ -95,6 +96,43 @@ function commentRecord(): DeliveryActionRecord {
     updatedAt: 1,
   };
 }
+
+test("provider rejects a non-comment operator action as typed policy before network access", async () => {
+  let requests = 0;
+  const provider = new GitHubHttpDeliveryProvider("fixture", async () => {
+    requests++;
+    throw new Error("provider should not be called");
+  });
+  const record = commentRecord();
+  record.binding = {
+    actor: "operator",
+    principal: "installation-operator",
+    projectId: randomUUID(),
+    taskId: randomUUID(),
+    taskVersion: 1,
+    sourceId: randomUUID(),
+    sourceRevision: 1,
+    sourceDigest: "a".repeat(64),
+    sourceNodeId: "I7",
+    sourceRepositoryId: "R1",
+    policyVersion: 2,
+  };
+  record.request.action = {
+    kind: "issue.labels",
+    target: { repositoryId: "R1", nodeId: "I7", number: 7 },
+    add: ["progress"],
+    remove: [],
+  };
+  await assert.rejects(
+    provider.performAction(record),
+    (error) =>
+      error instanceof DomainPolicyError &&
+      error.code === "forbidden" &&
+      error.message ===
+        "Operator delivery only permits the bound issue.comment",
+  );
+  assert.equal(requests, 0);
+});
 test("lost create response is reconciled only by complete exact-author marker readback", async () => {
   const record = commentRecord();
   let effects = 0;

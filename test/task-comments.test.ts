@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { deliveryFixture } from "./delivery-fixture.js";
 import { OperatorApi } from "../src/standalone/operator-api.js";
+import { DomainPolicyError } from "../src/core/domain.js";
+import type { DeliveryCaller } from "../src/core/delivery.js";
 import { runtimeDeliveryCallerSchema } from "../src/core/delivery.js";
 const policy = (
   f: Awaited<ReturnType<typeof deliveryFixture>>,
@@ -46,6 +48,32 @@ test("operator issue.comment uses server-owned imported identity, rejects spoofi
   await assert.rejects(api.execute({ ...send(f), actor: "runtime" }));
   await assert.rejects(api.execute({ ...send(f), target: { nodeId: "I2" } }));
   const caller = f.service.operatorCommentCaller(f.taskId);
+  const coordinator = (
+    f.service as unknown as {
+      requireDeliveryCoordinator: () => {
+        submit: (input: unknown, caller: DeliveryCaller) => Promise<unknown>;
+      };
+    }
+  ).requireDeliveryCoordinator();
+  assert.throws(
+    () =>
+      coordinator.submit(
+        {
+          operationId: randomUUID(),
+          action: {
+            kind: "issue.labels",
+            target: { nodeId: "I1", repositoryId: "R1", number: 1 },
+            add: ["other"],
+            remove: [],
+          },
+        },
+        caller,
+      ),
+    (error) =>
+      error instanceof DomainPolicyError &&
+      error.code === "forbidden" &&
+      error.message === "Operator delivery only permits issue.comment",
+  );
   assert.equal(
     f.service.delivery().prepareAction(
       {

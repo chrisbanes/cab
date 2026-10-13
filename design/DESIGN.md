@@ -328,12 +328,12 @@ No recommendation is inferred from running activity.
 | Failed check with recorded repair owner, no attention | Overview `N9G11A`; List `nD0nh`; cross-project/project boards `E7qC9`, `MUFPD`; task `oipj4` | `zs53F` |
 | Running with unknown repair responsibility | Overview `N9G11A`; List `nD0nh`; boards `E7qC9`, `MUFPD`; task `kiPK9` | `zs53F` |
 | Specific audience question, requester, reason and evidence | Inbox `cGjau`; Overview and paused task row/card | Queue `U3RAH`; request `pmu7r`; evidence `YjRad` |
-| Failed submission, stale read, confirmation and return | Lifecycle reference `jKzRk`, shared receipt `w5VRs`, interaction contract `BvX5O` | Failed `uJVe2`; stale `e1kkI`; recorded `o6O3M`; anchored return `q2vYE` |
+| Failed submission, stale read, confirmation and return | Lifecycle reference `jKzRk`, shared receipt `w5VRs`, interaction contract `BvX5O` | Failed `uJVe2`; stale `e1kkI`; sent `o6O3M`; anchored return `q2vYE` |
 | Exact approval and independent dependency hold | Review `DAeiN`; recorded approval `US7Kv`; imported task `biA7p` | Task `K045bl`; review `ZWQIU` |
 | Completed result and retained evidence, no decision | Task `Q24BPH`; outcomes `zeoGi`; Overview recent results | `Thy1i` |
 | Cancellation and provider closure without delivery | Outcomes `zeoGi` | Cancelled `rn49D`; provider-closed/Ensemble-paused `ALMfc` |
 | Uncertain execution and honest recovery | Overview/List; later board `x9cPnW`; outcomes `zeoGi` | `CTUzI` |
-| Confirmed creation waiting for capacity | Outcomes `zeoGi`; composer semantics `s34356` | Receipt `Z6U3T4` |
+| Confirmed creation waiting for capacity | Outcomes `zeoGi`; composer semantics `s34356` | Created `Z6U3T4` |
 | Optional values, collapsed error count and expanded invalid dependency | Composer `Z315o`; full-content `MhM7z` | Composer `i3glx`; collapsed error `JX4dm`; expanded error `wXiWx` |
 
 The question journey is queue → request → recorded evidence → request with
@@ -342,9 +342,9 @@ retains the choice; stale evidence retains the last read and requires checking t
 current request. Exact unknown command outcomes require reconciliation, not a
 blind retry. Confirmation does not automatically open another item.
 
-The approval receipt authorises AP-17 revision 2 only. It explicitly says no
-execution started and retains the source-owned GitHub dependency. It does not
-claim PR creation or successful delivery. Existing source refresh/comment outcome
+Approval shows one success line, "Approved. Waiting on the GitHub dependency.",
+with AP-17 v2 in Details. The source-owned GitHub dependency stays visible. It
+does not claim PR creation or successful delivery. Existing source refresh/comment outcome
 references remain in place; the design adds no remote-write capabilities.
 
 Overview orders execution uncertainty first, then the 09:14 question before the
@@ -401,6 +401,15 @@ and disclosure detail; do not shrink their entire height into a laptop viewport.
 | Runtime, assignment recovery and not found | 126 `AqYk0`, 127 `iEF1o`, 128 `ur1mr`, 129 `HCNJ2` |
 | Stop confirmation | 132 `uQrNE` |
 | CLI credentials, desktop and phone | 133 `rX5TO`, 134 `b6P8Z3`, 135 `vlG3U`, 136 `LJKCn`, 137 `JEKrc`, 138 `CcimU`, 139 `PnQRM`, 140 `XTiZ6`, 141 `B3XyJr`, 142 `MaR6q` |
+| First run & onboarding section | Section `B4S7E`; review notes 153 `uqAeR` |
+| Getting-started checklist, desktop and phone | 143 `AnubR`, 143b `Ttbda`, 144 `stx1O` |
+| Setup inline lead profile and ready check | 145 `HGgoK`, 145b `ju0c4`, 146 `UdnEc`, 146b `PFBIv`, 147 `akpq9` |
+| First task: start prediction, wait reasons and Fix | 148 `q9Ogr`, 149 `Ky9f4`, 149b `CLbNV`, 149c `itg8q`, 150 `A0xMwZ` |
+| Readiness panel and Add Claude | 151 `ahTxh`, 152 `CLLED`, 152b `vF8EX` |
+| Action feedback section and components | Section `BnKzu`; components `SKF0h`; review notes 167 `nrZYd` |
+| Action feedback, project configuration | 154 `JGenC`, 154b `TZhQ0`, 156 `RsAq8`, 157 `sbOOH`, 158 `x4tTqV`, 159 `IS6X0` |
+| Action feedback, other surfaces | 155 `hRBAj`, 160 `HYN4M`, 161 `thtaf`, 162 `zxH2a`, 162b `Gi4zR`, 163 `o6kBCw`, 164 `h0FyJW`, 165 `TGj4A` |
+| Action feedback, phone | 166a `VWHi0`, 166b `pPAmx`, 166c `N7QIqz` |
 | Operator refinement (section 10, renamed 800A–800H) | `qIVmm`; `h23qD`, `FsTwL`, `dUUIS`, `Z8BqXF`, `LBzlj`, `nKHGv`, `Sejey`, `g5wmIu` |
 
 Workspace inspection frames 77–106 and the task-overview, review, assignment and
@@ -481,6 +490,64 @@ use the desktop copy.
 - Phone inputs, selects and buttons, dialog actions included, are 44 px tall. Token
   values are fictional fixtures. Loading, a busy create button and an
   expiring-soon cue are not drawn.
+
+### First run and onboarding
+
+Frames 143–152b draw the planned flows in [docs/user-flows](../docs/user-flows/);
+none is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
+@fixture-user, lead Ada and task FA-1. Review notes 153 list each frame's flow and
+the open decisions.
+
+- **Getting started (143, 143b, 144):** Home replaces the board of 18 with a
+  "Get Ensemble running" card of six rows (Runtime, GitHub, Lead profile, Project,
+  First task, Claude optional). Each row has a status icon, title, explanation,
+  badge (Done secondary, Next default, Needs attention destructive, Not started
+  outline, Optional muted outline) and one action. Only the first incomplete
+  required row has the primary button; Done and optional rows use Ghost, the rest
+  Outline. On phone the action moves below the explanation.
+- **Project setup (145, 145b):** with no profiles, step 1 shows an inline profile
+  form (name, runtime with Codex preselected, summary, instructions) and Create
+  profile. Afterwards the lead select shows the new profile and "Profile created.
+  Other setup values kept."
+- **Ready check (146, 146b, 147):** replaces the "Recorded … as a paused project"
+  alert. It lists what was saved, states that the project is Paused and nothing
+  has run, and offers Resume and create first task with Keep paused. A blocking
+  item disables the primary and gives the reason beneath it.
+- **First task (148–150):** the composer warns before Create and start that a paused
+  project makes the task wait. Task detail shows "Waiting · <reason>" with one Fix;
+  Fix: Resume project confirms first (149b). A dependency wait has no Fix, only a
+  link to the blocking task (149c).
+- **Readiness and Add Claude (151, 152, 152b):** Readiness sits at the top of the
+  Settings right column with Pass, Fail and Not configured badges, a Geist Mono fix
+  line under each failure, and Run again as its only action. Add Claude sits at the
+  top of the runtime page's left column: copyable token-file commands, a Token
+  reference field (`file:` or `env:`), Save, and a live Token readable row. A
+  failure names neither the path nor the value and offers Clear.
+
+### Action feedback
+
+Section 12 (frames 154–166c, review notes 167) sets one message per action, sized
+to the outcome. Frames 1–153 were swept to the same rules; 167 lists each change.
+
+- **In progress:** the button label only ("Saving…", "Sending…").
+- **Success:** one quiet inline line beside the action: muted check, muted text,
+  no Alert (component `ugjxZ`).
+- **Rejected:** one destructive Alert naming the cause (`NaPr2`), plus any field
+  error.
+- **Changed elsewhere or unknown outcome:** one warning Alert with a single button
+  (`TsFAB`). An unknown outcome locks the other fields.
+- **Copy:** at most two short sentences. Message text never uses recorded,
+  receipt, observation, admission, reconcile, submission or revision, and never
+  shows command names, IDs, versions, hashes or raw codes. Every failure says the
+  input is safe ("Your changes are still here.").
+- **Details:** every outcome has a collapsed Details disclosure (`Q5Ff9`).
+  Expanded, it shows a Geist Mono key/value list (Command, Resource, Version,
+  Request key, Code) with Copy (`kUOab`).
+- **Consequences** go in the Changes to save list before Save (159), never in the
+  success line.
+
+Warning colours are the local `nova-warning-fg` and `nova-warning-bg` tokens;
+shadcn has no warning variant.
 
 ## Task overview
 
@@ -570,7 +637,7 @@ access remain.
 | Labelled before/after comparison | `dKc4O` |
 | Inspect evidence and edit contextual feedback | `WEBvT` |
 | Confirmed send failure with editable draft | `uqbVh` |
-| Confirmed local-message receipt | `AVuFr` |
+| Sent local message | `AVuFr` |
 | Phone before/after comparison | `mrRXI` |
 | Missing before and unavailable after material | `OisQm` |
 | Revision changes, no baseline and failed-source alternatives | `ge1Mm` |
@@ -815,8 +882,8 @@ reading content uses 16–20px padding and phone action targets are at least
 | 93 · Phone repository-free Markdown output | `bz4VC` |
 | 94 · Phone sending / original payload locked | `OHIOZ` |
 | 95 · Phone confirmed failure / editable draft / retry | `OBijt` |
-| 96 · Phone unknown outcome / original-operation reconciliation | `X3wI8B` |
-| 97 · Phone confirmed receipt and sent-review access | `CACzF` |
+| 96 · Phone unknown outcome / check whether it was sent | `X3wI8B` |
+| 97 · Phone sent and sent-review access | `CACzF` |
 | 98 · Phone retained result bytes after workspace removal | `KVIG2` |
 | 99 · Phone PDF page and zoom controls | `FCvHl` |
 | 100 · Phone raster fit/zoom/pan | `MKzws` |
@@ -851,7 +918,7 @@ specimen explicitly distinguishes it from the latest finished capture T-209.
 R3 evidence survives replacement of T-208 and workspace removal. `c-73a1`,
 `c-4e91` and `d-19f2` are illustrative immutable content/capture identities,
 not real hashes. Review operation RV-42 carries two comments and a summary;
-confirmed local receipt LR-42 is shown at 12:14. Sending/failure/unknown/sent
+the sent line keeps LR-42 and the time in Details. Sending/failure/unknown/sent
 frames are alternative outcomes of that operation, not simultaneous states.
 
 Repository-free **Fieldnotes / FN-58**, Research brief, also has Mira as lead,
