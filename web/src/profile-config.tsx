@@ -30,7 +30,6 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
-  SavedNotice,
   key,
   locked,
   reloadDraft,
@@ -217,6 +216,7 @@ export function ProfileCreate(p: SettingsProps) {
               client={p.client}
               session={p.session}
               label="Create profile"
+              refresh={p.refresh}
             />
             <div className="settings-actions">
               {d.phase === "recorded" ? (
@@ -433,28 +433,16 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                     label="Save profile"
                     saveDisabled={lines.length === 0}
                     discard={() => initial && reloadDraft(d, initial)}
-                    onRecorded={() => {
+                    refresh={() => {
                       p.refresh();
                       resource.refresh();
                     }}
+                    review={() =>
+                      initial && d.adoptLatest(data.profile.version, initial)
+                    }
                   />
-                  {d.phase === "conflict" && (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      onClick={() =>
-                        initial && d.adoptLatest(data.profile.version, initial)
-                      }
-                    >
-                      Review latest profile revision
-                    </Button>
-                  )}
                 </form>
               </Panel>
-              <SavedNotice
-                saved={p.drafts.saved(draftKey)}
-                label={`Saved ${data.profile.name ?? "profile"}`}
-              />
             </div>
             <div className="settings-column">
               <Aside

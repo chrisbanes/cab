@@ -5,10 +5,9 @@ import {
   savedCandidates,
   type Values,
 } from "./settings-changes.js";
-import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import type { TabProps } from "./project-config.js";
-import { clock } from "./settings-view.js";
+import { joinNames } from "./settings-view.js";
 import {
   Aside,
   ChangeList,
@@ -17,7 +16,6 @@ import {
   DraftOutcome,
   Panel,
   ReferenceInput,
-  SavedNotice,
   locked,
   reloadDraft,
   submitDraft,
@@ -31,8 +29,7 @@ const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
 export function RoutingTab(p: TabProps) {
   const { data, projectId } = p,
     draftKey = `routing.configure:${projectId}`,
-    d = useDraft(p.drafts, draftKey),
-    saved = p.drafts.saved(draftKey);
+    d = useDraft(p.drafts, draftKey);
   const initial: Values = {
     expectedVersion: String(data.routing.version),
     enabled: data.routing.enabled,
@@ -48,13 +45,11 @@ export function RoutingTab(p: TabProps) {
     ? d.values.candidateProfileIds
     : [];
   const names = (ids: string[]) =>
-    ids
-      .map(
-        (id) =>
-          data.profiles.find((r) => r.id === id)?.name ?? "Name unavailable",
-      )
-      .join(", ") || "None";
-  const projectName = data.project.name ?? "this project";
+    ids.map(
+      (id) =>
+        data.profiles.find((r) => r.id === id)?.name ?? "Name unavailable",
+    );
+  const used = names(data.routing.candidateProfileIds);
   return (
     <div className="settings-split">
       <div className="settings-column">
@@ -134,31 +129,22 @@ export function RoutingTab(p: TabProps) {
               label="Save routing"
               saveDisabled={lines.length === 0}
               discard={() => reloadDraft(d, initial)}
-              onRecorded={p.refreshConfiguration}
+              refresh={p.refreshConfiguration}
+              review={() => d.adoptLatest(data.routing.version, initial)}
+              success={
+                // After the re-read, say what routing now uses; until then the saved line is plain.
+                d.phase === "editing" && data.routing.enabled && used.length
+                  ? `Saved. Routing now uses ${joinNames(used)}.`
+                  : undefined
+              }
             />
-            {d.phase === "conflict" && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => d.adoptLatest(data.routing.version, initial)}
-              >
-                Review latest routing revision
-              </Button>
-            )}
           </form>
         </Panel>
-        <SavedNotice saved={saved} label={`Saved routing for ${projectName}`} />
       </div>
       <div className="settings-column">
         <section className="settings-aside" aria-label="Saved routing">
-          <h2 className="small-heading">
-            {saved
-              ? `Saved · ${clock(saved.at)}`
-              : `Saved · version ${data.routing.version}`}
-          </h2>
-          <p className="body">
-            Candidates: {names(data.routing.candidateProfileIds)}
-          </p>
+          <h2 className="small-heading">Saved routing</h2>
+          <p className="body">Candidates: {used.join(", ") || "None"}</p>
           <p className="metadata muted">
             Guidance: private · not loaded into this form
           </p>

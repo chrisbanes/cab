@@ -92,6 +92,10 @@ authorise dispatch while paused.
 Use Node.js from `.node-version` and the package manager pinned in `package.json`.
 Run `npm ci` then `npm run check` (type checking, lint, formatting, build, tests).
 CI runs the same check. Existing tests use real SQLite and a fake host.
+Claude Code cloud sessions get the toolchain from `scripts/cloud-environment-setup.sh`
+and dependencies from the `scripts/cloud-session-start.sh` SessionStart hook. Their
+GitHub proxy rejects GraphQL, so `gh issue`, `gh pr` and Projects v2 fail there; use
+`gh api` REST calls or the built-in GitHub tools.
 Standalone release
 evidence must exercise the chosen real runtime and operator UI; see
 `docs/acceptance.md`. Do not claim

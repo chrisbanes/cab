@@ -6,14 +6,17 @@ import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
+import type { ConfigurationDraft } from "./settings-state.js";
 import { observationLabel, sourceCredentialCopy } from "./settings-view.js";
 import {
   DraftField,
+  DraftMessage,
   DraftOutcome,
   Panel,
   key,
   submitDraft,
   useDraft,
+  useLoadedDraft,
   type SettingsProps,
 } from "./settings.js";
 
@@ -23,18 +26,21 @@ interface ObservationResource {
   refresh: () => void;
 }
 
+/** The one saved line of a recorded placement, in plain words. */
+const placedLine = (d: ConfigurationDraft) =>
+  `Saved. ${d.values.placementTitle || "The task"} now belongs to ${d.values.placementProject || "the chosen project"}.`;
+
 export function SyncTab(p: TabProps & { observations: ObservationResource }) {
   const { data } = p,
     preview = useDraft(p.drafts, `github.preview:${p.projectId}`);
-  useEffect(
-    () =>
-      preview.initialize({
-        key: key(),
-        expectedVersion: String(data.source.version),
-        selectionId:
-          data.source.selections.find((s) => s.id !== null)?.id ?? "",
-      }),
-    [preview, data.source.version, data.source.selections],
+  // After a preview is recorded the next read starts a new one, so the form never stays locked.
+  useLoadedDraft(
+    preview,
+    {
+      expectedVersion: String(data.source.version),
+      selectionId: data.source.selections.find((s) => s.id !== null)?.id ?? "",
+    },
+    p.loadedAt,
   );
   const unsettled = p.drafts
     .unsettledPlacements(p.projectId)
@@ -92,20 +98,13 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
               session={p.session}
               label="Preview and activate selection"
               saveDisabled={data.source.credential?.usable === false}
+              refresh={p.refreshConfiguration}
+              review={() => preview.adoptVersion(data.source.version)}
             />
             {preview.phase === "conflict" && preview.errors.credentialRef && (
               <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
                 Set or change source credential
               </a>
-            )}
-            {(preview.phase === "recorded" || preview.phase === "conflict") && (
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => preview.adoptVersion(data.source.version)}
-              >
-                Review latest preview revision
-              </Button>
             )}
           </form>
         </Panel>
@@ -118,19 +117,24 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
         {unsettled.map((command) => (
           <UnsettledPlacement key={command.taskId} {...p} command={command} />
         ))}
-        {p.drafts.placementReceipts(p.projectId).map((receipt) => (
-          <p key={receipt.key} className="body" role="status">
-            {`Recorded placement outcome: task ${receipt.result.resourceId}; project `}
-            {receipt.result.commandType === "github.place"
-              ? receipt.result.projectId
-              : "Unavailable"}
-            ; version{" "}
-            {"version" in receipt.result
-              ? receipt.result.version
-              : "Unavailable"}
-            . Latest observations may differ from this original receipt.
-          </p>
-        ))}
+        {p.drafts
+          .recordedPlacements(p.projectId)
+          // A task still listed here shows its line on its own row, so each saves once.
+          .filter(
+            (placed) =>
+              !data.placements.some(
+                (row) =>
+                  placed.frozen?.type === "github.place" &&
+                  row.taskId === placed.frozen.taskId,
+              ),
+          )
+          .map((placed) => (
+            <DraftMessage
+              key={placed.receipt?.key}
+              draft={placed}
+              success={placedLine(placed)}
+            />
+          ))}
         {data.placements.length === 0 && unsettled.length === 0 && (
           <Panel
             title="Source placement"
@@ -230,6 +234,7 @@ function SourceObservations(
 function UnsettledPlacement(
   p: SettingsProps & {
     command: Extract<OperatorCommand, { type: "github.place" }>;
+    refreshConfiguration: () => void;
   },
 ) {
   const d = useDraft(p.drafts, `github.place:${p.command.taskId}`);
@@ -246,6 +251,8 @@ function UnsettledPlacement(
         client={p.client}
         session={p.session}
         label="Placement pending"
+        refresh={p.refreshConfiguration}
+        success={placedLine(d)}
       />
     </Panel>
   );
@@ -283,6 +290,13 @@ function PlacementConfiguration(
       <form
         onSubmit={(e) => {
           d.set("placementOriginProjectId", p.projectId);
+          // The conflict row is gone once this is recorded, so keep the words for the saved line.
+          d.set("placementTitle", c.title ?? "");
+          d.set(
+            "placementProject",
+            c.choices.find((r) => r.id === d.values.chosenProjectId)?.name ??
+              "",
+          );
           void submitDraft(
             e,
             d,
@@ -313,17 +327,11 @@ function PlacementConfiguration(
           client={p.client}
           session={p.session}
           label="Record placement"
+          refresh={p.refreshConfiguration}
+          review={() => d.adoptVersion(c.version)}
+          success={placedLine(d)}
         />
         <a href={`/task/${c.taskId}`}>Advanced source review controls</a>
-        {d.phase === "conflict" && (
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => d.adoptVersion(c.version)}
-          >
-            Review latest placement revision
-          </Button>
-        )}
       </form>
       <p className="metadata muted">
         Recording a placement does not start work or grant repository access;

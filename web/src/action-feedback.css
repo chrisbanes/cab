@@ -1,0 +1,72 @@
+/* Action feedback (frames 154–166c): the one outcome message and its Details. */
+
+.action-outcome {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.action-outcome > button {
+  justify-self: start;
+}
+
+.action-outcome-message {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.action-outcome-message svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+}
+
+div.action-outcome[data-tone="success"] {
+  color: var(--muted-foreground);
+}
+
+.action-outcome-details {
+  display: grid;
+  gap: var(--space-8);
+}
+
+.action-outcome-details > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.action-outcome-details > button {
+  justify-self: start;
+}
+
+.action-outcome-fields {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.action-outcome-fields > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+}
+
+.action-outcome-fields dt {
+  flex: none;
+  color: var(--muted-foreground);
+}
+
+.action-outcome-fields dt::after {
+  content: ":";
+}
+
+.action-outcome-fields dd {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}

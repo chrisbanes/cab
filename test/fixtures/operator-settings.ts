@@ -1,12 +1,14 @@
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { BrowserJourney } from "./browser-diagnostics.js";
 import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import type {
   RuntimeSpawnContext,
   StandaloneServiceOptions,
@@ -209,13 +211,15 @@ export async function startSettings(
       harness: ExecutionHarness,
     ) => OperatorFixtureRuntime;
     serviceOptions?: StandaloneServiceOptions;
+    /** Answers GitHub reads, so a source preview can succeed offline. */
+    readerFactory?: GitHubReaderFactory;
   } = {},
 ) {
   const f = await journey.start("fixture.create", () =>
     options.runtimeFactory
       ? createOperatorFixture(
           null,
-          undefined,
+          options.readerFactory,
           undefined,
           journey.fixtureOptions,
           options.runtimeFactory,
@@ -223,7 +227,7 @@ export async function startSettings(
         )
       : createOperatorFixture(
           null,
-          undefined,
+          options.readerFactory,
           undefined,
           journey.fixtureOptions,
           undefined,
@@ -276,3 +280,23 @@ export const trail = (page: Page) =>
     .getByRole("navigation", { name: "Breadcrumb" })
     .locator("li")
     .evaluateAll((es) => es.map((e) => e.textContent).join(" / "));
+/** Every outcome message within `scope` (the page by default); an action leaves at most one. */
+export const outcomeMessages = (scope: Page | Locator) =>
+  scope.locator('[data-slot="action-outcome"]');
+/**
+ * The one saved line the last save left. The page shows exactly one outcome message, and its
+ * text carries no service vocabulary, version or identifier.
+ */
+export async function savedOutcome(
+  scope: Page | Locator,
+  text: RegExp = /^Saved\./,
+) {
+  const saved = outcomeMessages(scope).filter({ hasText: text });
+  await saved.waitFor();
+  assert.equal(await outcomeMessages(scope).count(), 1);
+  assert.doesNotMatch(
+    await saved.innerText(),
+    /recorded|receipt|revision|version|\w+\.(?:create|configure|preview|place)\b|system:/i,
+  );
+  return saved;
+}

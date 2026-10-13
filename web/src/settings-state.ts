@@ -6,6 +6,39 @@ import {
 import type { OperatorClient } from "./api.js";
 import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
+/** The plain outcome copy of a configuration save. Details, not these lines, carry the codes. */
+export const outcomeCopy = {
+  saved: "Saved.",
+  fields:
+    "Couldn't save: check the highlighted fields. Your changes are still here.",
+  tooLarge:
+    "Couldn't save: the change is too large. Your changes are still here.",
+  rejected: "Couldn't save. Your changes are still here.",
+  conflict: "A newer version was saved elsewhere.",
+  unknown: "We couldn't confirm the save.",
+  adopted: "Loaded the latest version. Your changes are still here.",
+};
+
+/** The receipt fields behind an outcome, shown only in its collapsed Details. */
+export interface DraftDetails {
+  command?: string | undefined;
+  resource?: string | undefined;
+  version?: number | undefined;
+  requestKey?: string | undefined;
+  code?: string | undefined;
+}
+
+/** The resource a command names, or null for installation-wide commands. */
+function commandResource(c: OperatorCommand) {
+  return "profileId" in c
+    ? c.profileId
+    : "taskId" in c
+      ? c.taskId
+      : "projectId" in c
+        ? c.projectId
+        : null;
+}
+
 function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
   if (r.key !== c.key || r.kind !== "configuration") return false;
   const result = r.result;
@@ -33,15 +66,7 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.commandType === "claude-token.configure" &&
       result.configured === (c.credentialRef !== null)
     );
-  const resource =
-    "profileId" in c
-      ? c.profileId
-      : "taskId" in c
-        ? c.taskId
-        : "projectId" in c
-          ? c.projectId
-          : null;
-  if (result.resourceId !== resource) return false;
+  if (result.resourceId !== commandResource(c)) return false;
   if (
     c.type === "github.place" &&
     (result.commandType !== "github.place" ||
@@ -72,6 +97,11 @@ export class ConfigurationDraft {
     | "unknown" = "editing";
   dirty = false;
   notice = "";
+  /** Set while the last save is confirmed; the next edit or new operation clears it. */
+  savedAt: number | null = null;
+  details: DraftDetails = {};
+  /** A source credential refusal is a failure to fix, not a newer version to review. */
+  credentialRefusal = false;
   errors: Record<string, string> = {};
   private readonly lifecycle = new CommandLifecycle<OperatorCommand>();
   get frozen() {
@@ -108,6 +138,7 @@ export class ConfigurationDraft {
       return false;
     this.values = { ...this.values, [field]: value };
     this.dirty = true;
+    this.savedAt = null;
     this.changed();
     return true;
   }
@@ -115,6 +146,15 @@ export class ConfigurationDraft {
   private base: Record<string, string | boolean | string[]> = {};
   initialize(values: Record<string, string | boolean | string[]>) {
     if (!this.dirty && !this.frozen) {
+      // A read at another version was saved by someone else, so the confirmation of this
+      // session's save no longer describes what the page now shows.
+      if (
+        this.savedAt !== null &&
+        values.expectedVersion !== this.base.expectedVersion
+      ) {
+        this.savedAt = null;
+        this.details = {};
+      }
       this.values = { ...values };
       this.base = { ...values };
       this.changed();
@@ -150,7 +190,10 @@ export class ConfigurationDraft {
     this.generation++;
     this.lifecycle.reset();
     this.phase = "editing";
-    this.notice = "Latest revision explicitly adopted; input retained.";
+    this.savedAt = null;
+    this.details = {};
+    this.credentialRefusal = false;
+    this.notice = outcomeCopy.adopted;
     this.values = {
       ...this.values,
       expectedVersion: String(version),
@@ -158,10 +201,29 @@ export class ConfigurationDraft {
     };
     this.changed();
   }
-  startOperation(values: Record<string, string | boolean | string[]>) {
+  /**
+   * Begin a new operation from `values`. A re-read after a save keeps that save's
+   * confirmation (`keepSaved`) only when it loaded the version the save produced; if
+   * another writer committed first the page shows their version, so the confirmation is
+   * dropped. Saves without a version (capacity, credential references) cannot tell.
+   * Any other new operation starts without a confirmation.
+   */
+  startOperation(
+    values: Record<string, string | boolean | string[]>,
+    keepSaved = false,
+  ) {
     if (this.phase === "pending" || this.lifecycle.uncertain) return;
+    const { savedAt, details } = this;
     this.purge();
     this.initialize(values);
+    if (
+      keepSaved &&
+      (details.version === undefined ||
+        String(details.version) === values.expectedVersion)
+    ) {
+      this.savedAt = savedAt;
+      this.details = details;
+    }
   }
   purge() {
     this.generation++;
@@ -172,6 +234,9 @@ export class ConfigurationDraft {
     this.phase = "editing";
     this.dirty = false;
     this.notice = "";
+    this.savedAt = null;
+    this.details = {};
+    this.credentialRefusal = false;
     this.changed();
   }
   /** Reject before sending: field errors keyed by command path, as after a rejected send. */
@@ -184,7 +249,9 @@ export class ConfigurationDraft {
       return;
     this.errors = errors;
     this.phase = "rejected";
-    this.notice = "Check the highlighted fields.";
+    this.notice = outcomeCopy.fields;
+    this.details = { code: "invalid-input" };
+    this.credentialRefusal = false;
     this.changed();
   }
   async submit(client: OperatorClient, input: unknown, csrf: string) {
@@ -208,14 +275,18 @@ export class ConfigurationDraft {
         this.errors[path] = "Check this field.";
       }
       this.phase = "rejected";
-      this.notice = "Check the highlighted fields.";
+      this.notice = outcomeCopy.fields;
+      this.details = { code: "invalid-input" };
+      this.credentialRefusal = false;
       this.changed();
       return;
     }
     const bytes = JSON.stringify(parsed.data);
     if (new TextEncoder().encode(bytes).length > 65536) {
-      this.notice = "Submission exceeds the request limit.";
+      this.notice = outcomeCopy.tooLarge;
       this.phase = "rejected";
+      this.details = { code: "request-too-large" };
+      this.credentialRefusal = false;
       this.changed();
       return;
     }
@@ -232,6 +303,7 @@ export class ConfigurationDraft {
     if (!c) return;
     const generation = this.generation;
     this.phase = "pending";
+    this.savedAt = null;
     this.changed();
     const result = await client.command(c, csrf);
     if (generation !== this.generation) return;
@@ -239,30 +311,52 @@ export class ConfigurationDraft {
       result,
       matchesConfigurationReceipt,
     );
+    const receipt =
+      this.receipt?.kind === "configuration" ? this.receipt : null;
+    this.credentialRefusal = false;
+    this.details = {
+      command: c.type,
+      requestKey: c.key,
+      resource: receipt?.result.resourceId ?? commandResource(c) ?? undefined,
+      ...(receipt
+        ? {
+            version:
+              "version" in receipt.result
+                ? receipt.result.version
+                : "configVersion" in receipt.result
+                  ? receipt.result.configVersion
+                  : undefined,
+          }
+        : {}),
+      ...(result.state === "recorded" ? {} : { code: result.code }),
+    };
     if (disposition === "recorded") {
       this.phase = "recorded";
       if (this.receipt) this.onSaved(this.receipt);
-      this.notice =
-        "Recorded. Latest observations may differ from this original receipt.";
+      this.savedAt = Date.now();
+      this.notice = outcomeCopy.saved;
     } else if (disposition === "unknown") {
       this.phase = "unknown";
-      this.notice =
-        "Outcome unknown. Reconcile the exact original submission before making changes.";
+      this.notice = outcomeCopy.unknown;
     } else {
       this.phase = disposition;
-      this.notice =
-        result.state !== "recorded" &&
-        result.credentialReason &&
-        (c.type === "github.preview" || c.type === "github.configure")
-          ? sourceCredentialCopy(result.credentialReason)
-          : disposition === "conflict"
-            ? "Configuration changed. Review the loaded revision before a new submission."
-            : "Submission rejected. Your input is retained.";
       this.errors = Object.fromEntries(
         (result.state === "recorded" ? [] : (result.fieldPaths ?? [])).map(
           (p) => [p, "Check this field."],
         ),
       );
+      this.credentialRefusal =
+        result.state !== "recorded" &&
+        Boolean(result.credentialReason) &&
+        (c.type === "github.preview" || c.type === "github.configure");
+      this.notice =
+        result.state !== "recorded" && this.credentialRefusal
+          ? `${sourceCredentialCopy(result.credentialReason)} Your changes are still here.`
+          : disposition === "conflict"
+            ? outcomeCopy.conflict
+            : Object.keys(this.errors).length
+              ? outcomeCopy.fields
+              : outcomeCopy.rejected;
     }
     this.changed();
   }
@@ -288,17 +382,20 @@ export class ConfigurationDrafts {
         : [],
     );
   }
-  placementReceipts(projectId: string) {
-    return [...this.drafts.values()].flatMap((draft) => {
-      const receipt = draft.receipt;
-      return draft.frozen?.type === "github.place" &&
+  /**
+   * Placements this session recorded from `projectId`. The conflict row disappears once a
+   * placement is recorded, so the page shows the confirmation from the draft instead.
+   */
+  recordedPlacements(projectId: string) {
+    return [...this.drafts.values()].filter(
+      (draft) =>
+        draft.phase === "recorded" &&
+        draft.frozen?.type === "github.place" &&
         (draft.values.placementOriginProjectId ?? draft.frozen.projectId) ===
           projectId &&
-        receipt?.kind === "configuration" &&
-        receipt.result.commandType === "github.place"
-        ? [receipt]
-        : [];
-    });
+        draft.receipt?.kind === "configuration" &&
+        draft.receipt.result.commandType === "github.place",
+    );
   }
   get(key: string, changed: () => void) {
     let draft = this.drafts.get(key);

@@ -8,6 +8,7 @@ import { holdPills } from "../web/src/settings-view.js";
 import {
   noPageOverflow,
   phone,
+  savedOutcome,
   startSettings,
   trail,
 } from "./fixtures/operator-settings.js";
@@ -48,10 +49,7 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
     .getByText(`Global active-turn cap: ${before} → 1`)
     .waitFor();
   await save.click();
-  await page
-    .locator(".settings-saved")
-    .getByText("Recorded capacity limits: global 1", { exact: false })
-    .waitFor();
+  await savedOutcome(page);
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
       (b) => b.textContent === "Save capacity" && b.disabled,
