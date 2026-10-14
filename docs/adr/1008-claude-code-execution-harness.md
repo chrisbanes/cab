@@ -12,7 +12,9 @@ Delivery scope and status live under
 
 ## Selection
 
-The execution runtime is an agent profile setting. Codex remains the default.
+The execution runtime is an agent profile setting. The operator can enable or disable
+each runtime, and new profiles default to the first enabled one
+([ADR-1012](1012-operator-controlled-runtime-enablement.md)).
 An assignment conversation stays bound to the harness that started it; changing a
 profile's harness affects new conversations only and never migrates a live session.
 One task may therefore mix Codex and Claude assignments. Ensemble keeps admission,
