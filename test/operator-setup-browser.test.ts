@@ -1001,6 +1001,38 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
   assert.equal(f.service.domain().project(projectId).paused, 1);
 });
 
+test("Setup shows a missing claude's fix for a Claude lead, without an Add Claude link", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, {
+    profiles: false,
+    claude: true,
+  });
+  f.service.domain().execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Claude lead",
+    instructions: "Lead",
+    capabilities: "Coordinate",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  } as never);
+  await stubReadiness(page, { "claude-executable": "fail" });
+  await page.reload();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  const { ready, resume } = await createProject(
+    page,
+    sentCommands(page),
+    "Claude lead",
+  );
+  await ready.getByText("claude-executable reason").waitFor();
+  await ready.getByText("claude-executable fix").waitFor();
+  assert.equal(await resume.isDisabled(), true);
+  assert.equal(
+    await ready.getByRole("link", { name: "Add Claude" }).count(),
+    0,
+  );
+});
+
 test("Setup lets the operator check again after fixing a failed item", async (_t, journey) => {
   const { f, page } = await setupJourney(journey);
   let failing: Parameters<typeof readinessBody>[0] = { "codex-login": "fail" };

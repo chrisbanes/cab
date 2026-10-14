@@ -25,6 +25,7 @@ import {
   parseFailureEvidence,
   type Runtime,
   type RuntimeConversationEvent,
+  RuntimeNotEnabledError,
   type RuntimeToolCall,
   type RuntimeToolDefinition,
   type RuntimeToolResult,
@@ -47,6 +48,7 @@ import {
   captureProcessIdentity,
   MacProcessTerminationVerifier,
 } from "./termination.js";
+import { resolveOnPath } from "./executable-path.js";
 import { isWithin } from "./workspace-inspection.js";
 
 /** The SDK surface the runtime uses; tests inject a fake. */
@@ -66,6 +68,8 @@ export interface ClaudeRuntimeOptions {
     turnEnvironment: () => ClaudeTurnEnvironment;
   };
   sdk?: ClaudeSdk;
+  /** Finds the `claude` to run; defaults to the service's own `PATH`. */
+  resolveExecutable?: () => Promise<string | null>;
   captureProcessIdentity?: (
     pid: number | undefined,
   ) => Promise<RuntimeProcessIdentity | null>;
@@ -326,6 +330,7 @@ export const claudePolicyLimits: readonly string[] = [
   "Untested: inertness of model-written Claude configuration (C0 F5.5), whether Claude Code honours dangerouslyDisableSandbox (F6.3; Ensemble's hook denies it), and a missing sandbox-exec binary (F6.4).",
   "The subprocess environment scrub is qualified for sandboxed Bash only (#827): Bash saw neither the token variable nor its value, and could not read its parent's environment with ps. Other ways to read a parent process's environment are untested.",
   "After a service crash, a running Claude CLI process can outlive the service (#827); verify it has exited before recovering the turn.",
+  "Only the Claude Code version the pinned SDK declares was qualified. The installed claude is not version-checked, and another version may enforce the sandbox, tool and permission controls differently.",
   "Whether processes started by sandboxed Bash keep the per-task temporary directory is untested.",
   "The sandboxed agent can write the per-task temporary directory; Ensemble checks only its top-level entries before each turn.",
   "The per-task temporary directory has a predictable name under /tmp; another local user who creates it first makes Claude work wait, but never shares it.",
@@ -474,6 +479,8 @@ export class ClaudeRuntime implements Runtime {
   readonly harness = "claude" as const;
   private generation: string | undefined;
   private sdk: ClaudeSdk | undefined;
+  /** The service-PATH `claude`, resolved once per start; the SDK never falls back to its bundled one. */
+  private executable: string | undefined;
   private readonly freshThreads = new Set<string>();
   private readonly threadTools = new Map<
     string,
@@ -677,8 +684,8 @@ export class ClaudeRuntime implements Runtime {
     env: Record<string, string>,
     workspace: string,
   ): Promise<Map<string, readonly string[]>> {
-    const sdk = this.sdk;
-    if (!sdk) throw new Error("Runtime stopped");
+    const { sdk, executable } = this;
+    if (!sdk || !executable) throw new Error("Runtime stopped");
     const abort = new AbortController();
     this.settingsAbort = abort;
     let child: ChildProcess | undefined;
@@ -693,6 +700,7 @@ export class ClaudeRuntime implements Runtime {
       options: {
         cwd: workspace,
         env,
+        pathToClaudeCodeExecutable: executable,
         settingSources: [],
         strictMcpConfig: true,
         permissionMode: "dontAsk",
@@ -749,6 +757,14 @@ export class ClaudeRuntime implements Runtime {
 
   async start(): Promise<void> {
     if (this.generation) throw new Error("Runtime already started");
+    const executable = await (
+      this.options.resolveExecutable ??
+      (() => resolveOnPath("claude", process.env))
+    )();
+    if (executable === null)
+      throw new RuntimeNotEnabledError(
+        "Claude executable is not on the service PATH",
+      );
     await mkdir(this.options.claude.configDirectory, {
       recursive: true,
       mode: 0o700,
@@ -757,12 +773,14 @@ export class ClaudeRuntime implements Runtime {
     this.sdk =
       this.options.sdk ??
       ((await import("@anthropic-ai/claude-agent-sdk")) as ClaudeSdk);
+    this.executable = executable;
     this.generation = randomUUID();
   }
 
   async stop(): Promise<void> {
     if (!this.generation) return;
     this.generation = undefined;
+    this.executable = undefined;
     const pending = [...this.turns.values()].filter((turn) => !turn.done);
     for (const turn of pending) turn.abort.abort();
     this.settingsAbort?.abort();
@@ -814,9 +832,9 @@ export class ClaudeRuntime implements Runtime {
     prompt: string,
     settings?: RuntimeTurnSettings,
   ): Promise<string> {
-    const sdk = this.sdk;
+    const { sdk, executable } = this;
     const generation = this.generation;
-    if (!sdk || !generation) throw new Error("Runtime stopped");
+    if (!sdk || !executable || !generation) throw new Error("Runtime stopped");
     const environment = this.options.claude.turnEnvironment();
     if ("unavailable" in environment) throw new Error(environment.unavailable);
     const problem = this.settingsProblem(settings);
@@ -878,6 +896,7 @@ export class ClaudeRuntime implements Runtime {
     };
     const options: Options = {
       cwd: workspace,
+      pathToClaudeCodeExecutable: executable,
       env: claudeTurnEnvironment(
         environment.env,
         environment.token,

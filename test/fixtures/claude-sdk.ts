@@ -58,8 +58,10 @@ export function fakeSdk(
       : Promise.resolve(fakeModels);
   const sessions: Session[] = [];
   const queries: string[] = [];
+  const optionsSeen: Options[] = [];
   const sdk: ClaudeSdk = {
     query: ({ prompt, options }) => {
+      optionsSeen.push(options);
       if (!options.mcpServers) {
         // The model-free settings read: no prompt is ever released.
         queries.push("settings");
@@ -189,7 +191,7 @@ export function fakeSdk(
         handler(z.object(shape).parse(args), extra),
     })) as never,
   };
-  return { sdk, sessions, queries };
+  return { sdk, sessions, queries, optionsSeen };
 }
 
 export const init = (sessionId: string) => ({

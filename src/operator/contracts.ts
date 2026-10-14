@@ -122,7 +122,11 @@ const harnessStatusBase = {
   /** Null until the runtime has read them; then the server validates against them. */
   settings: supportedRuntimeSettingsSchema.nullable(),
 };
-/** One per harness; `not-configured` is not in the service's `runtimeHarnesses`. */
+/**
+ * One per harness. `not-configured` (shown as "Not enabled") is a harness outside the service's
+ * `runtimeHarnesses`, or one whose runtime reported at start that it cannot run on this host
+ * (Claude without `claude` on the `PATH`); `unavailable` is a runtime that failed.
+ */
 export const harnessStatusSchema = z.discriminatedUnion("state", [
   z.object({ ...harnessStatusBase, state: z.literal("available") }).strict(),
   z
