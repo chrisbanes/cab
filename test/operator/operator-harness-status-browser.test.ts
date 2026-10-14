@@ -45,7 +45,7 @@ for (const [name, viewport] of [
       .filter({ hasText: "runtime unavailable" });
     await alerts.first().waitFor();
     assert.deepEqual(await alerts.allInnerTexts(), [
-      "Claude runtime unavailable — restart the service",
+      "Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
     ]);
     const runtimes = page.locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Execution runtimes" }),

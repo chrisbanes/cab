@@ -239,7 +239,7 @@ test("runtime overview shows the restart notice only after a runtime failure", a
   const body = await read();
   assert.match(
     body,
-    /<p role="alert">Codex runtime unavailable — restart the service<\/p>/,
+    /<p role="alert">Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service<\/p>/,
   );
   assert.doesNotMatch(body, /Runtime lost|<script>/);
 });
@@ -281,7 +281,7 @@ test("runtime overview alerts once per unavailable harness and never for a disab
   const body = await read(failed);
   assert.match(
     body,
-    /<p role="alert">Claude runtime unavailable — restart the service<\/p>/,
+    /<p role="alert">Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service<\/p>/,
   );
   assert.doesNotMatch(body, /Codex runtime unavailable/);
 });

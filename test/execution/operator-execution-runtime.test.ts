@@ -4,6 +4,7 @@ import { claudePolicyDisclosure } from "../../src/standalone/execution-policy.js
 import {
   executionSummary,
   failureNotice,
+  harnessNote,
   runtimeCommand,
   runtimeErrors,
   runtimeSummary,
@@ -153,16 +154,25 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
     "/app/profiles/p1/settings",
     "/app/settings/runtime",
   ]);
-  const restart = waitRoute(
-    assignment({
-      waitReason: "Claude runtime unavailable; restart the service",
-    }),
+  assert.match(
+    notConfigured?.message ?? "",
+    /Turn it on in Settings → Runtime; if that is refused, install `claude` on the service PATH first/,
   );
-  assert.match(restart?.message ?? "", /restart the service.*see Recovery/);
-  assert.deepEqual(routes("Codex runtime unavailable; restart the service"), [
-    "/app/settings/runtime",
-    "/app/assignments/a1/recovery",
-  ]);
+  // The stored reason is the current text or the legacy one persisted before the off/on recovery.
+  for (const reason of [
+    "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
+    "Claude runtime unavailable; restart the service",
+  ]) {
+    const unavailable = waitRoute(assignment({ waitReason: reason }));
+    assert.match(
+      unavailable?.message ?? "",
+      /Turn it off and on in Settings → Runtime.*restart the service.*see Recovery/,
+    );
+    assert.deepEqual(routes(reason), [
+      "/app/settings/runtime",
+      "/app/assignments/a1/recovery",
+    ]);
+  }
   assert.match(
     waitRoute(
       assignment({
@@ -185,6 +195,29 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
     null,
   );
   assert.equal(waitRoute(assignment()), null);
+});
+
+const base = (harness: "codex" | "claude") => ({
+  harness,
+  policy: null,
+  settings: null,
+  enabled: true,
+});
+
+test("the profile runtime note names the recovery for each cause", () => {
+  assert.equal(harnessNote({ ...base("codex"), state: "available" }), null);
+  assert.match(
+    harnessNote({
+      ...base("claude"),
+      state: "not-configured",
+      reason: "disabled",
+    }) ?? "",
+    /Turn it on in Settings → Runtime; if that is refused, install `claude` on the service PATH first/,
+  );
+  assert.match(
+    harnessNote({ ...base("codex"), state: "unavailable", since: 1 }) ?? "",
+    /turn it off and on in Settings → Runtime, or restart the service/,
+  );
 });
 
 test("only Claude failures render a failure notice", () => {

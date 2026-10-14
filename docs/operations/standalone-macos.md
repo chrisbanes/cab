@@ -151,11 +151,13 @@ remove that plist and `STATE/launchd/<label>.json` and install again.
 Restart the installed job with `launchctl kickstart -k
 "gui/$(id -u)/local.ensemble.service"`; operator sessions reset and you log in
 again. If the Codex App Server process exits while the service runs, the
-operator workspace and `/runtime` page show "Codex runtime unavailable — restart
-the service". Queued requests stay queued with that reason and nothing new is
-admitted; turns already running are held for recovery. Nothing restarts the App
-Server automatically; the same `kickstart -k` recovers it, and startup
-reconciliation and the usual admission checks then apply.
+operator workspace and `/runtime` page show "Codex runtime unavailable — turn it
+off and on in Settings → Runtime, or restart the service". Queued requests stay
+queued with that reason and nothing new is admitted; turns already running are
+held for recovery. Nothing restarts the App Server automatically. Turning the
+runtime off and on in Settings → Runtime replaces it with a fresh one; if it
+stays unavailable, the same `kickstart -k` recovers it. Startup reconciliation
+and the usual admission checks then apply.
 
 The LaunchAgent in `~/Library/LaunchAgents` is meant to start the service when
 the user logs into the GUI session; the procedure does not claim unattended
