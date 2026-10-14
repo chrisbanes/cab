@@ -2109,38 +2109,30 @@ export class OperatorApi {
     };
   }
   /**
-   * Runtime facts of the profiles whose turns are next: each queued turn request at its
-   * bound profile revision, and each pending assignment not yet requested. With neither,
+   * Runtime facts of the profiles whose turns are next: each assignment whose current turn
+   * request is queued, at the request's bound profile revision, and each pending assignment
+   * not yet requested. With neither,
    * the lead takes the next turn. The first candidate with a runtime wait is reported.
    */
   private executingWaitFacts(t: Row, excluded: readonly string[] | undefined) {
-    const taskId = String(t.id),
-      assignments = this.domain().assignments(taskId),
-      queued = this.service
-        .turnRequestsForTask(taskId)
-        .filter((r) => r.state === "queued" && r.assignmentId);
-    const candidates = [
-      ...queued.flatMap((r) => {
-        const a = assignments.find((x) => x.id === r.assignmentId);
-        return a
+    // Each assignment's current request only, so the read stays bounded by assignments.
+    const candidates = this.domain()
+      .assignments(String(t.id))
+      .flatMap((a) => {
+        const request = this.service.currentTurnRequest(
+          String(a.id),
+          Number(a.version),
+        );
+        return request?.state === "queued" ||
+          (a.state === "pending" && !request)
           ? [
-              [
+              this.profileWaitFacts(
                 String(a.profileId),
-                r.profileRevision ?? Number(a.profileRevision),
-              ] as const,
+                request?.profileRevision ?? Number(a.profileRevision),
+              ),
             ]
           : [];
-      }),
-      ...assignments
-        .filter(
-          (a) =>
-            a.state === "pending" &&
-            !queued.some((r) => r.assignmentId === a.id),
-        )
-        .map((a) => [String(a.profileId), Number(a.profileRevision)] as const),
-    ].map(([profileId, revision]) =>
-      this.profileWaitFacts(profileId, revision),
-    );
+      });
     if (!candidates.length)
       return this.profileWaitFacts(this.taskLead(t, excluded)?.profileId);
     return (

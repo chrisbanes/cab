@@ -2914,8 +2914,14 @@ test("a running assignment with a queued turn reports its own runtime waits", as
     );
     db.prepare(
       `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
-        profileRevision, prompt, state) VALUES ('probe-key', 'probe-work', 'assignment', ?, ?, ?, 1, 'probe', 'queued')`,
-    ).run(ids.taskId, ids.projectId, assignmentId);
+        assignmentVersion, profileRevision, prompt, state)
+        VALUES ('probe-key', 'probe-work', 'assignment', ?, ?, ?, ?, 1, 'probe', 'queued')`,
+    ).run(
+      ids.taskId,
+      ids.projectId,
+      assignmentId,
+      Number(d.assignment(assignmentId).version),
+    );
   });
   assert.deepEqual(
     (await api.readTask(ids.taskId)).data.waits.map((w) => w.code),
