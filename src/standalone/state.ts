@@ -4694,18 +4694,21 @@ export class ExecutionState {
     );
   }
 
-  hold(id: string, reason: string): void {
-    this.db
+  /** Returns false when the intent was already settled and stays unheld. */
+  hold(id: string, reason: string): boolean {
+    const held = this.db
       .prepare(
-        "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ? AND state NOT IN ('completed','reconciled','resolved-failed')",
+        "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ? AND state NOT IN ('completed','reconciled','resolved-failed') RETURNING workId",
       )
-      .run(reason, id);
-    if (this.hasTurnRequests)
+      .get(reason, id) as { workId: string } | undefined;
+    // A settled intent keeps its request settled so later inbox delivery is not blocked.
+    if (held && this.hasTurnRequests)
       this.db
         .prepare(
-          "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = (SELECT workId FROM execution_intents WHERE id = ?)",
+          "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = ?",
         )
-        .run(reason, id);
+        .run(reason, held.workId);
+    return held !== undefined;
   }
 
   wait(id: string, reason: string): void {

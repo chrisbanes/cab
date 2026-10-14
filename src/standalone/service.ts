@@ -3202,7 +3202,14 @@ export class StandaloneService {
     if (!replayed) {
       if (command.type === "task.stop")
         await this.afterStop(command.taskId, state.stopTargets(command.taskId));
-      else await this.wakeScheduler();
+      else {
+        // Post-commit: the Resume receipt stands even if the wake fails.
+        const generation = this.generation;
+        if (generation)
+          this.observeBackgroundFailure(generation, "domain-wake", () =>
+            this.wakeScheduler(0, generation),
+          );
+      }
     }
     return receipt;
   }
@@ -3632,7 +3639,12 @@ export class StandaloneService {
               success: result.state === "confirmed-success",
             },
           );
-          await this.wakeScheduler();
+          // Post-commit: a wake failure must not report committed work as failed.
+          const generation = this.generation;
+          if (generation)
+            this.observeBackgroundFailure(generation, "domain-wake", () =>
+              this.wakeScheduler(0, generation),
+            );
           return response;
         }
         if (call.tool === "ensemble_register_pr") {
@@ -3756,7 +3768,14 @@ export class StandaloneService {
             () => !state.taskHold(binding.taskId),
           );
         }
-        if (response.success) await this.wakeScheduler();
+        if (response.success) {
+          // Post-commit: a wake failure must not make the agent retry committed work.
+          const generation = this.generation;
+          if (generation)
+            this.observeBackgroundFailure(generation, "domain-wake", () =>
+              this.wakeScheduler(0, generation),
+            );
+        }
         return response;
       })
       .catch((error: unknown) => {
@@ -4637,16 +4656,12 @@ export class StandaloneService {
               (priorBinding?.taskId !== context.taskId ||
                 priorBinding.assignmentId !== context.assignmentId))))
       ) {
-        store.hold(
-          request.workId,
-          "Previous work is not a completed binding in this workspace",
-        );
+        const reason =
+          "Previous work is not a completed binding in this workspace";
         const queuedIntent = state.byWorkId(request.workId);
-        if (queuedIntent)
-          state.hold(
-            queuedIntent.id,
-            "Previous work is not a completed binding in this workspace",
-          );
+        // state.hold also holds the request unless the intent is already settled.
+        if (!queuedIntent || !state.hold(queuedIntent.id, reason))
+          store.hold(request.workId, reason);
         return;
       }
     }
