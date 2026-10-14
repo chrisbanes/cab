@@ -106,12 +106,31 @@ export class ConfigurationDraft {
     return this.lifecycle.receipt;
   }
   private generation = 0;
+  /** Counts announced changes, so a caller can wait for the commit that shows them. */
+  revision = 0;
+  private shown = 0;
+  private afterCommit: (() => void)[] = [];
   constructor(
-    private changed: () => void = () => {},
+    private render: () => void = () => {},
     private onSaved: (receipt: CommandReceipt) => void = () => {},
   ) {}
-  bind(changed: () => void) {
-    this.changed = changed;
+  bind(render: () => void) {
+    this.render = render;
+  }
+  private changed = () => {
+    this.revision++;
+    this.render();
+  };
+  /** The page committed a render that shows every change up to `revision`. */
+  committed(revision: number) {
+    this.shown = Math.max(this.shown, revision);
+    if (this.shown < this.revision) return;
+    for (const run of this.afterCommit.splice(0)) run();
+  }
+  /** Run `run` once the page has committed every change announced so far. */
+  afterRender(run: () => void) {
+    if (this.shown >= this.revision) run();
+    else this.afterCommit.push(run);
   }
   /** Drop field errors under a path prefix once the input they named has changed. */
   clearErrors(prefix: string) {
@@ -389,15 +408,15 @@ export class ConfigurationDrafts {
         draft.receipt.result.commandType === "github.place",
     );
   }
-  get(key: string, changed: () => void) {
+  get(key: string, render: () => void) {
     let draft = this.drafts.get(key);
     if (!draft) {
-      draft = new ConfigurationDraft(changed, (receipt) =>
+      draft = new ConfigurationDraft(render, (receipt) =>
         this.savedRecords.set(key, { at: Date.now(), receipt }),
       );
       this.drafts.set(key, draft);
     }
-    draft.bind(changed);
+    draft.bind(render);
     return draft;
   }
   purge() {
