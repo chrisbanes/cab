@@ -16,6 +16,7 @@ export class ResourceController<T> {
   };
   private generation = 0;
   private abort: AbortController | undefined;
+  private polling = false;
   constructor(
     private readonly changed: (state: ResourceState<T>) => void = () => {},
   ) {}
@@ -26,6 +27,7 @@ export class ResourceController<T> {
   clear() {
     this.generation++;
     this.abort?.abort();
+    this.polling = false;
     this.publish({
       status: "empty",
       data: null,
@@ -34,20 +36,31 @@ export class ResourceController<T> {
       pending: false,
     });
   }
-  async load(loader: (signal: AbortSignal) => Promise<T>) {
+  /**
+   * A background load publishes nothing until it settles, so timers do not
+   * flash progress. It never interrupts a read that is already in flight.
+   */
+  async load(
+    loader: (signal: AbortSignal) => Promise<T>,
+    { background = false } = {},
+  ) {
+    if (background && (this.state.pending || this.polling)) return;
     this.abort?.abort();
     const generation = ++this.generation;
     const abort = new AbortController();
     this.abort = abort;
-    this.publish({
-      ...this.state,
-      status: this.state.data ? "stale" : "loading",
-      error: null,
-      pending: true,
-    });
+    this.polling = background;
+    if (!background)
+      this.publish({
+        ...this.state,
+        status: this.state.data ? "stale" : "loading",
+        error: null,
+        pending: true,
+      });
     try {
       const data = await loader(abort.signal);
       if (generation !== this.generation || abort.signal.aborted) return;
+      this.polling = false;
       this.publish({
         status: "fresh",
         data,
@@ -57,6 +70,7 @@ export class ResourceController<T> {
       });
     } catch (error) {
       if (generation !== this.generation || abort.signal.aborted) return;
+      this.polling = false;
       const code = error instanceof Error ? error.message : "unavailable";
       if (code === "unauthenticated") {
         this.clear();
@@ -73,6 +87,7 @@ export class ResourceController<T> {
   dispose() {
     this.generation++;
     this.abort?.abort();
+    this.polling = false;
   }
 }
 
@@ -106,5 +121,6 @@ export function useOperatorResource<T>(
   return {
     state: snapshot.scope === scope ? snapshot.state : resource.state,
     refresh: () => resource.load(loader),
+    poll: () => resource.load(loader, { background: true }),
   };
 }
