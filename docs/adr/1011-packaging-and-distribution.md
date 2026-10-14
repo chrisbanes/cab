@@ -25,9 +25,11 @@ blocking a later public release.
 - The release does not redistribute Anthropic's `claude` binary. Like `codex`,
   `claude` resolves from the LaunchAgent's fixed `PATH` and is passed to the Claude
   Agent SDK. Ensemble does not gate the CLI version: readiness reports the version
-  found, and compatibility is between the SDK and the CLI, so an incompatible CLI
-  fails at turn startup. Qualification evidence records the version used, and only
-  the version the pinned SDK declares (`claudeCodeVersion`) has been qualified.
+  found, and compatibility is between the SDK and the CLI. Only the version the
+  pinned SDK declares (`claudeCodeVersion`) has been qualified. Another version may
+  fail at startup, or start and enforce the CLI-side sandbox, tool and permission
+  controls differently; that is a disclosed limit, not a fail-closed boundary.
+  Qualification evidence records the version used.
   Claude stays optional (ADR-1008), so a missing `claude` makes only that harness
   unavailable.
 - An npm package is a later channel for the same build. It is not a native app:
