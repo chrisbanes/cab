@@ -167,6 +167,7 @@ export class OperatorWebBoundary {
       path === "/app/tasks/new" ||
       path === "/app/inbox" ||
       path === "/app/search" ||
+      path === "/app/getting-started" ||
       /^\/app\/tasks\/[a-f0-9-]{36}$/.test(path) ||
       path === "/app/settings" ||
       /^\/app\/assignments\/[a-f0-9-]{36}\/recovery$/.test(path) ||

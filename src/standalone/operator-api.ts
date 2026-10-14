@@ -98,6 +98,7 @@ import {
   workspacePreviewReadSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
+import { deriveWaits } from "../operator/wait-reasons.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -1828,6 +1829,10 @@ export class OperatorApi {
         })),
         runtime: this.service.runtimeStatus(),
         harnesses: this.service.harnessStatuses(),
+        gettingStarted: {
+          turnStarted: this.service.taskTurnStarted(),
+          dismissed: this.domain().gettingStartedDismissed(),
+        },
       },
       observedAt: Date.now(),
     });
@@ -2074,6 +2079,161 @@ export class OperatorApi {
         c.effectiveProjectLimits[projectId] ?? c.defaultProjectLimit,
     };
   }
+  /**
+   * The runtime facts of the profile that will execute, mirroring the ready check; none for
+   * a missing or revoked profile. `revision` is an assignment's bound profile revision.
+   */
+  private profileWaitFacts(profileId: string | undefined, revision?: number) {
+    if (!profileId) return undefined;
+    const d = this.domain();
+    let runtime: ReturnType<typeof d.profileRuntime>;
+    try {
+      if (d.profile(profileId).revoked) return undefined;
+      runtime = d.profileRuntime(profileId, revision);
+    } catch {
+      return undefined;
+    }
+    const status = this.service
+      .harnessStatuses()
+      .find((h) => h.harness === runtime.harness);
+    return {
+      profileId,
+      runtimeUnavailable: status?.state === "unavailable",
+      runtimeNotConfigured:
+        status?.state === "not-configured" ||
+        (!!status?.settings &&
+          unsupportedRuntimeField(runtime, status.settings) !== null),
+      claudeTokenUnavailable:
+        runtime.harness === "claude" &&
+        this.service.claudeTokenStatus().state !== "available",
+    };
+  }
+  /**
+   * Runtime facts of the profiles whose turns are next: each assignment whose current turn
+   * request is queued, at the request's bound profile revision, and each pending assignment
+   * not yet requested. With neither,
+   * the lead takes the next turn. The first candidate with a runtime wait is reported.
+   */
+  private executingWaitFacts(t: Row, excluded: readonly string[] | undefined) {
+    // Each assignment's current request only, so the read stays bounded by assignments.
+    const candidates = this.domain()
+      .assignments(String(t.id))
+      .flatMap((a) => {
+        const request = this.service.currentTurnRequest(
+          String(a.id),
+          Number(a.version),
+        );
+        return request?.state === "queued" ||
+          (a.state === "pending" && !request)
+          ? [
+              this.profileWaitFacts(
+                String(a.profileId),
+                request?.profileRevision ?? Number(a.profileRevision),
+              ),
+            ]
+          : [];
+      });
+    if (!candidates.length)
+      return this.profileWaitFacts(this.taskLead(t, excluded)?.profileId);
+    return (
+      candidates.find(
+        (f) =>
+          f &&
+          (f.runtimeUnavailable ||
+            f.runtimeNotConfigured ||
+            f.claudeTokenUnavailable),
+      ) ?? candidates[0]
+    );
+  }
+  /** What is using capacity when the project or installation is at its limit. */
+  private capacityWait(projectId: string) {
+    const c = this.capacity(projectId);
+    return c.projectUsage >= c.projectLimit
+      ? `${c.projectUsage} of ${c.projectLimit} project turns running`
+      : c.globalUsage >= c.globalLimit
+        ? `${c.globalUsage} of ${c.globalLimit} turns running`
+        : null;
+  }
+  /** Waits a new task in this project would have before its own dependencies. */
+  private projectWaits(p: Row) {
+    const projectId = String(p.id);
+    let lead: Row | undefined;
+    try {
+      lead = p.leadProfileId
+        ? this.domain().profile(String(p.leadProfileId))
+        : undefined;
+    } catch {}
+    return deriveWaits({
+      projectId,
+      admissionReasons: [
+        ...(p.paused ? ["project-paused"] : []),
+        ...(!lead
+          ? ["project-lead-unconfigured"]
+          : lead.revoked
+            ? ["project-lead-revoked"]
+            : []),
+      ],
+      lead: this.profileWaitFacts(
+        p.leadProfileId ? String(p.leadProfileId) : undefined,
+      ),
+      capacity: this.capacityWait(projectId),
+    });
+  }
+  /** The task's ordered waits; a closed task has none. Labels pass the exclusion check. */
+  private taskWaits(
+    t: Row,
+    admission: ReturnType<OperatorApi["admission"]>,
+    execution: Execution,
+    excluded: readonly string[] | undefined,
+    approvals: readonly CoordinationInteraction[],
+  ) {
+    if (t.state !== "open") return [];
+    const d = this.domain(),
+      taskId = String(t.id),
+      projectId = String(t.projectId),
+      identity = this.identity(taskId),
+      // As the source summary discloses it: a valid name that passes the exclusions.
+      repository = (value: unknown) =>
+        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(value)) &&
+        this.disclosable(value, excluded)
+          ? String(value)
+          : null,
+      waiting = ["idle", "queued", "selected", "waiting"].includes(
+        execution.state,
+      );
+    return deriveWaits({
+      projectId,
+      admissionReasons: admission.reasons,
+      lead: this.executingWaitFacts(t, excluded),
+      // The same predicate as admission, so an imported blocker marked done keeps its link.
+      dependencies: d.blockingDependencies(taskId).map((id) => ({
+        id,
+        label: this.safe(d.task(id).title, excluded) ?? "Unavailable task",
+      })),
+      nativeBlockers: identity
+        ? this.service
+            .githubSources()
+            .nativeBlockers(identity.nodeId)
+            .filter((b) => b.status === "open")
+            .map((b) => {
+              const name = repository(b.repositoryName);
+              return {
+                url: githubIssueUrl(name, Number(b.issueNumber) || null),
+                label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
+              };
+            })
+        : [],
+      sourceUrl: this.sourceSummary(taskId, excluded)?.url ?? null,
+      approvals: approvals
+        .filter((a) => a.status === "open")
+        .map((a) => ({
+          id: a.interactionId,
+          label: "Review material & decide",
+        })),
+      capacity:
+        admission.eligible && waiting ? this.capacityWait(projectId) : null,
+    });
+  }
   private admission(taskId: string) {
     const a = this.domain().admission(taskId);
     return {
@@ -2307,6 +2467,7 @@ export class OperatorApi {
             title: this.safe(row.title, safe),
             state: row.state,
             source: this.sourceSummary(t.id, safe),
+            blocking: d.blocksDependents(t.id),
           };
         }),
     );
@@ -2319,6 +2480,17 @@ export class OperatorApi {
         dependencies,
         capacity: this.capacity(projectId),
         routingEnabled: Boolean(d.routing(projectId).enabled),
+        waits: this.projectWaits(p),
+        assigneeWaits: Object.fromEntries(
+          profiles.map((profile) => [
+            profile.id,
+            deriveWaits({
+              projectId,
+              admissionReasons: [],
+              lead: this.profileWaitFacts(profile.id),
+            }),
+          ]),
+        ),
       },
       observedAt: Date.now(),
     });
@@ -2735,6 +2907,8 @@ export class OperatorApi {
         ? {}
         : { interactionId: m.interactionId }),
     }));
+    const admission = this.admission(taskId),
+      execution = this.execution(t);
     const leadAssignmentId =
       this.domain()
         .leadBindings()
@@ -2824,8 +2998,9 @@ export class OperatorApi {
               : null,
         };
       }),
-      admission: this.admission(taskId),
-      execution: this.execution(t),
+      admission,
+      waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
+      execution,
       localDependencies: d.dependencies(taskId).map((id) => {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };
@@ -5799,6 +5974,14 @@ export class OperatorApi {
           parseDomainCommandOutcome("claude-token.configure", outcome),
           c.key,
           "system:claude-token",
+        );
+      }
+      if (c.type === "getting-started.configure") {
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("getting-started.configure", outcome),
+          c.key,
+          "system:getting-started",
         );
       }
       if (c.type === "discovery.configure") {

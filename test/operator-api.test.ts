@@ -1588,11 +1588,13 @@ test("global labels exclude retained private revisions without any task or proje
     profileRuntime: d.profileRuntime.bind(d),
     claudeTokenReference: () => null,
     projects: () => [],
+    gettingStartedDismissed: () => false,
   };
   const isolated = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
     harnessStatuses: () => [],
+    taskTurnStarted: () => false,
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   assert.doesNotMatch(
     JSON.stringify(await isolated.readWorkspace()),
@@ -1619,11 +1621,13 @@ test("global snapshot privacy fails closed before excessive revision lookup work
     },
     profileRuntime: () => ({ harness: "codex" }),
     claudeTokenReference: () => null,
+    gettingStartedDismissed: () => false,
   };
   const api = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
     harnessStatuses: () => [],
+    taskTurnStarted: () => false,
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   const read = await api.readWorkspace();
   assert.equal(read.data.profiles[0]?.name, null);
@@ -2558,4 +2562,373 @@ test("task reads redact the Claude token reference and its value", async (t) => 
   );
   assert.equal(read.includes(value), false);
   assert.equal(read.includes(name), false);
+});
+
+test("task and composer reads return ordered waits with Fix kinds and blocker links", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const codes = async (taskId: string) =>
+    (await api.readTask(taskId)).data.waits.map((w) => w.code);
+  const task = (projectId: string, ready = true) => {
+    const taskId = randomUUID();
+    d.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title: "Wait probe",
+      outcome: "Probe",
+      ready,
+    });
+    return taskId;
+  };
+  // A paused project with no lead.
+  const bare = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: bare,
+    name: "Bare",
+    leadProfileId: null,
+  });
+  const bareTask = task(bare);
+  assert.deepEqual(await codes(bareTask), [
+    "project-paused",
+    "project-lead-unconfigured",
+  ]);
+  assert.deepEqual((await api.readTask(bareTask)).data.waits[0]?.fix, {
+    kind: "resume-project",
+    projectId: bare,
+  });
+  assert.deepEqual(
+    (await api.readComposerOptions(bare)).data.waits.map((w) => w.code),
+    ["project-paused", "project-lead-unconfigured"],
+  );
+  // A Draft keeps its other waits; a closed task has none.
+  assert.deepEqual(await codes(task(bare, false)), [
+    "project-paused",
+    "project-lead-unconfigured",
+  ]);
+
+  // A revoked lead.
+  const revoked = await seed(f);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: revoked.profileId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  assert.deepEqual(await codes(revoked.taskId), [
+    "project-paused",
+    "project-lead-revoked",
+  ]);
+
+  // A Claude lead with the Claude harness not configured and no token reference.
+  const claude = await seed(f);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude.profileId,
+    expectedVersion: 1,
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  const claudeWaits = (await api.readTask(claude.taskId)).data.waits;
+  assert.deepEqual(
+    claudeWaits.map((w) => w.code),
+    [
+      "project-paused",
+      "claude-token-unavailable",
+      "profile-runtime-not-configured",
+    ],
+  );
+  assert.deepEqual(claudeWaits[1]?.fix, { kind: "add-claude" });
+  assert.deepEqual(claudeWaits[2]?.fix, {
+    kind: "open-profile",
+    profileId: claude.profileId,
+  });
+
+  // An incomplete local dependency on an enabled project.
+  const enabled = await seed(f);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: enabled.projectId,
+    expectedVersion: Number(d.project(enabled.projectId).version),
+    paused: false,
+  });
+  assert.deepEqual(
+    (await api.readComposerOptions(enabled.projectId)).data.waits,
+    [],
+  );
+  const blocker = task(enabled.projectId, false),
+    dependent = task(enabled.projectId);
+  d.execute({
+    type: "dependency.add",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: enabled.projectId,
+    taskId: dependent,
+    blockerTaskId: blocker,
+    expectedVersion: Number(d.task(dependent).version),
+  });
+  assert.deepEqual((await api.readTask(dependent)).data.waits, [
+    {
+      code: "local-dependency",
+      fix: null,
+      links: [{ kind: "task", id: blocker, label: "Wait probe" }],
+    },
+  ]);
+
+  // Capacity full: project limit 1 with one running reservation.
+  d.execute({
+    type: "capacity.configure",
+    actor: "operator",
+    key: randomUUID(),
+    globalLimit: 4,
+    projectOverrides: { [enabled.projectId]: 1 },
+  });
+  // A reservation without its intent stands in for another running turn.
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      "INSERT INTO execution_capacity_reservations(workId,projectId) VALUES ('capacity-probe',?)",
+    ).run(enabled.projectId);
+  });
+  assert.deepEqual((await api.readTask(task(enabled.projectId))).data.waits, [
+    {
+      code: "capacity",
+      fix: null,
+      links: [{ kind: "tasks-running", label: "1 of 1 project turns running" }],
+    },
+  ]);
+  assert.deepEqual(
+    (await api.readComposerOptions(enabled.projectId)).data.waits.map(
+      (w) => w.code,
+    ),
+    ["capacity"],
+  );
+});
+
+test("the workspace read carries whether a turn started and whether getting started was dismissed", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual((await api.readWorkspace()).data.gettingStarted, {
+    turnStarted: false,
+    dismissed: false,
+  });
+  const receipt = await api.execute({
+    type: "getting-started.configure",
+    key: randomUUID(),
+    dismissed: true,
+  });
+  assert.deepEqual(receipt.kind === "configuration" && receipt.result, {
+    commandType: "getting-started.configure",
+    resourceId: "system:getting-started",
+    dismissed: true,
+  });
+  // A task-bound intent that records a turn id is a started turn.
+  await seed(f, true);
+  assert.deepEqual((await api.readWorkspace()).data.gettingStarted, {
+    turnStarted: true,
+    dismissed: true,
+  });
+});
+
+test("runtime waits come from the pending assignment's profile, not only the lead's", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const claude = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [claude],
+  });
+  // The healthy Codex lead alone gives no runtime wait.
+  assert.deepEqual(
+    (await api.readComposerOptions(ids.projectId)).data.waits.map(
+      (w) => w.code,
+    ),
+    ["project-paused"],
+  );
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    title: "Explicit Claude assignee",
+    outcome: "Probe",
+    ready: true,
+  });
+  await f.service.provisionTask(taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    assignmentId: randomUUID(),
+    profileId: claude,
+    brief: "Claude work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const waits = (await api.readTask(taskId)).data.waits;
+  assert.deepEqual(
+    waits.map((w) => w.code),
+    [
+      "project-paused",
+      "claude-token-unavailable",
+      "profile-runtime-not-configured",
+    ],
+  );
+  assert.deepEqual(waits[2]?.fix, { kind: "open-profile", profileId: claude });
+  // The composer predicts the same for that explicit assignee.
+  assert.deepEqual(
+    (await api.readComposerOptions(ids.projectId)).data.assigneeWaits[
+      claude
+    ]?.map((w) => w.code),
+    ["claude-token-unavailable", "profile-runtime-not-configured"],
+  );
+});
+
+test("an imported blocker marked done keeps its dependency link while its issue is not closed", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const blocker = randomUUID();
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: blocker,
+    title: "Imported blocker",
+    outcome: "Probe",
+    ready: false,
+  });
+  d.execute({
+    type: "dependency.add",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    blockerTaskId: blocker,
+    expectedVersion: Number(d.task(ids.taskId).version),
+  });
+  d.markImportedTask(blocker, "imported-blocker", "repository");
+  f.seedPersistedState((db) =>
+    db.prepare("UPDATE domain_tasks SET state='done' WHERE id=?").run(blocker),
+  );
+  assert.ok(d.admission(ids.taskId).reasons.includes("local-dependency"));
+  // The composer applies the same rule to a chosen dependency.
+  assert.equal(
+    (await api.readComposerOptions(ids.projectId)).data.dependencies.find(
+      (x) => x.id === blocker,
+    )?.blocking,
+    true,
+  );
+  const wait = (await api.readTask(ids.taskId)).data.waits.find(
+    (w) => w.code === "local-dependency",
+  );
+  assert.deepEqual(wait?.links, [
+    { kind: "task", id: blocker, label: "Imported blocker" },
+  ]);
+});
+
+test("a running assignment with a queued turn reports its own runtime waits", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const claude = randomUUID(),
+    assignmentId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [claude],
+  });
+  await f.service.provisionTask(ids.taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    assignmentId,
+    profileId: claude,
+    brief: "Claude work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  // The Claude delegate already ran once and has a follow-up delivery queued.
+  f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_assignments SET state='running' WHERE id=?").run(
+      assignmentId,
+    );
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        assignmentVersion, profileRevision, prompt, state)
+        VALUES ('probe-key', 'probe-work', 'assignment', ?, ?, ?, ?, 1, 'probe', 'queued')`,
+    ).run(
+      ids.taskId,
+      ids.projectId,
+      assignmentId,
+      Number(d.assignment(assignmentId).version),
+    );
+  });
+  assert.deepEqual(
+    (await api.readTask(ids.taskId)).data.waits.map((w) => w.code),
+    [
+      "project-paused",
+      "claude-token-unavailable",
+      "profile-runtime-not-configured",
+    ],
+  );
 });

@@ -49,7 +49,13 @@ test("read envelopes reject row fields and invalid states", () => {
   const runtime = { state: "available" };
   assert.deepEqual(
     workspaceSchema.parse({
-      data: { projects: [], profiles: [], runtime, harnesses: [] },
+      data: {
+        projects: [],
+        profiles: [],
+        runtime,
+        harnesses: [],
+        gettingStarted: { turnStarted: false, dismissed: false },
+      },
       observedAt: 1,
     }).data.projects,
     [],
@@ -75,6 +81,7 @@ test("read envelopes reject row fields and invalid states", () => {
             settings: { models: [{ model: "default", efforts: ["high"] }] },
           },
         ],
+        gettingStarted: { turnStarted: false, dismissed: false },
       },
       observedAt: 1,
     }).data.runtime,
@@ -89,7 +96,13 @@ test("read envelopes reject row fields and invalid states", () => {
   ])
     assert.equal(
       workspaceSchema.safeParse({
-        data: { projects: [], profiles: [], runtime: invalid, harnesses: [] },
+        data: {
+          projects: [],
+          profiles: [],
+          runtime: invalid,
+          harnesses: [],
+          gettingStarted: { turnStarted: false, dismissed: false },
+        },
         observedAt: 1,
       }).success,
       false,

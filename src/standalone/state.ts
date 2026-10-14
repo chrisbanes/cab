@@ -1269,6 +1269,17 @@ export class ExecutionState {
     return current;
   }
 
+  /** Whether any task's execution has started a turn; intents are never deleted. */
+  taskTurnStarted(): boolean {
+    return (
+      this.db
+        .prepare(
+          "SELECT 1 AS started FROM execution_intents i JOIN task_execution_bindings b ON b.workId = i.workId WHERE i.turnId IS NOT NULL LIMIT 1",
+        )
+        .get() !== undefined
+    );
+  }
+
   taskBinding(workId: string): TaskExecutionBindingRecord | undefined {
     const row = this.db
       .prepare("SELECT * FROM task_execution_bindings WHERE workId = ?")

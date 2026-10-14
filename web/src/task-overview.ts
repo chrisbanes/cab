@@ -1,6 +1,6 @@
 import type { TaskRead } from "../../src/operator/contracts.js";
+import { waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
-import { reasonLabels } from "./tasks.js";
 
 type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
@@ -81,11 +81,18 @@ const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
  * task's terminal state, as the Board columns do.
  */
 export function taskStatusLine(
-  data: Pick<Data, "task" | "execution" | "admission" | "source" | "lead">,
+  data: Pick<
+    Data,
+    "task" | "execution" | "admission" | "waits" | "source" | "lead"
+  >,
 ) {
   const { task, execution } = data;
-  const blocker = data.source?.nativeBlockers.find((b) => b.state === "open");
-  const reason = data.admission.reasons.find((r) => r !== "task-unready");
+  // The first wait in the flow's order is the one the header names.
+  const reason = data.waits[0]?.code;
+  const blocker =
+    reason === "imported-blockers-blocked"
+      ? data.source?.nativeBlockers.find((b) => b.state === "open")
+      : undefined;
   const terminal =
     task.state === "done"
       ? "Done"
@@ -114,7 +121,7 @@ export function taskStatusLine(
               : blocker
                 ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
                 : reason
-                  ? `Ready · ${lowerFirst(reasonLabels[reason])}`
+                  ? `Ready · ${lowerFirst(waitLabels[reason])}`
                   : execution.state === "idle"
                     ? "Ready"
                     : `Ready · ${execution.state}`;

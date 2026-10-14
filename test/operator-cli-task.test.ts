@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { derivedUuid } from "../src/cli/write.js";
+import { OperatorApi } from "../src/standalone/operator-api.js";
 import { completedLead, until } from "./fixtures/completed-lead.js";
 import { databaseDigest } from "./fixtures/database-digest.js";
 import { startCliOperator } from "./fixtures/operator-cli.js";
@@ -723,4 +724,64 @@ test("lost replies reuse the unresolved key once; read-only and managed callers 
   r = await cli("rw", [...create, "--decision", "approved"]);
   assert.equal(r.code, 2, "a flag from another command");
   assert.equal(posts(o), sent);
+});
+
+test("task get prints waits in the flow's order with the Fix command or the blocking task", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, d } = o;
+  const projectId = randomUUID(),
+    blocker = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "No lead",
+    leadProfileId: null,
+  });
+  for (const [id, ready] of [
+    [blocker, false],
+    [taskId, true],
+  ] as const)
+    d.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId: id,
+      title: id === blocker ? "Blocking task" : "Waiting task",
+      outcome: "Probe",
+      ready,
+    });
+  d.execute({
+    type: "dependency.add",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    blockerTaskId: blocker,
+    expectedVersion: Number(d.task(taskId).version),
+  });
+  const human = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
+  assert.equal(human.code, 0, human.err);
+  const lines = human.out.split("\n");
+  const at = lines.indexOf("Waiting: Project paused");
+  assert.ok(at > 0, human.out);
+  assert.deepEqual(lines.slice(at, at + 8), [
+    "Waiting: Project paused",
+    `  Fix: ensemble project prepare ${projectId} --out project.json --paused false`,
+    "  Fix: ensemble project apply --file project.json",
+    "Waiting: Project has no lead",
+    `  Fix: ensemble project prepare ${projectId} --out project.json --lead-profile PROFILE_ID`,
+    "  Fix: ensemble project apply --file project.json",
+    "Waiting: Blocked by a task dependency",
+    `  Blocked by task ${blocker} (Blocking task)`,
+  ]);
+  const json = await cli("ro", ["task", "get", taskId]);
+  assert.deepEqual(
+    json.json().data.waits,
+    (await new OperatorApi(o.s.f.service, [o.s.f.directory]).readTask(taskId))
+      .data.waits,
+  );
 });

@@ -10,6 +10,7 @@ import {
   requestKindLabel,
 } from "../web/src/inbox-presentation.js";
 import type { InboxItem, TaskRead } from "../src/operator/contracts.js";
+import { orderWaits } from "../src/operator/wait-reasons.js";
 
 const minute = 60_000;
 test("relative age reads at the largest useful unit and never goes negative", () => {
@@ -81,6 +82,12 @@ const task = (
 ) =>
   ({
     admission: { eligible: reasons.length === 0, reasons },
+    // As the task read derives them: the flow's order, Drafts and closed tasks excluded.
+    waits: orderWaits(
+      reasons
+        .filter((r) => r !== "task-unready" && r !== "task-not-open")
+        .map((code) => ({ code, fix: null, links: [] })),
+    ),
     localDependencies: [],
     source: null,
     ...extra,
@@ -139,6 +146,13 @@ test("hold notices name each independent hold and what approval does not clear",
   assert.equal(
     local[0]?.detail,
     "Dependency hold. Approval does not clear it.",
+  );
+  // Notices follow the waits' order, as task detail and the CLI do.
+  assert.deepEqual(
+    holdNotices(
+      task(["source-held", "local-dependency", "project-paused"]),
+    ).map((notice) => notice.id),
+    ["paused", "dependency", "source-held"],
   );
   const paused = holdNotices(task(["project-paused"]));
   assert.equal(paused[0]?.title, "Project paused");

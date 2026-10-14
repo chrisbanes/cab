@@ -58,6 +58,11 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
       result.commandType === "claude-token.configure" &&
       result.configured === (c.credentialRef !== null)
     );
+  if (c.type === "getting-started.configure")
+    return (
+      result.commandType === "getting-started.configure" &&
+      result.dismissed === c.dismissed
+    );
   if (result.resourceId !== commandResource(c)) return false;
   if (
     c.type === "github.place" &&

@@ -140,6 +140,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     task: { state: "open", ready: true },
     execution: { state: "idle", holds },
     admission: { reasons: [] },
+    waits: [],
     source: null,
     lead: { name: "Mira" },
   };
@@ -153,6 +154,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
   assert.equal(
     line({
       admission: { reasons: ["imported-blockers-blocked"] },
+      waits: [{ code: "imported-blockers-blocked" }],
       source: {
         nativeBlockers: [
           { repositoryName: "acme/design-system", number: 87, state: "open" },
@@ -160,6 +162,11 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       },
     }),
     "Ready · waiting on acme/design-system#87 / Accountable project lead: Mira",
+  );
+  // The header names the first wait in the flow's order.
+  assert.equal(
+    line({ waits: [{ code: "local-dependency" }, { code: "capacity" }] }),
+    "Ready · blocked by a task dependency / Accountable project lead: Mira",
   );
   assert.equal(
     line({ execution: { state: "stopping", holds: { ...holds, stop: true } } }),

@@ -21,6 +21,7 @@ import {
 import { coverage } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
 import { RequestJournal } from "./request-journal.js";
+import { waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
@@ -424,6 +425,7 @@ async function run(
         `Project: ${task.projectId}`,
         `State:   ${task.state}${task.ready ? " (ready)" : ""}`,
         `Version: ${task.version}`,
+        ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),
       ].join("\n"),
     };

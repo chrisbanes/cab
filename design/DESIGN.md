@@ -538,7 +538,13 @@ the open decisions.
   badge (Done secondary, Next default, Needs attention destructive, Not started
   outline, Optional muted outline) and one action. Only the first incomplete
   required row has the primary button; Done and optional rows use Ghost, the rest
-  Outline. On phone the action moves below the explanation.
+  Outline. On phone the action moves below the explanation. The summary counts the
+  four required rows ("1 of 4 required steps done"); GitHub and Claude are optional.
+  In 143b the paused fixture-app is not Done: the Project row reads Not started with
+  Resume, which confirms as in 149b. After the first turn Home keeps only rows that
+  need attention. Not drawn: the account menu's Getting started opens
+  `/app/getting-started`, the same card with a secondary Dismiss; once dismissed the
+  menu shows Show getting started, which undoes it.
 - **Project setup (145, 145b):** with no profiles, step 1 replaces the Lead profile
   select with an inline profile form: a help line ("No lead profiles yet. Create one
   here, or leave this blank and choose a lead later; tasks wait for a lead before
@@ -571,10 +577,12 @@ the open decisions.
     task will wait for capacity." While reads are pending the check shows
     "Checking readiness…" and keeps the primary disabled; with no item yet it shows
     no hint or Check again.
-- **First task (148–150):** the composer warns before Create and start that a paused
-  project makes the task wait. Task detail shows "Waiting · <reason>" with one Fix;
-  Fix: Resume project confirms first (149b). A dependency wait has no Fix, only a
-  link to the blocking task (149c).
+- **First task (148–150):** above Create and start the composer says "Starts now."
+  or "It will wait: <reason>" for the project and the chosen dependencies (148).
+  Task detail shows "Waiting · <reason>" with its Fix; any further reasons are listed
+  beneath it in the flow's order, each with its own Fix or link. Fix: Resume project
+  confirms first (149b). A dependency wait has no Fix, only a link to the blocking
+  task (149c). Inbox notices and the CLI use the same order.
 - **Readiness and Add Claude (151, 152, 152b):** Readiness sits at the top of the
   Settings right column with Pass, Fail and Not configured badges, a Geist Mono fix
   line under each failure, and Run again as its only action. Add Claude sits at the
@@ -624,10 +632,10 @@ to the outcome. Frames 1–153 were swept to the same rules; 167 lists each chan
   `h0FyJW`). An unconfirmed sign-out re-reads the session: signed out is success and
   shows nothing; a session that survived shows one warning, "We couldn't sign you
   out. You're still signed in.", in the shell only (130 `DuF5u`).
-- **Drawn ahead of the build:** 161 `thtaf` and 166c `N7QIqz` draw "It will wait: …"
-  in the success line beside the Resume project Fix, and 39 `Z6U3T4` draws "It will
-  wait for capacity." there. The build shows the wait reason on its own line below
-  "Task created." until the Fix actions ship.
+- **Created and waiting:** 161 `thtaf` and 166c `N7QIqz` draw "It will wait: …"
+  beside the Resume project Fix, and 39 `Z6U3T4` draws "It will wait for capacity."
+  As built, "It will wait: <reason>" and its Fix sit below the "Task created." line,
+  with any further reasons listed beneath.
 
 Warning colours are the local `nova-warning-fg` and `nova-warning-bg` tokens;
 shadcn has no warning variant.
