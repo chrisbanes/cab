@@ -101,13 +101,13 @@ or cost.
 
 `CoordinationView` returns task-scoped DTOs and validates operator commands. It
 does not own HTTP, authentication, sessions, or shared navigation. The
-`test/s04b/local-view.mjs` probe starts a read-only ephemeral loopback server with
+`test/coordination/routing-qualification/local-view.mjs` probe starts a read-only ephemeral loopback server with
 a disposable database and fake runtime; it is test-only and does not add a
 production route. Authentication, sessions and shared navigation belong to the
 operator HTTP layer ([S04c](s04c-operator-ui.md)); the production runtime and
 coordination routes are assembled in [S04d](s04d-operator-integration.md).
 
-The opt-in `npm run s04b:live` probe uses the real Codex App Server, a temporary
+The opt-in `npm run routing:live` probe uses the real Codex App Server, a temporary
 service database/workspace, disabled routing, and no TypeSafe client. It records
 outer callback identity and outcome, scheduler/work state, durable result/event
 identities, dynamic-tool registration on resumed threads, process-exit

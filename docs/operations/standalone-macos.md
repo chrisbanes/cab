@@ -273,14 +273,14 @@ aggregate process or host keychain containment.
 
 ### Disposable source qualification
 
-`test/944/live-source-credential.mjs` supports preparation separately from launch.
+`test/sources/credential-qualification/live-source-credential.mjs` supports preparation separately from launch.
 The lead supplies exact private root/label/Node/compiled-CLI/port and already-read
 complete one-page Project metadata: one issue identity, narrow repository/issue/
 ready-for-agent filter, readiness label and candidate SHA. Preparation performs
 no provider, gh, model or launchctl calls:
 
 ```sh
-/absolute/pinned/node test/944/live-source-credential.mjs --prepare-only /absolute/private/input.json
+/absolute/pinned/node test/sources/credential-qualification/live-source-credential.mjs --prepare-only /absolute/private/input.json
 ```
 
 Preparation creates an exclusive 0700 root with private data/auth/log/plist paths,
@@ -297,7 +297,7 @@ consumed durably and creates a separate private record with `consumed:true`,
 harness never edits or resets the lead's allowance ledger:
 
 ```sh
-/absolute/pinned/node test/944/live-source-credential.mjs --live --one-attempt --max-seconds 300 --prepared /absolute/private/prepared.json --consumed-record /absolute/private/root-consumed.json
+/absolute/pinned/node test/sources/credential-qualification/live-source-credential.mjs --live --one-attempt --max-seconds 300 --prepared /absolute/private/prepared.json --consumed-record /absolute/private/root-consumed.json
 ```
 
 The outer monotonic 300 second deadline starts before bootstrap. Startup and

@@ -5,10 +5,12 @@ operations and backup/restore, see the [operations procedure](operations/standal
 
 Use the Node version in [`.node-version`](../.node-version) and the npm version in
 `packageManager` (`package.json`).
-Node 26 is tested for compatibility (CI job `check-node-26` runs the latest 26.x;
-26.9.0 has [local evidence](evidence/node-26-compatibility-2026-10-09.md)) but is not the
-default baseline. `engines.node` is `>=24` as permissive metadata; Node 25, 27
-and later majors are not qualified.
+Node 26 compatibility jobs use the latest 26.x: `node26-service-*` covers PRs and
+main pushes; `node26-full-compatibility` covers the complete build and browser suite
+on nightly, manual and release-tag runs, as described below. Version 26.9.0 has
+[local evidence](evidence/node-26-compatibility-2026-10-09.md) but is not the default
+baseline. `engines.node` is `>=24` as permissive metadata; Node 25, 27 and later
+majors are not qualified.
 
 ```sh
 npm ci
@@ -18,10 +20,56 @@ npm run check
 `check` runs strict type checking, lint, formatting, compilation and tests,
 including deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
-completion tests, and the operator auth, HTTP and Chromium browser tests. CI
-installs the pinned Chromium engine used by those browser tests. Real App Server
+completion tests, and the operator auth, HTTP and browser tests. CI
+builds once and runs eight test jobs on PRs and main pushes: six Node 24 Chromium
+jobs and two Node 26 service jobs. Coordination, sources, delivery, operations and
+infrastructure share one lane; workspaces has one lane; execution and operator
+have two shards each. Logical suites remain separate directories even when they
+share a CI lane. Runtime retention tests are split by terminal events, threads and
+native input so the expensive workloads can run on different execution shards.
+
+Shards use separate `all`, `chromium` and `service` weights in
+`scripts/test-timings.json`. Weights measure complete file durations, including
+startup and imports; new files use the selected profile's median fallback. The required
+`check` context aggregates static checks and all applicable test jobs, including
+their failure evidence uploads. Superseded PR runs are cancelled.
+
+Daily CI at 05:00 UTC skips the build and tests only when the previous scheduled
+run on the same branch completed successfully on the same commit. Changed commits,
+first nights and failed, cancelled or unfinished previous runs execute all checks;
+a history lookup failure fails CI. Manual workflow runs always
+run the complete checks. Nightly, manual and release-tag runs include WebKit on
+Node 24 and the complete suite and build on Node 26. These triggers become available when the
+workflow reaches the default branch. Local `npm run check` continues to run all
+tests and both browsers. For focused checks after building, use:
+
+```sh
+npm run test:built -- --suite=operator --profile=chromium --shard=1/2
+npm run test:built -- --profile=service
+```
+
+`all` is the default profile; `chromium` excludes WebKit, and `service` excludes
+browser-dependent cases while retaining service assertions in mixed test files.
+Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
+their engine. Missing compiled tests, unknown suites/options and empty shards
+fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence directory;
+CI uploads these with the synthetic evidence. Refresh a profile from a successful
+complete run, or all its shards, using:
+
+```sh
+node scripts/update-test-timings.mjs chromium 24 /path/to/evidence
+```
+
+Use `all 24` or `service 26` for the other profiles. Keep receipts from one run
+separate from other runs. The updater rejects missing, duplicate, unsuccessful or
+stale receipts and requires every current source test file. Its input digest
+covers runtime, test, web and runner inputs; changing these requires new receipts.
+Committed initial weights are measured locally; hosted CI receipts can refresh
+them as runner performance changes.
+
+Real App Server
 qualification is separate and runs only when requested explicitly, for example
-`npm run s03b:live` and `npm run s04b:live`, which require their `--live` opt-in
+`npm run recovery:live` and `npm run routing:live`, which require their `--live` opt-in
 (see the other `*:live` scripts in `package.json`). These checks do not prove
 physical sleep/wake behavior, operational host-restart recovery or private remote
 Tailscale access.
@@ -35,7 +83,7 @@ installed LaunchAgent service uses an owner-only token file
 replaced file applies from the next turn. An `env:NAME` variable must be in the
 service process environment when the service starts, and a reference configured
 while the service runs takes effect after a restart.
-`npm run c5:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
+`npm run mixed-runtime:live -- --live --facet <scrub|stop|crash|claude-only|mixed>` runs one
 bounded journey against disposable data and prints redacted evidence. It refuses
 any other arguments, a missing `CLAUDE_CODE_OAUTH_TOKEN` (read from the
 environment, then `~/.env`) or a missing ChatGPT.app Codex launcher before creating
@@ -429,12 +477,12 @@ Troubleshooting:
 `npm run check` covers the CLI with injected fakes and a packed offline install
 against a real service over loopback and verified HTTPS. The Keychain test is
 opt-in on macOS: `npm run build && ENSEMBLE_KEYCHAIN_LIVE=1 node --test
-dist/test/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
+dist/test/operations/operator-cli-keychain.test.js`; it adds and deletes only a throwaway
 `ensemble-cli-test-<uuid>` item.
 
-`node test/cli8/live-journey.mjs --fixture` (run by `npm run check`) drives the
+`node test/operator/cli-journey-qualification/live-journey.mjs --fixture` (run by `npm run check`) drives the
 installed binary through the assembled journey with a scripted runtime.
-`npm run cli8:live` runs it once against Codex through the ChatGPT.app launcher with
+`npm run operator-cli:live` runs it once against Codex through the ChatGPT.app launcher with
 at most two model turns, a Keychain login and verified cleanup; it prints sanitised
 evidence JSON.
 

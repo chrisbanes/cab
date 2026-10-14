@@ -9,13 +9,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import {
-  test as nodeTest,
-  type TestContext,
-  type TestOptions,
-} from "node:test";
+import { test as nodeTest, type TestContext } from "node:test";
 import type { Page } from "playwright";
-import { tmpdir } from "../temp.js";
+import { tmpdir } from "./temp.js";
+import {
+  browserTestEngine,
+  browserEngineTestOptions,
+  type BrowserTestOptions,
+} from "./browser-engines.js";
 import {
   FixtureLifecycle,
   FixtureStartupError,
@@ -683,15 +684,21 @@ export function browserSuite(
   return (
     name: string,
     optionsOrAction:
-      | TestOptions
+      | BrowserTestOptions
       | ((t: TestContext, journey: BrowserJourney) => Promise<void>),
     action?: (t: TestContext, journey: BrowserJourney) => Promise<void>,
   ) => {
-    const options =
+    const testOptions =
       typeof optionsOrAction === "function" ? {} : optionsOrAction;
+    const browserEngine = browserTestEngine(testOptions);
+    const { browserEngine: _browserEngine, ...options } = testOptions;
     const run =
       typeof optionsOrAction === "function" ? optionsOrAction : action;
     if (!run) throw Error("Browser journey callback is required");
+    const effectiveOptions = browserEngineTestOptions(
+      browserEngine,
+      testOptions,
+    );
     return nodeTest(
       name,
       {
@@ -699,6 +706,7 @@ export function browserSuite(
           (journeyOptions.overallMs ?? defaultBrowserJourneyOverallMs) +
           browserSuiteTimeoutMarginMs,
         ...options,
+        ...effectiveOptions,
       },
       async (t) => {
         await runBrowserJourney(

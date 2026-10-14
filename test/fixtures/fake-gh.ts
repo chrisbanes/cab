@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "../temp.js";
+import { tmpdir } from "./temp.js";
 
 export const fakeGhLogin = "octo";
 /** The token the signed-in fake prints; tests assert it never appears in output. */
