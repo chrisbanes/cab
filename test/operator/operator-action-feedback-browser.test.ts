@@ -528,3 +528,62 @@ test("a source preview that conflicts re-reads, and the next preview records wit
   await preview.click();
   await savedOutcome(page);
 });
+
+const previewButton = (page: Page) =>
+  page.getByRole("button", { name: "Preview and activate selection" });
+const optionText = (page: Page, id: string) =>
+  page
+    .getByLabel("Selection to preview")
+    .locator("option", { hasText: `${id} (` })
+    .textContent();
+const observationRow = (page: Page, id: string) =>
+  page.locator("article.settings-row", {
+    has: page.getByRole("heading", { name: new RegExp(`^${id}\\b`) }),
+  });
+/** Saves the source again elsewhere, which moves its version and drops old active markers. */
+const saveSourceElsewhere = async (d: Fixture) => {
+  const domain = d.f.service.domain();
+  await new OperatorApi(d.f.service, [d.f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: d.ids.atlas,
+    expectedVersion: domain.githubConfiguration(d.ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+};
+const formReady = (page: Page) =>
+  page.waitForFunction(() =>
+    [...document.querySelectorAll("button")].some(
+      (b) => b.textContent === "Preview and activate selection" && !b.disabled,
+    ),
+  );
+
+test("Sync & placement marks active selections and drops the marker when the source changes", async (_t, journey) => {
+  const fixture = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  const { page } = fixture;
+  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
+  await observationRow(page, "S-1").getByText("Inactive").waitFor();
+  await previewButton(page).click();
+  await formReady(page);
+  assert.match((await optionText(page, "S-1")) ?? "", /· active$/);
+  await observationRow(page, "S-1")
+    .getByText("Active", { exact: true })
+    .waitFor();
+  assert.match((await optionText(page, "S-2")) ?? "", /· inactive$/);
+  await saveSourceElsewhere(fixture);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await observationRow(page, "S-1").getByText("Inactive").waitFor();
+  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
+});

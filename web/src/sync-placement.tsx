@@ -89,6 +89,8 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
                 .map((s) => (
                   <option value={s.id ?? ""} key={s.id}>
                     {s.id} ({s.kind === "project" ? "GitHub Project" : s.kind})
+                    {" · "}
+                    {s.active ? "active" : "inactive"}
                   </option>
                 ))}
             </DraftField>
@@ -155,8 +157,9 @@ function SourceObservations(
   const resource = p.observations,
     [notice, setNotice] = useState(""),
     [pending, setPending] = useState(false);
-  const descriptor = (id: string | null) =>
-    p.data.source.selections.find((s) => s.id === id)?.descriptor;
+  const selection = (id: string | null) =>
+    p.data.source.selections.find((s) => s.id === id);
+  const descriptor = (id: string | null) => selection(id)?.descriptor;
   return (
     <Panel
       title="Source observations"
@@ -188,6 +191,11 @@ function SourceObservations(
                 </p>
               </div>
               <StatusBadge>{observationLabel(s)}</StatusBadge>
+              {selection(s.selectionId) && (
+                <StatusBadge>
+                  {selection(s.selectionId)?.active ? "Active" : "Inactive"}
+                </StatusBadge>
+              )}
               {s.credentialReason && (
                 <p className="body">
                   {sourceCredentialCopy(s.credentialReason)}{" "}
