@@ -431,11 +431,8 @@ export class CoordinationView {
         .flatMap((delivery) => delivery.events.map((event) => event.eventId)),
     );
     const messages = inbox
-      .map((event) => this.messageView(event, pending, queued))
-      .sort(
-        (a, b) =>
-          a.createdAt - b.createdAt || a.eventId.localeCompare(b.eventId),
-      );
+      .sort((a, b) => a.createdAt - b.createdAt || a.sequence - b.sequence)
+      .map((event) => this.messageView(event, pending, queued));
     const interactions = this.coordination.interactions(id);
     const operatorAttention = this.coordination.operatorAttention(id);
     const completionRequests = this.coordination.completionRequests(id);

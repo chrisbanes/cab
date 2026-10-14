@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainPolicyError } from "../../src/core/domain.js";
 import type {
@@ -616,6 +617,23 @@ test("task coordination view is scoped, durable, and excludes runtime internals"
         ).length,
         1,
       );
+    // Messages within one createdAt second keep inbox insertion order.
+    const db = (service as unknown as { db: DatabaseSync }).db;
+    db.prepare(
+      "UPDATE coordination_inbox_events SET createdAt = 1 WHERE taskId = ?",
+    ).run(f.taskId);
+    const inserted = (
+      db
+        .prepare(
+          "SELECT eventId FROM coordination_inbox_events WHERE taskId = ? ORDER BY sequence",
+        )
+        .all(f.taskId) as Array<{ eventId: string }>
+    ).map((row) => row.eventId);
+    assert.ok(inserted.length > 4);
+    assert.deepEqual(
+      view.readTask(f.taskId).messages.map((message) => message.eventId),
+      inserted,
+    );
     await waitUntil(() => runtime.turns > 0);
     await waitUntil(() => runtime.resumed.includes(f.threadId));
     assert.equal(
