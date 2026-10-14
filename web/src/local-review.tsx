@@ -844,13 +844,18 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
   const shown = Boolean(review && composer?.originKey === originKey);
   const state = review?.state;
   // Tell the state this form is on screen, so a message for it is placed here and a
-  // composer that is not on this page does not block new comments.
+  // composer that is not on this page does not block new comments. A refusal shows in one
+  // place: here while the form is on screen, otherwise in the panel.
   useEffect(() => {
     if (!shown || !state) return;
     state.composerShown = true;
+    if (state.composer?.error && state.notice === state.composer.error)
+      state.notice = null;
     state.notify();
     return () => {
       state.composerShown = false;
+      if (state.composer?.error && state.notice === null)
+        state.notice = state.composer.error;
       state.notify();
     };
   }, [shown, state]);

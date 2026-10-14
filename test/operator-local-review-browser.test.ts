@@ -1168,6 +1168,37 @@ test("a refused replay on a new entry is reported in the panel and does not bloc
   await files.getByLabel("Comment", { exact: true }).waitFor();
 });
 
+test("a refusal shown in the panel moves into the composer when it is reopened and back when it leaves", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { review } = await loseStageAnswer(page, task, web, "refuse");
+  const files = page.locator("#files");
+  const refusal =
+    "Couldn't capture the exact lines: you don't have permission. Your comment is kept.";
+  const panel = review.locator("[data-slot=action-outcome]");
+  await reopenTask(page);
+  await panel
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await panel.getByText(refusal, { exact: true }).waitFor();
+  assert.equal(await panel.count(), 1);
+  // Opening the file brings the composer's form back: it carries the refusal, the panel does not.
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files
+    .getByRole("form", { name: "Review comment" })
+    .getByText(refusal, { exact: true })
+    .waitFor();
+  await panel.waitFor({ state: "detached" });
+  assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
+  // When the form leaves, the panel says it again, once.
+  await reopenTask(page);
+  await panel.getByText(refusal, { exact: true }).waitFor();
+  assert.equal(await panel.count(), 1);
+  assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
+});
+
 test("a review send in flight when its page goes away is left for the next page to check", async (_t, j) => {
   const { web, task, page } = await startReview(j);
   await signIn(
