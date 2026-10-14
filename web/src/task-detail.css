@@ -122,7 +122,15 @@
 }
 
 .brief-prose {
-  white-space: pre-wrap;
+  min-width: 0;
+}
+
+/* Supplied headings stay inside the brief card: match the card's small-heading size. */
+.brief-prose :is(h1, h2, h3, h4, h5, h6) {
+  font-size: var(--type-sm);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-1-25);
+  margin-block: var(--space-8) 0;
 }
 
 .brief-criteria {
