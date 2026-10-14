@@ -9,13 +9,14 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import {
   installService,
@@ -114,6 +115,14 @@ class FakeLaunchd {
       },
       // Probe timeouts run 1000 times faster; the polling sleep advances the fake clock.
       timeout: (ms) => AbortSignal.timeout(Math.max(1, ms / 1000)),
+      // Directories are separate volumes here: only a rename within one directory works.
+      rename: (from, to) => {
+        if (dirname(dirname(from)) !== dirname(to))
+          throw Object.assign(new Error("cross-device link"), {
+            code: "EXDEV",
+          });
+        renameSync(from, to);
+      },
       ...this.overrides,
     };
   }
@@ -274,11 +283,18 @@ test("install renders, lints, records and bootstraps the versioned LaunchAgent",
   assert.equal(f.launchd.linted.length, 1);
   assert.match(
     f.launchd.linted[0] ?? "",
-    /\/launchd\/\.staging-[^/]+\/local\.ensemble\.test\.plist$/,
+    /\/LaunchAgents\/\.local\.ensemble\.test\.staging-[^/]+\/local\.ensemble\.test\.plist$/,
   );
   assert.deepEqual(readdirSync(join(f.stateDir, "launchd")), [
     "local.ensemble.test.json",
   ]);
+  assert.deepEqual(readdirSync(f.options.agentsDir), [
+    "local.ensemble.test.plist",
+  ]);
+  assert.equal(
+    existsSync(join(f.stateDir, ".local.ensemble.test.lock")),
+    false,
+  );
   for (const name of ["data", "snapshots", "launchd"])
     assert.equal(statSync(join(f.stateDir, name)).mode & 0o777, 0o700, name);
   assert.deepEqual(readFileSync(join(f.stateDir, "config.yaml")), legacy);
@@ -930,4 +946,77 @@ test("a launchctl failure while confirming the stop reports the exit unconfirmed
   assert.equal(result.report.stage, "stop");
   assert.equal(result.report.jobStopped, false);
   assert.equal(result.report.snapshot, null);
+});
+
+test("overlapping installs: the loser fails fast on the lock and leaves the winner untouched", async (t) => {
+  const f = await setup(t);
+  const [first, second] = await Promise.all([f.install(), f.install()]);
+  const loser = first.code === 0 ? second : first;
+  assert.deepEqual([first.code, second.code].sort(), [0, 1]);
+  const report = JSON.parse(loser.stderr);
+  assert.equal(report.stage, "preflight");
+  assert.match(
+    report.error,
+    /Another service command holds .*\.local\.ensemble\.test\.lock/,
+  );
+  assert.deepEqual(f.launchd.mutations(), [
+    ["bootstrap", `gui/${UID}`, f.activation],
+  ]);
+  assert.equal(f.launchd.jobs.size, 1);
+  assert.equal(f.record().plistSha256, sha256(f.activation));
+  assert.equal(
+    existsSync(join(f.stateDir, ".local.ensemble.test.lock")),
+    false,
+  );
+
+  // A stale lock is never taken over; removing it, as the error says, recovers.
+  const lock = join(f.stateDir, ".local.ensemble.test.lock");
+  writeFileSync(lock, '{"pid":999999}\n', { mode: 0o600 });
+  const blocked = await f.uninstall();
+  assert.equal(blocked.code, 1);
+  assert.match(JSON.parse(blocked.stderr).error, /pid 999999.*remove/);
+  assert.equal(f.launchd.jobs.size, 1);
+  rmSync(lock);
+  assert.equal((await f.uninstall()).code, 0);
+});
+
+test("an interrupt during the render never bootstraps the upgraded release", async (t) => {
+  const f = await installed(t);
+  const interrupt = new AbortController();
+  f.launchd.overrides = {
+    lint: async () => {
+      interrupt.abort();
+      return true;
+    },
+  };
+  const result = await f.upgrade(f.releaseB, interrupt.signal);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "render");
+  assert.equal(result.report.error, "interrupted");
+  assert.equal(result.report.jobStopped, true);
+  assert.deepEqual(
+    f.launchd.mutations().map(([command]) => command),
+    ["bootout"],
+  );
+  assert.equal(existsSync(f.activation), false);
+});
+
+test("the plist is staged on the LaunchAgents volume, and a failed move leaves nothing staged", async (t) => {
+  const f = await setup(t);
+  // The fixture's state and LaunchAgents directories are separate volumes for rename.
+  assert.equal((await f.install()).code, 0, "same-volume staging installs");
+  assert.equal((await f.uninstall()).code, 0);
+
+  f.launchd.calls = [];
+  f.launchd.overrides = {
+    rename: () => {
+      throw Object.assign(new Error("cross-device link"), { code: "EXDEV" });
+    },
+  };
+  const result = await f.install();
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.stderr).stage, "render");
+  assert.deepEqual(readdirSync(f.options.agentsDir), []);
+  assert.equal(existsSync(f.recordPath), false);
+  assert.deepEqual(f.launchd.mutations(), []);
 });

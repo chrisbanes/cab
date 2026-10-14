@@ -71,6 +71,8 @@ export type ServiceHost = {
   fetch: typeof fetch;
   now(): number;
   sleep(ms: number): Promise<void>;
+  /** Moves the staged plist into place; a rename within the LaunchAgents directory. */
+  rename(from: string, to: string): void;
   /** A signal that aborts after `ms`; tests shorten it. */
   timeout(ms: number): AbortSignal;
 };
@@ -380,7 +382,11 @@ class Service {
       stderrPath: `${prefix}.err.log`,
     };
     const logs = [configuration.stdoutPath, configuration.stderrPath];
-    const staging = mkdtempSync(join(this.launchdDir, ".staging-"));
+    // Staged beside the activation so the final rename stays on one filesystem; launchd
+    // loads only the directory's own .plist files, not this private subdirectory.
+    const staging = mkdtempSync(
+      join(this.options.agentsDir, `.${label}.staging-`),
+    );
     try {
       const staged = join(staging, `${label}.plist`);
       const { writeLaunchAgent } = await import("../standalone/launchd.js");
@@ -399,7 +405,7 @@ class Service {
         configuration,
       };
       this.writeRecord(record);
-      renameSync(staged, this.activation);
+      this.host.rename(staged, this.activation);
       return { record, logs };
     } finally {
       rmSync(staging, { recursive: true, force: true });
@@ -483,6 +489,56 @@ function bounded<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
+/**
+ * Run one lifecycle command under an owner-only per-label lock file in the state directory,
+ * so overlapping commands never act on the same job. A live holder is never displaced; a
+ * stale lock (its process gone) is removed by the operator, as the error says.
+ */
+async function withLock(
+  options: ServiceOptions,
+  host: ServiceHost,
+  io: ServiceIo,
+  operation: string,
+  run: () => Promise<number>,
+): Promise<number> {
+  const path = join(options.stateDir, `.${options.label}.lock`);
+  // Without a state directory nothing is installed and nothing can install concurrently.
+  if (!existsSync(options.stateDir)) return run();
+  try {
+    const holderProcess = await host.captureIdentity(process.pid);
+    writeFileSync(
+      path,
+      `${JSON.stringify({ pid: process.pid, process: holderProcess })}\n`,
+      { flag: "wx", mode: 0o600 },
+    );
+  } catch (error) {
+    let holder = "";
+    try {
+      holder = ` (pid ${z.object({ pid: z.number() }).parse(JSON.parse(readFileSync(path, "utf8"))).pid})`;
+    } catch {
+      // Unreadable lock: report it without a pid.
+    }
+    io.stderr.write(
+      `${JSON.stringify({
+        ok: false,
+        operation,
+        stage: "preflight",
+        error:
+          (error as NodeJS.ErrnoException).code === "EEXIST"
+            ? `Another service command holds ${path}${holder}; nothing was changed. If that process has exited (check with ps -p), remove ${path} and retry.`
+            : `Could not create the lock file ${path}`,
+        jobStopped: null,
+      })}\n`,
+    );
+    return 1;
+  }
+  try {
+    return await run();
+  } finally {
+    rmSync(path, { force: true });
+  }
+}
+
 function portIsFree(port: number): Promise<boolean> {
   return new Promise((done) => {
     const server = createServer();
@@ -495,7 +551,18 @@ const message = (error: unknown) =>
   error instanceof ServiceFailure ? error.message : "operation failed";
 
 /** Install the LaunchAgent for the release at `releaseRoot`; undoes itself on failure. */
-export async function installService(
+export function installService(
+  options: ServiceOptions,
+  releaseRoot: string,
+  host: ServiceHost,
+  io: ServiceIo,
+): Promise<number> {
+  return withLock(options, host, io, "install", () =>
+    installServiceLocked(options, releaseRoot, host, io),
+  );
+}
+
+async function installServiceLocked(
   options: ServiceOptions,
   releaseRoot: string,
   host: ServiceHost,
@@ -566,7 +633,19 @@ export async function installService(
 }
 
 /** Stop, snapshot, re-render for `target`, start and check readiness. Never rolls back. */
-export async function upgradeService(
+export function upgradeService(
+  options: ServiceOptions,
+  target: string,
+  connection: OperatorConnection,
+  host: ServiceHost,
+  io: ServiceIo,
+): Promise<number> {
+  return withLock(options, host, io, "upgrade", () =>
+    upgradeServiceLocked(options, target, connection, host, io),
+  );
+}
+
+async function upgradeServiceLocked(
   options: ServiceOptions,
   target: string,
   connection: OperatorConnection,
@@ -636,6 +715,8 @@ export async function upgradeService(
       target,
       record.configuration,
     ));
+    // The render awaits a dynamic import and plutil; nothing starts after an interrupt.
+    service.checkInterrupt();
     stage = "start";
     await service.bootstrap();
     stage = "health";
@@ -679,7 +760,17 @@ export async function upgradeService(
 }
 
 /** Remove the owned job and its activation; keep data, auth, snapshots, versions and logs. */
-export async function uninstallService(
+export function uninstallService(
+  options: ServiceOptions,
+  host: ServiceHost,
+  io: ServiceIo,
+): Promise<number> {
+  return withLock(options, host, io, "uninstall", () =>
+    uninstallServiceLocked(options, host, io),
+  );
+}
+
+async function uninstallServiceLocked(
   options: ServiceOptions,
   host: ServiceHost,
   io: ServiceIo,
@@ -755,6 +846,7 @@ export function defaultServiceHost(): ServiceHost {
     now: Date.now,
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     timeout: (ms) => AbortSignal.timeout(ms),
+    rename: renameSync,
   };
 }
 

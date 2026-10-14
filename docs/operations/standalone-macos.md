@@ -131,6 +131,14 @@ exits 1; run it again. A re-run cannot recheck the earlier process, so confirm
 with `launchctl print` and `ps` that it is gone. With nothing installed it reports
 `"installed":false`.
 
+Install, upgrade and uninstall each hold `STATE/.<label>.lock` (mode `0600`,
+recording the command's pid) while they run, so a second command for the same label
+fails at once and changes nothing. A lock is never taken over: if the command that
+made it was killed, confirm with `ps -p <pid>` that the pid it names is gone,
+remove the lock file and run the command again. The plist is staged in a private
+`.<label>.staging-*` directory inside the LaunchAgents directory and moved into
+place within that directory; a failed command removes it.
+
 Ctrl-C during an install or upgrade wait fails it at that stage, and the failure
 handling above still runs. If a command is killed outright, or the install record
 is unreadable, `upgrade` and `uninstall` refuse rather than guess. Recover by
