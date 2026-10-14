@@ -542,7 +542,8 @@ recovery has no recorded continuation has no Fix and links to its recovery; open
 it releases nothing. A request refused only because the captured task or assignment
 revisions changed is shown as held execution (`recovery-held`), not as a wait:
 clearing it is a recovery or fresh operator message decision. A Fix never clears
-holds or grants access by implication. These controls must preserve existing readiness and admission rules.
+holds or grants access by implication. These controls must preserve existing
+readiness and admission rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
 from current service state: runtime readiness, GitHub discovery, lead profile,

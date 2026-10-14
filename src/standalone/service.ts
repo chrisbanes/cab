@@ -4530,12 +4530,12 @@ export class StandaloneService {
    */
   repositoryAccessRevoked(
     taskId: string,
-    repositories: TaskWorkspaceBinding["repositories"] = this.current?.workspaceBindings.get(
-      taskId,
-    )?.repositories ?? [],
+    repositories?: TaskWorkspaceBinding["repositories"],
   ): boolean {
     const domain = this.domain();
     if (!domain.importedTask(taskId)) return false;
+    repositories ??=
+      this.current?.workspaceBindings.get(taskId)?.repositories ?? [];
     const linked = domain.githubConfiguration(
       String(domain.task(taskId).projectId),
     ).repositories;
