@@ -6,6 +6,11 @@ import {
   captureBrowserEvidence,
 } from "./fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
+import { until } from "./fixtures/operator-work.js";
+import {
+  ControllablePowerEvents,
+  supervisedPower,
+} from "./fixtures/power-events.js";
 
 const test = browserSuite("ui-composer-layout");
 
@@ -384,4 +389,113 @@ test("Composer predicts start or wait before submission from the same waits", as
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await page.getByText("Draft saved.", { exact: true }).waitFor();
   assert.equal(commands, 1);
+});
+
+test("Composer, post-create line and task detail show a power-supervision hold", async (_t, j) => {
+  const events = new ControllablePowerEvents();
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      j.fixtureOptions,
+      undefined,
+      { power: supervisedPower(events) },
+    ),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId } = seed(f);
+  const d = f.service.domain();
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(d.project(projectId).version),
+    paused: false,
+  });
+  // A permitted, healthy assignee: choosing it replaces only runtime waits.
+  const worker = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: worker,
+    name: "Healthy worker",
+    instructions: "build",
+    capabilities: "code",
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [worker],
+  });
+  await until(() => f.service.powerStatus()?.admissionHeld === true);
+  const reason = "Power-event history is incomplete or ambiguous";
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 820 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await open(page, web.origin, web.password, projectId);
+
+  // The healthy project does not start now: the hold and its reason, with no Fix.
+  const prediction = page.locator(".composer-prediction");
+  await prediction
+    .getByText("It will wait: Held by power supervision", { exact: true })
+    .waitFor();
+  await prediction.getByText(reason, { exact: true }).waitFor();
+  assert.equal(await prediction.getByText("Starts now.").count(), 0);
+  assert.equal(await prediction.getByText(/^Fix:/).count(), 0);
+  await page.getByText(/^Optional settings/).click();
+  await page.getByLabel("Assignee").selectOption(worker);
+  await prediction
+    .getByText("It will wait: Held by power supervision", { exact: true })
+    .waitFor();
+  assert.equal(await prediction.getByText("Starts now.").count(), 0);
+  await page.getByLabel("Assignee").selectOption("");
+
+  // The post-create line shows the same hold.
+  await page.getByLabel("Task title").fill("Held by power");
+  await page.getByLabel("Desired outcome").fill("Probe");
+  await page
+    .getByRole("button", { name: "Create and start", exact: true })
+    .click();
+  await page.getByText("Task created.", { exact: true }).waitFor();
+  const created = page.locator(".wait-reasons");
+  await created
+    .getByText("It will wait: Held by power supervision", { exact: true })
+    .waitFor();
+  await created.getByText(reason, { exact: true }).waitFor();
+
+  // Task detail lists it as the primary wait, again with no Fix.
+  await page.getByRole("link", { name: "Open task", exact: true }).click();
+  const waits = page.locator(".wait-reasons");
+  await waits
+    .getByText("Waiting · Held by power supervision", { exact: true })
+    .waitFor();
+  await waits.getByText(reason, { exact: true }).waitFor();
+  assert.equal(await waits.getByText(/^Fix:/).count(), 0);
+
+  // Once the hold releases the composer predicts a start again.
+  events.complete = true;
+  await until(() => f.service.powerStatus()?.admissionHeld === false);
+  await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
+  await page
+    .locator(".composer-prediction")
+    .getByText("Starts now.", { exact: true })
+    .waitFor();
+  assert.equal(await page.getByText(reason).count(), 0);
 });

@@ -12,6 +12,7 @@ export const waitCodes = [
   "runtime-unavailable",
   "claude-token-unavailable",
   "profile-runtime-not-configured",
+  "power-held",
   "local-dependency",
   "imported-blockers-blocked",
   "imported-blockers-unknown",
@@ -59,6 +60,8 @@ export const waitSchema = z
     code: z.enum(waitCodes),
     fix: waitFixSchema.nullable(),
     links: z.array(waitLinkSchema).max(10000),
+    /** Context a hold has no link for; omitted when absent. */
+    detail: label.optional(),
   })
   .strict();
 export type Wait = z.infer<typeof waitSchema>;
@@ -72,6 +75,7 @@ export const waitLabels: Record<WaitCode, string> = {
   "runtime-unavailable": "Runtime unavailable",
   "claude-token-unavailable": "Claude token unavailable",
   "profile-runtime-not-configured": "Lead profile runtime not configured",
+  "power-held": "Held by power supervision",
   "local-dependency": "Blocked by a task dependency",
   "imported-blockers-blocked": "Blocked by a GitHub dependency",
   "imported-blockers-unknown": "GitHub dependencies unconfirmed",
@@ -116,6 +120,8 @@ export interface WaitFacts {
   approvals?: readonly { id: string; label: string }[];
   /** Set when capacity holds the task; the label says what uses it. */
   capacity?: string | null;
+  /** Installation-wide: set while the power supervisor holds admission. */
+  powerHold?: { reason: string | null } | null;
 }
 
 /** Builds the ordered waits from current facts. Pure: no reads, no clocks. */
@@ -168,6 +174,13 @@ export function deriveWaits(f: WaitFacts): Wait[] {
     if (f.lead.claudeTokenUnavailable)
       add("claude-token-unavailable", { kind: "add-claude" });
   }
+  if (f.powerHold)
+    waits.push({
+      code: "power-held",
+      fix: null,
+      links: [],
+      ...(f.powerHold.reason ? { detail: f.powerHold.reason } : {}),
+    });
   if (f.approvals?.length)
     add(
       "approval",

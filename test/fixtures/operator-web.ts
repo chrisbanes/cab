@@ -266,7 +266,7 @@ export async function createOperatorFixture<
         ...serviceOptions,
         ghExecutable:
           serviceOptions.ghExecutable ?? join(directory, "no-gh", "gh"),
-        power: { enabled: false },
+        power: serviceOptions.power ?? { enabled: false },
         routingClient,
         ...(delivery ? { delivery } : {}),
         ...(readerFactory ? { github: { readerFactory } } : {}),

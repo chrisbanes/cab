@@ -81,7 +81,9 @@ export function taskStatusLines(task: TaskData): [string, string][] {
     [
       "Waiting",
       task.waits.length
-        ? task.waits.map((w) => waitLabels[w.code]).join(", ")
+        ? task.waits
+            .map((w) => waitLabels[w.code] + (w.detail ? ` (${w.detail})` : ""))
+            .join(", ")
         : "none",
     ],
     ["Execution", task.execution.state],
@@ -89,10 +91,11 @@ export function taskStatusLines(task: TaskData): [string, string][] {
   ];
 }
 
-/** One `Waiting:` line per wait in the flow's order, then its Fix command or path, or what blocks it. */
+/** One `Waiting:` line per wait in the flow's order, then its detail, its Fix command or path, or what blocks it. */
 export function waitLines(waits: readonly Wait[], taskId: string): string[] {
   return waits.flatMap((w) => [
     `Waiting: ${waitLabels[w.code]}`,
+    ...(w.detail ? [`  ${w.detail}`] : []),
     ...(w.fix ? cliFix(w.fix).map((line) => `  Fix: ${line}`) : []),
     ...w.links.map((link) =>
       link.kind === "task"
