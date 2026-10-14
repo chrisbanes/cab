@@ -278,7 +278,7 @@ or run `node dist/src/cli/main.js` directly.
    evicted, failed, interrupted, late and limit gaps `evidence-gap`, and baseline or
    uncaptured executions `evidence-unavailable`.
 
-   `project prepare PROJECT_ID --diagnostic-capture baseline|enhanced` previews and
+   `project prepare PROJECT_ID --diagnostic-capture enhanced|baseline` previews and
    applies the mode change through the same revision-checked, replay-safe flow;
    omitting the flag leaves the mode unchanged.
 

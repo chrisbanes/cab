@@ -913,7 +913,7 @@ function parseLifecycleArgs(args: string[]) {
   }
 }
 
-/** A number within the service's bound, or `default` (null) to clear; undefined for a usage error. */
+/** A number within the service's bound, or `default` (null) to clear; undefined when absent, false for a usage error. */
 function diagnosticValue(
   raw: string | undefined,
   bound: Parameters<typeof isInBound>[1],

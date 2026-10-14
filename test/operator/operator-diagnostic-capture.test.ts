@@ -154,6 +154,7 @@ test("project prepare and apply change the diagnostic capture mode once", async 
 
   const replay = await cli("rw", ["project", "apply", "--file", baseline.out]);
   assert.equal(replay.code, 0, replay.err + replay.out);
+  assert.deepEqual(replay.json().data.receipt, r.json().data.receipt);
   assert.equal(Number(d.project(s.projectId).version), version);
 
   // The same mode is no change.

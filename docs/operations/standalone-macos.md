@@ -412,7 +412,10 @@ value on an installed service, run `service upgrade` with the installed release
 directory and the new option: it stops the job, takes a verified snapshot,
 re-renders the plist, restarts the job and checks readiness. A hand-edited
 plist is unsupported: upgrade refuses an activation that no longer matches its
-recorded hash.
+recorded hash. A release built before these options rejects an install record
+that holds them, so before moving to such a release run `service upgrade` with
+`default` for each value.
+
 The quota counts stored diagnostic payload text only, not the database, WAL or
 filesystem. Pruning deletes payload items only and keeps per-execution gap
 counts. There is no manual purge, and older snapshots keep any payloads they
@@ -670,7 +673,8 @@ the service defaults apply.
 The current renderer sets `RunAtLoad=true` and `KeepAlive=false`; launchctl,
 not automatic crash relaunch, owns restart. The plist contains the Node/CLI,
 operator command, data directory, port, separate auth-file path, canonical
-origin, fixed non-secret PATH, the diagnostic retention variables when set, and private log paths. It contains no password
+origin, fixed non-secret PATH, the diagnostic retention variables when set,
+and private log paths. It contains no password
 or shell wrapper. Before bootstrap, inspect and lint the exact plist:
 
 ```sh
