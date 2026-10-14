@@ -23,3 +23,7 @@
   flex-wrap: wrap;
   gap: var(--space-8);
 }
+.wait-detail {
+  flex-basis: 100%;
+  margin: 0;
+}
