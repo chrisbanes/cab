@@ -679,6 +679,9 @@ export class ExecutionState {
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
     this.migrateTaskStopHoldKind();
+    // Earlier builds kept Stop targets after a receipt reconciled their work.
+    this.db.exec(`DELETE FROM execution_stop_targets
+      WHERE workId IN (SELECT workId FROM execution_intents WHERE state = 'reconciled')`);
     // Workspace recovery runs before this state is opened. Keep the archival
     // hold only when bounded Git work recorded unresolved filesystem effects.
     const workspaceColumns = this.db

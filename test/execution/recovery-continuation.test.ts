@@ -965,6 +965,31 @@ test("a reconciled Stop target does not answer a later Stop of the successor", a
   }
 });
 
+test("reopening removes Stop targets an earlier build kept for reconciled work", async () => {
+  const f = await heldFixture();
+  let service = f.service;
+  try {
+    await service.resolveHeldExecution(f.receipt);
+    const { db } = internals(service);
+    db.prepare(
+      "INSERT INTO execution_intents (id, workId, prompt, workspace, state, reason, threadId, turnId, accountType, sandbox, approval) VALUES (?, 'unreconciled', 'Fixture', '/tmp', 'held', 'Fixture hold', NULL, NULL, 'chatgpt', 'workspaceWrite', 'never')",
+    ).run(randomUUID());
+    const insertTarget = db.prepare(
+      "INSERT INTO execution_stop_targets (taskId, workId, interruptState, terminalState, requestedAt) VALUES (?, ?, 'unbound', 'unknown', 1)",
+    );
+    insertTarget.run(f.taskId, f.old.workId);
+    insertTarget.run(f.taskId, "unreconciled");
+    await service.stop();
+    service = f.makeService();
+    await service.start();
+    const { state } = internals(service);
+    assert.equal(state.stopTarget(f.old.workId), undefined);
+    assert.equal(state.stopTarget("unreconciled")?.terminalState, "unknown");
+  } finally {
+    await close(f, service);
+  }
+});
+
 function required<T>(value: T | null | undefined): T {
   assert.ok(
     value !== null && value !== undefined,
