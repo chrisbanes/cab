@@ -1040,6 +1040,14 @@ test("the macOS 27 preamble is accepted once, in order, and only before the firs
       uuid,
       ...macos27Rows,
     ],
+    "header then a row": [asl, blank, header, ...macos27Rows],
+    "header and separator then a row": [
+      asl,
+      blank,
+      header,
+      separator,
+      ...macos27Rows,
+    ],
     "UUID without header and separator": [asl, blank, uuid, ...macos27Rows],
     "separator before header": [
       asl,

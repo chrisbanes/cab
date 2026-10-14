@@ -125,6 +125,15 @@ function createPmsetParser(requested: PowerEventCursor | null) {
       malformed = true;
       return;
     }
+    // A started preamble must be complete before the first row.
+    if (
+      earliestTimestamp === undefined &&
+      preambleStage > 0 &&
+      preambleStage < pmsetPreamble.length
+    ) {
+      malformed = true;
+      return;
+    }
     earliestTimestamp ??= timestamp;
     previousTimestamp = timestamp;
     const body = match[2] ?? "";
