@@ -388,8 +388,12 @@ function useLocalReviewController({
     expectedDraftVersion,
     draft: content,
   });
+  // Focus waits for the commit that shows the write's outcome: a frame callback can run
+  // first, while the target is still disabled or not yet rendered.
+  // The gate waits for the latest announced change. `write()` re-notifies in a microtask after
+  // `settle`, ahead of React's commit; a `settle` branch that awaits real work would break that.
   const focusLater = (selector: string, fallback?: string) =>
-    requestAnimationFrame(() =>
+    state.afterRender(() =>
       (
         document.querySelector<HTMLElement>(selector) ??
         (fallback ? document.querySelector<HTMLElement>(fallback) : null)
@@ -404,7 +408,7 @@ function useLocalReviewController({
     state.notify();
     // Return to the selected line when it is still rendered, else the origin's
     // button; the trigger may re-render, so prefer live controls.
-    requestAnimationFrame(() => {
+    state.afterRender(() => {
       const origin = composer ? CSS.escape(composer.originKey) : null;
       const live = origin
         ? (document.querySelector<HTMLElement>(
@@ -798,6 +802,9 @@ export function LocalReviewProvider({
   children: React.ReactNode;
 }) {
   const controller = useLocalReviewController(props);
+  // Every notify re-renders this provider; tell the gate which change that commit shows.
+  const revision = props.state.gate.revision;
+  useEffect(() => props.state.gate.committed(revision));
   return (
     <LocalReviewContext.Provider
       value={{
