@@ -528,6 +528,34 @@ test("an invalidated recovery continuation keeps the successor waiting without s
         detail: d.profile(String(d.assignment(assignmentId).profileId)).name,
       },
     );
+    // Ordinary held history is never looked up one turn at a time: only reconciled turns are.
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, state)
+        SELECT 'history-' || value, 'history-' || value, kind, taskId, projectId, assignmentId,
+          taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, 'held'
+        FROM turn_requests, (WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < 200) SELECT value FROM n)
+        WHERE workId = ?`,
+    ).run(f.old.workId);
+    const lookup = coordination.hasRecoveryContinuation.bind(coordination);
+    const looked: string[] = [];
+    coordination.hasRecoveryContinuation = (workId) => {
+      looked.push(workId);
+      return lookup(workId);
+    };
+    const disposition =
+      coordination.recoveryDispositionForWork.bind(coordination);
+    let perTurnDispositions = 0;
+    coordination.recoveryDispositionForWork = (workId) => {
+      perTurnDispositions += 1;
+      return disposition(workId);
+    };
+    assert.equal(
+      f.service.recoveryContinuationUnresolved(assignmentId, "other-work"),
+      true,
+    );
+    assert.deepEqual(looked, [f.old.workId]);
+    assert.equal(perTurnDispositions, 0);
   } finally {
     await close(f);
   }

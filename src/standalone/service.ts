@@ -4512,15 +4512,10 @@ export class StandaloneService {
     excludeWorkId: string,
   ): boolean {
     return (
-      this.current?.schedulerStore
-        .heldWorkIds(assignmentId, excludeWorkId)
-        .some(
-          (olderWorkId) =>
-            this.current?.coordination.recoveryDispositionForWork(
-              olderWorkId,
-            ) === "operator-reconciled" &&
-            !this.current.coordination.hasRecoveryContinuation(olderWorkId),
-        ) ?? false
+      this.current?.coordination.hasUnresolvedRecoveryContinuation(
+        assignmentId,
+        excludeWorkId,
+      ) ?? false
     );
   }
 
