@@ -671,3 +671,38 @@ test("activation made before a source change does not read as current", async (_
   await previewButton(page).click();
   await savedOutcome(page, firstActivation);
 });
+
+test("observation rows of withheld selections show no activation marker", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  // Two selections whose ids are withheld both read null, whatever their activation.
+  const withhold =
+    (state: boolean[]) => (selections: { id: string | null }[]) =>
+      selections.map((s, i) => ({ ...s, id: null, active: state[i] }));
+  await page.route("**/configuration", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.source.selections = withhold([true, false, false])(
+      body.data.source.selections,
+    );
+    await route.fulfill({ response, json: body });
+  });
+  await page.route("**/api/operator/source-observations", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const project of body.data.projects)
+      for (const s of project.selections) s.selectionId = null;
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+  const rows = page.locator("article.settings-row", {
+    has: page.getByRole("heading", { name: /^Selection unavailable/ }),
+  });
+  await rows.nth(1).waitFor();
+  assert.equal(await rows.getByText(/^(?:Active|Inactive)$/).count(), 0);
+});

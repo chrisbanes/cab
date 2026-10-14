@@ -210,8 +210,9 @@ function SourceObservations(
   const resource = p.observations,
     [notice, setNotice] = useState(""),
     [pending, setPending] = useState(false);
+  // Withheld ids all read null, so a null never identifies one configuration row.
   const selection = (id: string | null) =>
-    p.data.source.selections.find((s) => s.id === id);
+    id === null ? undefined : p.data.source.selections.find((s) => s.id === id);
   const descriptor = (id: string | null) => selection(id)?.descriptor;
   return (
     <Panel
