@@ -14,13 +14,15 @@ on:
 permissions:
   contents: read
 jobs:
-  check:
+  # Not named `check`: a skipped job with that name could stand in for the required
+  # `check` status on pull requests.
+  ci:
     # ci.yml already runs this check on pull requests.
     if: github.event_name != 'pull_request'
     uses: ./.github/workflows/ci.yml
   package:
-    needs: check
-    if: ${{ !cancelled() && (needs.check.result == 'success' || needs.check.result == 'skipped') }}
+    needs: ci
+    if: ${{ !cancelled() && (needs.ci.result == 'success' || needs.ci.result == 'skipped') }}
     runs-on: macos-15
     timeout-minutes: 30
     steps:
@@ -46,7 +48,7 @@ jobs:
           overwrite: true
           if-no-files-found: error
   release:
-    needs: [check, package]
+    needs: [ci, package]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 10
