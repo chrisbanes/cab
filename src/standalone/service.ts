@@ -1403,7 +1403,9 @@ export class StandaloneService {
     }
     if (!this.runtimeHarnesses.includes(harness) || !this.spawnRuntime) return;
     const current = this.runtimes.get(harness);
-    if (current && !this.runtimeUnavailableSince.has(harness)) return;
+    // Still running or draining: keep it, and admit work that waited while it was disabled.
+    if (current && !this.runtimeUnavailableSince.has(harness))
+      return this.wakeScheduler();
     if (current) {
       this.runtimes.delete(harness);
       this.detachRuntimeStop(current);

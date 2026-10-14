@@ -297,12 +297,12 @@ test("turning off a runtime that tasks use confirms first; Keep leaves it on and
   await captureBrowserEvidence(page, "1366-runtime-turn-off-confirm");
   assert.equal(
     await dialog
-      .getByRole("button", { name: "Keep Claude on" })
+      .getByRole("button", { name: "Cancel" })
       .evaluate((e) => e === document.activeElement),
     true,
     "Keep takes the focus",
   );
-  await dialog.getByRole("button", { name: "Keep Claude on" }).click();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
   await dialog.waitFor({ state: "detached" });
   assert.equal(await control.isChecked(), true);
   assert.equal(f.service.domain().runtimeEnabled("claude"), true);

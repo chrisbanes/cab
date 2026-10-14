@@ -116,7 +116,10 @@ test("a missing codex is not configured and git fails, with the contract fix, wh
   const codex = await check(f, "codex-executable");
   assert.equal(codex.status, "not-configured");
   assert.equal(codex.reason, "`codex` not found on PATH");
-  assert.equal(codex.fix, "Install Codex into the fixed PATH");
+  assert.equal(
+    codex.fix,
+    "Install Codex into the fixed PATH, then turn Codex off and on in Settings → Runtime",
+  );
   const git = await check(f, "git");
   assert.equal(git.status, "fail");
   assert.equal(git.fix, "Install git");
@@ -146,7 +149,7 @@ const claudeExecutable = (f: Fixture, over: Partial<ReadinessDeps> = {}) =>
   check(f, "claude-executable", { versionTimeoutMs: 1000, ...over });
 const MISSING = {
   reason: "`claude` not found on PATH",
-  fix: "Install Claude Code into the fixed PATH, then restart the service",
+  fix: "Install Claude Code into the fixed PATH, then turn Claude off and on in Settings → Runtime",
 };
 const UNRUNNABLE = {
   reason: "Claude Code did not report a version",
@@ -267,6 +270,17 @@ test("a disabled or missing runtime reports its own checks Not configured; only 
 
   const failed = await read(statuses("unavailable", "disabled"));
   assert.equal(failed.get("runtime-enabled")?.status, "pass");
+  const claudeDown = await read({
+    harnessStatuses: () => [
+      { harness: "codex", enabled: true, state: "available" },
+      { harness: "claude", enabled: true, state: "unavailable" },
+    ],
+  });
+  assert.equal(claudeDown.get("claude-executable")?.status, "fail");
+  assert.equal(
+    claudeDown.get("claude-executable")?.fix,
+    "Turn Claude off and on in Settings → Runtime, or restart the service",
+  );
   const login = await check(f, "codex-login", {
     ...statuses("unavailable", "disabled"),
     codexLogin: async () => "unavailable",

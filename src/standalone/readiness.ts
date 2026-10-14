@@ -108,12 +108,13 @@ const outcome = (
 });
 
 const fixes = {
-  codex: "Install Codex into the fixed PATH",
+  codex:
+    "Install Codex into the fixed PATH, then turn Codex off and on in Settings → Runtime",
   codexLogin: "Run `codex login` as the service user",
   git: "Install git",
   discovery: "Run `gh auth login`, or Settings → discovery credential",
   claudeInstall:
-    "Install Claude Code into the fixed PATH, then restart the service",
+    "Install Claude Code into the fixed PATH, then turn Claude off and on in Settings → Runtime",
   claudeVersion:
     "Run `claude --version` as the service user, or reinstall Claude Code, then restart the service",
   claudeAdd: "Add a Claude token in Settings → Add Claude",
@@ -217,7 +218,19 @@ export class Readiness {
       case "github-discovery":
         return this.discovery();
       case "claude-executable":
-        return this.notEnabled(id, "claude") ?? this.claudeExecutable();
+        return (
+          this.notEnabled(id, "claude") ??
+          (this.deps
+            .harnessStatuses()
+            .some((s) => s.harness === "claude" && s.state === "unavailable")
+            ? outcome(
+                id,
+                "fail",
+                "The Claude runtime is not running",
+                "Turn Claude off and on in Settings → Runtime, or restart the service",
+              )
+            : this.claudeExecutable())
+        );
       case "claude-token":
         return this.notEnabled(id, "claude") ?? this.claudeTokenCheck();
       case "runtime-harness":

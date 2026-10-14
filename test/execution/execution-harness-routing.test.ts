@@ -1677,12 +1677,26 @@ test("re-enabling a draining runtime keeps it; disabling one with no bound work 
       enabled: false,
       confirmed: true,
     });
+    // Work that waited while it was disabled is admitted on re-enable, before the
+    // running turn ends.
+    const waiting = await task(service, projectId, [worker]);
+    const waitingWork = initial(waiting.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, waitingWork)?.reason ===
+        "Claude runtime is not configured",
+      describe,
+    );
     await service.configureRuntime({
       key: randomUUID(),
       harness: "claude",
       enabled: true,
     });
     assert.equal(live.created.claude.length, 1, "nothing starts twice");
+    await waitUntil(
+      () => intent(service, waitingWork)?.state === "running",
+      describe,
+    );
     claude.releaseAll();
     await waitUntil(
       () => intent(service, work)?.state === "completed",

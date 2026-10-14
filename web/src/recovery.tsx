@@ -155,7 +155,7 @@ function RuntimeToggle(
           role="switch"
           className="native-check settings-switch size-5 shrink-0 p-0 accent-foreground"
           checked={p.status.enabled}
-          disabled={pending || confirm !== null}
+          disabled={pending || confirm !== null || Boolean(outcome?.retry)}
           aria-busy={pending}
           onChange={(e) => void toggle(e.target.checked)}
         />
@@ -168,7 +168,10 @@ function RuntimeToggle(
           message={outcome.message}
           details={outcome.details}
           action={
-            outcome.retry && { label: "Try again", onClick: outcome.retry }
+            outcome.retry && {
+              label: "Check whether it saved",
+              onClick: outcome.retry,
+            }
           }
         />
       )}
@@ -200,7 +203,7 @@ function RuntimeToggle(
             </Button>
             <DialogClose asChild>
               <Button type="button" variant="secondary" data-keep>
-                Keep {label} on
+                Cancel
               </Button>
             </DialogClose>
           </div>

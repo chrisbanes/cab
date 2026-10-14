@@ -284,7 +284,9 @@ export function readyCheckItems(input: {
       const status = workspace.harnesses.find((h) => h.harness === harness);
       if (
         status?.state === "unavailable" ||
-        (harness === "codex" && workspace.runtime.state === "unavailable")
+        (harness === "codex" &&
+          workspace.runtime.state === "unavailable" &&
+          status?.state !== "not-configured")
       )
         items.push({ text: unavailableAlert({ harness }) });
       else if (status?.state === "not-configured" && !noRuntime)

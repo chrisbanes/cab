@@ -597,7 +597,10 @@ test("newly configured delivery credentials inherited by the current runtime hol
   }
 });
 
-import { StandaloneService } from "../../src/standalone/service.js";
+import {
+  StandaloneService,
+  type StandaloneServiceOptions,
+} from "../../src/standalone/service.js";
 test("restart retains one unavailable PR binding while independent feedback and operator views continue", async () => {
   const f = await deliveryFixture();
   try {
@@ -702,11 +705,8 @@ test("failed startup releases delivery state before a clean retry", async () => 
   const root = realpathSync(
     mkdtempSync(join(tmpdir(), "ensemble-delivery-startup-")),
   );
-  let fail = true;
   const runtime = {
-    async start() {
-      if (fail) throw new Error("unavailable");
-    },
+    async start() {},
     async stop() {},
     onUnexpectedRequest() {},
     async startThread() {
@@ -721,16 +721,20 @@ test("failed startup releases delivery state before a clean retry", async () => 
       return "completed" as const;
     },
   };
+  // Read at each start: an invalid poll interval fails start-up after delivery opens.
+  const options: StandaloneServiceOptions = {
+    power: { enabled: true, pollIntervalMs: 0 },
+  };
   const service = new StandaloneService(
     join(root, "data"),
     () => runtime,
     undefined,
-    { power: { enabled: false } },
+    options,
   );
   try {
     await assert.rejects(() => service.start());
     assert.throws(() => service.delivery(), /Service is not started/);
-    fail = false;
+    options.power = { enabled: false };
     await service.start();
     assert.deepEqual(service.delivery().actions(), []);
   } finally {
