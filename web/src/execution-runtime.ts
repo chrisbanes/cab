@@ -30,9 +30,13 @@ export function harnessReason(status: HarnessStatus) {
 export const executableMissingMessage = (harness: HarnessStatus["harness"]) =>
   `${executionHarnessLabels[harness]} was not turned on: \`${harness}\` not found on the service PATH.`;
 
-/** Recovery for a runtime that is not enabled: turn it on, installing the executable if that is refused. */
-const turnOnAdvice = (harness: HarnessStatus["harness"]) =>
-  `Turn it on in Settings → Runtime; if that is refused, install \`${harness}\` on the service PATH first.`;
+/** Recovery for a runtime whose executable is not on the service PATH: install it, then restart the runtime. */
+const installAdvice = (harness: HarnessStatus["harness"]) =>
+  `Install \`${harness}\` on the service PATH, then turn it off and on in Settings → Runtime.`;
+
+/** A wait reason does not say which cause: the runtime is off, or on but its executable is missing. */
+const notEnabledAdvice = (harness: HarnessStatus["harness"]) =>
+  `If it is off, turn it on in Settings → Runtime. If that is refused, or it is already on, install \`${harness}\` on the service PATH, then turn it off and on there.`;
 
 /** The confirmation body for disabling a runtime that tasks use. */
 export const disableConfirmation = (
@@ -113,7 +117,7 @@ export function harnessNote(status: HarnessStatus | undefined) {
   if (!status || status.state === "available") return null;
   const label = executionHarnessLabels[status.harness];
   return status.state === "not-configured"
-    ? `The ${label} runtime is not enabled on this service. ${turnOnAdvice(status.harness)} Assignments using this profile wait until it is; they never fall back to another runtime.`
+    ? `The ${label} runtime is not enabled on this service. ${status.reason === "disabled" ? "Turn it on in Settings → Runtime." : installAdvice(status.harness)} Assignments using this profile wait until it is; they never fall back to another runtime.`
     : `The ${label} runtime is unavailable; turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.`;
 }
 
@@ -167,7 +171,7 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
   const label = executionHarnessLabels[harness];
   if (reason === `${label} runtime is not configured`)
     return {
-      message: `The ${label} runtime is not enabled on this service. ${turnOnAdvice(harness)} This work waits and never falls back to another runtime; Stop the task from its header to end it, or change the profile's runtime for new conversations.`,
+      message: `The ${label} runtime is not enabled on this service. ${notEnabledAdvice(harness)} This work waits and never falls back to another runtime; Stop the task from its header to end it, or change the profile's runtime for new conversations.`,
       routes: [
         {
           label: "Edit profile",

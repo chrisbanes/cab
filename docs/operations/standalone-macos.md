@@ -339,14 +339,16 @@ and a fresh bound preparation.
 
 Claude profiles run the `claude` command (Claude Code) that resolves on the
 service's fixed `PATH`; Ensemble does not redistribute it. Install it so it
-resolves there (Homebrew puts it in `/opt/homebrew/bin`), then restart the service
-after installing or upgrading it: the runtime looks `claude` up once when it starts.
+resolves there (Homebrew puts it in `/opt/homebrew/bin`), then turn Claude off and
+on in Settings → Runtime (or restart the service) after installing or upgrading it:
+the runtime looks `claude` up when it starts.
 A `claude` that does not resolve on the `PATH` when the service starts leaves the
 Claude runtime not enabled for that run. Settings → Runtime shows it as Not enabled,
 with no alert, as if Claude were not configured, and Claude work waits visibly with
 the not-enabled reason; it never falls back to another runtime. Codex and the
-service are unaffected. After installing `claude`, restart the service to enable
-Claude. A `claude` that resolves but whose runtime fails shows as unavailable
+service are unaffected. The Claude switch can already be on: after installing
+`claude`, turn Claude off and on in Settings → Runtime (or restart the service) to
+start it. A `claude` that resolves but whose runtime fails shows as unavailable
 instead. Readiness shows the Claude executable as Not configured while Claude is
 unused, and as Fail with the fix once a token reference or an active Claude profile
 needs it.
@@ -546,7 +548,8 @@ its licence, `dist/src`, `dist/operator`, the production `node_modules`,
 `package.json`, `package-lock.json`, `LICENSE` and `manifest.json`. It needs `codex`
 on `PATH` like a checkout build. It does not include `claude`: a release without one
 on the service `PATH` shows Claude as Not enabled, and installing `claude` on that
-`PATH` enables it after a restart (see [Claude executable](#claude-executable)).
+`PATH` enables it once Claude is turned off and on in Settings → Runtime, or after a
+restart (see [Claude executable](#claude-executable)).
 Codex remains the default harness.
 
 `manifest.json` records the schema `ensemble.release/v1`, name, version, platform,

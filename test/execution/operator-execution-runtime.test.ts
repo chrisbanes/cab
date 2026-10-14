@@ -156,7 +156,7 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
   ]);
   assert.match(
     notConfigured?.message ?? "",
-    /Turn it on in Settings → Runtime; if that is refused, install `claude` on the service PATH first/,
+    /If it is off, turn it on in Settings → Runtime\. If that is refused, or it is already on, install `claude` on the service PATH, then turn it off and on/,
   );
   // The stored reason is the current text or the legacy one persisted before the off/on recovery.
   for (const reason of [
@@ -206,14 +206,23 @@ const base = (harness: "codex" | "claude") => ({
 
 test("the profile runtime note names the recovery for each cause", () => {
   assert.equal(harnessNote({ ...base("codex"), state: "available" }), null);
+  const disabled = harnessNote({
+    ...base("claude"),
+    state: "not-configured",
+    reason: "disabled",
+  });
+  assert.match(disabled ?? "", /Turn it on in Settings → Runtime\./);
+  // The switch is already on when the executable is missing: installing it is the fix.
+  const missing = harnessNote({
+    ...base("claude"),
+    state: "not-configured",
+    reason: "executable-missing",
+  });
   assert.match(
-    harnessNote({
-      ...base("claude"),
-      state: "not-configured",
-      reason: "disabled",
-    }) ?? "",
-    /Turn it on in Settings → Runtime; if that is refused, install `claude` on the service PATH first/,
+    missing ?? "",
+    /Install `claude` on the service PATH, then turn it off and on in Settings → Runtime\./,
   );
+  assert.doesNotMatch(missing ?? "", /Turn it on/);
   assert.match(
     harnessNote({ ...base("codex"), state: "unavailable", since: 1 }) ?? "",
     /turn it off and on in Settings → Runtime, or restart the service/,
