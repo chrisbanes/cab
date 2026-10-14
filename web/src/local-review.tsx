@@ -16,7 +16,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { CommandState, OperatorClient } from "./api.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
-import { Button, StatusBadge } from "./components.js";
+import { Button, StatusBadge, isPlainClick } from "./components.js";
 import { failureCause } from "./outcome-copy.js";
 import {
   leadAwaitingRecoveryNotice,
@@ -289,6 +289,10 @@ function useLocalReviewController({
   // The draft write this page is awaiting an answer for, ready to be kept. If the page goes
   // away first, its cleanup keeps that exact request, so the answer that arrives later is ignored.
   const inFlight = useRef<Unconfirmed | null>(null);
+  // The next warning to appear takes focus: this page just held a write while no composer form
+  // was on screen, so the control the operator used is gone. A warning restored on a later
+  // visit never takes it.
+  const focusWarning = useRef(false);
   const rerender = useRef(changed);
   rerender.current = changed;
   useEffect(() => {
@@ -333,6 +337,7 @@ function useLocalReviewController({
     inFlight.current = null;
     if (result.state === "unknown") {
       holdUnconfirmed(command, intent, result);
+      focusWarning.current = !state.composerShown;
       await resource.refresh();
       state.notify();
       return true;
@@ -443,6 +448,7 @@ function useLocalReviewController({
           // Without this page's draft the stage stays unconfirmed: replaying it is safe.
           if (!draft) {
             holdUnconfirmed(command, intent);
+            focusWarning.current = !state.composerShown;
             return;
           }
           return write(
@@ -575,6 +581,15 @@ function useLocalReviewController({
     resource,
     sentList,
     lead,
+    focusWarning,
+    /** Move focus to the check of the unconfirmed write, the first warning in the panel. */
+    showWarning() {
+      document
+        .querySelector<HTMLElement>(
+          '#local-review [data-slot="action-outcome"][data-tone="warning"] button',
+        )
+        ?.focus();
+    },
     open(originKey: string, label: string, anchor: ReviewAnchorCandidate) {
       if (state.notice?.tone === "success") state.notice = null;
       state.composer = {
@@ -934,7 +949,18 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
       )}
       {review.state.unconfirmed && (
         <p className="metadata muted" role="status">
-          Check whether it saved in Local review.
+          {/* biome-ignore lint/a11y/useValidAnchor: a link to the panel on this page; modified clicks keep the browser's own behaviour. */}
+          <a
+            href="#local-review"
+            onClick={(event) => {
+              if (!isPlainClick(event)) return;
+              // Stay on this history entry: the check is on this page.
+              event.preventDefault();
+              review.showWarning();
+            }}
+          >
+            Check whether it saved in Local review.
+          </a>
         </p>
       )}
       <div className="task-actions">
@@ -1142,6 +1168,10 @@ export function LocalReviewPanel() {
   const review = useLocalReview();
   const draft = review?.draft;
   const state = review?.state;
+  // A warning that appeared has had its turn at the focus.
+  useEffect(() => {
+    if (review) review.focusWarning.current = false;
+  });
   if (!review || !state) return null;
   const send = state.send;
   const locked = frozen(review) || draft?.state !== "editable";
@@ -1303,6 +1333,7 @@ export function LocalReviewPanel() {
           tone="warning"
           message={state.unconfirmed.outcome.message}
           details={state.unconfirmed.outcome.details}
+          focus={review.focusWarning.current}
           action={checkAction(review)}
         />
       )}

@@ -463,6 +463,18 @@ async function reopenTask(page: Page) {
   await page.getByRole("link", { name: "Review exact lines" }).first().click();
 }
 
+const warningSelector =
+  '#local-review [data-slot="action-outcome"][data-tone="warning"]';
+/** Whether the check of the Local review warning has the focus. */
+const checkFocused = (selector: string) => {
+  const element = document.activeElement;
+  return (
+    element?.tagName === "BUTTON" &&
+    element.textContent === "Check whether it saved" &&
+    element.closest(selector) !== null
+  );
+};
+
 /** The draft version on the server, read outside the page's own state. */
 const draftVersion = (page: Page, taskId: string) =>
   page.evaluate(async (id) => {
@@ -584,8 +596,28 @@ test("a comment save whose response is lost stays one exact request until it is 
     true,
   );
   // The composer points to the check instead of repeating the warning.
-  await files.getByText("Check whether it saved in Local review.").waitFor();
+  const pointer = files.getByRole("link", {
+    name: "Check whether it saved in Local review.",
+  });
+  await pointer.waitFor();
   assert.equal(await files.locator("[data-slot=action-outcome]").count(), 0);
+  assert.equal(await pointer.getAttribute("href"), "#local-review");
+  // The warning appeared without taking the focus: the pointer is the route to it.
+  assert.equal(await page.evaluate(checkFocused, warningSelector), false);
+  // Following it focuses the check in the same task as the click, and adds no history entry.
+  assert.equal(
+    await pointer.evaluate((link, selector) => {
+      (link as HTMLElement).click();
+      const element = document.activeElement;
+      return (
+        element?.tagName === "BUTTON" &&
+        element.textContent === "Check whether it saved" &&
+        element.closest(selector) !== null
+      );
+    }, warningSelector),
+    true,
+  );
+  assert.equal(new URL(page.url()).hash, "");
   await warning.getByText("Details", { exact: true }).click();
   assert.match(
     await warning.locator("dl").innerText(),
@@ -638,6 +670,8 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
     })
     .waitFor();
   assert.equal(await warning.getByRole("button").count(), 1);
+  // Save edit gave way to the check, so the check takes the focus.
+  await page.waitForFunction(checkFocused, warningSelector);
   // Other edits stay blocked: the textarea is off and no new comment can start.
   assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
   await files.getByRole("button", { name: "Line 2: second" }).click();
@@ -1021,6 +1055,8 @@ test("an unconfirmed anchor stays checkable from a new navigation entry and fini
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
+  // A warning restored on a later visit does not take the focus.
+  assert.equal(await page.evaluate(checkFocused, warningSelector), false);
   assert.equal(await page.getByLabel("Comment", { exact: true }).count(), 0);
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -1070,6 +1106,8 @@ test("a stage replay stays held while no draft is loaded, then finishes the comm
       )
       .waitFor();
     assert.equal(await outcome.count(), 1);
+    // The check the operator pressed gave way to the held replay's, which takes the focus.
+    await page.waitForFunction(checkFocused, warningSelector);
     assert.equal(saves.length, 0, "the held replay started no save");
     assert.equal(await review.getByText("Settled after leaving").count(), 0);
     const finished = stageAnswered();
