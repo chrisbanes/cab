@@ -515,17 +515,25 @@ project selection, title and desired outcome prominent. Progressively disclose
 optional context, reference links, permitted explicit assignee selection and task
 dependencies; show a summary of supplied optional settings when collapsed. Keep
 entered values and field errors accessible through disclosure. Use Create and start
-as the primary action and Save draft as the secondary action. Explain before submission that starting is subject to
-project state, dependencies, capacity and execution holds. Show the persisted
-state and reason for any wait after submission; creation does not imply running.
-Where the operator can clear a wait (paused project, missing or revoked project
-lead, unavailable runtime, unreadable Claude token, unconfigured profile runtime), the reason links to that one action;
-it never clears holds or grants access by implication. These controls must
-preserve existing readiness and admission rules.
+as the primary action and Save draft as the secondary action. Before submission,
+state whether the task would start now or wait, with the reasons a new task in the
+project and its chosen dependencies would have. Show the persisted state and the
+reasons for any wait after submission; creation does not imply running. Task
+detail, Inbox and the operator CLI list the same wait reasons in one fixed order,
+the first primary. Where the operator can clear a wait (paused project, missing or
+revoked project lead, unavailable runtime, unreadable Claude token, unconfigured
+profile runtime), the reason carries a Fix that performs that one action: Resume
+project confirms and sends only the project resume, and every other Fix opens the
+screen that clears it (the CLI prints the command or Settings path). Dependency,
+approval, source and capacity waits link to what blocks them and have no Fix. A Fix
+never clears holds or grants access by implication. These controls must preserve
+existing readiness and admission rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
 from current service state: runtime readiness, GitHub discovery, lead profile,
-an enabled project and the first task, with Claude optional. A readiness check,
+an enabled project and the first task, with Claude optional. Afterwards Home shows
+only rows that need attention. The account menu opens the checklist until the
+operator dismisses it for the installation; Show getting started undoes that. A readiness check,
 shared by Settings and the operator CLI, reports what the running service can use
 and one fix per problem. The [user flows](user-flows/) define these journeys.
 

@@ -111,7 +111,7 @@ export function checklistRows(input: {
           ? "Checking readiness…"
           : "Readiness couldn't be checked."
         : runtime
-          ? "The service can use the Codex login."
+          ? "Codex login readable by the service."
           : (failing?.reason ?? "The service can't use the Codex login."),
       { kind: "link", label: "Open readiness check", href: "/app/settings" },
     ),
@@ -119,7 +119,7 @@ export function checklistRows(input: {
       "github",
       "GitHub",
       `${
-        githubDone
+        githubDone && !(discovery?.source === "gh" && gh?.state === "signed-in")
           ? "Discovery credential is readable."
           : gh?.state === "signed-in"
             ? `Signed in to github.com as @${gh.login}.`
@@ -141,7 +141,7 @@ export function checklistRows(input: {
       "Lead profile",
       profiles.length
         ? `${profiles.length} ${profiles.length === 1 ? "profile" : "profiles"}`
-        : "No lead profile yet.",
+        : "No profiles yet.",
       profiles.length
         ? { kind: "link", label: "Open settings", href: "/app/settings" }
         : {
@@ -157,7 +157,7 @@ export function checklistRows(input: {
         ? `${enabled.name ?? "Project"} is running.`
         : paused
           ? `${paused.name ?? "Project"} is paused. Nothing runs until you resume it.`
-          : "No project yet.",
+          : "No projects yet.",
       enabled
         ? {
             kind: "link",
@@ -175,7 +175,11 @@ export function checklistRows(input: {
     row(
       "first-task",
       "First task",
-      turnStarted ? "A task has started a turn." : "No task has started yet.",
+      turnStarted
+        ? "A task has started a turn."
+        : enabled || paused
+          ? "No task has started yet."
+          : "Needs a project first.",
       {
         kind: "link",
         label: "Create task",

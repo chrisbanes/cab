@@ -1,6 +1,6 @@
 # First task
 
-**Status:** planned changes to the implemented composer and task detail.
+**Status:** implemented.
 
 ## Goal
 
@@ -15,8 +15,9 @@ waits, led by the reason to clear first and a link that fixes it.
 
 ## Steps
 
-1. Composer opens with the project selected. Before submission it states whether
-   the project would start now or wait, using the same reasons as step 3.
+1. Composer opens with the project selected. Before submission it states "Starts
+   now." or "It will wait: <reason>", using the same reasons and order as step 3
+   for the project and the chosen dependencies.
 2. **Create and start** opens the new task's detail page.
 3. Task detail shows the current state. A waiting task shows its reasons in the
    table's order: the first is primary and carries its **Fix**, and the rest are
@@ -32,6 +33,9 @@ waits, led by the reason to clear first and a link that fixes it.
    | Lead profile runtime not configured | Open the profile                                         |
    | Dependency, approval or source hold | No Fix; link to the blocking task, request or source     |
    | Capacity                            | No Fix; shows what is using capacity                     |
+
+   A Fix that opens a screen is a link; only Resume project sends a command. The
+   service derives the reasons from current state on every task read.
 
 4. Once the first turn starts, Home drops the getting-started checklist.
 
