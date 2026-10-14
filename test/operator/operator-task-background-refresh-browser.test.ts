@@ -104,7 +104,7 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   await page.waitForLoadState("networkidle");
   const quiet = await observedDom(page);
   assert.equal(quiet?.statusSeen, false);
-  assert.equal(quiet?.mutations, 0);
+  assert.deepEqual(quiet?.changes, []);
   assert.equal(await unavailable.count(), unavailableCount);
   assert.equal(await top(), refreshTop);
   assert.equal(await page.evaluate(() => scrollY), scrolled);

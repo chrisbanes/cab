@@ -40,6 +40,12 @@ test("Inbox and shell timer reads stay silent until they fail; header Refresh st
   const rowTop = () =>
     rows.first().evaluate((el) => el.getBoundingClientRect().top);
   const top = await rowTop();
+  // Land just before a minute boundary so the poll also ticks the row's relative age.
+  const created = Date.parse(
+    (await rows.first().locator("time").getAttribute("datetime")) ?? "",
+  );
+  assert.ok(created > 0);
+  await page.clock.setSystemTime(created + 50_000);
   await watchDom(page);
 
   const holds = await Promise.all(
@@ -56,7 +62,7 @@ test("Inbox and shell timer reads stay silent until they fail; header Refresh st
   await page.waitForLoadState("networkidle");
   const quiet = await observedDom(page);
   assert.equal(quiet?.statusSeen, false);
-  assert.equal(quiet?.mutations, 0);
+  assert.deepEqual(quiet?.changes, []);
   for (const hold of holds) await hold.stop();
 
   const failing = await failResponses(page, "**/api/operator/inbox*");

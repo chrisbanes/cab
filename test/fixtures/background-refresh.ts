@@ -42,22 +42,47 @@ export async function failResponses(page: Page, glob: string) {
 
 declare global {
   interface Window {
-    __observedDom?: { mutations: number; statusSeen: boolean };
+    __observedDom?: { changes: string[]; statusSeen: boolean };
   }
 }
 
-/** Records every DOM mutation and whether a `.resource-status` alert ever appeared. */
+/**
+ * Records DOM mutations that could change what the viewer sees, and whether a `.resource-status`
+ * alert ever appeared. Relative ages (`<time>`) legitimately tick when the fake clock advances, and
+ * React rewrites unchanged attributes and text on re-render, so those records are ignored.
+ */
 export async function watchDom(page: Page) {
   await page.evaluate(() => {
-    const log = { mutations: 0, statusSeen: false };
+    const log = { changes: [] as string[], statusSeen: false };
     window.__observedDom = log;
     new MutationObserver((records) => {
-      log.mutations += records.length;
+      for (const record of records) {
+        const target =
+          record.target instanceof Element
+            ? record.target
+            : record.target.parentElement;
+        if (target?.closest("time")) continue;
+        if (
+          record.type === "attributes" &&
+          target?.getAttribute(record.attributeName ?? "") === record.oldValue
+        )
+          continue;
+        if (
+          record.type === "characterData" &&
+          record.target.textContent === record.oldValue
+        )
+          continue;
+        log.changes.push(
+          `${record.type} ${target?.tagName.toLowerCase()}.${target?.className} ${record.attributeName ?? ""}`,
+        );
+      }
       if (document.querySelector(".resource-status")) log.statusSeen = true;
     }).observe(document.body, {
       childList: true,
       characterData: true,
+      characterDataOldValue: true,
       attributes: true,
+      attributeOldValue: true,
       subtree: true,
     });
   });
