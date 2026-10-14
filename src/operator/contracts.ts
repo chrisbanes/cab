@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { waitSchema } from "./wait-reasons.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
   githubConfigurationSchema,
@@ -878,6 +879,8 @@ export const composerOptionsSchema = envelope(
         })
         .strict(),
       routingEnabled: z.boolean(),
+      /** Project-level waits a new task would have; the composer adds selected dependencies. */
+      waits: z.array(waitSchema).max(13),
     })
     .strict(),
 );
@@ -1240,6 +1243,7 @@ export const taskSchema = envelope(
           ),
         })
         .strict(),
+      waits: z.array(waitSchema).max(13),
       execution: executionSchema,
       localDependencies: z.array(
         z.object({ id: uuid, title: safeText, state: taskState }).strict(),

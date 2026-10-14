@@ -98,6 +98,7 @@ import {
   workspacePreviewReadSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
+import { deriveWaits } from "../operator/wait-reasons.js";
 import {
   claudeTokenExclusions,
   claudeTokenSource,
@@ -2074,6 +2075,129 @@ export class OperatorApi {
         c.effectiveProjectLimits[projectId] ?? c.defaultProjectLimit,
     };
   }
+  /** The lead's runtime facts for waits, mirroring the ready check; none for a missing or revoked lead. */
+  private leadWaitFacts(profileId: string | undefined) {
+    if (!profileId) return undefined;
+    const d = this.domain();
+    let runtime: ReturnType<typeof d.profileRuntime>;
+    try {
+      if (d.profile(profileId).revoked) return undefined;
+      runtime = d.profileRuntime(profileId);
+    } catch {
+      return undefined;
+    }
+    const status = this.service
+      .harnessStatuses()
+      .find((h) => h.harness === runtime.harness);
+    return {
+      profileId,
+      runtimeUnavailable: status?.state === "unavailable",
+      runtimeNotConfigured:
+        status?.state === "not-configured" ||
+        (!!status?.settings &&
+          unsupportedRuntimeField(runtime, status.settings) !== null),
+      claudeTokenUnavailable:
+        runtime.harness === "claude" &&
+        this.service.claudeTokenStatus().state !== "available",
+    };
+  }
+  /** What is using capacity when the project or installation is at its limit. */
+  private capacityWait(projectId: string) {
+    const c = this.capacity(projectId);
+    return c.projectUsage >= c.projectLimit
+      ? `${c.projectUsage} of ${c.projectLimit} project turns running`
+      : c.globalUsage >= c.globalLimit
+        ? `${c.globalUsage} of ${c.globalLimit} turns running`
+        : null;
+  }
+  /** Waits a new task in this project would have before its own dependencies. */
+  private projectWaits(p: Row) {
+    const projectId = String(p.id);
+    let lead: Row | undefined;
+    try {
+      lead = p.leadProfileId
+        ? this.domain().profile(String(p.leadProfileId))
+        : undefined;
+    } catch {}
+    return deriveWaits({
+      projectId,
+      admissionReasons: [
+        ...(p.paused ? ["project-paused"] : []),
+        ...(!lead
+          ? ["project-lead-unconfigured"]
+          : lead.revoked
+            ? ["project-lead-revoked"]
+            : []),
+      ],
+      lead: this.leadWaitFacts(
+        p.leadProfileId ? String(p.leadProfileId) : undefined,
+      ),
+      capacity: this.capacityWait(projectId),
+    });
+  }
+  /** The task's ordered waits; a closed task has none. Labels pass the exclusion check. */
+  private taskWaits(
+    t: Row,
+    admission: ReturnType<OperatorApi["admission"]>,
+    execution: Execution,
+    excluded: readonly string[] | undefined,
+    approvals: readonly CoordinationInteraction[],
+  ) {
+    if (t.state !== "open") return [];
+    const d = this.domain(),
+      taskId = String(t.id),
+      projectId = String(t.projectId),
+      identity = this.identity(taskId),
+      issue = identity
+        ? this.service.githubSources().issue(identity.nodeId)
+        : undefined,
+      sourceName =
+        issue &&
+        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(issue.repositoryName))
+          ? String(issue.repositoryName)
+          : null,
+      waiting = ["idle", "queued", "selected", "waiting"].includes(
+        execution.state,
+      );
+    return deriveWaits({
+      projectId,
+      admissionReasons: admission.reasons,
+      lead: this.leadWaitFacts(this.taskLead(t, excluded)?.profileId),
+      dependencies: d
+        .dependencies(taskId)
+        .filter((id) => d.task(id).state !== "done")
+        .map((id) => ({
+          id,
+          label: this.safe(d.task(id).title, excluded) ?? "Unavailable task",
+        })),
+      nativeBlockers: identity
+        ? this.service
+            .githubSources()
+            .nativeBlockers(identity.nodeId)
+            .filter((b) => b.status === "open")
+            .map((b) => {
+              const name = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(
+                String(b.repositoryName),
+              )
+                ? String(b.repositoryName)
+                : null;
+              return {
+                url: githubIssueUrl(name, Number(b.issueNumber) || null),
+                label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
+              };
+            })
+        : [],
+      sourceUrl: githubIssueUrl(
+        sourceName,
+        Number(issue?.issueNumber) > 0 ? Number(issue?.issueNumber) : null,
+      ),
+      approvals: approvals
+        .filter((a) => a.status === "open")
+        .map((a) => ({ id: a.interactionId, label: "Review the request" })),
+      capacity:
+        admission.eligible && waiting ? this.capacityWait(projectId) : null,
+    });
+  }
   private admission(taskId: string) {
     const a = this.domain().admission(taskId);
     return {
@@ -2319,6 +2443,7 @@ export class OperatorApi {
         dependencies,
         capacity: this.capacity(projectId),
         routingEnabled: Boolean(d.routing(projectId).enabled),
+        waits: this.projectWaits(p),
       },
       observedAt: Date.now(),
     });
@@ -2735,6 +2860,8 @@ export class OperatorApi {
         ? {}
         : { interactionId: m.interactionId }),
     }));
+    const admission = this.admission(taskId),
+      execution = this.execution(t);
     const leadAssignmentId =
       this.domain()
         .leadBindings()
@@ -2824,8 +2951,9 @@ export class OperatorApi {
               : null,
         };
       }),
-      admission: this.admission(taskId),
-      execution: this.execution(t),
+      admission,
+      waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
+      execution,
       localDependencies: d.dependencies(taskId).map((id) => {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };

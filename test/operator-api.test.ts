@@ -2559,3 +2559,156 @@ test("task reads redact the Claude token reference and its value", async (t) => 
   assert.equal(read.includes(value), false);
   assert.equal(read.includes(name), false);
 });
+
+test("task and composer reads return ordered waits with Fix kinds and blocker links", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const codes = async (taskId: string) =>
+    (await api.readTask(taskId)).data.waits.map((w) => w.code);
+  const task = (projectId: string, ready = true) => {
+    const taskId = randomUUID();
+    d.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title: "Wait probe",
+      outcome: "Probe",
+      ready,
+    });
+    return taskId;
+  };
+  // A paused project with no lead.
+  const bare = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: bare,
+    name: "Bare",
+    leadProfileId: null,
+  });
+  const bareTask = task(bare);
+  assert.deepEqual(await codes(bareTask), [
+    "project-paused",
+    "project-lead-unconfigured",
+  ]);
+  assert.deepEqual((await api.readTask(bareTask)).data.waits[0]?.fix, {
+    kind: "resume-project",
+    projectId: bare,
+  });
+  assert.deepEqual(
+    (await api.readComposerOptions(bare)).data.waits.map((w) => w.code),
+    ["project-paused", "project-lead-unconfigured"],
+  );
+  // A Draft keeps its other waits; a closed task has none.
+  assert.deepEqual(await codes(task(bare, false)), [
+    "project-paused",
+    "project-lead-unconfigured",
+  ]);
+
+  // A revoked lead.
+  const revoked = await seed(f);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: revoked.profileId,
+    expectedVersion: 1,
+    revoked: true,
+  });
+  assert.deepEqual(await codes(revoked.taskId), [
+    "project-paused",
+    "project-lead-revoked",
+  ]);
+
+  // A Claude lead with the Claude harness not configured and no token reference.
+  const claude = await seed(f);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude.profileId,
+    expectedVersion: 1,
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  const claudeWaits = (await api.readTask(claude.taskId)).data.waits;
+  assert.deepEqual(
+    claudeWaits.map((w) => w.code),
+    [
+      "project-paused",
+      "claude-token-unavailable",
+      "profile-runtime-not-configured",
+    ],
+  );
+  assert.deepEqual(claudeWaits[1]?.fix, { kind: "add-claude" });
+  assert.deepEqual(claudeWaits[2]?.fix, {
+    kind: "open-profile",
+    profileId: claude.profileId,
+  });
+
+  // An incomplete local dependency on an enabled project.
+  const enabled = await seed(f);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: enabled.projectId,
+    expectedVersion: Number(d.project(enabled.projectId).version),
+    paused: false,
+  });
+  assert.deepEqual(
+    (await api.readComposerOptions(enabled.projectId)).data.waits,
+    [],
+  );
+  const blocker = task(enabled.projectId, false),
+    dependent = task(enabled.projectId);
+  d.execute({
+    type: "dependency.add",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: enabled.projectId,
+    taskId: dependent,
+    blockerTaskId: blocker,
+    expectedVersion: Number(d.task(dependent).version),
+  });
+  assert.deepEqual((await api.readTask(dependent)).data.waits, [
+    {
+      code: "local-dependency",
+      fix: null,
+      links: [{ kind: "task", id: blocker, label: "Wait probe" }],
+    },
+  ]);
+
+  // Capacity full: project limit 1 with one running reservation.
+  d.execute({
+    type: "capacity.configure",
+    actor: "operator",
+    key: randomUUID(),
+    globalLimit: 4,
+    projectOverrides: { [enabled.projectId]: 1 },
+  });
+  // A reservation without its intent stands in for another running turn.
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      "INSERT INTO execution_capacity_reservations(workId,projectId) VALUES ('capacity-probe',?)",
+    ).run(enabled.projectId);
+  });
+  assert.deepEqual((await api.readTask(task(enabled.projectId))).data.waits, [
+    {
+      code: "capacity",
+      fix: null,
+      links: [{ kind: "tasks-running", label: "1 of 1 project turns running" }],
+    },
+  ]);
+  assert.deepEqual(
+    (await api.readComposerOptions(enabled.projectId)).data.waits.map(
+      (w) => w.code,
+    ),
+    ["capacity"],
+  );
+});

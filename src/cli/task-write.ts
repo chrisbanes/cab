@@ -3,6 +3,7 @@ import {
   type TaskRead,
   taskSchema,
 } from "../operator/contracts.js";
+import { cliFix, type Wait, waitLabels } from "../operator/wait-reasons.js";
 import { uuidArg } from "./browse.js";
 import {
   boolFlag,
@@ -78,14 +79,31 @@ export function taskStatusLines(task: TaskData): [string, string][] {
       `${task.task.state}${task.task.ready ? " (ready)" : " (not ready)"}, version ${task.task.version}`,
     ],
     [
-      "Admission",
-      task.admission.eligible
-        ? "eligible"
-        : `waiting: ${task.admission.reasons.join(", ")}`,
+      "Waiting",
+      task.waits.length
+        ? task.waits.map((w) => waitLabels[w.code]).join(", ")
+        : "none",
     ],
     ["Execution", task.execution.state],
     ["Holds", holds.length ? holds.join(", ") : "none"],
   ];
+}
+
+/** One `Waiting:` line per wait in the flow's order, then its Fix command or path, or what blocks it. */
+export function waitLines(waits: readonly Wait[]): string[] {
+  return waits.flatMap((w) => [
+    `Waiting: ${waitLabels[w.code]}`,
+    ...(w.fix ? cliFix(w.fix).map((line) => `  Fix: ${line}`) : []),
+    ...w.links.map((link) =>
+      link.kind === "task"
+        ? `  Blocked by task ${link.id} (${link.label})`
+        : link.kind === "request"
+          ? `  Request ${link.id}`
+          : link.kind === "source"
+            ? `  ${link.label}: ${link.url}`
+            : `  ${link.label}`,
+    ),
+  ]);
 }
 
 /** `queued` only when the task is ready and admissible now; holds still decide. */
