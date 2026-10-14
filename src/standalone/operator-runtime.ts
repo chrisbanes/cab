@@ -113,7 +113,7 @@ function overview(api: RuntimeOperatorApi, csrfToken: string): string {
     .filter((status) => status.state === "unavailable")
     .map(
       (status) =>
-        `<p role="alert">${executionHarnessLabels[status.harness]} runtime unavailable — restart the service</p>`,
+        `<p role="alert">${executionHarnessLabels[status.harness]} runtime unavailable — turn it off and on in Settings → Runtime, or restart the service</p>`,
     )
     .join("");
   return `<main><h1>Runtime</h1>${unavailable}<section><h2>Capacity</h2><p>Global active turns: ${capacity.globalLimit}; currently in use: ${capacity.currentUsage.global}.</p><p>Default project active turns: ${capacity.defaultProjectLimit}.</p>${projects
