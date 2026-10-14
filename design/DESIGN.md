@@ -441,14 +441,23 @@ unconfigured.
   gh login, the alert offers **Use GitHub CLI login (@account)** before **Set
   discovery credential**. The action configures the reference in one step and
   re-reads discovery. Without a detected login, only **Set discovery credential**
-  appears. Ensemble never uses a gh login the operator did not choose. Frame 116
-  draws discovery available and is unchanged.
+  appears. Discovery never reads with a gh login the operator did not choose for
+  it. Frame 116 draws discovery available and is unchanged.
+- **Setup source credential (115, 117):** "What creation does" states the source
+  credential setup will record before Create. 115 draws a signed-in candidate
+  login, "GitHub source credential: GitHub CLI · @account", recorded as the new
+  project's `gh:github.com` source credential and changed or cleared later in
+  GitHub source settings. 117 draws the unusable case, "GitHub source credential:
+  none", where the source starts without a credential. There is no opt-out
+  control in setup.
 
 ### Project source credential
 
 Frame 119 `w0ozf` shows the configured GitHub CLI account with Change and Clear in
 `b331J`. Frame 119b `xCaEr` opens GitHub CLI and Environment variable choices;
-the detected account is an offer, and selecting a source identity is explicit.
+the detected account is an offer, and selecting a source identity is explicit;
+the panel description says a guided-setup project starts with the GitHub CLI login
+setup detected, when it was usable. A cleared source stays cleared.
 Cancel abandons only the credential edit, keeping unrelated source draft changes.
 The environment field takes the full `env:NAME` reference; values stay private.
 Discovery never supplies the source identity.
@@ -560,10 +569,15 @@ the open decisions.
   - Drawn: the success line "Created fixture-app. It's paused."; plain lines
     "Nothing has run.", "Instructions saved." (or "No instructions yet."),
     "Repository access: fixture-org/fixture-app (main), checked on this Mac." (or
-    "none · repository-free") and, when linked, the GitHub Project; the Details
+    "none · repository-free"), when linked, the GitHub Project, and the recorded
+    source credential, "GitHub source credential: GitHub CLI · @fixture-user"; the
+    Details
     toggle; the actions, primary Resume and create first task and secondary Keep
     paused. On phone (147) the actions stack at full width.
-  - Drawn in 146b: while anything would make work wait, the primary is disabled (50%)
+  - Drawn in 146b: a source without a credential reads "GitHub source credential:
+    not set. The source won't sync until one is set." with a GitHub source settings
+    link that opens in a new tab. The line is informational and never disables
+    Resume. While anything would make work wait, the primary is disabled (50%)
     and the reasons sit beneath it, one item each: the readiness reason with its fix
     line in Geist Mono, and a secondary link that opens in a new tab when the fix is
     elsewhere (Add Claude for the Claude token, Edit profile when the Claude lead's

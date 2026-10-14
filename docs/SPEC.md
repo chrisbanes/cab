@@ -584,13 +584,18 @@ whose primary action resumes the project and opens the composer, and whose
 secondary action keeps it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends and setup offers in one step
-when the service detects it. The service never uses a login the operator did not
-choose. The discovery credential is excluded from agent and helper environments.
+when the service detects it. Discovery never reads with a login the operator did
+not choose for it. The discovery credential is excluded from agent and helper environments.
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
 
 Project GitHub sources independently choose `env:NAME` or exactly `gh:github.com`.
+Guided setup shows the GitHub CLI login a new project's source would use and, when
+it is signed in, records `gh:github.com` as that source's credential at creation;
+otherwise the source starts without one and the ready check says it cannot sync
+until one is set. Creates from the HTML fallback or CLI record none. Existing,
+environment-selected and cleared sources are never re-defaulted.
 The discovery credential never supplies a missing source credential. Source settings
 offer the detected GitHub CLI account or an environment variable, with Change,
 Cancel and Clear. Every selection, preview, issue-status and blocker read resolves
