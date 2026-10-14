@@ -595,21 +595,34 @@ An agent profile has a name, an optional short summary, private instructions and
 capabilities. Settings and routing candidate lists show the name with its summary
 (for example "Eli · Repairs"). Like capabilities, the summary describes
 suitability; it grants no permission or repository access. A profile also selects
-its execution runtime, Codex by default, with harness-specific settings (model and
-reasoning effort for Claude). An assignment conversation keeps the runtime that
+its execution runtime, by default the first enabled runtime (Codex, then Claude;
+Codex when none is enabled), with harness-specific settings (model and reasoning
+effort for Claude). An assignment conversation keeps the runtime that
 started it; work for an unconfigured or unavailable runtime waits visibly and never
 falls back to another. The operator UI selects and shows each profile's runtime,
 the runtime of each assignment and each runtime's effective policy, and sets the
 Claude token as a `file:/absolute/path` (owner-only file) or `env:NAME` reference
 without showing it.
 
-The production service runs both runtimes; profiles default to Codex. The Claude
-runtime is qualified, with limits, by bounded live journeys
+The operator enables or disables each execution runtime for the installation in
+Settings → Runtime or with `ensemble runtime enable|disable`
+([ADR-1012](adr/1012-operator-controlled-runtime-enablement.md)). A missing setting
+means enabled. No runtime is required: the service starts and serves the operator UI
+with none enabled, and an enabled runtime that fails to start, Codex included, is
+unavailable without stopping the service. Disabling takes effect at once for new
+admissions; running turns finish and are never cancelled, the runtime stops once no
+execution it owns remains, and work bound to it waits as not configured until it is
+enabled again. Disabling a runtime that bound tasks use asks for confirmation with
+their count (`--yes` on the CLI). Enabling starts the runtime in the running service,
+and is refused, with nothing saved, while its executable is not on the service
+`PATH`. Readiness fails "An execution runtime is enabled" when none is; a disabled
+runtime's checks are Not configured and raise no alert. The Claude runtime is
+qualified, with limits, by bounded live journeys
 ([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
 an available token reference waits visibly. It runs the `claude` that resolves on the
-service's fixed `PATH`, looked up when the service starts; without one the Claude
-runtime is not enabled for that run (Claude work waits as not configured and never
-falls back), and Codex is unaffected. Readiness reports the version it finds and never
+service's fixed `PATH`, looked up when the runtime starts; without one the Claude
+runtime is not enabled (Claude work waits as not configured and never falls back),
+and Codex is unaffected. Readiness reports the version it finds and never
 compares it: only the Claude Code version the pinned SDK declares was qualified, and
 another version is a disclosed limit
 ([ADR-1011](adr/1011-packaging-and-distribution.md)). Its execution policy differs from

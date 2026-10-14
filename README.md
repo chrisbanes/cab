@@ -131,8 +131,10 @@ owns delivery scope and status.
   privately connected machine is unproved because none was available. See
   [development](docs/development.md#operator-cli).
 - **Claude runtime.** Profiles may select a Claude Code runtime
-  ([ADR-1008](docs/adr/1008-claude-code-execution-harness.md)); Codex stays the
-  default. Bounded live journeys qualified it with limits
+  ([ADR-1008](docs/adr/1008-claude-code-execution-harness.md)). The operator turns
+  each runtime on or off live in Settings → Runtime or with `ensemble runtime`, and
+  no runtime is required ([ADR-1012](docs/adr/1012-operator-controlled-runtime-enablement.md));
+  new profiles default to the first enabled runtime, Codex first. Bounded live journeys qualified it with limits
   ([evidence](docs/evidence/issue-827-claude-journeys-2026-10-12.md)): a Claude-only
   task, a Codex lead with a Claude worker, Stop and a service crash with explicit
   recovery. Its execution policy and disclosed limits differ from Codex's (see the
