@@ -104,7 +104,6 @@ export function GettingStarted({
   });
   const { turnStarted, dismissed } = workspace.gettingStarted;
   const rows = mode === "home" ? homeRows(all, turnStarted) : all;
-  const paused = all.find((r) => r.action.kind === "resume")?.action;
   const changed = () => {
     p.onChanged();
     void readiness.refresh();
@@ -157,12 +156,14 @@ export function GettingStarted({
           if (ghDraft.phase === "recorded") changed();
         }}
       />
-      {paused?.kind === "resume" && (
+      {/* Every project, so a Resume outcome stays after its row changes. */}
+      {workspace.projects.map((project) => (
         <ResumeOutcome
+          key={project.id}
           p={{ ...p, onChanged: changed }}
-          projectId={paused.projectId}
+          projectId={project.id}
         />
-      )}
+      ))}
       {mode === "page" && (
         <div className="getting-started-dismiss">
           {dismissDraft.phase !== "unknown" && (

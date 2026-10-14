@@ -550,23 +550,23 @@ export function TaskComposer({
             <div className="composer-actions">
               {prediction && (
                 <div className="composer-prediction" aria-live="polite">
-                  {prediction.length ? (
-                    <WaitReasons
-                      waits={prediction}
-                      projectId={input.projectId}
-                      prefix="It will wait: "
-                      client={client}
-                      session={session}
-                      drafts={drafts}
-                      workspace={workspace}
-                      onChanged={() => {
-                        void options.refresh();
-                        refresh();
-                      }}
-                    />
-                  ) : (
+                  {!prediction.length && (
                     <p className="small-heading">Starts now.</p>
                   )}
+                  {/* Kept when no wait remains, so a Resume outcome stays visible. */}
+                  <WaitReasons
+                    waits={prediction}
+                    projectId={input.projectId}
+                    prefix="It will wait: "
+                    client={client}
+                    session={session}
+                    drafts={drafts}
+                    workspace={workspace}
+                    onChanged={() => {
+                      void options.refresh();
+                      refresh();
+                    }}
+                  />
                 </div>
               )}
               <Button type="submit">Create and start</Button>
