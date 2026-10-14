@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { waitLines } from "../../src/cli/task-write.js";
+import { taskStatusLines, waitLines } from "../../src/cli/task-write.js";
 import {
   cliFix,
   deriveWaits,
   orderWaits,
+  runtimeWaitCodes,
   waitCodes,
   waitSchema,
 } from "../../src/operator/wait-reasons.js";
@@ -18,6 +19,7 @@ const lead = {
   claudeTokenUnavailable: false,
   runtimeNotConfigured: false,
 };
+const powerReason = "Power-event history is incomplete or ambiguous";
 const one = (facts: Partial<Parameters<typeof deriveWaits>[0]>) =>
   deriveWaits({ projectId, admissionReasons: [], ...facts });
 
@@ -66,6 +68,10 @@ test("each wait code has one input producing exactly that wait, its Fix or its l
         fix: { kind: "open-profile", profileId },
         links: [],
       },
+    ],
+    [
+      { powerHold: { reason: powerReason } },
+      { code: "power-held", fix: null, links: [], detail: powerReason },
     ],
     [
       {
@@ -172,6 +178,7 @@ test("every reason present returns the flow's fixed order, and holds never carry
     },
     approvals: [{ id: "r", label: "Review the request" }],
     capacity: "1 of 1 turns running",
+    powerHold: { reason: powerReason },
   });
   const withProfile = one({ lead: { ...lead, runtimeNotConfigured: true } });
   assert.deepEqual(
@@ -181,6 +188,7 @@ test("every reason present returns the flow's fixed order, and holds never carry
   for (const w of waits)
     if (
       [
+        "power-held",
         "local-dependency",
         "imported-blockers-blocked",
         "imported-blockers-unknown",
@@ -209,6 +217,36 @@ test("a Draft alone has no wait, and an unmapped admission reason is never dropp
     }).map((w) => w.code),
     ["admission-blocked"],
   );
+});
+
+test("a power hold is installation-wide, sits after the runtime waits and carries its reason only when known", () => {
+  assert.deepEqual(
+    one({
+      admissionReasons: ["local-dependency"],
+      lead: { ...lead, runtimeUnavailable: true },
+      powerHold: { reason: powerReason },
+    }).map((w) => w.code),
+    ["runtime-unavailable", "power-held", "local-dependency"],
+  );
+  const unknown = one({ powerHold: { reason: null } });
+  assert.deepEqual(unknown, [{ code: "power-held", fix: null, links: [] }]);
+  assert.ok(!("detail" in (unknown[0] ?? {})));
+  assert.deepEqual(one({ powerHold: null }), []);
+  assert.deepEqual(one({}), []);
+  // Not a runtime wait, so an explicit composer assignee never replaces it.
+  assert.ok(!runtimeWaitCodes.includes("power-held"));
+});
+
+test("a wait detail is bounded like a label", () => {
+  const wait = { code: "power-held", fix: null, links: [] };
+  assert.ok(
+    waitSchema.safeParse({ ...wait, detail: "x".repeat(16000) }).success,
+  );
+  assert.ok(
+    !waitSchema.safeParse({ ...wait, detail: "x".repeat(16001) }).success,
+  );
+  assert.ok(!waitSchema.safeParse({ ...wait, detail: "" }).success);
+  assert.ok(!waitSchema.safeParse({ ...wait, detail: null }).success);
 });
 
 test("the CLI Fix is the command or Settings path", () => {
@@ -240,4 +278,37 @@ test("the CLI names the approval command for an approval wait", () => {
       `  Review: ensemble approval get ${projectId} request-1`,
     ],
   );
+});
+
+test("the CLI prints a power hold's reason under its label, with no Fix", () => {
+  assert.deepEqual(
+    waitLines(one({ powerHold: { reason: powerReason } }), projectId),
+    ["Waiting: Held by power supervision", `  ${powerReason}`],
+  );
+  assert.deepEqual(waitLines(one({ powerHold: { reason: null } }), projectId), [
+    "Waiting: Held by power supervision",
+  ]);
+});
+
+test("a write command's status row carries the power hold's reason", () => {
+  const status = (waits: ReturnType<typeof one>) =>
+    taskStatusLines({
+      task: { id: projectId, state: "open", ready: true, version: 3 },
+      waits,
+      execution: { state: "queued", holds: {} },
+    } as never).find(([name]) => name === "Waiting")?.[1];
+  assert.equal(
+    status(
+      one({
+        powerHold: { reason: powerReason },
+        capacity: "1 of 1 turns running",
+      }),
+    ),
+    `Held by power supervision (${powerReason}), Capacity full`,
+  );
+  assert.equal(
+    status(one({ powerHold: { reason: null } })),
+    "Held by power supervision",
+  );
+  assert.equal(status([]), "none");
 });

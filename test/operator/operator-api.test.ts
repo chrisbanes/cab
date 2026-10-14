@@ -30,6 +30,10 @@ import {
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
 import { controlledGit } from "../fixtures/controlled-git.js";
+import {
+  ControllablePowerEvents,
+  supervisedPower,
+} from "../fixtures/power-events.js";
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { tmpdir } from "../fixtures/temp.js";
@@ -2715,6 +2719,62 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
     ),
     ["capacity"],
   );
+  // Without power supervision no read derives a power wait.
+  assert.equal(f.service.powerStatus(), null);
+});
+
+test("a power-supervision hold is a task and composer wait until it releases", async (t) => {
+  const events = new ControllablePowerEvents();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    { power: supervisedPower(events) },
+  );
+  t.after(() => f.close());
+  const d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const ids = await seed(f);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: Number(d.project(ids.projectId).version),
+    paused: false,
+  });
+  await f.service.provisionTask(ids.taskId);
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    expectedVersion: Number(d.task(ids.taskId).version),
+    ready: true,
+  });
+  const power = {
+    code: "power-held",
+    fix: null,
+    links: [],
+    detail: "Power-event history is incomplete or ambiguous",
+  };
+  await until(() => f.service.powerStatus()?.admissionHeld === true);
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits, [power]);
+  const held = (await api.readComposerOptions(ids.projectId)).data;
+  assert.deepEqual(held.waits, [power]);
+  // An explicit assignee replaces only runtime waits, so it never hides the hold.
+  assert.deepEqual(held.assigneeWaits[ids.profileId], []);
+
+  events.complete = true;
+  await until(() => f.service.powerStatus()?.admissionHeld === false);
+  assert.deepEqual(
+    (await api.readComposerOptions(ids.projectId)).data.waits,
+    [],
+  );
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits, []);
 });
 
 test("the workspace read carries whether a turn started and whether getting started was dismissed", async (t) => {

@@ -373,8 +373,11 @@ Uncertain effects hold dependent work; independent
 work may proceed only when independence is established. No arbitrary external API
 is promised exactly-once effects.
 
-The offline operations CLI provides generic standalone SQLite snapshot, verification
-and restore, and a generated per-user LaunchAgent. These preserve database state and
+`ensemble snapshot create|verify|restore` provides generic standalone SQLite snapshot,
+verification and restore. `ensemble service install|upgrade|uninstall` manages a
+per-user LaunchAgent bound to an unpacked release: upgrade stops the job, takes and
+verifies a snapshot, then starts the new release and checks readiness; a failed
+upgrade leaves the job stopped with no automatic rollback. These preserve database state and
 use ordinary service-start reconciliation; they do not include workspace contents,
 settle external effects, or qualify a final operational cutover. See the
 [macOS operations procedure](operations/standalone-macos.md) and its
@@ -525,9 +528,11 @@ revoked project lead, unavailable runtime, unreadable Claude token, unconfigured
 profile runtime), the reason carries a Fix that performs that one action: Resume
 project confirms and sends only the project resume, and every other Fix opens the
 screen that clears it (the CLI prints the command or Settings path). Dependency,
-approval, source and capacity waits link to what blocks them and have no Fix. A Fix
-never clears holds or grants access by implication. These controls must preserve
-existing readiness and admission rules.
+approval, source and capacity waits link to what blocks them and have no Fix. A power
+supervision hold, which applies to every task while the supervisor holds admission, has
+no Fix and shows the supervisor's hold reason. A Fix never clears holds or grants
+access by implication. These controls must preserve existing readiness and admission
+rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
 from current service state: runtime readiness, GitHub discovery, lead profile,

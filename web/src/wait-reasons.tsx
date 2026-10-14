@@ -101,6 +101,12 @@ function WaitAction({
   );
 }
 
+/** What a hold has no link for, on its own line under the reason. */
+const WaitDetail = ({ wait }: { wait: Wait }) =>
+  wait.detail ? (
+    <p className="metadata muted wait-detail">{wait.detail}</p>
+  ) : null;
+
 /**
  * Frames 149–150: the first wait is primary with its Fix; the rest stay listed with
  * their own Fix or link. The Resume project outcome stays after the wait it cleared.
@@ -138,6 +144,7 @@ export function WaitReasons({
               resume={resume}
             />
           </div>
+          <WaitDetail wait={first} />
         </div>
       )}
       {rest.length > 0 && (
@@ -154,6 +161,7 @@ export function WaitReasons({
                   resume={resume}
                 />
               </span>
+              <WaitDetail wait={wait} />
             </li>
           ))}
         </ul>

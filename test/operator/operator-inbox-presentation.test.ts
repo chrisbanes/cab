@@ -181,6 +181,38 @@ test("every other admission reason still produces a hold notice", () => {
   assert.equal(unexplained[0]?.title, "Execution held");
 });
 
+test("a power hold notice lists the supervisor's reason in the waits' order", () => {
+  const reason = "Power-event history is incomplete or ambiguous";
+  const withPower = (
+    reasons: TaskRead["data"]["admission"]["reasons"],
+    detail?: string,
+  ) =>
+    task(reasons, {
+      waits: orderWaits([
+        ...task(reasons).waits,
+        { code: "power-held", fix: null, links: [], ...(detail && { detail }) },
+      ]),
+    });
+  const notices = holdNotices(
+    withPower(["local-dependency", "project-paused"], reason),
+  );
+  assert.deepEqual(
+    notices.map((notice) => notice.id),
+    ["paused", "power-held", "dependency"],
+  );
+  assert.deepEqual(notices[1], {
+    id: "power-held",
+    title: "Execution held by power supervision",
+    items: [reason],
+    detail: "Approving does not clear it.",
+  });
+  assert.deepEqual(holdNotices(withPower([]))[0]?.items, []);
+  assert.equal(
+    holdNotices(withPower([], reason), "answer")[0]?.detail,
+    "Answering does not clear it.",
+  );
+});
+
 test("answering a question words each hold notice for answers, with the same titles and items", () => {
   const source = {
     nativeBlockers: [

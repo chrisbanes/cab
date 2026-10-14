@@ -137,6 +137,15 @@ export function holdNotices(
         items: [],
         detail: "Approval does not resume work.",
       });
+    else if (code === "power-held") {
+      const reason = task.waits.find((wait) => wait.code === code)?.detail;
+      notices.push({
+        id: code,
+        title: "Execution held by power supervision",
+        items: reason ? [reason] : [],
+        detail: "Approving does not clear it.",
+      });
+    }
     // The request being decided is not a hold on itself.
     else if (code !== "approval")
       notices.push({
