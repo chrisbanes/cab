@@ -23,7 +23,10 @@ import {
   OperatorApiError,
 } from "../../src/standalone/operator-api.js";
 import { RoutingAttemptStore } from "../../src/standalone/routing.js";
-import { ExecutionState } from "../../src/standalone/state.js";
+import {
+  ExecutionState,
+  refusedRevisionPrefix,
+} from "../../src/standalone/state.js";
 import {
   ClaudeShapedFixtureRuntime,
   createOperatorFixture,
@@ -2878,6 +2881,303 @@ test("runtime waits come from the pending assignment's profile, not only the lea
     ]?.map((w) => w.code),
     ["claude-token-unavailable", "profile-runtime-not-configured"],
   );
+});
+
+/**
+ * The seeded project's ready task with a pending assignment for a healthy Codex worker that
+ * routing permits, so only the assignment's own admission can add a wait to the paused project.
+ */
+async function seedPendingWorker(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  name = "Worker",
+) {
+  const ids = await seed(f),
+    d = f.service.domain(),
+    worker = randomUUID(),
+    assignmentId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: worker,
+    name,
+    instructions: "build",
+    capabilities: "code",
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [worker],
+  });
+  await f.service.provisionTask(ids.taskId);
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    expectedVersion: Number(d.task(ids.taskId).version),
+    ready: true,
+  });
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    assignmentId,
+    profileId: worker,
+    brief: "Worker work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  return { ...ids, worker, assignmentId };
+}
+
+test("a revoked profile on the next assignment is a wait with an Open profile Fix and the task's own waits are not repeated", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const paused = {
+    code: "project-paused",
+    fix: { kind: "resume-project", projectId: ids.projectId },
+    links: [],
+  };
+  // A permitted, current, healthy assignment adds nothing to the project's pause.
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits, [paused]);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.worker,
+    expectedVersion: Number(d.profile(ids.worker).version),
+    revoked: true,
+  });
+  const fix = { kind: "open-profile", profileId: ids.worker };
+  // Revoking bumps the profile's version, so the revision wait follows the revoked one.
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits, [
+    paused,
+    { code: "assignment-profile-revoked", fix, links: [], detail: "Worker" },
+    { code: "assignment-profile-stale", fix, links: [], detail: "Worker" },
+  ]);
+});
+
+test("a changed profile revision on the next assignment is a wait with an Open profile Fix", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.worker,
+    expectedVersion: Number(d.profile(ids.worker).version),
+    instructions: "build differently",
+  });
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), [
+    {
+      code: "assignment-profile-stale",
+      fix: { kind: "open-profile", profileId: ids.worker },
+      links: [],
+      detail: "Worker",
+    },
+  ]);
+});
+
+for (const [reason, code, named, change] of [
+  [
+    "changed project instructions",
+    "assignment-instructions-stale",
+    // The lead's pending assignment is stale too and comes first.
+    "Lead",
+    (d: DomainStore, ids: { projectId: string }) =>
+      d.execute({
+        type: "project.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: ids.projectId,
+        expectedVersion: Number(d.project(ids.projectId).version),
+        instructions: "New project instructions",
+      }),
+  ],
+  [
+    "a profile project routing no longer permits",
+    "assignment-profile-not-permitted",
+    "Worker",
+    (d: DomainStore, ids: { projectId: string }) =>
+      d.execute({
+        type: "routing.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: ids.projectId,
+        expectedVersion: Number(d.routing(ids.projectId).version),
+        enabled: false,
+        guidance: "",
+        candidateProfileIds: [],
+      }),
+  ],
+] as const)
+  test(`the next assignment with ${reason} waits as ${code}, without a Fix`, async (t) => {
+    const f = await createOperatorFixture();
+    t.after(() => f.close());
+    const ids = await seedPendingWorker(f),
+      api = new OperatorApi(f.service, [f.directory]);
+    change(f.service.domain(), ids);
+    assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), [
+      { code, fix: null, links: [], detail: named },
+    ]);
+  });
+
+test("a held assignment with a queued turn waits as assignment-held, without a Fix", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  // A held assignment is next to run only through its queued turn.
+  f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_assignments SET state='held' WHERE id=?").run(
+      ids.assignmentId,
+    );
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, state)
+        VALUES ('held-key', 'held-work', 'assignment', ?, ?, ?, ?, ?, 1, 1, 'probe', 'queued')`,
+    ).run(
+      ids.taskId,
+      ids.projectId,
+      ids.assignmentId,
+      Number(d.task(ids.taskId).version),
+      Number(d.assignment(ids.assignmentId).version),
+    );
+  });
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), [
+    {
+      code: "assignment-held",
+      fix: null,
+      links: [],
+      detail: "Worker",
+    },
+  ]);
+});
+
+test("a request the scheduler refused for stale revisions keeps its assignment's waits, and any other hold adds none", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.worker,
+    expectedVersion: Number(d.profile(ids.worker).version),
+    revoked: true,
+  });
+  const hold = (reason: string) =>
+    f.seedPersistedState((db) => {
+      db.prepare("DELETE FROM turn_requests WHERE workId='refused-work'").run();
+      db.prepare(
+        `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+          taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, state, reason)
+          VALUES ('refused-key', 'refused-work', 'assignment', ?, ?, ?, ?, ?, 1, 1, 'probe', 'held', ?)`,
+      ).run(
+        ids.taskId,
+        ids.projectId,
+        ids.assignmentId,
+        Number(d.task(ids.taskId).version),
+        Number(d.assignment(ids.assignmentId).version),
+        reason,
+      );
+    });
+  const codes = async () =>
+    (await api.readTask(ids.taskId)).data.waits.map((w) => w.code);
+  // A held request is not next to run, so a service restart's hold shows no assignment wait.
+  hold("service restarted with unresolved execution");
+  assert.deepEqual(await codes(), ["project-paused"]);
+  hold(
+    `${refusedRevisionPrefix}project-paused, profile-revoked, assignment-profile-revision-stale)`,
+  );
+  assert.deepEqual(await codes(), [
+    "project-paused",
+    "assignment-profile-revoked",
+    "assignment-profile-stale",
+  ]);
+});
+
+test("a revoked lead keeps its own assignment's waits beside the project's lead wait", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: Number(d.profile(ids.profileId).version),
+    revoked: true,
+  });
+  // Choosing another lead clears the project's wait but not the bound lead assignment's.
+  const fix = { kind: "open-profile", profileId: ids.profileId };
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits, [
+    {
+      code: "project-paused",
+      fix: { kind: "resume-project", projectId: ids.projectId },
+      links: [],
+    },
+    {
+      code: "project-lead-revoked",
+      fix: { kind: "choose-lead", projectId: ids.projectId },
+      links: [],
+    },
+    { code: "assignment-profile-revoked", fix, links: [], detail: "Lead" },
+    { code: "assignment-profile-stale", fix, links: [], detail: "Lead" },
+  ]);
+});
+
+test("a lead's own task-level reasons are not repeated, and a name the exclusions redact is left out", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  // The profile's name is its own instructions text, which every read redacts.
+  const ids = await seedPendingWorker(f, "build"),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  // The lead's pending assignment has the paused project's reasons and no others.
+  assert.ok(d.ensureLeadBinding(ids.taskId));
+  assert.deepEqual(
+    (await api.readTask(ids.taskId)).data.waits.map((w) => w.code),
+    ["project-paused"],
+  );
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.worker,
+    expectedVersion: Number(d.profile(ids.worker).version),
+    revoked: true,
+  });
+  const waits = (await api.readTask(ids.taskId)).data.waits;
+  assert.deepEqual(
+    waits.map((w) => w.code),
+    [
+      "project-paused",
+      "assignment-profile-revoked",
+      "assignment-profile-stale",
+    ],
+  );
+  for (const wait of waits.slice(1)) assert.ok(!("detail" in wait), wait.code);
 });
 
 test("an imported blocker marked done keeps its dependency link while its issue is not closed", async (t) => {

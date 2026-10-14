@@ -213,6 +213,35 @@ test("a power hold notice lists the supervisor's reason in the waits' order", ()
   );
 });
 
+test("assignment waits are hold notices in the waits' order, worded from their labels and naming the profile", () => {
+  const waits = orderWaits([
+    { code: "assignment-held", fix: null, links: [], detail: "Worker" },
+    { code: "assignment-profile-revoked", fix: null, links: [] },
+  ]);
+  const notices = holdNotices(task([], { waits }));
+  assert.deepEqual(
+    notices.map(({ id, title, items }) => ({ id, title, items })),
+    [
+      {
+        id: "assignment-profile-revoked",
+        title: "Execution held (assignment profile revoked)",
+        items: [],
+      },
+      {
+        id: "assignment-held",
+        title: "Execution held (assignment held)",
+        items: ["Worker"],
+      },
+    ],
+  );
+  assert.ok(notices.every((n) => n.detail === "Approving does not clear it."));
+  assert.ok(
+    holdNotices(task([], { waits }), "answer").every(
+      (n) => n.detail === "Answering does not clear it.",
+    ),
+  );
+});
+
 test("answering a question words each hold notice for answers, with the same titles and items", () => {
   const source = {
     nativeBlockers: [

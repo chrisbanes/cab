@@ -785,3 +785,110 @@ test("task get prints waits in the flow's order with the Fix command or the bloc
       .data.waits,
   );
 });
+
+test("task get names the next assignment's revoked profile and prints its Settings path, as the task read does", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, d } = o;
+  const lead = randomUUID(),
+    worker = randomUUID(),
+    projectId = randomUUID(),
+    taskId = randomUUID(),
+    assignmentId = randomUUID();
+  for (const [profileId, name] of [
+    [lead, "Lead"],
+    [worker, "Worker"],
+  ] as const)
+    d.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name,
+      instructions: "Build the delegated work",
+      capabilities: "code",
+    });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Delegating",
+    leadProfileId: lead,
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [worker],
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Delegated task",
+    outcome: "Probe",
+    ready: true,
+  });
+  await o.s.f.service.provisionTask(taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    assignmentId,
+    profileId: worker,
+    brief: "Worker work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: worker,
+    expectedVersion: Number(d.profile(worker).version),
+    revoked: true,
+  });
+  // The running scheduler refuses the worker's request for its stale revisions and holds it.
+  await until(
+    () =>
+      o.s.f.service
+        .turnRequestsForTask(taskId)
+        .some((r) => r.assignmentId === assignmentId && r.state === "held"),
+    "the worker's request is refused and held",
+  );
+  const human = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
+  assert.equal(human.code, 0, human.err);
+  const lines = human.out.split("\n");
+  const at = lines.indexOf("Waiting: Assignment profile revoked");
+  assert.ok(at > 0, human.out);
+  assert.deepEqual(lines.slice(at, at + 6), [
+    "Waiting: Assignment profile revoked",
+    "  Worker",
+    `  Fix: Settings → Profiles → ${worker}`,
+    "Waiting: Assignment profile changed",
+    "  Worker",
+    `  Fix: Settings → Profiles → ${worker}`,
+  ]);
+  const json = await cli("ro", ["task", "get", taskId]);
+  assert.deepEqual(
+    json.json().data.waits,
+    (await new OperatorApi(o.s.f.service, [o.s.f.directory]).readTask(taskId))
+      .data.waits,
+  );
+  assert.deepEqual(
+    json.json().data.waits.map((w: { code: string }) => w.code),
+    [
+      "project-paused",
+      "assignment-profile-revoked",
+      "assignment-profile-stale",
+    ],
+  );
+});

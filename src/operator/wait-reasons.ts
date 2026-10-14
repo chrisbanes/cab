@@ -13,6 +13,11 @@ export const waitCodes = [
   "claude-token-unavailable",
   "profile-runtime-not-configured",
   "power-held",
+  "assignment-profile-revoked",
+  "assignment-profile-stale",
+  "assignment-instructions-stale",
+  "assignment-profile-not-permitted",
+  "assignment-held",
   "local-dependency",
   "imported-blockers-blocked",
   "imported-blockers-unknown",
@@ -76,6 +81,11 @@ export const waitLabels: Record<WaitCode, string> = {
   "claude-token-unavailable": "Claude token unavailable",
   "profile-runtime-not-configured": "Lead profile runtime not configured",
   "power-held": "Held by power supervision",
+  "assignment-profile-revoked": "Assignment profile revoked",
+  "assignment-profile-stale": "Assignment profile changed",
+  "assignment-instructions-stale": "Assignment instructions changed",
+  "assignment-profile-not-permitted": "Assignment profile not permitted",
+  "assignment-held": "Assignment held",
   "local-dependency": "Blocked by a task dependency",
   "imported-blockers-blocked": "Blocked by a GitHub dependency",
   "imported-blockers-unknown": "GitHub dependencies unconfirmed",
@@ -122,7 +132,40 @@ export interface WaitFacts {
   capacity?: string | null;
   /** Installation-wide: set while the power supervisor holds admission. */
   powerHold?: { reason: string | null } | null;
+  /**
+   * The assignments whose turns are next, each with the admission reasons it has beyond the
+   * task's own. An unmapped reason is never dropped: it becomes `admission-blocked`.
+   */
+  assignments?: readonly {
+    profileId: string;
+    profileName: string | null;
+    reasons: readonly string[];
+  }[];
 }
+
+/** Assignment-only admission reasons; `openProfile` is the Fix, the others have none. */
+const assignmentReasonWaits = new Map<
+  string,
+  { code: WaitCode; openProfile: boolean }
+>([
+  [
+    "profile-revoked",
+    { code: "assignment-profile-revoked", openProfile: true },
+  ],
+  [
+    "assignment-profile-revision-stale",
+    { code: "assignment-profile-stale", openProfile: true },
+  ],
+  [
+    "assignment-instructions-revision-stale",
+    { code: "assignment-instructions-stale", openProfile: false },
+  ],
+  [
+    "profile-not-permitted",
+    { code: "assignment-profile-not-permitted", openProfile: false },
+  ],
+  ["assignment-held", { code: "assignment-held", openProfile: false }],
+]);
 
 /** Builds the ordered waits from current facts. Pure: no reads, no clocks. */
 export function deriveWaits(f: WaitFacts): Wait[] {
@@ -181,6 +224,20 @@ export function deriveWaits(f: WaitFacts): Wait[] {
       links: [],
       ...(f.powerHold.reason ? { detail: f.powerHold.reason } : {}),
     });
+  for (const a of f.assignments ?? [])
+    for (const reason of a.reasons) {
+      const wait = assignmentReasonWaits.get(reason);
+      if (!wait) add("admission-blocked", null);
+      else
+        waits.push({
+          code: wait.code,
+          fix: wait.openProfile
+            ? { kind: "open-profile", profileId: a.profileId }
+            : null,
+          links: [],
+          ...(a.profileName ? { detail: a.profileName } : {}),
+        });
+    }
   if (f.approvals?.length)
     add(
       "approval",

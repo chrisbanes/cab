@@ -20,6 +20,22 @@ const lead = {
   runtimeNotConfigured: false,
 };
 const powerReason = "Power-event history is incomplete or ambiguous";
+const assignmentReasons = [
+  ["profile-revoked", "assignment-profile-revoked", true],
+  ["assignment-profile-revision-stale", "assignment-profile-stale", true],
+  [
+    "assignment-instructions-revision-stale",
+    "assignment-instructions-stale",
+    false,
+  ],
+  ["profile-not-permitted", "assignment-profile-not-permitted", false],
+  ["assignment-held", "assignment-held", false],
+] as const;
+const assignment = (reasons: readonly string[], profileName = "Worker") => ({
+  profileId,
+  profileName,
+  reasons,
+});
 const one = (facts: Partial<Parameters<typeof deriveWaits>[0]>) =>
   deriveWaits({ projectId, admissionReasons: [], ...facts });
 
@@ -73,6 +89,20 @@ test("each wait code has one input producing exactly that wait, its Fix or its l
       { powerHold: { reason: powerReason } },
       { code: "power-held", fix: null, links: [], detail: powerReason },
     ],
+    ...assignmentReasons.map(
+      ([reason, code, openProfile]): [
+        Partial<Parameters<typeof deriveWaits>[0]>,
+        unknown,
+      ] => [
+        { assignments: [assignment([reason])] },
+        {
+          code,
+          fix: openProfile ? { kind: "open-profile", profileId } : null,
+          links: [],
+          detail: "Worker",
+        },
+      ],
+    ),
     [
       {
         admissionReasons: ["local-dependency"],
@@ -179,6 +209,7 @@ test("every reason present returns the flow's fixed order, and holds never carry
     approvals: [{ id: "r", label: "Review the request" }],
     capacity: "1 of 1 turns running",
     powerHold: { reason: powerReason },
+    assignments: [assignment(assignmentReasons.map(([reason]) => reason))],
   });
   const withProfile = one({ lead: { ...lead, runtimeNotConfigured: true } });
   assert.deepEqual(
@@ -189,6 +220,9 @@ test("every reason present returns the flow's fixed order, and holds never carry
     if (
       [
         "power-held",
+        "assignment-instructions-stale",
+        "assignment-profile-not-permitted",
+        "assignment-held",
         "local-dependency",
         "imported-blockers-blocked",
         "imported-blockers-unknown",
@@ -235,6 +269,85 @@ test("a power hold is installation-wide, sits after the runtime waits and carrie
   assert.deepEqual(one({}), []);
   // Not a runtime wait, so an explicit composer assignee never replaces it.
   assert.ok(!runtimeWaitCodes.includes("power-held"));
+});
+
+test("an assignment's admission reasons sit after the power hold, name its profile and keep the first per code", () => {
+  const all = assignmentReasons.map(([reason]) => reason);
+  assert.deepEqual(
+    one({
+      admissionReasons: ["project-paused", "local-dependency"],
+      lead: { ...lead, runtimeUnavailable: true },
+      powerHold: { reason: null },
+      assignments: [assignment(all)],
+    }).map((w) => w.code),
+    [
+      "project-paused",
+      "runtime-unavailable",
+      "power-held",
+      ...assignmentReasons.map(([, code]) => code),
+      "local-dependency",
+    ],
+  );
+  assert.deepEqual(
+    waitCodes.slice(
+      waitCodes.indexOf("power-held") + 1,
+      waitCodes.indexOf("local-dependency"),
+    ),
+    assignmentReasons.map(([, code]) => code),
+  );
+  // Only the first assignment's wait, with its Fix and profile name, is kept per code.
+  const other = "00000000-0000-4000-8000-000000000004";
+  assert.deepEqual(
+    one({
+      assignments: [
+        assignment(["profile-revoked"]),
+        {
+          profileId: other,
+          profileName: "Other",
+          reasons: ["profile-revoked"],
+        },
+      ],
+    }),
+    [
+      {
+        code: "assignment-profile-revoked",
+        fix: { kind: "open-profile", profileId },
+        links: [],
+        detail: "Worker",
+      },
+    ],
+  );
+  // A name that is not disclosable leaves the detail out rather than null.
+  const unnamed = one({
+    assignments: [{ ...assignment(["profile-revoked"]), profileName: null }],
+  });
+  assert.ok(!("detail" in (unnamed[0] ?? {})));
+  assert.ok(waitSchema.safeParse(unnamed[0]).success);
+  assert.deepEqual(one({ assignments: [assignment([])] }), []);
+  assert.deepEqual(one({ assignments: [] }), []);
+});
+
+test("an unmapped assignment reason is never dropped and shares the one admission-blocked wait", () => {
+  assert.deepEqual(
+    one({
+      assignments: [assignment(["assignment-completed", "future-reason"])],
+    }),
+    [{ code: "admission-blocked", fix: null, links: [] }],
+  );
+  // Reasons are looked up by own key, never on the shared prototype.
+  assert.deepEqual(
+    one({ assignments: [assignment(["constructor", "__proto__"])] }).map(
+      (w) => w.code,
+    ),
+    ["admission-blocked"],
+  );
+  assert.deepEqual(
+    one({
+      admissionReasons: ["task-not-open"],
+      assignments: [assignment(["assignment-completed"])],
+    }),
+    [{ code: "admission-blocked", fix: null, links: [] }],
+  );
 });
 
 test("a wait detail is bounded like a label", () => {
@@ -288,6 +401,27 @@ test("the CLI prints a power hold's reason under its label, with no Fix", () => 
   assert.deepEqual(waitLines(one({ powerHold: { reason: null } }), projectId), [
     "Waiting: Held by power supervision",
   ]);
+});
+
+test("the CLI names the assignment's profile under its wait and the Settings path as its Fix", () => {
+  assert.deepEqual(
+    waitLines(
+      one({ assignments: [assignment(["profile-revoked"])] }),
+      projectId,
+    ),
+    [
+      "Waiting: Assignment profile revoked",
+      "  Worker",
+      `  Fix: Settings → Profiles → ${profileId}`,
+    ],
+  );
+  assert.deepEqual(
+    waitLines(
+      one({ assignments: [assignment(["assignment-held"])] }),
+      projectId,
+    ),
+    ["Waiting: Assignment held", "  Worker"],
+  );
 });
 
 test("a write command's status row carries the power hold's reason", () => {

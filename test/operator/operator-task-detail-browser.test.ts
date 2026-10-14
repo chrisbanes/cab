@@ -697,6 +697,73 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
     outcome: "Probe",
     ready: true,
   });
+  // A paused Codex-led project whose delegate's profile has been revoked.
+  const codexLead = randomUUID(),
+    revokedWorker = randomUUID(),
+    delegateProject = randomUUID(),
+    delegateTask = randomUUID();
+  for (const [profileId, name] of [
+    [codexLead, "Grace"],
+    [revokedWorker, "Linus"],
+  ] as const)
+    d.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name,
+      instructions: "Work carefully",
+      capabilities: "code",
+    });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: delegateProject,
+    name: "delegate-app",
+    leadProfileId: codexLead,
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: delegateProject,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [revokedWorker],
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: delegateProject,
+    taskId: delegateTask,
+    title: "Delegated task",
+    outcome: "Probe",
+    ready: true,
+  });
+  await f.service.provisionTask(delegateTask);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: delegateProject,
+    taskId: delegateTask,
+    assignmentId: randomUUID(),
+    profileId: revokedWorker,
+    brief: "Delegated work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: revokedWorker,
+    expectedVersion: Number(d.profile(revokedWorker).version),
+    revoked: true,
+  });
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
@@ -809,6 +876,23 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   assert.equal(commands.length, 3);
   assert.deepEqual(commands[2], commands[1]);
   assert.equal(d.project(claudeProject).paused, 0);
+
+  // A revoked delegate profile is listed by its label and name, and its Fix opens that profile.
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.goto(`${web.origin}/app/tasks/${delegateTask}`);
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
+    "Assignment profile revoked",
+    "Assignment profile changed",
+  ]);
+  const revoked = list.nth(0);
+  assert.equal(
+    await revoked
+      .getByRole("link", { name: "Fix: Open profile" })
+      .getAttribute("href"),
+    `/app/profiles/${revokedWorker}/settings`,
+  );
+  assert.equal(await revoked.locator(".wait-detail").innerText(), "Linus");
 });
 
 test("An approval wait opens the approval review, not the question form", async (_t, j) => {

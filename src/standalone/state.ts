@@ -305,7 +305,7 @@ const powerEventCursorSchema = z
     value: z.string().min(1).max(512),
   })
   .strict();
-const refusedRevisionPrefix =
+export const refusedRevisionPrefix =
   "Request refused: captured revisions no longer match (";
 const safeRefusedAssignmentRevisionReasons = new Set([
   "assignment-revision-changed",
