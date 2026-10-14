@@ -2851,10 +2851,78 @@ test("an imported blocker marked done keeps its dependency link while its issue 
     db.prepare("UPDATE domain_tasks SET state='done' WHERE id=?").run(blocker),
   );
   assert.ok(d.admission(ids.taskId).reasons.includes("local-dependency"));
+  // The composer applies the same rule to a chosen dependency.
+  assert.equal(
+    (await api.readComposerOptions(ids.projectId)).data.dependencies.find(
+      (x) => x.id === blocker,
+    )?.blocking,
+    true,
+  );
   const wait = (await api.readTask(ids.taskId)).data.waits.find(
     (w) => w.code === "local-dependency",
   );
   assert.deepEqual(wait?.links, [
     { kind: "task", id: blocker, label: "Imported blocker" },
   ]);
+});
+
+test("a running assignment with a queued turn reports its own runtime waits", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const claude = randomUUID(),
+    assignmentId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [claude],
+  });
+  await f.service.provisionTask(ids.taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    assignmentId,
+    profileId: claude,
+    brief: "Claude work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  // The Claude delegate already ran once and has a follow-up delivery queued.
+  f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_assignments SET state='running' WHERE id=?").run(
+      assignmentId,
+    );
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        profileRevision, prompt, state) VALUES ('probe-key', 'probe-work', 'assignment', ?, ?, ?, 1, 'probe', 'queued')`,
+    ).run(ids.taskId, ids.projectId, assignmentId);
+  });
+  assert.deepEqual(
+    (await api.readTask(ids.taskId)).data.waits.map((w) => w.code),
+    [
+      "project-paused",
+      "claude-token-unavailable",
+      "profile-runtime-not-configured",
+    ],
+  );
 });

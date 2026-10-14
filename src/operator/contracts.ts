@@ -870,6 +870,8 @@ export const composerOptionsSchema = envelope(
               title: safeText,
               state: taskState,
               source: taskSourceSummarySchema,
+              /** Whether it would hold a new dependent, by admission's rule. */
+              blocking: z.boolean(),
             })
             .strict(),
         )

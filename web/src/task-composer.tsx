@@ -257,7 +257,7 @@ export function TaskComposer({
   const optional = optionalSummary(input, o, unavailable, state.errors);
   // The same waits the task would show, from the project's and the selected dependencies.
   const blocking = (o?.dependencies ?? []).filter(
-    (d) => input.blockerTaskIds.includes(d.id) && d.state !== "done",
+    (d) => input.blockerTaskIds.includes(d.id) && d.blocking,
   );
   const assigneeWaits = input.profileId
     ? o?.assigneeWaits[input.profileId]

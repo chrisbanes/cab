@@ -101,7 +101,7 @@ export interface WaitFacts {
   projectId: string;
   /** Admission reasons as the operator API maps them; `task-unready` is a Draft, not a wait. */
   admissionReasons: readonly string[];
-  /** The accountable lead's runtime facts; absent when no lead resolves. */
+  /** Runtime facts of the profile that runs the next turn; absent when none resolves. */
   lead?:
     | {
         profileId: string;

@@ -2083,7 +2083,7 @@ export class OperatorApi {
    * The runtime facts of the profile that will execute, mirroring the ready check; none for
    * a missing or revoked profile. `revision` is an assignment's bound profile revision.
    */
-  private leadWaitFacts(profileId: string | undefined, revision?: number) {
+  private profileWaitFacts(profileId: string | undefined, revision?: number) {
     if (!profileId) return undefined;
     const d = this.domain();
     let runtime: ReturnType<typeof d.profileRuntime>;
@@ -2109,27 +2109,48 @@ export class OperatorApi {
     };
   }
   /**
-   * Runtime facts of the profile whose turn is next: a pending assignment runs on its own
-   * bound profile revision, and with none pending the lead takes the next turn. The first
-   * pending assignment with a runtime wait is reported.
+   * Runtime facts of the profiles whose turns are next: each queued turn request at its
+   * bound profile revision, and each pending assignment not yet requested. With neither,
+   * the lead takes the next turn. The first candidate with a runtime wait is reported.
    */
   private executingWaitFacts(t: Row, excluded: readonly string[] | undefined) {
-    const pending = this.domain()
-      .assignments(String(t.id))
-      .filter((a) => a.state === "pending")
-      .map((a) =>
-        this.leadWaitFacts(String(a.profileId), Number(a.profileRevision)),
-      );
-    if (!pending.length)
-      return this.leadWaitFacts(this.taskLead(t, excluded)?.profileId);
+    const taskId = String(t.id),
+      assignments = this.domain().assignments(taskId),
+      queued = this.service
+        .turnRequestsForTask(taskId)
+        .filter((r) => r.state === "queued" && r.assignmentId);
+    const candidates = [
+      ...queued.flatMap((r) => {
+        const a = assignments.find((x) => x.id === r.assignmentId);
+        return a
+          ? [
+              [
+                String(a.profileId),
+                r.profileRevision ?? Number(a.profileRevision),
+              ] as const,
+            ]
+          : [];
+      }),
+      ...assignments
+        .filter(
+          (a) =>
+            a.state === "pending" &&
+            !queued.some((r) => r.assignmentId === a.id),
+        )
+        .map((a) => [String(a.profileId), Number(a.profileRevision)] as const),
+    ].map(([profileId, revision]) =>
+      this.profileWaitFacts(profileId, revision),
+    );
+    if (!candidates.length)
+      return this.profileWaitFacts(this.taskLead(t, excluded)?.profileId);
     return (
-      pending.find(
+      candidates.find(
         (f) =>
           f &&
           (f.runtimeUnavailable ||
             f.runtimeNotConfigured ||
             f.claudeTokenUnavailable),
-      ) ?? pending[0]
+      ) ?? candidates[0]
     );
   }
   /** What is using capacity when the project or installation is at its limit. */
@@ -2160,7 +2181,7 @@ export class OperatorApi {
             ? ["project-lead-revoked"]
             : []),
       ],
-      lead: this.leadWaitFacts(
+      lead: this.profileWaitFacts(
         p.leadProfileId ? String(p.leadProfileId) : undefined,
       ),
       capacity: this.capacityWait(projectId),
@@ -2454,6 +2475,7 @@ export class OperatorApi {
             title: this.safe(row.title, safe),
             state: row.state,
             source: this.sourceSummary(t.id, safe),
+            blocking: d.blocksDependents(t.id),
           };
         }),
     );
@@ -2473,7 +2495,7 @@ export class OperatorApi {
             deriveWaits({
               projectId,
               admissionReasons: [],
-              lead: this.leadWaitFacts(profile.id),
+              lead: this.profileWaitFacts(profile.id),
             }),
           ]),
         ),

@@ -345,6 +345,12 @@ function present(row: Row, key: string): string | number | null {
   return value;
 }
 
+/** A blocker task `b` with its import and source status, and when it still blocks. */
+const blockerStatus = `LEFT JOIN github_imported_tasks i ON i.taskId = b.id
+      LEFT JOIN github_issue_status s ON s.nodeId = i.nodeId`;
+const blocks = `((i.taskId IS NULL AND b.state != 'done')
+        OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed'))`;
+
 /** Receipt scope: the project, the profile, or an installation-level singleton. */
 function scopeOf(command: ParsedCommand): string {
   return "projectId" in command
@@ -1585,15 +1591,19 @@ export class DomainStore {
       this.db
         .prepare(
           `SELECT d.blockerTaskId AS id FROM local_dependencies d
-      JOIN domain_tasks b ON b.id = d.blockerTaskId
-      LEFT JOIN github_imported_tasks i ON i.taskId = b.id
-      LEFT JOIN github_issue_status s ON s.nodeId = i.nodeId
-      WHERE d.taskId = ? AND ((i.taskId IS NULL AND b.state != 'done')
-        OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed'))
-      ORDER BY d.blockerTaskId`,
+      JOIN domain_tasks b ON b.id = d.blockerTaskId ${blockerStatus}
+      WHERE d.taskId = ? AND ${blocks} ORDER BY d.blockerTaskId`,
         )
         .all(taskId) as Row[]
     ).map((row) => String(row.id));
+  }
+
+  /** Whether `taskId` would block a task that depends on it, by the same rule. */
+  blocksDependents(taskId: string): boolean {
+    return !!this.one(
+      `SELECT 1 AS blocks FROM domain_tasks b ${blockerStatus} WHERE b.id = ? AND ${blocks}`,
+      taskId,
+    );
   }
 
   recordRouting(
