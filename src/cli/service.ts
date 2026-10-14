@@ -425,12 +425,12 @@ class Service {
     }
   }
 
-  waitForApp() {
+  waitForApp(origin: string) {
     return this.waitFor(
       "health",
       "The service did not serve /app within 120 s",
       async () => {
-        const response = await this.host.fetch(`${this.origin}/app`, {
+        const response = await this.host.fetch(`${origin}/app`, {
           signal: AbortSignal.timeout(5_000),
         });
         await response.body?.cancel();
@@ -487,7 +487,7 @@ export async function installService(
     stage = "start";
     await service.bootstrap();
     stage = "health";
-    await service.waitForApp();
+    await service.waitForApp(service.origin);
     service.write("stdout", {
       ok: true,
       operation: "install",
@@ -584,7 +584,8 @@ export async function upgradeService(
     stage = "start";
     await service.bootstrap();
     stage = "health";
-    await service.waitForApp();
+    // The installed origin; upgrade never changes the port.
+    await service.waitForApp(record.configuration.origin);
     stage = "readiness";
     const readiness = await service.waitFor(
       stage,
@@ -782,7 +783,8 @@ export async function serviceCommand(
     if (
       !parsed ||
       parsed.positionals.length !== (command === "upgrade" ? 1 : 0) ||
-      (command !== "upgrade" && parsed.connection !== undefined)
+      (command !== "upgrade" && parsed.connection !== undefined) ||
+      (command !== "install" && args.some((arg) => arg.startsWith("--port")))
     )
       return usage(deps);
     const { options } = parsed;

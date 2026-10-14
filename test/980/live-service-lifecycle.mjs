@@ -28,6 +28,7 @@ const repo = process.cwd();
 const started = Date.now();
 const evidence = { steps: {}, durationsMs: {} };
 let root;
+let before;
 let target;
 let activation;
 const pids = new Set();
@@ -240,7 +241,7 @@ async function main() {
   });
 
   // Baselines are taken right around the launchd work to limit unrelated churn.
-  const before = baseline();
+  before = baseline();
 
   mkdirSync(join(state, "auth"), { mode: 0o700 });
   const authFile = join(state, "auth", "operator-auth.json");
@@ -444,6 +445,7 @@ try {
   } catch (cleanupError) {
     evidence.cleanup = `cleanup failed: ${cleanupError.message}`;
   }
+  if (before) evidence.baselineChangesAfterFailure = diff(before, baseline());
   evidence.retainedRoot = root;
 } finally {
   process.stdout.write(`${JSON.stringify(evidence, null, 2)}\n`);

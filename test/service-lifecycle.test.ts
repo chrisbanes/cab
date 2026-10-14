@@ -41,6 +41,7 @@ class FakeLaunchd {
   jobs = new Map<string, { path: string; pid: number }>();
   alive = new Set<number>();
   linted: string[] = [];
+  fetched: string[] = [];
   clock = Date.UTC(2026, 9, 14, 12);
   nextPid = 4000;
   failBootstrap = false;
@@ -101,7 +102,10 @@ class FakeLaunchd {
         if (exited) this.events.push("exited");
         return exited;
       },
-      fetch: async () => new Response(null, { status: this.health }),
+      fetch: async (url) => {
+        this.fetched.push(String(url));
+        return new Response(null, { status: this.health });
+      },
       now: () => this.clock,
       sleep: async (ms) => {
         this.clock += ms;
@@ -307,6 +311,12 @@ test("lifecycle options default under HOME", async (t) => {
   );
   assert.equal(
     await serviceCommand(["install", "--port", "0"], deps, unused, () =>
+      fake.host(),
+    ),
+    2,
+  );
+  assert.equal(
+    await serviceCommand(["uninstall", "--port", "9"], deps, unused, () =>
       fake.host(),
     ),
     2,
@@ -541,7 +551,8 @@ async function installed(t: { after(fn: () => void): void }) {
   const upgrade = async (target = releaseB) => {
     const { out, io } = capture();
     const code = await upgradeService(
-      f.options,
+      // Upgrade keeps the installed port whatever --port defaults to.
+      { ...f.options, port: 1 },
       target,
       connection,
       f.launchd.host(),
@@ -590,6 +601,10 @@ test("upgrade stops, snapshots, re-renders, starts and checks readiness in order
   ]);
   const { report } = result;
   assert.equal(report.version, "0.2.0");
+  assert.deepEqual(
+    new Set(f.launchd.fetched),
+    new Set([`http://127.0.0.1:${f.options.port}/app`]),
+  );
   assert.deepEqual(report.readiness, [
     { id: "codex-login", status: "pass" },
     { id: "claude-token", status: "not-configured" },
