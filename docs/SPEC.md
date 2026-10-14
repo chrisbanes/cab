@@ -194,7 +194,10 @@ boundaries. Typed judgments and confidence are not proof of correctness or autho
 The operator admits local work or defines an authoritative source readiness rule.
 The lead may inspect and triage unready tasks but cannot grant readiness. For
 GitHub, allow simple all/any label and Project-field conditions; nested expressions
-are deferred. Membership in another source cannot grant admission. Ready authorizes
+are deferred. Each GitHub source also has a closed-issue mode, changed only through
+its versioned configuration: **Skip closed issues** (the default) never imports an
+issue first observed closed, and **Treat closure as Done** imports one as Done from a
+complete read only. Membership in another source cannot grant admission. Ready authorizes
 work within scope, without a universal per-task plan approval. Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
@@ -218,7 +221,15 @@ between projects are deferred. Discovery grants no additional repository access.
 
 Losing readiness, leaving all selections or external closure holds new delegation
 and notifies the lead and active assignees to reach a safe stopping point. Operator resolution is needed
-to resume, except confirmed closure from this task's own delivery. Harmless edits
+to resume, except confirmed closure from this task's own delivery. External closure
+after import holds the task in both closed-issue modes, whatever its readiness. Under
+Treat closure as Done, the service then completes it once current membership evidence
+is complete and its execution has settled, with no writer, ambiguity or unfinished
+execution; provider closure never resolves uncertain execution or clears other holds.
+Reopening returns a provider-completed task to open and recomputes readiness from the
+rule; reopening grants no readiness and keeps any closure hold. Switching a source to
+Skip reopens its provider-completed tasks under a closure hold; no mode or switch
+deletes tasks or history. Harmless edits
 can be incorporated; materially changed scope holds work for clarification.
 
 ## Execution and recovery
@@ -500,7 +511,8 @@ view. Provide readable narrow-screen navigation between columns.
 Attention appears alongside work state rather than replacing it. Keep actionable
 readiness, successful completion, cancellation and provider closure without
 delivery visibly distinguishable. Provider closure alone does not establish task
-completion. Prioritise the task's meaning, current situation and next actor;
+completion, except under a source's Treat closure as Done mode, which records the task
+as completed by provider closure, distinct from Ensemble or manual completion. Prioritise the task's meaning, current situation and next actor;
 supporting identifiers and timestamps must remain readable and accessible without
 competing with that information. These refinements do not change the existing
 board state mapping.

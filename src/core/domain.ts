@@ -1976,6 +1976,17 @@ export class DomainStore {
             command.state ?? present(current, "state"),
             command.taskId,
           );
+        // A manual state change replaces any provider-closure completion.
+        if (
+          command.state !== undefined &&
+          command.state !== current.state &&
+          this.one(
+            "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
+          )
+        )
+          this.db
+            .prepare("DELETE FROM github_provider_completions WHERE taskId = ?")
+            .run(command.taskId);
         return this.task(command.taskId);
       }
       case "profile.create": {

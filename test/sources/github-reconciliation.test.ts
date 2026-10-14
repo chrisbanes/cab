@@ -437,3 +437,269 @@ test("unowned cross-project overlap waits for operator placement; assigned task 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function closedIssueWorld(closedIssues: "skip" | "done") {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  const projectId = randomUUID();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Closed",
+    leadProfileId: null,
+  });
+  const configure = (mode: "skip" | "done") => {
+    const { version } = domain.githubConfiguration(projectId);
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: version,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R_1",
+          owner: "org",
+          name: "repo",
+        },
+      ],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      closedIssues: mode,
+      repositories: [],
+    });
+    domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId: "repo",
+      expectedVersion: version + 1,
+    });
+  };
+  configure(closedIssues);
+  const observe = (
+    changes: Partial<IssueSnapshot>,
+    complete = true,
+  ): ReturnType<DomainStore["task"]> | undefined => {
+    const issues = [{ ...issue, ...changes }];
+    sources.reconcileSelection(
+      projectId,
+      "repo",
+      complete
+        ? { complete, issues, reason: null }
+        : { complete, issues, reason: "http-403" },
+    );
+    const taskId = sources.issue("I_1")?.taskId;
+    return taskId === undefined ? undefined : domain.task(String(taskId));
+  };
+  return {
+    db,
+    domain,
+    sources,
+    projectId,
+    configure,
+    observe,
+    completion: (taskId: unknown) =>
+      sources.providerCompletion(String(taskId)) !== undefined,
+    hold: () => sources.hold("I_1"),
+    close: () => {
+      db.close();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+test("skip mode does not import an issue first observed closed", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    assert.equal(w.observe({ state: "closed" }), undefined);
+    assert.equal(w.domain.tasks(w.projectId).length, 0);
+    assert.equal(w.sources.memberships("I_1").length, 0);
+  } finally {
+    w.close();
+  }
+});
+
+test("done mode imports a first-observed closed issue as Done only on a complete read", () => {
+  const w = closedIssueWorld("done");
+  try {
+    assert.equal(w.observe({ state: "closed" }, false), undefined);
+    const task = w.observe({ state: "closed" });
+    assert.equal(task?.state, "done");
+    assert.equal(task?.ready, 0);
+    assert.equal(w.completion(task?.id), true);
+    assert.equal(w.hold(), undefined);
+    // Reopening returns it to the normal readiness flow without a hold.
+    const reopened = w.observe({ state: "open" });
+    assert.equal(reopened?.state, "open");
+    assert.equal(reopened?.ready, 1);
+    assert.equal(w.completion(task?.id), false);
+    assert.equal(w.hold(), undefined);
+  } finally {
+    w.close();
+  }
+});
+
+for (const mode of ["skip", "done"] as const)
+  test(`${mode} mode holds an unready imported task that closes after import`, () => {
+    const w = closedIssueWorld(mode);
+    try {
+      const imported = w.observe({ labels: [] });
+      assert.equal(imported?.ready, 0);
+      assert.equal(w.hold(), undefined);
+      const closed = w.observe({ labels: [], state: "closed" });
+      assert.equal(closed?.state, "open");
+      assert.equal(closed?.ready, 0);
+      assert.deepEqual(
+        [w.hold()?.active, w.hold()?.reason],
+        [1, "closed"],
+      );
+      assert.ok(
+        w.domain.admission(String(closed?.id)).reasons.includes("source-hold"),
+      );
+      assert.equal(w.completion(closed?.id), false);
+      // Reopening keeps the closure hold and grants nothing beyond the rule.
+      const reopened = w.observe({ state: "open", labels: [] });
+      assert.equal(reopened?.ready, 0);
+      assert.deepEqual(
+        [w.hold()?.active, w.hold()?.reason],
+        [1, "closed"],
+      );
+      assert.equal(w.observe({ state: "open" })?.ready, 1);
+      assert.equal(w.hold()?.reason, "closed");
+    } finally {
+      w.close();
+    }
+  });
+
+test("a closure hold never replaces a changed-text hold", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    w.observe({});
+    w.observe({ body: "Changed scope" });
+    assert.equal(w.hold()?.reason, "changed-text");
+    w.observe({ body: "Changed scope", state: "closed" });
+    assert.equal(w.hold()?.reason, "changed-text");
+  } finally {
+    w.close();
+  }
+});
+
+test("switching done to skip reopens a provider-completed task under a closure hold", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const task = w.observe({ state: "closed" });
+    assert.equal(task?.state, "done");
+    w.configure("skip");
+    const reverted = w.observe({ state: "closed" });
+    assert.equal(reverted?.id, task?.id);
+    assert.equal(reverted?.state, "open");
+    assert.equal(w.completion(task?.id), false);
+    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    assert.equal(w.domain.tasks(w.projectId).length, 1);
+  } finally {
+    w.close();
+  }
+});
+
+test("provider-closure completion requires done mode, complete membership, settlement and no own closure", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    w.observe({ state: "closed" });
+    assert.equal(w.hold()?.reason, "closed");
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => false),
+      false,
+    );
+    assert.equal(w.domain.task(taskId).state, "open");
+    // An incomplete read leaves membership evidence incomplete.
+    w.observe({ state: "closed" }, false);
+    let calls = 0;
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => ++calls > 0),
+      false,
+    );
+    assert.equal(calls, 0);
+    w.observe({ state: "closed" });
+    w.db
+      .prepare(
+        "INSERT INTO github_delivery_closures VALUES ('I_1', 'op', NULL, '{}')",
+      )
+      .run();
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    w.db.prepare("DELETE FROM github_delivery_closures").run();
+    w.configure("skip");
+    w.observe({ state: "closed" });
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    w.configure("done");
+    w.observe({ state: "closed" });
+    const version = Number(w.domain.task(taskId).version);
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      true,
+    );
+    const done = w.domain.task(taskId);
+    assert.equal(done.state, "done");
+    assert.equal(Number(done.version), version + 1);
+    assert.equal(w.completion(taskId), true);
+    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    // A provider completion after import reopens with its closure hold retained.
+    assert.equal(w.observe({ state: "open" })?.state, "open");
+    assert.equal(w.completion(taskId), false);
+    assert.equal(w.hold()?.reason, "closed");
+  } finally {
+    w.close();
+  }
+});
+
+test("manual state changes never carry a provider-completion record", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const task = w.observe({ state: "closed" });
+    const taskId = String(task?.id);
+    w.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: w.projectId,
+      taskId,
+      expectedVersion: Number(task?.version),
+      state: "open",
+    });
+    assert.equal(w.completion(taskId), false);
+    const reopened = w.domain.task(taskId);
+    w.domain.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: w.projectId,
+      taskId,
+      expectedVersion: Number(reopened.version),
+      state: "done",
+    });
+    assert.equal(w.domain.task(taskId).state, "done");
+    assert.equal(w.completion(taskId), false);
+  } finally {
+    w.close();
+  }
+});
