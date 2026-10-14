@@ -1,4 +1,7 @@
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
+import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
+
+const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /** One label per request kind; the record keeps every kind visible if the enum grows. */
 const kindLabels: Record<InboxItem["kind"], string> = {
@@ -53,9 +56,8 @@ export interface HoldNotice {
   detail: string;
 }
 
-type Reason = TaskRead["data"]["admission"]["reasons"][number];
 /** Reasons with no dedicated notice still say what holds execution. */
-const heldLabels: Partial<Record<Reason, string>> = {
+const heldLabels: Partial<Record<string, string>> = {
   "task-unready": "task not ready",
   "task-not-open": "task not open",
   "project-lead-unconfigured": "project lead not configured",
@@ -77,63 +79,69 @@ const answerDetails: Record<string, string> = {
 
 /**
  * Independent holds an approval (or, with "answer", a recorded answer) does not clear, from the
- * task read's admission facts. The wording is the only thing the action changes.
+ * task read's waits in the same order as task detail and the CLI. The wording is the only thing the action changes.
  */
 export function holdNotices(
   task: TaskRead["data"],
   action: "approve" | "answer" = "approve",
 ): HoldNotice[] {
-  const reasons = new Set(task.admission.reasons),
-    notices: HoldNotice[] = [],
+  const notices: HoldNotice[] = [],
     openBlockers = (task.source?.nativeBlockers ?? [])
       .filter((blocker) => blocker.state === "open")
       .map((blocker) => `${blocker.repositoryName}#${blocker.number}`);
-  if (reasons.has("imported-blockers-blocked"))
-    notices.push({
-      id: "blocked",
-      title: "Execution blocked by dependency",
-      items: openBlockers,
-      detail:
-        "Source-owned hold. Approval does not clear it; execution still waits for the GitHub blocker.",
-    });
-  if (reasons.has("imported-blockers-unknown"))
-    notices.push({
-      id: "blockers-unknown",
-      title: "Execution held: dependencies unconfirmed",
-      items: openBlockers,
-      detail:
-        "GitHub blockers could not be confirmed. Approval does not clear this hold.",
-    });
-  if (reasons.has("source-held"))
-    notices.push({
-      id: "source-held",
-      title: "Execution held by the source",
-      items: [],
-      detail:
-        "Source review or hold is unresolved. Approval does not clear it.",
-    });
-  if (reasons.has("local-dependency"))
-    notices.push({
-      id: "dependency",
-      title: "Execution blocked by dependency",
-      items: task.localDependencies
-        .filter((dependency) => dependency.state !== "done")
-        .map((dependency) => dependency.title ?? "Unavailable task"),
-      detail: "Dependency hold. Approval does not clear it.",
-    });
-  if (reasons.has("project-paused"))
-    notices.push({
-      id: "paused",
-      title: "Project paused",
-      items: [],
-      detail: "Approval does not resume work.",
-    });
-  for (const reason of task.admission.reasons) {
-    const label = heldLabels[reason];
-    if (label)
+  // The task read's waits in the flow's order, then what makes the task itself not startable.
+  const codes = [
+    ...task.waits.map((wait) => wait.code),
+    ...task.admission.reasons.filter(
+      (r) => r === "task-unready" || r === "task-not-open",
+    ),
+  ];
+  for (const code of codes) {
+    if (code === "imported-blockers-blocked")
       notices.push({
-        id: reason,
-        title: `Execution held (${label})`,
+        id: "blocked",
+        title: "Execution blocked by dependency",
+        items: openBlockers,
+        detail:
+          "Source-owned hold. Approval does not clear it; execution still waits for the GitHub blocker.",
+      });
+    else if (code === "imported-blockers-unknown")
+      notices.push({
+        id: "blockers-unknown",
+        title: "Execution held: dependencies unconfirmed",
+        items: openBlockers,
+        detail:
+          "GitHub blockers could not be confirmed. Approval does not clear this hold.",
+      });
+    else if (code === "source-held")
+      notices.push({
+        id: "source-held",
+        title: "Execution held by the source",
+        items: [],
+        detail:
+          "Source review or hold is unresolved. Approval does not clear it.",
+      });
+    else if (code === "local-dependency")
+      notices.push({
+        id: "dependency",
+        title: "Execution blocked by dependency",
+        items: task.localDependencies
+          .filter((dependency) => dependency.state !== "done")
+          .map((dependency) => dependency.title ?? "Unavailable task"),
+        detail: "Dependency hold. Approval does not clear it.",
+      });
+    else if (code === "project-paused")
+      notices.push({
+        id: "paused",
+        title: "Project paused",
+        items: [],
+        detail: "Approval does not resume work.",
+      });
+    // The request being decided is not a hold on itself.
+    else if (code !== "approval")
+      notices.push({
+        id: code,
+        title: `Execution held (${heldLabels[code] ?? lowerFirst(waitLabels[code as WaitCode])})`,
         items: [],
         detail: "Approving does not clear it.",
       });

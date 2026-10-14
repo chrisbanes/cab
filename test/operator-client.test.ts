@@ -9,6 +9,7 @@ const good: Workspace = {
     profiles: [],
     runtime: { state: "available" },
     harnesses: [],
+    gettingStarted: { turnStarted: false, dismissed: false },
   },
   observedAt: 42,
 };

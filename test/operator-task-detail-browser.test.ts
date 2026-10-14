@@ -7,7 +7,7 @@ import {
 } from "./fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { guideForm } from "./fixtures/question-data.js";
-import { seedOwnQuestion } from "./fixtures/questions.js";
+import { seedOwnApproval, seedOwnQuestion } from "./fixtures/questions.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 
 const test = browserSuite("ui-task-detail");
@@ -606,3 +606,229 @@ for (const engine of [
       /^Stopping; effects may continue/,
     );
   });
+
+test("Task detail lists waits in order: Resume project confirms and sends one command, holds only link", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain();
+  const projectId = randomUUID(),
+    blocker = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "fixture-app",
+    leadProfileId: null,
+  });
+  for (const [id, title, ready] of [
+    [blocker, "Set up the deploy check", false],
+    [taskId, "Add a health-check endpoint", true],
+  ] as const)
+    d.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId: id,
+      title,
+      outcome: "Probe",
+      ready,
+    });
+  d.execute({
+    type: "dependency.add",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    blockerTaskId: blocker,
+    expectedVersion: Number(d.task(taskId).version),
+  });
+  // A Claude lead with no token reference, in a second paused project.
+  const claudeLead = randomUUID(),
+    claudeProject = randomUUID(),
+    claudeTask = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claudeLead,
+    name: "Ada",
+    instructions: "Lead",
+    capabilities: "coordination",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: claudeProject,
+    name: "claude-app",
+    leadProfileId: claudeLead,
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: claudeProject,
+    taskId: claudeTask,
+    title: "Claude task",
+    outcome: "Probe",
+    ready: true,
+  });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: unknown[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      commands.push(request.postDataJSON());
+  });
+  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  const waits = page.locator(".wait-reasons");
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  const list = waits.locator(".wait-list li");
+  assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
+    "Project has no lead",
+    "Blocked by a task dependency",
+  ]);
+  assert.equal(
+    await list
+      .nth(0)
+      .getByRole("link", { name: "Fix: Choose a lead" })
+      .getAttribute("href"),
+    `/app/projects/${projectId}/settings`,
+  );
+  // A dependency links to the blocking task and has no Fix.
+  const dependency = list.nth(1);
+  assert.equal(
+    await dependency
+      .getByRole("link", { name: "Set up the deploy check" })
+      .getAttribute("href"),
+    `/app/tasks/${blocker}`,
+  );
+  assert.equal(await dependency.getByText(/^Fix:/).count(), 0);
+  assert.equal(await dependency.getByRole("button").count(), 0);
+
+  // Cancel sends nothing.
+  const fix = waits.getByRole("button", { name: "Fix: Resume project" });
+  await fix.click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByText("Resume fixture-app?").waitFor();
+  await dialog.getByText("Holds and access are unchanged.").waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.deepEqual(commands, []);
+
+  // Confirm sends exactly one project.configure and nothing else.
+  await fix.click();
+  await dialog.getByRole("button", { name: "Resume", exact: true }).click();
+  await waits.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(commands.length, 1);
+  const sent = commands[0] as unknown as Record<string, unknown>;
+  assert.deepEqual(
+    { type: sent.type, projectId: sent.projectId, paused: sent.paused },
+    { type: "project.configure", projectId, paused: false },
+  );
+  assert.deepEqual(Object.keys(sent).sort(), [
+    "expectedVersion",
+    "key",
+    "paused",
+    "projectId",
+    "type",
+  ]);
+  await waits
+    .getByText("Waiting · Project has no lead", { exact: true })
+    .waitFor();
+  assert.equal(await waits.getByText("Project paused").count(), 0);
+  // The dependency hold remains: Resume clears only the pause.
+  assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
+    "Blocked by a task dependency",
+  ]);
+  assert.deepEqual(d.dependencies(taskId), [blocker]);
+  assert.equal(d.project(projectId).paused, 0);
+
+  // Claude token unavailable opens Add Claude.
+  await page.goto(`${web.origin}/app/tasks/${claudeTask}`);
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  assert.equal(
+    await waits
+      .getByRole("link", { name: "Fix: Add Claude" })
+      .getAttribute("href"),
+    "/app/settings/runtime",
+  );
+  assert.equal(
+    await waits
+      .getByRole("link", { name: "Fix: Open profile" })
+      .getAttribute("href"),
+    `/app/profiles/${claudeLead}/settings`,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await waits.getByRole("button", { name: "Fix: Resume project" }).waitFor();
+  assert.ok(await noHorizontalScroll(page));
+  assert.equal(commands.length, 1);
+
+  // A lost reply is an unknown outcome: the Fix leaves, and Check resends it exactly.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await waits.getByRole("button", { name: "Fix: Resume project" }).click();
+  await dialog.getByRole("button", { name: "Resume", exact: true }).click();
+  const check = waits.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.equal(await waits.getByRole("button", { name: /Resum/ }).count(), 0);
+  await page.unroute("**/api/operator/commands");
+  await check.click();
+  await waits.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[2], commands[1]);
+  assert.equal(d.project(claudeProject).paused, 0);
+});
+
+test("An approval wait opens the approval review, not the question form", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnApproval(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const waits = page.locator(".wait-reasons");
+  const review = waits.getByRole("link", { name: "Review material & decide" });
+  assert.equal(
+    await review.getAttribute("href"),
+    `/coordination/task/${a.taskId}#${a.interactionId}`,
+  );
+  await review.click();
+  await page.waitForURL(
+    (url) => url.pathname === `/coordination/task/${a.taskId}`,
+  );
+  // The coordination view decides the exact approval material.
+  await page
+    .getByRole("button", { name: "Approve this exact material" })
+    .waitFor();
+});

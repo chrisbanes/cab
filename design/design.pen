@@ -161270,7 +161270,7 @@
                       "fill": "$X:--muted-foreground",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "2 of 5 required steps done · read from the running service",
+                      "content": "1 of 4 required steps done",
                       "lineHeight": 1.45,
                       "fontFamily": "$font-sans",
                       "fontSize": 12,
@@ -161345,7 +161345,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Codex login readable by the service",
+                              "content": "Runtime login readable by the service",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162496,7 +162496,7 @@
                       "fill": "$X:--muted-foreground",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "3 of 5 required steps done · Runtime needs attention",
+                      "content": "1 of 4 required steps done · Runtime needs attention",
                       "lineHeight": 1.45,
                       "fontFamily": "$font-sans",
                       "fontSize": 12,
@@ -162571,7 +162571,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Codex login unreadable · run codex login as the service user",
+                              "content": "Codex is not signed in on the running service",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162820,7 +162820,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "1 profile · Ada",
+                              "content": "1 profile",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162873,7 +162873,7 @@
                                   "enabled": false
                                 },
                                 "X:UZfKV": {
-                                  "content": "Open profiles",
+                                  "content": "Open settings",
                                   "fontFamily": "$font-sans"
                                 }
                               }
@@ -162936,7 +162936,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "fixture-app · Paused. Nothing runs until you resume it.",
+                              "content": "fixture-app is paused. Nothing runs until you resume it.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162951,14 +162951,14 @@
                           "width": 120,
                           "children": [
                             {
-                              "id": "f7lpr",
+                              "id": "dhhaG",
                               "type": "ref",
-                              "ref": "X:WuUMk",
-                              "name": "Done badge",
+                              "ref": "X:3IiAS",
+                              "name": "Not started badge",
                               "cornerRadius": 9999,
                               "descendants": {
                                 "X:zHpCv": {
-                                  "content": "Done",
+                                  "content": "Not started",
                                   "fontWeight": "500",
                                   "fontFamily": "$font-sans"
                                 }
@@ -163057,7 +163057,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "No task yet · it waits while fixture-app is paused",
+                              "content": "No task has started yet.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -163072,14 +163072,14 @@
                           "width": 120,
                           "children": [
                             {
-                              "id": "a6MUE",
+                              "id": "EdWnW",
                               "type": "ref",
-                              "ref": "X:UjXug",
-                              "name": "Next badge",
+                              "ref": "X:3IiAS",
+                              "name": "Not started badge",
                               "cornerRadius": 9999,
                               "descendants": {
                                 "X:zHpCv": {
-                                  "content": "Next",
+                                  "content": "Not started",
                                   "fontWeight": "500",
                                   "fontFamily": "$font-sans"
                                 }
@@ -163377,7 +163377,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "2 of 5 required steps done",
+                  "content": "1 of 4 required steps done",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 12,
@@ -163494,7 +163494,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Codex login readable by the service",
+                              "content": "Runtime login readable by the service",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -169080,12 +169080,12 @@
               "gap": 10,
               "descendants": {
                 "X:nbvca": {
-                  "content": "fixture-app is Paused.",
+                  "content": "It will wait: Project paused",
                   "fontFamily": "$font-sans",
                   "fontSize": 14
                 },
                 "X:W4UBy": {
-                  "content": "This task will wait until the project is resumed. Creating it does not resume the project.",
+                  "content": "Fix: Resume project asks first. Holds and access are unchanged; creating the task does not resume the project.",
                   "fontFamily": "$font-sans"
                 }
               }
@@ -169177,7 +169177,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Creates the task now; it starts when fixture-app is resumed and nothing else holds it.",
+                  "content": "Save draft keeps it without starting.",
                   "lineHeight": 1.25,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -173059,7 +173059,7 @@
           "fill": "$X:--muted-foreground",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "One reason shows at a time, in the task's state area. Each Fix performs exactly one named command or opens one screen. It never clears holds or grants access.",
+          "content": "The first reason shows with its Fix; any others are listed beneath it, each with its own Fix or link. Each Fix performs exactly one named command or opens one screen. It never clears holds or grants access.",
           "lineHeight": 1.45,
           "fontFamily": "$font-sans",
           "fontSize": 12,
@@ -173511,7 +173511,7 @@
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Waiting · Blocked by dependency",
+                          "content": "Waiting · Blocked by a task dependency",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 16,
@@ -180539,7 +180539,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· 143b: per the brief the Project row stays Done while reading “Paused” with Resume. getting-started.md counts Project as done only when enabled. Pick one before build.",
+              "content": "· 143b: resolved — a paused project is not Done; the Project row reads Not started with Resume (getting-started.md). The summary counts the four required rows; GitHub stays optional.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -180552,7 +180552,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· Only the first incomplete required row is primary: Lead profile in 143/144, Runtime in 143b. The Home header’s New task button is hidden while the checklist shows, so the card holds the only primary.",
+              "content": "· Only the first incomplete required row is primary: Lead profile in 143/144, Runtime in 143b. As built, the header New task button stays beside the card.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -180565,7 +180565,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· 143/144 First task: Create task is disabled (“Needs a project first”). Claude row badge reads “Optional” in a muted outline.",
+              "content": "· 143/144 First task: Create task opens the composer and reads “Needs a project first” until a project exists. Claude row badge reads “Optional” in a muted outline.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -180640,7 +180640,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "4 · Entry points not drawn",
+              "content": "4 · Entry points as built, not drawn",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 16,
@@ -180653,7 +180653,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· Account menu → Getting started (and undoing dismissal), ensemble doctor CLI output, profile-form route into Add Claude, and Inbox/CLI wait reasons. They must reuse these labels and Fix commands.",
+              "content": "· Account menu → Getting started opens /app/getting-started: the same checklist with a secondary Dismiss. Dismissed, the menu shows Show getting started, which undoes it. After the first turn Home shows only rows that need attention. Inbox hold notices and the CLI (Waiting: lines, each Fix: a command or Settings path) use these labels in the same order.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,

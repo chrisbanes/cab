@@ -1808,6 +1808,11 @@ export class StandaloneService {
     return this.current?.power?.status() ?? null;
   }
 
+  /** Whether any task in this installation has started a turn. */
+  taskTurnStarted() {
+    return this.started().state.taskTurnStarted();
+  }
+
   /** The persisted harness of a bound work, or null before binding. */
   bindingHarness(workId: string): ExecutionHarness | null {
     return this.started().state.taskBinding(workId)?.harness ?? null;

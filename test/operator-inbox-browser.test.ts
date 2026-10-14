@@ -592,6 +592,9 @@ test("an approval shows its exact action, target and independent holds, and deci
     };
     body.data.admission.eligible = false;
     body.data.admission.reasons = ["imported-blockers-blocked"];
+    body.data.waits = [
+      { code: "imported-blockers-blocked", fix: null, links: [] },
+    ];
     taskSchema.parse(body);
     await route.fulfill({ response, json: body });
   });
@@ -618,6 +621,7 @@ test("an approval shows its exact action, target and independent holds, and deci
       body = (await response.json()) as TaskRead;
     body.data.admission.eligible = false;
     body.data.admission.reasons = ["task-unready"];
+    body.data.waits = [];
     taskSchema.parse(body);
     await route.fulfill({ response, json: body });
   });

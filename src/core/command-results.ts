@@ -161,6 +161,10 @@ export const credentialStatusCommandResultSchema = z
   .object({ configured: z.boolean() })
   .strict();
 
+export const gettingStartedCommandResultSchema = z
+  .object({ dismissed: z.boolean() })
+  .strict();
+
 export interface DomainCommandResultMap {
   "delivery.configure": z.output<typeof deliveryCommandResultSchema>;
   "project.create": z.output<typeof projectCommandResultSchema>;
@@ -183,6 +187,9 @@ export interface DomainCommandResultMap {
   "discovery.configure": z.output<typeof credentialStatusCommandResultSchema>;
   "claude-token.configure": z.output<
     typeof credentialStatusCommandResultSchema
+  >;
+  "getting-started.configure": z.output<
+    typeof gettingStartedCommandResultSchema
   >;
 }
 
@@ -314,6 +321,11 @@ function parseCommandOutcome(
       return {
         type,
         result: parseUnchanged(credentialStatusCommandResultSchema, value),
+      };
+    case "getting-started.configure":
+      return {
+        type,
+        result: parseUnchanged(gettingStartedCommandResultSchema, value),
       };
     default: {
       const exhaustive: never = type;

@@ -6,7 +6,13 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
-import { ChevronsUpDown, Gauge, LogOut, Settings } from "lucide-react";
+import {
+  ChevronsUpDown,
+  Gauge,
+  ListChecks,
+  LogOut,
+  Settings,
+} from "lucide-react";
 
 /** Sessions carry no operator name (SPEC: one operator), so the account is labelled by its role. */
 export const OPERATOR_LABEL = "Operator";
@@ -23,11 +29,17 @@ export function AccountMenu({
   navigate,
   pending,
   onSignOut,
+  gettingStartedDismissed,
+  onShowGettingStarted,
 }: {
   path: string;
   navigate: (path: string) => void;
   pending: boolean;
   onSignOut: () => void;
+  /** Null until the workspace is read. */
+  gettingStartedDismissed: boolean | null;
+  /** Undoes the dismissal and opens the checklist, where its outcome shows. */
+  onShowGettingStarted: () => void;
 }) {
   const [open, setOpen] = useState(false);
   // Which item to focus when the menu opens from the keyboard.
@@ -175,6 +187,27 @@ export function AccountMenu({
             "/app/settings/runtime",
             <Gauge aria-hidden="true" />,
             "Runtime",
+          )}
+          {gettingStartedDismissed === false &&
+            link(
+              "/app/getting-started",
+              <ListChecks aria-hidden="true" />,
+              "Getting started",
+            )}
+          {gettingStartedDismissed && (
+            <button
+              type="button"
+              role="menuitem"
+              tabIndex={-1}
+              className="account-menu-item"
+              onClick={() => {
+                setOpen(false);
+                onShowGettingStarted();
+              }}
+            >
+              <ListChecks aria-hidden="true" />
+              Show getting started
+            </button>
           )}
           <hr />
           <button

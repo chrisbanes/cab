@@ -1950,6 +1950,42 @@ test("Claude token reference configures, clears and never returns the name", () 
   }
 });
 
+test("getting-started dismissal toggles per installation, replays its receipt and needs the operator", () => {
+  const f = fixture();
+  try {
+    assert.equal(f.domain.gettingStartedDismissed(), false);
+    const dismiss = {
+      type: "getting-started.configure" as const,
+      actor: "operator" as const,
+      key: key(),
+      dismissed: true,
+    };
+    assert.deepEqual(f.domain.execute(dismiss), { dismissed: true });
+    f.reopen();
+    assert.equal(f.domain.gettingStartedDismissed(), true);
+    assert.deepEqual(
+      f.domain.execute({ ...dismiss, key: key(), dismissed: false }),
+      { dismissed: false },
+    );
+    assert.equal(f.domain.gettingStartedDismissed(), false);
+    // An exact replay returns the recorded receipt and changes nothing.
+    assert.deepEqual(f.domain.execute(dismiss), { dismissed: true });
+    assert.equal(f.domain.gettingStartedDismissed(), false);
+    assert.throws(
+      () =>
+        f.domain.execute({
+          ...dismiss,
+          key: key(),
+          actor: "agent",
+        } as DomainCommand),
+      /Operator authority required/,
+    );
+    assert.equal(f.domain.gettingStartedDismissed(), false);
+  } finally {
+    f.close();
+  }
+});
+
 test("configuration command hashes stay byte-identical", () => {
   const f = fixture();
   try {

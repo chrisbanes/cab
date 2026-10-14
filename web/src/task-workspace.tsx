@@ -50,7 +50,8 @@ import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
 import { AssignmentRows, EntryLinks, showSection } from "./task-detail.js";
 import { type TaskHeaderReport, taskHeaderReport } from "./task-header.js";
 import { briefParts, criterionRows, sourceLine } from "./task-overview.js";
-import { reasonLabels } from "./tasks.js";
+import type { ConfigurationDrafts } from "./settings-state.js";
+import { WaitReasons } from "./wait-reasons.js";
 
 type Reference = z.infer<typeof feedbackReferenceSchema>;
 type History = z.infer<typeof assignmentHistorySchema>["data"];
@@ -210,9 +211,11 @@ export function TaskWorkspace({
   onRefresh,
   workspace,
   onHeader,
+  drafts,
 }: {
   client: OperatorClient;
   session: Session;
+  drafts: ConfigurationDrafts;
   taskId: string;
   path: string;
   /** Also re-reads the shell data (sidebar, runtime alert) that this page's own refresh replaced. */
@@ -1235,13 +1238,20 @@ export function TaskWorkspace({
         >
           <h3 className="sr-only">Decisions and holds</h3>
           {openRequests.length === 0 &&
-            !data.admission.reasons.length &&
+            !data.waits.length &&
             !Object.values(data.execution.holds).some(Boolean) && (
               <p className="muted">No operator decision needed.</p>
             )}
-          {data.admission.reasons.map((r) => (
-            <p key={r}>{reasonLabels[r]}</p>
-          ))}
+          <WaitReasons
+            waits={data.waits}
+            taskId={taskId}
+            projectId={data.task.projectId}
+            client={client}
+            session={session}
+            drafts={drafts}
+            workspace={workspace ?? null}
+            onChanged={refreshAll}
+          />
           {Object.entries(data.execution.holds)
             .filter(([, v]) => v)
             .map(([k]) => (
