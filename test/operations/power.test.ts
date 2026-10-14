@@ -1003,43 +1003,47 @@ test("macOS 27 preamble output streams to the same batch as whole-output parsing
   }
 });
 
-test("an event cursor saved before the preamble existed still resolves, and any other shifted index is rejected", () => {
+test("an event cursor saved from headerless output resolves to the one matching row, and ambiguous or unsupported matches are rejected", () => {
+  const baseline = powerCursor(`pmset-time:${macos27BaselineMs}`);
+  // A real cursor from the pre-macOS 27 layout, where the first Sleep is line 2.
+  const old = parsePmsetPowerLog(pmsetRows.join("\n"), baseline).events[0];
+  const [prefix, timestamp, index, hash] = (old?.cursor.value ?? "").split(":");
+  assert.equal(index, "2");
+  const withIndex = (value: number, rowHash = hash) =>
+    powerCursor([prefix, timestamp, value, rowHash].join(":"));
   const text = macos27Log.join("\n");
-  const sleep = parsePmsetPowerLog(
-    text,
-    powerCursor(`pmset-time:${macos27BaselineMs}`),
-  ).events[0];
-  const [prefix, timestamp, index, hash] = (sleep?.cursor.value ?? "").split(
-    ":",
-  );
-  const at = (shift: number) =>
-    powerCursor([prefix, timestamp, Number(index) + shift, hash].join(":"));
 
-  const current = parsePmsetPowerLog(text, at(0));
-  const legacy = parsePmsetPowerLog(text, at(-3));
-  assert.equal(current.complete, true);
+  const current = parsePmsetPowerLog(text, baseline).events[0]?.cursor;
+  assert.ok(current);
+  const exact = parsePmsetPowerLog(text, current);
+  const legacy = parsePmsetPowerLog(text, withIndex(2));
   assert.equal(legacy.complete, true);
   assert.deepEqual(
     legacy.events.map((event) => event.cursor),
-    current.events.map((event) => event.cursor),
+    exact.events.map((event) => event.cursor),
   );
   assert.deepEqual(
     legacy.events.map((event) => event.transition),
     ["wake"],
   );
-  for (const shift of [-4, -2, -1, 1, 3])
-    assert.equal(
-      parsePmsetPowerLog(text, at(shift)).complete,
-      false,
-      `${shift}`,
-    );
 
-  // Without the preamble in the output the offset is not applied.
-  const noPreamble = [...macos27Preamble.slice(0, 2), ...macos27Rows];
-  assert.equal(
-    parsePmsetPowerLog(noPreamble.join("\n"), at(-6)).complete,
-    false,
-  );
+  const rejects = (output: string[], cursor: PowerEventCursor, label: string) =>
+    assert.equal(
+      parsePmsetPowerLog(output.join("\n"), cursor).complete,
+      false,
+      label,
+    );
+  rejects(macos27Log, withIndex(2, "0123456789abcdef"), "unknown hash");
+  rejects(macos27Log, withIndex(7), "cursor past the row");
+  rejects(pmsetRows, withIndex(1), "no preamble in the output");
+  const [sleepRow] = macos27Rows.slice(1, 2) as [string];
+  const duplicated = [
+    ...macos27Preamble,
+    ...macos27Rows.slice(0, 2),
+    sleepRow,
+    ...macos27Rows.slice(2),
+  ];
+  rejects(duplicated, withIndex(2), "two matching rows");
 });
 
 test("the macOS 27 preamble is accepted once, in order, and only before the first timestamped row", () => {
