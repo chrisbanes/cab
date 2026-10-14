@@ -663,12 +663,26 @@ npm run operations -- render-launch-agent \
   http://127.0.0.1:8787 8787 \
   /absolute/private/logs/operator.stdout.log \
   /absolute/private/logs/operator.stderr.log \
-  /absolute/private/launch-agents/com.example.ensemble.plist \
-  [--diagnostic-retention-days N] [--diagnostic-storage-mib N]
+  /absolute/private/launch-agents/com.example.ensemble.plist
 ```
 
-The two optional trailing flags set the diagnostic retention limits; omitted,
-the service defaults apply.
+To set the diagnostic retention limits, append the two optional flags after the
+plist path (1–365 days, 16–1048576 MiB); omitted, the service defaults apply.
+Malformed or out-of-range values print usage and exit 2:
+
+```sh
+npm run operations -- render-launch-agent \
+  com.example.ensemble \
+  /absolute/path/to/node \
+  /absolute/path/to/ensemble/dist/src/standalone/cli.js \
+  /absolute/private/ensemble-data \
+  /absolute/private/auth/operator-auth.json \
+  http://127.0.0.1:8787 8787 \
+  /absolute/private/logs/operator.stdout.log \
+  /absolute/private/logs/operator.stderr.log \
+  /absolute/private/launch-agents/com.example.ensemble.plist \
+  --diagnostic-retention-days 14 --diagnostic-storage-mib 512
+```
 
 The current renderer sets `RunAtLoad=true` and `KeepAlive=false`; launchctl,
 not automatic crash relaunch, owns restart. The plist contains the Node/CLI,
