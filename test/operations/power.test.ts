@@ -926,6 +926,250 @@ test("the default pmset reader streams lines so cursors match the whole-output p
   }
 });
 
+const macos27Header = `Time stamp${" ".repeat(16)}Domain${" ".repeat(14)}\tMessage${" ".repeat(20)}\tDuration  \tDelay     `;
+const macos27Separator = `==========${" ".repeat(16)}======${" ".repeat(14)}\t=======${" ".repeat(20)}\t========  \t=====     `;
+const macos27Preamble = [
+  "PM ASL data store: /var/log/powermanagement",
+  "",
+  macos27Header,
+  macos27Separator,
+  "UUID: (null)",
+];
+const macos27Rows = [
+  "2026-09-29 09:50:00 +0100 Assertions\tPID 10(app) Created PreventUserIdleSystemSleep",
+  "2026-09-29 10:00:00 +0100 Sleep\tEntering Sleep state due to 'Clamshell Sleep'",
+  "2026-09-29 10:05:00 +0100 Wake\tWake from Deep Idle due to EC.LidOpen",
+  "Assertion status system-wide:",
+  "   PreventSystemSleep             0",
+  "",
+];
+const macos27Log = [...macos27Preamble, ...macos27Rows];
+const macos27BaselineMs = Date.parse("2026-09-29T08:59:00Z");
+
+test("a macOS 27 column header gives a complete baseline and follow-up with cursors that count the skipped lines", async () => {
+  const readLog: PowerLogReader = async function* () {
+    yield* macos27Log;
+  };
+  const source = new MacPowerEventSource(
+    readLog,
+    2500,
+    4096,
+    () => macos27BaselineMs,
+  );
+  const baseline = await source.readSince(null);
+  assert.equal(baseline.complete, true);
+  assert.deepEqual(
+    baseline.cursor,
+    powerCursor(`pmset-time:${macos27BaselineMs}`),
+  );
+  const batch = await source.readSince(baseline.cursor);
+  assert.equal(batch.complete, true);
+  assert.deepEqual(
+    batch.events.map((event) => event.transition),
+    ["sleep", "wake"],
+  );
+  assert.deepEqual(batch.events[0]?.previousCursor, baseline.cursor);
+  assert.deepEqual(
+    batch.events.map((event) => event.cursor.value.split(":")[2]),
+    ["6", "7"],
+  );
+});
+
+test("macOS 27 preamble output streams to the same batch as whole-output parsing, and a cursor that ignores the skipped lines is rejected", async () => {
+  for (const eol of ["\n", "\r\n"]) {
+    for (const text of [macos27Log, [...macos27Log, ""]]) {
+      const reader: PowerLogReader = (_c, _a, options) =>
+        spawnPowerLogReader(process.execPath, printLines(text, eol), options);
+      const source = new MacPowerEventSource(
+        reader,
+        10_000,
+        65_536,
+        () => macos27BaselineMs,
+      );
+      const baseline = await source.readSince(null);
+      const batch = await source.readSince(baseline.cursor);
+      assert.equal(batch.complete, true);
+      assert.deepEqual(
+        batch,
+        parsePmsetPowerLog(text.join(eol), baseline.cursor),
+      );
+      const resumed = await source.readSince(batch.events[0]?.cursor ?? null);
+      assert.equal(resumed.complete, true);
+      assert.deepEqual(
+        resumed.events.map((event) => event.transition),
+        ["wake"],
+      );
+    }
+  }
+});
+
+test("an event cursor saved from headerless output resolves to the one matching row, and ambiguous or unsupported matches are rejected", () => {
+  const baseline = powerCursor(`pmset-time:${macos27BaselineMs}`);
+  // A real cursor from the pre-macOS 27 layout, where the first Sleep is line 2.
+  const old = parsePmsetPowerLog(pmsetRows.join("\n"), baseline).events[0];
+  const [prefix, timestamp, index, hash] = (old?.cursor.value ?? "").split(":");
+  assert.equal(index, "2");
+  const withIndex = (value: number, rowHash = hash) =>
+    powerCursor([prefix, timestamp, value, rowHash].join(":"));
+  const text = macos27Log.join("\n");
+
+  const current = parsePmsetPowerLog(text, baseline).events[0]?.cursor;
+  assert.ok(current);
+  const exact = parsePmsetPowerLog(text, current);
+  const legacy = parsePmsetPowerLog(text, withIndex(2));
+  assert.equal(legacy.complete, true);
+  assert.deepEqual(
+    legacy.events.map((event) => event.cursor),
+    exact.events.map((event) => event.cursor),
+  );
+  assert.deepEqual(
+    legacy.events.map((event) => event.transition),
+    ["wake"],
+  );
+
+  const rejects = (output: string[], cursor: PowerEventCursor, label: string) =>
+    assert.equal(
+      parsePmsetPowerLog(output.join("\n"), cursor).complete,
+      false,
+      label,
+    );
+  rejects(macos27Log, withIndex(2, "0123456789abcdef"), "unknown hash");
+  rejects(macos27Log, withIndex(7), "cursor past the row");
+  rejects(pmsetRows, withIndex(1), "no preamble in the output");
+  const [sleepRow] = macos27Rows.slice(1, 2) as [string];
+  const duplicated = [
+    ...macos27Preamble,
+    ...macos27Rows.slice(0, 2),
+    sleepRow,
+    ...macos27Rows.slice(2),
+  ];
+  rejects(duplicated, withIndex(2), "two matching rows");
+});
+
+test("the macOS 27 preamble is accepted once, in order, and only before the first timestamped row", () => {
+  const [asl, blank, header, separator, uuid] = macos27Preamble as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const [first, ...rest] = macos27Rows as [string, ...string[]];
+  const cases: Record<string, string[]> = {
+    "header after a row": [asl, blank, first, header, ...rest],
+    "separator after a row": [asl, blank, first, separator, ...rest],
+    "UUID after a row": [asl, blank, first, uuid, ...rest],
+    "duplicated header": [
+      asl,
+      blank,
+      header,
+      header,
+      separator,
+      uuid,
+      ...macos27Rows,
+    ],
+    "header then a row": [asl, blank, header, ...macos27Rows],
+    "header and separator then a row": [
+      asl,
+      blank,
+      header,
+      separator,
+      ...macos27Rows,
+    ],
+    "UUID without header and separator": [asl, blank, uuid, ...macos27Rows],
+    "separator before header": [
+      asl,
+      blank,
+      separator,
+      header,
+      uuid,
+      ...macos27Rows,
+    ],
+    "unrecognised UUID": [
+      asl,
+      blank,
+      header,
+      separator,
+      "UUID: not-a-uuid",
+      ...macos27Rows,
+    ],
+    "unfamiliar preamble line": [
+      ...macos27Preamble,
+      "Domain: surprise",
+      ...macos27Rows,
+    ],
+    "out-of-order timestamp": [
+      ...macos27Preamble,
+      first,
+      "2026-09-29 09:40:00 +0100 Assertions\tearlier",
+      ...rest,
+    ],
+    "unknown wake summary": [
+      ...macos27Preamble,
+      "2026-09-29 10:06:00 +0100 UnknownWakeSummary",
+      ...rest,
+    ],
+  };
+  for (const [label, lines] of Object.entries(cases)) {
+    for (const cursor of [
+      null,
+      powerCursor(`pmset-time:${macos27BaselineMs}`),
+    ]) {
+      assert.equal(
+        parsePmsetPowerLog(lines.join("\n"), cursor).complete,
+        false,
+        label,
+      );
+    }
+  }
+});
+
+test("a well-formed UUID line is accepted in the macOS 27 preamble", () => {
+  const lines = [
+    ...macos27Preamble.slice(0, 4),
+    "UUID: 123e4567-E89B-12d3-a456-426614174000",
+    ...macos27Rows,
+  ];
+  assert.equal(parsePmsetPowerLog(lines.join("\n"), null).complete, true);
+});
+
+test("power supervision establishes its baseline from macOS 27 output but holds when the header is misplaced", async () => {
+  const [asl, blank, header, separator, uuid] = macos27Preamble as [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ];
+  const [first, ...rest] = macos27Rows as [string, ...string[]];
+  const misplaced = [asl, blank, first, header, separator, uuid, ...rest];
+  for (const [lines, held] of [
+    [macos27Log, false],
+    [misplaced, true],
+  ] as const) {
+    const root = mkdtempSync(join(tmpdir(), "ensemble-power-macos27-"));
+    const store = powerStore(join(root, "power.sqlite"));
+    const readLog: PowerLogReader = async function* () {
+      yield* lines;
+    };
+    const power = new ExecutionPower(
+      store.state,
+      new MacPowerEventSource(readLog, 2500, 4096, () => macos27BaselineMs),
+      new CaffeinateAssertion(() => new FakeChild()),
+      async () => {},
+    );
+    try {
+      await power.start();
+      await power.poll();
+      assert.equal(power.admissionHeld(), held);
+    } finally {
+      await power.stop();
+      store.db.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("a multi-megabyte valid log streams to a complete batch without a total-size cap", async () => {
   const script = `const row="2026-09-29 09:50:00 +0100 Assertions\\tPID 10(app) Created PreventUserIdleSystemSleep";
 let out="";for(let i=0;i<60000;i++){out+=row+"\\n";if(out.length>1e5){process.stdout.write(out);out=""}}
