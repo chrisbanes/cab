@@ -455,7 +455,10 @@ function closedIssueWorld(closedIssues: "skip" | "done") {
     name: "Closed",
     leadProfileId: null,
   });
-  const configure = (mode: "skip" | "done") => {
+  const configure = (
+    mode: "skip" | "done",
+    { activate = true, keepSelection = true } = {},
+  ) => {
     const { version } = domain.githubConfiguration(projectId);
     domain.execute({
       type: "github.configure",
@@ -464,15 +467,17 @@ function closedIssueWorld(closedIssues: "skip" | "done") {
       projectId,
       expectedVersion: version,
       credentialRef: "env:TEST_GITHUB",
-      selections: [
-        {
-          id: "repo",
-          kind: "repository",
-          repositoryId: "R_1",
-          owner: "org",
-          name: "repo",
-        },
-      ],
+      selections: keepSelection
+        ? [
+            {
+              id: "repo",
+              kind: "repository",
+              repositoryId: "R_1",
+              owner: "org",
+              name: "repo",
+            },
+          ]
+        : [],
       readiness: {
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
@@ -480,6 +485,7 @@ function closedIssueWorld(closedIssues: "skip" | "done") {
       closedIssues: mode,
       repositories: [],
     });
+    if (!activate) return;
     domain.execute({
       type: "github.activate",
       actor: "operator",
@@ -637,6 +643,53 @@ test("switching done to skip reopens a provider-completed task under a closure h
     assert.equal(w.completion(task?.id), false);
     assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
     assert.equal(w.domain.tasks(w.projectId).length, 1);
+  } finally {
+    w.close();
+  }
+});
+
+for (const keepSelection of [true, false])
+  test(`switching done to skip reopens provider-completed tasks at once with ${keepSelection ? "retained" : "removed"} selections`, () => {
+    const w = closedIssueWorld("done");
+    try {
+      const task = w.observe({ state: "closed" });
+      assert.equal(task?.state, "done");
+      w.configure("skip", { activate: false, keepSelection });
+      const reverted = w.domain.task(String(task?.id));
+      assert.equal(reverted.state, "open");
+      assert.equal(w.completion(task?.id), false);
+      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+      assert.equal(w.domain.tasks(w.projectId).length, 1);
+      assert.ok(w.sources.issue("I_1"));
+    } finally {
+      w.close();
+    }
+  });
+
+test("switching skip to done completes nothing before a settled complete refresh", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    const taskId = String(w.observe({})?.id);
+    w.observe({ state: "closed" });
+    assert.equal(w.hold()?.reason, "closed");
+    w.configure("done", { activate: false });
+    assert.equal(w.domain.task(taskId).state, "open");
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    w.configure("done");
+    w.observe({ state: "closed" });
+    assert.equal(w.domain.task(taskId).state, "open");
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => false),
+      false,
+    );
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      true,
+    );
+    assert.equal(w.domain.task(taskId).state, "done");
   } finally {
     w.close();
   }

@@ -2153,6 +2153,17 @@ export class DomainStore {
               .run(command.projectId, selectionIds);
           const sources = new GitHubSourceStore(this.db);
           for (const taskId of affectedTasks) sources.updateReadiness(taskId);
+          // Skip never leaves a provider closure as Done: reopen those tasks under their
+          // closure hold now, since retained selections stay inactive until previewed.
+          if (
+            current.closedIssues === "done" &&
+            command.closedIssues === "skip"
+          )
+            for (const row of this.db
+              .prepare(`SELECT p.taskId FROM github_provider_completions p
+              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
+              .all(command.projectId) as Row[])
+              sources.updateReadiness(String(row.taskId));
           this.db
             .prepare(
               "UPDATE github_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",
