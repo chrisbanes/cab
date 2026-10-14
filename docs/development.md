@@ -340,8 +340,12 @@ or run `node dist/src/cli/main.js` directly.
    either scope; the rest need a read/write credential (a read-only one exits 3):
    - `project sources PROJECT_ID` lists the source version, whether a credential
      reference is configured, selections (id, kind, descriptor, active, observation
-     state and times), readiness, the closed-issue mode, linked repositories and
-     refs, and placement conflicts. Queries, filters, paths and reference names are never shown. A
+     state and times, and stored observed/open/matching item counts), readiness, the
+     closed-issue mode, linked repositories and refs, and placement conflicts. A
+     complete read with open items and none matching the readiness rule adds a
+     warning line naming `project prepare-source`; JSON carries the counts and
+     `readinessRule`. `task get` adds a `Readiness:` line naming an imported Draft
+     task's unmet conditions. Queries, filters, paths and reference names are never shown. A
      partial observation is gap `evidence-gap`, an unavailable one
      `redaction-unavailable`, and an unreadable saved value `content-unavailable`.
    - `project prepare-source PROJECT_ID --out FILE --edit-file FILE

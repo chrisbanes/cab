@@ -1025,3 +1025,33 @@ test("a pending own-delivery closure proof is not shown as GitHub closure on any
     );
   }
 });
+
+test("task get names an imported Draft task's unmet readiness condition", async (t) => {
+  const o = await startCliOperator(t);
+  const taskId = seedImported(o);
+  const get = async () => {
+    const human = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
+    assert.equal(human.code, 0, human.err);
+    return human.out;
+  };
+  assert.doesNotMatch(await get(), /Readiness:/);
+  o.s.f.service.githubSources().reconcileSelection(o.s.projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I1",
+        repositoryId: "R1",
+        repositoryName: "owner/repo",
+        number: 42,
+        title: "Imported task",
+        body: "Imported body",
+        state: "open",
+        labels: [],
+        projectFields: [],
+      },
+    ],
+  });
+  assert.match(await get(), /^Readiness: Not Ready: missing label `ready`$/m);
+});

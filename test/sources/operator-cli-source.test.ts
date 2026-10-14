@@ -96,7 +96,49 @@ test("project sources reads selections, links and observations without private t
     expectedVersion: json.data.source.version,
   });
   assert.equal(activated.status, 200);
-  w.s.f.service.githubSources().reconcileSelection(w.ids.atlas, "S-1", {
+  const sources = w.s.f.service.githubSources();
+  sources.reconcileSelection(w.ids.atlas, "S-1", {
+    complete: true,
+    issues: [1, 2, 3].map((n) => ({
+      providerInstance: "github.com" as const,
+      nodeId: `I_${n}`,
+      repositoryId: "acme/atlas",
+      repositoryName: "acme/atlas",
+      number: n,
+      title: `Issue ${n}`,
+      body: "Scope",
+      state: "open" as const,
+      labels: [],
+      projectFields: [],
+    })),
+    reason: null,
+  });
+  const counted = databaseDigest(w.s.f);
+  const complete = await w.ok("ro", ["project", "sources", w.ids.atlas]);
+  const humanCounts = await w.h.run([
+    "project",
+    "sources",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.deepEqual(complete.data.observations[0].counts, {
+    observed: 3,
+    open: 3,
+    closedSkipped: 0,
+    matching: 0,
+    complete: true,
+  });
+  assert.equal(complete.data.readinessRule.kind, "rule");
+  assert.match(humanCounts.out, /3 observed · 3 open · 0 match label `ready`/);
+  assert.match(
+    humanCounts.out,
+    /^S-1: No open item matches the readiness rule \(label `ready`\); imported tasks stay Draft until one does\. Change readiness with 'ensemble project prepare-source'\.$/m,
+  );
+  for (const secret of [...PRIVATE, w.ids.checkout])
+    assert.ok(!humanCounts.out.includes(secret), secret);
+  assert.equal(databaseDigest(w.s.f), counted);
+  sources.reconcileSelection(w.ids.atlas, "S-1", {
     complete: false,
     issues: [],
     reason: "rate-limited",
@@ -104,6 +146,15 @@ test("project sources reads selections, links and observations without private t
   const partial = await w.ok("ro", ["project", "sources", w.ids.atlas]);
   assert.equal(partial.data.observations[0].state, "partial");
   assert.deepEqual(partial.coverage.gaps, ["evidence-gap"]);
+  const humanPartial = await w.h.run([
+    "project",
+    "sources",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(humanPartial.out, /partial read; counts may be incomplete/);
+  assert.doesNotMatch(humanPartial.out, /No open item matches/);
   assert.equal(existsSync(w.journal), false);
 });
 
