@@ -14,6 +14,7 @@ import type { ReadinessRead } from "../../web/src/setup-model.js";
 const projectId = "00000000-0000-4000-8000-000000000001",
   profileId = "00000000-0000-4000-8000-000000000002";
 type Check =
+  | "runtime-enabled"
   | "codex-executable"
   | "codex-login"
   | "claude-executable"
@@ -24,6 +25,7 @@ const readiness = (
   state: "ready",
   checks: (
     [
+      "runtime-enabled",
       "codex-executable",
       "codex-login",
       "claude-executable",
@@ -137,6 +139,62 @@ test("Runtime is Next, Done, Needs attention after a later row is Done, or Check
   assert.equal(
     byId(rows(workspace(), { state: "unavailable" })).runtime?.status,
     "unknown",
+  );
+});
+
+test("Runtime passes on any enabled runtime and sends a missing one to Settings > Runtime", () => {
+  // Claude-only: Codex is disabled (its checks are not configured), Claude passes.
+  const claudeOnly = byId(
+    rows(
+      workspace(),
+      readiness({
+        "codex-executable": "not-configured",
+        "codex-login": "not-configured",
+        "claude-token": "pass",
+      }),
+    ),
+  ).runtime;
+  assert.equal(claudeOnly?.status, "done");
+  // Codex failing while Claude passes still has a runtime that can run work.
+  assert.equal(
+    byId(
+      rows(
+        workspace(),
+        readiness({ "codex-login": "fail", "claude-token": "pass" }),
+      ),
+    ).runtime?.status,
+    "done",
+  );
+  // Nothing enabled: the runtime-enabled check fails and the row opens Runtime settings.
+  const none = byId(
+    rows(
+      workspace(),
+      readiness({
+        "runtime-enabled": "fail",
+        "codex-executable": "not-configured",
+        "codex-login": "not-configured",
+      }),
+    ),
+  ).runtime;
+  assert.equal(none?.status, "next");
+  assert.equal(none?.detail, "runtime-enabled reason");
+  assert.deepEqual(none?.action, {
+    kind: "link",
+    label: "Open runtime settings",
+    href: "/app/settings/runtime",
+  });
+  // An enabled runtime that fails (and no other) keeps the readiness link.
+  assert.deepEqual(
+    byId(
+      rows(
+        workspace(),
+        readiness({
+          "codex-login": "fail",
+          "claude-executable": "not-configured",
+        }),
+      ),
+    ).runtime?.action,
+    { kind: "link", label: "Open readiness check", href: "/app/settings" },
   );
 });
 

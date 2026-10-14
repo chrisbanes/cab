@@ -215653,6 +215653,991 @@
           ]
         }
       ]
+    },
+    {
+      "type": "frame",
+      "id": "bXZvb",
+      "x": 23650,
+      "y": 38520,
+      "name": "126b · Runtime / execution runtime switches, four row states",
+      "theme": {
+        "X:Mode": "Dark",
+        "X:Base": "Neutral",
+        "X:Accent": "Default"
+      },
+      "width": 760,
+      "fill": "$X:--background",
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 32,
+      "children": [
+        {
+          "type": "text",
+          "id": "ByGZz",
+          "name": "Breadcrumb",
+          "fill": "$X:--muted-foreground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Settings / Runtime",
+          "lineHeight": 1.45,
+          "fontFamily": "$font-sans",
+          "fontSize": 12,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "ris67",
+          "name": "Execution runtimes panel",
+          "width": "fill_container",
+          "fill": "$X:--card",
+          "cornerRadius": "$radius-xl",
+          "stroke": "$X:--border",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "ietMo",
+              "name": "Heading",
+              "fill": "$X:--foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Execution runtimes",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 16,
+              "fontWeight": "500"
+            },
+            {
+              "type": "text",
+              "id": "TMEqw",
+              "name": "Summary",
+              "fill": "$X:--muted-foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Work for a runtime that is not enabled or unavailable waits; it never falls back to another runtime.",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "frame",
+              "id": "oIiQs",
+              "name": "Row · enabled and running",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "svUGV",
+                  "name": "Row heading",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "HUyNX",
+                      "name": "Name and status",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "mfVDl",
+                          "name": "Runtime name",
+                          "fill": "$X:--foreground",
+                          "content": "Codex",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "id": "tnwvi",
+                          "type": "ref",
+                          "ref": "j3TsL",
+                          "name": "Status badge",
+                          "descendants": {
+                            "uKHIr": {
+                              "content": "Available"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "MExW6",
+                      "type": "ref",
+                      "ref": "X:c8fiq",
+                      "name": "Codex enabled switch",
+                      "descendants": {
+                        "X:HsFun": {
+                          "content": "Codex enabled",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "Mi7dt",
+              "name": "Row · enabled and unavailable with Fix",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "xSoqm",
+                  "name": "Row heading",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "W8XU3",
+                      "name": "Name and status",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "qj9iW",
+                          "name": "Runtime name",
+                          "fill": "$X:--foreground",
+                          "content": "Claude",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "id": "TQzco",
+                          "type": "ref",
+                          "ref": "j3TsL",
+                          "name": "Status badge",
+                          "descendants": {
+                            "uKHIr": {
+                              "content": "Unavailable"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "w7Re7",
+                      "type": "ref",
+                      "ref": "X:c8fiq",
+                      "name": "Claude enabled switch",
+                      "descendants": {
+                        "X:HsFun": {
+                          "content": "Claude enabled",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "vPfSH",
+                  "name": "Fix line",
+                  "fill": "$X:--muted-foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Turn it off and on, or restart the service.",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ij7Ex",
+              "name": "Row · disabled",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "VZeYN",
+                  "name": "Row heading",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "NZrHG",
+                      "name": "Name and status",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "kHNRT",
+                          "name": "Runtime name",
+                          "fill": "$X:--foreground",
+                          "content": "Claude",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "id": "wf89k",
+                          "type": "ref",
+                          "ref": "j3TsL",
+                          "name": "Status badge",
+                          "descendants": {
+                            "uKHIr": {
+                              "content": "Not enabled · Disabled in Settings"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "EwTkS",
+                      "type": "ref",
+                      "ref": "X:fcMl6",
+                      "name": "Claude enabled switch",
+                      "descendants": {
+                        "X:HsFun": {
+                          "content": "Claude enabled",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "J8GZn3",
+              "name": "Row · refused, executable missing",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "B9OVZL",
+                  "name": "Row heading",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "t6rX7",
+                      "name": "Name and status",
+                      "gap": 8,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "w1OF9",
+                          "name": "Runtime name",
+                          "fill": "$X:--foreground",
+                          "content": "Claude",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "500"
+                        },
+                        {
+                          "id": "FwRM7",
+                          "type": "ref",
+                          "ref": "j3TsL",
+                          "name": "Status badge",
+                          "descendants": {
+                            "uKHIr": {
+                              "content": "Not enabled · Disabled in Settings"
+                            }
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "id": "b8KxdM",
+                      "type": "ref",
+                      "ref": "X:fcMl6",
+                      "name": "Claude enabled switch",
+                      "descendants": {
+                        "X:HsFun": {
+                          "content": "Claude enabled",
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "id": "UeyrS",
+                  "type": "ref",
+                  "ref": "NaPr2",
+                  "name": "Refusal reason",
+                  "descendants": {
+                    "E4Apxu": {
+                      "content": "Claude was not turned on: `claude` not found on the service PATH."
+                    },
+                    "T7OnsT": {
+                      "content": "Install Claude Code into the fixed PATH, then turn it on again. The switch stays off."
+                    },
+                    "Zyyh5/pMN71": {
+                      "content": "runtime.configure"
+                    },
+                    "Zyyh5/DfcEu": {
+                      "content": "system:runtime:claude"
+                    },
+                    "Zyyh5/KLIpp": {
+                      "content": "—"
+                    },
+                    "Zyyh5/E9I4M": {
+                      "content": "runtime-executable-missing"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "FQScX",
+      "x": 24490,
+      "y": 38520,
+      "name": "126c · Runtime / disable confirmation with bound tasks",
+      "theme": {
+        "X:Mode": "Dark",
+        "X:Base": "Neutral",
+        "X:Accent": "Default"
+      },
+      "width": 480,
+      "fill": "$X:--card",
+      "cornerRadius": "$radius-xl",
+      "stroke": "$X:--border",
+      "strokeWidth": 1,
+      "layout": "vertical",
+      "gap": 12,
+      "padding": 24,
+      "children": [
+        {
+          "type": "text",
+          "id": "I25hPR",
+          "name": "Title",
+          "fill": "$X:--foreground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "Turn off Claude?",
+          "lineHeight": 1.45,
+          "fontFamily": "$font-sans",
+          "fontSize": 16,
+          "fontWeight": "600"
+        },
+        {
+          "type": "text",
+          "id": "pcoGI",
+          "name": "Body",
+          "fill": "$X:--muted-foreground",
+          "textGrowth": "fixed-width",
+          "width": "fill_container",
+          "content": "2 tasks use Claude. Running turns finish; their next turns wait until Claude is enabled again.",
+          "lineHeight": 1.45,
+          "fontFamily": "$font-sans",
+          "fontSize": 14,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "he8hG",
+          "name": "Actions",
+          "width": "fill_container",
+          "gap": 8,
+          "justifyContent": "end",
+          "children": [
+            {
+              "id": "Nv7uz",
+              "type": "ref",
+              "ref": "K7cX7",
+              "name": "Cancel",
+              "descendants": {
+                "X:poRwU": {
+                  "content": "Cancel"
+                }
+              }
+            },
+            {
+              "id": "Jn6jg",
+              "type": "ref",
+              "ref": "X:YKnjc",
+              "name": "Turn off Claude",
+              "descendants": {
+                "X:PqjlB": {
+                  "enabled": false
+                },
+                "X:NDadS": {
+                  "content": "Turn off Claude",
+                  "fontFamily": "$font-sans"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "WM9Em",
+      "x": 25050,
+      "y": 38520,
+      "name": "151b · Settings / Readiness · no execution runtime enabled",
+      "theme": {
+        "X:Mode": "Dark",
+        "X:Base": "Neutral",
+        "X:Accent": "Default"
+      },
+      "width": 760,
+      "fill": "$X:--background",
+      "layout": "vertical",
+      "gap": 16,
+      "padding": 32,
+      "children": [
+        {
+          "type": "frame",
+          "id": "t0Esg",
+          "name": "Readiness panel",
+          "width": "fill_container",
+          "fill": "$X:--card",
+          "cornerRadius": "$radius-xl",
+          "stroke": "$X:--border",
+          "strokeWidth": 1,
+          "layout": "vertical",
+          "gap": 12,
+          "padding": 16,
+          "children": [
+            {
+              "type": "text",
+              "id": "PS8Y2",
+              "name": "Heading",
+              "fill": "$X:--foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "Readiness",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 16,
+              "fontWeight": "500"
+            },
+            {
+              "type": "frame",
+              "id": "A6lGL",
+              "name": "Check · An execution runtime is enabled",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                10,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "kVS4W",
+                  "name": "Check heading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PnXuV",
+                      "name": "Label",
+                      "fill": "$X:--foreground",
+                      "content": "An execution runtime is enabled",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "id": "jrYWb",
+                      "type": "ref",
+                      "ref": "j3TsL",
+                      "name": "Status",
+                      "descendants": {
+                        "uKHIr": {
+                          "content": "Fail"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "XNwyq",
+                  "name": "Reason",
+                  "fill": "$X:--muted-foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "No execution runtime is enabled",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "YrfGN",
+                  "name": "Fix",
+                  "fill": "$X:--foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Fix: Enable a runtime in Settings → Runtime",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "K90k6Y",
+              "name": "Check · Codex executable",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                10,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "ipf7R",
+                  "name": "Check heading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "bIpPK",
+                      "name": "Label",
+                      "fill": "$X:--foreground",
+                      "content": "Codex executable",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "id": "n43o0",
+                      "type": "ref",
+                      "ref": "j3TsL",
+                      "name": "Status",
+                      "descendants": {
+                        "uKHIr": {
+                          "content": "Not configured"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "K3hRFl",
+                  "name": "Reason",
+                  "fill": "$X:--muted-foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Disabled in Settings",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "a6um2n",
+                  "name": "Fix",
+                  "fill": "$X:--foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Fix: Enable Codex in Settings → Runtime",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "fIVEU",
+              "name": "Check · Codex login",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                10,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "gmqRu",
+                  "name": "Check heading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "NmY7y",
+                      "name": "Label",
+                      "fill": "$X:--foreground",
+                      "content": "Codex login",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "id": "mafAl",
+                      "type": "ref",
+                      "ref": "j3TsL",
+                      "name": "Status",
+                      "descendants": {
+                        "uKHIr": {
+                          "content": "Not configured"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "Zyt8Q",
+                  "name": "Reason",
+                  "fill": "$X:--muted-foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Disabled in Settings",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "xEGi6",
+                  "name": "Fix",
+                  "fill": "$X:--foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Fix: Enable Codex in Settings → Runtime",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "z1Woly",
+              "name": "Check · Git",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                10,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Lw2hn",
+                  "name": "Check heading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "W9d2f",
+                      "name": "Label",
+                      "fill": "$X:--foreground",
+                      "content": "Git",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "id": "Tj7AE",
+                      "type": "ref",
+                      "ref": "j3TsL",
+                      "name": "Status",
+                      "descendants": {
+                        "uKHIr": {
+                          "content": "Pass"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "l4wDzc",
+              "name": "Check · Claude executable",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                10,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "IjgsD",
+                  "name": "Check heading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "I0E2Lx",
+                      "name": "Label",
+                      "fill": "$X:--foreground",
+                      "content": "Claude executable",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "id": "U5Axru",
+                      "type": "ref",
+                      "ref": "j3TsL",
+                      "name": "Status",
+                      "descendants": {
+                        "uKHIr": {
+                          "content": "Not configured"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "P15Ez",
+                  "name": "Reason",
+                  "fill": "$X:--muted-foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Disabled in Settings",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "goiKj",
+                  "name": "Fix",
+                  "fill": "$X:--foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Fix: Enable Claude in Settings → Runtime",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "i7ObEz",
+              "name": "Check · Claude token",
+              "width": "fill_container",
+              "stroke": "$X:--border",
+              "strokeWidth": {
+                "top": 1
+              },
+              "layout": "vertical",
+              "gap": 4,
+              "padding": [
+                10,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "nFnhl",
+                  "name": "Check heading",
+                  "width": "fill_container",
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "mqLTa",
+                      "name": "Label",
+                      "fill": "$X:--foreground",
+                      "content": "Claude token",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
+                    },
+                    {
+                      "id": "Ll6wU",
+                      "type": "ref",
+                      "ref": "j3TsL",
+                      "name": "Status",
+                      "descendants": {
+                        "uKHIr": {
+                          "content": "Not configured"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "rYk8c",
+                  "name": "Reason",
+                  "fill": "$X:--muted-foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Disabled in Settings",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-sans",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "PXHlU",
+                  "name": "Fix",
+                  "fill": "$X:--foreground",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "Fix: Enable Claude in Settings → Runtime",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$font-mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
     }
   ],
   "variables": {

@@ -111,6 +111,7 @@ import {
   gitHubSourceCredentialStatus,
 } from "./github-source-credential.js";
 import { type GitHubReaderFactory, GitHubSynchronizer } from "./github-sync.js";
+import { resolveOnPath } from "./executable-path.js";
 import { InboxStartupReconciliation } from "./inbox-startup.js";
 import {
   encodeNativeInputReply,
@@ -314,11 +315,30 @@ const unionExclusions = (
 const joinPromptParts = (parts: readonly PromptPart[]) =>
   parts.map((part) => part.text).join("\n\n");
 
+/** Why `configureRuntime` refused before saving anything (ADR-1012). */
+export class RuntimeConfigurationRefusedError extends Error {
+  constructor(
+    readonly code:
+      | "runtime-executable-missing"
+      | "runtime-confirmation-required"
+      | "unavailable",
+    readonly harness: ExecutionHarness,
+    readonly boundTasks = 0,
+  ) {
+    super(code);
+  }
+}
+
 export interface StandaloneServiceOptions {
-  /** Harnesses whose runtime this service starts; must include the default. */
+  /** Harnesses this service can run; the operator's setting decides which it starts. */
   runtimeHarnesses?: readonly ExecutionHarness[];
-  /** Secondary startup cannot block healthy default work; defaults to 10 seconds. */
+  /** A live or secondary start cannot block healthy work; defaults to 10 seconds. */
   secondaryRuntimeStartTimeoutMs?: number;
+  /**
+   * Whether the harness's executable (`codex`, `claude`) is on the service `PATH`. Defaults to a
+   * `PATH` lookup for real runtimes and to true for injected factories.
+   */
+  resolveExecutable?: (harness: ExecutionHarness) => Promise<boolean>;
   delivery?: {
     fetcher?: typeof fetch;
     providerFactory?: (
@@ -499,6 +519,10 @@ export class StandaloneService {
   private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
   /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
   private readonly detachedRuntimeStops = new Set<Promise<void>>();
+  /** Creates and attaches a runtime with this generation's spawn context; set by start(). */
+  private spawnRuntime: ((harness: ExecutionHarness) => Runtime) | undefined;
+  /** Serialises enable/disable per harness; shutdown awaits them. */
+  private readonly runtimeToggles = new Map<ExecutionHarness, Promise<void>>();
   /** Keyed like conversation captures; finished ones stay to count late events. */
   private readonly diagnosticCaptures = new Map<
     string,
@@ -560,13 +584,8 @@ export class StandaloneService {
     const harnesses = z
       .array(executionHarnessSchema)
       .parse(options.runtimeHarnesses ?? [defaultExecutionHarness]);
-    if (
-      !harnesses.includes(defaultExecutionHarness) ||
-      new Set(harnesses).size !== harnesses.length
-    )
-      throw new Error(
-        "Runtime harnesses must include the default harness once each",
-      );
+    if (new Set(harnesses).size !== harnesses.length)
+      throw new Error("Runtime harnesses must be listed once each");
     this.runtimeHarnesses = harnesses;
     const startupTimeout = options.secondaryRuntimeStartTimeoutMs ?? 10_000;
     if (
@@ -981,26 +1000,32 @@ export class StandaloneService {
       spawnEnvironment.spawnEnvironment();
       this.runtimeUnavailableSince.clear();
       this.runtimeNotEnabled.clear();
-      for (const harness of this.runtimeHarnesses) {
-        let runtime: Runtime;
-        try {
-          // Keyed by the requested harness: test fakes do not declare one.
-          runtime = this.runtimeFactory(
-            { ...spawnEnvironment, safety: runtimeSafety(harness), claude },
-            harness,
-          );
-        } catch (error) {
-          if (harness === defaultExecutionHarness) throw error;
-          this.runtimeUnavailableSince.set(harness, Date.now());
-          continue;
-        }
-        this.runtimes.set(harness, runtime);
+      this.spawnRuntime = (harness) => {
+        // Keyed by the requested harness: test fakes do not declare one.
+        const runtime = this.runtimeFactory(
+          { ...spawnEnvironment, safety: runtimeSafety(harness), claude },
+          harness,
+        );
         this.attachRuntime(
           harness,
           runtime,
           state,
           () => this.acquired?.supervisor,
         );
+        return runtime;
+      };
+      // No runtime is required: a disabled, missing or failed one leaves the others running.
+      for (const harness of this.runtimeHarnesses) {
+        if (!domain.runtimeEnabled(harness)) continue;
+        if (!(await this.executableResolves(harness))) {
+          this.runtimeNotEnabled.add(harness);
+          continue;
+        }
+        try {
+          this.runtimes.set(harness, this.spawnRuntime(harness));
+        } catch {
+          this.runtimeUnavailableSince.set(harness, Date.now());
+        }
       }
       const supervisor = new ExecutionSupervisor(
         state,
@@ -1036,35 +1061,13 @@ export class StandaloneService {
         this.options.terminationVerifier ?? new MacProcessTerminationVerifier(),
       );
       acquire("supervisor", supervisor);
-      for (const [harness, runtime] of this.runtimes) {
-        let startup: Promise<void> | undefined;
-        let startupSettled = false;
-        try {
-          startup = runtime.start().finally(() => {
-            startupSettled = true;
-          });
-          await this.startRuntime(harness, runtime, startup);
-        } catch (error) {
-          if (harness === defaultExecutionHarness) throw error;
-          this.runtimes.delete(harness);
-          if (error instanceof RuntimeNotEnabledError)
-            this.runtimeNotEnabled.add(harness);
-          else this.runtimeUnavailableSince.set(harness, Date.now());
-          // Healthy start-up never waits on a failed secondary's cleanup.
-          const cleanup = stopRuntime(runtime);
-          cleanup.catch(() => {});
-          this.detachedRuntimeStops.add(cleanup);
-          if (startup && !startupSettled) {
-            // stop() need not cancel start(). Retain ownership until startup
-            // settles, then stop any resources it created after the first stop.
-            const lateCleanup = Promise.allSettled([startup, cleanup]).then(
-              () => stopRuntime(runtime),
-            );
-            lateCleanup.catch(() => {});
-            this.detachedRuntimeStops.add(lateCleanup);
-          }
-        }
-      }
+      // Codex keeps its untimed start here; only its failure is no longer fatal.
+      for (const [harness, runtime] of this.runtimes)
+        await this.startOrDetach(
+          harness,
+          runtime,
+          harness !== defaultExecutionHarness,
+        );
       await supervisor.reconcileOnStart();
       await deliveryCoordinator.refresh();
       await this.reconcileOwnDeliveryClosures({
@@ -1080,7 +1083,10 @@ export class StandaloneService {
       inboxStartup.reconcile();
       const powerOptions = this.options.power;
       let power: ExecutionPower | undefined;
+      // Production supervises even with no runtime started: one may be enabled later.
       if (
+        (this.runtimeFactory === createRuntime &&
+          powerOptions?.enabled !== false) ||
         [...this.runtimes.values()].some((runtime) =>
           powerSupervisionEnabled(powerOptions, runtime),
         )
@@ -1235,26 +1241,207 @@ export class StandaloneService {
     }
   }
 
-  private async startRuntime(
+  /**
+   * Starts a created runtime. On failure it leaves `this.runtimes`, is marked not enabled
+   * (`RuntimeNotEnabledError`) or unavailable, and is stopped without being awaited.
+   */
+  private async startOrDetach(
     harness: ExecutionHarness,
     runtime: Runtime,
-    startup: Promise<void>,
-  ): Promise<void> {
-    if (harness === defaultExecutionHarness) return startup;
+    timed: boolean,
+  ): Promise<boolean> {
+    let startup: Promise<void> | undefined;
+    let startupSettled = false;
     let timer: NodeJS.Timeout | undefined;
     try {
-      await Promise.race([
-        this.untilFailure(runtime, startup, runtimeFailedError),
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error("Secondary runtime startup timed out")),
-            this.options.secondaryRuntimeStartTimeoutMs ?? 10_000,
-          );
-        }),
-      ]);
+      startup = runtime.start().finally(() => {
+        startupSettled = true;
+      });
+      await (timed
+        ? Promise.race([
+            this.untilFailure(runtime, startup, runtimeFailedError),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("Secondary runtime startup timed out")),
+                this.options.secondaryRuntimeStartTimeoutMs ?? 10_000,
+              );
+            }),
+          ])
+        : startup);
+      return true;
+    } catch (error) {
+      if (this.runtimes.get(harness) === runtime) this.runtimes.delete(harness);
+      if (error instanceof RuntimeNotEnabledError)
+        this.runtimeNotEnabled.add(harness);
+      else this.runtimeUnavailableSince.set(harness, Date.now());
+      // Healthy work never waits on a failed runtime's cleanup.
+      const cleanup = this.detachRuntimeStop(runtime);
+      if (startup && !startupSettled) {
+        // stop() need not cancel start(). Retain ownership until startup
+        // settles, then stop any resources it created after the first stop.
+        const lateCleanup = Promise.allSettled([startup, cleanup]).then(() =>
+          stopRuntime(runtime),
+        );
+        lateCleanup.catch(() => {});
+        this.detachedRuntimeStops.add(lateCleanup);
+      }
+      return false;
     } finally {
       if (timer) clearTimeout(timer);
     }
+  }
+
+  /** Stops a runtime without awaiting it; shutdown awaits and reports it. */
+  private detachRuntimeStop(runtime: Runtime): Promise<void> {
+    const cleanup = stopRuntime(runtime);
+    cleanup.catch(() => {});
+    this.detachedRuntimeStops.add(cleanup);
+    return cleanup;
+  }
+
+  private executableResolves(harness: ExecutionHarness): Promise<boolean> {
+    if (this.options.resolveExecutable)
+      return this.options.resolveExecutable(harness);
+    if (this.runtimeFactory !== createRuntime) return Promise.resolve(true);
+    return resolveOnPath(harness, process.env).then((path) => path !== null);
+  }
+
+  /** Disabled tasks' count for confirmation, and each runtime's persisted setting. */
+  runtimeSettings(): {
+    harness: ExecutionHarness;
+    enabled: boolean;
+    boundTasks: number;
+  }[] {
+    const { domain, state } = this.started();
+    return executionHarnessSchema.options.map((harness) => ({
+      harness,
+      enabled: domain.runtimeEnabled(harness),
+      boundTasks: state.boundTaskCount(harness),
+    }));
+  }
+
+  /**
+   * Saves the operator's setting, then brings the live runtime to it (ADR-1012). Enabling is
+   * refused while the executable is missing; disabling a runtime bound tasks use is refused
+   * unless `confirmedBoundTasks` covers the current count. A recorded key skips both gates
+   * and reconciles again.
+   */
+  async configureRuntime(command: {
+    key: string;
+    harness: ExecutionHarness;
+    enabled: boolean;
+    confirmedBoundTasks?: number | undefined;
+  }): Promise<{ harness: ExecutionHarness; enabled: boolean }> {
+    const { key, harness, enabled } = command;
+    const domainCommand = {
+      key,
+      actor: "operator" as const,
+      type: "runtime.configure" as const,
+      harness,
+      enabled,
+    };
+    return this.toggleRuntime(harness, async () => {
+      const { domain, state } = this.started();
+      let result = domain.recordedCommand(domainCommand);
+      if (result === undefined) {
+        if (enabled && !(await this.executableResolves(harness)))
+          throw new RuntimeConfigurationRefusedError(
+            "runtime-executable-missing",
+            harness,
+          );
+        const boundTasks = state.boundTaskCount(harness);
+        // A task bound after the operator saw the count needs a fresh confirmation.
+        if (!enabled && boundTasks > (command.confirmedBoundTasks ?? 0))
+          throw new RuntimeConfigurationRefusedError(
+            "runtime-confirmation-required",
+            harness,
+            boundTasks,
+          );
+        result = domain.execute(domainCommand);
+      }
+      await this.reconcileRuntime(harness);
+      return parseDomainCommandOutcome("runtime.configure", result).result;
+    });
+  }
+
+  /** Per-harness serialisation; refused once the service stops accepting work. */
+  private toggleRuntime<T>(
+    harness: ExecutionHarness,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const generation = this.generation;
+    const refused = () =>
+      new RuntimeConfigurationRefusedError("unavailable", harness);
+    if (!this.current || !generation?.accepting)
+      return Promise.reject(refused());
+    const previous = this.runtimeToggles.get(harness) ?? Promise.resolve();
+    const next = previous.then(() => {
+      if (this.generation !== generation || !generation.accepting)
+        throw refused();
+      return action();
+    });
+    const settled = next.then(
+      () => {},
+      () => {},
+    );
+    this.runtimeToggles.set(harness, settled);
+    void settled.then(() => {
+      if (this.runtimeToggles.get(harness) === settled)
+        this.runtimeToggles.delete(harness);
+    });
+    return next;
+  }
+
+  /**
+   * Brings the live runtime to the persisted setting. Disabled: stopped once no execution it
+   * owns remains (see `stopDrainedRuntimes`). Enabled: an unavailable or absent runtime is
+   * replaced by a fresh one; a running or draining one is kept, so nothing starts twice.
+   */
+  private async reconcileRuntime(harness: ExecutionHarness): Promise<void> {
+    const { domain } = this.started();
+    if (!domain.runtimeEnabled(harness)) {
+      this.stopDrainedRuntimes();
+      return;
+    }
+    if (!this.runtimeHarnesses.includes(harness) || !this.spawnRuntime) return;
+    const current = this.runtimes.get(harness);
+    // Still running or draining: keep it, and admit work that waited while it was disabled.
+    if (current && !this.runtimeUnavailableSince.has(harness))
+      return this.wakeScheduler();
+    if (current) {
+      this.runtimes.delete(harness);
+      this.detachRuntimeStop(current);
+    }
+    this.runtimeUnavailableSince.delete(harness);
+    this.runtimeNotEnabled.delete(harness);
+    if (!(await this.executableResolves(harness))) {
+      this.runtimeNotEnabled.add(harness);
+      return;
+    }
+    let runtime: Runtime;
+    try {
+      runtime = this.spawnRuntime(harness);
+    } catch {
+      this.runtimeUnavailableSince.set(harness, Date.now());
+      return;
+    }
+    this.runtimes.set(harness, runtime);
+    if (await this.startOrDetach(harness, runtime, true))
+      await this.wakeScheduler();
+  }
+
+  /** Stops each disabled runtime that no submitting, running or held execution still needs. */
+  private stopDrainedRuntimes(): void {
+    const { domain, state } = this.current ?? {};
+    if (!domain || !state) return;
+    for (const [harness, runtime] of this.runtimes)
+      if (
+        !domain.runtimeEnabled(harness) &&
+        !state.hasRuntimeOwnedExecution(harness)
+      ) {
+        this.runtimes.delete(harness);
+        this.detachRuntimeStop(runtime);
+      }
   }
 
   /**
@@ -1463,11 +1650,12 @@ export class StandaloneService {
     return failed ? Promise.race([work, failed.then(onFailure)]) : work;
   }
 
-  /** In the service's harness list, and its runtime did not report at start that it cannot run. */
+  /** Enabled by the operator, in the service's harness list, and its executable was found. */
   private harnessEnabled(harness: ExecutionHarness): boolean {
     return (
       this.runtimeHarnesses.includes(harness) &&
-      !this.runtimeNotEnabled.has(harness)
+      !this.runtimeNotEnabled.has(harness) &&
+      (this.current?.domain.runtimeEnabled(harness) ?? true)
     );
   }
 
@@ -1554,6 +1742,9 @@ export class StandaloneService {
   }
 
   private async stopOwned(): Promise<void> {
+    // A live enable may be starting a runtime; let it land in `runtimes` first.
+    await Promise.all([...this.runtimeToggles.values()]);
+    this.spawnRuntime = undefined;
     const {
       scheduler,
       supervisor,
@@ -1866,13 +2057,30 @@ export class StandaloneService {
   harnessStatuses(): HarnessStatus[] {
     return executionHarnessSchema.options.map((harness) => {
       const policy = this.harnessPolicy(harness),
-        settings = this.harnessSettings(harness);
+        settings = this.harnessSettings(harness),
+        enabled = this.current?.domain.runtimeEnabled(harness) ?? true;
+      if (!enabled)
+        return {
+          harness,
+          enabled,
+          state: "not-configured",
+          reason: "disabled",
+          policy,
+          settings,
+        };
       if (!this.harnessEnabled(harness))
-        return { harness, state: "not-configured", policy, settings };
+        return {
+          harness,
+          enabled,
+          state: "not-configured",
+          reason: "executable-missing",
+          policy,
+          settings,
+        };
       const since = this.runtimeUnavailableSince.get(harness);
       return since === undefined
-        ? { harness, state: "available", policy, settings }
-        : { harness, state: "unavailable", since, policy, settings };
+        ? { harness, enabled, state: "available", policy, settings }
+        : { harness, enabled, state: "unavailable", since, policy, settings };
     });
   }
 
@@ -3695,6 +3903,8 @@ export class StandaloneService {
       return;
     // Unpublished during start-up, so start-up wakes cannot admit work.
     if (!this.current) return;
+    // Every settled turn and resolved hold wakes the scheduler: a drained runtime stops here.
+    this.stopDrainedRuntimes();
     const {
       scheduler,
       schedulerStore: store,

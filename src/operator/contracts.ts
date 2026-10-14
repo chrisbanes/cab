@@ -123,18 +123,30 @@ const harnessStatusBase = {
   settings: supportedRuntimeSettingsSchema.nullable(),
 };
 /**
- * One per harness. `not-configured` (shown as "Not enabled") is a harness outside the service's
- * `runtimeHarnesses`, or one whose runtime reported at start that it cannot run on this host
- * (Claude without `claude` on the `PATH`); `unavailable` is a runtime that failed.
+ * One per harness; `enabled` is the operator's persisted setting. `not-configured` (shown as
+ * "Not enabled") is a disabled runtime, or an enabled one whose executable is not on the service
+ * `PATH`; `unavailable` is an enabled runtime that failed to start or failed later.
  */
 export const harnessStatusSchema = z.discriminatedUnion("state", [
-  z.object({ ...harnessStatusBase, state: z.literal("available") }).strict(),
   z
-    .object({ ...harnessStatusBase, state: z.literal("not-configured") })
+    .object({
+      ...harnessStatusBase,
+      enabled: z.boolean(),
+      state: z.literal("available"),
+    })
     .strict(),
   z
     .object({
       ...harnessStatusBase,
+      enabled: z.boolean(),
+      state: z.literal("not-configured"),
+      reason: z.enum(["disabled", "executable-missing"]),
+    })
+    .strict(),
+  z
+    .object({
+      ...harnessStatusBase,
+      enabled: z.boolean(),
       state: z.literal("unavailable"),
       since: time,
     })
@@ -1860,6 +1872,19 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      ...base,
+      type: z.literal("runtime.configure"),
+      harness: executionHarnessSchema,
+      enabled: z.boolean(),
+      /**
+       * The bound-task count the operator confirmed. Disabling a runtime that bound tasks
+       * use is refused without it, or when the service now counts more.
+       */
+      confirmedBoundTasks: z.number().int().nonnegative().safe().optional(),
+    })
+    .strict(),
+  z
+    .object({
       ...domainBase,
       type: z.literal("github.preview"),
       selectionId: z.string().trim().min(1).max(512),
@@ -2051,6 +2076,14 @@ export const configurationReceiptSchema = z
         .strict(),
       z
         .object({
+          commandType: z.literal("runtime.configure"),
+          resourceId: z.enum(["system:runtime:codex", "system:runtime:claude"]),
+          harness: executionHarnessSchema,
+          enabled: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
           commandType: z.literal("github.preview"),
           resourceId: uuid,
           selectionId: z.string().min(1).max(512),
@@ -2072,6 +2105,16 @@ export const configurationReceiptSchema = z
 export const runtimeSettingsSchema = envelope(
   z
     .object({
+      /** Each execution runtime's setting and the tasks a disable would make wait. */
+      runtimes: z.array(
+        z
+          .object({
+            harness: executionHarnessSchema,
+            enabled: z.boolean(),
+            boundTasks: time,
+          })
+          .strict(),
+      ),
       globalLimit: revision,
       defaultProjectLimit: z.literal(2),
       globalUsage: time,
@@ -2704,6 +2747,8 @@ export const apiErrorSchema = z
           "local-review-comment-anchor-required",
           "credential-invalid",
           "insufficient-scope",
+          "runtime-executable-missing",
+          "runtime-confirmation-required",
         ]),
         message: z.string().max(256),
         fieldPaths: z.array(z.string().max(128)).optional(),
@@ -3018,6 +3063,7 @@ export const operationTypeSchema = z.enum([
   "project.configure",
   "routing.configure",
   "capacity.configure",
+  "runtime.configure",
   "assignment.apply",
   "github.configure",
   "github.preview",
@@ -3027,11 +3073,11 @@ export const operationTypeSchema = z.enum([
   "recovery.no-turn.recover",
   "recovery.conversation.replace",
 ]);
-/** `project:<id>`, `profile:<id>`, `assignment:<id>` or `system:capacity`; nothing else is a readable scope. */
+/** `project:<id>`, `profile:<id>`, `assignment:<id>`, `system:capacity` or `system:runtime:<harness>`; nothing else is a readable scope. */
 export const operationScopeSchema = z
   .string()
   .regex(
-    /^(?:(?:project|profile|assignment):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity)$/i,
+    /^(?:(?:project|profile|assignment):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|system:capacity|system:runtime:(?:codex|claude))$/i,
   );
 export const operationReadSchema = envelope(
   z.discriminatedUnion("state", [

@@ -79,6 +79,7 @@ export type Values = {
   kind?: string | undefined;
   severity?: string | undefined;
   follow?: boolean | undefined;
+  yes?: boolean | undefined;
   interval?: string | undefined;
   "max-duration"?: string | undefined;
   "compare-current"?: boolean | undefined;

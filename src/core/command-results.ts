@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { canonicalMaterial, deliveryPolicySchema } from "./delivery.js";
 import type { DomainCommand } from "./domain.js";
+import { executionHarnessSchema } from "./execution-runtime.js";
 import { linkedRepositorySchema } from "./github-source.js";
 import { githubConfigurationSchema } from "./github-source-contracts.js";
 
@@ -165,6 +166,10 @@ export const gettingStartedCommandResultSchema = z
   .object({ dismissed: z.boolean() })
   .strict();
 
+export const runtimeEnablementCommandResultSchema = z
+  .object({ harness: executionHarnessSchema, enabled: z.boolean() })
+  .strict();
+
 export interface DomainCommandResultMap {
   "delivery.configure": z.output<typeof deliveryCommandResultSchema>;
   "project.create": z.output<typeof projectCommandResultSchema>;
@@ -191,6 +196,7 @@ export interface DomainCommandResultMap {
   "getting-started.configure": z.output<
     typeof gettingStartedCommandResultSchema
   >;
+  "runtime.configure": z.output<typeof runtimeEnablementCommandResultSchema>;
 }
 
 type DomainCommandType = DomainCommand["type"];
@@ -326,6 +332,11 @@ function parseCommandOutcome(
       return {
         type,
         result: parseUnchanged(gettingStartedCommandResultSchema, value),
+      };
+    case "runtime.configure":
+      return {
+        type,
+        result: parseUnchanged(runtimeEnablementCommandResultSchema, value),
       };
     default: {
       const exhaustive: never = type;

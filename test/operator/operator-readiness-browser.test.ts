@@ -32,7 +32,13 @@ for (const [name, viewport] of [
   ["phone", phone],
 ] as const) {
   test(`Settings shows the service readiness checks with fix lines on ${name}`, async (t, journey) => {
-    const { f, page } = await startSettings(journey, "/app/settings", viewport);
+    const { f, page } = await startSettings(
+      journey,
+      "/app/settings",
+      viewport,
+      undefined,
+      { serviceOptions: { runtimeHarnesses: ["codex", "claude"] } },
+    );
     const root = mkdtempSync(join(tmpdir(), "ensemble-ready-ui-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const tokenPath = join(root, "claude-token");
@@ -81,7 +87,7 @@ for (const [name, viewport] of [
         (await fetch("/api/operator/readiness")).json(),
       ),
     );
-    assert.equal(api.data.checks.length, 8);
+    assert.equal(api.data.checks.length, 9);
     for (const c of api.data.checks) {
       const row = panel.getByRole("article", {
         name: c.label,

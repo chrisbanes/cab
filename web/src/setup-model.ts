@@ -254,6 +254,23 @@ export function readyCheckItems(input: {
 }) {
   const { workspace, readiness, capacity } = input;
   const items: WaitItem[] = [];
+  const runtimeLink = {
+    label: "Runtime settings",
+    href: "/app/settings/runtime",
+  };
+  // With no runtime enabled the readiness check speaks for every lead, so say it once.
+  const noRuntime =
+    readiness.state === "ready"
+      ? readiness.checks.find(
+          (c) => c.id === "runtime-enabled" && c.status === "fail",
+        )
+      : undefined;
+  if (noRuntime?.reason && noRuntime.fix)
+    items.push({
+      text: noRuntime.reason,
+      fix: noRuntime.fix,
+      link: runtimeLink,
+    });
   if (workspace) {
     const lead = workspace.profiles.find(
       (profile) => profile.id === input.leadProfileId && !profile.revoked,
@@ -267,12 +284,15 @@ export function readyCheckItems(input: {
       const status = workspace.harnesses.find((h) => h.harness === harness);
       if (
         status?.state === "unavailable" ||
-        (harness === "codex" && workspace.runtime.state === "unavailable")
+        (harness === "codex" &&
+          workspace.runtime.state === "unavailable" &&
+          status?.state !== "not-configured")
       )
         items.push({ text: unavailableAlert({ harness }) });
-      else if (status?.state === "not-configured")
+      else if (status?.state === "not-configured" && !noRuntime)
         items.push({
           text: `${executionHarnessLabels[harness]} runtime isn't enabled for this service.`,
+          link: runtimeLink,
         });
       // The readiness check for this is a count over every profile, so it cannot speak for
       // this lead. The service applies the same rule to the settings the workspace carries;
@@ -293,8 +313,17 @@ export function readyCheckItems(input: {
           ? ["claude-executable", "claude-token"]
           : ["codex-executable", "codex-login"];
       if (readiness.state === "ready")
+        // A runtime that is not enabled is already one item above; its checks repeat it.
         for (const c of readiness.checks)
-          if (own.includes(c.id) && c.reason && c.fix)
+          if (
+            own.includes(c.id) &&
+            c.reason &&
+            c.fix &&
+            !(
+              status?.state === "not-configured" &&
+              c.status === "not-configured"
+            )
+          )
             items.push({
               text: c.reason,
               fix: c.fix,

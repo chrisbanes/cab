@@ -41,6 +41,7 @@ const documented = [
   "project sources",
   "delivery get",
   "recovery get",
+  "runtime list",
 ];
 
 /** The documented CLI3 configuration, adoption and receipt commands. */
@@ -75,6 +76,8 @@ const documentedWrites = [
   "delivery send-comment",
   "recovery prepare",
   "recovery submit",
+  "runtime enable",
+  "runtime disable",
 ];
 
 test("every documented browse command runs read-only with a coverage envelope", async (t) => {

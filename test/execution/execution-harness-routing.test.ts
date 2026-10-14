@@ -857,22 +857,27 @@ for (const failure of ["construction", "start"] as const)
     }
   });
 
-test("a default runtime start failure still aborts start-up", async () => {
+test("no runtime is required: a Codex start failure leaves the service running (ADR-1012)", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-harness-default-"));
   const runtimes = fakes();
   runtimes.codex.failStart = true;
   const service = open(join(root, "data"), runtimes);
   try {
-    await assert.rejects(service.start(), /Runtime failed to start/);
-    assert.throws(
-      () => open(join(root, "other"), runtimes, ["claude"]),
-      /must include the default harness/,
+    await service.start();
+    assert.deepEqual(
+      service.harnessStatuses().map((s) => [s.harness, s.state]),
+      [
+        ["codex", "unavailable"],
+        ["claude", "available"],
+      ],
     );
+    assert.doesNotThrow(() => open(join(root, "other"), runtimes, ["claude"]));
     assert.throws(
       () => open(join(root, "other"), runtimes, ["codex", "codex"]),
-      /must include the default harness/,
+      /listed once each/,
     );
   } finally {
+    await service.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -1496,6 +1501,344 @@ test("shutdown retains pending secondary startup until its late cleanup settles"
   } finally {
     release();
     await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** Each create returns a fresh fake, so a live enable is visible as a new instance. */
+function openLive(
+  dataDir: string,
+  options: {
+    resolves?: (harness: ExecutionHarness) => boolean;
+    prepare?: (runtime: HarnessRuntime, harness: ExecutionHarness) => void;
+  } = {},
+) {
+  const created: Record<ExecutionHarness, HarnessRuntime[]> = {
+    codex: [],
+    claude: [],
+  };
+  const service = new StandaloneService(
+    dataDir,
+    (context, harness) => {
+      const runtime = new HarnessRuntime(harness);
+      runtime.safety = context.safety;
+      options.prepare?.(runtime, harness);
+      created[harness].push(runtime);
+      return runtime;
+    },
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      power: { enabled: false },
+      routingClient: null,
+      resolveExecutable: async (harness) => options.resolves?.(harness) ?? true,
+    },
+  );
+  const latest = (harness: ExecutionHarness) => {
+    const runtime = created[harness].at(-1);
+    assert.ok(runtime, `${harness} was created`);
+    return runtime;
+  };
+  return { service, created, latest };
+}
+
+const statusOf = (service: StandaloneService, harness: ExecutionHarness) => {
+  const status = service.harnessStatuses().find((s) => s.harness === harness);
+  return status && [status.state, "reason" in status ? status.reason : null];
+};
+
+test("disabling Claude lets its running turn finish, then stops it; new Claude work waits and never runs on Codex", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-toggle-"));
+  const live = openLive(join(root, "data"));
+  const { service } = live;
+  const describe = () => ({
+    claude: live.created.claude.map((r) => r.calls),
+    codex: live.created.codex.map((r) => r.calls),
+    intents: service.list().map((i) => [i.workId, i.state, i.reason]),
+  });
+  try {
+    await service.start();
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    const first = live.latest("claude");
+    first.holdTurns = true;
+    const running = await task(service, projectId, [worker]);
+    const runningWork = initial(running.assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, runningWork)?.state === "running",
+      describe,
+    );
+
+    // Bound work needs confirmation; nothing is saved without it.
+    await assert.rejects(
+      service.configureRuntime({
+        key: randomUUID(),
+        harness: "claude",
+        enabled: false,
+      }),
+      (error: { code?: string; boundTasks?: number }) =>
+        error.code === "runtime-confirmation-required" &&
+        error.boundTasks === 1,
+    );
+    assert.equal(service.domain().runtimeEnabled("claude"), true);
+    const key = randomUUID();
+    const disable = {
+      key,
+      harness: "claude" as const,
+      enabled: false,
+      confirmedBoundTasks: 1,
+    };
+    assert.deepEqual(await service.configureRuntime(disable), {
+      harness: "claude",
+      enabled: false,
+    });
+    // A replay converges without re-asking for confirmation.
+    assert.deepEqual(
+      await service.configureRuntime({
+        ...disable,
+        confirmedBoundTasks: undefined,
+      }),
+      { harness: "claude", enabled: false },
+    );
+    assert.deepEqual(statusOf(service, "claude"), [
+      "not-configured",
+      "disabled",
+    ]);
+    assert.equal(first.stops, 0, "a draining runtime keeps running");
+    assert.ok(!first.calls.some((c) => c.startsWith("interruptTurn")));
+
+    const waiting = await task(service, projectId, [worker]);
+    const waitingWork = initial(waiting.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, waitingWork)?.reason ===
+        "Claude runtime is not configured",
+      describe,
+    );
+
+    first.releaseAll();
+    await waitUntil(
+      () => intent(service, runningWork)?.state === "completed",
+      describe,
+    );
+    await waitUntil(() => first.stops === 1, describe);
+    assert.equal(intent(service, waitingWork)?.state, "ready");
+    assert.ok(
+      live.created.codex.every((r) =>
+        r.calls.every((call) => !call.includes("claude")),
+      ),
+    );
+    assert.equal(
+      live.created.codex
+        .flatMap((r) => r.calls)
+        .filter((c) => c.startsWith("startTurn")).length,
+      0,
+      "no Codex turn ran for Claude work",
+    );
+
+    // Re-enabling starts a new runtime without a restart and admits the waiting work.
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "claude",
+      enabled: true,
+    });
+    assert.equal(live.created.claude.length, 2);
+    assert.deepEqual(statusOf(service, "claude"), ["available", null]);
+    await waitUntil(
+      () => intent(service, waitingWork)?.state === "completed",
+      describe,
+    );
+    assert.ok(
+      live.latest("claude").calls.some((c) => c.startsWith("startTurn")),
+    );
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("re-enabling a draining runtime keeps it; disabling one with no bound work stops it at once", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-drain-"));
+  const live = openLive(join(root, "data"));
+  const { service } = live;
+  const describe = () => service.list().map((i) => [i.state, i.reason]);
+  try {
+    await service.start();
+    const worker = profile(service, "claude");
+    const lead = profile(service, "codex");
+    const projectId = project(service, lead, [worker]);
+    const claude = live.latest("claude");
+    claude.holdTurns = true;
+    const running = await task(service, projectId, [worker]);
+    const work = initial(running.assignmentIds[0] ?? "");
+    await waitUntil(() => intent(service, work)?.state === "running", describe);
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "claude",
+      enabled: false,
+      confirmedBoundTasks: 1,
+    });
+    // Work that waited while it was disabled is admitted on re-enable, before the
+    // running turn ends.
+    const waiting = await task(service, projectId, [worker]);
+    const waitingWork = initial(waiting.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, waitingWork)?.reason ===
+        "Claude runtime is not configured",
+      describe,
+    );
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "claude",
+      enabled: true,
+    });
+    assert.equal(live.created.claude.length, 1, "nothing starts twice");
+    await waitUntil(
+      () => intent(service, waitingWork)?.state === "running",
+      describe,
+    );
+    claude.releaseAll();
+    await waitUntil(
+      () => intent(service, work)?.state === "completed",
+      describe,
+    );
+    assert.equal(claude.stops, 0);
+
+    // Codex has no bound work: no confirmation, stopped immediately.
+    assert.equal(
+      service.runtimeSettings().find((r) => r.harness === "codex")?.boundTasks,
+      0,
+    );
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "codex",
+      enabled: false,
+    });
+    assert.equal(live.latest("codex").stops, 1);
+    assert.deepEqual(statusOf(service, "codex"), [
+      "not-configured",
+      "disabled",
+    ]);
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("enabling is refused while the executable is missing; a failed start is unavailable until enabled again", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-refuse-"));
+  let claudeOnPath = true;
+  let failNext = false;
+  const live = openLive(join(root, "data"), {
+    resolves: (harness) => harness !== "claude" || claudeOnPath,
+    prepare: (runtime, harness) => {
+      if (harness === "claude" && failNext) {
+        runtime.failStart = true;
+        failNext = false;
+      }
+    },
+  });
+  const { service } = live;
+  try {
+    await service.start();
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "claude",
+      enabled: false,
+    });
+    claudeOnPath = false;
+    await assert.rejects(
+      service.configureRuntime({
+        key: randomUUID(),
+        harness: "claude",
+        enabled: true,
+      }),
+      (error: { code?: string; harness?: string }) =>
+        error.code === "runtime-executable-missing" &&
+        error.harness === "claude",
+    );
+    assert.equal(service.domain().runtimeEnabled("claude"), false);
+    assert.equal(live.created.claude.length, 1);
+
+    claudeOnPath = true;
+    failNext = true;
+    assert.deepEqual(
+      await service.configureRuntime({
+        key: randomUUID(),
+        harness: "claude",
+        enabled: true,
+      }),
+      { harness: "claude", enabled: true },
+    );
+    assert.equal(service.domain().runtimeEnabled("claude"), true);
+    assert.equal(statusOf(service, "claude")?.[0], "unavailable");
+    assert.equal(
+      live.latest("claude").stops,
+      1,
+      "the failed start is cleaned up",
+    );
+
+    // Enabling an enabled, unavailable runtime retries on a fresh instance.
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "claude",
+      enabled: true,
+    });
+    assert.equal(live.created.claude.length, 3);
+    assert.deepEqual(statusOf(service, "claude"), ["available", null]);
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the setting persists across restart; with none enabled the service starts and work waits", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-runtime-none-"));
+  const dataDir = join(root, "data");
+  let live = openLive(dataDir);
+  try {
+    await live.service.start();
+    for (const harness of ["codex", "claude"] as const)
+      await live.service.configureRuntime({
+        key: randomUUID(),
+        harness,
+        enabled: false,
+      });
+    await live.service.stop();
+
+    live = openLive(dataDir);
+    const { service } = live;
+    await service.start();
+    assert.equal(live.created.codex.length + live.created.claude.length, 0);
+    assert.deepEqual(
+      ["codex", "claude"].map((h) => statusOf(service, h as ExecutionHarness)),
+      [
+        ["not-configured", "disabled"],
+        ["not-configured", "disabled"],
+      ],
+    );
+    const lead = profile(service, "codex");
+    const projectId = project(service, lead, [lead]);
+    const waiting = await task(service, projectId, [lead]);
+    const work = initial(waiting.assignmentIds[0] ?? "");
+    await waitUntil(
+      () => intent(service, work)?.reason === "Codex runtime is not configured",
+      () => service.list().map((i) => [i.state, i.reason]),
+    );
+    await service.configureRuntime({
+      key: randomUUID(),
+      harness: "codex",
+      enabled: true,
+    });
+    await waitUntil(
+      () => intent(service, work)?.state === "completed",
+      () => service.list().map((i) => [i.state, i.reason]),
+    );
+  } finally {
+    await live.service.stop();
     rmSync(root, { recursive: true, force: true });
   }
 });

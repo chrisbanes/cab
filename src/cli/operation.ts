@@ -52,7 +52,7 @@ export const operationCommands = new Map<string, WriteCommand>([
         if (!scope.success)
           throw new CliError(
             "invalid-input",
-            "--scope must be project:ID, profile:ID, assignment:ID or system:capacity.",
+            "--scope must be project:ID, profile:ID, assignment:ID, system:capacity or system:runtime:HARNESS.",
           );
         const type = operationTypeSchema.safeParse(ctx.values.type);
         if (!type.success)

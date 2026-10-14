@@ -111,6 +111,7 @@ const cases = {
   "discovery.configure": { configured: false },
   "claude-token.configure": { configured: false },
   "getting-started.configure": { dismissed: false },
+  "runtime.configure": { harness: "claude", enabled: false },
 } satisfies { [K in DomainCommand["type"]]: DomainCommandResultMap[K] };
 
 test("validates one concrete result shape for every domain command", () => {

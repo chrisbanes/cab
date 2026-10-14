@@ -32,10 +32,10 @@ blocking a later public release.
   Qualification evidence records the version used.
   Claude stays optional (ADR-1008), so a missing `claude` on the service `PATH` leaves
   only that harness Not enabled (`not-configured`), with no alert: Claude work waits
-  and never falls back, and installing `claude` and restarting the service enables it.
-  A `claude` that resolves but whose runtime fails is unavailable instead. Turning a
-  provider on or off by choice is tracked in
-  [#989](https://github.com/chrisbanes/ensemble/issues/989).
+  and never falls back, and installing `claude`, then turning Claude off and on in
+  Settings → Runtime or restarting the service, enables it.
+  A `claude` that resolves but whose runtime fails is unavailable instead. The
+  operator turns each runtime on or off in Settings → Runtime (ADR-1012).
 - An npm package is a later channel for the same build. It is not a native app:
   a desktop wrapper (Tauri or similar) would need signing, notarization and a second
   owner of the service lifecycle, and can be added later around the same install.

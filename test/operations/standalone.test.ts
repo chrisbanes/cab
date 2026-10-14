@@ -230,11 +230,13 @@ test("canonical directory has one process owner; crash and failed startup releas
       "held",
     );
     await recovered.stop();
-    const failed = new FakeRuntime();
-    failed.failAt = "start";
+    // A runtime start failure no longer fails start-up (ADR-1012); invalid power
+    // options still do, after the runtime has started.
     await assert.rejects(
-      new StandaloneService(data, () => failed).start(),
-      /login unavailable/,
+      new StandaloneService(data, () => new FakeRuntime(), undefined, {
+        power: { enabled: true, pollIntervalMs: 0 },
+      }).start(),
+      /poll interval/,
     );
     const next = new StandaloneService(data, () => new FakeRuntime());
     await next.start();
@@ -1180,31 +1182,35 @@ test("a startup failure after admission begins unpublishes the service and relea
 test("failed startup keeps an open database owner until a later stop closes it", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-880-start-db-close-"));
   const data = join(root, "data");
-  const startupFailure = new Error("injected startup failure");
   const closeFailure = new Error(
     "injected failed-start database close failure",
   );
   let access: ServiceShutdownAccess | undefined;
   let patched: { db: DatabaseSync; originalClose: () => void } | undefined;
-  const service = new StandaloneService(data, () => {
-    access = shutdownAccess(service);
-    const db = access.db;
-    assert.ok(db?.isOpen);
-    const originalClose = db.close.bind(db);
-    patched = { db, originalClose };
-    let failOnce = true;
-    Object.defineProperty(db, "close", {
-      configurable: true,
-      value: () => {
-        if (failOnce) {
-          failOnce = false;
-          throw closeFailure;
-        }
-        originalClose();
-      },
-    });
-    throw startupFailure;
-  });
+  const service = new StandaloneService(
+    data,
+    () => {
+      access = shutdownAccess(service);
+      const db = access.db;
+      assert.ok(db?.isOpen);
+      const originalClose = db.close.bind(db);
+      patched = { db, originalClose };
+      let failOnce = true;
+      Object.defineProperty(db, "close", {
+        configurable: true,
+        value: () => {
+          if (failOnce) {
+            failOnce = false;
+            throw closeFailure;
+          }
+          originalClose();
+        },
+      });
+      return new FakeRuntime();
+    },
+    undefined,
+    { power: { enabled: true, pollIntervalMs: 0 } },
+  );
   try {
     await assert.rejects(service.start(), (error) => error === closeFailure);
     assert.ok(access && patched);
@@ -1269,10 +1275,21 @@ test("startup login failure holds ready work; unmarked prototype directory is re
     const queuedDb = new DatabaseSync(join(data, "standalone.sqlite"));
     new ExecutionState(queuedDb).create("queued", "test", workspace);
     queuedDb.close();
+    // A failed runtime start leaves the service running with the runtime
+    // unavailable (ADR-1012); a later fatal start-up failure still holds ready work.
     const unavailable = new FakeRuntime();
     unavailable.failAt = "start";
     service = new StandaloneService(data, () => unavailable);
-    await assert.rejects(service.start(), /login unavailable/);
+    await service.start();
+    assert.equal(
+      service.harnessStatuses().find((s) => s.harness === "codex")?.state,
+      "unavailable",
+    );
+    await service.stop();
+    service = new StandaloneService(data, () => new FakeRuntime(), undefined, {
+      power: { enabled: true, pollIntervalMs: 0 },
+    });
+    await assert.rejects(service.start(), /poll interval/);
     const heldDb = new DatabaseSync(join(data, "standalone.sqlite"));
     assert.equal(new ExecutionState(heldDb).byWorkId("queued")?.state, "held");
     heldDb.close();

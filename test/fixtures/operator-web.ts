@@ -246,7 +246,8 @@ export async function createOperatorFixture<
     });
   }
   let runtime: R | undefined;
-  let defaultRuntime: OperatorFixtureRuntime | undefined;
+  // One per harness, so a service running both starts two runtimes.
+  const defaultRuntimes = new Map<ExecutionHarness, OperatorFixtureRuntime>();
   const makeService = () =>
     new StandaloneService(
       join(directory, "data"),
@@ -254,8 +255,10 @@ export async function createOperatorFixture<
         let currentRuntime: R;
         if (runtimeFactory) currentRuntime = runtimeFactory(context, harness);
         else {
-          if (!defaultRuntime) defaultRuntime = new OperatorFixtureRuntime();
-          currentRuntime = defaultRuntime as unknown as R;
+          const existing =
+            defaultRuntimes.get(harness) ?? new OperatorFixtureRuntime();
+          defaultRuntimes.set(harness, existing);
+          currentRuntime = existing as unknown as R;
         }
         // `fixture.runtime` stays the default (Codex) harness's runtime.
         if (harness === "codex") runtime = currentRuntime;
@@ -352,7 +355,7 @@ export async function createOperatorFixture<
         throw Error("Settle active work before reopening");
       await service.stop();
       runtime = undefined;
-      defaultRuntime = undefined;
+      defaultRuntimes.clear();
       service = makeService();
       await service.start();
     },

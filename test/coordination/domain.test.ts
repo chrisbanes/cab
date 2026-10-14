@@ -2473,3 +2473,76 @@ test("project diagnostic capture defaults to enhanced and is reversible", () => 
     f.close();
   }
 });
+
+test("runtime enablement persists per harness, replays its receipt and sets the profile default", () => {
+  const f = fixture();
+  try {
+    assert.deepEqual(f.domain.enabledRuntimes(), ["codex", "claude"]);
+    const configure = (
+      harness: "codex" | "claude",
+      enabled: boolean,
+      k = key(),
+    ) =>
+      f.domain.execute({
+        type: "runtime.configure",
+        actor: "operator",
+        key: k,
+        harness,
+        enabled,
+      });
+    const replayKey = key();
+    assert.deepEqual(configure("claude", false, replayKey), {
+      harness: "claude",
+      enabled: false,
+    });
+    assert.deepEqual(configure("claude", false, replayKey), {
+      harness: "claude",
+      enabled: false,
+    });
+    assert.throws(
+      () => configure("claude", true, replayKey),
+      DomainConflictError,
+    );
+    f.reopen();
+    assert.equal(f.domain.runtimeEnabled("claude"), false);
+    assert.equal(f.domain.runtimeEnabled("codex"), true);
+
+    const create = () => {
+      const profileId = crypto.randomUUID();
+      f.domain.execute({
+        type: "profile.create",
+        actor: "operator",
+        key: key(),
+        profileId,
+        name: "Default",
+        instructions: "build",
+        capabilities: "code",
+      });
+      return f.domain.profileRuntime(profileId);
+    };
+    assert.deepEqual(create(), { harness: "codex" });
+    configure("claude", true);
+    configure("codex", false);
+    assert.deepEqual(create(), {
+      harness: "claude",
+      model: null,
+      reasoningEffort: null,
+    });
+    configure("claude", false);
+    assert.deepEqual(f.domain.enabledRuntimes(), []);
+    assert.deepEqual(create(), { harness: "codex" });
+    assert.throws(
+      () =>
+        f.domain.execute({
+          type: "runtime.configure",
+          actor: "agent",
+          key: key(),
+          harness: "codex",
+          enabled: true,
+        } as DomainCommand),
+      /Operator authority required/,
+    );
+  } finally {
+    f.close();
+  }
+});

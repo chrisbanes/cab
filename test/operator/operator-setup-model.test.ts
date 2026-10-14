@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   operatorCommandSchema,
+  type HarnessStatus,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import {
@@ -275,10 +276,26 @@ const leadId = randomUUID();
 const harness = (
   name: "codex" | "claude",
   state: "available" | "not-configured" | "unavailable" = "available",
-) =>
+): HarnessStatus =>
   state === "unavailable"
-    ? { harness: name, state, since: 1, policy: null, settings: null }
-    : { harness: name, state, policy: null, settings: null };
+    ? {
+        harness: name,
+        enabled: true,
+        state,
+        since: 1,
+        policy: null,
+        settings: null,
+      }
+    : state === "not-configured"
+      ? {
+          harness: name,
+          enabled: true,
+          state,
+          reason: "executable-missing",
+          policy: null,
+          settings: null,
+        }
+      : { harness: name, enabled: true, state, policy: null, settings: null };
 const workspace = (
   lead: "codex" | "claude" | null,
   patch: Partial<Workspace["data"]> = {},
@@ -459,6 +476,30 @@ test("the ready check names a runtime that cannot run the lead's work in fixed w
     assert.equal(result.blocked, true);
     assert.doesNotMatch(text, plain);
   }
+});
+
+test("the ready check links a disabled runtime to Settings > Runtime and says it once when none is enabled", () => {
+  const link = { label: "Runtime settings", href: "/app/settings/runtime" };
+  assert.deepEqual(
+    readyCheckItems(input({ workspace: workspace("claude") })).items,
+    [{ text: "Claude runtime isn't enabled for this service.", link }],
+  );
+  // Nothing enabled: the readiness check speaks once, not once more for the lead's runtime.
+  assert.deepEqual(
+    readyCheckItems(
+      input({
+        workspace: workspace("claude"),
+        readiness: readiness({ "runtime-enabled": "fail" }),
+      }),
+    ).items,
+    [
+      {
+        text: "runtime-enabled reason",
+        fix: "runtime-enabled fix",
+        link,
+      },
+    ],
+  );
 });
 
 test("the ready check fails closed while loading and never blocks on capacity", () => {

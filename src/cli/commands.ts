@@ -17,6 +17,7 @@ import { routingWriteCommands } from "./configure-routing.js";
 import { deliveryBrowseCommands, deliveryWriteCommands } from "./delivery.js";
 import { operationCommands } from "./operation.js";
 import { recoveryBrowseCommands, recoveryWriteCommands } from "./recovery.js";
+import { runtimeBrowseCommands, runtimeWriteCommands } from "./runtime.js";
 import { sourceBrowseCommands, sourceWriteCommands } from "./source.js";
 import { taskControlCommands } from "./task-control.js";
 import { taskWriteCommands } from "./task-write.js";
@@ -34,6 +35,7 @@ export const browseCommands = new Map<string, BrowseCommand>([
   ...sourceBrowseCommands,
   ...deliveryBrowseCommands,
   ...recoveryBrowseCommands,
+  ...runtimeBrowseCommands,
 ]);
 
 /** Configuration, adoption and receipt commands, keyed "area action". */
@@ -50,4 +52,5 @@ export const writeCommands = new Map<string, WriteCommand>([
   ...sourceWriteCommands,
   ...deliveryWriteCommands,
   ...recoveryWriteCommands,
+  ...runtimeWriteCommands,
 ]);

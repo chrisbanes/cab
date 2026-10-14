@@ -93,14 +93,15 @@ export function ProjectSetup(
   // clean, without showing its ready check. Unsaved input from an earlier visit is kept.
   const earlier = useRef(d.phase === "recorded");
   // Before paint, so the earlier visit's values never show.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the draft starts once, from the workspace already loaded on arrival.
   useLayoutEffect(() => {
     if (d.phase === "recorded") {
       earlier.current = false;
       d.startOperation(blank());
-      inline.startOperation(emptyProfile());
+      inline.startOperation(emptyProfile(p.workspace));
     } else {
       d.initialize(blank());
-      inline.initialize(emptyProfile());
+      inline.initialize(emptyProfile(p.workspace));
     }
   }, [d, inline]);
   // The browser's leave prompt, while anything entered would be lost.

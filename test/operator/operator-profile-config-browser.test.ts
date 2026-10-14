@@ -14,6 +14,10 @@ import {
   trail,
 } from "../fixtures/operator-settings.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
+import {
+  ClaudeShapedFixtureRuntime,
+  OperatorFixtureRuntime,
+} from "../fixtures/operator-web.js";
 
 const test = browserSuite("operator-profile-config-browser");
 
@@ -330,4 +334,32 @@ test("Profile configuration switches Codex to Claude and back as new revisions",
     .locator(".settings-row", { hasText: "Builder" })
     .getByText("Runtime: Codex")
     .waitFor();
+});
+
+test("New profile starts on the first enabled runtime: Claude when Codex is disabled", async (_t, journey) => {
+  const { f, page } = await startSettings(
+    journey,
+    "/app/settings/profiles/new",
+    undefined,
+    undefined,
+    {
+      runtimeFactory: (_context, harness) =>
+        harness === "claude"
+          ? new ClaudeShapedFixtureRuntime()
+          : new OperatorFixtureRuntime(),
+      serviceOptions: { runtimeHarnesses: ["codex", "claude"] },
+    },
+  );
+  await f.service.configureRuntime({
+    key: randomUUID(),
+    harness: "codex",
+    enabled: false,
+    confirmedBoundTasks: f.service
+      .runtimeSettings()
+      .find((r) => r.harness === "codex")?.boundTasks,
+  });
+  await page.reload();
+  const runtime = page.getByLabel("Runtime", { exact: true });
+  await runtime.waitFor();
+  assert.equal(await runtime.inputValue(), "claude");
 });

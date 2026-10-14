@@ -20,7 +20,17 @@ async function launch(
   viewport: { width: number; height: number },
 ) {
   const f = await journey.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      journey.fixtureOptions,
+      undefined,
+      {
+        runtimeHarnesses: ["codex", "claude"],
+        resolveExecutable: async () => true,
+      },
+    ),
   );
   let browser: Browser | undefined;
   journey.cleanup(

@@ -28,9 +28,11 @@ stronger credentials. Tokens expire after 90 days by default, support shorter
 selected lifetimes and can be revoked immediately. Authentication status exposes
 expiry. Credential and transport details are specified below.
 
-Reuse existing configuration controls. Expose runtime/model settings read-only
-where Ensemble has no supported edit operation. Adding profile-level model or
-effort controls is outside this release.
+Reuse existing configuration controls. Enabling and disabling each execution
+runtime for the installation is a supported mutation (`runtime enable|disable`,
+ADR-1012). Expose other runtime and model settings read-only where Ensemble has no
+supported edit operation. Adding profile-level model or effort controls is outside
+this release.
 
 Service process management and offline backup/restore remain host-local.
 Remote clients use the running service for task controls and diagnostics;
@@ -278,13 +280,15 @@ Node.js version and package tooling; distribution follows
 | `assignment` | Get/history; compare bound/current instructions; explicit current-revision adoption |
 | `inbox`, `question`, `approval` | Inspect attention; answer supported forms; approve/deny exact reviewed material |
 | `execution`, `logs`, `doctor` | List/get; supplied inputs, observed settings, events/tool activity, filtered service diagnostics and bounded follow; the service readiness checks |
+| `runtime` | List each execution runtime's setting, state and bound tasks; enable or disable one (`disable` needs `--yes` when bound tasks use it) |
 | `recovery` | Inspect eligibility/holds; prepare and submit the existing evidence-bearing operations |
 | `result`, `artifact`, `delivery` | Inspect results/retained evidence and existing delivery state; existing refresh and staged comment operations |
 | `operation` | Read an existing mutation receipt and reconcile an uncertain command outcome |
 
 Service administration remains the separate host-local surface. Full setup
 discovery, line-comment review composition, MCP packaging, remote process control
-and new runtime/model-setting mutations are outside the first release. Existing
+and runtime or model setting mutations other than runtime enablement are outside
+the first release. Existing
 configuration operations such as source activation retain their staged previews.
 No generic command bypasses the typed operation contracts.
 
@@ -383,8 +387,9 @@ advertise fails with `unsupported-service` before any other read.
 
 `GET /api/operator/operations?scope=&type=&key=` returns `recorded` with the
 receipt `POST /api/operator/commands` returned, or `not-recorded`. It accepts only
-the scopes `project:<id>`, `profile:<id>` and `system:capacity` with the
-configuration and adoption types and, for a project, `github.configure` and
+the scopes `project:<id>`, `profile:<id>`, `system:capacity` and
+`system:runtime:<harness>` (with `runtime.configure`) with the configuration and
+adoption types and, for a project, `github.configure` and
 `github.preview` (a preview whose selection ID is now excluded text reads
 `503 unavailable`), and `assignment:<id>` with the five recovery types (a key reads
 `recorded` only under its own type and for that assignment's work), rebuilds the receipt from the stored result with
