@@ -75,7 +75,8 @@ _Avoid_: Scheduler when referring to the system executing one agent turn; runtim
 
 **Disabled runtime**:
 An execution runtime the operator has turned off for the installation. Disabled is
-one cause of a runtime being not enabled; a missing binary or failed start are others.
+one cause of a runtime being not enabled; a missing binary is the other. An enabled
+runtime that fails to start is unavailable, not disabled or not enabled.
 _Avoid_: Not enabled when meaning the operator's choice
 
 **Credential reference**:
