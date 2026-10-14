@@ -32,6 +32,7 @@ waits, led by the reason to clear first and a link that fixes it.
    | Runtime unavailable                 | Open [readiness check](readiness-check.md)               |
    | Claude token unavailable            | Open [Add Claude](claude-runtime.md)                     |
    | Lead profile runtime not configured | Open the profile                                         |
+   | Held by power supervision           | No Fix; shows the power supervisor's hold reason         |
    | Dependency, approval or source hold | No Fix; link to the blocking task, request or source     |
    | Capacity                            | No Fix; shows what is using capacity                     |
 

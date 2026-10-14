@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { waitSchema } from "./wait-reasons.js";
+import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
   githubConfigurationSchema,
@@ -890,7 +890,7 @@ export const composerOptionsSchema = envelope(
         .strict(),
       routingEnabled: z.boolean(),
       /** Project-level waits a new task would have; the composer adds selected dependencies. */
-      waits: z.array(waitSchema).max(13),
+      waits: z.array(waitSchema).max(waitCodes.length),
       /** Runtime waits per permitted profile, used in place of the lead's when it is the explicit assignee. */
       assigneeWaits: z.record(uuid, z.array(waitSchema).max(3)),
     })
@@ -1255,7 +1255,7 @@ export const taskSchema = envelope(
           ),
         })
         .strict(),
-      waits: z.array(waitSchema).max(13),
+      waits: z.array(waitSchema).max(waitCodes.length),
       execution: executionSchema,
       localDependencies: z.array(
         z.object({ id: uuid, title: safeText, state: taskState }).strict(),

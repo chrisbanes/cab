@@ -525,7 +525,9 @@ revoked project lead, unavailable runtime, unreadable Claude token, unconfigured
 profile runtime), the reason carries a Fix that performs that one action: Resume
 project confirms and sends only the project resume, and every other Fix opens the
 screen that clears it (the CLI prints the command or Settings path). Dependency,
-approval, source and capacity waits link to what blocks them and have no Fix. A Fix
+approval, source and capacity waits link to what blocks them and have no Fix. A power
+supervision hold, which applies to every task while the supervisor holds admission, has
+no Fix and shows the supervisor's hold reason. A Fix
 never clears holds or grants access by implication. These controls must preserve
 existing readiness and admission rules.
 
