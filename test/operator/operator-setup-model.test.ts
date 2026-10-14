@@ -10,6 +10,7 @@ import {
   readinessCheckIds,
   readinessSchema,
 } from "../../src/operator/readiness.js";
+import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import { ClientError, OperatorClient } from "../../web/src/api.js";
 import { ConfigurationDraft } from "../../web/src/settings-state.js";
 import { settingsHeader } from "../../web/src/settings-view.js";
@@ -26,6 +27,8 @@ import {
   readyCheckItems,
   rowsFromDraft,
   rowsToDraft,
+  setupSourceCredentialCopy,
+  sourceCredentialLine,
   typedRepositoryId,
   typeRepository,
   verificationCopy,
@@ -591,4 +594,97 @@ test("the ready check judges the lead's own model and effort against the support
       "Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
     ],
   );
+});
+
+test("setup sends the source credential only for a signed-in source login", () => {
+  const rows = [emptyRow("discovered")];
+  const signedIn = buildProjectCreate(values, rows, "", {
+    state: "signed-in",
+    login: "octo",
+  }).command;
+  assert.equal(
+    (signedIn as { sourceCredentialRef?: string }).sourceCredentialRef,
+    "gh:github.com",
+  );
+  assert.equal(operatorCommandSchema.safeParse(signedIn).success, true);
+  for (const gh of [
+    null,
+    { state: "not-signed-in" as const },
+    { state: "unreadable" as const },
+    { state: "not-installed" as const },
+  ]) {
+    assert.equal(
+      "sourceCredentialRef" in buildProjectCreate(values, rows, "", gh).command,
+      false,
+    );
+    assert.match(
+      setupSourceCredentialCopy(gh),
+      /^GitHub source credential: none\./,
+    );
+  }
+  assert.match(
+    setupSourceCredentialCopy({ state: "signed-in", login: "octo" }),
+    /^GitHub source credential: GitHub CLI · @octo\./,
+  );
+});
+
+test("the ready check states the recorded source credential with a settings link when it cannot sync", () => {
+  const id = "p1";
+  const link = {
+    label: "GitHub source settings",
+    href: "/app/projects/p1/settings?tab=github",
+  };
+  const credential = (
+    over: Partial<{
+      configured: boolean;
+      source: "env" | "gh" | null;
+      usable: boolean;
+      reason: "gh-not-signed-in" | null;
+    }> = {},
+  ) => ({
+    configured: true,
+    source: "gh" as const,
+    usable: true,
+    reason: null,
+    gh: { state: "signed-in" as const, login: "octo" },
+    ...over,
+  });
+  assert.deepEqual(
+    sourceCredentialLine(id, {
+      credentialConfigured: true,
+      credential: credential(),
+    }),
+    { text: "GitHub source credential: GitHub CLI · @octo" },
+  );
+  assert.deepEqual(
+    sourceCredentialLine(id, {
+      credentialConfigured: false,
+      credential: credential({
+        configured: false,
+        source: null,
+        usable: false,
+      }),
+    }),
+    {
+      text: "GitHub source credential: not set. The source won't sync until one is set.",
+      link,
+    },
+  );
+  assert.deepEqual(
+    sourceCredentialLine(id, {
+      credentialConfigured: true,
+      credential: credential({ usable: false, reason: "gh-not-signed-in" }),
+    }),
+    {
+      text: `GitHub source credential: GitHub CLI. ${sourceCredentialExplanation("gh-not-signed-in")}`,
+      link,
+    },
+  );
+  assert.deepEqual(sourceCredentialLine(id, undefined), {
+    text: "GitHub source credential: checking…",
+  });
+  for (const unavailable of [null, { credentialConfigured: true }])
+    assert.deepEqual(sourceCredentialLine(id, unavailable), {
+      text: "GitHub source credential: status unavailable.",
+    });
 });

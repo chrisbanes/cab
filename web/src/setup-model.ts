@@ -5,11 +5,15 @@ import {
   type DiscoveryUnavailableReason,
   executionHarnessLabels,
   type FolderListing,
+  type ghLoginStateSchema,
   type OperatorCommand,
+  type sourceCredentialStatusSchema,
   unsupportedRuntimeField,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import type { ReadinessCheck } from "../../src/operator/readiness.js";
+import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
+import type { z } from "zod";
 import { unavailableAlert } from "./execution-runtime.js";
 
 /** One repository row. A typed row keeps its raw `text`; a discovered row carries the node ID. */
@@ -111,6 +115,8 @@ export function buildProjectCreate(
   },
   rows: SetupRow[],
   githubProjectNodeId: string,
+  /** The source login setup showed as signed in; anything else records no credential. */
+  sourceGh: z.infer<typeof ghLoginStateSchema> | null = null,
 ) {
   const included = rows.flatMap((r, i) => (blankRow(r) ? [] : [i]));
   const command = {
@@ -138,6 +144,10 @@ export function buildProjectCreate(
       : {}),
     ...(githubProjectNodeId
       ? { githubProject: { projectNodeId: githubProjectNodeId } }
+      : {}),
+    // Omitted, never undefined, so a create without it keeps its payload hash.
+    ...(sourceGh?.state === "signed-in"
+      ? { sourceCredentialRef: "gh:github.com" }
       : {}),
   } as OperatorCommand;
   return { command, rowIndex: included };
@@ -349,5 +359,57 @@ export function readyCheckItems(input: {
       capacity !== null &&
       (capacity.projectUsage >= capacity.projectLimit ||
         capacity.globalUsage >= capacity.globalLimit),
+  };
+}
+
+/** Frames 115–117b: the source credential guided setup will record, stated before Create. */
+export function setupSourceCredentialCopy(
+  sourceGh: z.infer<typeof ghLoginStateSchema> | null,
+) {
+  return sourceGh?.state === "signed-in"
+    ? `GitHub source credential: GitHub CLI · @${sourceGh.login}. Change or clear it later in the project's GitHub source settings.`
+    : "GitHub source credential: none. No usable GitHub CLI login was detected, so the source starts without a credential and won't sync until one is set in its GitHub source settings.";
+}
+
+/**
+ * Frames 146–147: the recorded source credential from the configuration read. Informational
+ * only; it never blocks Resume. `undefined` is still loading, `null` a failed read.
+ */
+export function sourceCredentialLine(
+  projectId: string,
+  source:
+    | {
+        credentialConfigured: boolean;
+        credential?: z.infer<typeof sourceCredentialStatusSchema> | undefined;
+      }
+    | null
+    | undefined,
+): WaitItem {
+  if (source === undefined)
+    return { text: "GitHub source credential: checking…" };
+  if (source === null)
+    return { text: "GitHub source credential: status unavailable." };
+  const link = {
+    label: "GitHub source settings",
+    href: `/app/projects/${projectId}/settings?tab=github`,
+  };
+  const status = source.credential;
+  if (!source.credentialConfigured)
+    return {
+      text: "GitHub source credential: not set. The source won't sync until one is set.",
+      link,
+    };
+  if (!status) return { text: "GitHub source credential: status unavailable." };
+  const kind = status.source === "gh" ? "GitHub CLI" : "environment variable";
+  if (!status.usable)
+    return {
+      text: `GitHub source credential: ${kind}. ${sourceCredentialExplanation(status.reason ?? "missing-credential")}`,
+      link,
+    };
+  return {
+    text:
+      status.source === "gh" && status.gh.state === "signed-in"
+        ? `GitHub source credential: GitHub CLI · @${status.gh.login}`
+        : `GitHub source credential: ${kind}`,
   };
 }

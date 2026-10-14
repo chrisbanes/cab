@@ -8,7 +8,11 @@ import { readinessSchema } from "../../src/operator/readiness.js";
 import { ActionLink, Button } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { DraftMessage, key, type SettingsProps, useDraft } from "./settings.js";
-import { type ReadinessRead, readyCheckItems } from "./setup-model.js";
+import {
+  type ReadinessRead,
+  readyCheckItems,
+  sourceCredentialLine,
+} from "./setup-model.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 
 /** Frames 146–147: what creation saved, what would make work wait, and Resume or Keep paused. */
@@ -50,6 +54,23 @@ export function ReadyCheck({
         ),
       [p.client, projectId],
     ),
+  );
+  // Informational: the recorded source credential never affects `blocked`.
+  const configuration = useOperatorResource(
+    scope,
+    useCallback(
+      (signal: AbortSignal) =>
+        p.client.read(
+          `/api/operator/projects/${projectId}/configuration`,
+          projectConfigurationSchema,
+          signal,
+        ),
+      [p.client, projectId],
+    ),
+  );
+  const credential = sourceCredentialLine(
+    projectId,
+    configuration.state.error ? null : configuration.state.data?.data.source,
   );
   // Its own key: the project configuration General tab loads into `project.configure:<id>`.
   const resume = useDraft(p.drafts, `project.resume:${projectId}`);
@@ -113,6 +134,22 @@ export function ReadyCheck({
           {created.githubProject && (
             <li>GitHub Project linked as an inactive discovery source.</li>
           )}
+          <li>
+            {credential.text}
+            {credential.link && (
+              <>
+                {" "}
+                <ActionLink
+                  variant="secondary"
+                  href={credential.link.href}
+                  target="_blank"
+                  rel="noopener"
+                >
+                  {credential.link.label}
+                </ActionLink>
+              </>
+            )}
+          </li>
         </ul>
       </DraftMessage>
       <div className="setup-inline-actions">
@@ -186,6 +223,7 @@ export function ReadyCheck({
                 onClick={() => {
                   void readiness.refresh();
                   void options.refresh();
+                  void configuration.refresh();
                   p.refresh();
                   // The result takes focus: the button leaves when a failed read starts again.
                   waitsRoot.current?.focus();
