@@ -611,17 +611,17 @@ means enabled. No runtime is required: the service starts and serves the operato
 with none enabled, and an enabled runtime that fails to start, Codex included, is
 unavailable without stopping the service. Disabling takes effect at once for new
 admissions; running turns finish and are never cancelled, the runtime stops once no
-execution it owns remains, and work bound to it waits as not configured until it is
+execution it owns remains, and work bound to it waits as not enabled until it is
 enabled again. Disabling a runtime that bound tasks use asks for confirmation with
 their count (`--yes` on the CLI). Enabling starts the runtime in the running service,
-and is refused, with nothing saved, while its executable is not on the service
+and is refused, with nothing saved, while its binary does not resolve on the service
 `PATH`. Readiness fails "An execution runtime is enabled" when none is; a disabled
 runtime's checks are Not configured and raise no alert. The Claude runtime is
 qualified, with limits, by bounded live journeys
 ([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
 an available token reference waits visibly. It runs the `claude` that resolves on the
 service's fixed `PATH`, looked up when the runtime starts; without one the Claude
-runtime is not enabled (Claude work waits as not configured and never falls back),
+runtime is not enabled (Claude work waits as not enabled and never falls back),
 and Codex is unaffected. Readiness reports the version it finds and never
 compares it: only the Claude Code version the pinned SDK declares was qualified, and
 another version is a disclosed limit

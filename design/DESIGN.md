@@ -594,7 +594,7 @@ the open decisions.
   has a "<Runtime> enabled" switch beside its status badge, in four states: enabled
   and Available; enabled and Unavailable with the Fix "Turn it off and on, or restart
   the service."; disabled, "Not enabled · Disabled in Settings", with no shell alert;
-  and refused because the executable is missing, an inline error naming it while the
+  and refused because the binary is missing, an inline error naming it while the
   switch stays off (126b). Turning off a runtime that bound tasks use asks first:
   "N tasks use Claude. Running turns finish; their next turns wait until Claude is
   enabled again." with Cancel and Turn off (126c); without bound tasks it saves at

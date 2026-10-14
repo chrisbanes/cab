@@ -4,64 +4,38 @@ status: accepted
 
 # Let the operator enable and disable each execution runtime
 
-The service ran every harness in its fixed production list and required Codex: the
-list had to include the default harness, and a Codex start failure stopped the
-service. Claude was Not enabled only when `claude` was missing at startup. The
-operator could not turn either runtime off.
+The service ran every production runtime and required Codex: it refused to start
+without Codex, and profiles defaulted to it. An operator who uses only one runtime
+still saw the other's readiness checks and alerts. Delivery scope lives in
+[#989](https://github.com/chrisbanes/ensemble/issues/989).
 
 ## Decision
 
-- Each execution runtime (Codex, Claude) has one installation-wide enabled setting,
-  stored in the domain store beside the other installation settings. A missing
-  setting means enabled, so an upgrade changes nothing.
-- No runtime is required. Any runtime can be disabled, including all of them, and
-  the service starts and serves the operator UI with none enabled. An enabled
-  runtime that fails to start, Codex included, is unavailable; it does not stop the
-  service.
-- The setting applies live:
-  - Disabling stops new admissions for that runtime at once. Running turns finish
-    and are never cancelled. The runtime keeps running until no submitting, running
-    or held execution it owns remains, then stops. Work bound to it waits with the
-    existing Not enabled wait and never falls back to another runtime.
-  - Enabling starts the runtime in the running service through the same create,
-    attach, bounded start and detached stop paths as a secondary runtime at start-up,
-    then wakes the scheduler. Re-enabling a runtime that is still draining keeps it.
-    Enabling an enabled but unavailable runtime retries on a fresh instance.
-- Enabling is refused while the runtime's executable (`codex`, `claude`) is not on
-  the service `PATH`; the refusal names it and nothing is saved. If it resolves but
-  the runtime fails to start, the setting is saved and the runtime is reported
-  unavailable with a readiness Fix.
-- Disabling a runtime that bound tasks use (non-terminal work bound to its harness)
-  needs confirmation that states the count. The server enforces it: the web asks in a
-  dialog, the CLI requires `--yes`. Without bound work there is no confirmation.
+- Each execution runtime (Codex, Claude) has an installation-wide enabled setting,
+  persisted with the installation's other settings. A missing setting means enabled,
+  so upgrades keep their behaviour. Profiles still choose their runtime; this setting
+  decides whether the installation runs it at all.
+- Any runtime may be disabled, including all of them. No runtime is required: the
+  service starts with none enabled, and a runtime that fails to start, Codex included,
+  is reported unavailable instead of stopping the service.
+- A toggle takes effect in the running service. Disabling stops new admissions for
+  that runtime; running turns finish and are never cancelled. Work bound to a
+  disabled runtime waits as not enabled and never falls back to another runtime.
+  Enabling starts the runtime in place.
+- Enabling is refused while the runtime's binary does not resolve on the service
+  `PATH`. A binary that resolves but fails to start is saved as enabled and reported
+  unavailable.
 - New profiles default to the first enabled runtime in the order Codex, Claude, and
   to Codex when none is enabled.
-- Readiness adds a first check, "An execution runtime is enabled". A runtime's own
-  checks report Not configured with "Disabled in Settings" or "`<binary>` not found on
-  PATH"; only an enabled, unavailable runtime fails. A disabled runtime raises no
-  destructive alert.
-- The operator command is `runtime.configure`, with a normal mutation receipt; the
-  operator CLI exposes it as `ensemble runtime list|enable|disable`.
+- Readiness fails when no runtime is enabled. A disabled runtime's own checks report
+  not configured, never fail, and raise no destructive alert.
 
 ## Considered options
 
-- **Codex-only disable, or Claude-only.** Rejected: a required runtime keeps the
-  service fatal on its start failure and gives the operator no way to run a
-  Claude-only installation.
-- **Refuse to disable a runtime that bound work uses.** Rejected: it forces the
-  operator to stop or finish tasks first. Waiting is already the behaviour for a
-  missing executable, keeps every conversation on its own runtime and is reversed by
-  enabling again.
-- **Apply the setting at the next start only.** Rejected: a restart interrupts every
-  running turn, which is what a live toggle avoids.
-
-## Consequences
-
-- Effective enablement is the persisted setting combined with whether the
-  executable resolved and how the start went. Status reads distinguish disabled,
-  executable missing and unavailable.
-- A held execution keeps its runtime alive while disabled, so recovery keeps its
-  inspector; after a restart with the runtime disabled it stays held, as with a
-  missing executable.
-- Per-profile enablement, runtime or model setting edits beyond enablement, and
-  migrating bound conversations between runtimes stay out of scope.
+- Keeping Codex required and only allowing Claude to be disabled. Rejected: it
+  leaves no path for a Claude-only installation.
+- Refusing to disable a runtime that holds bound or running work. Rejected: one stale
+  task would block the operator, and waiting is reversible by enabling again.
+- Applying toggles at the next service start. Rejected: a toggle that does nothing
+  until restart reads as broken, and the secondary-runtime start and stop paths
+  already exist.
