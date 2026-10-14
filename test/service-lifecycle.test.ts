@@ -897,3 +897,40 @@ test("an interrupt during the stop poll still confirms the exit before failing",
     ["bootout"],
   );
 });
+
+test("an interrupt before the stop leaves the old job running", async (t) => {
+  const f = await installed(t);
+  const interrupt = new AbortController();
+  interrupt.abort();
+  const result = await f.upgrade(f.releaseB, interrupt.signal);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "preflight");
+  assert.equal(result.report.jobStopped, null);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.equal(f.launchd.jobs.size, 1);
+});
+
+test("a launchctl failure while confirming the stop reports the exit unconfirmed", async (t) => {
+  const f = await installed(t);
+  const host = f.launchd.host();
+  let bootedOut = false;
+  f.launchd.overrides = {
+    launchctl: async (args) => {
+      if (args[0] === "bootout") bootedOut = true;
+      else if (
+        bootedOut &&
+        args[0] === "print" &&
+        !f.launchd.calls.some(([c]) => c === "failed")
+      ) {
+        f.launchd.calls.push(["failed"]);
+        return { status: 1, stdout: "" };
+      }
+      return host.launchctl(args);
+    },
+  };
+  const result = await f.upgrade();
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "stop");
+  assert.equal(result.report.jobStopped, false);
+  assert.equal(result.report.snapshot, null);
+});

@@ -301,19 +301,23 @@ class Service {
     // A bootout error can race the job's own exit; the poll below decides.
     await this.host.launchctl(["bootout", this.target]);
     const deadline = this.host.now() + STOP_TIMEOUT_MS;
-    for (;;) {
-      if (
-        (await this.loadedJob()) === null &&
-        (!identity || (await this.host.exited(identity)))
-      )
-        return;
-      if (this.host.now() >= deadline) {
-        this.exitUnconfirmed = true;
-        throw new ServiceFailure("process exit unconfirmed");
+    try {
+      for (;;) {
+        if (
+          (await this.loadedJob()) === null &&
+          (!identity || (await this.host.exited(identity)))
+        )
+          return;
+        if (this.host.now() >= deadline)
+          throw new ServiceFailure("process exit unconfirmed");
+        // Once bootout is issued the bounded confirmation runs to the end, even after an
+        // interrupt; the next stage then fails with the exit confirmed or reported unconfirmed.
+        await this.host.sleep(POLL_MS);
       }
-      // Once bootout is issued the bounded confirmation runs to the end, even after an
-      // interrupt; the next stage then fails with the exit confirmed or reported unconfirmed.
-      await this.host.sleep(POLL_MS);
+    } catch (error) {
+      // The captured identity is lost after this, so the exit stays unconfirmed.
+      this.exitUnconfirmed = true;
+      throw error;
     }
   }
 
@@ -523,6 +527,7 @@ export async function installService(
       origin: service.origin,
       port: options.port,
     }));
+    service.checkInterrupt();
     stage = "start";
     await service.bootstrap();
     stage = "health";
@@ -597,6 +602,7 @@ export async function upgradeService(
         `The CLI connection is not for ${record.configuration.origin}`,
       );
 
+    service.checkInterrupt();
     stage = "stop";
     await service.stopOwned(record);
     // Nothing starts the old version at login from here on, and a torn render cannot leave
@@ -637,7 +643,7 @@ export async function upgradeService(
     await service.waitForApp(record.configuration.origin);
     stage = "readiness";
     const readiness = await service.waitFor(
-      "Readiness did not answer without a failing check within 120 s",
+      "Readiness did not report every check passing or not configured within 120 s",
       READINESS_PROBE_MS,
       async (signal) => {
         const checks = await connection.readiness(signal);
