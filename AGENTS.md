@@ -93,9 +93,22 @@ authorise dispatch while paused.
 
 ## Validation
 
+Group tests under `test/` by the behavior they protect: coordination, execution,
+sources, delivery, workspaces, operator, operations or infrastructure. Place CLI,
+HTTP and browser tests with the asserted behavior; keep interface-specific tests
+in operator and shared helpers in fixtures. Name tests and qualification harnesses
+for their behavior rather than milestone or issue numbers. Keep historical evidence
+and existing external fixture/grant identifiers intact. When moving tests, update
+imports, executable paths and preflight selection, and verify full-suite discovery
+preserves every test exactly once, including in a checkout with stale build output.
+Register browser-dependent cases through `browserSuite` or `browserTest`, with an
+explicit engine for WebKit. Keep non-browser cases independently runnable in mixed
+files; Node 26 service CI deliberately has no browser executables.
+
 Use Node.js from `.node-version` and the package manager pinned in `package.json`.
 Run `npm ci` then `npm run check` (type checking, lint, formatting, build, tests).
-CI runs the same check. Existing tests use real SQLite and a fake host.
+CI runs the static checks and build once, then the runtime profiles documented in
+`docs/development.md`. Existing tests use real SQLite and a fake host.
 Claude Code cloud sessions get the toolchain from `scripts/cloud-environment-setup.sh`
 and dependencies from the `scripts/cloud-session-start.sh` SessionStart hook. Their
 GitHub proxy rejects GraphQL, so `gh issue`, `gh pr` and Projects v2 fail there; use

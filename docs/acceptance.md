@@ -442,7 +442,7 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   [live follow-up](evidence/issue-828-operator-follow-up-live-2026-10-09.md).
 - **Claude execution harness** (C5-1–C5-4) — **Bounded.** Fault, rejection,
   policy, Stop and restart holds are covered by deterministic tests, and the guarded
-  driver (`npm run c5:live`) passed each journey on Claude Code `2.1.296` (scrub,
+  driver (`npm run mixed-runtime:live`) passed each journey on Claude Code `2.1.296` (scrub,
   Stop and crash on their second attempt after harness repairs, Stop on `sonnet`): Claude-only, Codex lead with a Claude worker, Stop, and a service crash
   recovered through the service seam (no operator route) on the same session. The
   token scrub is qualified for sandboxed Bash only. Untested surfaces, including
@@ -604,11 +604,11 @@ exact resource cleanup, and reuse unaffected runtime evidence.
 guard, finite deadlines/read count, delayed start and terminal handling,
 uncertain Stop/reopen hold preservation, and checkpoint privacy. Fake-runtime
 tests qualify this control boundary only; they do not prove native Codex
-behaviour. The guarded `test/wi03/live-turn-capture.mjs` entry ran one
+behaviour. The guarded `test/workspaces/turn-capture-qualification/live-turn-capture.mjs` entry ran one
 repository-free actual journey for the actual-turn portion of WI06; the
 [turn-capture evidence](evidence/wi03-turn-capture.md) records its runtime
 identity, exact capture assertions, SQLite readback, shutdown proof and limits.
-The guarded `test/wi782/live-inspection-journey.mjs` entry ran a reduced actual
+The guarded `test/workspaces/inspection-qualification/live-inspection-journey.mjs` entry ran a reduced actual
 journey (three starts, no local review) in which the Stop hold was retained; see the
 [inspection and review evidence](evidence/wi01-wi13-workspace-review.md). Neither
 covers native successive-turn, restart, failed, interrupted or uncertain-capture
@@ -626,7 +626,7 @@ candidate and results recorded before retention preserve their earlier behaviour
 
 A message, contextual feedback or review sent to a completed lead of an open task
 resumes it. Service, read model and operator UI are covered by these deterministic
-suites; the real-runtime journey (`test/wi828/live-operator-follow-up.mjs`) is
+suites; the real-runtime journey (`test/coordination/follow-up-qualification/live-operator-follow-up.mjs`) is
 recorded in the
 [live follow-up evidence](evidence/issue-828-operator-follow-up-live-2026-10-09.md).
 

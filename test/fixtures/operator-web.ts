@@ -38,7 +38,7 @@ import {
   StandaloneService,
   type StandaloneServiceOptions,
 } from "../../src/standalone/service.js";
-import { tmpdir } from "../temp.js";
+import { tmpdir } from "./temp.js";
 import {
   FixtureLifecycle,
   type FixtureLifecycleOptions,

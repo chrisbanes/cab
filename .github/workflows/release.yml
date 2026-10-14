@@ -13,6 +13,7 @@ on:
       - .node-version
 permissions:
   contents: read
+  actions: read
 jobs:
   # Not named `check`: a skipped job with that name could stand in for the required
   # `check` status on pull requests.

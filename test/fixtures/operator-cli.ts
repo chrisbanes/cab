@@ -19,7 +19,7 @@ import {
 } from "../../src/standalone/operator.js";
 import { harness } from "./cli-harness.js";
 import { createOperatorFixture } from "./operator-web.js";
-import { createReleaseDeliveryFixture } from "./s07b-delivery.js";
+import { createReleaseDeliveryFixture } from "./delivery-integration.js";
 
 type After = { after(fn: () => unknown): void };
 

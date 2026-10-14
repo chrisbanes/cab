@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
-import { globSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { profileTimings } from "./test-timings.mjs";
 import { constants } from "node:os";
 import {
   createTestEvidenceDirectory,
@@ -267,21 +268,138 @@ export async function recordRunnerEvidence(result, name, evidenceRoot) {
   }
 }
 
-async function main() {
-  const mode = process.argv.slice(2);
+export function discoverTestFiles(root = ".") {
+  const files = globSync("test/**/*.test.ts", { cwd: root })
+    .sort()
+    .map((source) => `dist/${source.slice(0, -3)}.js`);
+  if (!files.length) throw Error("No test source files found");
+  for (const file of files)
+    if (!logicalSuites.some((suite) => file.startsWith(`dist/test/${suite}/`)))
+      throw Error(`Test is outside the logical suites: ${file}`);
+    else if (!existsSync(resolve(root, file)))
+      throw Error(`Compiled test missing: ${file}; run npm run build first`);
+  return files;
+}
+
+export const logicalSuites = [
+  "coordination",
+  "execution",
+  "sources",
+  "delivery",
+  "workspaces",
+  "operator",
+  "operations",
+  "infrastructure",
+];
+
+export function parseTestOptions(args) {
+  const options = {
+    profile: "all",
+    suite: "all",
+    shard: 1,
+    shards: 1,
+    preflight: false,
+  };
+  const seen = new Set();
+  for (const arg of args) {
+    const key = arg.split("=")[0];
+    if (seen.has(key)) throw Error(`Duplicate test option: ${key}`);
+    seen.add(key);
+    if (arg === "--fixture-preflight") options.preflight = true;
+    else if (arg.startsWith("--profile=")) options.profile = arg.slice(10);
+    else if (arg.startsWith("--suite=")) options.suite = arg.slice(8);
+    else if (arg.startsWith("--shard=")) {
+      const match = /^--shard=([12])\/([12])$/.exec(arg);
+      if (!match || Number(match[1]) > Number(match[2]))
+        throw Error("Shard must be 1/1, 1/2 or 2/2");
+      options.shard = Number(match[1]);
+      options.shards = Number(match[2]);
+    } else throw Error(`Unknown test option: ${arg}`);
+  }
+  if (!["all", "chromium", "service"].includes(options.profile))
+    throw Error("Profile must be all, chromium or service");
+  if (options.suite !== "all") {
+    const suites = options.suite.split(",");
+    if (
+      new Set(suites).size !== suites.length ||
+      suites.some((suite) => !logicalSuites.includes(suite))
+    )
+      throw Error(`Unknown or duplicate logical suites: ${options.suite}`);
+  }
   if (
-    mode.length > 1 ||
-    (mode.length === 1 && mode[0] !== "--fixture-preflight")
+    options.preflight &&
+    (options.suite !== "all" ||
+      options.shards !== 1 ||
+      options.profile === "service")
   )
-    throw Error("Only --fixture-preflight is supported");
-  const preflight = mode.length === 1;
+    throw Error(
+      "Fixture preflight requires all suites, no sharding and browser coverage",
+    );
+  return options;
+}
+
+export function selectTestFiles(files, options, timings = {}) {
+  const selected = files.filter(
+    (file) =>
+      options.suite === "all" ||
+      options.suite
+        .split(",")
+        .some((suite) => file.startsWith(`dist/test/${suite}/`)),
+  );
+  if (!selected.length)
+    throw Error(`No tests selected for suite ${options.suite}`);
+  if (options.shards === 1) return selected;
+  const measured = Object.values(timings)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b);
+  const fallback = measured[Math.floor(measured.length / 2)] ?? 1000;
+  const weight = (file) => {
+    const value = timings[file.replace(/^dist\//, "").replace(/\.js$/, ".ts")];
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+  };
+  const bins = Array.from({ length: options.shards }, () => ({
+    files: [],
+    weight: 0,
+  }));
+  for (const file of selected.toSorted(
+    (a, b) => weight(b) - weight(a) || (a < b ? -1 : a > b ? 1 : 0),
+  )) {
+    const bin = bins.reduce((best, candidate) =>
+      candidate.weight < best.weight ? candidate : best,
+    );
+    bin.files.push(file);
+    bin.weight += weight(file);
+  }
+  const result = bins[options.shard - 1].files.sort();
+  if (!result.length) throw Error("Selected shard contains no tests");
+  return result;
+}
+
+async function main() {
+  const options = parseTestOptions(process.argv.slice(2));
+  const preflight = options.preflight;
   const files = preflight
     ? [
-        "dist/test/operator-fixture-preflight.test.js",
-        "dist/test/operator-web-browser.test.js",
+        "dist/test/infrastructure/operator-fixture-preflight.test.js",
+        "dist/test/operator/operator-web-browser.test.js",
       ]
-    : globSync("dist/test/*.test.js").sort();
+    : selectTestFiles(
+        discoverTestFiles(),
+        options,
+        profileTimings(
+          JSON.parse(
+            readFileSync(
+              new URL("./test-timings.json", import.meta.url),
+              "utf8",
+            ),
+          ),
+          options.profile,
+        ),
+      );
   if (!files.length) throw Error("No compiled test files found");
+  process.stdout.write(
+    `Test selection: suite=${options.suite} profile=${options.profile} shard=${options.shard}/${options.shards} files=${files.length}\n`,
+  );
   const args = [
     "--test",
     ...(preflight
@@ -291,14 +409,41 @@ async function main() {
       : []),
     ...files,
   ];
+  if (!preflight) {
+    const directory = await createTestEvidenceDirectory(
+      "test-runner",
+      `${options.suite} ${options.profile} shard ${options.shard} timings`,
+    );
+    const destination = join(directory, "file-timings.ndjson");
+    args.splice(
+      1,
+      0,
+      "--test-reporter=spec",
+      "--test-reporter-destination=stdout",
+      "--test-reporter=./scripts/test-timing-reporter.mjs",
+      `--test-reporter-destination=${destination}`,
+    );
+    process.stdout.write(`Test timings: ${destination}\n`);
+  }
   const result = await runTestProcess(args, {
+    env: {
+      ...process.env,
+      ENSEMBLE_TEST_PROFILE: options.profile,
+      ENSEMBLE_TEST_BROWSER_ENGINE: {
+        all: "all",
+        chromium: "chromium",
+        service: "none",
+      }[options.profile],
+    },
     forwardOutput: true,
     forwardSignals: true,
   });
   try {
     await recordRunnerEvidence(
       result,
-      preflight ? "fixture preflight" : "complete test suite",
+      preflight
+        ? "fixture preflight"
+        : `${options.suite} ${options.profile} shard ${options.shard}/${options.shards}`,
     );
   } catch {
     process.stderr.write("Runner evidence incomplete\n");
