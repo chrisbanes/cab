@@ -5,10 +5,12 @@ operations and backup/restore, see the [operations procedure](operations/standal
 
 Use the Node version in [`.node-version`](../.node-version) and the npm version in
 `packageManager` (`package.json`).
-Node 26 is tested for compatibility (CI job `check-node-26` runs the latest 26.x;
-26.9.0 has [local evidence](evidence/node-26-compatibility-2026-10-09.md)) but is not the
-default baseline. `engines.node` is `>=24` as permissive metadata; Node 25, 27
-and later majors are not qualified.
+Node 26 compatibility jobs use the latest 26.x: `node26-service-*` covers PRs and
+main pushes; `node26-full-compatibility` covers the complete build and browser suite
+on nightly and manual runs, as described below. Version 26.9.0 has
+[local evidence](evidence/node-26-compatibility-2026-10-09.md) but is not the default
+baseline. `engines.node` is `>=24` as permissive metadata; Node 25, 27 and later
+majors are not qualified.
 
 ```sh
 npm ci

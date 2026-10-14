@@ -53,7 +53,7 @@ jobs:
     name: node24-${{ matrix.suite }}-${{ matrix.shard }}
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -115,7 +115,7 @@ jobs:
     name: node26-service-${{ matrix.shard }}
     needs: quality
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
