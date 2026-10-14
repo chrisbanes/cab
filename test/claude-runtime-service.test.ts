@@ -529,6 +529,8 @@ interface ClaudeHarnessControls {
   verified: boolean;
   hangModels?: boolean;
   hangIdentity?: boolean;
+  /** The `claude` the runtime finds; `null` is none on the PATH. Defaults to a fixture path. */
+  executable?: string | null;
 }
 
 /** The service with the real ClaudeRuntime over a scripted SDK and a fake Codex. */
@@ -569,6 +571,10 @@ function claudeHarness(
         safety: context.safety,
         claude: context.claude,
         sdk,
+        resolveExecutable: async () =>
+          controls.executable === undefined
+            ? "/fixture/bin/claude"
+            : controls.executable,
         captureProcessIdentity: async (pid) =>
           controls.hangIdentity
             ? new Promise<never>(() => {})
@@ -1198,6 +1204,38 @@ test("operator token status for a file reference names neither its path nor its 
   assert.equal(await state(), "available");
   chmodSync(path, 0o640);
   assert.equal(await state(), "missing-value");
+});
+
+test("a service whose host has no claude starts with only Claude unavailable", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-claude-missing-"));
+  const missing = claudeHarness(join(root, "missing"), [], {
+    selfTest: true,
+    verified: true,
+    executable: null,
+  });
+  const present = claudeHarness(join(root, "present"), [], {
+    selfTest: true,
+    verified: true,
+  });
+  t.after(async () => {
+    await missing.service.stop().catch(() => {});
+    await present.service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  });
+  await missing.service.start();
+  await present.service.start();
+  const states = (service: StandaloneService) =>
+    Object.fromEntries(
+      service.harnessStatuses().map(({ harness, state }) => [harness, state]),
+    );
+  assert.deepEqual(states(missing.service), {
+    codex: "available",
+    claude: "unavailable",
+  });
+  assert.deepEqual(states(present.service), {
+    codex: "available",
+    claude: "available",
+  });
 });
 
 test("a started Claude runtime's supported settings and effective policy parse into the harness status", async (t) => {

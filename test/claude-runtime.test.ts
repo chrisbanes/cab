@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -58,6 +59,7 @@ async function settledPreflight(
 }
 
 const TOKEN = "claude-runtime-token-canary-3319";
+const fixtureClaude = "/fixture/bin/claude";
 
 function fixture(
   options: {
@@ -67,6 +69,7 @@ function fixture(
     verified?: boolean;
     selfTest?: () => boolean;
     hangModels?: boolean;
+    resolveExecutable?: () => Promise<string | null>;
   } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-claude-runtime-"));
@@ -75,9 +78,13 @@ function fixture(
   const safetyFixture = runtimeSafetyFixture();
   const log: string[] = [];
   const recorded: unknown[] = [];
-  const { sdk, sessions, queries } = fakeSdk(options.scripts ?? [], log, {
-    hangModels: options.hangModels ?? false,
-  });
+  const { sdk, sessions, queries, optionsSeen } = fakeSdk(
+    options.scripts ?? [],
+    log,
+    {
+      hangModels: options.hangModels ?? false,
+    },
+  );
   const runtime = new ClaudeRuntime({
     safety: {
       ...safetyFixture.safety,
@@ -97,6 +104,7 @@ function fixture(
         })),
     },
     sdk,
+    resolveExecutable: options.resolveExecutable ?? (async () => fixtureClaude),
     captureProcessIdentity: async (pid) =>
       pid
         ? {
@@ -168,6 +176,7 @@ function fixture(
     toolCalls,
     turn,
     queries,
+    optionsSeen,
     cleanup: async () => {
       await releaseClaudeTemporaryBase(workspace);
       await runtime.stop();
@@ -335,6 +344,56 @@ test("a Claude turn runs one isolated query, releases its prompt only after the 
     assert.equal(await f.runtime.waitForTurn(threadId, second), "completed");
     assert.equal(f.sessions[1]?.options.resume, threadId);
     assert.equal(f.sessions[1]?.options.sessionId, undefined);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("the settings read and every turn run the PATH-resolved claude, resolved once per start", async () => {
+  let resolved = 0;
+  const script: Script = async function* (session) {
+    yield init(sessionOf(session));
+    yield result(sessionOf(session));
+  };
+  const f = fixture({
+    scripts: [script, script],
+    resolveExecutable: async () => {
+      resolved++;
+      return fixtureClaude;
+    },
+  });
+  try {
+    await f.runtime.start();
+    const threadId = await f.runtime.startThread(f.workspace, []);
+    const first = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, first), "completed");
+    await f.runtime.resumeThread(threadId, []);
+    const second = await f.turn(threadId);
+    assert.equal(await f.runtime.waitForTurn(threadId, second), "completed");
+    assert.equal(resolved, 1);
+    assert.deepEqual(f.queries, ["settings", "turn", "turn"]);
+    assert.deepEqual(
+      f.optionsSeen.map((options) => options.pathToClaudeCodeExecutable),
+      [fixtureClaude, fixtureClaude, fixtureClaude],
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test("a missing claude rejects start before any query and leaves the runtime stopped", async () => {
+  const f = fixture({ resolveExecutable: async () => null });
+  try {
+    await assert.rejects(
+      f.runtime.start(),
+      /Claude executable is not on the service PATH/,
+    );
+    await assert.rejects(
+      f.runtime.startThread(f.workspace, []),
+      /Runtime stopped/,
+    );
+    assert.deepEqual(f.queries, []);
+    assert.equal(existsSync(join(f.root, "data", "claude")), false);
   } finally {
     await f.cleanup();
   }
@@ -855,6 +914,7 @@ test("the effective policy discloses hook confinement, the redirected temporary 
     /F6\.3/,
     /F6\.4/,
     /scrub/,
+    /version the pinned SDK declares/,
   ])
     assert.match(limits, pattern);
 });
