@@ -1533,14 +1533,19 @@ export class DomainStore {
       return null;
     const row = this.one(
       `SELECT t.state, e.observedState,
-        EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed
+        EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed,
+        EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
+          AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending
       FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
       taskId,
     );
     if (row?.state === "done" && Number(row.completed) === 1)
       return "completed";
+    // A pending proof of Ensemble's own closure is re-checked by the service; it is not
+    // provider closure and needs no reopen.
     return row?.state === "open" &&
       row.observedState === "closed" &&
+      Number(row.ownProofPending) === 0 &&
       !this.hasOwnDeliveryClosure(taskId)
       ? "held"
       : null;

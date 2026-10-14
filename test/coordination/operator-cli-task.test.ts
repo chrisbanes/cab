@@ -972,3 +972,53 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
   );
   await agree("completed", "done (closed on GitHub)");
 });
+
+test("a pending own-delivery closure proof is not shown as GitHub closure on any task view", async (t) => {
+  const o = await startCliOperator(t);
+  const { d, s } = o;
+  const taskId = seedImported(o);
+  const sources = s.f.service.githubSources();
+  sources.recordDeliveryClosureUnavailable("I1");
+  sources.reconcileSelection(s.projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I1",
+        repositoryId: "R1",
+        repositoryName: "owner/repo",
+        number: 42,
+        title: "Imported task",
+        body: "Imported body",
+        state: "closed",
+        labels: ["ready"],
+        projectFields: [],
+      },
+    ],
+  });
+  assert.equal(sources.hold("I1")?.reason, "closure-read-unavailable");
+  const api = new OperatorApi(s.f.service, [s.f.directory]);
+  assert.equal((await api.readTask(taskId)).data.source?.closure, null);
+  assert.equal(
+    (await api.readTaskListPage()).data.tasks.find((task) => task.id === taskId)
+      ?.source?.closure,
+    null,
+  );
+  for (const args of [
+    ["task", "get", taskId],
+    ["task", "list"],
+  ]) {
+    const human = await o.h.run([...args, "--connection", "ro"]);
+    assert.equal(human.code, 0, human.err);
+    assert.ok(!human.out.includes("closed on GitHub"), human.out);
+  }
+  for (const page of [
+    new LocalOperatorUi(d, undefined, sources).task(taskId),
+    new LocalOperatorUi(d, undefined, sources).project(s.projectId),
+  ])
+    assert.ok(
+      !/closed on GitHub|issue reopens/.test(page),
+      "no reopen guidance for a pending own-delivery proof",
+    );
+});

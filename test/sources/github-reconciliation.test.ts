@@ -573,6 +573,7 @@ for (const mode of ["skip", "done"] as const)
       assert.ok(
         w.domain.admission(String(closed?.id)).reasons.includes("source-hold"),
       );
+      assert.equal(w.domain.providerClosure(String(closed?.id)), "held");
       assert.equal(w.completion(closed?.id), false);
       // Reopening keeps the closure hold and grants nothing beyond the rule.
       const reopened = w.observe({ state: "open", labels: [] });
@@ -606,6 +607,8 @@ test("a pending own-delivery closure proof is never turned into a provider compl
     assert.equal(w.hold()?.reason, "closure-read-unavailable");
     w.observe({ state: "closed" });
     assert.equal(w.hold()?.reason, "closure-read-unavailable");
+    // Not provider closure: the service re-checks its own delivery, so no view asks for a reopen.
+    assert.equal(w.domain.providerClosure(taskId), null);
     assert.equal(
       w.sources.completeFromProviderClosure(taskId, () => true),
       false,
