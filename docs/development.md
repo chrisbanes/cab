@@ -278,12 +278,17 @@ or run `node dist/src/cli/main.js` directly.
    evicted, failed, interrupted, late and limit gaps `evidence-gap`, and baseline or
    uncaptured executions `evidence-unavailable`.
 
+   `project prepare PROJECT_ID --diagnostic-capture baseline|enhanced` previews and
+   applies the mode change through the same revision-checked, replay-safe flow;
+   omitting the flag leaves the mode unchanged.
+
    Retention: items older than `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` (1–365,
    default 30) are deleted hourly; beyond `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB`
    (16–1048576, default 1024) the oldest items are evicted. Invalid values fail
-   service startup. Each execution keeps at most 16 MiB and 8192 items and each item
-   at most 64 KiB (a 4 KiB command or 48 KiB text field over its cap is replaced
-   whole, never cut). Pruning removes items only; executions and coalesced gap counts
+   service startup. `service install|upgrade` take `--diagnostic-retention-days` and
+   `--diagnostic-storage-mib` and write them into the LaunchAgent. Each execution
+   keeps at most 16 MiB and 8192 items and each item at most 64 KiB (a 4 KiB
+   command or 48 KiB text field over its cap is replaced whole, never cut). Pruning removes items only; executions and coalesced gap counts
    remain. The quota bounds stored payload text, not the database, WAL or backups,
    and older backups keep what they held.
 

@@ -27,7 +27,7 @@
     },
     "CLI05": {
       "state": "bounded",
-      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write remains unproved (no command). Bounded by that unproved write."
+      "basis": "Renewed CLI7 deterministic suites at the candidate cover redaction, instruction projection, historical and expired gaps, capture and storage failure, pruning and bounded read and follow; the host live journey (issue-901-cli8-live-2026-10-12.json, candidate eda2733e, Codex, 2 turns) captured inputs, settings and events with no gaps. The diagnosticCapture CLI write is covered by deterministic fixtures only."
     },
     "CLI06": {
       "state": "unproved",
@@ -1384,13 +1384,13 @@
         "test/operator-diagnostic-capture.test.ts",
         "docs/evidence/issue-900-cli7-2026-10-11.md"
       ],
-      "effect": "Would prepare and apply the project's diagnostic capture mode (baseline or enhanced) as a reviewed, revision-checked change; today the mode is set only by a direct POST /api/operator/commands and read back with project get.",
-      "denial": "API level only: a read-only bearer post is 403 with no change; there is no CLI write path to deny.",
-      "revision": "API level only: a stale version conflicts and the default is enhanced; there is no CLI prepare or apply.",
-      "retry": "API level only: the same key replays and a changed payload conflicts; there is no CLI receipt flow.",
+      "effect": "project prepare --diagnostic-capture enhanced|baseline adds the mode to the one project.configure command, previewed as a field change; apply sets it and project get reads it back. Omitting the flag leaves the mode alone, and the current mode is refused as no change.",
+      "denial": "A read credential prepares (nothing is sent, the database digest is unchanged) and its apply exits 3 with the mode unchanged; a read-write credential applies.",
+      "revision": "A document prepared before another actor changed the project exits 4 on apply with the mode unchanged.",
+      "retry": "Applying the same document again returns the recorded receipt without another version change.",
       "observation": "synthetic",
-      "state": "unproved",
-      "gap": "project prepare has no diagnostic-capture flag (its options are name, paused, lead-profile, instructions-file and restore-revision) and CLI8 may not add commands or flags. The operation is unproved through the CLI; the API write and project get readback are covered separately."
+      "state": "bounded",
+      "gap": "Deterministic fixture evidence only (CLI against a fixture service with real SQLite); the write is not part of the host live journey."
     },
     {
       "id": "credential provisioning in Settings",
