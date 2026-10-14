@@ -626,6 +626,75 @@ test("the store remembers a recorded save until purge, and never an unknown outc
   unknown.startOperation({ name: "y" });
   assert.equal(unknown.phase, "unknown");
 });
+test("a saved record keeps the active selections of a source preview and no other form value", async () => {
+  const projectId = randomUUID();
+  const client = new OperatorClient(async (_url, init) => {
+    const c = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "configuration",
+      key: c.key,
+      recorded: true,
+      result:
+        c.type === "github.preview"
+          ? {
+              commandType: "github.preview",
+              resourceId: projectId,
+              selectionId: c.selectionId,
+              configVersion: c.expectedVersion,
+              active: true,
+            }
+          : {
+              commandType: "profile.configure",
+              resourceId: projectId,
+              version: c.expectedVersion + 1,
+              revoked: false,
+            },
+    });
+  });
+  const drafts = new ConfigurationDrafts();
+  const preview = drafts.get("github.preview:a", () => {});
+  preview.initialize({ activeSelectionIds: ["S-1"], key: "k" });
+  await preview.submit(
+    client,
+    {
+      type: "github.preview",
+      key: randomUUID(),
+      projectId,
+      selectionId: "S-1",
+      expectedVersion: 2,
+    },
+    "csrf",
+  );
+  assert.deepEqual(drafts.saved("github.preview:a")?.activeSelectionIds, [
+    "S-1",
+  ]);
+  // The record outlives the draft starting over.
+  preview.startOperation({ activeSelectionIds: [] });
+  assert.deepEqual(drafts.saved("github.preview:a")?.activeSelectionIds, [
+    "S-1",
+  ]);
+  // A private field of any other save is never retained in the record.
+  const profile = drafts.get("profile.configure:p", () => {});
+  profile.initialize({
+    instructions: "PRIVATE-INSTRUCTIONS",
+    guidance: "PRIVATE-GUIDANCE",
+  });
+  await profile.submit(
+    client,
+    {
+      type: "profile.configure",
+      key: randomUUID(),
+      profileId: projectId,
+      expectedVersion: 2,
+      name: "Renamed",
+    },
+    "csrf",
+  );
+  assert.equal(profile.phase, "recorded");
+  const record = drafts.saved("profile.configure:p");
+  assert.deepEqual(record?.activeSelectionIds, []);
+  assert.doesNotMatch(JSON.stringify(record), /PRIVATE/);
+});
 test("adopting a newer revision keeps edited fields and takes the latest for untouched ones", () => {
   const draft = new ConfigurationDraft();
   draft.initialize({

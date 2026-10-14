@@ -1620,6 +1620,11 @@ frames 114 and 118–128 as follows:
   raises the source version, and activation counts only at the version it was
   previewed, so every kept selection reads "Inactive" and is not synced until it
   is previewed again in Sync & placement.
+- Frames 118–121 draw no activation result. Production's "Preview and activate
+  selection" names the selection (or says it was already active), states that
+  tasks aren't imported until source observations are refreshed, and offers
+  "Refresh source observations" inside that outcome. Selections and Source
+  observation rows also read active or inactive.
 - Removing every linked repository shows a warning and a required "Remove all
   repository access" checkbox inside "Changes to save" (no frame draws it).
 - Profile Revoke and Restore are one draft field saved by Save profile, so the

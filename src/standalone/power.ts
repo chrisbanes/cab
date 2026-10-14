@@ -58,6 +58,13 @@ function knownPmsetSummary(line: string): boolean {
   );
 }
 
+// macOS 27 prints these three lines, in order, before the first timestamped row.
+const pmsetPreamble = [
+  /^Time stamp\s+Domain\s+Message\b.*\bDuration\s+Delay$/,
+  /^=+(?:\s+=+)*$/,
+  /^UUID: (?:\(null\)|[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12})$/,
+];
+
 /**
  * Incremental parser for the documented, timestamped Sleep/Wake rows of
  * `pmset -g log`. Feed it exactly the pieces of `output.split(/\r?\n/)` so
@@ -86,6 +93,7 @@ function createPmsetParser(requested: PowerEventCursor | null) {
   let previousTimestamp = Number.NEGATIVE_INFINITY;
   let malformed = false;
   let inSummary = false;
+  let preambleStage = 0;
   let lineIndex = -1;
 
   function line(text: string): void {
@@ -98,6 +106,15 @@ function createPmsetParser(requested: PowerEventCursor | null) {
     }
     if (inSummary || knownPmsetSummary(trimmed)) return;
     const normalized = trimmed.trim();
+    // Each preamble line is accepted once, in order, and only before the first
+    // row, so a header in the middle of the history still fails closed.
+    if (
+      earliestTimestamp === undefined &&
+      pmsetPreamble[preambleStage]?.test(normalized)
+    ) {
+      preambleStage++;
+      return;
+    }
     const match = timestampPrefix.exec(normalized);
     if (!match) {
       malformed = true;
@@ -105,6 +122,15 @@ function createPmsetParser(requested: PowerEventCursor | null) {
     }
     const timestamp = parseTimestamp(match[1] ?? "");
     if (timestamp === undefined || timestamp < previousTimestamp) {
+      malformed = true;
+      return;
+    }
+    // A started preamble must be complete before the first row.
+    if (
+      earliestTimestamp === undefined &&
+      preambleStage > 0 &&
+      preambleStage < pmsetPreamble.length
+    ) {
       malformed = true;
       return;
     }
@@ -142,16 +168,24 @@ function createPmsetParser(requested: PowerEventCursor | null) {
     if (requestedEvent) {
       const timestamp = Number(requestedEvent[1]);
       const requestedLine = Number(requestedEvent[2]);
-      const found = events.find(
+      // A cursor saved before macOS 27 predates the preamble, so its row moved
+      // later by an unknown number of lines. With the preamble present, accept
+      // the one later row with the same timestamp and hash; zero or several fail.
+      const exact = events.find(
         (event) => event.cursor.value === requested?.value,
       );
-      if (
-        !found ||
-        found.timestamp !== timestamp ||
-        found.lineIndex !== requestedLine
-      )
-        return rejected();
-      afterLine = requestedLine;
+      const moved =
+        exact || preambleStage !== pmsetPreamble.length
+          ? []
+          : events.filter(
+              (event) =>
+                event.timestamp === timestamp &&
+                event.lineIndex > requestedLine &&
+                event.cursor.value.endsWith(`:${requestedEvent[3]}`),
+            );
+      const found = exact ?? (moved.length === 1 ? moved[0] : undefined);
+      if (!found) return rejected();
+      afterLine = found.lineIndex;
     } else if (requestedTime) {
       const timestamp = Number(requestedTime[1]);
       if (
