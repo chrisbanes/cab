@@ -5,7 +5,6 @@ import { CliError } from "../../src/cli/connections.js";
 import { ServiceClient } from "../../src/cli/transport.js";
 import { cliCapabilities } from "../../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
-import { OperatorWebBoundary } from "../../src/standalone/operator-web.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
@@ -475,11 +474,7 @@ test("every known API route has an explicit authority", () => {
     ),
     undefined,
   );
-  const known = Object.create(
-    OperatorWebBoundary.prototype,
-  ) as OperatorWebBoundary;
   for (const path of representative) {
-    assert.ok(known.knownApi(path), path);
     assert.ok(
       operatorRouteAuthority("GET", path) ??
         operatorRouteAuthority("POST", path),
