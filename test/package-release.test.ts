@@ -12,6 +12,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
@@ -29,6 +30,12 @@ const release = (await import(
   }): Promise<{ nodeDirectory: string; sha256: string }>;
   treeDigest(root: string): Promise<string>;
   checkTag(tag: string, version: string): void;
+  checkOperatorUi(
+    origin: string,
+    child: { exitCode: number | null; signalCode: string | null },
+    deadline: number,
+    requestMs?: number,
+  ): Promise<string>;
 };
 
 const VERSION = "24.21.0";
@@ -168,4 +175,27 @@ test("the launcher runs the bundled Node from a path with spaces", (t) => {
     encoding: "utf8",
   });
   assert.equal(out, `${root}/dist/src/cli/main.js\n--version\n`);
+});
+
+test("checkOperatorUi fails within its request bound when an asset stalls", async (t) => {
+  const server = createServer((request, response) => {
+    if (request.url === "/app")
+      response.end('<script src="/assets/index.js"></script>');
+    // The asset request never receives a response.
+  });
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  t.after(() => server.closeAllConnections());
+  t.after(() => new Promise((done) => server.close(done)));
+  const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const started = Date.now();
+  await assert.rejects(
+    release.checkOperatorUi(
+      origin,
+      { exitCode: null, signalCode: null },
+      Date.now() + 60_000,
+      200,
+    ),
+    { name: "TimeoutError" },
+  );
+  assert.ok(Date.now() - started < 5000);
 });

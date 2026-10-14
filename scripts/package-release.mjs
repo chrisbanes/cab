@@ -343,7 +343,31 @@ const fakeCodex = [
   "}",
 ].join("\n");
 
-async function waitForApp(origin, child, deadline) {
+/**
+ * Wait for the service to serve /app, then one of its assets. Every request is
+ * bounded so a stalled response cannot keep verify (and the service) alive.
+ */
+export async function checkOperatorUi(
+  origin,
+  child,
+  deadline,
+  requestMs = 5000,
+) {
+  const html = await waitForApp(origin, child, deadline, requestMs);
+  const asset = html.match(/\/assets\/[^"']+/)?.[0];
+  if (
+    !asset ||
+    (
+      await fetch(`${origin}${asset}`, {
+        signal: AbortSignal.timeout(requestMs),
+      })
+    ).status !== 200
+  )
+    throw new Error(`Operator UI asset ${asset} was not served`);
+  return asset;
+}
+
+async function waitForApp(origin, child, deadline, requestMs) {
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null)
       throw new Error(
@@ -351,7 +375,7 @@ async function waitForApp(origin, child, deadline) {
       );
     try {
       const response = await fetch(`${origin}/app`, {
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(requestMs),
       });
       if (response.status === 200) return await response.text();
     } catch {
@@ -468,10 +492,7 @@ await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
         stdio: ["ignore", "inherit", "inherit"],
       },
     );
-    const html = await waitForApp(origin, child, Date.now() + 120_000);
-    const asset = html.match(/\/assets\/[^"']+/)?.[0];
-    if (!asset || (await fetch(`${origin}${asset}`)).status !== 200)
-      throw new Error(`Operator UI asset ${asset} was not served`);
+    const asset = await checkOperatorUi(origin, child, Date.now() + 120_000);
     process.stdout.write(
       `Verified ${name} (${manifest.commit})\nTree digest: ${digest}\nServed ${origin}/app and ${asset}\n`,
     );
