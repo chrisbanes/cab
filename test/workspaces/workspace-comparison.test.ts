@@ -1229,3 +1229,81 @@ test("stored rows in the lenient persistence shape still read back unchanged", (
     latestFinished: JSON.parse(captureJson),
   });
 });
+
+test("nested repositories and submodule pointer changes are unsupported entries, not whole-comparison gaps", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const repo = f.repository.workspacePath;
+  const sub = join(f.root, "submodule-source");
+  mkdirSync(sub);
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main", sub]);
+  for (const text of ["one\n", "two\n"]) {
+    writeFileSync(join(sub, "file.txt"), text);
+    git(sub, "add", "file.txt");
+    git(
+      sub,
+      "-c",
+      "user.name=Sub",
+      "-c",
+      "user.email=sub@example.invalid",
+      "commit",
+      "--quiet",
+      "-m",
+      text.trim(),
+    );
+  }
+  const second = git(sub, "rev-parse", "HEAD");
+  const first = git(sub, "rev-parse", "HEAD~1");
+  execFileSync("git", ["clone", "--quiet", sub, join(repo, "vendor", "sub")]);
+  git(join(repo, "vendor", "sub"), "checkout", "--quiet", first);
+  git(repo, "-c", "advice.addEmbeddedRepo=false", "add", "vendor/sub");
+  git(repo, "commit", "--quiet", "-m", "add submodule pointer");
+  git(join(repo, "vendor", "sub"), "checkout", "--quiet", second);
+  execFileSync("git", ["init", "--quiet", join(repo, "nested")]);
+  writeFileSync(join(repo, "nested", "inner.txt"), "inner\n");
+  writeFileSync(join(repo, "untracked.md"), "untracked content\n");
+
+  const request = {
+    taskId: f.binding.taskId,
+    repositoryId: f.repository.repositoryId,
+    target: "uncommitted" as const,
+    changeSet: "unstaged" as const,
+  };
+  const unstaged = await compareRepository(request, f.current);
+  assert.equal(unstaged.state, "available");
+  assert.equal(entry(unstaged, "vendor/sub", "unstaged")?.state, "unsupported");
+  assert.equal(entry(unstaged, "nested", "unstaged")?.state, "unsupported");
+  assert.equal(entry(unstaged, "untracked.md", "unstaged")?.state, "text");
+
+  git(repo, "add", "vendor/sub");
+  const staged = await compareRepository(
+    { ...request, changeSet: "staged" },
+    f.current,
+  );
+  assert.equal(staged.state, "available");
+  assert.equal(entry(staged, "vendor/sub", "staged")?.state, "unsupported");
+});
+
+test("a base branch sharing its name with a tag is offered and resolved by its branch name", async (t) => {
+  const f = await fixture();
+  t.after(() => f.close());
+  const repo = f.repository.workspacePath;
+  git(repo, "branch", "release");
+  git(repo, "tag", "release");
+  const request = {
+    taskId: f.binding.taskId,
+    repositoryId: f.repository.repositoryId,
+    target: "branch" as const,
+  };
+  const missingSelection = await compareRepository(request, f.current);
+  assert.equal(missingSelection.reason, "base-branch-required");
+  assert.deepEqual([...(missingSelection.availableBaseBranches ?? [])].sort(), [
+    "main",
+    "release",
+  ]);
+  const selected = await compareRepository(
+    { ...request, baseBranch: "release" },
+    f.current,
+  );
+  assert.equal(selected.state, "available");
+});
