@@ -240,19 +240,30 @@ test("a claude that ignores SIGTERM is killed, and the check settles only after 
   const pidFile = join(f.root, "pid");
   // Ignored signals stay ignored across exec, so the long sleep is the process that traps SIGTERM.
   installClaude(f, `trap '' TERM\necho $$ > "${pidFile}"\nexec /bin/sleep 30`);
-  t.after(() => {
+  const result = await claudeExecutable(f, { versionTimeoutMs: 1000 });
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  assert.ok(pid > 1);
+  try {
+    assert.equal(result.status, "fail");
+    assert.equal(result.reason, UNRUNNABLE.reason);
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  } finally {
+    // Only a regression leaves it running; the fixture root, and the pid file, outlive this.
     try {
-      process.kill(Number(readFileSync(pidFile, "utf8")), "SIGKILL");
+      process.kill(pid, "SIGKILL");
     } catch {
       // Already gone, which is what the test expects.
     }
-  });
-  const result = await claudeExecutable(f, { versionTimeoutMs: 500 });
+  }
+});
+
+test("a claude that exits while a descendant keeps its output open still settles the check", async (t) => {
+  const f = fixture(t);
+  installClaude(f, "/bin/sleep 3 &\nexit 0");
+  const started = Date.now();
+  const result = await claudeExecutable(f, { versionTimeoutMs: 200 });
   assert.equal(result.status, "fail");
-  assert.equal(result.reason, UNRUNNABLE.reason);
-  const pid = Number(readFileSync(pidFile, "utf8"));
-  assert.ok(pid > 1);
-  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  assert.ok(Date.now() - started < 1500);
 });
 
 test("a claude whose child outlives the timeout still settles the check", async (t) => {

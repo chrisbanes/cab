@@ -28,15 +28,16 @@ export async function resolveOnPath(
 
 /** How long a probe child gets to exit on SIGTERM before it is killed. */
 const killGraceMs = 1000;
-const maxOutputBytes = 4096;
+const maxOutputChars = 4096;
 
 /**
  * What `path --version` prints on stdout. The child's environment is `PATH` alone, because the
  * service environment holds credentials. After `timeoutMs` the child gets SIGTERM, then SIGKILL
  * after a grace period, and the promise settles only once it has exited, so a hung `claude`
  * never outlives its probe. Rejects on a spawn failure, a non-zero exit or the timeout.
- * shortcut: descendants the child started are not tracked; upgrade to a process group if a
- * wrapper `claude` must be covered.
+ * shortcut: descendants the child started are not tracked, and a child that cannot be killed
+ * (uninterruptible I/O) holds the probe; upgrade to a process group if a wrapper `claude`
+ * must be covered.
  */
 export function printVersion(
   path: string,
@@ -50,7 +51,7 @@ export function printVersion(
     });
     let stdout = "";
     child.stdout.on("data", (chunk: Buffer) => {
-      stdout = `${stdout}${chunk}`.slice(0, maxOutputBytes);
+      stdout = `${stdout}${chunk}`.slice(0, maxOutputChars);
     });
     let timedOut = false;
     let escalation: NodeJS.Timeout | undefined;
@@ -69,8 +70,9 @@ export function printVersion(
       child.kill("SIGTERM");
       escalation = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
     }, timeoutMs);
-    // A spawn failure has no exit to wait for.
+    // A spawn failure has no exit to wait for; a pipe error ends the probe too.
     child.once("error", settle);
+    child.stdout.once("error", settle);
     child.once("exit", () => {
       if (timedOut) settle(new Error("Version probe timed out"));
     });
