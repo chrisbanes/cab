@@ -2392,6 +2392,7 @@ export class OperatorApi {
       number,
       url: githubIssueUrl(repositoryName, number),
       state: issue?.observedState ?? null,
+      closure: this.domain().providerClosure(taskId),
     };
   }
   private async taskSummary(taskId: string, base?: ExclusionBase) {
@@ -3966,6 +3967,9 @@ export class OperatorApi {
       title: this.safe(issue?.observedTitle, excluded),
       body: this.safe(issue?.observedBody, excluded),
       state: issue?.observedState ?? null,
+      closure: issue
+        ? this.domain().providerClosure(String(issue.taskId))
+        : null,
       memberships: store
         .memberships(identity.nodeId)
         .filter((m) => m.projectId === projectId)

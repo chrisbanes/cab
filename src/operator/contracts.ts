@@ -803,6 +803,8 @@ function taskSchemaAdmission() {
 }
 // The server only builds https GitHub URLs; reject javascript: and data: links.
 const sourceUrl = z.url().startsWith("https://");
+/** Provider-closure provenance: closed on GitHub while held, or completed by that closure. */
+const sourceClosure = z.enum(["held", "completed"]).nullable();
 export const taskSourceSummarySchema = z
   .object({
     identity: sourceIdentity,
@@ -813,6 +815,7 @@ export const taskSourceSummarySchema = z
     number: revision.nullable(),
     url: sourceUrl.nullable(),
     state: z.enum(["open", "closed"]).nullable(),
+    closure: sourceClosure,
   })
   .strict()
   .nullable();
@@ -1057,6 +1060,7 @@ const source = z
     title: safeText,
     body: safeText,
     state: z.enum(["open", "closed"]).nullable(),
+    closure: sourceClosure,
     memberships: z.array(
       z
         .object({

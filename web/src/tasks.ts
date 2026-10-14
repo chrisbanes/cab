@@ -89,7 +89,9 @@ export function taskColumn(task: TaskListSummary): TaskColumn {
   if (s === "running" || s === "starting") return "Running";
   if (task.state === "done") return "Done";
   if (task.state === "cancelled") return "Cancelled";
-  if (task.project.paused || s === "paused") return "Paused";
+  // Closed on GitHub without own delivery: paused until resolved, never Draft or Ready.
+  if (task.project.paused || s === "paused" || task.source?.closure === "held")
+    return "Paused";
   if (!task.ready) return "Draft";
   if (!task.admission.eligible || s === "waiting" || task.execution.holds.task)
     return "Waiting";
@@ -174,6 +176,9 @@ export function taskReasons(task: TaskListSummary) {
       (r) => reasonLabels[r] ?? "Waiting to start",
     ),
   ];
+  if (task.source?.closure === "held") reasons.unshift("Closed on GitHub");
+  if (task.source?.closure === "completed")
+    reasons.unshift("Closed on GitHub, not delivered by Ensemble");
   if (task.execution.holds.stop)
     reasons.unshift("Stop requested; effects may continue");
   if (

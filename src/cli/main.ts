@@ -28,7 +28,7 @@ import {
   snapshotCommand,
 } from "./service.js";
 import { RequestJournal } from "./request-journal.js";
-import { waitLines } from "./task-write.js";
+import { closureSuffix, waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
@@ -452,7 +452,7 @@ async function run(
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
-        `State:   ${task.state}${task.ready ? " (ready)" : ""}`,
+        `State:   ${task.state}${closureSuffix(read.data.source?.closure)}${task.ready ? " (ready)" : ""}`,
         `Version: ${task.version}`,
         ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),

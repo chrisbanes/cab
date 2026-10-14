@@ -1523,6 +1523,28 @@ export class DomainStore {
       )
     );
   }
+  /** Provider-closure provenance shared by every task view. */
+  providerClosure(taskId: string): "held" | "completed" | null {
+    if (
+      !this.one(
+        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
+      )
+    )
+      return null;
+    const row = this.one(
+      `SELECT t.state, e.observedState,
+        EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed
+      FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
+      taskId,
+    );
+    if (row?.state === "done" && Number(row.completed) === 1)
+      return "completed";
+    return row?.state === "open" &&
+      row.observedState === "closed" &&
+      !this.hasOwnDeliveryClosure(taskId)
+      ? "held"
+      : null;
+  }
   admission(
     taskId: string,
     deliveryContinuation = false,

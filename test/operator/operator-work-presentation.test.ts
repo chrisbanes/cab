@@ -14,7 +14,9 @@ import {
   columns,
   filterTasks,
   parseTaskFilters,
+  taskColumn,
   taskNext,
+  taskReasons,
   taskRouteSubtitle,
   visibleColumns,
 } from "../../web/src/tasks.js";
@@ -35,6 +37,7 @@ type Overrides = {
   execution?: string;
   codes?: string[];
   paused?: boolean;
+  closure?: "held" | "completed" | null;
 };
 function summary(o: Overrides = {}): TaskListSummary {
   const projectId = o.projectId ?? randomUUID();
@@ -71,10 +74,49 @@ function summary(o: Overrides = {}): TaskListSummary {
       projectUsage: 0,
       projectLimit: 10,
     },
-    source: null,
+    source:
+      o.closure === undefined
+        ? null
+        : {
+            identity: {
+              provider: "github.com",
+              nodeId: "I_1",
+              repositoryId: "R_1",
+            },
+            repositoryName: "acme/atlas",
+            number: 1,
+            url: "https://github.com/acme/atlas/issues/1",
+            state: "closed",
+            closure: o.closure,
+          },
     attention: { codes: o.codes ?? [], count: o.codes?.length ?? 0 },
   });
 }
+
+test("closure provenance places held tasks in Paused and names provider completion", () => {
+  for (const ready of [true, false]) {
+    const held = summary({ ready, closure: "held" });
+    assert.equal(taskColumn(held), "Paused");
+    assert.ok(taskReasons(held).includes("Closed on GitHub"));
+  }
+  const completed = summary({ state: "done", closure: "completed" });
+  assert.equal(taskColumn(completed), "Done");
+  assert.ok(
+    taskReasons(completed).includes(
+      "Closed on GitHub, not delivered by Ensemble",
+    ),
+  );
+  for (const plain of [
+    summary({ state: "done", closure: null }),
+    summary({ state: "done" }),
+  ]) {
+    assert.equal(taskColumn(plain), "Done");
+    assert.equal(
+      taskReasons(plain).some((reason) => reason.includes("GitHub")),
+      false,
+    );
+  }
+});
 
 test("columns follow the design order and Active tasks hides only terminal work", () => {
   assert.deepEqual(
@@ -145,6 +187,7 @@ test("source summaries only accept https links", () => {
       number: 1,
       url,
       state: "open",
+      closure: null,
     }).success;
   assert.equal(source("https://github.com/a/b/issues/1"), true);
   assert.equal(source(null), true);
