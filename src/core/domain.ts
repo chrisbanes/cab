@@ -1574,19 +1574,26 @@ export class DomainStore {
         }
       }
     }
-    if (
-      this.one(
-        `SELECT 1 AS blocked FROM local_dependencies d
+    if (this.blockingDependencies(taskId).length)
+      reasons.push("local-dependency");
+    return { eligible: reasons.length === 0, reasons };
+  }
+
+  /** Dependencies that still block: a local task not done, or an imported one whose issue is not closed. */
+  blockingDependencies(taskId: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT d.blockerTaskId AS id FROM local_dependencies d
       JOIN domain_tasks b ON b.id = d.blockerTaskId
       LEFT JOIN github_imported_tasks i ON i.taskId = b.id
       LEFT JOIN github_issue_status s ON s.nodeId = i.nodeId
       WHERE d.taskId = ? AND ((i.taskId IS NULL AND b.state != 'done')
-        OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed')) LIMIT 1`,
-        taskId,
-      )
-    )
-      reasons.push("local-dependency");
-    return { eligible: reasons.length === 0, reasons };
+        OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed'))
+      ORDER BY d.blockerTaskId`,
+        )
+        .all(taskId) as Row[]
+    ).map((row) => String(row.id));
   }
 
   recordRouting(

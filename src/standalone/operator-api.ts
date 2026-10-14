@@ -2079,14 +2079,17 @@ export class OperatorApi {
         c.effectiveProjectLimits[projectId] ?? c.defaultProjectLimit,
     };
   }
-  /** The lead's runtime facts for waits, mirroring the ready check; none for a missing or revoked lead. */
-  private leadWaitFacts(profileId: string | undefined) {
+  /**
+   * The runtime facts of the profile that will execute, mirroring the ready check; none for
+   * a missing or revoked profile. `revision` is an assignment's bound profile revision.
+   */
+  private leadWaitFacts(profileId: string | undefined, revision?: number) {
     if (!profileId) return undefined;
     const d = this.domain();
     let runtime: ReturnType<typeof d.profileRuntime>;
     try {
       if (d.profile(profileId).revoked) return undefined;
-      runtime = d.profileRuntime(profileId);
+      runtime = d.profileRuntime(profileId, revision);
     } catch {
       return undefined;
     }
@@ -2104,6 +2107,30 @@ export class OperatorApi {
         runtime.harness === "claude" &&
         this.service.claudeTokenStatus().state !== "available",
     };
+  }
+  /**
+   * Runtime facts of the profile whose turn is next: a pending assignment runs on its own
+   * bound profile revision, and with none pending the lead takes the next turn. The first
+   * pending assignment with a runtime wait is reported.
+   */
+  private executingWaitFacts(t: Row, excluded: readonly string[] | undefined) {
+    const pending = this.domain()
+      .assignments(String(t.id))
+      .filter((a) => a.state === "pending")
+      .map((a) =>
+        this.leadWaitFacts(String(a.profileId), Number(a.profileRevision)),
+      );
+    if (!pending.length)
+      return this.leadWaitFacts(this.taskLead(t, excluded)?.profileId);
+    return (
+      pending.find(
+        (f) =>
+          f &&
+          (f.runtimeUnavailable ||
+            f.runtimeNotConfigured ||
+            f.claudeTokenUnavailable),
+      ) ?? pending[0]
+    );
   }
   /** What is using capacity when the project or installation is at its limit. */
   private capacityWait(projectId: string) {
@@ -2164,15 +2191,12 @@ export class OperatorApi {
     return deriveWaits({
       projectId,
       admissionReasons: admission.reasons,
-      lead: this.leadWaitFacts(this.taskLead(t, excluded)?.profileId),
-      dependencies: d
-        .dependencies(taskId)
-        .map((id) => ({ id, task: d.task(id) }))
-        .filter(({ task }) => task.state !== "done")
-        .map(({ id, task }) => ({
-          id,
-          label: this.safe(task.title, excluded) ?? "Unavailable task",
-        })),
+      lead: this.executingWaitFacts(t, excluded),
+      // The same predicate as admission, so an imported blocker marked done keeps its link.
+      dependencies: d.blockingDependencies(taskId).map((id) => ({
+        id,
+        label: this.safe(d.task(id).title, excluded) ?? "Unavailable task",
+      })),
       nativeBlockers: identity
         ? this.service
             .githubSources()
@@ -2443,6 +2467,16 @@ export class OperatorApi {
         capacity: this.capacity(projectId),
         routingEnabled: Boolean(d.routing(projectId).enabled),
         waits: this.projectWaits(p),
+        assigneeWaits: Object.fromEntries(
+          profiles.map((profile) => [
+            profile.id,
+            deriveWaits({
+              projectId,
+              admissionReasons: [],
+              lead: this.leadWaitFacts(profile.id),
+            }),
+          ]),
+        ),
       },
       observedAt: Date.now(),
     });

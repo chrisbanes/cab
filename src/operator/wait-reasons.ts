@@ -21,6 +21,12 @@ export const waitCodes = [
   "capacity",
 ] as const;
 export type WaitCode = (typeof waitCodes)[number];
+/** Waits that come from the executing profile's runtime rather than the project or task. */
+export const runtimeWaitCodes: readonly WaitCode[] = [
+  "runtime-unavailable",
+  "claude-token-unavailable",
+  "profile-runtime-not-configured",
+];
 
 const id = z.string().uuid();
 // Redaction can lengthen a title, so this matches the task read's text bound.

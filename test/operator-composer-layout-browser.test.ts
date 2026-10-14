@@ -297,6 +297,28 @@ test("Composer predicts start or wait before submission from the same waits", as
       paused,
     });
   configure(false);
+  // A permitted Claude assignee whose runtime the service can't use.
+  const claude = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [claude],
+  });
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
@@ -324,6 +346,14 @@ test("Composer predicts start or wait before submission from the same waits", as
     .waitFor();
   await prediction.getByRole("link", { name: "Command menu task" }).waitFor();
   await page.getByLabel("Command menu task").uncheck();
+  await prediction.getByText("Starts now.", { exact: true }).waitFor();
+
+  // An explicit assignee runs the turn, so its runtime waits replace the lead's.
+  await page.getByLabel("Assignee").selectOption(claude);
+  await prediction
+    .getByText("It will wait: Claude token unavailable", { exact: true })
+    .waitFor();
+  await page.getByLabel("Assignee").selectOption("");
   await prediction.getByText("Starts now.", { exact: true }).waitFor();
 
   // A paused project leads with its Fix; the dependency is listed beneath it.

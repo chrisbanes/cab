@@ -21,7 +21,11 @@ import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import { ComposerState, type ComposerInput } from "./composer-state.js";
 import { useOperatorResource } from "./resource.js";
-import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
+import {
+  orderWaits,
+  runtimeWaitCodes,
+  type Wait,
+} from "../../src/operator/wait-reasons.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 import { optionalFields, optionalSummary } from "./composer-summary.js";
@@ -255,10 +259,19 @@ export function TaskComposer({
   const blocking = (o?.dependencies ?? []).filter(
     (d) => input.blockerTaskIds.includes(d.id) && d.state !== "done",
   );
+  const assigneeWaits = input.profileId
+    ? o?.assigneeWaits[input.profileId]
+    : undefined;
   const prediction: Wait[] | null =
     o && options.state.status === "fresh"
       ? orderWaits([
-          ...o.waits,
+          // An explicit assignee runs the turn, so its runtime waits replace the lead's.
+          ...(assigneeWaits
+            ? [
+                ...o.waits.filter((w) => !runtimeWaitCodes.includes(w.code)),
+                ...assigneeWaits,
+              ]
+            : o.waits),
           ...(blocking.length
             ? [
                 {

@@ -885,6 +885,8 @@ export const composerOptionsSchema = envelope(
       routingEnabled: z.boolean(),
       /** Project-level waits a new task would have; the composer adds selected dependencies. */
       waits: z.array(waitSchema).max(13),
+      /** Runtime waits per permitted profile, used in place of the lead's when it is the explicit assignee. */
+      assigneeWaits: z.record(uuid, z.array(waitSchema).max(3)),
     })
     .strict(),
 );

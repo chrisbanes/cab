@@ -2742,3 +2742,119 @@ test("the workspace read carries whether a turn started and whether getting star
     dismissed: true,
   });
 });
+
+test("runtime waits come from the pending assignment's profile, not only the lead's", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const claude = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: claude,
+    name: "Claude worker",
+    instructions: "build",
+    capabilities: "code",
+    runtime: { harness: "claude", model: null, reasoningEffort: null },
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [claude],
+  });
+  // The healthy Codex lead alone gives no runtime wait.
+  assert.deepEqual(
+    (await api.readComposerOptions(ids.projectId)).data.waits.map(
+      (w) => w.code,
+    ),
+    ["project-paused"],
+  );
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    title: "Explicit Claude assignee",
+    outcome: "Probe",
+    ready: true,
+  });
+  await f.service.provisionTask(taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId,
+    assignmentId: randomUUID(),
+    profileId: claude,
+    brief: "Claude work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  const waits = (await api.readTask(taskId)).data.waits;
+  assert.deepEqual(
+    waits.map((w) => w.code),
+    [
+      "project-paused",
+      "claude-token-unavailable",
+      "profile-runtime-not-configured",
+    ],
+  );
+  assert.deepEqual(waits[2]?.fix, { kind: "open-profile", profileId: claude });
+  // The composer predicts the same for that explicit assignee.
+  assert.deepEqual(
+    (await api.readComposerOptions(ids.projectId)).data.assigneeWaits[
+      claude
+    ]?.map((w) => w.code),
+    ["claude-token-unavailable", "profile-runtime-not-configured"],
+  );
+});
+
+test("an imported blocker marked done keeps its dependency link while its issue is not closed", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  const blocker = randomUUID();
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: blocker,
+    title: "Imported blocker",
+    outcome: "Probe",
+    ready: false,
+  });
+  d.execute({
+    type: "dependency.add",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.projectId,
+    taskId: ids.taskId,
+    blockerTaskId: blocker,
+    expectedVersion: Number(d.task(ids.taskId).version),
+  });
+  d.markImportedTask(blocker, "imported-blocker", "repository");
+  f.seedPersistedState((db) =>
+    db.prepare("UPDATE domain_tasks SET state='done' WHERE id=?").run(blocker),
+  );
+  assert.ok(d.admission(ids.taskId).reasons.includes("local-dependency"));
+  const wait = (await api.readTask(ids.taskId)).data.waits.find(
+    (w) => w.code === "local-dependency",
+  );
+  assert.deepEqual(wait?.links, [
+    { kind: "task", id: blocker, label: "Imported blocker" },
+  ]);
+});
