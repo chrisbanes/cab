@@ -24,9 +24,11 @@ import {
   ResourceStatus,
   StatusBadge,
 } from "./components.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { Card } from "./ui/card.js";
 import { Textarea } from "./ui/textarea.js";
 import {
+  answerCopy,
   answerSummary,
   completedQuestionCount,
   type QuestionResponseStates,
@@ -78,6 +80,9 @@ export function QuestionResponse({
   const content = useRef<HTMLDivElement>(null),
     formElement = useRef<HTMLFormElement>(null);
   const state = data?.form ? states.forQuestion(data) : null;
+  // The check that follows a send replaces the button the operator used, so it takes focus.
+  const sent = useRef(false);
+  if (state?.sending) sent.current = true;
   useLayoutEffect(() => {
     // The bounded Inbox detail owns question scrolling there; elsewhere the body does.
     const owner =
@@ -156,27 +161,11 @@ export function QuestionResponse({
     if (!command) return;
     const currentAuthentication = client.captureAuthenticationScope();
     state.sending = true;
-    state.notice = "Recording answer…";
+    state.notice = "";
     states.changed();
     const result = await client.command(command, session.csrfToken);
     if (!currentAuthentication()) return;
-    state.sending = false;
-    const disposition = state.lifecycle.settle(result, (c, r) =>
-      state.matches(c, r),
-    );
-    state.outcome = disposition === "rejected" ? "failed" : disposition;
-    state.failureCode =
-      disposition === "rejected" && result.state !== "recorded"
-        ? result.code
-        : null;
-    state.notice =
-      disposition === "recorded"
-        ? "Answer recorded. Delivery and admission remain subject to independent holds."
-        : disposition === "unknown"
-          ? "Outcome unknown. Original answer and key are frozen; reconcile before editing."
-          : disposition === "conflict"
-            ? "Request is stale, cancelled or already answered. Your input is retained."
-            : "Answer not recorded. Your selection is retained. The request remains unresolved.";
+    const disposition = state.settle(command, result);
     states.changed();
     if (disposition === "recorded") {
       resource.refresh();
@@ -194,6 +183,10 @@ export function QuestionResponse({
           )
         : null,
     notice = state ? statusNotice(data?.status) : null,
+    // An unconfirmed, refused or stale send speaks in the footer; a confirmed one in the card.
+    outcome = Boolean(
+      state?.outcome && state.outcome !== "recorded" && state.notice,
+    ),
     evidenceFocus = (id: string) => () => {
       if (state) state.focusId = id;
     },
@@ -269,16 +262,19 @@ export function QuestionResponse({
             <p>Exact form unavailable. This request remains unresolved.</p>
           ) : recorded ? (
             <Card className="question-recorded">
-              <h3 className="small-heading">Answer recorded</h3>
+              <ActionOutcome
+                tone="success"
+                message={answerCopy.sent}
+                focus={sent.current}
+                details={
+                  state.outcome === "recorded" ? detailRows(state.details) : []
+                }
+              />
               {summary?.lines.map((line) => (
                 <p key={line} className="body literal">
                   {line}
                 </p>
               ))}
-              <p className="body muted">
-                Delivery waits for the requester's next eligible turn;
-                independent holds are unchanged.
-              </p>
               <QuestionHolds holds={holds} />
               {onBack && (
                 <Button variant="secondary" onClick={onBack}>
@@ -441,44 +437,66 @@ export function QuestionResponse({
                 {state.errors[""] && <p role="alert">{state.errors[""]}</p>}
               </div>
               <div className="question-submit">
-                <p role="status" className="question-status">
-                  {state.notice ||
-                    (staleRead
-                      ? `Stale read · last read ${resource.state.fetchedAt ? clockLabel(resource.state.fetchedAt) : "unknown"} · refresh to continue`
-                      : draftStatus(state, summary))}
-                </p>
-                {state.failureCode && state.outcome === "failed" && (
-                  <p className="metadata muted">Reason: {state.failureCode}</p>
+                {outcome ? (
+                  <ActionOutcome
+                    key={`${state.outcome}:${state.details.requestKey}`}
+                    tone={state.outcome === "failed" ? "error" : "warning"}
+                    message={state.notice}
+                    action={
+                      state.outcome === "unknown"
+                        ? {
+                            label: "Check whether it saved",
+                            onClick: submit,
+                          }
+                        : state.outcome === "conflict"
+                          ? {
+                              label: "Review current request",
+                              onClick: resource.refresh,
+                            }
+                          : undefined
+                    }
+                    focus={state.outcome === "unknown" && sent.current}
+                    details={detailRows(state.details)}
+                  />
+                ) : (
+                  !state.sending && (
+                    <p role="status" className="question-status">
+                      {staleRead
+                        ? `Stale read · last read ${resource.state.fetchedAt ? clockLabel(resource.state.fetchedAt) : "unknown"} · refresh to continue`
+                        : draftStatus(state, summary)}
+                    </p>
+                  )
                 )}
                 <QuestionHolds holds={holds} />
                 <div className="question-actions">
-                  <Button
-                    type="submit"
-                    disabled={
-                      state.sending ||
-                      Boolean(state.lifecycle.receipt) ||
-                      (!canEdit && !state.lifecycle.uncertain)
-                    }
-                  >
-                    {state.lifecycle.uncertain
-                      ? "Reconcile original answer"
-                      : state.sending
-                        ? "Recording…"
+                  {(!state.lifecycle.uncertain || state.sending) && (
+                    <Button
+                      type="submit"
+                      disabled={
+                        state.sending ||
+                        Boolean(state.lifecycle.receipt) ||
+                        !canEdit
+                      }
+                    >
+                      {state.sending
+                        ? "Sending…"
                         : state.outcome === "failed"
                           ? "Retry answer"
                           : total > 1
                             ? "Submit answers"
                             : "Submit answer"}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={staleRead ? "primary" : "secondary"}
-                    onClick={resource.refresh}
-                  >
-                    {state.outcome === "conflict"
-                      ? "Review current request"
-                      : "Refresh request"}
-                  </Button>
+                    </Button>
+                  )}
+                  {state.outcome !== "conflict" &&
+                    !state.lifecycle.uncertain && (
+                      <Button
+                        type="button"
+                        variant={staleRead ? "primary" : "secondary"}
+                        onClick={resource.refresh}
+                      >
+                        Refresh request
+                      </Button>
+                    )}
                 </div>
               </div>
             </form>

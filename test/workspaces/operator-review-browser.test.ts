@@ -433,7 +433,12 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   await page
     .getByRole("button", { name: "Send to task lead", exact: true })
     .click();
-  await page.getByText(/conflict: conflict.*Draft retained/).waitFor();
+  await page
+    .getByText("This task changed since you opened it. Your draft is kept.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.locator("[data-slot=action-outcome]").count(), 1);
   assert.ok(await page.getByLabel("Editable reply").isEditable());
   assert.equal(
     f.service
@@ -445,7 +450,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   assert.equal(
     await page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Check whether it saved",
         exact: true,
       })
       .count(),
@@ -455,7 +460,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   await page
     .getByRole("button", { name: "Send to task lead", exact: true })
     .click();
-  await page.getByText("Receipt recorded", { exact: true }).waitFor();
+  await page.getByText("Sent to Task lead.", { exact: true }).waitFor();
   const message = f.service
     .coordinationView()
     .readTask(a.taskId)
@@ -912,7 +917,12 @@ test("every lead composer shows the same resume line for a completed lead and ke
     ),
     sendButton.click(),
   ]);
-  await page.getByText(/conflict: conflict.*Draft retained/).waitFor();
+  await page
+    .getByText("This task changed since you opened it. Your draft is kept.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.locator("[data-slot=action-outcome]").count(), 1);
   assert.ok(await reply.isEditable());
   assert.equal(
     await reply.inputValue(),
@@ -935,7 +945,12 @@ test("every lead composer shows the same resume line for a completed lead and ke
     ),
     sendButton.click(),
   ]);
-  await page.getByText(/conflict: conflict.*Draft retained/).waitFor();
+  await page
+    .getByText("This task changed since you opened it. Your draft is kept.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.locator("[data-slot=action-outcome]").count(), 1);
   assert.equal(
     await reply.inputValue(),
     "Please review evidence artifact Lead screenshot.",
@@ -946,7 +961,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
 
   await sendButton.click();
   await page
-    .getByText("Receipt recorded. Task lead resumed with this feedback.", {
+    .getByText("Sent. Task lead resumed with this feedback.", {
       exact: true,
     })
     .waitFor();

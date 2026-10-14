@@ -259,8 +259,8 @@ export function RetainedResultEvidence({
       )}
       {data?.state === "unavailable" && (
         <p role="status">
-          Retained evidence is unavailable for this result ({data.reason}).
-          Current workspace bytes are not substituted.
+          Retained evidence is unavailable for this result. Current files are
+          not used instead. <span className="identifier">{data.reason}</span>
         </p>
       )}
       {data && data.state !== "unavailable" && (
@@ -271,8 +271,8 @@ export function RetainedResultEvidence({
           </p>
           {data.state !== "available" && data.state !== "empty" && (
             <p role="status">
-              Retained evidence is {data.state}; missing items stay identified
-              and are not backfilled from later bytes.
+              Some of this evidence was not kept in full. Missing items stay
+              marked and are not filled in from later files.
             </p>
           )}
           <details>
@@ -332,7 +332,8 @@ export function RetainedResultEvidence({
                     </Button>
                   ) : (
                     <span>
-                      {entry.kind} {entry.state}: {entry.reason}
+                      {entry.kind} {entry.state}:{" "}
+                      <span className="identifier">{entry.reason}</span>
                     </span>
                   )}
                 </li>
@@ -347,8 +348,10 @@ export function RetainedResultEvidence({
           )}
           {content && content.state !== "available" && (
             <p role="status">
-              Retained item is {content.state} ({content.reason}). Current bytes
-              are not substituted.
+              Retained item is unavailable. Current files are not used instead.{" "}
+              <span className="identifier">
+                {content.state} · {content.reason}
+              </span>
             </p>
           )}
           {content?.state === "available" && (
@@ -361,7 +364,7 @@ export function RetainedResultEvidence({
               {content.item.kind === "diff" ? (
                 content.preview.kind === "text" ? (
                   <>
-                    <p>
+                    <p className="identifier">
                       {content.preview.mime} ·{" "}
                       {content.preview.size.toLocaleString()} bytes · SHA-256{" "}
                       {content.preview.sha256}

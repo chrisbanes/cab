@@ -609,6 +609,9 @@ test("shared task reasons retain all current interventions and deduplicate uncer
     "lead-review",
     "execution-uncertain",
   ];
+  assert.equal(reasonLabels["admission-blocked"], "Waiting to start");
+  for (const label of Object.values(reasonLabels))
+    assert.doesNotMatch(label, /admission|receipt|observation|revision/i);
   for (const code of codes) {
     const task: TaskListSummary = {
       ...template,
@@ -684,7 +687,7 @@ test("shared task reasons retain all current interventions and deduplicate uncer
       assert.ok(taskReasons(terminal).includes(reasonLabels[code] ?? ""));
     assert.equal(
       taskReasons(terminal).some((r) =>
-        /Draft: not Ready|dependency|Capacity currently full/.test(r),
+        /Draft: not Ready|dependency|Capacity is full/.test(r),
       ),
       false,
     );

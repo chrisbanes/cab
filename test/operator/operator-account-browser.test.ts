@@ -484,13 +484,13 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     await page.route("**/api/operator/logout", (route) => route.abort());
     await trigger.click();
     await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
-    await page
-      .getByRole("alert")
-      .filter({
-        hasText:
-          "Sign-out outcome is unknown. Session status has been checked; review before retrying.",
-      })
-      .waitFor();
+    // One warning in the shell, with no receipt and no Details.
+    const warning = page.getByRole("alert").filter({
+      hasText: "We couldn't sign you out. You're still signed in.",
+    });
+    await warning.waitFor();
+    assert.equal(await page.getByText(/couldn't sign you out/).count(), 1);
+    assert.equal(await warning.getByText("Details").count(), 0);
     await page.unroute("**/api/operator/logout");
     await trigger.click();
     assert.equal(
@@ -501,6 +501,20 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     );
     await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+
+    // Unknown outcome that did sign out: the re-read finds no session, and that is success.
+    await submitPassword(page, web.password);
+    await trigger.waitFor();
+    await page.route("**/api/operator/logout", async (route) => {
+      await route.fetch();
+      await route.abort();
+    });
+    await trigger.click();
+    await menu.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+    await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+    assert.equal(await page.getByRole("alert").count(), 0);
+    assert.equal(await page.getByText(/couldn't sign you out/).count(), 0);
+    await page.unroute("**/api/operator/logout");
   } finally {
     release();
   }

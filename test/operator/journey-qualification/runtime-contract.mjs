@@ -753,7 +753,7 @@ export async function runQualification(options = {}) {
       await page
         .getByRole("button", { name: "Submit answer", exact: true })
         .click();
-      await page.getByRole("heading", { name: "Answer recorded" }).waitFor();
+      await page.locator(".question-recorded").waitFor();
     }, "browser-submit-native-answer");
     const sent = commands.filter((c) => c.type === "question.native.answer");
     assert.equal(sent.length, 1);

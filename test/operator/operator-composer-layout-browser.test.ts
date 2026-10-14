@@ -218,7 +218,7 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
   await page.getByText("Open settings to fix the link.").waitFor();
   await page
     .getByText(
-      "Not created. Values retained. Review optional settings to continue.",
+      "Check the optional settings to continue. Your input is still here.",
     )
     .waitFor();
   assert.ok(await noHorizontalScroll(page));
@@ -268,7 +268,7 @@ test("Composer never claims on-device saving when storage fails", async (_t, j) 
   });
   await open(page, web.origin, web.password, projectId);
   await page.getByLabel("Task title").fill("Unsaved");
-  await page.getByText(/^Recovery unavailable for current edits/).waitFor();
+  await page.getByText(/^Couldn't keep your edits on this device/).waitFor();
   assert.equal(
     await page.getByText("Unfinished input saved on this device").count(),
     0,

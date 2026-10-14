@@ -253,13 +253,12 @@ for (const [name, engine] of engines) {
         .waitFor();
       await submit.click();
       // (g) the confirmation replaces the controls and stays in the detail.
-      await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+      await form.locator(".question-recorded").waitFor();
       await form.getByText("Q1 · Team owners", { exact: true }).waitFor();
       await form
-        .getByText(
-          "Delivery waits for the requester's next eligible turn; independent holds are unchanged.",
-          { exact: true },
-        )
+        .getByText("Answer sent. It reaches the requester on its next turn.", {
+          exact: true,
+        })
         .waitFor();
       assert.equal(await form.getByRole("radio").count(), 0);
       await page
@@ -277,7 +276,7 @@ for (const [name, engine] of engines) {
       });
       // After a reload this session did not record the answer: neutral header copy, full context.
       await page.reload();
-      await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+      await form.locator(".question-recorded").waitFor();
       assert.equal(
         await page.locator(".page-header-title p").textContent(),
         "1 unresolved across 1 project",
@@ -382,12 +381,15 @@ for (const [name, engine] of engines) {
       );
       await submit.click();
       const failed =
-        "Answer not recorded. Your selection is retained. The request remains unresolved.";
+        "Couldn't send the answer: the service is unavailable. Your answer is still here.";
       await form.getByText(failed, { exact: true }).waitFor();
-      assert.equal(
-        await form.getByRole("heading", { name: "Answer recorded" }).count(),
-        0,
-      );
+      // The code is in Details, not in the message; there is no separate Reason line.
+      assert.equal(await form.getByText(/^Reason:/).count(), 0);
+      await form
+        .locator("[data-slot=action-outcome] summary", { hasText: "Details" })
+        .click();
+      await form.getByText("unavailable", { exact: true }).waitFor();
+      assert.equal(await form.locator(".question-recorded").count(), 0);
       assert.equal(
         await form
           .getByRole("radio", { name: /^Every new member/ })
@@ -418,7 +420,7 @@ for (const [name, engine] of engines) {
         .click();
       await form
         .getByText(
-          "Request is stale, cancelled or already answered. Your input is retained.",
+          "This question was already answered, changed or withdrawn. Your answer is still here.",
           { exact: true },
         )
         .waitFor();
@@ -435,7 +437,7 @@ for (const [name, engine] of engines) {
       await form
         .getByRole("button", { name: /^Retry answer$|^Submit answers$/ })
         .click();
-      await form.getByRole("heading", { name: "Answer recorded" }).waitFor();
+      await form.locator(".question-recorded").waitFor();
       assert.equal(
         f.service.coordinationView().readTask(group.taskId).questions[0]
           ?.status,

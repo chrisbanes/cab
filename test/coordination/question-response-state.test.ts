@@ -8,6 +8,7 @@ import {
 } from "../../web/src/question-response-state.js";
 import { mixedForm, mixedAnswers } from "../fixtures/question-data.js";
 import type { QuestionRead } from "../../src/operator/contracts.js";
+import type { CommandState } from "../../web/src/api.js";
 const data: QuestionRead["data"] = {
   taskId: randomUUID(),
   interactionId: randomUUID(),
@@ -128,4 +129,74 @@ test("progress counts valid answers, an empty optional question counts, and the 
   state.answers = { ...state.answers, places: { optionIds: [], text: "" } };
   assert.deepEqual(answerSummary(state.form, state.answers).missing, ["Q3"]);
   assert.equal(state.outcome, null);
+});
+
+test("every answer outcome reads in plain words and keeps the receipt fields for Details", () => {
+  const plain =
+    /recorded|receipt|observation|admission|reconcile|submission|revision|\d|question\.|conflict|invalid|unavailable/i;
+  const settle = (result: (c: { key: string }) => CommandState) => {
+    const state = new QuestionResponseStates().forQuestion(data);
+    const command = {
+      type: "question.form.answer" as const,
+      key: randomUUID(),
+      taskId: data.taskId,
+      interactionId: data.interactionId,
+      expectedRevision: 1,
+      answers: mixedAnswers,
+    };
+    state.lifecycle.freeze(command);
+    state.lifecycle.begin();
+    const disposition = state.settle(command, result(command));
+    return { state, command, disposition };
+  };
+  const recorded = settle((c) => ({
+    state: "recorded",
+    receipt: {
+      kind: "coordination",
+      key: c.key,
+      recorded: true,
+      eventId: randomUUID(),
+      taskId: data.taskId,
+      recipientAssignmentId: randomUUID(),
+      eventType: "question-answer",
+      createdAt: 1,
+    },
+  }));
+  assert.equal(recorded.disposition, "recorded");
+  assert.deepEqual(recorded.state.details, {
+    command: "question.form.answer",
+    resource: data.interactionId,
+    version: 1,
+    requestKey: recorded.command.key,
+    kind: "coordination",
+  });
+  const failed = settle(() => ({
+    state: "rejected",
+    command: {} as never,
+    code: "forbidden",
+  }));
+  assert.equal(
+    failed.state.notice,
+    "Couldn't send the answer: you don't have permission. Your answer is still here.",
+  );
+  assert.equal(failed.state.details.code, "forbidden");
+  const unknown = settle(() => ({
+    state: "unknown",
+    command: {} as never,
+    code: "command-outcome-unknown",
+  }));
+  assert.equal(unknown.disposition, "unknown");
+  assert.equal(unknown.state.lifecycle.uncertain, true);
+  const conflict = settle(() => ({
+    state: "conflict",
+    command: {} as never,
+    code: "conflict",
+  }));
+  for (const { state, command } of [recorded, failed, unknown, conflict]) {
+    assert.doesNotMatch(state.notice, plain, state.notice);
+    assert.ok(!state.notice.includes(command.key));
+  }
+  // Every refusal says the answer is kept.
+  for (const { state } of [failed, unknown, conflict])
+    assert.match(state.notice, /Your answer is (still here|kept)/);
 });

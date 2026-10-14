@@ -13,6 +13,7 @@ import {
   type Session,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
 import type { PDFDocumentProxy, PDFDocumentLoadingTask } from "pdfjs-dist";
 import {
@@ -56,20 +57,46 @@ function pathLabel(scope: TaskFilesState["scope"], path: readonly string[]) {
 
 type PreviewData = NonNullable<TaskFileTabState["preview"]>;
 
-function previewChange(previous: PreviewData | null, next: PreviewData) {
+/** The plain notice for a refreshed preview, with the hashes and raw states behind it. */
+function previewChange(
+  previous: PreviewData | null,
+  next: PreviewData,
+): { notice: string; details: OutcomeField[] } {
   const hash = (value: PreviewData | null) =>
     value?.state === "ready" ? value.preview?.sha256 : undefined;
   const before = hash(previous);
   const after = hash(next);
   if (before && after)
     return before === after
-      ? ""
-      : `Changed since previous observation: SHA-256 ${before.slice(0, 8)} → ${after.slice(0, 8)}. Earlier review comments stay attached to the bytes they selected.`;
+      ? { notice: "", details: [] }
+      : {
+          notice:
+            "Changed since you last looked. Earlier comments stay on the version they selected.",
+          details: [
+            ["Previous SHA-256", before],
+            ["Current SHA-256", after],
+          ],
+        };
   if (before)
-    return `No longer readable since previous observation: the file is now ${next.state}${next.metadata?.reason ? ` (${next.metadata.reason})` : ""}. Previous SHA-256 ${before.slice(0, 8)}.`;
+    return {
+      notice: "No longer readable since you last looked.",
+      details: [
+        ["Previous SHA-256", before],
+        ["State", next.state],
+        ...(next.metadata?.reason
+          ? [["Reason", String(next.metadata.reason)] as OutcomeField]
+          : []),
+      ],
+    };
   if (after && previous)
-    return `Readable now (was ${previous.state}); SHA-256 ${after.slice(0, 8)}.`;
-  return "";
+    return {
+      notice: "Readable now. It could not be read when you last looked.",
+      details: [
+        ["Previous state", previous.state],
+        ["SHA-256", after],
+      ],
+    };
+  return { notice: "", details: [] };
 }
 
 function fileEntryKey(
@@ -652,7 +679,7 @@ export function FilePreviewBody({
     <>
       {data.kind === "text" && (
         <>
-          <p>
+          <p className="identifier">
             {data.mime} · {data.size.toLocaleString()} bytes · SHA-256{" "}
             {data.sha256}
           </p>
@@ -745,7 +772,7 @@ export function FilePreviewBody({
       )}
       {data.kind === "base64" && data.mime !== "application/pdf" && (
         <>
-          <p>
+          <p className="identifier">
             Bounded raster preview · {data.width} × {data.height} pixels ·
             SHA-256 {data.sha256}
           </p>
@@ -759,7 +786,7 @@ export function FilePreviewBody({
       )}
       {data.kind === "base64" && data.mime === "application/pdf" && (
         <>
-          <p>
+          <p className="identifier">
             PDF · {data.size.toLocaleString()} bytes · SHA-256 {data.sha256}
           </p>
           {data.maxDisplayedPages !== undefined &&
@@ -913,11 +940,14 @@ export function TaskFiles({
     )
       return;
     // A re-read of the same file is a Refresh; compare it with what was shown.
-    if (activeTab.preview !== response.response.data)
-      activeTab.changeNotice =
+    if (activeTab.preview !== response.response.data) {
+      const change =
         activeTab.previewKey === previewKey
           ? previewChange(activeTab.preview, response.response.data)
-          : "";
+          : { notice: "", details: [] };
+      activeTab.changeNotice = change.notice;
+      activeTab.changeDetails = change.details;
+    }
     activeTab.preview = response.response.data;
     activeTab.previewKey = previewKey;
     activeTab.observedAt = response.response.observedAt;
@@ -1333,9 +1363,16 @@ export function TaskFiles({
                   </p>
                 )}
                 {activeTab.changeNotice && (
-                  <p role="status" className="file-change-notice">
-                    {activeTab.changeNotice}
-                  </p>
+                  <>
+                    <p role="status" className="file-change-notice">
+                      {activeTab.changeNotice}
+                    </p>
+                    <OutcomeDetails
+                      // A new notice starts with Details collapsed.
+                      key={activeTab.changeDetails.map(([, v]) => v).join()}
+                      fields={activeTab.changeDetails}
+                    />
+                  </>
                 )}
                 {previewResource.state.pending && !preview && (
                   <p role="status">Reading selected file…</p>

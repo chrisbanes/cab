@@ -391,7 +391,7 @@ for (const viewport of [
     } else await signOutFromSidebar(page);
     await page
       .getByRole("alert")
-      .filter({ hasText: "Sign-out outcome is unknown" })
+      .filter({ hasText: "We couldn't sign you out. You're still signed in." })
       .waitFor();
     await page.unroute("**/api/operator/logout");
     f.advanceClock(60001);

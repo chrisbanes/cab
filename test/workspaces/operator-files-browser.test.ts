@@ -727,11 +727,17 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .getByRole("button", { name: "Line 3: ## Current refreshed" })
     .waitFor();
   assert.equal(
-    (await page.locator(".file-change-notice").innerText()).startsWith(
-      `Changed since previous observation: SHA-256 ${stableHash.slice(0, 8)} → ${refreshedHash.slice(0, 8)}`,
-    ),
-    true,
+    await page.locator(".file-change-notice").innerText(),
+    "Changed since you last looked. Earlier comments stay on the version they selected.",
   );
+  // The hashes moved into the notice's Details instead of the message.
+  // Read without opening it: expanding would scroll the reading position under test.
+  const changeDetails = page.locator(".action-outcome-details");
+  assert.equal(await changeDetails.locator("summary").innerText(), "Details");
+  assert.deepEqual(await changeDetails.locator("dd").allTextContents(), [
+    stableHash,
+    refreshedHash,
+  ]);
 
   const latestGuide = guideMarkdown("latest-unobserved");
   writeFileSync(alphaGuide, latestGuide);
@@ -830,7 +836,10 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     await page.locator(".file-source-lines .file-line-text").allTextContents(),
     refreshedGuide.replace(/\n$/, "").split("\n"),
   );
-  await page.getByText(new RegExp(refreshedHash)).waitFor();
+  await page
+    .locator("p.identifier")
+    .getByText(new RegExp(refreshedHash))
+    .waitFor();
   const afterFailedRefresh = await inspectReadingArea();
   _t.diagnostic(
     `reading area after confirmed 503 and retained-preview notice: ${JSON.stringify(afterFailedRefresh)}`,
@@ -899,7 +908,10 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     })
     .click();
   await page.getByRole("button", { name: /guide\.md/ }).click();
-  await page.getByText(new RegExp(refreshedHash)).waitFor();
+  await page
+    .locator("p.identifier")
+    .getByText(new RegExp(refreshedHash))
+    .waitFor();
   const afterCachedReturn = await inspectReadingArea();
   _t.diagnostic(
     `reading area after cached A→B→A return cleared the refresh notice: ${JSON.stringify(afterCachedReturn)}`,
@@ -1043,8 +1055,13 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .waitFor();
   await page
     .locator(".file-change-notice")
-    .getByText(/^No longer readable since previous observation: .*now missing/)
+    .getByText("No longer readable since you last looked.", { exact: true })
     .waitFor();
+  assert.ok(
+    (
+      await page.locator(".action-outcome-details dd").allTextContents()
+    ).includes("missing"),
+  );
 
   await page
     .getByRole("button", { name: "Workspace root", exact: true })

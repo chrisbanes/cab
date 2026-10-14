@@ -533,12 +533,19 @@ for (const engine of [
       const text = (await dialog.textContent()) ?? "";
       for (const line of [
         "Task lead (lead) and 1 delegated assignment is affected.",
-        "Holds queued and new turns for the lead and every delegated assignment.",
-        "Requests cancellation of active turns. Effects may continue after the observation window.",
-        "Stop, writer and capacity holds stay until termination is verified. Resume clears only Stop.",
-        "Stop is not cancellation or completion. Files, history and results are kept.",
+        "Stops new work and asks running turns to end; some effects may still finish, and files, history and results are kept.",
       ])
         assert.ok(text.includes(line), `${line} in ${text}`);
+      // The description plus body stay at two sentences in plain words.
+      const sentences = (
+        await dialog
+          .locator("p")
+          .evaluateAll((els) => els.map((e) => e.textContent ?? ""))
+      )
+        .join(" ")
+        .match(/[^.]+\./g);
+      assert.equal(sentences?.length, 2, text);
+      assert.doesNotMatch(text, /observation|cancellation|termination/i);
       await page.waitForFunction(
         () => document.activeElement?.textContent === "Keep running",
       );

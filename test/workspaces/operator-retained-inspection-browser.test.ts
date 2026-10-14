@@ -165,6 +165,14 @@ test("production retained result evidence keeps original bytes and opens current
     await retained.getByLabel("Retained evidence items").innerText(),
     /diff gap: comparison-unsettled/,
   );
+  // The reason code sits in an identifier element, not in the sentence.
+  assert.equal(
+    await retained
+      .locator(".retained-items .identifier")
+      .getByText("comparison-unsettled", { exact: true })
+      .count(),
+    1,
+  );
   await captureBrowserEvidence(page, "1366-retained-original-text");
 
   // Opening current contents is a separate, explicit action.

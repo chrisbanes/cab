@@ -1,12 +1,28 @@
 import { Check } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "./components.js";
+import type { ReceiptDetails } from "./outcome-copy.js";
 import { Alert } from "./ui/alert.js";
 import "./action-feedback.css";
 
 export type OutcomeTone = "success" | "error" | "warning";
 /** One Details row: a label and its value. */
 export type OutcomeField = readonly [label: string, value: string];
+
+/** The receipt fields that are present, as labeled Details rows. */
+export const detailRows = (d: ReceiptDetails): OutcomeField[] =>
+  (
+    [
+      ["Command", d.command],
+      ["Resource", d.resource],
+      ["Version", d.version],
+      ["Request key", d.requestKey],
+      ["Kind", d.kind],
+      ["Code", d.code],
+    ] as const
+  ).flatMap(([label, value]) =>
+    value === undefined ? [] : [[label, String(value)] as const],
+  );
 
 /**
  * The one message an action leaves behind: a quiet success line, or one alert with at

@@ -7,6 +7,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
+import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 export const storageKey = "ensemble.ui03.composer.v1";
 export const recoveryLimit = 262144,
   commandLimit = 65536;
@@ -157,10 +158,31 @@ function matchesCreationReceipt(
     receipt.result.version === 1 + (command.blockerTaskIds?.length ?? 0)
   );
 }
+/** The plain outcome copy of a creation; Details, not these lines, carry the codes. */
+export const creationCopy = {
+  created: "Task created.",
+  drafted: "Draft saved.",
+  unknown: (ready: boolean) =>
+    `We couldn't confirm the ${ready ? "task was created" : "draft was saved"}. Your input is kept until you check.`,
+  unsafeToCheck: (ready: boolean) =>
+    `We couldn't check whether the ${ready ? "task was created" : "draft was saved"}: this browser can't keep your input safe. Your input is kept until you check.`,
+  refused: (ready: boolean, cause: string, kept = true) =>
+    `Couldn't ${ready ? "create the task" : "save the draft"}: ${cause}. ${
+      kept
+        ? "Your input is still here."
+        : "Your input is still here, but reloading may lose it."
+    }`,
+};
+
 export class ComposerState {
   input: ComposerInput = emptyInput();
   phase: "editable" | "pending" | "unknown" | "recorded" = "editable";
+  /** The line to show: an outcome while `failed` or unknown, otherwise a quiet note. */
   notice = "";
+  /** `notice` reports a creation that was refused; the next edit clears it. */
+  failed = false;
+  /** The receipt fields behind the outcome, shown only in its collapsed Details. */
+  details: ReceiptDetails = {};
   errors: Record<string, string> = {};
   /** The latest edit is stored in this tab; never true after a failed write. */
   savedOnDevice = false;
@@ -190,6 +212,8 @@ export class ComposerState {
       this.lifecycle.reset();
       this.lifecycle.restoreUnknown(command);
       this.phase = "unknown";
+      this.notice = creationCopy.unknown(command.ready);
+      this.details = this.describe(command);
     }
   }
   recovered = false;
@@ -205,8 +229,8 @@ export class ComposerState {
       if (saved.status === "unknown") {
         this.phase = "unknown";
         this.lifecycle.restoreUnknown(saved.command);
-        this.notice =
-          "On-device submission outcome is unknown. Reconcile the exact original submission.";
+        this.notice = creationCopy.unknown(saved.command.ready);
+        this.details = this.describe(saved.command);
       } else
         this.notice =
           "On-device unfinished input recovered. This is not a saved Ensemble task.";
@@ -215,11 +239,31 @@ export class ComposerState {
   private publish() {
     if (this.active) this.changed();
   }
+  private describe(command: CreationCommand, code?: string): ReceiptDetails {
+    const receipt = this.receipt;
+    return {
+      command: command.type,
+      resource: command.taskId,
+      requestKey: command.key,
+      ...(receipt?.kind === "domain" && "state" in receipt.result
+        ? { version: receipt.result.version }
+        : {}),
+      ...(code ? { code } : {}),
+    };
+  }
+  /** Refuse a creation before anything is sent, keeping the input. */
+  refuse(ready: boolean, cause: string) {
+    this.failed = true;
+    this.notice = creationCopy.refused(ready, cause);
+    this.details = {};
+    this.publish();
+  }
   edit(patch: Partial<ComposerInput>) {
     if (this.phase !== "editable") return;
     this.input = { ...this.input, ...patch };
     this.errors = {};
     this.notice = "";
+    this.failed = false;
     try {
       writeRecovery(this.storage, {
         version: 1,
@@ -230,7 +274,7 @@ export class ComposerState {
     } catch {
       this.savedOnDevice = false;
       this.notice =
-        "Recovery unavailable for current edits. Reload may restore only the last successfully saved input.";
+        "Couldn't keep your edits on this device. Reloading may lose them.";
     }
     this.publish();
   }
@@ -243,6 +287,7 @@ export class ComposerState {
     this.recovered = false;
     this.savedOnDevice = false;
     this.notice = "";
+    this.failed = false;
     this.publish();
   }
   async submit(client: OperatorClient, csrfToken: string, ready: boolean) {
@@ -251,6 +296,8 @@ export class ComposerState {
     const wasUnknown = this.phase === "unknown";
     if (!wasUnknown) {
       this.errors = {};
+      this.failed = false;
+      this.notice = "";
       const validated = validInputSchema.safeParse(this.input);
       if (!validated.success) {
         for (const issue of validated.error.issues)
@@ -307,12 +354,20 @@ export class ComposerState {
       this.savedOnDevice = true;
     } catch {
       this.savedOnDevice = false;
-      if (!wasUnknown) {
+      if (wasUnknown) {
+        // The unconfirmed creation stays as it was, with its one action.
+        this.notice = creationCopy.unsafeToCheck(command.ready);
+      } else {
         this.lifecycle.reset();
         this.phase = "editable";
+        this.failed = true;
+        this.notice = creationCopy.refused(
+          command.ready,
+          "this browser can't keep your input safe, so nothing was sent",
+          false,
+        );
+        this.details = {};
       }
-      this.notice =
-        "Submission not sent. Recovery unavailable; current input remains in memory. Reload may restore only last successfully saved input.";
       this.publish();
       return;
     }
@@ -320,16 +375,16 @@ export class ComposerState {
     if (!sending) return;
     const isCurrent = this.captureScope();
     this.phase = "pending";
-    this.notice = "Submitting the recorded creation request…";
+    this.failed = false;
+    this.notice = "";
     this.publish();
     const result = await client.command(sending, csrfToken);
     if (!isCurrent()) return;
     const disposition = this.lifecycle.settle(result, matchesCreationReceipt);
     if (disposition === "recorded") {
       this.phase = "recorded";
-      this.notice = command.ready
-        ? "Task recorded as Ready. Creation does not establish execution."
-        : "Draft task saved in Ensemble.";
+      this.details = this.describe(command);
+      this.notice = command.ready ? creationCopy.created : creationCopy.drafted;
       try {
         this.storage.removeItem(storageKey);
       } catch {}
@@ -337,12 +392,18 @@ export class ComposerState {
       this.savedOnDevice = false;
     } else if (disposition === "unknown") {
       this.phase = "unknown";
-      this.notice =
-        "Submission outcome is unknown. Reconcile the exact original submission; no automatic retry.";
+      this.details = this.describe(
+        command,
+        result.state === "recorded" ? undefined : result.code,
+      );
+      this.notice = creationCopy.unknown(command.ready);
     } else {
       this.phase = "editable";
-
-      this.notice = `Submission rejected (${result.state === "recorded" ? "command-outcome-unknown" : result.code}). Input retained.`;
+      const code =
+        result.state === "recorded" ? "command-outcome-unknown" : result.code;
+      this.failed = true;
+      this.details = this.describe(command, code);
+      this.notice = creationCopy.refused(command.ready, failureCause(code));
       try {
         writeRecovery(this.storage, {
           version: 1,
@@ -352,7 +413,11 @@ export class ComposerState {
         this.savedOnDevice = true;
       } catch {
         this.savedOnDevice = false;
-        this.notice += " Recovery unavailable.";
+        this.notice = creationCopy.refused(
+          command.ready,
+          failureCause(code),
+          false,
+        );
       }
     }
     this.publish();

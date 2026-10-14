@@ -452,18 +452,6 @@ nav {
   display: none;
 }
 
-.logout-notice {
-  position: fixed;
-  bottom: 16px;
-  left: 16px;
-  right: 16px;
-  padding: 16px;
-  background: color-mix(in srgb, var(--destructive) 20%, var(--background));
-  color: var(--foreground);
-  border: 1px solid var(--destructive);
-  border-radius: var(--radius-lg);
-}
-
 .task-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1818,6 +1806,11 @@ textarea[data-auto-grow="true"] {
 }
 .question-submit p {
   margin: 0;
+}
+/* Opened Details scrolls inside the sticky footer instead of covering the form. */
+.question-submit .action-outcome-details[open] {
+  max-height: 30dvh;
+  overflow-y: auto;
 }
 .question-actions {
   display: flex;
