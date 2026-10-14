@@ -1219,6 +1219,24 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
   await panel.getByText(refusal, { exact: true }).waitFor();
   assert.equal(await panel.count(), 1);
   // Opening the file brings the composer's form back: it carries the refusal, the panel does not.
+  // Every committed DOM change is sampled, so a commit that shows both alerts counts even if
+  // the next one removes the panel's.
+  await page.evaluate((text) => {
+    const samples: number[] = [];
+    (window as unknown as { refusalSamples: number[] }).refusalSamples =
+      samples;
+    new MutationObserver(() =>
+      samples.push(
+        [...document.querySelectorAll('[data-slot="action-outcome"]')].filter(
+          (alert) => alert.textContent?.includes(text),
+        ).length,
+      ),
+    ).observe(document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  }, refusal);
   await files
     .getByRole("button", { name: /repo-alpha, repository, full path/ })
     .click();
@@ -1229,6 +1247,18 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
     .waitFor();
   await panel.waitFor({ state: "detached" });
   assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
+  assert.deepEqual(
+    [
+      ...new Set(
+        await page.evaluate(
+          () =>
+            (window as unknown as { refusalSamples: number[] }).refusalSamples,
+        ),
+      ),
+    ],
+    [1],
+    "the refusal is on screen once in every committed state",
+  );
   // When the form leaves, the panel says it again, once.
   await reopenTask(page);
   await panel.getByText(refusal, { exact: true }).waitFor();

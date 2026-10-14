@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
 } from "react";
 import { z } from "zod";
@@ -866,8 +867,9 @@ export function ReviewComposer({ originKey }: { originKey: string }) {
   const state = review?.state;
   // Tell the state this form is on screen, so a message for it is placed here and a
   // composer that is not on this page does not block new comments. A refusal shows in one
-  // place: here while the form is on screen, otherwise in the panel.
-  useEffect(() => {
+  // place: here while the form is on screen, otherwise in the panel. The hand-over runs before
+  // paint, so no frame shows the refusal twice or not at all.
+  useLayoutEffect(() => {
     if (!shown || !state) return;
     state.composerShown = true;
     if (state.composer?.error && state.notice === state.composer.error)
