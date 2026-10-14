@@ -314,12 +314,46 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
     assert.match(task, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
     assert.doesNotMatch(project + task, /<script>|<img src=x/);
     assert.doesNotMatch(project + task, /ENSEMBLE_TEST_GITHUB|fixture-token/);
+    assert.match(project, /1 observed · 1 open · 1 match any of label `ready`/);
+    assert.doesNotMatch(project, /No open item matches/);
+    // The label is removed on GitHub: nothing matches and the task names why.
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues: [
+        {
+          providerInstance: "github.com",
+          nodeId: "I_1",
+          repositoryId: "R_1",
+          repositoryName: "org/repo",
+          number: 1,
+          title: "<img src=x onerror=alert(1)>",
+          body: "<script>alert(2)</script>",
+          state: "open",
+          labels: [],
+          projectFields: [],
+        },
+      ],
+      reason: null,
+    });
+    const unmatched = ui.project(projectId);
+    assert.match(
+      unmatched,
+      /1 observed · 1 open · 0 match any of label `ready`\. No open item matches the readiness rule \(any of label `ready`\); imported tasks stay Draft until one does\. <a href="#github-readiness">Check readiness conditions<\/a>/,
+    );
+    assert.match(unmatched, /<div id="github-readiness">/);
+    assert.match(ui.task(taskId), /Not ready \(needs any of label `ready`\)/);
+    assert.doesNotMatch(ui.task(localId), /needs any of/);
     sources.reconcileSelection(projectId, "repo", {
       complete: false,
       issues: [],
       reason: "http-403",
     });
     assert.match(ui.project(projectId), /repo.*partial: http-403/i);
+    assert.match(
+      ui.project(projectId),
+      /partial read; counts may be incomplete/,
+    );
+    assert.doesNotMatch(ui.project(projectId), /No open item matches/);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
