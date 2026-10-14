@@ -1001,19 +1001,43 @@ test("macOS 27 preamble output streams to the same batch as whole-output parsing
       );
     }
   }
+});
 
+test("an event cursor saved before the preamble existed still resolves, and any other shifted index is rejected", () => {
+  const text = macos27Log.join("\n");
   const sleep = parsePmsetPowerLog(
-    macos27Log.join("\n"),
+    text,
     powerCursor(`pmset-time:${macos27BaselineMs}`),
   ).events[0];
   const [prefix, timestamp, index, hash] = (sleep?.cursor.value ?? "").split(
     ":",
   );
-  const shifted = powerCursor(
-    [prefix, timestamp, Number(index) - 3, hash].join(":"),
+  const at = (shift: number) =>
+    powerCursor([prefix, timestamp, Number(index) + shift, hash].join(":"));
+
+  const current = parsePmsetPowerLog(text, at(0));
+  const legacy = parsePmsetPowerLog(text, at(-3));
+  assert.equal(current.complete, true);
+  assert.equal(legacy.complete, true);
+  assert.deepEqual(
+    legacy.events.map((event) => event.cursor),
+    current.events.map((event) => event.cursor),
   );
+  assert.deepEqual(
+    legacy.events.map((event) => event.transition),
+    ["wake"],
+  );
+  for (const shift of [-4, -2, -1, 1, 3])
+    assert.equal(
+      parsePmsetPowerLog(text, at(shift)).complete,
+      false,
+      `${shift}`,
+    );
+
+  // Without the preamble in the output the offset is not applied.
+  const noPreamble = [...macos27Preamble.slice(0, 2), ...macos27Rows];
   assert.equal(
-    parsePmsetPowerLog(macos27Log.join("\n"), shifted).complete,
+    parsePmsetPowerLog(noPreamble.join("\n"), at(-6)).complete,
     false,
   );
 });

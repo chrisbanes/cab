@@ -168,16 +168,16 @@ function createPmsetParser(requested: PowerEventCursor | null) {
     if (requestedEvent) {
       const timestamp = Number(requestedEvent[1]);
       const requestedLine = Number(requestedEvent[2]);
-      const found = events.find(
-        (event) => event.cursor.value === requested?.value,
-      );
-      if (
-        !found ||
-        found.timestamp !== timestamp ||
-        found.lineIndex !== requestedLine
-      )
-        return rejected();
-      afterLine = requestedLine;
+      // A cursor saved before macOS 27 predates the preamble lines, so its row
+      // sits that many lines later; accept it only when the preamble was seen.
+      const legacy = `pmset-event:${requestedEvent[1]}:${requestedLine + pmsetPreamble.length}:${requestedEvent[3]}`;
+      const found =
+        events.find((event) => event.cursor.value === requested?.value) ??
+        (preambleStage === pmsetPreamble.length
+          ? events.find((event) => event.cursor.value === legacy)
+          : undefined);
+      if (!found || found.timestamp !== timestamp) return rejected();
+      afterLine = found.lineIndex;
     } else if (requestedTime) {
       const timestamp = Number(requestedTime[1]);
       if (
