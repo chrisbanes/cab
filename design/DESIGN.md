@@ -448,8 +448,10 @@ unconfigured.
   login, "GitHub source credential: GitHub CLI · @account", recorded as the new
   project's `gh:github.com` source credential and changed or cleared later in
   GitHub source settings. 117 draws the unusable case, "GitHub source credential:
-  none", where the source starts without a credential. There is no opt-out
-  control in setup.
+  none", where the source starts without a credential. Not drawn: the line reads
+  "checking…" until the login read returns, and a failed read says the login could
+  not be checked; neither records a credential. There is no opt-out control in
+  setup.
 
 ### Project source credential
 

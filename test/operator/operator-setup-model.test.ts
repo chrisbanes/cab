@@ -607,10 +607,6 @@ test("setup sends the source credential only for a signed-in source login", () =
     "gh:github.com",
   );
   assert.equal(operatorCommandSchema.safeParse(signedIn).success, true);
-  assert.equal(
-    setupSourceCredentialCopy(undefined),
-    "GitHub source credential: checking…",
-  );
   for (const gh of [
     undefined,
     null,
@@ -632,6 +628,11 @@ test("setup sends the source credential only for a signed-in source login", () =
   assert.match(
     setupSourceCredentialCopy({ state: "signed-in", login: "octo" }),
     /^GitHub source credential: GitHub CLI · @octo\./,
+  );
+  assert.match(setupSourceCredentialCopy(null), /could not be checked/);
+  assert.match(
+    setupSourceCredentialCopy({ state: "not-signed-in" }),
+    /No usable GitHub CLI login was detected/,
   );
 });
 
