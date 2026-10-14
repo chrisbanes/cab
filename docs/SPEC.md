@@ -205,7 +205,9 @@ Local Done clears a blocker; cancellation does not. Imported GitHub tasks follow
 native dependency edges, including blockers outside the selection, without importing
 those blockers or granting repository access. No duplicate local edge or bypass is
 provided for an extant native edge. Closure or edge removal releases that blocker;
-reopening reapplies it. Unknown or incomplete state holds dispatch even on first
+reopening reapplies it. Native edges are read only for Ready open tasks (and a
+task continuing from its own delivery closure); other imported tasks hold them as
+unknown. Unknown or incomplete state holds dispatch even on first
 observation or after prior clearance. Current turns may finish when a new blocker
 appears; results and ownership remain. Clearance rechecks every other control.
 
@@ -1350,7 +1352,8 @@ Stable operation IDs retain exact material and bound caller revisions, including
 denied outcomes. Intent commits before an effect. Successful write responses alone
 do not establish success: provider readback must prove the exact target. Ambiguous
 creates retain uncertainty across restart; a missing marker cannot authorize replay.
-Only positively confirmed transient no-effect failures receive up to two retries.
+Only positively confirmed transient no-effect failures receive up to two retries,
+each made by reconciliation once any provider rate-limit resume time has passed.
 
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding
