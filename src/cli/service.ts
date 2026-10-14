@@ -411,9 +411,8 @@ class Service {
     await this.host.sleep(POLL_MS);
   }
 
-  /** Poll until `probe` returns a value, or fail at `stage` after the deadline. */
+  /** Poll until `probe` returns a value, or fail with `message` after the deadline. */
   async waitFor<T>(
-    stage: string,
     message: string,
     probe: () => Promise<T | undefined>,
   ): Promise<T> {
@@ -432,7 +431,6 @@ class Service {
 
   waitForApp(origin: string) {
     return this.waitFor(
-      "health",
       "The service did not serve /app within 120 s",
       async () => {
         const response = await this.host.fetch(`${origin}/app`, {
@@ -600,7 +598,6 @@ export async function upgradeService(
     await service.waitForApp(record.configuration.origin);
     stage = "readiness";
     const readiness = await service.waitFor(
-      stage,
       "Readiness still reports a failing check",
       async () => {
         const checks = await connection.readiness();
