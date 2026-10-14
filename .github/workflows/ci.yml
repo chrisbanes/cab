@@ -12,7 +12,24 @@ concurrency:
   group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.changes.outputs.run }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check for changes since the previous nightly
+        id: changes
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-nightly-changes.mjs
   quality:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -176,12 +193,13 @@ jobs:
   check:
     name: check
     if: always()
-    needs: [quality, suites, service-node26, compatibility-node26]
+    needs: [changes, quality, suites, service-node26, compatibility-node26]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     env:
       RESULTS: ${{ toJSON(needs) }}
       FULL_COMPATIBILITY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      RUN_CHECKS: ${{ needs.changes.outputs.run }}
     steps:
       - uses: actions/checkout@v7
       - name: Require every applicable job to succeed

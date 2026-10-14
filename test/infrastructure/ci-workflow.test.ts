@@ -6,10 +6,68 @@ import { pathToFileURL } from "node:url";
 const { ciFailures } = (await import(
   pathToFileURL(resolve("scripts/check-ci-results.mjs")).href
 )) as {
-  ciFailures(jobs: unknown, full: boolean): string[];
+  ciFailures(jobs: unknown, full: boolean, run?: boolean): string[];
 };
+const { previousNightlyRun, nightlyChanged } = (await import(
+  pathToFileURL(resolve("scripts/check-nightly-changes.mjs")).href
+)) as {
+  previousNightlyRun(
+    id: string,
+    fetchPage: (page: number) => Promise<{
+      runs: Array<{ id: number; head_sha?: string }>;
+      hasNext: boolean;
+    }>,
+  ): Promise<{ id: number; head_sha: string } | null>;
+  nightlyChanged(sha: string, previous: { head_sha: string } | null): boolean;
+};
+
+test("nightly commit comparison excludes the current run and newer runs, including on reruns", async () => {
+  const previous = await previousNightlyRun("20", async () => ({
+    runs: [
+      { id: 21, head_sha: "newer" },
+      { id: 20, head_sha: "current" },
+      { id: 18, head_sha: "older" },
+      { id: 19, head_sha: "previous" },
+    ],
+    hasNext: false,
+  }));
+  assert.equal(previous?.id, 19);
+  assert.equal(nightlyChanged("previous", previous), false);
+  assert.equal(nightlyChanged("current", previous), true);
+  assert.equal(nightlyChanged("first", null), true);
+});
+
+test("nightly history pagination finds the previous run and lookup errors cannot skip CI", async () => {
+  const pages: number[] = [];
+  const previous = await previousNightlyRun("20", async (page) => {
+    pages.push(page);
+    return page === 1
+      ? { runs: [{ id: 21, head_sha: "newer" }], hasNext: true }
+      : { runs: [{ id: 19, head_sha: "previous" }], hasNext: false };
+  });
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(previous?.head_sha, "previous");
+  assert.equal(
+    await previousNightlyRun("20", async () => ({ runs: [], hasNext: false })),
+    null,
+  );
+  await assert.rejects(
+    previousNightlyRun("20", async () => {
+      throw Error("API unavailable");
+    }),
+    /API unavailable/,
+  );
+  await assert.rejects(
+    previousNightlyRun("20", async () => ({
+      runs: [{ id: 19 }],
+      hasNext: false,
+    })),
+    /no commit SHA/,
+  );
+});
 function successful(full: boolean) {
   return {
+    changes: { result: "success" },
     quality: { result: "success" },
     suites: { result: "success" },
     "service-node26": { result: full ? "skipped" : "success" },
@@ -19,6 +77,25 @@ function successful(full: boolean) {
 test("aggregate check accepts complete PR and compatibility runs", () => {
   assert.deepEqual(ciFailures(successful(false), false), []);
   assert.deepEqual(ciFailures(successful(true), true), []);
+});
+test("unchanged nightly skips require a successful change gate and every test job skipped", () => {
+  const skipped = Object.fromEntries(
+    Object.keys(successful(true)).map((name) => [
+      name,
+      { result: name === "changes" ? "success" : "skipped" },
+    ]),
+  );
+  assert.deepEqual(ciFailures(skipped, true, false), []);
+  assert.ok(ciFailures(skipped, false, false).length);
+  for (const name of Object.keys(skipped)) {
+    assert.ok(
+      ciFailures({ ...skipped, [name]: { result: "failure" } }, true, false)
+        .length,
+    );
+    const missing = { ...skipped };
+    delete missing[name];
+    assert.ok(ciFailures(missing, true, false).length);
+  }
 });
 test("failed, cancelled, missing and unexpectedly skipped applicable jobs cannot pass check", () => {
   for (const full of [false, true]) {

@@ -26,8 +26,11 @@ service run use two shards balanced by observed named-test durations in
 `check` context aggregates static checks and all applicable test jobs, including
 their failure evidence uploads. Superseded PR runs are cancelled.
 
-Daily CI at 05:00 UTC and manual workflow runs include WebKit on Node 24 and the
-complete suite and build on Node 26. These triggers become available when the
+Daily CI at 05:00 UTC runs only when the commit differs from the previous scheduled
+run on the same branch (or there is no previous run). An unchanged night skips the
+build and tests; a history lookup failure fails CI. Manual workflow runs always
+run the complete checks. Both include WebKit on Node 24 and the complete suite and
+build on Node 26. These triggers become available when the
 workflow reaches the default branch. Local `npm run check` continues to run all
 tests and both browsers. For focused checks after building, use:
 
