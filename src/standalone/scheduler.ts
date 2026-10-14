@@ -322,7 +322,6 @@ export class TurnScheduler {
   private stopped = true;
   private draining: Promise<void> | undefined;
   private wakeAgain = false;
-  private readonly attempting = new Set<string>();
   private timer: NodeJS.Timeout | undefined;
 
   constructor(
@@ -396,13 +395,7 @@ export class TurnScheduler {
       this.wakeAgain = false;
       for (const request of this.store.queued(this.now())) {
         if (this.stopped) return;
-        if (this.attempting.has(request.workId)) continue;
-        this.attempting.add(request.workId);
-        try {
-          await this.attempt(request);
-        } finally {
-          this.attempting.delete(request.workId);
-        }
+        await this.attempt(request);
       }
     }
   }

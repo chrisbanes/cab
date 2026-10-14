@@ -16,6 +16,7 @@ import type {
 import { RoutingAttemptStore } from "../../src/standalone/routing.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { ExecutionState } from "../../src/standalone/state.js";
 import { tmpdir } from "../fixtures/temp.js";
 import { startedOf } from "../fixtures/service-internals.js";
 
@@ -846,5 +847,81 @@ test("inbox delivery waits on unresolved held work and sees holds added while a 
     await fixture.wake();
     assert.ok(consulted.includes("blocker-2"));
     assert.equal(deliveries(fixture), 2);
+  });
+});
+
+test("holding a settled execution leaves its request settled", async () => {
+  await withFixture(async (fixture) => {
+    const db = access(fixture.service).db;
+    const store = new SchedulerStore(db);
+    const state = new ExecutionState(db);
+    const bind = (workId: string) => {
+      store.ensure({
+        requestKey: workId,
+        workId,
+        kind: "direct",
+        taskId: null,
+        projectId: null,
+        assignmentId: null,
+        taskVersion: null,
+        assignmentVersion: null,
+        instructionsRevision: null,
+        profileRevision: null,
+        prompt: workId,
+        workspace: "/synthetic",
+        previousWorkId: null,
+      });
+      const intent = state.create(workId, workId, "/synthetic");
+      fixture.sql(
+        "UPDATE execution_intents SET state = 'running', threadId = ?, turnId = ? WHERE id = ?",
+        `thread-${workId}`,
+        `turn-${workId}`,
+        intent.id,
+      );
+      return intent;
+    };
+    const settled = bind("settled");
+    const running = bind("running");
+    state.complete(settled.id, "thread-settled", "turn-settled");
+
+    // A failing post-completion step reaches hold() with a completed intent.
+    assert.equal(state.hold(settled.id, "Post-completion step failed"), false);
+    assert.equal(state.get(settled.id).state, "completed");
+    assert.equal(store.byWorkId("settled").state, "completed");
+
+    assert.equal(state.hold(running.id, "Runtime uncertain"), true);
+    assert.equal(state.get(running.id).state, "held");
+    assert.equal(store.byWorkId("running").state, "held");
+  });
+});
+
+test("a failed wake after a committed delegation still reports success", async () => {
+  await withFixture(async (fixture) => {
+    const gate = deferred();
+    fixture.runtime.release = gate.promise;
+    const { taskId } = await fixture.addTask({ assignment: "Parent" });
+    assert.equal(await waitUntil(() => fixture.runtime.turns === 1), true);
+    const before = fixture.service.domain().assignments(taskId).length;
+    access(fixture.service).wakeScheduler = async () => {
+      throw new Error("Synthetic wake failure");
+    };
+    const toolCall = (
+      fixture.runtime as unknown as {
+        toolCall: (call: RuntimeToolCall) => Promise<RuntimeToolResult>;
+      }
+    ).toolCall;
+    const result = await toolCall({
+      threadId: "thread-1",
+      turnId: "turn-1",
+      callId: "delegate-after-commit",
+      tool: "ensemble_delegate",
+      arguments: { profileId: fixture.profileId, brief: "Child work" },
+    });
+    assert.equal(result.success, true, result.text);
+    assert.equal(
+      fixture.service.domain().assignments(taskId).length,
+      before + 1,
+    );
+    gate.resolve();
   });
 });
