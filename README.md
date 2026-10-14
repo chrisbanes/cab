@@ -99,8 +99,12 @@ owns delivery scope and status.
   with provider-owned readiness and dependency holds; operators can inspect and
   refresh source state. Scoped delivery records durable intents, confirmed readback,
   retained PR feedback and operator settlement controls.
-- **Operations.** Offline database backup, verification and restore commands, and a
-  generated per-user macOS LaunchAgent.
+- **Operations.** `ensemble service install`, `upgrade` and `uninstall` manage a
+  per-user macOS LaunchAgent bound to an unpacked release; upgrade stops the job,
+  takes a verified snapshot and checks readiness, and a failure leaves the job
+  stopped. `ensemble snapshot create|verify|restore` provides offline database
+  backup, verification and restore
+  ([standalone operations](docs/operations/standalone-macos.md)).
 - **Operator CLI (authentication, browsing, configuration, diagnostics, task operation, sources, delivery and recovery).** A packaged `ensemble`
   executable logs in to the running service with a revocable read-only or read/write
   credential issued from Settings, manages named connections and browses projects,
@@ -155,7 +159,7 @@ each acceptance scenario to its evidence and disposition.
 - **Packaging.** `scripts/package-release.mjs` builds a self-contained `darwin-arm64`
   release tarball with bundled Node, and a tag-triggered workflow attaches it to a
   GitHub Release ([standalone operations](docs/operations/standalone-macos.md#release-build));
-  no release has been published. Planned: `ensemble service install/upgrade`
+  no release has been published
   ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
 - **Isolation.** Ensemble relies on the execution runtime and host for isolation.
   Broad host-permitted reads remain enabled, and Stop is best-effort: unresolved work

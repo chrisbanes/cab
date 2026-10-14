@@ -373,8 +373,11 @@ Uncertain effects hold dependent work; independent
 work may proceed only when independence is established. No arbitrary external API
 is promised exactly-once effects.
 
-The offline operations CLI provides generic standalone SQLite snapshot, verification
-and restore, and a generated per-user LaunchAgent. These preserve database state and
+`ensemble snapshot create|verify|restore` provides generic standalone SQLite snapshot,
+verification and restore. `ensemble service install|upgrade|uninstall` manages a
+per-user LaunchAgent bound to an unpacked release: upgrade stops the job, takes and
+verifies a snapshot, then starts the new release and checks readiness; a failed
+upgrade leaves the job stopped with no automatic rollback. These preserve database state and
 use ordinary service-start reconciliation; they do not include workspace contents,
 settle external effects, or qualify a final operational cutover. See the
 [macOS operations procedure](operations/standalone-macos.md) and its

@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
   createSnapshot,
   restoreSnapshot,
@@ -20,19 +22,33 @@ function parsePort(value: string): number {
   return port;
 }
 
-function writeResult(value: unknown): void {
-  process.stdout.write(`${JSON.stringify(value)}\n`);
+type Io = { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
+
+/** Runs one operation and returns its exit code; `ensemble snapshot` shares it. */
+export async function runOperations(
+  argv: string[],
+  io: Io = process,
+): Promise<number> {
+  try {
+    return await operate(argv, io);
+  } catch {
+    // Causes can contain local paths. The CLI intentionally emits no raw error.
+    io.stderr.write('{"ok":false,"error":"operation failed"}\n');
+    return 1;
+  }
 }
 
-async function main(): Promise<void> {
-  const [command, ...args] = process.argv.slice(2);
+async function operate(argv: string[], io: Io): Promise<number> {
+  const writeResult = (value: unknown) =>
+    io.stdout.write(`${JSON.stringify(value)}\n`);
+  const [command, ...args] = argv;
   if (command === "backup" && args.length === 2) {
     writeResult({
       ok: true,
       operation: "backup",
       manifest: await createSnapshot(args[0] as string, args[1] as string),
     });
-    return;
+    return 0;
   }
   if (command === "verify" && args.length === 1) {
     writeResult({
@@ -40,7 +56,7 @@ async function main(): Promise<void> {
       operation: "verify",
       manifest: await verifySnapshot(args[0] as string),
     });
-    return;
+    return 0;
   }
   if (command === "restore" && args.length === 2) {
     writeResult({
@@ -48,7 +64,7 @@ async function main(): Promise<void> {
       operation: "restore",
       manifest: await restoreSnapshot(args[0] as string, args[1] as string),
     });
-    return;
+    return 0;
   }
   if (command === "render-launch-agent" && args.length === 10) {
     const configuration: LaunchAgentConfiguration = {
@@ -72,17 +88,15 @@ async function main(): Promise<void> {
       operation: "render-launch-agent",
       label: configuration.label,
     });
-    return;
+    return 0;
   }
 
-  process.stderr.write(USAGE);
-  process.exitCode = 2;
+  io.stderr.write(USAGE);
+  return 2;
 }
 
-try {
-  await main();
-} catch {
-  // Causes can contain local paths. The CLI intentionally emits no raw error.
-  process.stderr.write('{"ok":false,"error":"operation failed"}\n');
-  process.exitCode = 1;
-}
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  process.exitCode = await runOperations(process.argv.slice(2));

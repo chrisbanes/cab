@@ -3,6 +3,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { readinessSchema } from "../operator/readiness.js";
 import {
   operatorCredentialTokenSchema,
   taskSchema,
@@ -20,6 +21,12 @@ import {
 } from "./connections.js";
 import { coverage } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
+import {
+  type OperatorConnection,
+  SERVICE_USAGE,
+  serviceCommand,
+  snapshotCommand,
+} from "./service.js";
 import { RequestJournal } from "./request-journal.js";
 import { waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
@@ -76,6 +83,7 @@ Commands:
   task get TASK_ID [--connection NAME]
 ${[...browseCommands.values(), ...writeCommands.values()].map((c) => `  ${c.usage}`).join("\n")}
 
+${SERVICE_USAGE}
 Options:
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
@@ -125,6 +133,12 @@ export async function main(
   argv: string[],
   deps: CliDeps = defaultDeps(),
 ): Promise<number> {
+  // Local commands on the service's own Mac, outside the operator CLI's options.
+  if (argv[0] === "service")
+    return serviceCommand(argv.slice(1), deps, (name) =>
+      operatorConnection(deps, name),
+    );
+  if (argv[0] === "snapshot") return snapshotCommand(argv.slice(1), deps);
   let json = false;
   let jsonl = false;
   try {
@@ -471,6 +485,43 @@ async function run(
     },
   });
   return { ...session?.result, ...output };
+}
+
+/** The upgrade's readiness reads through the operator's own CLI connection. */
+function operatorConnection(
+  deps: CliDeps,
+  name: string | undefined,
+): OperatorConnection {
+  const config = new ConnectionConfig(configDirectory(deps.env));
+  const requested = name ?? deps.env.ENSEMBLE_CONNECTION;
+  return {
+    async origin() {
+      rejectManaged(deps.env);
+      const { connection } = config.select(await config.read(), requested);
+      await loadToken(connection, deps);
+      return connection.url;
+    },
+    async readiness(signal) {
+      // Every request of this read, identity included, aborts with the lifecycle wait.
+      const bound: CliDeps = {
+        ...deps,
+        fetch: (input, init) =>
+          deps.fetch(input, {
+            ...init,
+            signal,
+          }),
+      };
+      const session = await connect(config, requested, bound, [
+        "cli.identity",
+        "diagnostics.read",
+      ]);
+      const read = await session.client.get(
+        "/api/operator/readiness",
+        readinessSchema,
+      );
+      return read.data.checks;
+    },
+  };
 }
 
 async function connect(

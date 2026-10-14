@@ -1,77 +1,187 @@
 # Standalone macOS operations
 
 This procedure applies to the standalone Ensemble service only. It does not
-read or migrate the installed Haze prototype, install a persistent service on
-its own, or authorize production deployment or cutover. Keep all data, auth,
-snapshot, restore, plist and log paths separate, absolute and lexically
-canonical, with every existing path component a real directory (not a symlink),
-and private to the operator.
+read or migrate the installed Haze prototype or authorize production deployment
+or cutover. `ensemble service install` installs the service as a per-user
+LaunchAgent; nothing installs it implicitly.
 
-## Runtime and authentication
+## Install, upgrade and uninstall
 
-Use the Node.js version in `.node-version` and the npm version in `packageManager`
-(`package.json`). Node.js `26.9.0` has passed the checks
-and the fixture service/operator journey
-([evidence](../evidence/node-26-compatibility-2026-10-09.md)) but is not the
-deployment baseline; later majors are not qualified. Build from a reviewed
-checkout and keep the Node executable and compiled CLI at stable absolute paths that remain
-available to the logged-in user:
+The service runs from an unpacked [release](#release-build) under the state
+directory. The defaults are:
 
-```sh
-node --version
-npm --version
-npm ci
-npm run check
-npm run build
-```
+| Path | Default |
+| --- | --- |
+| State (`STATE`) | `~/Library/Application Support/Ensemble` |
+| Data | `STATE/data` |
+| Operator auth | `STATE/auth/operator-auth.json` |
+| Snapshots | `STATE/snapshots` |
+| Install records | `STATE/launchd/<label>.json` |
+| Releases | `STATE/versions/<version>` |
+| Logs | `~/Library/Logs/Ensemble/<label>.<version>.<UTC time>.{out,err}.log` |
+| LaunchAgent | `~/Library/LaunchAgents/<label>.plist` |
 
-Create the auth parent directory with mode `0700`, then initialize an
-independent Ensemble operator password. The command reads the password from a
-hidden terminal prompt; do not put it in shell history, argv, a plist or logs.
-The auth file contains a password verifier, not the password, and is mode
-`0600`:
+The label defaults to `local.ensemble.service` and the port to `8787`
+(`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
+`--label` and, at install only, `--port` override them; upgrade keeps the
+installed port. Pass the same directory and label options to `upgrade` and
+`uninstall` as to `install`. The state and LaunchAgents directories must
+be real directories you own that no one else can write; the data, snapshot,
+install-record and log directories are created with mode `0700` and must stay
+private. The state directory may already hold unrelated files, such as the
+earlier pipeline implementation's `config.yaml` and `state/`; the commands read
+and change only the entries above.
 
-```sh
-npm run operator-auth -- init /absolute/private/auth/operator-auth.json
-```
-
-Create an empty private standalone data directory and a private log directory.
-The first service start creates `.ensemble-standalone` and acquires
-`.ensemble-owner.sqlite`. Do not point the service at a prototype, an
-unmarked non-empty directory, a symlink, or an existing unrelated install.
-
-## Generate and review a per-user LaunchAgent
-
-Choose a unique reverse-DNS label, an available loopback port, and private
-stdout/stderr paths whose parent directories already exist. Render the plist
-using the built CLI; the renderer validates its absolute paths and writes only
-the exact `${label}.plist` destination, exclusively, with mode `0600`:
+Unpack a release into its version directory, then initialize the operator
+password once. `init-auth` reads the password from a hidden terminal prompt and
+writes a mode `0600` verifier, not the password:
 
 ```sh
-npm run operations -- render-launch-agent \
-  com.example.ensemble \
-  /absolute/path/to/node \
-  /absolute/path/to/ensemble/dist/src/standalone/cli.js \
-  /absolute/private/ensemble-data \
-  /absolute/private/auth/operator-auth.json \
-  http://127.0.0.1:8787 8787 \
-  /absolute/private/logs/operator.stdout.log \
-  /absolute/private/logs/operator.stderr.log \
-  /absolute/private/launch-agents/com.example.ensemble.plist
+STATE="$HOME/Library/Application Support/Ensemble"
+mkdir -p "$STATE/versions/0.1.0"
+tar -xzf ensemble-0.1.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/0.1.0"
+"$STATE/versions/0.1.0/bin/ensemble" service init-auth
 ```
 
-The current renderer sets `RunAtLoad=true` and `KeepAlive=false`; launchctl,
-not automatic crash relaunch, owns restart. The plist contains the Node/CLI,
-operator command, data directory, port, separate auth-file path, canonical
-origin, fixed non-secret PATH, and private log paths. It contains no password
-or shell wrapper. Before bootstrap, inspect and lint the exact plist:
+### Install
 
 ```sh
-/usr/bin/plutil -lint /absolute/private/launch-agents/com.example.ensemble.plist
-/usr/bin/plutil -p /absolute/private/launch-agents/com.example.ensemble.plist
+"$STATE/versions/0.1.0/bin/ensemble" service install
 ```
 
-The `PATH` is deliberately fixed to
+Install binds the LaunchAgent to the release it runs from. It refuses, changing
+nothing, unless that release sits directly in `STATE/versions` with a
+`manifest.json` naming the same version, the label is not loaded, no install
+record or LaunchAgent for the label exists, the auth file exists, and the port is
+free. It then renders the plist with the same validation as before (absolute
+canonical paths, no symlinks, new log files, the fixed `PATH`, `RunAtLoad=true`,
+`KeepAlive=false`, no secrets), lints it with `plutil -lint`, records it, moves it
+into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and waits up to 120
+seconds for `/app`. The plist names the release's own `node/bin/node` and
+`dist/src/standalone/cli.js`, so each version keeps its exact executable.
+
+If bootstrap or the wait fails, install boots out the job it started, confirms
+the process exited, removes the LaunchAgent and its record, keeps the data, auth
+and logs, reports the log paths and exits 1. Run it again after fixing the cause.
+If the exit cannot be confirmed, it reports `"jobStopped":false` and keeps the
+record so that `service uninstall` can finish.
+
+Then log in the operator CLI with a read credential issued in Settings →
+Credentials. Upgrade reads readiness through this connection, and `ensemble
+doctor` shows the same checks:
+
+```sh
+"$STATE/versions/0.1.0/bin/ensemble" auth login --connection local --url http://127.0.0.1:8787
+"$STATE/versions/0.1.0/bin/ensemble" doctor
+```
+
+### Upgrade
+
+Unpack the new release beside the old one and run its `upgrade`:
+
+```sh
+mkdir "$STATE/versions/0.2.0"
+tar -xzf ensemble-0.2.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/0.2.0"
+"$STATE/versions/0.2.0/bin/ensemble" service upgrade "$STATE/versions/0.2.0" --connection local
+```
+
+Before it changes anything, upgrade reads the install record, checks the target
+release as install does, checks that the running job is the one the record
+describes, and loads the connection's token (`--connection`,
+`ENSEMBLE_CONNECTION` or the default connection), which must be for the
+installed origin. It then runs these stages:
+
+1. `stop`: boots out the job and confirms that its process exited, within 30
+   seconds.
+2. `snapshot`: writes `STATE/snapshots/<label>.<from>-to-<to>.<UTC time>` and
+   verifies it. The data directory's owner lock refuses if any process still
+   holds the data.
+3. `render`: renders, lints and records the new plist, with new log files.
+4. `start`: `launchctl bootstrap`.
+5. `health`: waits up to 120 seconds for `/app`.
+6. `readiness`: reads readiness until no check reports Fail, for up to 120
+   seconds. Not configured is accepted, so an unused GitHub discovery or Claude
+   does not block it. The identity check confirms the same installation.
+
+On success it prints the version, snapshot, log paths and each readiness
+status. On a failure from `stop` onward it leaves the job stopped: it boots out
+the new job if it started, with its exit confirmed, and removes the LaunchAgent
+so nothing starts at login. It keeps the install record and prints
+`{"ok":false,"operation":"upgrade","stage",…,"jobStopped","snapshot","logs"}`.
+`jobStopped` is false only when a process exit could not be confirmed. There is
+no rollback command. Recover by running `upgrade` again, with a fixed release or
+the same one once the cause is fixed, or restore the reported snapshot (see
+[Offline snapshot and restore](#offline-snapshot-and-restore)). An older release
+refuses a newer database schema, so going back to an older release needs that
+restore.
+
+### Uninstall
+
+```sh
+"$STATE/versions/0.2.0/bin/ensemble" service uninstall
+```
+
+Uninstall boots out the job, confirms its process exited, and removes the
+LaunchAgent and the install record. It keeps the data, auth file, snapshots,
+release versions and logs, so a later install reuses them. It refuses, changing
+nothing, when the loaded job or the LaunchAgent file is not the one the record
+describes (a different plist path or a changed plist hash). If the exit cannot be
+confirmed, it removes the LaunchAgent once the label is gone, keeps the record and
+exits 1; run it again. A re-run cannot recheck the earlier process, so confirm
+with `launchctl print` and `ps` that it is gone. With nothing installed it reports
+`"installed":false`.
+
+Install, upgrade and uninstall each hold `STATE/.<label>.lock` (mode `0600`,
+recording the command's pid) while they run, so a second command for the same label
+fails at once and changes nothing. A lock is never taken over: if the command that
+made it was killed, confirm with `ps -p <pid>` that the pid it names is gone,
+remove the lock file and run the command again. The plist is staged in a private
+`.<label>.staging-*` directory inside the LaunchAgents directory and moved into
+place within that directory; a failed command removes it.
+
+Ctrl-C during an install or upgrade wait fails it at that stage, and the failure
+handling above still runs. If a command is killed outright, or the install record
+is unreadable, `upgrade` and `uninstall` refuse rather than guess. Recover by
+hand: boot out the label only after `launchctl print` shows the expected
+`~/Library/LaunchAgents/<label>.plist` path, confirm its process exited, then
+remove that plist and `STATE/launchd/<label>.json` and install again.
+
+### Restart and host restarts
+
+Restart the installed job with `launchctl kickstart -k
+"gui/$(id -u)/local.ensemble.service"`; operator sessions reset and you log in
+again. If the Codex App Server process exits while the service runs, the
+operator workspace and `/runtime` page show "Codex runtime unavailable — restart
+the service". Queued requests stay queued with that reason and nothing new is
+admitted; turns already running are held for recovery. Nothing restarts the App
+Server automatically; the same `kickstart -k` recovers it, and startup
+reconciliation and the usual admission checks then apply.
+
+The LaunchAgent in `~/Library/LaunchAgents` is meant to start the service when
+the user logs into the GUI session; the procedure does not claim unattended
+pre-login startup. If the label is absent after a login, run
+`launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/local.ensemble.service.plist`
+and check `/app`.
+
+### Not yet proven
+
+The [bounded live run](../evidence/980-service-lifecycle-2026-10-14.md) used a
+throwaway label and temporary directories. These still need the maintainer:
+
+- the first install with the default label into the real
+  `~/Library/LaunchAgents` and `~/Library/Application Support/Ensemble`, beside
+  the earlier pipeline files;
+- launchd starting the job at login from the LaunchAgent after a logout or reboot;
+- an upgrade over a real data directory with projects, workspaces or a running
+  turn, where the bootout interrupts work and recovery holds apply;
+- installing from a CI-built tagged release, or from a browser-downloaded tarball
+  with quarantine attributes;
+- Claude turns under launchd;
+- the [#761](https://github.com/chrisbanes/ensemble/issues/761) cutover.
+
+## LaunchAgent environment
+
+The rendered LaunchAgent's `PATH` is deliberately fixed to
 `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`; launchctl's observed GUI
 domain does not provide the interactive shell's PATH, while `CodexRuntime`
 starts the installed `codex` executable by name, `ClaudeRuntime` resolves
@@ -79,7 +189,7 @@ starts the installed `codex` executable by name, `ClaudeRuntime` resolves
 use `git` or `caffeinate`. This avoids inheriting arbitrary interactive
 environment variables. Confirm `codex`, `claude` (if Claude is used), Node, the
 compiled CLI, `git`, and `caffeinate` resolve to the intended installed
-executables before loading the job. A host whose Codex or Claude installation is
+executables before installing. A host whose Codex or Claude installation is
 outside this fixed PATH, such as Claude Code's native installer in `~/.local/bin`,
 needs a Homebrew install in `/opt/homebrew/bin` or a reviewed renderer change; do
 not patch launchctl's shared environment or add arbitrary plist variables locally.
@@ -281,41 +391,6 @@ the row shows the token unavailable. To rotate, write the new token to a new mod
 it without a restart. A launchd-installed Claude turn with a real token is
 untested; the bounded live journeys ran the service outside launchd.
 
-## Start, inspect, restart and stop
-
-Run these commands in the logged-in user's GUI launchd domain, using the exact
-label and plist you just reviewed:
-
-```sh
-launchctl bootstrap "gui/$(id -u)" /absolute/private/launch-agents/com.example.ensemble.plist
-launchctl print "gui/$(id -u)/com.example.ensemble"
-launchctl kickstart -k "gui/$(id -u)/com.example.ensemble"
-launchctl print "gui/$(id -u)/com.example.ensemble"
-launchctl bootout "gui/$(id -u)/com.example.ensemble"
-launchctl print "gui/$(id -u)/com.example.ensemble"  # must fail after bootout
-```
-
-After bootstrap, request the configured loopback `/login` page and authenticate
-with the separate Ensemble password. Do not expose this local HTTP listener
-through a tunnel or network proxy as part of this procedure. After
-`kickstart -k`, expect in-memory operator sessions to reset and log in again.
-Before deleting a plist or fixture, wait for the exact service process to exit
-and verify that the label is absent. An active service holds the data-directory
-owner lock, so offline backup refuses rather than racing it.
-
-After a host restart, the per-user LaunchAgent is available when that user logs
-into the GUI session. Inspect the exact label; if it is absent, review the same
-plist and manually bootstrap it, then verify the loopback operator page and
-service state. This is the documented fallback only; the procedure does not claim
-unattended pre-login service startup or recovery after a host reboot.
-
-If the Codex App Server process exits while the service runs, the operator
-workspace and `/runtime` page show "Codex runtime unavailable — restart the
-service". Queued requests stay queued with that reason and nothing new is
-admitted; turns already running are held for recovery. Nothing restarts the
-App Server automatically, so recover with `launchctl kickstart -k` on the exact
-label; startup reconciliation and the usual admission checks then apply.
-
 ## Execution diagnostic retention
 
 Execution diagnostics expire after `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` days
@@ -330,17 +405,20 @@ held until those snapshots are deleted.
 
 ## Offline snapshot and restore
 
-Stop the exact per-user job with `launchctl bootout`, wait for its process to
-exit, and confirm the exact label is absent. Then back up to a new snapshot
-directory and verify it before relying on it:
+`service upgrade` takes and verifies a snapshot itself. For a separate backup,
+stop the job with `launchctl bootout "gui/$(id -u)/local.ensemble.service"`,
+wait for its process to exit, and confirm the label is absent (`launchctl print`
+fails). Then back up to a new snapshot directory and verify it before relying on
+it, and start the job again with `launchctl bootstrap "gui/$(id -u)"
+~/Library/LaunchAgents/local.ensemble.service.plist`:
 
 ```sh
-npm run operations -- backup \
-  /absolute/private/ensemble-data \
-  /absolute/private/snapshots/ensemble-snapshot
-npm run operations -- verify \
-  /absolute/private/snapshots/ensemble-snapshot
+ensemble snapshot create "$STATE/data" "$STATE/snapshots/manual-<date>"
+ensemble snapshot verify "$STATE/snapshots/manual-<date>"
 ```
+
+`ensemble` here is any release's `bin/ensemble`; from a checkout,
+`npm run operations -- backup|verify|restore` runs the same operations.
 
 The snapshot is a private directory containing only `standalone.sqlite` and a
 strict `manifest.json` commit marker. Node's SQLite backup API (qualified on
@@ -358,11 +436,8 @@ Restore only to a distinct, nonexistent data-directory path whose parent is
 already private:
 
 ```sh
-npm run operations -- restore \
-  /absolute/private/snapshots/ensemble-snapshot \
-  /absolute/private/ensemble-data-restored
-npm run operations -- verify \
-  /absolute/private/snapshots/ensemble-snapshot
+ensemble snapshot restore SNAPSHOT /absolute/private/ensemble-data-restored
+ensemble snapshot verify SNAPSHOT
 ```
 
 The restore command verifies the snapshot and restored database, creates a
@@ -371,8 +446,9 @@ promotes its incomplete sentinel to `.ensemble-standalone` as its final commit.
 It never copies the source owner file or SQLite WAL/journal files. The
 second `verify` checks the snapshot, not the restored directory. Do not start a
 restore destination unless `restore` exits successfully; successful restore
-returns the matching manifest identity. Generate a new reviewed LaunchAgent
-for that destination, then start it normally. Service startup performs normal
+returns the matching manifest identity. To run the installed service on
+restored data, `ensemble service uninstall`, move `STATE/data` aside, restore
+into `STATE/data` and `ensemble service install` again. Service startup performs normal
 migrations and workspace/execution reconciliation before scheduler admission;
 restore itself neither clears holds nor upgrades domain state.
 
@@ -495,45 +571,8 @@ service against a fresh data directory, and expects the operator UI and one of i
 assets within 120 seconds before stopping that service. It does not exercise a real
 Codex login.
 
-The commands below use these values:
-
-```sh
-ROOT="$HOME/.config/ensemble-dev"
-RELEASE="$ROOT/builds/<sha>/ensemble-<version>-darwin-arm64"
-NODE="$RELEASE/node/bin/node"
-```
-
-Initialize the operator password once ([Runtime and
-authentication](#runtime-and-authentication)) with the release's CLI:
-
-```sh
-"$NODE" "$RELEASE/dist/src/standalone/operator-auth-cli.js" init "$ROOT/auth/operator-auth.json"
-```
-
-Start the service with the printed command, which serves the operator UI on
-`http://127.0.0.1:8787`; stop it with Ctrl-C:
-
-```sh
-ENSEMBLE_OPERATOR_AUTH_FILE="$ROOT/auth/operator-auth.json" \
-ENSEMBLE_OPERATOR_ORIGIN=http://127.0.0.1:8787 \
-"$NODE" "$RELEASE/dist/src/standalone/cli.js" operator "$ROOT/data" 8787
-```
-
-To upgrade, stop the service and take a verified snapshot with the current build
-([Offline snapshot and restore](#offline-snapshot-and-restore)), then build and
-start the new commit against the same `data/`. Startup migrates the data forward,
-and an older build refuses a newer schema:
-
-```sh
-"$NODE" "$RELEASE/dist/src/standalone/operations-cli.js" backup "$ROOT/data" "$ROOT/snapshots/<old-sha>-<date>"
-"$NODE" "$RELEASE/dist/src/standalone/operations-cli.js" verify "$ROOT/snapshots/<old-sha>-<date>"
-node scripts/package-release.mjs build NEW_COMMIT
-```
-
-Rollback is manual and discards everything after the upgrade: `restore` the
-snapshot to a new data directory under `$ROOT` and start the old build against
-it. Keep the previous build and its snapshot until the new build has proved
-itself.
+To run a release as the service, unpack it into `STATE/versions/<version>` and
+use [`ensemble service install`](#install) or [`upgrade`](#upgrade).
 
 ### Tagged releases
 
@@ -545,3 +584,98 @@ release job finishes a draft release that the failed run left behind; it refuses
 replace a published release. Manual runs and pull requests that change the packaging
 files build and verify the same tarball and upload it only as a workflow artifact. No
 release has been published yet.
+
+## Checkout and low-level procedure
+
+`ensemble service` is the supported route. From a checkout, or to inspect each
+step, the pieces run directly. Keep all data, auth, snapshot, restore, plist and
+log paths separate, absolute and lexically canonical, with every existing path
+component a real directory (not a symlink), and private to the operator.
+`npm run operations` and `npm run operator-auth` remain available and behave as
+before.
+
+### Build and authenticate from a checkout
+
+Use the Node.js version in `.node-version` and the npm version in `packageManager`
+(`package.json`). Node.js `26.9.0` has passed the checks
+and the fixture service/operator journey
+([evidence](../evidence/node-26-compatibility-2026-10-09.md)) but is not the
+deployment baseline; later majors are not qualified. Build from a reviewed
+checkout and keep the Node executable and compiled CLI at stable absolute paths that remain
+available to the logged-in user:
+
+```sh
+node --version
+npm --version
+npm ci
+npm run check
+npm run build
+```
+
+Create the auth parent directory with mode `0700`, then initialize an
+independent Ensemble operator password. The command reads the password from a
+hidden terminal prompt; do not put it in shell history, argv, a plist or logs.
+The auth file contains a password verifier, not the password, and is mode
+`0600`:
+
+```sh
+npm run operator-auth -- init /absolute/private/auth/operator-auth.json
+```
+
+Create an empty private standalone data directory and a private log directory.
+The first service start creates `.ensemble-standalone` and acquires
+`.ensemble-owner.sqlite`. Do not point the service at a prototype, an
+unmarked non-empty directory, a symlink, or an existing unrelated install.
+
+### Render a LaunchAgent by hand
+
+Choose a unique reverse-DNS label, an available loopback port, and private
+stdout/stderr paths whose parent directories already exist. Render the plist
+using the built CLI; the renderer validates its absolute paths and writes only
+the exact `${label}.plist` destination, exclusively, with mode `0600`:
+
+```sh
+npm run operations -- render-launch-agent \
+  com.example.ensemble \
+  /absolute/path/to/node \
+  /absolute/path/to/ensemble/dist/src/standalone/cli.js \
+  /absolute/private/ensemble-data \
+  /absolute/private/auth/operator-auth.json \
+  http://127.0.0.1:8787 8787 \
+  /absolute/private/logs/operator.stdout.log \
+  /absolute/private/logs/operator.stderr.log \
+  /absolute/private/launch-agents/com.example.ensemble.plist
+```
+
+The current renderer sets `RunAtLoad=true` and `KeepAlive=false`; launchctl,
+not automatic crash relaunch, owns restart. The plist contains the Node/CLI,
+operator command, data directory, port, separate auth-file path, canonical
+origin, fixed non-secret PATH, and private log paths. It contains no password
+or shell wrapper. Before bootstrap, inspect and lint the exact plist:
+
+```sh
+/usr/bin/plutil -lint /absolute/private/launch-agents/com.example.ensemble.plist
+/usr/bin/plutil -p /absolute/private/launch-agents/com.example.ensemble.plist
+```
+
+### Start, inspect, restart and stop by hand
+
+Run these commands in the logged-in user's GUI launchd domain, using the exact
+label and plist you just reviewed:
+
+```sh
+launchctl bootstrap "gui/$(id -u)" /absolute/private/launch-agents/com.example.ensemble.plist
+launchctl print "gui/$(id -u)/com.example.ensemble"
+launchctl kickstart -k "gui/$(id -u)/com.example.ensemble"
+launchctl print "gui/$(id -u)/com.example.ensemble"
+launchctl bootout "gui/$(id -u)/com.example.ensemble"
+launchctl print "gui/$(id -u)/com.example.ensemble"  # must fail after bootout
+```
+
+After bootstrap, request the configured loopback `/login` page and authenticate
+with the separate Ensemble password. Do not expose this local HTTP listener
+through a tunnel or network proxy as part of this procedure. After
+`kickstart -k`, expect in-memory operator sessions to reset and log in again.
+Before deleting a plist or fixture, wait for the exact service process to exit
+and verify that the label is absent. An active service holds the data-directory
+owner lock, so offline backup refuses rather than racing it.
