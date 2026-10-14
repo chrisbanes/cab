@@ -523,7 +523,7 @@ function SourceLines({
   );
 }
 
-function MarkdownPreview({ text }: { text: string }) {
+export function MarkdownPreview({ text }: { text: string }) {
   return (
     <article className="file-markdown">
       <Markdown

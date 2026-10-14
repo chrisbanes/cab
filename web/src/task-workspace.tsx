@@ -38,7 +38,7 @@ import {
 import { failureCause } from "./outcome-copy.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
-import { TaskFiles } from "./task-files.js";
+import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
 import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
@@ -1353,7 +1353,9 @@ export function TaskWorkspace({
                 return (
                   <>
                     {brief.prose && (
-                      <p className="brief-prose">{brief.prose}</p>
+                      <div className="brief-prose">
+                        <MarkdownPreview text={brief.prose} />
+                      </div>
                     )}
                     <h4 className="small-heading">
                       Supplied acceptance criteria
