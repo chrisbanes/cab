@@ -1,11 +1,12 @@
 import { z } from "zod";
 
-/** The seven readiness checks, in the fixed order they are reported. */
+/** The eight readiness checks, in the fixed order they are reported. */
 export const readinessCheckIds = [
   "codex-executable",
   "codex-login",
   "git",
   "github-discovery",
+  "claude-executable",
   "claude-token",
   "runtime-harness",
   "data-paths",

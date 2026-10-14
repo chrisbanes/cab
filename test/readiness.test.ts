@@ -135,6 +135,125 @@ test("codex and git fail with the contract fix when missing, not executable or n
   );
 });
 
+/** A fixture `claude` whose body is a shell script; the version probe runs it for real. */
+function installClaude(f: Fixture, body: string) {
+  writeFileSync(join(f.bin, "claude"), `#!/bin/sh\n${body}\n`, {
+    mode: 0o755,
+  });
+}
+const claudeExecutable = (f: Fixture, over: Partial<ReadinessDeps> = {}) =>
+  check(f, "claude-executable", { versionTimeoutMs: 1000, ...over });
+const MISSING = {
+  reason: "Claude Code is not on the service PATH",
+  fix: "Install Claude Code into the fixed PATH, then restart the service",
+};
+const UNRUNNABLE = {
+  reason: "Claude Code did not report a version",
+  fix: "Run `claude --version` as the service user, or reinstall Claude Code, then restart the service",
+};
+
+test("a runnable claude passes with its version in the label and no path anywhere", async (t) => {
+  const f = fixture(t);
+  installClaude(f, 'echo "2.1.296 (Claude Code)"');
+  const result = await claudeExecutable(f);
+  assert.equal(result.status, "pass");
+  assert.equal(result.label, "Claude executable (2.1.296)");
+  assert.equal(result.reason, null);
+  assert.equal(result.fix, null);
+  assert.ok(!JSON.stringify(result).includes(f.bin));
+});
+
+test("the claude version is reported and never compared", async (t) => {
+  const f = fixture(t);
+  for (const [printed, version] of [
+    ["0.0.1 (Claude Code)", "0.0.1"],
+    ["99.9.9", "99.9.9"],
+    ["3.0.0-beta.1+build5 (Claude Code)", "3.0.0-beta.1+build5"],
+  ] as const) {
+    installClaude(f, `echo "${printed}"`);
+    const result = await claudeExecutable(f);
+    assert.equal(result.status, "pass", printed);
+    assert.equal(result.label, `Claude executable (${version})`);
+  }
+});
+
+test("a missing claude is not configured while Claude is unused and fails once it is needed", async (t) => {
+  const f = fixture(t);
+  const unused = await claudeExecutable(f);
+  assert.equal(unused.status, "not-configured");
+  assert.equal(unused.label, "Claude executable");
+  assert.equal(unused.reason, MISSING.reason);
+  assert.equal(unused.fix, MISSING.fix);
+  assert.equal(
+    (await claudeExecutable(f, profiles(codexProfile()))).status,
+    "not-configured",
+    "a Codex-only host shows no red row",
+  );
+  assert.equal(
+    (
+      await claudeExecutable(
+        f,
+        profiles({ revoked: true, runtime: claude(null) }),
+      )
+    ).status,
+    "not-configured",
+    "a revoked Claude profile does not need it",
+  );
+  for (const over of [
+    { claudeTokenReference: () => "file:/x" },
+    profiles({ revoked: false, runtime: claude(null) }),
+    {
+      profiles: () => {
+        throw new Error("unreadable");
+      },
+    },
+  ]) {
+    const needed = await claudeExecutable(f, over);
+    assert.equal(needed.status, "fail");
+    assert.equal(needed.label, "Claude executable");
+    assert.equal(needed.reason, MISSING.reason);
+    assert.equal(needed.fix, MISSING.fix);
+  }
+});
+
+test("a claude that does not print a version fails as not runnable", async (t) => {
+  const f = fixture(t);
+  for (const [body, over] of [
+    ["echo hello", {}],
+    ["exit 1", {}],
+    ["", {}],
+    ['echo "v2.1.296"', {}],
+    ["exec sleep 30", { versionTimeoutMs: 200 }],
+  ] as const) {
+    installClaude(f, body);
+    const result = await claudeExecutable(f, over);
+    assert.equal(result.status, "fail", body);
+    assert.equal(result.label, "Claude executable");
+    assert.equal(result.reason, UNRUNNABLE.reason);
+    assert.equal(result.fix, UNRUNNABLE.fix);
+  }
+});
+
+test("a claude whose child outlives the timeout still settles the check", async (t) => {
+  const f = fixture(t);
+  installClaude(f, "sleep 2 &\nwait");
+  const started = Date.now();
+  const result = await claudeExecutable(f, { versionTimeoutMs: 200 });
+  assert.equal(result.status, "fail");
+  assert.ok(Date.now() - started < 1500);
+});
+
+test("the claude version probe sees the PATH and nothing else of the service environment", async (t) => {
+  const f = fixture(t);
+  const seen = join(f.root, "seen");
+  installClaude(f, `echo "\${${ENV_NAME}-unset}" > "${seen}"\necho 2.1.296`);
+  const result = await claudeExecutable(f, {
+    env: { PATH: f.bin, [ENV_NAME]: "leaked" },
+  });
+  assert.equal(result.status, "pass");
+  assert.equal(readFileSync(seen, "utf8").trim(), "unset");
+});
+
 test("codex login passes when verified and fails otherwise with the login fix", async (t) => {
   const f = fixture(t);
   assert.equal((await check(f, "codex-login")).status, "pass");
@@ -449,7 +568,7 @@ test("the data and auth paths check names the rule, not the path", async (t) => 
       assert.ok(!JSON.stringify(result).includes(path));
 });
 
-test("read returns all seven checks in fixed order and parses with the shared schema", async (t) => {
+test("read returns all eight checks in fixed order and parses with the shared schema", async (t) => {
   const f = fixture(t);
   const result = await new Readiness(deps(f)).read();
   assert.deepEqual(
@@ -491,7 +610,7 @@ test("failing profiles are counted, never named, and stay inside the schema", as
     const harness = checks.find((c) => c.id === "runtime-harness");
     assert.equal(harness?.status, "fail");
     assert.equal(harness?.reason, REJECTED(count));
-    assert.equal(checks.length, 7, "the other checks are unaffected");
+    assert.equal(checks.length, 8, "the other checks are unaffected");
   }
 });
 
@@ -500,7 +619,7 @@ test("an invalid check result degrades to that check's failure, not a failed rea
   const { data } = await new Readiness(
     deps(f, { codexLogin: async () => "weird" as never }),
   ).read();
-  assert.equal(data.checks.length, 7);
+  assert.equal(data.checks.length, 8);
   assert.equal(
     data.checks.filter((c) => c.status === "pass").length >= 3,
     true,

@@ -1,6 +1,7 @@
-import { constants } from "node:fs";
-import { access, lstat, stat } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join } from "node:path";
+import { execFile } from "node:child_process";
+import { lstat } from "node:fs/promises";
+import { dirname, isAbsolute } from "node:path";
+import { promisify } from "node:util";
 import type { z } from "zod";
 import {
   type ExecutionHarness,
@@ -25,6 +26,7 @@ import {
 } from "../operator/readiness.js";
 import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
 import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
+import { resolveOnPath } from "./executable-path.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
 
@@ -65,6 +67,8 @@ export type ReadinessDeps = {
   now?: () => number;
   /** Bound on the Codex login and GitHub discovery checks; defaults to 10 s. */
   timeoutMs?: number;
+  /** Bound on `claude --version`; defaults to 5 s. */
+  versionTimeoutMs?: number;
 };
 
 const labels: Record<ReadinessCheckId, string> = {
@@ -72,6 +76,7 @@ const labels: Record<ReadinessCheckId, string> = {
   "codex-login": "Codex login",
   git: "Git",
   "github-discovery": "GitHub discovery",
+  "claude-executable": "Claude executable",
   "claude-token": "Claude token",
   "runtime-harness": "Runtime harness",
   "data-paths": "Data and auth paths",
@@ -103,6 +108,10 @@ const fixes = {
   codexLogin: "Run `codex login` as the service user",
   git: "Install git",
   discovery: "Run `gh auth login`, or Settings → discovery credential",
+  claudeInstall:
+    "Install Claude Code into the fixed PATH, then restart the service",
+  claudeVersion:
+    "Run `claude --version` as the service user, or reinstall Claude Code, then restart the service",
   claudeAdd: "Add a Claude token in Settings → Add Claude",
   claudeRestart: "Restart the service",
   claudeVariable:
@@ -129,26 +138,15 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-/** The first `PATH` directory holding an executable regular file called `name`. */
-async function onPath(name: string, env: NodeJS.ProcessEnv): Promise<boolean> {
-  for (const directory of (env.PATH ?? "").split(delimiter)) {
-    // shortcut: relative and empty entries depend on the cwd; skipped, not resolved.
-    if (!isAbsolute(directory)) continue;
-    const candidate = join(directory, name);
-    try {
-      if (!(await stat(candidate)).isFile()) continue;
-      await access(candidate, constants.X_OK);
-      return true;
-    } catch {
-      // Not here; keep searching.
-    }
-  }
-  return false;
-}
+const execFileAsync = promisify(execFile);
+/** A release number such as `2.1.296`, possibly with a pre-release or build suffix. */
+const versionToken = /^\d+\.\d+\.\d+[0-9A-Za-z.+-]{0,32}$/;
 
 /**
- * Seven read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
- * `read()` runs fresh. Reasons and fixes are literals, never a caught error or a path.
+ * Eight read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
+ * `read()` runs fresh, and the only spawn is the bounded `claude --version` probe. Reasons and
+ * fixes are literals, never a caught error or a path; the one dynamic string is the version
+ * that probe printed, which is shown and never compared.
  */
 export class Readiness {
   constructor(private readonly deps: ReadinessDeps) {}
@@ -194,6 +192,8 @@ export class Readiness {
         return this.codexLogin();
       case "github-discovery":
         return this.discovery();
+      case "claude-executable":
+        return this.claudeExecutable();
       case "claude-token":
         return this.claudeTokenCheck();
       case "runtime-harness":
@@ -208,7 +208,7 @@ export class Readiness {
     name: string,
     fix: string,
   ): Promise<ReadinessCheck> {
-    return (await onPath(name, this.deps.env))
+    return (await resolveOnPath(name, this.deps.env))
       ? pass(id)
       : outcome(id, "fail", `${labels[id]} is not on the service PATH`, fix);
   }
@@ -271,6 +271,60 @@ export class Readiness {
           "The GitHub discovery credential is not readable",
           fixes.discovery,
         );
+  }
+
+  /**
+   * Claude is optional (ADR-1008): a missing `claude` fails only when a token reference or an
+   * active Claude profile makes it needed. Found must mean runnable, but the version is only
+   * reported (ADR-1011).
+   */
+  private async claudeExecutable(): Promise<ReadinessCheck> {
+    const id = "claude-executable";
+    const path = await resolveOnPath("claude", this.deps.env);
+    if (path === null) {
+      let inUse = true;
+      try {
+        inUse =
+          this.deps.claudeTokenReference() !== null ||
+          this.deps
+            .profiles()
+            .some((p) => !p.revoked && p.runtime.harness === "claude");
+      } catch {
+        // An unreadable configuration counts as in use.
+      }
+      return outcome(
+        id,
+        inUse ? "fail" : "not-configured",
+        "Claude Code is not on the service PATH",
+        fixes.claudeInstall,
+      );
+    }
+    const timeout = this.deps.versionTimeoutMs ?? 5000;
+    let version: string | undefined;
+    try {
+      // `bounded` also covers a wrapper whose grandchild holds the pipe past the kill.
+      const { stdout } = await bounded(
+        execFileAsync(path, ["--version"], {
+          // PATH only: the service environment holds credentials.
+          env: { PATH: this.deps.env.PATH ?? "" },
+          timeout,
+          maxBuffer: 4096,
+        }),
+        timeout,
+      );
+      const token = stdout.split("\n", 1)[0]?.trim().split(/\s+/, 1)[0];
+      if (token !== undefined && versionToken.test(token)) version = token;
+    } catch {
+      // Falls through to the single unrunnable failure.
+    }
+    return version === undefined
+      ? outcome(
+          id,
+          "fail",
+          "Claude Code did not report a version",
+          fixes.claudeVersion,
+        )
+      : { ...pass(id), label: `${labels[id]} (${version})` };
   }
 
   private claudeTokenCheck(): ReadinessCheck {
