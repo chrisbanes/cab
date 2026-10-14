@@ -406,6 +406,7 @@ and disclosure detail; do not shrink their entire height into a laptop viewport.
 | Setup inline lead profile and ready check | 145 `HGgoK`, 145b `ju0c4`, 146 `UdnEc`, 146b `PFBIv`, 147 `akpq9` |
 | First task: start prediction, wait reasons and Fix | 148 `q9Ogr`, 149 `Ky9f4`, 149b `CLbNV`, 149c `itg8q`, 150 `A0xMwZ` |
 | Readiness panel and Add Claude | 151 `ahTxh`, 152 `CLLED`, 152b `vF8EX` |
+| Execution runtime switches, disable confirmation and no runtime enabled | 126b `bXZvb`, 126c `FQScX`, 151b `WM9Em` |
 | Action feedback section and components | Section `BnKzu`; components `SKF0h`; review notes 167 `nrZYd` |
 | Action feedback, project configuration | 154 `JGenC`, 154b `TZhQ0`, 156 `RsAq8`, 157 `sbOOH`, 158 `x4tTqV`, 159 `IS6X0` |
 | Action feedback, other surfaces | 155 `hRBAj`, 160 `HYN4M`, 161 `thtaf`, 162 `zxH2a`, 162b `Gi4zR`, 163 `o6kBCw`, 164 `h0FyJW`, 165 `TGj4A` |
@@ -589,6 +590,18 @@ the open decisions.
   top of the runtime page's left column: copyable token-file commands, a Token
   reference field (`file:` or `env:`), Save, and a live Token readable row. A
   failure names neither the path nor the value and offers Clear.
+- **Execution runtimes (126b, 126c, 151b):** each runtime row on the runtime page
+  has a "<Runtime> enabled" switch beside its status badge, in four states: enabled
+  and Available; enabled and Unavailable with the Fix "Turn it off and on, or restart
+  the service."; disabled, "Not enabled · Disabled in Settings", with no shell alert;
+  and refused because the executable is missing, an inline error naming it while the
+  switch stays off (126b). Turning off a runtime that bound tasks use asks first:
+  "N tasks use Claude. Running turns finish; their next turns wait until Claude is
+  enabled again." with Cancel and Turn off (126c); without bound tasks it saves at
+  once. With no runtime enabled, Readiness fails "An execution runtime is enabled"
+  with the Fix "Enable a runtime in Settings → Runtime", and each disabled runtime's
+  checks read Not configured, "Disabled in Settings" (151b). Composer and task waits
+  reuse the existing Not enabled copy.
 
 ### Action feedback
 
