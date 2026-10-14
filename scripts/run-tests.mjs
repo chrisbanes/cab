@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync, globSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
+import { profileTimings } from "./test-timings.mjs";
 import { constants } from "node:os";
 import {
   createTestEvidenceDirectory,
@@ -317,8 +318,14 @@ export function parseTestOptions(args) {
   }
   if (!["all", "chromium", "service"].includes(options.profile))
     throw Error("Profile must be all, chromium or service");
-  if (options.suite !== "all" && !logicalSuites.includes(options.suite))
-    throw Error(`Unknown logical suite: ${options.suite}`);
+  if (options.suite !== "all") {
+    const suites = options.suite.split(",");
+    if (
+      new Set(suites).size !== suites.length ||
+      suites.some((suite) => !logicalSuites.includes(suite))
+    )
+      throw Error(`Unknown or duplicate logical suites: ${options.suite}`);
+  }
   if (
     options.preflight &&
     (options.suite !== "all" ||
@@ -334,7 +341,10 @@ export function parseTestOptions(args) {
 export function selectTestFiles(files, options, timings = {}) {
   const selected = files.filter(
     (file) =>
-      options.suite === "all" || file.startsWith(`dist/test/${options.suite}/`),
+      options.suite === "all" ||
+      options.suite
+        .split(",")
+        .some((suite) => file.startsWith(`dist/test/${suite}/`)),
   );
   if (!selected.length)
     throw Error(`No tests selected for suite ${options.suite}`);
@@ -376,9 +386,15 @@ async function main() {
     : selectTestFiles(
         discoverTestFiles(),
         options,
-        JSON.parse(
-          readFileSync(new URL("./test-timings.json", import.meta.url), "utf8"),
-        ).milliseconds,
+        profileTimings(
+          JSON.parse(
+            readFileSync(
+              new URL("./test-timings.json", import.meta.url),
+              "utf8",
+            ),
+          ),
+          options.profile,
+        ),
       );
   if (!files.length) throw Error("No compiled test files found");
   process.stdout.write(
@@ -393,9 +409,26 @@ async function main() {
       : []),
     ...files,
   ];
+  if (!preflight) {
+    const directory = await createTestEvidenceDirectory(
+      "test-runner",
+      `${options.suite} ${options.profile} shard ${options.shard} timings`,
+    );
+    const destination = join(directory, "file-timings.ndjson");
+    args.splice(
+      1,
+      0,
+      "--test-reporter=spec",
+      "--test-reporter-destination=stdout",
+      "--test-reporter=./scripts/test-timing-reporter.mjs",
+      `--test-reporter-destination=${destination}`,
+    );
+    process.stdout.write(`Test timings: ${destination}\n`);
+  }
   const result = await runTestProcess(args, {
     env: {
       ...process.env,
+      ENSEMBLE_TEST_PROFILE: options.profile,
       ENSEMBLE_TEST_BROWSER_ENGINE: {
         all: "all",
         chromium: "chromium",

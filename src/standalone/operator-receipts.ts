@@ -118,6 +118,17 @@ export function commandReceipt(
             projectOverrides: outcome.result.projectOverrides,
           },
         };
+      case "getting-started.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: "system:getting-started" as const,
+            dismissed: outcome.result.dismissed,
+          },
+        };
       case "discovery.configure":
       case "claude-token.configure":
         return {

@@ -132,7 +132,8 @@ owns delivery scope and status.
   ([evidence](docs/evidence/issue-827-claude-journeys-2026-10-12.md)): a Claude-only
   task, a Codex lead with a Claude worker, Stop and a service crash with explicit
   recovery. Its execution policy and disclosed limits differ from Codex's (see the
-  [specification](docs/SPEC.md)), and untested surfaces remain limits. It uses the
+  [specification](docs/SPEC.md)), and untested surfaces remain limits. It runs the
+  `claude` on the service `PATH` without gating its version. It uses the
   operator's own Claude subscription, and Anthropic's
   [terms](https://code.claude.com/docs/en/legal-and-compliance) do not explicitly
   address a self-hosted single-operator service.
@@ -151,6 +152,11 @@ each acceptance scenario to its evidence and disposition.
   ([#761](https://github.com/chrisbanes/ensemble/issues/761)) is a separate, reviewed
   step ([proposal](docs/operations/standalone-cutover-proposal.md)); the installed
   Haze prototype stays in place until then.
+- **Packaging.** `scripts/package-release.mjs` builds a self-contained `darwin-arm64`
+  release tarball with bundled Node, and a tag-triggered workflow attaches it to a
+  GitHub Release ([standalone operations](docs/operations/standalone-macos.md#release-build));
+  no release has been published. Planned: `ensemble service install/upgrade`
+  ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
 - **Isolation.** Ensemble relies on the execution runtime and host for isolation.
   Broad host-permitted reads remain enabled, and Stop is best-effort: unresolved work
   can remain held for reconciliation. See the
@@ -171,7 +177,7 @@ Use the Node and npm versions pinned in [`.node-version`](.node-version) and
 `packageManager` in [`package.json`](package.json). Node 26 is tested for
 compatibility: `node26-service-*` jobs run service coverage on PRs and main pushes;
 `node26-full-compatibility` runs the complete build and Chromium/WebKit suite on
-changed-commit nights and manual runs. Both use the latest 26.x; 26.9.0 has
+changed-commit nights, manual runs and release tags. Both use the latest 26.x; 26.9.0 has
 [local evidence](docs/evidence/node-26-compatibility-2026-10-09.md). Node 26 is not
 the deployment baseline. `engines.node` is `>=24` as permissive metadata; later
 majors are not qualified.

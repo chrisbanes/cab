@@ -305,6 +305,13 @@ const commandSchema = z.discriminatedUnion("type", [
         .nullable(),
     })
     .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("getting-started.configure"),
+      dismissed: z.boolean(),
+    })
+    .strict(),
 ]);
 
 function parseCommand(input: unknown) {
@@ -338,6 +345,12 @@ function present(row: Row, key: string): string | number | null {
   return value;
 }
 
+/** A blocker task `b` with its import and source status, and when it still blocks. */
+const blockerStatus = `LEFT JOIN github_imported_tasks i ON i.taskId = b.id
+      LEFT JOIN github_issue_status s ON s.nodeId = i.nodeId`;
+const blocks = `((i.taskId IS NULL AND b.state != 'done')
+        OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed'))`;
+
 /** Receipt scope: the project, the profile, or an installation-level singleton. */
 function scopeOf(command: ParsedCommand): string {
   return "projectId" in command
@@ -348,7 +361,9 @@ function scopeOf(command: ParsedCommand): string {
         ? "system:discovery"
         : command.type === "claude-token.configure"
           ? "system:claude-token"
-          : "system:capacity";
+          : command.type === "getting-started.configure"
+            ? "system:getting-started"
+            : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -481,6 +496,10 @@ export class DomainStore {
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
         );
+        CREATE TABLE IF NOT EXISTS installation_getting_started (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          dismissed INTEGER NOT NULL CHECK(dismissed IN (0, 1))
+        );
         CREATE TABLE IF NOT EXISTS project_diagnostic_capture (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           mode TEXT NOT NULL CHECK(mode IN ('enhanced', 'baseline'))
@@ -601,6 +620,11 @@ export class DomainStore {
       this.db
         .prepare(
           "INSERT OR IGNORE INTO claude_runtime_credentials (singleton, credentialRef) VALUES (1, NULL)",
+        )
+        .run();
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO installation_getting_started (singleton, dismissed) VALUES (1, 0)",
         )
         .run();
       this.db
@@ -767,6 +791,15 @@ export class DomainStore {
       "SELECT credentialRef FROM claude_runtime_credentials WHERE singleton = 1",
     );
     return row?.credentialRef ? String(row.credentialRef) : null;
+  }
+
+  /** Whether the operator dismissed the getting-started checklist for this installation. */
+  gettingStartedDismissed(): boolean {
+    return Boolean(
+      this.one(
+        "SELECT dismissed FROM installation_getting_started WHERE singleton = 1",
+      )?.dismissed,
+    );
   }
 
   recordedCommand<C extends DomainCommand>(
@@ -1547,19 +1580,30 @@ export class DomainStore {
         }
       }
     }
-    if (
-      this.one(
-        `SELECT 1 AS blocked FROM local_dependencies d
-      JOIN domain_tasks b ON b.id = d.blockerTaskId
-      LEFT JOIN github_imported_tasks i ON i.taskId = b.id
-      LEFT JOIN github_issue_status s ON s.nodeId = i.nodeId
-      WHERE d.taskId = ? AND ((i.taskId IS NULL AND b.state != 'done')
-        OR (i.taskId IS NOT NULL AND COALESCE(s.status, 'unknown') != 'closed')) LIMIT 1`,
-        taskId,
-      )
-    )
+    if (this.blockingDependencies(taskId).length)
       reasons.push("local-dependency");
     return { eligible: reasons.length === 0, reasons };
+  }
+
+  /** Dependencies that still block: a local task not done, or an imported one whose issue is not closed. */
+  blockingDependencies(taskId: string): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT d.blockerTaskId AS id FROM local_dependencies d
+      JOIN domain_tasks b ON b.id = d.blockerTaskId ${blockerStatus}
+      WHERE d.taskId = ? AND ${blocks} ORDER BY d.blockerTaskId`,
+        )
+        .all(taskId) as Row[]
+    ).map((row) => String(row.id));
+  }
+
+  /** Whether `taskId` would block a task that depends on it, by the same rule. */
+  blocksDependents(taskId: string): boolean {
+    return !!this.one(
+      `SELECT 1 AS blocks FROM domain_tasks b ${blockerStatus} WHERE b.id = ? AND ${blocks}`,
+      taskId,
+    );
   }
 
   recordRouting(
@@ -2363,6 +2407,15 @@ export class DomainStore {
           .run(command.credentialRef);
         // The receipt never carries the reference name.
         return { configured: command.credentialRef !== null };
+      }
+      case "getting-started.configure": {
+        this.operator(command);
+        this.db
+          .prepare(
+            "UPDATE installation_getting_started SET dismissed = ? WHERE singleton = 1",
+          )
+          .run(Number(command.dismissed));
+        return { dismissed: command.dismissed };
       }
       case "capacity.configure": {
         this.operator(command);

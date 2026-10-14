@@ -152,6 +152,11 @@
     margin-top: 0;
   }
 
+  /* Frame 147: Resume and Keep paused stack at full width. */
+  .setup-ready .setup-inline-actions > * {
+    flex: 1 1 100%;
+  }
+
   .setup-page input,
   .setup-page select,
   .setup-page textarea,

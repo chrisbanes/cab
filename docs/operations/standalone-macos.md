@@ -74,17 +74,19 @@ or shell wrapper. Before bootstrap, inspect and lint the exact plist:
 The `PATH` is deliberately fixed to
 `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`; launchctl's observed GUI
 domain does not provide the interactive shell's PATH, while `CodexRuntime`
-starts the installed `codex` executable by name and the runtime may use `git`
-or `caffeinate`. This avoids inheriting arbitrary interactive environment
-variables. Confirm `codex`, Node, the compiled CLI, `git`, and `caffeinate`
-resolve to the intended installed executables before loading the job. A host
-whose Codex installation is outside this fixed PATH needs a reviewed renderer
-change; do not patch launchctl's shared environment or add arbitrary plist
-variables locally.
+starts the installed `codex` executable by name, `ClaudeRuntime` resolves
+`claude` from the same `PATH` once when the service starts, and the runtime may
+use `git` or `caffeinate`. This avoids inheriting arbitrary interactive
+environment variables. Confirm `codex`, `claude` (if Claude is used), Node, the
+compiled CLI, `git`, and `caffeinate` resolve to the intended installed
+executables before loading the job. A host whose Codex or Claude installation is
+outside this fixed PATH, such as Claude Code's native installer in `~/.local/bin`,
+needs a Homebrew install in `/opt/homebrew/bin` or a reviewed renderer change; do
+not patch launchctl's shared environment or add arbitrary plist variables locally.
 
 After the service starts, run `ensemble doctor` or open Settings → Readiness. Both
 show what the running service sees: Codex executable and login, git, GitHub
-discovery, the Claude token, runtime harness and data and auth paths, each as Pass,
+discovery, the Claude executable and token, runtime harness and data and auth paths, each as Pass,
 Fail or Not configured with one fix line and no token value or path. The checks
 change nothing and request no model turn; re-run them after any fix.
 
@@ -220,6 +222,28 @@ exact results and limits. Later sync-pause/status-fanout/account-offer repairs
 use controlled fake and full-check evidence; they have not received another live
 run. Its single allowance is consumed; rerunning requires separate authorization
 and a fresh bound preparation.
+
+### Claude executable
+
+Claude profiles run the `claude` command (Claude Code) that resolves on the
+service's fixed `PATH`; Ensemble does not redistribute it. Install it so it
+resolves there (Homebrew puts it in `/opt/homebrew/bin`), then restart the service
+after installing or upgrading it: the runtime looks `claude` up once when it starts.
+A `claude` that does not resolve on the `PATH` when the service starts leaves the
+Claude runtime not enabled for that run. Settings → Runtime shows it as Not enabled,
+with no alert, as if Claude were not configured, and Claude work waits visibly with
+the not-enabled reason; it never falls back to another runtime. Codex and the
+service are unaffected. After installing `claude`, restart the service to enable
+Claude. A `claude` that resolves but whose runtime fails shows as unavailable
+instead. Readiness shows the Claude executable as Not configured while Claude is
+unused, and as Fail with the fix once a token reference or an active Claude profile
+needs it.
+
+Ensemble reports the version `claude --version` prints and never compares it. Only
+the Claude Code version the pinned SDK declares was qualified; another version may
+fail at startup or enforce the sandbox, tool and permission controls differently.
+That is a disclosed limit, not a fail-closed boundary
+([ADR-1011](../adr/1011-packaging-and-distribution.md)).
 
 ### Claude subscription token
 
@@ -402,43 +426,98 @@ enable competing production work based only on this snapshot or on recovery
 qualification. A separately authorised host-restart test may be needed for final
 recovery qualification.
 
-## Local stable build
+## Release build
 
-To use Ensemble locally without running a moving checkout, build a chosen commit
-into an immutable directory under `~/.config/ensemble-dev` and run it in the
-foreground. This is a personal instance for testing and evidence; it is not the
-Haze cutover and must not take over projects the prototype owns. Cite the build
-SHA with any evidence it produces.
+`scripts/package-release.mjs` builds the self-contained `darwin-arm64` release
+([ADR-1011](../adr/1011-packaging-and-distribution.md)). CI uses it for tagged
+releases, and it also builds a chosen commit into an immutable local directory for a
+personal instance. A local build is for testing and evidence; it is not the Haze
+cutover and must not take over projects the prototype owns. Cite the commit with
+any evidence it produces.
+
+Run it from a checkout on an Apple silicon Mac with any Node 24 or later:
 
 ```sh
-scripts/local-build.sh COMMIT
+node scripts/package-release.mjs build COMMIT
 ```
 
-The script archives exactly `COMMIT` into `builds/<sha>/`, installs and selects the
-commit's `.node-version` through nvm, and runs `npm ci` and `npm run build` with
-the pinned npm. Like CI, it ignores `~/.npmrc`, so user registry, proxy or auth
-settings do not apply. It refuses an existing build directory; remove it to
-rebuild. It creates private `data/`, `auth/` and `snapshots/` directories beside
-`builds/` and prints the absolute Node path and start command.
+The script archives exactly `COMMIT` and downloads the official
+`node-v<.node-version>-darwin-arm64.tar.gz` from `nodejs.org`. It refuses that Node
+unless the tarball's SHA-256 matches the single entry for that file in the release's
+`SHASUMS256.txt`. Verification happens before extraction, and there is no way to skip
+it. With that Node and the pinned npm, it runs `npm ci`, `npm run build` and
+`npm prune --omit=dev`. Like CI, it ignores `~/.npmrc`, so user registry, proxy or auth
+settings do not apply. It then removes the Claude Agent SDK's platform packages,
+which bundle a `claude` binary that the release does not redistribute, and fails if
+any of them or any dev-only package from the lockfile remains.
+
+By default the output goes to `~/.config/ensemble-dev/builds/<sha>/`. The script
+creates private `data/`, `auth/` and `snapshots/` directories beside `builds/`,
+refuses symlinks there, and prints the start command. `--out DIR` writes the output
+to `DIR` instead and creates no state directories. Work is staged in
+`<output>.partial` and renamed on success; the script refuses an existing output or
+partial directory, so remove it to rebuild. The output contains:
+
+- `ensemble-<version>-darwin-arm64.tar.gz`, the release;
+- `ensemble-<version>-darwin-arm64/`, the same release unpacked;
+- `manifest.json`, a copy of the release manifest;
+- `SHA256SUMS` for the tarball and manifest, checked with `shasum -a 256 -c SHA256SUMS`.
+
+A release directory contains `bin/ensemble` (the operator CLI), `node/bin/node` and
+its licence, `dist/src`, `dist/operator`, the production `node_modules`,
+`package.json`, `package-lock.json`, `LICENSE` and `manifest.json`. It needs `codex`
+on `PATH` like a checkout build. It does not include `claude`: a release without one
+on the service `PATH` shows Claude as Not enabled, and installing `claude` on that
+`PATH` enables it after a restart (see [Claude executable](#claude-executable)).
+Codex remains the default harness.
+
+`manifest.json` records the schema `ensemble.release/v1`, name, version, platform,
+commit, the Node version with the official tarball's SHA-256, and a tree digest.
+The `ensemble-tree-sha256/v1` digest walks the release directory, excluding the
+root `manifest.json`, and sorts relative POSIX paths by byte order. Each regular
+file contributes `file <mode> <sha256> <path>\n`, where `<mode>` is `0755` when any
+execute bit is set and `0644` otherwise. Each symlink contributes
+`link <target> <path>\n`. Any other entry type is an error. The digest is the
+SHA-256 of the concatenated lines.
+
+To check a release, run:
+
+```sh
+node scripts/package-release.mjs verify PATH/TO/ensemble-<version>-darwin-arm64.tar.gz
+```
+
+`verify` checks `SHA256SUMS` when it sits beside the tarball, unpacks into a fresh
+temporary directory whose path contains a space, recomputes the tree digest, and
+repeats the package checks. It then uses a temporary `HOME` and a `PATH` of only the
+system directories plus a generated fake `codex`, with no `node`. In that
+environment it runs `bin/ensemble --version`, initializes operator auth, starts the
+service against a fresh data directory, and expects the operator UI and one of its
+assets within 120 seconds before stopping that service. It does not exercise a real
+Codex login.
 
 The commands below use these values:
 
 ```sh
 ROOT="$HOME/.config/ensemble-dev"
-NODE=/absolute/node/printed/by/the/script
-BUILD="$ROOT/builds/<sha>"
+RELEASE="$ROOT/builds/<sha>/ensemble-<version>-darwin-arm64"
+NODE="$RELEASE/node/bin/node"
 ```
 
 Initialize the operator password once ([Runtime and
-authentication](#runtime-and-authentication)). Call the build's CLI directly,
-because `npm run operator-auth` rebuilds first:
+authentication](#runtime-and-authentication)) with the release's CLI:
 
 ```sh
-"$NODE" "$BUILD/dist/src/standalone/operator-auth-cli.js" init "$ROOT/auth/operator-auth.json"
+"$NODE" "$RELEASE/dist/src/standalone/operator-auth-cli.js" init "$ROOT/auth/operator-auth.json"
 ```
 
-Start with the printed command, which serves the operator UI on
-`http://127.0.0.1:8787`; stop it with Ctrl-C.
+Start the service with the printed command, which serves the operator UI on
+`http://127.0.0.1:8787`; stop it with Ctrl-C:
+
+```sh
+ENSEMBLE_OPERATOR_AUTH_FILE="$ROOT/auth/operator-auth.json" \
+ENSEMBLE_OPERATOR_ORIGIN=http://127.0.0.1:8787 \
+"$NODE" "$RELEASE/dist/src/standalone/cli.js" operator "$ROOT/data" 8787
+```
 
 To upgrade, stop the service and take a verified snapshot with the current build
 ([Offline snapshot and restore](#offline-snapshot-and-restore)), then build and
@@ -446,12 +525,23 @@ start the new commit against the same `data/`. Startup migrates the data forward
 and an older build refuses a newer schema:
 
 ```sh
-"$NODE" "$BUILD/dist/src/standalone/operations-cli.js" backup "$ROOT/data" "$ROOT/snapshots/<old-sha>-<date>"
-"$NODE" "$BUILD/dist/src/standalone/operations-cli.js" verify "$ROOT/snapshots/<old-sha>-<date>"
-scripts/local-build.sh NEW_COMMIT
+"$NODE" "$RELEASE/dist/src/standalone/operations-cli.js" backup "$ROOT/data" "$ROOT/snapshots/<old-sha>-<date>"
+"$NODE" "$RELEASE/dist/src/standalone/operations-cli.js" verify "$ROOT/snapshots/<old-sha>-<date>"
+node scripts/package-release.mjs build NEW_COMMIT
 ```
 
 Rollback is manual and discards everything after the upgrade: `restore` the
 snapshot to a new data directory under `$ROOT` and start the old build against
 it. Keep the previous build and its snapshot until the new build has proved
 itself.
+
+### Tagged releases
+
+`.github/workflows/release.yml` publishes a release when a `v*` tag is pushed. It runs
+the CI `check` job, refuses a tag other than `v` plus the `package.json` version,
+builds and verifies the release on a macOS arm64 runner, and attaches the tarball,
+`SHA256SUMS` and `manifest.json` to a GitHub Release for that tag. Rerunning a failed
+release job finishes a draft release that the failed run left behind; it refuses to
+replace a published release. Manual runs and pull requests that change the packaging
+files build and verify the same tarball and upload it only as a workflow artifact. No
+release has been published yet.

@@ -67,6 +67,9 @@ export const locked = (d: ConfigurationDraft) =>
 export function useDraft(drafts: ConfigurationDrafts, key: string) {
   const [, render] = useReducer((v) => v + 1, 0);
   const d = drafts.get(key, render);
+  // Each commit reports the changes it shows, so `afterRender` runs on the one that shows its own.
+  const revision = d.revision;
+  useEffect(() => d.committed(revision));
   return d;
 }
 export function DraftField({
@@ -422,7 +425,8 @@ export async function sendDraft(
   else await d.submit(client, command, session.csrfToken);
   if (d.phase === "recorded" || d.phase === "conflict") refresh();
   else if (d.phase === "rejected")
-    requestAnimationFrame(() =>
+    // The fields are off until the commit that shows the rejection, so focus waits for it.
+    d.afterRender(() =>
       scope.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus(),
     );
 }

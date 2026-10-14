@@ -161270,7 +161270,7 @@
                       "fill": "$X:--muted-foreground",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "2 of 5 required steps done · read from the running service",
+                      "content": "1 of 4 required steps done",
                       "lineHeight": 1.45,
                       "fontFamily": "$font-sans",
                       "fontSize": 12,
@@ -161345,7 +161345,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Codex login readable by the service",
+                              "content": "Runtime login readable by the service",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162496,7 +162496,7 @@
                       "fill": "$X:--muted-foreground",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "3 of 5 required steps done · Runtime needs attention",
+                      "content": "1 of 4 required steps done · Runtime needs attention",
                       "lineHeight": 1.45,
                       "fontFamily": "$font-sans",
                       "fontSize": 12,
@@ -162571,7 +162571,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Codex login unreadable · run codex login as the service user",
+                              "content": "Codex is not signed in on the running service",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162820,7 +162820,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "1 profile · Ada",
+                              "content": "1 profile",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162873,7 +162873,7 @@
                                   "enabled": false
                                 },
                                 "X:UZfKV": {
-                                  "content": "Open profiles",
+                                  "content": "Open settings",
                                   "fontFamily": "$font-sans"
                                 }
                               }
@@ -162936,7 +162936,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "fixture-app · Paused. Nothing runs until you resume it.",
+                              "content": "fixture-app is paused. Nothing runs until you resume it.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -162951,14 +162951,14 @@
                           "width": 120,
                           "children": [
                             {
-                              "id": "f7lpr",
+                              "id": "dhhaG",
                               "type": "ref",
-                              "ref": "X:WuUMk",
-                              "name": "Done badge",
+                              "ref": "X:3IiAS",
+                              "name": "Not started badge",
                               "cornerRadius": 9999,
                               "descendants": {
                                 "X:zHpCv": {
-                                  "content": "Done",
+                                  "content": "Not started",
                                   "fontWeight": "500",
                                   "fontFamily": "$font-sans"
                                 }
@@ -163057,7 +163057,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "No task yet · it waits while fixture-app is paused",
+                              "content": "No task has started yet.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -163072,14 +163072,14 @@
                           "width": 120,
                           "children": [
                             {
-                              "id": "a6MUE",
+                              "id": "EdWnW",
                               "type": "ref",
-                              "ref": "X:UjXug",
-                              "name": "Next badge",
+                              "ref": "X:3IiAS",
+                              "name": "Not started badge",
                               "cornerRadius": 9999,
                               "descendants": {
                                 "X:zHpCv": {
-                                  "content": "Next",
+                                  "content": "Not started",
                                   "fontWeight": "500",
                                   "fontFamily": "$font-sans"
                                 }
@@ -163377,7 +163377,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "2 of 5 required steps done",
+                  "content": "1 of 4 required steps done",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 12,
@@ -163494,7 +163494,7 @@
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Codex login readable by the service",
+                              "content": "Runtime login readable by the service",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 12,
@@ -164260,7 +164260,7 @@
       },
       "clip": true,
       "width": 1366,
-      "height": 1210,
+      "height": 1126,
       "fill": "$X:--background",
       "children": [
         {
@@ -164618,7 +164618,7 @@
                         {
                           "type": "frame",
                           "id": "iB5eo",
-                          "name": "Name and lead",
+                          "name": "Project name row",
                           "width": "fill_container",
                           "gap": 12,
                           "children": [
@@ -164656,54 +164656,6 @@
                                   }
                                 }
                               ]
-                            },
-                            {
-                              "type": "frame",
-                              "id": "IDWI7",
-                              "name": "Lead field",
-                              "width": "fill_container",
-                              "layout": "vertical",
-                              "gap": 6,
-                              "children": [
-                                {
-                                  "id": "lakgz",
-                                  "type": "ref",
-                                  "ref": "X:A4VOm",
-                                  "name": "Lead profile",
-                                  "width": "fill_container",
-                                  "descendants": {
-                                    "X:Yd2lV": {
-                                      "content": "Lead profile",
-                                      "fontFamily": "$font-sans"
-                                    },
-                                    "X:Ch62V": {
-                                      "cornerRadius": "$radius-lg",
-                                      "padding": [
-                                        6,
-                                        10
-                                      ],
-                                      "fill": "$nova-input-bg"
-                                    },
-                                    "X:V1STL": {
-                                      "content": "Unconfigured",
-                                      "fontFamily": "$font-sans"
-                                    }
-                                  }
-                                },
-                                {
-                                  "type": "text",
-                                  "id": "hiCxc",
-                                  "name": "Lead profile help",
-                                  "fill": "$X:--muted-foreground",
-                                  "textGrowth": "fixed-width",
-                                  "width": "fill_container",
-                                  "content": "No lead profiles yet. Create one here, or leave the lead unconfigured; tasks wait for a lead before starting.",
-                                  "lineHeight": 1.45,
-                                  "fontFamily": "$font-sans",
-                                  "fontSize": 12,
-                                  "fontWeight": "normal"
-                                }
-                              ]
                             }
                           ]
                         },
@@ -164721,24 +164673,11 @@
                             {
                               "type": "frame",
                               "id": "sB7bq",
-                              "name": "Form heading",
+                              "name": "Form help",
                               "width": "fill_container",
                               "layout": "vertical",
                               "gap": 2,
                               "children": [
-                                {
-                                  "type": "text",
-                                  "id": "z7UO8",
-                                  "name": "Heading",
-                                  "fill": "$X:--foreground",
-                                  "textGrowth": "fixed-width",
-                                  "width": "fill_container",
-                                  "content": "New lead profile",
-                                  "lineHeight": 1.45,
-                                  "fontFamily": "$font-sans",
-                                  "fontSize": 14,
-                                  "fontWeight": "500"
-                                },
                                 {
                                   "type": "text",
                                   "id": "e6quWX",
@@ -164746,7 +164685,7 @@
                                   "fill": "$X:--muted-foreground",
                                   "textGrowth": "fixed-width",
                                   "width": "fill_container",
-                                  "content": "An ordinary profile, kept in Settings → Profiles. Creating it selects it as the lead and keeps every other setup value.",
+                                  "content": "No lead profiles yet. Create one here, or leave this blank and choose a lead later; tasks wait for a lead before starting.",
                                   "lineHeight": 1.45,
                                   "fontFamily": "$font-sans",
                                   "fontSize": 12,
@@ -164757,7 +164696,7 @@
                             {
                               "type": "frame",
                               "id": "U805Io",
-                              "name": "Name and runtime",
+                              "name": "Name and summary",
                               "width": "fill_container",
                               "gap": 12,
                               "children": [
@@ -164787,65 +164726,31 @@
                                   }
                                 },
                                 {
-                                  "type": "frame",
-                                  "id": "zFfqA",
-                                  "name": "Runtime field",
-                                  "width": 180,
-                                  "layout": "vertical",
-                                  "children": [
-                                    {
-                                      "id": "D3Aw5p",
-                                      "type": "ref",
-                                      "ref": "X:A4VOm",
-                                      "name": "Runtime",
-                                      "width": "fill_container",
-                                      "descendants": {
-                                        "X:Yd2lV": {
-                                          "content": "Runtime",
-                                          "fontFamily": "$font-sans"
-                                        },
-                                        "X:Ch62V": {
-                                          "cornerRadius": "$radius-lg",
-                                          "padding": [
-                                            6,
-                                            10
-                                          ],
-                                          "fill": "$nova-input-bg"
-                                        },
-                                        "X:V1STL": {
-                                          "content": "Codex",
-                                          "fontFamily": "$font-sans"
-                                        }
-                                      }
+                                  "id": "NnI5X",
+                                  "type": "ref",
+                                  "ref": "X:uHFal",
+                                  "name": "Summary",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:BX0XX": {
+                                      "content": "Summary",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:i0Z3E": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:SDRKn": {
+                                      "content": "Leads fixture-app work",
+                                      "fontFamily": "$font-sans"
                                     }
-                                  ]
+                                  }
                                 }
                               ]
-                            },
-                            {
-                              "id": "NnI5X",
-                              "type": "ref",
-                              "ref": "X:uHFal",
-                              "name": "Summary",
-                              "width": "fill_container",
-                              "descendants": {
-                                "X:BX0XX": {
-                                  "content": "Summary",
-                                  "fontFamily": "$font-sans"
-                                },
-                                "X:i0Z3E": {
-                                  "cornerRadius": "$radius-lg",
-                                  "padding": [
-                                    6,
-                                    10
-                                  ],
-                                  "fill": "$nova-input-bg"
-                                },
-                                "X:SDRKn": {
-                                  "content": "Leads fixture-app work and delegates focused changes",
-                                  "fontFamily": "$font-sans"
-                                }
-                              }
                             },
                             {
                               "id": "Iw70F",
@@ -164855,7 +164760,7 @@
                               "width": "fill_container",
                               "descendants": {
                                 "X:a78kl": {
-                                  "content": "Instructions",
+                                  "content": "Profile instructions",
                                   "fontFamily": "$font-sans"
                                 },
                                 "X:pzw5I": {
@@ -164877,6 +164782,40 @@
                             },
                             {
                               "type": "frame",
+                              "id": "zFfqA",
+                              "name": "Runtime field",
+                              "width": "fill_container",
+                              "layout": "vertical",
+                              "children": [
+                                {
+                                  "id": "D3Aw5p",
+                                  "type": "ref",
+                                  "ref": "X:A4VOm",
+                                  "name": "Runtime",
+                                  "width": "fill_container",
+                                  "descendants": {
+                                    "X:Yd2lV": {
+                                      "content": "Runtime",
+                                      "fontFamily": "$font-sans"
+                                    },
+                                    "X:Ch62V": {
+                                      "cornerRadius": "$radius-lg",
+                                      "padding": [
+                                        6,
+                                        10
+                                      ],
+                                      "fill": "$nova-input-bg"
+                                    },
+                                    "X:V1STL": {
+                                      "content": "Codex",
+                                      "fontFamily": "$font-sans"
+                                    }
+                                  }
+                                }
+                              ]
+                            },
+                            {
+                              "type": "frame",
                               "id": "RwNGk",
                               "name": "Form actions",
                               "width": "fill_container",
@@ -164884,42 +164823,27 @@
                               "alignItems": "center",
                               "children": [
                                 {
-                                  "id": "ZubXW",
+                                  "id": "eBBOt",
                                   "type": "ref",
-                                  "ref": "X:VSnC2",
+                                  "ref": "X:C10zH",
                                   "name": "Create profile",
-                                  "height": 36,
-                                  "width": "fit_content",
                                   "cornerRadius": "$radius-lg",
                                   "padding": [
                                     6,
                                     10
                                   ],
                                   "gap": 6,
+                                  "effect": [],
+                                  "fill": "$nova-outline-bg",
                                   "descendants": {
-                                    "X:8jVfJ": {
+                                    "X:l8v2I": {
                                       "enabled": false
                                     },
-                                    "X:8tnXG": {
+                                    "X:poRwU": {
                                       "content": "Create profile",
-                                      "textGrowth": "auto",
-                                      "fill": "$X:--primary-foreground",
                                       "fontFamily": "$font-sans"
                                     }
                                   }
-                                },
-                                {
-                                  "type": "text",
-                                  "id": "IJddm",
-                                  "name": "Form note",
-                                  "fill": "$X:--muted-foreground",
-                                  "textGrowth": "fixed-width",
-                                  "width": "fill_container",
-                                  "content": "Codex preselected · the service's Codex login is used",
-                                  "lineHeight": 1.45,
-                                  "fontFamily": "$font-sans",
-                                  "fontSize": 12,
-                                  "fontWeight": "normal"
                                 }
                               ]
                             }
@@ -165047,11 +164971,11 @@
                         {
                           "type": "text",
                           "id": "kOARP",
-                          "name": "· Resume is a separate decision in project configuration.",
+                          "name": "· Resume is a separate step after creation; nothing runs until you choose it.",
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "· Resume is a separate decision in project configuration.",
+                          "content": "· Resume is a separate step after creation; nothing runs until you choose it.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,
@@ -165840,7 +165764,7 @@
                         {
                           "type": "frame",
                           "id": "e6KBl",
-                          "name": "Name and lead",
+                          "name": "Project name and lead",
                           "width": "fill_container",
                           "gap": 12,
                           "children": [
@@ -165911,42 +165835,21 @@
                                       "fontFamily": "$font-sans"
                                     }
                                   }
-                                },
-                                {
-                                  "type": "frame",
-                                  "id": "smT3D",
-                                  "name": "Profile created status",
-                                  "width": "fill_container",
-                                  "gap": 6,
-                                  "children": [
-                                    {
-                                      "type": "icon",
-                                      "id": "b49tZ",
-                                      "name": "Created icon",
-                                      "width": 14,
-                                      "height": 14,
-                                      "icon": "circle-check",
-                                      "library": "lucide",
-                                      "fill": "$X:--foreground"
-                                    },
-                                    {
-                                      "type": "text",
-                                      "id": "o4Kq0U",
-                                      "name": "Status line",
-                                      "fill": "$X:--foreground",
-                                      "textGrowth": "fixed-width",
-                                      "width": "fill_container",
-                                      "content": "Profile created. Other setup values kept.",
-                                      "lineHeight": 1.45,
-                                      "fontFamily": "$font-sans",
-                                      "fontSize": 12,
-                                      "fontWeight": "normal"
-                                    }
-                                  ]
                                 }
                               ]
                             }
                           ]
+                        },
+                        {
+                          "id": "A9gl1Q",
+                          "type": "ref",
+                          "ref": "ugjxZ",
+                          "name": "Profile created status",
+                          "descendants": {
+                            "dQMvl": {
+                              "content": "Profile created. Other setup values kept."
+                            }
+                          }
                         }
                       ]
                     },
@@ -166070,11 +165973,11 @@
                         {
                           "type": "text",
                           "id": "U9qtI",
-                          "name": "· Resume is a separate decision in project configuration.",
+                          "name": "· Resume is a separate step after creation; nothing runs until you choose it.",
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "· Resume is a separate decision in project configuration.",
+                          "content": "· Resume is a separate step after creation; nothing runs until you choose it.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,
@@ -166797,7 +166700,7 @@
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Settings / Projects / fixture-app",
+              "content": "Settings / Projects / Create project",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 12,
@@ -166817,7 +166720,7 @@
                   "id": "q5azE",
                   "name": "Title",
                   "fill": "$X:--foreground",
-                  "content": "Set up your first project",
+                  "content": "Create project",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 18,
@@ -166832,7 +166735,7 @@
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "fixture-app was created Paused. Review what was saved before anything runs.",
+              "content": "Three short steps. Saving creates a paused project; nothing runs until you resume it.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -166866,30 +166769,21 @@
                   ],
                   "children": [
                     {
-                      "type": "text",
-                      "id": "gtean",
-                      "name": "Card title",
-                      "fill": "$X:--foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "fixture-app is ready to start",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 16,
-                      "fontWeight": "500"
-                    },
-                    {
-                      "type": "text",
-                      "id": "q6C89g",
-                      "name": "Card description",
-                      "fill": "$X:--muted-foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "Created 11:04 · lead Ada · Codex",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
+                      "id": "f10drK",
+                      "type": "ref",
+                      "ref": "ugjxZ",
+                      "name": "Created success line",
+                      "descendants": {
+                        "dQMvl": {
+                          "content": "Created fixture-app. It's paused."
+                        },
+                        "fojFJ": {
+                          "enabled": false
+                        },
+                        "A6FCA": {
+                          "enabled": false
+                        }
+                      }
                     }
                   ]
                 },
@@ -166907,30 +166801,40 @@
                   ],
                   "children": [
                     {
-                      "type": "text",
-                      "id": "wRFHN",
-                      "name": "List label",
-                      "fill": "$X:--muted-foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "SAVED",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "500",
-                      "letterSpacing": 0.5
-                    },
-                    {
                       "type": "frame",
-                      "id": "wxdhk",
-                      "name": "Spacer",
+                      "id": "Btm2T",
+                      "name": "Saved · Nothing has run",
                       "width": "fill_container",
-                      "height": 6
+                      "stroke": "$X:--border",
+                      "strokeWidth": {
+                        "top": 1
+                      },
+                      "gap": 8,
+                      "padding": [
+                        10,
+                        0
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "k46GaN",
+                          "name": "Paused note",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Nothing has run.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
                     },
                     {
                       "type": "frame",
                       "id": "U7gkW",
-                      "name": "Recorded · Instructions saved as revision 1",
+                      "name": "Saved · Instructions",
                       "width": "fill_container",
                       "stroke": "$X:--border",
                       "strokeWidth": {
@@ -166942,27 +166846,6 @@
                         0
                       ],
                       "children": [
-                        {
-                          "type": "frame",
-                          "id": "u6TfGY",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "Z1l8Bb",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "circle-check",
-                              "library": "lucide",
-                              "fill": "$X:--foreground"
-                            }
-                          ]
-                        },
                         {
                           "type": "frame",
                           "id": "zq3L0",
@@ -166978,23 +166861,10 @@
                               "fill": "$X:--foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Instructions saved",
+                              "content": "Instructions saved.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "k3VfE",
-                              "name": "Detail",
-                              "fill": "$X:--muted-foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Captured by assignments when they start",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
                               "fontWeight": "normal"
                             }
                           ]
@@ -167004,7 +166874,7 @@
                     {
                       "type": "frame",
                       "id": "p3rSSC",
-                      "name": "Recorded · Repository access: fixture-org/fixture-app (main)",
+                      "name": "Saved · Repository access",
                       "width": "fill_container",
                       "stroke": "$X:--border",
                       "strokeWidth": {
@@ -167016,27 +166886,6 @@
                         0
                       ],
                       "children": [
-                        {
-                          "type": "frame",
-                          "id": "kEzg2",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "ZrKBp",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "circle-check",
-                              "library": "lucide",
-                              "fill": "$X:--foreground"
-                            }
-                          ]
-                        },
                         {
                           "type": "frame",
                           "id": "dA9AI",
@@ -167052,23 +166901,10 @@
                               "fill": "$X:--foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Repository access: fixture-org/fixture-app (main)",
+                              "content": "Repository access: fixture-org/fixture-app (main), checked on this Mac.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "WS0Ka",
-                              "name": "Detail",
-                              "fill": "$X:--muted-foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Exactly the list from step 3",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
                               "fontWeight": "normal"
                             }
                           ]
@@ -167076,121 +166912,10 @@
                       ]
                     },
                     {
-                      "type": "frame",
-                      "id": "U91GKH",
-                      "name": "Recorded · Checkout verified",
-                      "width": "fill_container",
-                      "stroke": "$X:--border",
-                      "strokeWidth": {
-                        "top": 1
-                      },
-                      "gap": 10,
-                      "padding": [
-                        10,
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "ALbC0",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "hWv47",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "circle-check",
-                              "library": "lucide",
-                              "fill": "$X:--foreground"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "nMooT",
-                          "name": "Text",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 2,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "Upxs1",
-                              "name": "Item",
-                              "fill": "$X:--foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Checkout verified",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "ii8cp",
-                              "name": "Detail",
-                              "fill": "$X:--muted-foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "~/src/fixture-app · origin fixture-org/fixture-app",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "Btm2T",
-                      "name": "Paused line",
-                      "width": "fill_container",
-                      "stroke": "$X:--border",
-                      "strokeWidth": {
-                        "top": 1
-                      },
-                      "gap": 8,
-                      "padding": [
-                        12,
-                        0,
-                        0,
-                        0
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "CugAb",
-                          "name": "Paused icon",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "circle-pause",
-                          "library": "lucide",
-                          "fill": "$X:--muted-foreground"
-                        },
-                        {
-                          "type": "text",
-                          "id": "k46GaN",
-                          "name": "Paused note",
-                          "fill": "$X:--muted-foreground",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "The project is Paused. Nothing has run.",
-                          "lineHeight": 1.45,
-                          "fontFamily": "$font-sans",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        }
-                      ]
+                      "id": "qIpRp",
+                      "type": "ref",
+                      "ref": "Q5Ff9",
+                      "name": "Details toggle"
                     }
                   ]
                 },
@@ -167268,19 +166993,6 @@
                           }
                         }
                       ]
-                    },
-                    {
-                      "type": "text",
-                      "id": "pSosw",
-                      "name": "Resume note",
-                      "fill": "$X:--muted-foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "Resume runs only the project's Resume command, then opens the composer with fixture-app selected. Keep paused opens project configuration.",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
                     }
                   ]
                 }
@@ -167595,7 +167307,7 @@
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Settings / Projects / fixture-app",
+              "content": "Settings / Projects / Create project",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 12,
@@ -167615,7 +167327,7 @@
                   "id": "MtrsO",
                   "name": "Title",
                   "fill": "$X:--foreground",
-                  "content": "Set up your first project",
+                  "content": "Create project",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 18,
@@ -167630,7 +167342,7 @@
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "fixture-app was created Paused. Review what was saved before anything runs.",
+              "content": "Three short steps. Saving creates a paused project; nothing runs until you resume it.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -167664,30 +167376,21 @@
                   ],
                   "children": [
                     {
-                      "type": "text",
-                      "id": "M2Hzht",
-                      "name": "Card title",
-                      "fill": "$X:--foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "fixture-app can't start yet",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 16,
-                      "fontWeight": "500"
-                    },
-                    {
-                      "type": "text",
-                      "id": "OubTt",
-                      "name": "Card description",
-                      "fill": "$X:--muted-foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "Created 11:04 · lead Ada · Codex",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
+                      "id": "JVeZR",
+                      "type": "ref",
+                      "ref": "ugjxZ",
+                      "name": "Created success line",
+                      "descendants": {
+                        "dQMvl": {
+                          "content": "Created fixture-app. It's paused."
+                        },
+                        "fojFJ": {
+                          "enabled": false
+                        },
+                        "A6FCA": {
+                          "enabled": false
+                        }
+                      }
                     }
                   ]
                 },
@@ -167705,30 +167408,40 @@
                   ],
                   "children": [
                     {
-                      "type": "text",
-                      "id": "MZkl3",
-                      "name": "List label",
-                      "fill": "$X:--muted-foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "SAVED",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "500",
-                      "letterSpacing": 0.5
-                    },
-                    {
                       "type": "frame",
-                      "id": "XSmn2",
-                      "name": "Spacer",
+                      "id": "xsOwK",
+                      "name": "Saved · Nothing has run",
                       "width": "fill_container",
-                      "height": 6
+                      "stroke": "$X:--border",
+                      "strokeWidth": {
+                        "top": 1
+                      },
+                      "gap": 8,
+                      "padding": [
+                        10,
+                        0
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "n2W9co",
+                          "name": "Paused note",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Nothing has run.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
                     },
                     {
                       "type": "frame",
                       "id": "C9I8h",
-                      "name": "Recorded · Instructions saved as revision 1",
+                      "name": "Saved · Instructions",
                       "width": "fill_container",
                       "stroke": "$X:--border",
                       "strokeWidth": {
@@ -167740,27 +167453,6 @@
                         0
                       ],
                       "children": [
-                        {
-                          "type": "frame",
-                          "id": "SMOnQ",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "g05sP2",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "circle-check",
-                              "library": "lucide",
-                              "fill": "$X:--foreground"
-                            }
-                          ]
-                        },
                         {
                           "type": "frame",
                           "id": "C2egz",
@@ -167776,23 +167468,10 @@
                               "fill": "$X:--foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Instructions saved",
+                              "content": "Instructions saved.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "kA9HT",
-                              "name": "Detail",
-                              "fill": "$X:--muted-foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Captured by assignments when they start",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
                               "fontWeight": "normal"
                             }
                           ]
@@ -167802,7 +167481,7 @@
                     {
                       "type": "frame",
                       "id": "gHuja",
-                      "name": "Recorded · Repository access: fixture-org/fixture-app (main)",
+                      "name": "Saved · Repository access",
                       "width": "fill_container",
                       "stroke": "$X:--border",
                       "strokeWidth": {
@@ -167814,27 +167493,6 @@
                         0
                       ],
                       "children": [
-                        {
-                          "type": "frame",
-                          "id": "TI5V6",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "Ralz2",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "circle-check",
-                              "library": "lucide",
-                              "fill": "$X:--foreground"
-                            }
-                          ]
-                        },
                         {
                           "type": "frame",
                           "id": "VJIgs",
@@ -167850,23 +167508,10 @@
                               "fill": "$X:--foreground",
                               "textGrowth": "fixed-width",
                               "width": "fill_container",
-                              "content": "Repository access: fixture-org/fixture-app (main)",
+                              "content": "Repository access: fixture-org/fixture-app (main), checked on this Mac.",
                               "lineHeight": 1.45,
                               "fontFamily": "$font-sans",
                               "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "z9bVKa",
-                              "name": "Detail",
-                              "fill": "$X:--muted-foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Exactly the list from step 3",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
                               "fontWeight": "normal"
                             }
                           ]
@@ -167874,209 +167519,10 @@
                       ]
                     },
                     {
-                      "type": "frame",
-                      "id": "GnP7i",
-                      "name": "Recorded · Checkout verified",
-                      "width": "fill_container",
-                      "stroke": "$X:--border",
-                      "strokeWidth": {
-                        "top": 1
-                      },
-                      "gap": 10,
-                      "padding": [
-                        10,
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "sR6SJ",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "dU8Ym",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "circle-check",
-                              "library": "lucide",
-                              "fill": "$X:--foreground"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "a2LKF2",
-                          "name": "Text",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 2,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "vylzJ",
-                              "name": "Item",
-                              "fill": "$X:--foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Checkout verified",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "type": "text",
-                              "id": "W374T",
-                              "name": "Detail",
-                              "fill": "$X:--muted-foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "~/src/fixture-app · origin fixture-org/fixture-app",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
-                              "fontWeight": "normal"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "tWzNm",
-                      "name": "Blocker · Lead runtime unavailable",
-                      "width": "fill_container",
-                      "stroke": "$X:--border",
-                      "strokeWidth": {
-                        "top": 1
-                      },
-                      "gap": 10,
-                      "padding": [
-                        10,
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "frame",
-                          "id": "wotqN",
-                          "name": "Icon",
-                          "padding": [
-                            2,
-                            0
-                          ],
-                          "children": [
-                            {
-                              "type": "icon",
-                              "id": "KzP2r",
-                              "name": "Status icon",
-                              "width": 16,
-                              "height": 16,
-                              "icon": "triangle-alert",
-                              "library": "lucide",
-                              "fill": "$X:--destructive"
-                            }
-                          ]
-                        },
-                        {
-                          "type": "frame",
-                          "id": "VitWS",
-                          "name": "Text",
-                          "width": "fill_container",
-                          "layout": "vertical",
-                          "gap": 6,
-                          "children": [
-                            {
-                              "type": "text",
-                              "id": "PRhIA",
-                              "name": "Item",
-                              "fill": "$X:--foreground",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Lead runtime · Ada · Codex",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 14,
-                              "fontWeight": "normal"
-                            },
-                            {
-                              "id": "F7aqls",
-                              "type": "ref",
-                              "ref": "X:YvyLD",
-                              "name": "Lead runtime unavailable · Codex login unreadable badge",
-                              "cornerRadius": 9999,
-                              "descendants": {
-                                "X:zHpCv": {
-                                  "content": "Lead runtime unavailable · Codex login unreadable",
-                                  "fontWeight": "500",
-                                  "fontFamily": "$font-sans"
-                                }
-                              }
-                            },
-                            {
-                              "type": "text",
-                              "id": "gemqt",
-                              "name": "Readiness link",
-                              "fill": "$X:--primary",
-                              "textGrowth": "fixed-width",
-                              "width": "fill_container",
-                              "content": "Open readiness check →",
-                              "lineHeight": 1.45,
-                              "fontFamily": "$font-sans",
-                              "fontSize": 12,
-                              "fontWeight": "500"
-                            }
-                          ]
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "xsOwK",
-                      "name": "Paused line",
-                      "width": "fill_container",
-                      "stroke": "$X:--border",
-                      "strokeWidth": {
-                        "top": 1
-                      },
-                      "gap": 8,
-                      "padding": [
-                        12,
-                        0,
-                        0,
-                        0
-                      ],
-                      "alignItems": "center",
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "WFuEv",
-                          "name": "Paused icon",
-                          "width": 14,
-                          "height": 14,
-                          "icon": "circle-pause",
-                          "library": "lucide",
-                          "fill": "$X:--muted-foreground"
-                        },
-                        {
-                          "type": "text",
-                          "id": "n2W9co",
-                          "name": "Paused note",
-                          "fill": "$X:--muted-foreground",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "The project is Paused. Nothing has run.",
-                          "lineHeight": 1.45,
-                          "fontFamily": "$font-sans",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        }
-                      ]
+                      "id": "UnXKN",
+                      "type": "ref",
+                      "ref": "Q5Ff9",
+                      "name": "Details toggle"
                     }
                   ]
                 },
@@ -168157,17 +167603,173 @@
                       ]
                     },
                     {
-                      "type": "text",
-                      "id": "CHHq0",
-                      "name": "Disabled reason",
-                      "fill": "$X:--foreground",
-                      "textGrowth": "fixed-width",
+                      "type": "frame",
+                      "id": "T3AJ46",
+                      "name": "Waits",
                       "width": "fill_container",
-                      "content": "Resume is unavailable: work would wait for the lead runtime. Fix the Codex login, then this check re-reads.",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
+                      "layout": "vertical",
+                      "gap": 12,
+                      "padding": [
+                        10,
+                        0,
+                        0,
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "eRMpF",
+                          "name": "Wait · Lead model or effort",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 6,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "u96JOq",
+                              "name": "Reason",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Claude runtime doesn't accept the lead profile's model or reasoning effort.",
+                              "lineHeight": 1.45,
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "gUFM8",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Edit profile",
+                              "height": 36,
+                              "width": "fit_content",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Edit profile",
+                                  "textGrowth": "auto",
+                                  "fill": "$X:--foreground",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "tz0tu",
+                          "name": "Wait · Claude token",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 6,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "pzoQK",
+                              "name": "Reason",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Token file permits group or other access",
+                              "lineHeight": 1.45,
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "c0gtQH",
+                              "name": "Fix line",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Make the token file a private regular file you own (mode 600), or clear the reference in Add Claude",
+                              "lineHeight": 1.45,
+                              "fontFamily": "$font-mono",
+                              "fontSize": 12,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "id": "HYcCx",
+                              "type": "ref",
+                              "ref": "X:C10zH",
+                              "name": "Add Claude",
+                              "height": 36,
+                              "width": "fit_content",
+                              "cornerRadius": "$radius-lg",
+                              "padding": [
+                                6,
+                                10
+                              ],
+                              "gap": 6,
+                              "effect": [],
+                              "fill": "$nova-outline-bg",
+                              "descendants": {
+                                "X:l8v2I": {
+                                  "enabled": false
+                                },
+                                "X:poRwU": {
+                                  "content": "Add Claude",
+                                  "textGrowth": "auto",
+                                  "fill": "$X:--foreground",
+                                  "fontFamily": "$font-sans"
+                                }
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "type": "text",
+                          "id": "A6iKK",
+                          "name": "Recovery hint",
+                          "fill": "$X:--muted-foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "Links open in a new tab. Fix the item, then check again here. If you leave this page, resume later with the Pause project switch in project configuration.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 12,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "id": "uD68Y",
+                          "type": "ref",
+                          "ref": "X:C10zH",
+                          "name": "Check again",
+                          "height": 36,
+                          "width": "fit_content",
+                          "cornerRadius": "$radius-lg",
+                          "padding": [
+                            6,
+                            10
+                          ],
+                          "gap": 6,
+                          "effect": [],
+                          "fill": "$nova-outline-bg",
+                          "descendants": {
+                            "X:l8v2I": {
+                              "enabled": false
+                            },
+                            "X:poRwU": {
+                              "content": "Check again",
+                              "textGrowth": "auto",
+                              "fill": "$X:--foreground",
+                              "fontFamily": "$font-sans"
+                            }
+                          }
+                        }
+                      ]
                     }
                   ]
                 }
@@ -168242,30 +167844,21 @@
               ],
               "children": [
                 {
-                  "type": "text",
-                  "id": "Ym8sI",
-                  "name": "Card title",
-                  "fill": "$X:--foreground",
-                  "textGrowth": "fixed-width",
-                  "width": "fill_container",
-                  "content": "fixture-app is ready to start",
-                  "lineHeight": 1.45,
-                  "fontFamily": "$font-sans",
-                  "fontSize": 16,
-                  "fontWeight": "500"
-                },
-                {
-                  "type": "text",
-                  "id": "KYwC8",
-                  "name": "Card description",
-                  "fill": "$X:--muted-foreground",
-                  "textGrowth": "fixed-width",
-                  "width": "fill_container",
-                  "content": "Created 11:04 · lead Ada · Codex",
-                  "lineHeight": 1.45,
-                  "fontFamily": "$font-sans",
-                  "fontSize": 12,
-                  "fontWeight": "normal"
+                  "id": "HeXSa",
+                  "type": "ref",
+                  "ref": "ugjxZ",
+                  "name": "Created success line",
+                  "descendants": {
+                    "dQMvl": {
+                      "content": "Created fixture-app. It's paused."
+                    },
+                    "fojFJ": {
+                      "enabled": false
+                    },
+                    "A6FCA": {
+                      "enabled": false
+                    }
+                  }
                 }
               ]
             },
@@ -168283,30 +167876,40 @@
               ],
               "children": [
                 {
-                  "type": "text",
-                  "id": "xIvzj",
-                  "name": "List label",
-                  "fill": "$X:--muted-foreground",
-                  "textGrowth": "fixed-width",
-                  "width": "fill_container",
-                  "content": "SAVED",
-                  "lineHeight": 1.45,
-                  "fontFamily": "$font-sans",
-                  "fontSize": 12,
-                  "fontWeight": "500",
-                  "letterSpacing": 0.5
-                },
-                {
                   "type": "frame",
-                  "id": "EMH5K",
-                  "name": "Spacer",
+                  "id": "jFT7J",
+                  "name": "Saved · Nothing has run",
                   "width": "fill_container",
-                  "height": 6
+                  "stroke": "$X:--border",
+                  "strokeWidth": {
+                    "top": 1
+                  },
+                  "gap": 8,
+                  "padding": [
+                    10,
+                    0
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "PJvnr",
+                      "name": "Paused note",
+                      "fill": "$X:--foreground",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Nothing has run.",
+                      "lineHeight": 1.45,
+                      "fontFamily": "$font-sans",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
                 },
                 {
                   "type": "frame",
                   "id": "vpEcf",
-                  "name": "Recorded · Instructions saved as revision 1",
+                  "name": "Saved · Instructions",
                   "width": "fill_container",
                   "stroke": "$X:--border",
                   "strokeWidth": {
@@ -168318,27 +167921,6 @@
                     0
                   ],
                   "children": [
-                    {
-                      "type": "frame",
-                      "id": "bfmnQ",
-                      "name": "Icon",
-                      "padding": [
-                        2,
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "j4c6p",
-                          "name": "Status icon",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "circle-check",
-                          "library": "lucide",
-                          "fill": "$X:--foreground"
-                        }
-                      ]
-                    },
                     {
                       "type": "frame",
                       "id": "XUgmi",
@@ -168354,23 +167936,10 @@
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Instructions saved",
+                          "content": "Instructions saved.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "tP4nF",
-                          "name": "Detail",
-                          "fill": "$X:--muted-foreground",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Captured by assignments when they start",
-                          "lineHeight": 1.45,
-                          "fontFamily": "$font-sans",
-                          "fontSize": 12,
                           "fontWeight": "normal"
                         }
                       ]
@@ -168380,7 +167949,7 @@
                 {
                   "type": "frame",
                   "id": "x7DmfO",
-                  "name": "Recorded · Repository access: fixture-org/fixture-app (main)",
+                  "name": "Saved · Repository access",
                   "width": "fill_container",
                   "stroke": "$X:--border",
                   "strokeWidth": {
@@ -168392,27 +167961,6 @@
                     0
                   ],
                   "children": [
-                    {
-                      "type": "frame",
-                      "id": "zYYBb",
-                      "name": "Icon",
-                      "padding": [
-                        2,
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "Zmrsg",
-                          "name": "Status icon",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "circle-check",
-                          "library": "lucide",
-                          "fill": "$X:--foreground"
-                        }
-                      ]
-                    },
                     {
                       "type": "frame",
                       "id": "e7EVl",
@@ -168428,23 +167976,10 @@
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Repository access: fixture-org/fixture-app (main)",
+                          "content": "Repository access: fixture-org/fixture-app (main), checked on this Mac.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "hdYcT",
-                          "name": "Detail",
-                          "fill": "$X:--muted-foreground",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Exactly the list from step 3",
-                          "lineHeight": 1.45,
-                          "fontFamily": "$font-sans",
-                          "fontSize": 12,
                           "fontWeight": "normal"
                         }
                       ]
@@ -168452,121 +167987,10 @@
                   ]
                 },
                 {
-                  "type": "frame",
-                  "id": "OS9ZW",
-                  "name": "Recorded · Checkout verified",
-                  "width": "fill_container",
-                  "stroke": "$X:--border",
-                  "strokeWidth": {
-                    "top": 1
-                  },
-                  "gap": 10,
-                  "padding": [
-                    10,
-                    0
-                  ],
-                  "children": [
-                    {
-                      "type": "frame",
-                      "id": "e5U038",
-                      "name": "Icon",
-                      "padding": [
-                        2,
-                        0
-                      ],
-                      "children": [
-                        {
-                          "type": "icon",
-                          "id": "R052pR",
-                          "name": "Status icon",
-                          "width": 16,
-                          "height": 16,
-                          "icon": "circle-check",
-                          "library": "lucide",
-                          "fill": "$X:--foreground"
-                        }
-                      ]
-                    },
-                    {
-                      "type": "frame",
-                      "id": "mHwg4",
-                      "name": "Text",
-                      "width": "fill_container",
-                      "layout": "vertical",
-                      "gap": 2,
-                      "children": [
-                        {
-                          "type": "text",
-                          "id": "aN5lz",
-                          "name": "Item",
-                          "fill": "$X:--foreground",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "Checkout verified",
-                          "lineHeight": 1.45,
-                          "fontFamily": "$font-sans",
-                          "fontSize": 14,
-                          "fontWeight": "normal"
-                        },
-                        {
-                          "type": "text",
-                          "id": "zcWn5",
-                          "name": "Detail",
-                          "fill": "$X:--muted-foreground",
-                          "textGrowth": "fixed-width",
-                          "width": "fill_container",
-                          "content": "~/src/fixture-app · origin fixture-org/fixture-app",
-                          "lineHeight": 1.45,
-                          "fontFamily": "$font-sans",
-                          "fontSize": 12,
-                          "fontWeight": "normal"
-                        }
-                      ]
-                    }
-                  ]
-                },
-                {
-                  "type": "frame",
-                  "id": "jFT7J",
-                  "name": "Paused line",
-                  "width": "fill_container",
-                  "stroke": "$X:--border",
-                  "strokeWidth": {
-                    "top": 1
-                  },
-                  "gap": 8,
-                  "padding": [
-                    12,
-                    0,
-                    0,
-                    0
-                  ],
-                  "alignItems": "center",
-                  "children": [
-                    {
-                      "type": "icon",
-                      "id": "Qfdbj",
-                      "name": "Paused icon",
-                      "width": 14,
-                      "height": 14,
-                      "icon": "circle-pause",
-                      "library": "lucide",
-                      "fill": "$X:--muted-foreground"
-                    },
-                    {
-                      "type": "text",
-                      "id": "PJvnr",
-                      "name": "Paused note",
-                      "fill": "$X:--muted-foreground",
-                      "textGrowth": "fixed-width",
-                      "width": "fill_container",
-                      "content": "The project is Paused. Nothing has run.",
-                      "lineHeight": 1.45,
-                      "fontFamily": "$font-sans",
-                      "fontSize": 12,
-                      "fontWeight": "normal"
-                    }
-                  ]
+                  "id": "qYFh8",
+                  "type": "ref",
+                  "ref": "Q5Ff9",
+                  "name": "Details toggle"
                 }
               ]
             },
@@ -168645,19 +168069,6 @@
                       }
                     }
                   ]
-                },
-                {
-                  "type": "text",
-                  "id": "VG5y6",
-                  "name": "Resume note",
-                  "fill": "$X:--muted-foreground",
-                  "textGrowth": "fixed-width",
-                  "width": "fill_container",
-                  "content": "Resume runs only the project's Resume command, then opens the composer with fixture-app selected. Keep paused opens project configuration.",
-                  "lineHeight": 1.45,
-                  "fontFamily": "$font-sans",
-                  "fontSize": 12,
-                  "fontWeight": "normal"
                 }
               ]
             }
@@ -169669,12 +169080,12 @@
               "gap": 10,
               "descendants": {
                 "X:nbvca": {
-                  "content": "fixture-app is Paused.",
+                  "content": "It will wait: Project paused",
                   "fontFamily": "$font-sans",
                   "fontSize": 14
                 },
                 "X:W4UBy": {
-                  "content": "This task will wait until the project is resumed. Creating it does not resume the project.",
+                  "content": "Fix: Resume project asks first. Holds and access are unchanged; creating the task does not resume the project.",
                   "fontFamily": "$font-sans"
                 }
               }
@@ -169766,7 +169177,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Creates the task now; it starts when fixture-app is resumed and nothing else holds it.",
+                  "content": "Save draft keeps it without starting.",
                   "lineHeight": 1.25,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -173648,7 +173059,7 @@
           "fill": "$X:--muted-foreground",
           "textGrowth": "fixed-width",
           "width": "fill_container",
-          "content": "One reason shows at a time, in the task's state area. Each Fix performs exactly one named command or opens one screen. It never clears holds or grants access.",
+          "content": "The first reason shows with its Fix; any others are listed beneath it, each with its own Fix or link. Each Fix performs exactly one named command or opens one screen. It never clears holds or grants access.",
           "lineHeight": 1.45,
           "fontFamily": "$font-sans",
           "fontSize": 12,
@@ -174100,7 +173511,7 @@
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Waiting · Blocked by dependency",
+                          "content": "Waiting · Blocked by a task dependency",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 16,
@@ -181128,7 +180539,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· 143b: per the brief the Project row stays Done while reading “Paused” with Resume. getting-started.md counts Project as done only when enabled. Pick one before build.",
+              "content": "· 143b: resolved — a paused project is not Done; the Project row reads Not started with Resume (getting-started.md). The summary counts the four required rows; GitHub stays optional.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -181141,7 +180552,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· Only the first incomplete required row is primary: Lead profile in 143/144, Runtime in 143b. The Home header’s New task button is hidden while the checklist shows, so the card holds the only primary.",
+              "content": "· Only the first incomplete required row is primary: Lead profile in 143/144, Runtime in 143b. As built, the header New task button stays beside the card.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -181154,7 +180565,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· 143/144 First task: Create task is disabled (“Needs a project first”). Claude row badge reads “Optional” in a muted outline.",
+              "content": "· 143/144 First task: Create task opens the composer and reads “Needs a project first” until a project exists. Claude row badge reads “Optional” in a muted outline.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -181229,7 +180640,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "4 · Entry points not drawn",
+              "content": "4 · Entry points as built, not drawn",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 16,
@@ -181242,7 +180653,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· Account menu → Getting started (and undoing dismissal), ensemble doctor CLI output, profile-form route into Add Claude, and Inbox/CLI wait reasons. They must reuse these labels and Fix commands.",
+              "content": "· Account menu → Getting started opens /app/getting-started: the same checklist with a secondary Dismiss. Dismissed, the menu shows Show getting started, which undoes it. After the first turn Home shows only rows that need attention. Inbox hold notices and the CLI (Waiting: lines, each Fix: a command or Settings path) use these labels in the same order.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,

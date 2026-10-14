@@ -6,6 +6,7 @@ on:
   schedule:
     - cron: "0 5 * * *"
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 concurrency:
@@ -50,7 +51,7 @@ jobs:
           retention-days: 1
           if-no-files-found: error
   suites:
-    name: node24-${{ matrix.suite }}-${{ matrix.shard }}
+    name: node24-${{ matrix.lane }}-${{ matrix.shard }}
     needs: quality
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -58,17 +59,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { suite: coordination, shard: 1, shards: 1 }
-          - { suite: execution, shard: 1, shards: 1 }
-          - { suite: sources, shard: 1, shards: 1 }
-          - { suite: delivery, shard: 1, shards: 1 }
-          - { suite: workspaces, shard: 1, shards: 1 }
-          - { suite: operator, shard: 1, shards: 2 }
-          - { suite: operator, shard: 2, shards: 2 }
-          - { suite: operations, shard: 1, shards: 1 }
-          - { suite: infrastructure, shard: 1, shards: 1 }
+          - { lane: integrations, suite: "coordination,sources,delivery,operations,infrastructure", shard: 1, shards: 1, preflight: true }
+          - { lane: execution, suite: execution, shard: 1, shards: 2 }
+          - { lane: execution, suite: execution, shard: 2, shards: 2 }
+          - { lane: workspaces, suite: workspaces, shard: 1, shards: 1 }
+          - { lane: operator, suite: operator, shard: 1, shards: 2 }
+          - { lane: operator, suite: operator, shard: 2, shards: 2 }
     env:
-      TEST_PROFILE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'all' || 'chromium' }}
+      TEST_PROFILE: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')) && 'all' || 'chromium' }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -98,7 +96,7 @@ jobs:
             npx playwright install --with-deps chromium
           fi
       - name: Fixture preflight
-        if: matrix.suite == 'infrastructure'
+        if: matrix.preflight == true
         run: npm run test:built -- --fixture-preflight --profile="$TEST_PROFILE"
       - name: Run logical suite
         run: npm run test:built -- --suite=${{ matrix.suite }} --shard=${{ matrix.shard }}/${{ matrix.shards }} --profile="$TEST_PROFILE"
@@ -106,12 +104,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: evidence-node24-${{ matrix.suite }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          name: evidence-node24-${{ matrix.lane }}-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/ensemble-test-evidence
           retention-days: 3
           if-no-files-found: error
   service-node26:
-    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' && !startsWith(github.ref, 'refs/tags/')
     name: node26-service-${{ matrix.shard }}
     needs: quality
     runs-on: ubuntu-latest
@@ -154,7 +152,7 @@ jobs:
           retention-days: 3
           if-no-files-found: error
   compatibility-node26:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
     name: node26-full-compatibility
     needs: quality
     runs-on: ubuntu-latest
@@ -198,7 +196,7 @@ jobs:
     timeout-minutes: 2
     env:
       RESULTS: ${{ toJSON(needs) }}
-      FULL_COMPATIBILITY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      FULL_COMPATIBILITY: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/') }}
       RUN_CHECKS: ${{ needs.changes.outputs.run }}
     steps:
       - uses: actions/checkout@v7

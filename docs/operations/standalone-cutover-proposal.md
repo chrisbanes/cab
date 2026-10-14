@@ -11,7 +11,7 @@ Before executing any stage, #761 must attach a dated, reviewed packet binding ev
 | Binding | Required readback |
 | --- | --- |
 | Host/account | ComputerName, UID, exact GUI launchd domain; target repository and Project native IDs |
-| Build | Reviewed final commit, passing final-head checks, stable absolute `NODE` (`24.21.0`), `OPERATIONS_CLI` (`dist/src/standalone/operations-cli.js`) and `SERVICE_CLI` (`dist/src/standalone/cli.js`) paths; npm `12.2.0` |
+| Build | Reviewed final commit, passing final-head checks, stable absolute `NODE` (`24.21.0`), `OPERATIONS_CLI` (`dist/src/standalone/operations-cli.js`) and `SERVICE_CLI` (`dist/src/standalone/cli.js`) paths; npm `12.2.0`. Once packaging lands ([ADR-1011](../adr/1011-packaging-and-distribution.md)), the release version, tag, `SHA256SUMS` digest and installed version directory replace the checkout paths |
 | Standalone paths | Every shell variable: `DATA`, `AUTH`, `STDOUT`, `STDERR`, `SNAPSHOT`, `RESTORE_DATA`, `LABEL`, `PLIST`, `ORIGIN`, `PORT`; separate canonical private data/auth/log/snapshot/restore paths, exact label/plist, loopback origin/free port; no symlinks or prototype overlap |
 | Prototype controller | Actual controller/service/agent IDs, owning process generation and lifecycle controls, configured project/machine, all active work and writers, exact data/workspace/config paths |
 | Old-work disposition | Every old task/run/execution/PR identity: finish under old owner, stop and retain recovery hold, or explicitly abandon with independent effect reconciliation; no automatic migration |

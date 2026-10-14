@@ -81,7 +81,7 @@ for (const [name, viewport] of [
         (await fetch("/api/operator/readiness")).json(),
       ),
     );
-    assert.equal(api.data.checks.length, 7);
+    assert.equal(api.data.checks.length, 8);
     for (const c of api.data.checks) {
       const row = panel.getByRole("article", {
         name: c.label,

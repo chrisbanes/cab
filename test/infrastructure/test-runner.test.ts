@@ -65,6 +65,9 @@ test("CI options reject ambiguous, empty and incompatible selections", () => {
     ["--profile=unknown"],
     ["--profile="],
     ["--suite=missing"],
+    ["--suite=operator,operator"],
+    ["--suite=all,operator"],
+    ["--suite=operator,"],
     ["--shard=0/2"],
     ["--shard=3/2"],
     ["--shard=1/3"],
@@ -79,12 +82,18 @@ test("CI options reject ambiguous, empty and incompatible selections", () => {
 
 test("CI logical suite shards cover the current source inventory exactly once", () => {
   const all = runner.discoverTestFiles(".");
-  const selected = runner.logicalSuites.flatMap((suite) =>
-    suite === "operator"
-      ? [1, 2].flatMap((shard) =>
-          runner.selectTestFiles(all, { suite, shard, shards: 2 }),
-        )
-      : runner.selectTestFiles(all, { suite, shard: 1, shards: 1 }),
+  const selected = [
+    {
+      suite: "coordination,sources,delivery,operations,infrastructure",
+      shards: 1,
+    },
+    { suite: "execution", shards: 2 },
+    { suite: "operator", shards: 2 },
+    { suite: "workspaces", shards: 1 },
+  ].flatMap(({ suite, shards }) =>
+    Array.from({ length: shards }, (_, index) =>
+      runner.selectTestFiles(all, { suite, shard: index + 1, shards }),
+    ).flat(),
   );
   assert.equal(selected.length, new Set(selected).size);
   assert.deepEqual(selected.sort(), all);

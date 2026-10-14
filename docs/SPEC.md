@@ -515,17 +515,25 @@ project selection, title and desired outcome prominent. Progressively disclose
 optional context, reference links, permitted explicit assignee selection and task
 dependencies; show a summary of supplied optional settings when collapsed. Keep
 entered values and field errors accessible through disclosure. Use Create and start
-as the primary action and Save draft as the secondary action. Explain before submission that starting is subject to
-project state, dependencies, capacity and execution holds. Show the persisted
-state and reason for any wait after submission; creation does not imply running.
-Where the operator can clear a wait (paused project, missing or revoked project
-lead, unavailable runtime, unreadable Claude token, unconfigured profile runtime), the reason links to that one action;
-it never clears holds or grants access by implication. These controls must
-preserve existing readiness and admission rules.
+as the primary action and Save draft as the secondary action. Before submission,
+state whether the task would start now or wait, with the reasons a new task in the
+project and its chosen dependencies would have. Show the persisted state and the
+reasons for any wait after submission; creation does not imply running. Task
+detail, Inbox and the operator CLI list the same wait reasons in one fixed order,
+the first primary. Where the operator can clear a wait (paused project, missing or
+revoked project lead, unavailable runtime, unreadable Claude token, unconfigured
+profile runtime), the reason carries a Fix that performs that one action: Resume
+project confirms and sends only the project resume, and every other Fix opens the
+screen that clears it (the CLI prints the command or Settings path). Dependency,
+approval, source and capacity waits link to what blocks them and have no Fix. A Fix
+never clears holds or grants access by implication. These controls must preserve
+existing readiness and admission rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
 from current service state: runtime readiness, GitHub discovery, lead profile,
-an enabled project and the first task, with Claude optional. A readiness check,
+an enabled project and the first task, with Claude optional. Afterwards Home shows
+only rows that need attention. The account menu opens the checklist until the
+operator dismisses it for the installation; Show getting started undoes that. A readiness check,
 shared by Settings and the operator CLI, reports what the running service can use
 and one fix per problem. The [user flows](user-flows/) define these journeys.
 
@@ -590,7 +598,13 @@ without showing it.
 The production service runs both runtimes; profiles default to Codex. The Claude
 runtime is qualified, with limits, by bounded live journeys
 ([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
-an available token reference waits visibly. Its execution policy differs from
+an available token reference waits visibly. It runs the `claude` that resolves on the
+service's fixed `PATH`, looked up when the service starts; without one the Claude
+runtime is not enabled for that run (Claude work waits as not configured and never
+falls back), and Codex is unaffected. Readiness reports the version it finds and never
+compares it: only the Claude Code version the pinned SDK declares was qualified, and
+another version is a disclosed limit
+([ADR-1011](adr/1011-packaging-and-distribution.md)). Its execution policy differs from
 Codex's ([ADR-1008](adr/1008-claude-code-execution-harness.md)):
 
 - `dontAsk` permissions with an explicit tool allowlist and a `PreToolUse` hook that
@@ -1006,6 +1020,11 @@ available alongside batched reviews.
 - Preserve drafts through navigation and refresh under existing session/privacy
   rules. Confirmed failures retain editable content; uncertain submissions keep
   their original payload and identity for reconciliation without duplicate sends.
+  A draft write that is lost, or still unanswered when the operator leaves the
+  task page, stays checkable from the Local review panel on return, and the check
+  replays the same request. A browser reload discards that pending check; the
+  server draft stays authoritative, so an anchor staged for a comment that was
+  never saved is left unused.
 - A review delivers local feedback only. It does not publish to GitHub, approve
   or reject work, change readiness, grant merge authority or clear holds, and it
   never reopens or completes a task. Sent to a completed lead on an open task, it

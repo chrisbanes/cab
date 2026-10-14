@@ -529,6 +529,13 @@ export interface RuntimeTurnSettings {
   reasoningEffort: string | null;
 }
 
+/**
+ * Thrown by `Runtime.start()` when the harness cannot run on this host because something it
+ * runs is absent (Claude without `claude` on the `PATH`). The service treats that harness as
+ * not enabled for this run, not as a failed runtime, and never falls back to another one.
+ */
+export class RuntimeNotEnabledError extends Error {}
+
 export interface Runtime {
   /** Declared by real harness runtimes; test fakes omit it. */
   readonly harness?: ExecutionHarness;

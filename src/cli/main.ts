@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -21,6 +21,7 @@ import {
 import { coverage } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
 import { RequestJournal } from "./request-journal.js";
+import { waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
@@ -83,6 +84,7 @@ Options:
   --follow              logs only: poll every --interval S (1-30, default 2)
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
+  --version             Show the Ensemble version
 
 Task operations: task create, task message, task follow-up, question answer and
 approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
@@ -136,6 +138,7 @@ export async function main(
         "token-file": { type: "string" },
         output: { type: "string" },
         help: { type: "boolean" },
+        version: { type: "boolean" },
         limit: { type: "string" },
         cursor: { type: "string" },
         project: { type: "string" },
@@ -206,6 +209,14 @@ export async function main(
         "--output must be human or json (jsonl only for logs).",
       );
     json = values.output === "json";
+    if (values.version) {
+      // Resolves from dist/src/cli/main.js in a checkout, an npm install and a release.
+      const pkg = JSON.parse(
+        readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+      ) as { version: string };
+      deps.stdout.write(`ensemble ${pkg.version}\n`);
+      return 0;
+    }
     if (values.help || positionals.length === 0) {
       deps.stdout.write(USAGE);
       return values.help ? 0 : 2;
@@ -424,6 +435,7 @@ async function run(
         `Project: ${task.projectId}`,
         `State:   ${task.state}${task.ready ? " (ready)" : ""}`,
         `Version: ${task.version}`,
+        ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),
       ].join("\n"),
     };

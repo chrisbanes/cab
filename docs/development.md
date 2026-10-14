@@ -7,7 +7,7 @@ Use the Node version in [`.node-version`](../.node-version) and the npm version 
 `packageManager` (`package.json`).
 Node 26 compatibility jobs use the latest 26.x: `node26-service-*` covers PRs and
 main pushes; `node26-full-compatibility` covers the complete build and browser suite
-on nightly and manual runs, as described below. Version 26.9.0 has
+on nightly, manual and release-tag runs, as described below. Version 26.9.0 has
 [local evidence](evidence/node-26-compatibility-2026-10-09.md) but is not the default
 baseline. `engines.node` is `>=24` as permissive metadata; Node 25, 27 and later
 majors are not qualified.
@@ -21,18 +21,24 @@ npm run check
 including deterministic scheduler, supervision, recovery, power and
 service-integration fixtures, coordination, routing, inbox, interaction and
 completion tests, and the operator auth, HTTP and browser tests. CI
-builds once and runs logical suites in parallel. PRs and main pushes run Chromium
-coverage on Node 24 and service coverage on Node 26; the operator suite and Node 26
-service run use two shards balanced by observed named-test durations in
-`scripts/test-timings.json`. New files use a median timing fallback. The required
+builds once and runs eight test jobs on PRs and main pushes: six Node 24 Chromium
+jobs and two Node 26 service jobs. Coordination, sources, delivery, operations and
+infrastructure share one lane; workspaces has one lane; execution and operator
+have two shards each. Logical suites remain separate directories even when they
+share a CI lane. Runtime retention tests are split by terminal events, threads and
+native input so the expensive workloads can run on different execution shards.
+
+Shards use separate `all`, `chromium` and `service` weights in
+`scripts/test-timings.json`. Weights measure complete file durations, including
+startup and imports; new files use the selected profile's median fallback. The required
 `check` context aggregates static checks and all applicable test jobs, including
 their failure evidence uploads. Superseded PR runs are cancelled.
 
 Daily CI at 05:00 UTC runs only when the commit differs from the previous scheduled
 run on the same branch (or there is no previous run). An unchanged night skips the
 build and tests; a history lookup failure fails CI. Manual workflow runs always
-run the complete checks. Both include WebKit on Node 24 and the complete suite and
-build on Node 26. These triggers become available when the
+run the complete checks. Nightly, manual and release-tag runs include WebKit on
+Node 24 and the complete suite and build on Node 26. These triggers become available when the
 workflow reaches the default branch. Local `npm run check` continues to run all
 tests and both browsers. For focused checks after building, use:
 
@@ -45,7 +51,22 @@ npm run test:built -- --profile=service
 browser-dependent cases while retaining service assertions in mixed test files.
 Browser cases use `browserSuite` or `browserTest`; engine-specific cases declare
 their engine. Missing compiled tests, unknown suites/options and empty shards
-fail explicitly. Real App Server
+fail explicitly. Each normal test run writes `file-timings.ndjson` in its test evidence directory;
+CI uploads these with the synthetic evidence. Refresh a profile from a successful
+complete run, or all its shards, using:
+
+```sh
+node scripts/update-test-timings.mjs chromium 24 /path/to/evidence
+```
+
+Use `all 24` or `service 26` for the other profiles. Keep receipts from one run
+separate from other runs. The updater rejects missing, duplicate, unsuccessful or
+stale receipts and requires every current source test file. Its input digest
+covers runtime, test, web and runner inputs; changing these requires new receipts.
+Committed initial weights are measured locally; hosted CI receipts can refresh
+them as runner performance changes.
+
+Real App Server
 qualification is separate and runs only when requested explicitly, for example
 `npm run recovery:live` and `npm run routing:live`, which require their `--live` opt-in
 (see the other `*:live` scripts in `package.json`). These checks do not prove

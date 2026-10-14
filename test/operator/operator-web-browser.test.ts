@@ -394,6 +394,8 @@ for (const viewport of [
       .filter({ hasText: "We couldn't sign you out. You're still signed in." })
       .waitFor();
     await page.unroute("**/api/operator/logout");
+    // Reads the shell restarted after the failed sign-out settle before the session expires.
+    await page.waitForLoadState("networkidle");
     f.advanceClock(60001);
     await page
       .getByRole("button", { name: "Refresh tasks", exact: true })
