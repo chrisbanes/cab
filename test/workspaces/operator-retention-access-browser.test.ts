@@ -456,7 +456,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   await readingDiagnostic("header-attached");
   let snapshot = await waitReading("header-settled");
   if (!counterpart) {
-    // Drive the real production timer through its pending visibility boundary.
+    // Drive the real production timer: its poll keeps the validated history shown while it revalidates.
     let releaseTask!: () => void;
     const heldTask = new Promise<void>((resolve) => {
       releaseTask = resolve;
@@ -493,11 +493,10 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     try {
       await page.clock.fastForward(15000);
       await taskEntered;
-      await singleItem.waitFor({ state: "detached" });
       assert.equal(
         await singleItem.count(),
-        0,
-        "pending refresh hides unvalidated history",
+        1,
+        "a pending timer poll keeps the validated history visible",
       );
       await readingDiagnostic("timer-pending");
     } finally {
@@ -505,6 +504,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     }
     try {
       await historyEntered;
+      assert.equal(await singleItem.count(), 1);
       await readingDiagnostic("overlap-history-pending");
       await page.clock.fastForward(15000);
     } finally {
@@ -719,7 +719,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   try {
     await page.clock.fastForward(15000);
     await intentionalEntered;
-    await singleItem.waitFor({ state: "detached" });
+    assert.equal(await singleItem.count(), 1);
     await page.getByLabel("Editable reply").focus();
     await readingDiagnostic("intentional-control-focus-pending");
     await page.clock.fastForward(15000);

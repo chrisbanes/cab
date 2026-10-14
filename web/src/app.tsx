@@ -528,10 +528,10 @@ export function App() {
     inboxLoader,
     !onInboxRoute,
   );
-  const taskRefresh = useRef(tasks.refresh);
-  taskRefresh.current = tasks.refresh;
-  const workspaceRefresh = useRef(workspace.refresh);
-  workspaceRefresh.current = workspace.refresh;
+  const taskRefresh = useRef(tasks.poll);
+  taskRefresh.current = tasks.poll;
+  const workspaceRefresh = useRef(workspace.poll);
+  workspaceRefresh.current = workspace.poll;
   const inboxScope =
     session?.authenticated && path.split("?")[0] === "/app/inbox"
       ? session.csrfToken

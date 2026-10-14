@@ -129,10 +129,10 @@ export function Inbox({
       `${session.csrfToken}:action-inbox`,
       loader,
     ),
-    refresh = useRef(resource.refresh);
-  refresh.current = resource.refresh;
+    poll = useRef(resource.poll);
+  poll.current = resource.poll;
   useEffect(() => {
-    const timer = setInterval(() => refresh.current(), 15000);
+    const timer = setInterval(() => poll.current(), 15000);
     return () => clearInterval(timer);
   }, []);
   const count = inboxSummaryOf(resource.state)?.count,
@@ -149,7 +149,7 @@ export function Inbox({
   useEffect(() => {
     if (seen.current !== observation) {
       seen.current = observation;
-      if (observation) refresh.current();
+      if (observation) poll.current();
     }
   }, [observation]);
   const [, render] = useState(0),
