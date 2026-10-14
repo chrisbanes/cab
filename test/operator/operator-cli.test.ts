@@ -12,7 +12,9 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import type { BrowseContext } from "../../src/cli/browse.js";
 import { KeychainCredentialStore } from "../../src/cli/connections.js";
+import { logsCommand } from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
   harness,
@@ -91,6 +93,8 @@ test("login, status and task get through a token file against the live service",
   assert.match(r.out, /line one\nline two/);
   r = await h.run(["task", "get", hostileId, "--output", "json"]);
   assert.ok(r.json().data.task.title.includes("\u001b[31m"));
+  assert.ok(!r.out.includes("\u009b"), "JSON output escapes C1 controls");
+  assert.match(r.out, /line two\\u009b/);
 
   // 2. The same read-only token cannot write directly.
   const direct = await s.bearer(read.token, "/api/operator/source-refresh", {
@@ -490,4 +494,53 @@ test("usage errors exit 2 and help exits 0", async (t) => {
     (await h.run(["connection", "list", "--output", "yaml"])).code,
     2,
   );
+});
+
+test("streamed logs cannot drive the terminal in human or JSON Lines output", async () => {
+  const hostile = "tool\u001b]52;c;cGF3bmVk\u0007\u009b";
+  const run = async (output: string | undefined) => {
+    let out = "";
+    const ctx = {
+      positionals: ["logs"],
+      values: { execution: "w-1", follow: true, output, "max-duration": "1" },
+      deps: {
+        stdout: { write: (text: string) => (out += text) },
+        now: () => 0,
+        sleep: async () => {},
+      },
+      connect: async () => ({
+        get: async () => ({
+          observedAt: 0,
+          data: {
+            workId: "w-1",
+            items: [
+              {
+                sequence: 1,
+                createdAt: 0,
+                severity: "info",
+                kind: "tool",
+                name: hostile,
+                state: "available",
+                payload: { text: hostile },
+              },
+            ],
+            gaps: [],
+            resumeAfter: 1,
+            more: false,
+            finished: true,
+          },
+        }),
+      }),
+    } as unknown as BrowseContext;
+    await logsCommand.run(ctx);
+    return out;
+  };
+  const human = await run(undefined);
+  for (const control of ["\u001b", "\u0007", "\u009b"])
+    assert.ok(!human.includes(control));
+  assert.match(human, /tool.*52;c;cGF3bmVk/);
+  const lines = await run("jsonl");
+  assert.ok(!lines.includes("\u009b"));
+  const item = JSON.parse(lines.split("\n")[0] as string);
+  assert.equal(item.item.name, hostile);
 });

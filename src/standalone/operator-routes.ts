@@ -44,7 +44,7 @@ const RESERVED_ROOTS = new Set([
   "coordination",
 ]);
 
-function parseRoutePath(path: string, slot?: OperatorRouteSlot): string[] {
+function parseRoutePath(path: string, slot: OperatorRouteSlot): string[] {
   if (path === "/") throw new Error("Operator route path is reserved");
   if (
     !path.startsWith("/") ||
@@ -114,14 +114,8 @@ export function decodeSegment(segment: string): string | undefined {
 
 /** Pre-start, typed route seam for trusted Ensemble UI extensions. */
 export class OperatorRouteRegistry {
-  private readonly routes: RegisteredRoute[] = [];
   private readonly slots = new Map<OperatorRouteSlot, RegisteredRoute[]>();
   private started = false;
-
-  register(route: OperatorRoute): void {
-    if (this.started) throw new Error("Operator routes are already mounted");
-    this.routes.push(this.validateRoute(route));
-  }
 
   registerSlot(slot: OperatorRouteSlot, routes: OperatorRoute[]): void {
     if (this.started) throw new Error("Operator routes are already mounted");
@@ -153,7 +147,7 @@ export class OperatorRouteRegistry {
 
   private validateRoute(
     route: OperatorRoute,
-    slot?: OperatorRouteSlot,
+    slot: OperatorRouteSlot,
   ): RegisteredRoute {
     if (
       !route ||
@@ -162,31 +156,11 @@ export class OperatorRouteRegistry {
     ) {
       throw new Error("Invalid operator route");
     }
-    const segments = parseRoutePath(route.path, slot);
-    const routes = slot ? (this.slots.get(slot) ?? []) : this.routes;
-    if (
-      routes.some(
-        (registered) =>
-          registered.method === route.method &&
-          routesOverlap(registered.segments, segments),
-      )
-    ) {
-      throw new Error("Operator route already registered");
-    }
-    return { ...route, segments };
+    return { ...route, segments: parseRoutePath(route.path, slot) };
   }
 
   mount(): void {
     this.started = true;
-  }
-
-  match(
-    method: string,
-    pathname: string,
-  ):
-    | { handler: OperatorRouteHandler; params: Record<string, string> }
-    | undefined {
-    return this.matchRoutes(this.routes, method, pathname);
   }
 
   matchSlot(

@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import { type Database, transaction } from "../core/store.js";
 import {
+  OPERATOR_CREDENTIAL_TOKEN_PATTERN as TOKEN_PATTERN,
   operatorCredentialIssueRequestSchema,
   type OperatorCredential,
 } from "../operator/contracts.js";
@@ -19,7 +20,6 @@ export type VerifiedOperatorCredential = Pick<
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LAST_USED_INTERVAL_MS = 60_000;
-const TOKEN_PATTERN = /^ens_([0-9a-f-]{36})_([A-Za-z0-9_-]{43})$/;
 
 const rowSchema = z
   .object({

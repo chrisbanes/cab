@@ -19,7 +19,7 @@ import {
   KeychainCredentialStore,
   readTokenFile,
 } from "./connections.js";
-import { coverage } from "./browse.js";
+import { coverage, uuidArg } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
 import {
   type OperatorConnection,
@@ -27,6 +27,7 @@ import {
   serviceCommand,
   snapshotCommand,
 } from "./service.js";
+import { jsonLine, terminalSafe } from "./render.js";
 import { RequestJournal } from "./request-journal.js";
 import { waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
@@ -244,7 +245,7 @@ export async function main(
     if (result.streamed) return 0;
     if (json)
       deps.stdout.write(
-        `${JSON.stringify({
+        `${jsonLine({
           schema: SCHEMA,
           observedAt: deps.now(),
           ...(result.connection ? { connection: result.connection } : {}),
@@ -275,7 +276,7 @@ export async function main(
           : [5, "unavailable"]);
     if (json || jsonl)
       deps.stdout.write(
-        `${JSON.stringify({
+        `${jsonLine({
           schema: SCHEMA,
           ...(jsonl ? { type: "error" } : {}),
           error: {
@@ -298,11 +299,6 @@ export async function main(
       );
     return exit;
   }
-}
-
-/** Service text may hold terminal escape sequences; show only printable text and line breaks. */
-function terminalSafe(text: string): string {
-  return text.replace(/[^\P{Cc}\n\t]/gu, "\uFFFD");
 }
 
 function expectArgs(positionals: string[], count: number) {
@@ -428,13 +424,7 @@ async function run(
   if (key === "task get") {
     expectArgs(positionals, 3);
     rejectManaged(deps.env);
-    const taskId = argument ?? "";
-    if (
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        taskId,
-      )
-    )
-      throw new CliError("invalid-input", "TASK_ID must be a task UUID.");
+    const taskId = uuidArg(argument ?? "", "TASK_ID");
     const session = await connect(config, requested, deps, TASK_CAPABILITIES);
     const read = await session.client.get(
       `/api/operator/tasks/${encodeURIComponent(taskId)}`,

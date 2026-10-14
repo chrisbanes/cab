@@ -569,3 +569,28 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
   });
   assert.equal(r.status, 409, "same key, other content");
 });
+
+test("review commands need a browser review session: a bearer write token is forbidden, not unauthenticated", async (t) => {
+  const s = await startCliService(t);
+  const write = await s.issue("read-write", "review-rw");
+  const base = { key: randomUUID(), taskId: s.taskId, expectedDraftVersion: 0 };
+  for (const command of [
+    { ...base, type: "review.draft.discard" },
+    {
+      ...base,
+      type: "review.send",
+      recipientAssignmentId: randomUUID(),
+      expectedAssignmentVersion: 1,
+    },
+  ]) {
+    const r = await s.bearer(write.token, "/api/operator/commands", {
+      method: "POST",
+      body: command,
+    });
+    assert.equal(r.status, 403, command.type);
+    assert.equal(
+      ((await r.json()) as { error: { code: string } }).error.code,
+      "forbidden",
+    );
+  }
+});

@@ -252,7 +252,8 @@ export class OperatorClient {
         state:
           e.status === 409
             ? "conflict"
-            : e.code === "command-outcome-unknown"
+            : // A command can commit and then fail with a 5xx body, so only 4xx is a refusal.
+              e.status >= 500 || e.code === "command-outcome-unknown"
               ? "unknown"
               : "rejected",
         command,

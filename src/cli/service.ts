@@ -1,10 +1,13 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -248,10 +251,20 @@ class Service {
 
   writeRecord(record: InstallRecord) {
     const temporary = `${this.recordPath}.${process.pid}.tmp`;
-    writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, {
-      mode: 0o600,
-    });
+    const file = openSync(temporary, "w", 0o600);
+    try {
+      writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+      fsyncSync(file);
+    } finally {
+      closeSync(file);
+    }
     renameSync(temporary, this.recordPath);
+    const directory = openSync(dirname(this.recordPath), "r");
+    try {
+      fsyncSync(directory);
+    } finally {
+      closeSync(directory);
+    }
   }
 
   /** The label's launchd job, or null when it is not loaded. */
@@ -460,6 +473,22 @@ class Service {
       if (value !== undefined) return value;
       if (this.host.now() >= deadline) throw new ServiceFailure(message);
       await this.pause();
+    }
+  }
+
+  /** One readiness read; refuses before anything is stopped when the connection cannot make it. */
+  async requireReadable(connection: OperatorConnection) {
+    const signal = AbortSignal.any([
+      this.host.timeout(READINESS_PROBE_MS),
+      ...(this.io.signal ? [this.io.signal] : []),
+    ]);
+    try {
+      await bounded(connection.readiness(signal), signal);
+    } catch {
+      this.checkInterrupt();
+      throw refuse(
+        "The CLI connection cannot read readiness; run `ensemble auth login` with a read credential first",
+      );
     }
   }
 
@@ -681,6 +710,10 @@ async function upgradeServiceLocked(
         `The CLI connection is not for ${record.configuration.origin}`,
       );
 
+    service.checkInterrupt();
+    // The old job is still running: a credential that cannot read readiness would leave the
+    // healthy new release stopped after the readiness deadline.
+    await service.requireReadable(connection);
     service.checkInterrupt();
     stage = "stop";
     await service.stopOwned(record);
