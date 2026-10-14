@@ -67,6 +67,17 @@ export function requiredVersion(ctx: WriteContext) {
   return version;
 }
 
+/** ` (closed on GitHub…)` for a task closed on its provider, shared by every task view. */
+export function closureSuffix(
+  closure: "held" | "completed" | null | undefined,
+) {
+  return closure === "held"
+    ? " (closed on GitHub; held)"
+    : closure === "completed"
+      ? " (closed on GitHub)"
+      : "";
+}
+
 /** Task state, admission and the holds that still decide whether work runs. */
 export function taskStatusLines(task: TaskData): [string, string][] {
   const holds = Object.entries(task.execution.holds)
@@ -76,7 +87,7 @@ export function taskStatusLines(task: TaskData): [string, string][] {
     ["Task", task.task.id],
     [
       "State",
-      `${task.task.state}${task.task.ready ? " (ready)" : " (not ready)"}, version ${task.task.version}`,
+      `${task.task.state}${closureSuffix(task.source?.closure)}${task.task.ready ? " (ready)" : " (not ready)"}, version ${task.task.version}`,
     ],
     [
       "Waiting",

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
+import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { completedLead, until } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
@@ -891,4 +892,136 @@ test("task get names the next assignment's revoked profile and prints its Settin
       "assignment-profile-stale",
     ],
   );
+});
+
+test("task get, the task read, the catalog and the HTML page agree on GitHub closure", async (t) => {
+  const o = await startCliOperator(t);
+  const { d, s } = o;
+  const taskId = seedImported(o);
+  const sources = s.f.service.githubSources();
+  const api = new OperatorApi(s.f.service, [s.f.directory]);
+  const observe = () =>
+    sources.reconcileSelection(s.projectId, "repo", {
+      complete: true,
+      reason: null,
+      issues: [
+        {
+          providerInstance: "github.com",
+          nodeId: "I1",
+          repositoryId: "R1",
+          repositoryName: "owner/repo",
+          number: 42,
+          title: "Imported task",
+          body: "Imported body",
+          state: "closed",
+          labels: ["ready"],
+          projectFields: [],
+        },
+      ],
+    });
+  const agree = async (closure: "held" | "completed", state: string) => {
+    const read = await api.readTask(taskId);
+    const card = (await api.readTaskListPage()).data.tasks.find(
+      (task) => task.id === taskId,
+    );
+    assert.equal(read.data.source?.closure, closure);
+    assert.equal(card?.source?.closure, closure);
+    const human = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
+    assert.equal(human.code, 0, human.err);
+    assert.ok(human.out.includes(`State:   ${state}`), human.out);
+    const list = await o.h.run(["task", "list", "--connection", "ro"]);
+    assert.equal(list.code, 0, list.err);
+    assert.ok(list.out.includes(state), list.out);
+    const page = new LocalOperatorUi(d, undefined, sources).task(taskId);
+    assert.ok(
+      page.includes(
+        closure === "held"
+          ? "Paused · closed on GitHub"
+          : "Done · closed on GitHub, not delivered by Ensemble",
+      ),
+      page,
+    );
+  };
+  observe();
+  await agree("held", "open (closed on GitHub; held)");
+  const { version } = d.githubConfiguration(s.projectId);
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: s.projectId,
+    expectedVersion: version,
+    credentialRef: "env:CLI5_SYNTHETIC_REFERENCE",
+    selections: [{ id: "repo", keep: true }],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    closedIssues: "done",
+    repositories: [],
+  });
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: s.projectId,
+    selectionId: "repo",
+    expectedVersion: version + 1,
+  });
+  observe();
+  assert.equal(
+    sources.completeFromProviderClosure(taskId, () => true),
+    true,
+  );
+  await agree("completed", "done (closed on GitHub)");
+});
+
+test("a pending own-delivery closure proof is not shown as GitHub closure on any task view", async (t) => {
+  const o = await startCliOperator(t);
+  const { d, s } = o;
+  const taskId = seedImported(o);
+  const sources = s.f.service.githubSources();
+  sources.recordDeliveryClosureUnavailable("I1");
+  sources.reconcileSelection(s.projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I1",
+        repositoryId: "R1",
+        repositoryName: "owner/repo",
+        number: 42,
+        title: "Imported task",
+        body: "Imported body",
+        state: "closed",
+        labels: ["ready"],
+        projectFields: [],
+      },
+    ],
+  });
+  assert.equal(sources.hold("I1")?.reason, "closure-read-unavailable");
+  const api = new OperatorApi(s.f.service, [s.f.directory]);
+  assert.equal((await api.readTask(taskId)).data.source?.closure, null);
+  assert.equal(
+    (await api.readTaskListPage()).data.tasks.find((task) => task.id === taskId)
+      ?.source?.closure,
+    null,
+  );
+  for (const args of [
+    ["task", "get", taskId],
+    ["task", "list"],
+  ]) {
+    const human = await o.h.run([...args, "--connection", "ro"]);
+    assert.equal(human.code, 0, human.err);
+    assert.ok(!human.out.includes("closed on GitHub"), human.out);
+  }
+  const ui = new LocalOperatorUi(d, undefined, sources);
+  for (const [page, marker] of [
+    [ui.task(taskId), "Source hold: closure-read-unavailable"],
+    [ui.project(s.projectId), "Imported task"],
+  ] as const) {
+    assert.ok(page.includes(marker), marker);
+    assert.ok(
+      !/closed on GitHub|issue reopens/.test(page),
+      "no reopen guidance for a pending own-delivery proof",
+    );
+  }
 });

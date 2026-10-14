@@ -68,6 +68,7 @@ const github: DomainCommandResultMap["github.configure"] = {
   credentialRef: null,
   selections: [],
   readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+  closedIssues: "skip",
   repositories: [],
 };
 
@@ -436,6 +437,28 @@ test("legacy receipt validation preserves only the known migrated omissions", ()
     parseDomainCommandOutcome("assignment.create", {
       ...legacyAssignment,
       resultRecipientDisposition: "unknown",
+    }),
+  );
+
+  const { closedIssues: _closedIssues, ...legacyGithub } = github;
+  assert.deepEqual(
+    parseDomainCommandOutcome("github.configure", legacyGithub).result,
+    legacyGithub,
+  );
+  assert.throws(() =>
+    parseFreshDomainCommandOutcome("github.configure", legacyGithub),
+  );
+  assert.deepEqual(
+    parseFreshDomainCommandOutcome("github.configure", {
+      ...github,
+      closedIssues: "done",
+    }).result.closedIssues,
+    "done",
+  );
+  assert.throws(() =>
+    parseDomainCommandOutcome("github.configure", {
+      ...github,
+      closedIssues: "closed",
     }),
   );
 });

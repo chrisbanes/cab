@@ -85,6 +85,7 @@ const config = (): ProjectConfigurationData =>
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
+      closedIssues: "skip",
       repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
     },
   }) as ProjectConfigurationData;
@@ -278,6 +279,21 @@ test("source rows, change lines and command use keep markers and never paths", (
     [{ repositoryId: "acme/atlas", ref: "main" }],
   );
   assert.equal(removesAllAccess(c.source, { repositories: "[]" }), true);
+  assert.equal(rows.closedIssues, "skip");
+  assert.equal(command.closedIssues, undefined);
+  assert.deepEqual(
+    sourceChanges(c.source, { ...values, closedIssues: "skip" }),
+    lines,
+  );
+  assert.ok(
+    sourceChanges(c.source, { ...values, closedIssues: "done" }).includes(
+      "Closed issues: Treat closure as Done",
+    ),
+  );
+  assert.equal(
+    sourceCommand(projectId, { ...values, closedIssues: "done" }).closedIssues,
+    "done",
+  );
   assert.equal(
     removesAllAccess(c.source, {
       repositories: JSON.stringify([

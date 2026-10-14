@@ -352,6 +352,7 @@ test("retained rendered form actions, fields and mounted route controls match do
     "expectedHeadSha",
     "selections",
     "readiness",
+    "closedIssues",
     "repositories",
     "revoked",
     "capabilities",

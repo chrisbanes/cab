@@ -35,7 +35,10 @@ import {
   readinessSchema,
   selectionSchema,
 } from "./github-source.js";
-import { setupRepositoriesSchema } from "./github-source-contracts.js";
+import {
+  closedIssuesSchema,
+  setupRepositoriesSchema,
+} from "./github-source-contracts.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -453,7 +456,8 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS project_github_sources (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
           credentialRef TEXT, selections TEXT NOT NULL, readiness TEXT NOT NULL,
-          repositories TEXT NOT NULL
+          repositories TEXT NOT NULL,
+          closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))
         );
         CREATE TABLE IF NOT EXISTS project_github_active (
           projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
@@ -575,6 +579,16 @@ export class DomainStore {
           this.db.exec(
             `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,
           );
+      if (
+        !(
+          this.db
+            .prepare("PRAGMA table_info(project_github_sources)")
+            .all() as Row[]
+        ).some((column) => column.name === "closedIssues")
+      )
+        this.db.exec(
+          "ALTER TABLE project_github_sources ADD COLUMN closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))",
+        );
       if (!routingColumns.some((column) => column.name === "brief"))
         this.db.exec(
           "ALTER TABLE routing_operations ADD COLUMN brief TEXT NOT NULL DEFAULT ''",
@@ -984,11 +998,12 @@ export class DomainStore {
     credentialRef: string | null;
     selections: z.output<typeof selectionSchema>[];
     readiness: z.output<typeof readinessSchema>;
+    closedIssues: z.output<typeof closedIssuesSchema>;
     repositories: LinkedRepository[];
   } {
     this.project(projectId);
     const row = this.required(
-      "SELECT version, credentialRef, selections, readiness, repositories FROM project_github_sources WHERE projectId = ?",
+      "SELECT version, credentialRef, selections, readiness, closedIssues, repositories FROM project_github_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return {
@@ -999,6 +1014,7 @@ export class DomainStore {
         .array(selectionSchema)
         .parse(JSON.parse(String(row.selections))),
       readiness: readinessSchema.parse(JSON.parse(String(row.readiness))),
+      closedIssues: closedIssuesSchema.parse(row.closedIssues),
       repositories: z
         .array(linkedRepositorySchema)
         .parse(JSON.parse(String(row.repositories))),
@@ -1507,6 +1523,32 @@ export class DomainStore {
       )
     );
   }
+  /** Provider-closure provenance shared by every task view. */
+  providerClosure(taskId: string): "held" | "completed" | null {
+    if (
+      !this.one(
+        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
+      )
+    )
+      return null;
+    const row = this.one(
+      `SELECT t.state, e.observedState,
+        EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed,
+        EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
+          AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending
+      FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
+      taskId,
+    );
+    if (row?.state === "done" && Number(row.completed) === 1)
+      return "completed";
+    // Ensemble's own closure awaits proof; it is not provider closure.
+    return row?.state === "open" &&
+      row.observedState === "closed" &&
+      Number(row.ownProofPending) === 0 &&
+      !this.hasOwnDeliveryClosure(taskId)
+      ? "held"
+      : null;
+  }
   admission(
     taskId: string,
     deliveryContinuation = false,
@@ -1960,6 +2002,17 @@ export class DomainStore {
             command.state ?? present(current, "state"),
             command.taskId,
           );
+        // A manual state change replaces any provider-closure completion.
+        if (
+          command.state !== undefined &&
+          command.state !== current.state &&
+          this.one(
+            "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
+          )
+        )
+          this.db
+            .prepare("DELETE FROM github_provider_completions WHERE taskId = ?")
+            .run(command.taskId);
         return this.task(command.taskId);
       }
       case "profile.create": {
@@ -2066,7 +2119,7 @@ export class DomainStore {
         });
         this.db
           .prepare(
-            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, repositories = ? WHERE projectId = ?",
+            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ?, repositories = ? WHERE projectId = ?",
           )
           .run(
             command.credentialRef === undefined
@@ -2074,6 +2127,7 @@ export class DomainStore {
               : command.credentialRef,
             JSON.stringify(selections),
             JSON.stringify(command.readiness),
+            command.closedIssues ?? current.closedIssues,
             JSON.stringify(repositories),
             command.projectId,
           );
@@ -2103,6 +2157,17 @@ export class DomainStore {
               .run(command.projectId, selectionIds);
           const sources = new GitHubSourceStore(this.db);
           for (const taskId of affectedTasks) sources.updateReadiness(taskId);
+          // Skip never leaves a provider closure as Done: reopen those tasks under their
+          // closure hold now, since retained selections stay inactive until previewed.
+          if (
+            current.closedIssues === "done" &&
+            command.closedIssues === "skip"
+          )
+            for (const row of this.db
+              .prepare(`SELECT p.taskId FROM github_provider_completions p
+              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
+              .all(command.projectId) as Row[])
+              sources.updateReadiness(String(row.taskId));
           this.db
             .prepare(
               "UPDATE github_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",

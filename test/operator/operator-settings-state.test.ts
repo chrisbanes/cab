@@ -727,6 +727,19 @@ test("adopting a newer revision keeps edited fields and takes the latest for unt
   assert.equal(readiness.values.conditions, "[1]");
   // Reordering a set is not an edit, so the latest list is taken.
   assert.deepEqual(readiness.values.ids, ["a", "b", "c"]);
+  // The closed-issue mode is its own group: an edited mode survives adoption of new readiness.
+  const source = new ConfigurationDraft();
+  source.initialize({ mode: "all", conditions: "[1]", closedIssues: "skip" });
+  source.set("closedIssues", "done");
+  source.adoptLatest(
+    2,
+    { mode: "any", conditions: "[2]", closedIssues: "skip" },
+    [["mode", "conditions"], ["closedIssues"]],
+  );
+  assert.deepEqual(
+    [source.values.mode, source.values.conditions, source.values.closedIssues],
+    ["any", "[2]", "done"],
+  );
 });
 
 test("source credential refusal is actionable only after a definite lifecycle disposition", async () => {

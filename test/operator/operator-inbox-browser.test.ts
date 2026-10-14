@@ -577,6 +577,7 @@ test("an approval shows its exact action, target and independent holds, and deci
       title: "Imported task",
       body: "",
       state: "open",
+      closure: null,
       memberships: [],
       nativeBlockers: [
         {

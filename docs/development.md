@@ -340,8 +340,8 @@ or run `node dist/src/cli/main.js` directly.
    either scope; the rest need a read/write credential (a read-only one exits 3):
    - `project sources PROJECT_ID` lists the source version, whether a credential
      reference is configured, selections (id, kind, descriptor, active, observation
-     state and times), readiness, linked repositories and refs, and placement
-     conflicts. Queries, filters, paths and reference names are never shown. A
+     state and times), readiness, the closed-issue mode, linked repositories and
+     refs, and placement conflicts. Queries, filters, paths and reference names are never shown. A
      partial observation is gap `evidence-gap`, an unavailable one
      `redaction-unavailable`, and an unreadable saved value `content-unavailable`.
    - `project prepare-source PROJECT_ID --out FILE --edit-file FILE
@@ -350,7 +350,8 @@ or run `node dist/src/cli/main.js` directly.
      is strict JSON with any of `addSelections` (selection definitions without
      `id`: `{"kind":"repository","repositoryId","owner","name"}`,
      `{"kind":"search","query"}` or `{"kind":"project","projectNodeId","filter"}`),
-     `removeSelections` (ids), `readiness` (replaces), `linkRepositories`
+     `removeSelections` (ids), `readiness` (replaces), `closedIssues` (`"skip"`
+     or `"done"`; omitted keeps the saved mode), `linkRepositories`
      (`{"repositoryId","path","ref"}`), `unlinkRepositories` (ids), `setRefs`
      (`{"REPOSITORY_ID":"REF"}`), `credentialRef` (`"env:NAME"` or `null`) and
      `confirmUnlinkAll`. Saving makes every selection inactive until it is

@@ -148,6 +148,32 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     taskStatusLine({ ...base, ...patch } as unknown as Data);
   assert.equal(line({}), "Ready / Accountable project lead: Mira");
   assert.equal(
+    line({
+      task: { state: "open", ready: false },
+      source: { closure: "held" },
+    }),
+    "Paused · closed on GitHub / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
+      task: { state: "open", ready: false },
+      source: { closure: "held" },
+      execution: { state: "running", holds },
+    }),
+    "Paused · closed on GitHub · running / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
+      task: { state: "done", ready: false },
+      source: { closure: "completed" },
+    }),
+    "Done · closed on GitHub / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({ task: { state: "done", ready: false }, source: { closure: null } }),
+    "Done / Accountable project lead: Mira",
+  );
+  assert.equal(
     line({ task: { state: "open", ready: false } }),
     "Draft / Accountable project lead: Mira",
   );

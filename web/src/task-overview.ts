@@ -113,18 +113,22 @@ export function taskStatusLine(
         : terminal
           ? active
             ? `${terminal} · ${execution.state}`
-            : terminal
-          : paused
-            ? `${task.ready ? "Ready" : "Draft"} · project paused`
-            : !task.ready
-              ? "Draft"
-              : blocker
-                ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
-                : reason
-                  ? `Ready · ${lowerFirst(waitLabels[reason])}`
-                  : execution.state === "idle"
-                    ? "Ready"
-                    : `Ready · ${execution.state}`;
+            : data.source?.closure === "completed"
+              ? `${terminal} · closed on GitHub`
+              : terminal
+          : data.source?.closure === "held"
+            ? `Paused · closed on GitHub${active ? ` · ${execution.state}` : ""}`
+            : paused
+              ? `${task.ready ? "Ready" : "Draft"} · project paused`
+              : !task.ready
+                ? "Draft"
+                : blocker
+                  ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
+                  : reason
+                    ? `Ready · ${lowerFirst(waitLabels[reason])}`
+                    : execution.state === "idle"
+                      ? "Ready"
+                      : `Ready · ${execution.state}`;
   return `${state} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
 }
 

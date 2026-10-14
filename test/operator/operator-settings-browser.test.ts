@@ -767,6 +767,25 @@ test("source replacement verifies repositories without diagnostic echo and obser
     f.service.domain().githubConfiguration(ids.projectId).version,
     4,
   );
+  await page
+    .getByLabel("Closed GitHub issues", { exact: true })
+    .selectOption("done");
+  await page
+    .getByText("Closed issues: Treat closure as Done", { exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(
+    [
+      f.service.domain().githubConfiguration(ids.projectId).version,
+      f.service.domain().githubConfiguration(ids.projectId).closedIssues,
+    ],
+    [5, "done"],
+  );
+  assert.equal(
+    await page.getByLabel("Closed GitHub issues", { exact: true }).inputValue(),
+    "done",
+  );
 });
 for (const layout of [
   { name: "1366", width: 1366, height: 820, scale: 1 },

@@ -24,6 +24,7 @@ import {
 } from "./operator-credentials.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { closedIssuesSchema } from "../core/github-source-contracts.js";
 import {
   createServer,
   type IncomingMessage,
@@ -70,6 +71,13 @@ function field(
 function textarea(name: string, value = ""): string {
   return `<label>${escapeHtml(name)} <textarea name="${escapeHtml(name)}">${escapeHtml(value)}</textarea></label>`;
 }
+
+const closureText = (closure: "held" | "completed" | null) =>
+  closure === "held"
+    ? ", closed on GitHub; held"
+    : closure === "completed"
+      ? ", closed on GitHub"
+      : "";
 
 function selectField(
   name: string,
@@ -264,7 +272,7 @@ export class LocalOperatorUi {
       .tasks(projectId)
       .map(
         (task) =>
-          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
+          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}${closureText(this.store.providerClosure(String(task.id)))}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
       )
       .join("");
     const candidateProfileIds = JSON.stringify(
@@ -321,6 +329,14 @@ export class LocalOperatorUi {
         field("clearCredentialRef", "1", "checkbox") +
         textarea("selections", JSON.stringify(github.selections, null, 2)) +
         textarea("readiness", JSON.stringify(github.readiness, null, 2)) +
+        selectField(
+          "closedIssues",
+          [
+            { value: "skip", label: "Skip closed issues" },
+            { value: "done", label: "Treat closure as Done" },
+          ],
+          github.closedIssues,
+        ) +
         textarea(
           "repositories",
           JSON.stringify(
@@ -355,8 +371,9 @@ export class LocalOperatorUi {
     const hold = imported
       ? this.githubSources?.hold(String(imported.nodeId))
       : undefined;
+    const closure = this.store.providerClosure(taskId);
     const provenance = external
-      ? `<h2>GitHub source</h2><p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
+      ? `<h2>GitHub source</h2>${closure ? `<p>${closure === "held" ? "Paused · closed on GitHub. Resolve the source hold after the issue reopens." : "Done · closed on GitHub, not delivered by Ensemble."}</p>` : ""}<p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
           review &&
           (review.observedDigest !== review.acceptedDigest || hold?.active)
             ? form(
@@ -578,6 +595,9 @@ export class LocalOperatorUi {
                     : {}),
           selections: JSON.parse(required("selections")),
           readiness: JSON.parse(required("readiness")),
+          ...(fields.closedIssues === undefined
+            ? {}
+            : { closedIssues: closedIssuesSchema.parse(fields.closedIssues) }),
           repositories: JSON.parse(required("repositories")),
         };
         break;

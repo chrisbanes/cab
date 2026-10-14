@@ -85,6 +85,7 @@ test("project sources reads selections, links and observations without private t
   );
   assert.match(human.out, /S-2 +Search +\(query private\)/);
   assert.match(human.out, /acme\/atlas +main/);
+  assert.match(human.out, /Closed issues:? +Skip closed issues/);
   assert.equal(databaseDigest(w.s.f), before);
   // A partial provider read is an evidence gap, not a complete observation.
   const activated = await w.s.sessionPost("/api/operator/commands", {
@@ -154,6 +155,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
       { id: "S-5", kind: "search", query: "NEW PRIVATE QUERY" },
     ],
     readiness: edit.readiness,
+    closedIssues: "skip",
     repositories: [{ repositoryId: "acme/atlas", ref: "dev" }],
   });
   assert.deepEqual(document.preview.diff.lines, [
@@ -180,6 +182,22 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
   );
   assert.equal(databaseDigest(w.s.f), before);
   assert.equal(existsSync(w.journal), false);
+
+  const modeOut = join(w.h.dir, "mode-source.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.ids.atlas,
+    "--out",
+    modeOut,
+    "--edit-file",
+    w.file("mode.json", JSON.stringify({ closedIssues: "done" })),
+  ]);
+  const mode = JSON.parse(readFileSync(modeOut, "utf8"));
+  assert.equal(mode.command.closedIssues, "done");
+  assert.deepEqual(mode.preview.diff.lines, [
+    "Closed issues: Treat closure as Done",
+  ]);
 
   // Parity: the operator UI builds the same command for the same edit.
   const rows = sourceRowsFrom(source);
@@ -208,6 +226,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     ),
     conditions: JSON.stringify(edit.readiness.conditions),
     mode: "any",
+    closedIssues: rows.closedIssues,
   });
   const { key: _key, ...uiCommand } = ui;
   assert.deepEqual(uiCommand, document.command);
@@ -248,6 +267,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     linkRepositories: [{ repositoryId: "acme/atlas", path: "/x", ref: "main" }],
   });
   await reject(2, { surprise: true });
+  await reject(2, { closedIssues: "closed" });
   await reject(2, { credentialRef: "gh:example.com" });
   await reject(2, { credentialRef: "gh:" });
   await reject(2, { credentialRef: "GH:github.com" });
