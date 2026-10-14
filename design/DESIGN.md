@@ -568,9 +568,9 @@ the open decisions.
   - Not drawn, same layout: the items no lead profile, the lead's runtime unavailable
     or not enabled, and an unreadable readiness check ("Readiness couldn't be
     checked."); and, never blocking, the line "Capacity is full now, so the first
-    task will wait for capacity." While reads are pending the check shows only
-    "Checking readiness…" and keeps the primary disabled, with no hint or Check
-    again.
+    task will wait for capacity." While reads are pending the check shows
+    "Checking readiness…" and keeps the primary disabled; with no item yet it shows
+    no hint or Check again.
 - **First task (148–150):** the composer warns before Create and start that a paused
   project makes the task wait. Task detail shows "Waiting · <reason>" with one Fix;
   Fix: Resume project confirms first (149b). A dependency wait has no Fix, only a
