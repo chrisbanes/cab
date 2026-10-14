@@ -390,11 +390,15 @@ test("operations CLI renders diagnostic retention options and refuses bad ones",
     for (const bad of [
       ["--diagnostic-retention-days", "366"],
       ["--diagnostic-storage-mib", "abc"],
+      ["--diagnostic-storage-mib", "15"],
+      ["--diagnostic-retention-days", "1.5"],
+      ["--diagnostic-retention-days"],
       ["--unknown", "1"],
     ]) {
       const target = join(fixture.root, "bad", "x.plist");
       const result = render(target, bad);
-      assert.notEqual(result.status, 0);
+      assert.equal(result.status, 2);
+      assert.match(result.stderr, /Usage/);
       assert.equal(
         `${result.stdout}${result.stderr}`.includes(fixture.root),
         false,

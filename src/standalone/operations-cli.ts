@@ -2,6 +2,11 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
+  diagnosticRetentionDays,
+  diagnosticStorageMib,
+  isInBound,
+} from "./diagnostic-retention.js";
+import {
   createSnapshot,
   restoreSnapshot,
   verifySnapshot,
@@ -23,13 +28,19 @@ function parsePort(value: string): number {
   return port;
 }
 
-function parseDecimal(value: string): number {
-  if (!/^\d{1,10}$/.test(value)) throw new Error("invalid number");
-  return Number(value);
+/** A bounded decimal integer; throws so a malformed flag becomes a usage error. */
+function parseBounded(
+  value: string | undefined,
+  bound: Parameters<typeof isInBound>[1],
+): number | undefined {
+  if (value === undefined) return undefined;
+  const number = /^\d{1,10}$/.test(value) ? Number(value) : Number.NaN;
+  if (!isInBound(number, bound)) throw new Error("invalid diagnostic option");
+  return number;
 }
 
 function parseRenderArgs(args: string[]) {
-  return parseArgs({
+  const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
     strict: true,
@@ -38,6 +49,19 @@ function parseRenderArgs(args: string[]) {
       "diagnostic-storage-mib": { type: "string" },
     },
   });
+  const retention = parseBounded(
+    values["diagnostic-retention-days"],
+    diagnosticRetentionDays,
+  );
+  const storage = parseBounded(
+    values["diagnostic-storage-mib"],
+    diagnosticStorageMib,
+  );
+  return {
+    positionals,
+    ...(retention === undefined ? {} : { diagnosticRetentionDays: retention }),
+    ...(storage === undefined ? {} : { diagnosticStorageMib: storage }),
+  };
 }
 
 type Io = { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
@@ -92,13 +116,11 @@ async function operate(argv: string[], io: Io): Promise<number> {
       io.stderr.write(USAGE);
       return 2;
     }
-    const { values, positionals } = parsed;
+    const { positionals, ...diagnostic } = parsed;
     if (positionals.length !== 10) {
       io.stderr.write(USAGE);
       return 2;
     }
-    const retention = values["diagnostic-retention-days"];
-    const storage = values["diagnostic-storage-mib"];
     const configuration: LaunchAgentConfiguration = {
       label: positionals[0] as string,
       nodePath: positionals[1] as string,
@@ -109,12 +131,7 @@ async function operate(argv: string[], io: Io): Promise<number> {
       port: parsePort(positionals[6] as string),
       stdoutPath: positionals[7] as string,
       stderrPath: positionals[8] as string,
-      ...(retention === undefined
-        ? {}
-        : { diagnosticRetentionDays: parseDecimal(retention) }),
-      ...(storage === undefined
-        ? {}
-        : { diagnosticStorageMib: parseDecimal(storage) }),
+      ...diagnostic,
     };
     const plistPath = positionals[9] as string;
     // Validate before creating the destination. The rendered text is written
