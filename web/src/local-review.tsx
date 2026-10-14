@@ -283,8 +283,8 @@ function useLocalReviewController({
     state.notice = null;
   };
 
-  // The page that started a write may be gone when its answer arrives. Every mounted
-  // page re-renders from the shared state, so a write settled elsewhere still shows here.
+  // A send answered after its page is gone is left for the page that opens next. Every
+  // mounted page re-renders from the shared state, so a write settled elsewhere still shows here.
   const alive = useRef(true);
   // The draft write this page is awaiting an answer for, ready to be kept. If the page goes
   // away first, its cleanup keeps that exact request, so the answer that arrives later is ignored.
@@ -320,8 +320,9 @@ function useLocalReviewController({
    * Run a draft write. When its response is lost, or the page that sent it goes away first,
    * the exact request and what it is for are kept as plain data and the controls stay off until
    * the current page's `check` replays it, so a write is never repeated under a new key.
-   * Returns false when the answer came after this page's cleanup had kept the request: that
-   * late answer is ignored, and the state is left to the page that checks it.
+   * Returns false when the answer, or that of a write chained from it, came after this page's
+   * cleanup had kept the request: that late answer is ignored, and the state is left to the
+   * page that checks it.
    */
   const write = async (
     command: Command,
@@ -591,7 +592,12 @@ function useLocalReviewController({
         ?.focus();
     },
     open(originKey: string, label: string, anchor: ReviewAnchorCandidate) {
-      if (state.notice?.tone === "success") state.notice = null;
+      // The composer this replaces takes its refusal with it.
+      if (
+        state.notice?.tone === "success" ||
+        (state.notice && state.notice === state.composer?.error)
+      )
+        state.notice = null;
       state.composer = {
         originKey,
         label,

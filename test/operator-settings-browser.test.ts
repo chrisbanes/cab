@@ -477,7 +477,7 @@ test("configuration inline validation stale revision and revoked lead failures r
   await page.getByLabel("Project name", { exact: true }).fill("");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
   await page.getByText("Check this field.", { exact: true }).waitFor();
-  // submitDraft focuses the invalid field in the next animation frame.
+  // submitDraft focuses the invalid field on the commit that shows the rejection.
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-label") === "Project name",
   );

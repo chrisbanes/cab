@@ -729,8 +729,7 @@ test("a draft write still waiting when its page goes away is kept as one exact c
     const fields = (await outcome.locator("dl").textContent()) ?? "";
     assert.match(fields, new RegExp(`Request key\\s*${key}`));
     assert.match(fields, /Code\s*command-outcome-unknown/);
-    // Only the held write keeps every other write off.
-    // The unsaved edit stays open, with every control off.
+    // The unsaved edit stays open, and only the held write keeps every control off.
     const saveEdit = review.getByRole("button", { name: "Save edit" });
     await saveEdit.waitFor();
     assert.equal(await saveEdit.isDisabled(), true);
@@ -1235,6 +1234,18 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
   await panel.getByText(refusal, { exact: true }).waitFor();
   assert.equal(await panel.count(), 1);
   assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
+  // A comment started elsewhere replaces that composer, and its refusal goes with it.
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /diff\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 1: keep" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await files.getByLabel("Comment", { exact: true }).waitFor();
+  await panel.waitFor({ state: "detached" });
+  assert.equal(await page.getByText(refusal, { exact: true }).count(), 0);
 });
 
 test("a review send in flight when its page goes away is left for the next page to check", async (_t, j) => {
