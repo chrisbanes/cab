@@ -99,6 +99,10 @@ approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation; Resume clears only the operator Stop),
 add-dependency/remove-dependency and task configure --ready true/false.
 
+Runtimes: runtime enable and runtime disable are a reverse pair. Disabling never
+cancels a running turn; work bound to that runtime waits until it is enabled again,
+and disabling one that bound tasks use needs --yes.
+
 Sources and delivery: delivery send-comment posts a public GitHub comment that
 Ensemble cannot edit or retract, and a confirm-comment decision is final (deny
 is the counterpart of approve). Removing a source selection discards its saved
@@ -188,6 +192,7 @@ export async function main(
         kind: { type: "string" },
         severity: { type: "string" },
         follow: { type: "boolean" },
+        yes: { type: "boolean" },
         interval: { type: "string" },
         "max-duration": { type: "string" },
         "compare-current": { type: "boolean" },

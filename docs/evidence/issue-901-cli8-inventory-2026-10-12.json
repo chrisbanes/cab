@@ -1303,6 +1303,51 @@
       "gap": "A posted comment cannot be edited or retracted; there is no list of pending reviews. Scripted GitHub only; no live GitHub post. Exercised only through the in-process CLI against a real loopback service with fixture runtimes: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
     },
     {
+      "id": "runtime list",
+      "kind": "command",
+      "area": "execution/logs",
+      "scenarios": ["CLI05"],
+      "evidence": [
+        "test/operator-cli-runtime.test.ts",
+        "test/operator-cli-inventory.test.ts"
+      ],
+      "effect": "Lists each execution runtime's saved setting, its state (Available, Unavailable, or Not enabled with Disabled in Settings or the missing executable) and the tasks bound to it, in a coverage envelope.",
+      "denial": "n/a: read-only with a read credential.",
+      "revision": "n/a: read; no version or revision check",
+      "retry": "n/a: idempotent read; no receipt",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added with #989 after the CLI8 candidate. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
+      "id": "runtime enable",
+      "kind": "command",
+      "area": "execution/logs",
+      "scenarios": ["CLI02", "CLI03"],
+      "evidence": ["test/operator-cli-runtime.test.ts"],
+      "effect": "Saves the runtime as enabled under the runtime.configure receipt (scope system:runtime:<harness>) and starts it in the running service.",
+      "denial": "Refused with exit 4 and nothing saved while the runtime's executable is not on the service PATH; the shared command route denies read credentials.",
+      "revision": "n/a: no version; the setting is last-writer-wins and toggles are serialised per runtime in the service",
+      "retry": "A replayed request key returns the stored receipt and brings the live runtime to the saved setting again.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added with #989 after the CLI8 candidate. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
+      "id": "runtime disable",
+      "kind": "command",
+      "area": "execution/logs",
+      "scenarios": ["CLI02", "CLI03"],
+      "evidence": ["test/operator-cli-runtime.test.ts"],
+      "effect": "Saves the runtime as disabled; new admissions stop at once, running turns finish and the runtime stops once none remain.",
+      "denial": "A read-only credential exits 3; disabling a runtime that bound tasks use exits 4 without --yes and states the count.",
+      "revision": "n/a: no version; the bound-task count is checked server-side when the command arrives",
+      "retry": "A replayed request key returns the stored receipt without asking to confirm again.",
+      "observation": "synthetic",
+      "state": "bounded",
+      "gap": "Added with #989 after the CLI8 candidate. Exercised only through the in-process CLI against a real loopback service with fixture runtimes and an injected executable resolver: not through the installed binary in the live journey, and no second machine or private HTTPS (prerequisite unavailable: no second trusted machine was granted)."
+    },
+    {
       "id": "operation get",
       "kind": "command",
       "area": "operation",
