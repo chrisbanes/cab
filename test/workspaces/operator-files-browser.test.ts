@@ -986,7 +986,12 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     await page.locator(".file-source-lines .file-line-text").allTextContents(),
     codeText.replace(/\n$/, "").split("\n"),
   );
-  assert.equal(await page.locator("pre code, .file-markdown").count(), 0);
+  assert.equal(
+    await page
+      .locator(".file-workbench pre code, .file-workbench .file-markdown")
+      .count(),
+    0,
+  );
 
   await page
     .getByRole("button", { name: "Workspace root", exact: true })
