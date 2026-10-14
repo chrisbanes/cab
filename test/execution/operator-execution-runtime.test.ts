@@ -156,7 +156,7 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
   ]);
   assert.match(
     notConfigured?.message ?? "",
-    /If it is off, turn it on in Settings → Runtime\. If that is refused, or it is already on, install `claude` on the service PATH, then turn it off and on/,
+    /If it is off, turn it on in Settings → Runtime; if that is refused, install `claude` on the service PATH first\. If it is already on, install `claude` on the service PATH, then turn it off and on/,
   );
   // The stored reason is the current text or the legacy one persisted before the off/on recovery.
   for (const reason of [

@@ -36,7 +36,7 @@ const installAdvice = (harness: HarnessStatus["harness"]) =>
 
 /** A wait reason does not say which cause: the runtime is off, or on but its executable is missing. */
 const notEnabledAdvice = (harness: HarnessStatus["harness"]) =>
-  `If it is off, turn it on in Settings → Runtime. If that is refused, or it is already on, install \`${harness}\` on the service PATH, then turn it off and on there.`;
+  `If it is off, turn it on in Settings → Runtime; if that is refused, install \`${harness}\` on the service PATH first. If it is already on, install \`${harness}\` on the service PATH, then turn it off and on there.`;
 
 /** The confirmation body for disabling a runtime that tasks use. */
 export const disableConfirmation = (
