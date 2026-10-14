@@ -17,6 +17,11 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { childProcessEnvironment } from "../core/child-environment.js";
+import {
+  diagnosticRetentionDays,
+  diagnosticStorageMib,
+  isInBound,
+} from "../operator/diagnostic-retention.js";
 import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
@@ -37,7 +42,12 @@ SERVICE_OPTIONS:
   --launch-agents-dir DIR  default ~/Library/LaunchAgents
   --label LABEL            default local.ensemble.service
   --port PORT              loopback port for install, default 8787
+  --diagnostic-retention-days N|default  diagnostic retention (1-365, service default 30)
+  --diagnostic-storage-mib N|default     diagnostic storage cap (16-1048576, service default 1024)
 
+The diagnostic options (install and upgrade) are written into the LaunchAgent;
+upgrade keeps the recorded values unless an option changes them, and default
+clears one. To change a value, run upgrade with the installed release directory.
 install binds the LaunchAgent to the release it runs from (STATE/versions/V).
 upgrade stops the job, takes a verified snapshot, starts VERSION_DIR and checks
 readiness through a logged-in CLI connection with a read credential. A failed
@@ -83,6 +93,8 @@ export type ServiceOptions = {
   agentsDir: string;
   label: string;
   port: number;
+  /** Absent keeps the recorded value, null clears it, a number sets it. */
+  diagnostic?: { retentionDays?: number | null; storageMib?: number | null };
 };
 
 export type ServiceIo = {
@@ -100,6 +112,9 @@ export type OperatorConnection = {
   readiness(signal: AbortSignal): Promise<{ id: string; status: string }[]>;
 };
 
+const boundedInteger = (bound: Parameters<typeof isInBound>[1]) =>
+  z.number().refine((value) => isInBound(value, bound));
+
 const configurationSchema = z
   .object({
     label: z.string(),
@@ -111,6 +126,8 @@ const configurationSchema = z
     port: z.number().int(),
     stdoutPath: z.string(),
     stderrPath: z.string(),
+    diagnosticRetentionDays: boundedInteger(diagnosticRetentionDays).optional(),
+    diagnosticStorageMib: boundedInteger(diagnosticStorageMib).optional(),
   })
   .strict();
 type Configuration = z.infer<typeof configurationSchema>;
@@ -366,9 +383,24 @@ class Service {
   async activate(
     version: string,
     root: string,
-    base: Pick<Configuration, "dataDirectory" | "authFile" | "origin" | "port">,
+    base: Pick<
+      Configuration,
+      | "dataDirectory"
+      | "authFile"
+      | "origin"
+      | "port"
+      | "diagnosticRetentionDays"
+      | "diagnosticStorageMib"
+    >,
   ): Promise<{ record: InstallRecord; logs: string[] }> {
-    const { label, logDir } = this.options;
+    const { label, logDir, diagnostic } = this.options;
+    const resolved = (override: number | null | undefined, kept?: number) =>
+      override === undefined ? kept : (override ?? undefined);
+    const retention = resolved(
+      diagnostic?.retentionDays,
+      base.diagnosticRetentionDays,
+    );
+    const storage = resolved(diagnostic?.storageMib, base.diagnosticStorageMib);
     const prefix = join(logDir, `${label}.${version}.${this.stamp()}`);
     const configuration: Configuration = {
       label,
@@ -380,6 +412,10 @@ class Service {
       port: base.port,
       stdoutPath: `${prefix}.out.log`,
       stderrPath: `${prefix}.err.log`,
+      ...(retention === undefined
+        ? {}
+        : { diagnosticRetentionDays: retention }),
+      ...(storage === undefined ? {} : { diagnosticStorageMib: storage }),
     };
     const logs = [configuration.stdoutPath, configuration.stderrPath];
     // Staged beside the activation so the final rename stays on one filesystem; launchd
@@ -870,11 +906,25 @@ function parseLifecycleArgs(args: string[]) {
         label: { type: "string" },
         port: { type: "string" },
         connection: { type: "string" },
+        "diagnostic-retention-days": { type: "string" },
+        "diagnostic-storage-mib": { type: "string" },
       },
     });
   } catch {
     return null;
   }
+}
+
+/** A number within the service's bound, or `default` (null) to clear; undefined when absent, false for a usage error. */
+function diagnosticValue(
+  raw: string | undefined,
+  bound: Parameters<typeof isInBound>[1],
+): number | null | undefined | false {
+  if (raw === undefined) return undefined;
+  if (raw === "default") return null;
+  return /^\d{1,10}$/.test(raw) && isInBound(Number(raw), bound)
+    ? Number(raw)
+    : false;
 }
 
 /** Lifecycle options with their defaults under HOME; null for a usage error. */
@@ -893,7 +943,17 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
   );
   const label = values.label ?? "local.ensemble.service";
   const port = values.port ?? "8787";
+  const retentionDays = diagnosticValue(
+    values["diagnostic-retention-days"],
+    diagnosticRetentionDays,
+  );
+  const storageMib = diagnosticValue(
+    values["diagnostic-storage-mib"],
+    diagnosticStorageMib,
+  );
   if (
+    retentionDays === false ||
+    storageMib === false ||
     !stateDir ||
     !logDir ||
     !agentsDir ||
@@ -908,6 +968,14 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
     agentsDir,
     label,
     port: Number(port),
+    ...(retentionDays === undefined && storageMib === undefined
+      ? {}
+      : {
+          diagnostic: {
+            ...(retentionDays === undefined ? {} : { retentionDays }),
+            ...(storageMib === undefined ? {} : { storageMib }),
+          },
+        }),
   };
   return { options, positionals, connection: values.connection };
 }
@@ -931,6 +999,7 @@ export async function serviceCommand(
       !parsed ||
       parsed.positionals.length !== (command === "upgrade" ? 1 : 0) ||
       (command !== "upgrade" && parsed.connection !== undefined) ||
+      (command === "uninstall" && parsed.options.diagnostic !== undefined) ||
       (command !== "install" && args.some((arg) => arg.startsWith("--port")))
     )
       return usage(deps);
