@@ -26,6 +26,7 @@ test("the packed CLI installs offline and works against a real service over loop
   const installed = join(project, "node_modules", "ensemble");
   assert.ok(existsSync(join(installed, "dist/src/cli/main.js")));
   assert.ok(!existsSync(join(installed, "dist/test")));
+  assert.ok(existsSync(join(installed, "dist/operator/index.html")));
   const bin = join(project, "node_modules", ".bin", "ensemble");
   const config = join(dir, "config");
   const cli = async (args: string[], env: Record<string, string> = {}) => {
@@ -50,6 +51,13 @@ test("the packed CLI installs offline and works against a real service over loop
     writeFileSync(path, `${token}\n`, { mode: 0o600 });
     return path;
   };
+
+  const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+  assert.deepEqual(await cli(["--version"]), {
+    code: 0,
+    out: `ensemble ${version}\n`,
+    err: "",
+  });
 
   // Loopback.
   const s = await startCliService(t);

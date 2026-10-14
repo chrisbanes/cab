@@ -152,9 +152,11 @@ each acceptance scenario to its evidence and disposition.
   ([#761](https://github.com/chrisbanes/ensemble/issues/761)) is a separate, reviewed
   step ([proposal](docs/operations/standalone-cutover-proposal.md)); the installed
   Haze prototype stays in place until then.
-- **Packaging.** Planned: versioned self-contained releases with bundled Node and
-  `ensemble service install/upgrade` ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
-  Today the service runs from a built checkout.
+- **Packaging.** `scripts/package-release.mjs` builds a self-contained `darwin-arm64`
+  release tarball with bundled Node, and a tag-triggered workflow attaches it to a
+  GitHub Release ([standalone operations](docs/operations/standalone-macos.md#release-build));
+  no release has been published. Planned: `ensemble service install/upgrade`
+  ([ADR-1011](docs/adr/1011-packaging-and-distribution.md)).
 - **Isolation.** Ensemble relies on the execution runtime and host for isolation.
   Broad host-permitted reads remain enabled, and Stop is best-effort: unresolved work
   can remain held for reconciliation. See the

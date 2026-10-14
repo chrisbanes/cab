@@ -17,6 +17,13 @@ import { fakeServer, harness, MemoryKeychain } from "./fixtures/cli-harness.js";
 import { startCliService } from "./fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
+const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+
+test("--version prints the package version", async (t) => {
+  const r = await harness(t).run(["--version"]);
+  assert.equal(r.code, 0);
+  assert.equal(r.out, `ensemble ${version}\n`);
+});
 
 test("login, status and task get through a token file against the live service", async (t) => {
   const s = await startCliService(t);
@@ -466,7 +473,9 @@ test("the CLI imports no service state or SQLite modules", () => {
 
 test("usage errors exit 2 and help exits 0", async (t) => {
   const h = harness(t);
-  assert.equal((await h.run(["--help"])).code, 0);
+  const help = await h.run(["--help"]);
+  assert.equal(help.code, 0);
+  assert.match(help.out, /--version/);
   assert.equal((await h.run(["bogus"])).code, 2);
   assert.equal((await h.run(["task", "get", "not-a-uuid"])).code, 2);
   assert.equal(
