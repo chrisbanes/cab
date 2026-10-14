@@ -47,6 +47,8 @@ const reader: GitHubReaderFactory = () => ({
   },
 });
 
+const activated = /^Activated S-1\./;
+
 type Fixture = Awaited<ReturnType<typeof startSettings>>;
 
 interface Surface {
@@ -300,7 +302,7 @@ test("Profile edit, capacity, source preview, Claude token and discovery saves e
     name: "Preview and activate selection",
   });
   await preview.click();
-  await savedOutcome(page);
+  await savedOutcome(page, activated);
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
       (b) => b.textContent === "Preview and activate selection" && !b.disabled,
@@ -379,7 +381,7 @@ test("a source preview recorded through Check re-reads and opens the form again"
   await check(page).waitFor();
   const before = reads.length;
   await check(page).click();
-  await savedOutcome(page);
+  await savedOutcome(page, activated);
   // The check re-reads, so the form opens for the next preview, as after a direct save.
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
@@ -389,7 +391,7 @@ test("a source preview recorded through Check re-reads and opens the form again"
   assert.equal(await page.getByLabel("Selection to preview").isEnabled(), true);
   assert.ok(reads.length > before, "the check re-read the configuration");
   // The saved line stays, once, and focus did not fall to the page body.
-  await savedOutcome(page);
+  await savedOutcome(page, activated);
   assert.equal(await focusOnOutcome(page), true);
 });
 
@@ -526,5 +528,181 @@ test("a source preview that conflicts re-reads, and the next preview records wit
   assert.ok(reads.length > 0, "the conflict re-read the configuration");
   assert.equal(await preview.isEnabled(), true);
   await preview.click();
-  await savedOutcome(page);
+  await savedOutcome(page, activated);
+});
+
+const previewButton = (page: Page) =>
+  page.getByRole("button", { name: "Preview and activate selection" });
+const optionText = (page: Page, id: string) =>
+  page
+    .getByLabel("Selection to preview")
+    .locator("option", { hasText: `${id} (` })
+    .textContent();
+const observationRow = (page: Page, id: string) =>
+  page.locator("article.settings-row", {
+    has: page.getByRole("heading", { name: new RegExp(`^${id}\\b`) }),
+  });
+/** Saves the source again elsewhere, which moves its version and drops old active markers. */
+const saveSourceElsewhere = async (d: Fixture) => {
+  const domain = d.f.service.domain();
+  await new OperatorApi(d.f.service, [d.f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: d.ids.atlas,
+    expectedVersion: domain.githubConfiguration(d.ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+};
+const formReady = (page: Page) =>
+  page.waitForFunction(() =>
+    [...document.querySelectorAll("button")].some(
+      (b) => b.textContent === "Preview and activate selection" && !b.disabled,
+    ),
+  );
+
+test("Sync & placement marks active selections and drops the marker when the source changes", async (_t, journey) => {
+  const fixture = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  const { page } = fixture;
+  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
+  await observationRow(page, "S-1").getByText("Inactive").waitFor();
+  await previewButton(page).click();
+  await formReady(page);
+  assert.match((await optionText(page, "S-1")) ?? "", /· active$/);
+  await observationRow(page, "S-1")
+    .getByText("Active", { exact: true })
+    .waitFor();
+  assert.match((await optionText(page, "S-2")) ?? "", /· inactive$/);
+  await saveSourceElsewhere(fixture);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await observationRow(page, "S-1").getByText("Inactive").waitFor();
+  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
+});
+
+const firstActivation =
+  /^Activated S-1\. Tasks aren't imported until you refresh source observations\./;
+const repeatActivation =
+  /^S-1 was already active\. Tasks aren't imported until you refresh source observations\./;
+/** The sentence itself, apart from the Refresh action and its status. */
+const message = async (page: Page) =>
+  (
+    await outcomeMessages(page).locator(".action-outcome-message").innerText()
+  ).trim();
+const refreshButton = (page: Page) =>
+  outcomeMessages(page).getByRole("button", {
+    name: "Refresh source observations",
+  });
+
+test("first source activation names the selection, says nothing was imported and offers Refresh", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  await previewButton(page).click();
+  const outcome = await savedOutcome(page, firstActivation);
+  assert.equal(
+    await message(page),
+    "Activated S-1. Tasks aren't imported until you refresh source observations.",
+  );
+  await refreshButton(page).waitFor();
+  await observationRow(page, "S-1").getByText("Not synced").waitFor();
+  await refreshButton(page).click();
+  await observationRow(page, "S-1")
+    .getByText(/^Synced/)
+    .waitFor();
+  await outcome.getByText("Observation request completed.").waitFor();
+  await savedOutcome(page, firstActivation);
+  await page.setViewportSize(phone);
+  await noPageOverflow(page);
+  assert.equal(await refreshButton(page).isVisible(), true);
+});
+
+test("repeat activation says it was already active without claiming a refresh", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  await previewButton(page).click();
+  await savedOutcome(page, firstActivation);
+  await formReady(page);
+  await previewButton(page).click();
+  await savedOutcome(page, repeatActivation);
+  assert.equal(
+    await message(page),
+    "S-1 was already active. Tasks aren't imported until you refresh source observations.",
+  );
+  await observationRow(page, "S-1").getByText("Not synced").waitFor();
+});
+
+test("activation made before a source change does not read as current", async (_t, journey) => {
+  const fixture = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  const { page } = fixture;
+  await previewButton(page).click();
+  await savedOutcome(page, firstActivation);
+  await formReady(page);
+  await saveSourceElsewhere(fixture);
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await observationRow(page, "S-1").getByText("Inactive").waitFor();
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.match((await optionText(page, "S-1")) ?? "", /· inactive$/);
+  await previewButton(page).click();
+  await savedOutcome(page, firstActivation);
+});
+
+test("observation rows of withheld selections show no activation marker", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  // Two selections whose ids are withheld both read null, whatever their activation.
+  const withhold =
+    (state: boolean[]) => (selections: { id: string | null }[]) =>
+      selections.map((s, i) => ({ ...s, id: null, active: state[i] }));
+  await page.route("**/configuration", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.source.selections = withhold([true, false, false])(
+      body.data.source.selections,
+    );
+    await route.fulfill({ response, json: body });
+  });
+  await page.route("**/api/operator/source-observations", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    for (const project of body.data.projects)
+      for (const s of project.selections) s.selectionId = null;
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+  const rows = page.locator("article.settings-row", {
+    has: page.getByRole("heading", { name: /^Selection unavailable/ }),
+  });
+  await rows.nth(1).waitFor();
+  assert.equal(await rows.getByText(/^(?:Active|Inactive)$/).count(), 0);
 });

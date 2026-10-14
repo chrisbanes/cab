@@ -44,7 +44,9 @@ const fixHref = (fix: Exclude<WaitFix, { kind: "resume-project" }>) =>
       ? "/app/settings"
       : fix.kind === "add-claude"
         ? "/app/settings/runtime"
-        : `/app/profiles/${fix.profileId}/settings`;
+        : fix.kind === "open-repositories"
+          ? `/app/projects/${fix.projectId}/settings?tab=github`
+          : `/app/profiles/${fix.profileId}/settings`;
 
 const linkHref = (link: WaitLink, taskId: string | null) =>
   link.kind === "task"
@@ -54,7 +56,9 @@ const linkHref = (link: WaitLink, taskId: string | null) =>
         `/coordination/task/${taskId}#${encodeURIComponent(link.id)}`
       : link.kind === "source"
         ? link.url
-        : "/app/tasks?state=Running";
+        : link.kind === "recovery"
+          ? `/app/assignments/${link.assignmentId}/recovery`
+          : "/app/tasks?state=Running";
 
 /** One wait's Fix, or the links to what blocks it; holds never get a Fix. */
 function WaitAction({
@@ -90,7 +94,7 @@ function WaitAction({
     <>
       {wait.links.map((link) => (
         <ActionLink
-          key={`${link.kind}:${"id" in link ? link.id : link.label}`}
+          key={`${link.kind}:${"id" in link ? link.id : "assignmentId" in link ? link.assignmentId : link.label}`}
           variant="secondary"
           href={linkHref(link, taskId)}
         >

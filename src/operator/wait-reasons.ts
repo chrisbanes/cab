@@ -13,11 +13,13 @@ export const waitCodes = [
   "claude-token-unavailable",
   "profile-runtime-not-configured",
   "power-held",
+  "repository-access-revoked",
   "assignment-profile-revoked",
   "assignment-profile-stale",
   "assignment-instructions-stale",
   "assignment-profile-not-permitted",
   "assignment-held",
+  "assignment-recovery-unresolved",
   "local-dependency",
   "imported-blockers-blocked",
   "imported-blockers-unknown",
@@ -44,6 +46,7 @@ export const waitFixSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("readiness") }).strict(),
   z.object({ kind: z.literal("add-claude") }).strict(),
   z.object({ kind: z.literal("open-profile"), profileId: id }).strict(),
+  z.object({ kind: z.literal("open-repositories"), projectId: id }).strict(),
 ]);
 /** Holds link to their blocker and never carry a Fix. */
 export const waitLinkSchema = z.discriminatedUnion("kind", [
@@ -59,6 +62,8 @@ export const waitLinkSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("tasks-running"), label }).strict(),
+  /** Opens the assignment's recovery; reading it releases nothing. */
+  z.object({ kind: z.literal("recovery"), assignmentId: id, label }).strict(),
 ]);
 export const waitSchema = z
   .object({
@@ -81,11 +86,13 @@ export const waitLabels: Record<WaitCode, string> = {
   "claude-token-unavailable": "Claude token unavailable",
   "profile-runtime-not-configured": "Lead profile runtime not configured",
   "power-held": "Held by power supervision",
+  "repository-access-revoked": "Repository access revoked",
   "assignment-profile-revoked": "Assignment profile revoked",
   "assignment-profile-stale": "Assignment profile changed",
   "assignment-instructions-stale": "Assignment instructions changed",
   "assignment-profile-not-permitted": "Assignment profile not permitted",
   "assignment-held": "Assignment held",
+  "assignment-recovery-unresolved": "Assignment recovery unresolved",
   "local-dependency": "Blocked by a task dependency",
   "imported-blockers-blocked": "Blocked by a GitHub dependency",
   "imported-blockers-unknown": "GitHub dependencies unconfirmed",
@@ -101,6 +108,7 @@ export const fixLabels: Record<WaitFix["kind"], string> = {
   readiness: "Open readiness check",
   "add-claude": "Add Claude",
   "open-profile": "Open profile",
+  "open-repositories": "Open repositories",
 };
 
 /** Sorts by the flow's order and keeps the first wait per code. */
@@ -132,21 +140,27 @@ export interface WaitFacts {
   capacity?: string | null;
   /** Installation-wide: set while the power supervisor holds admission. */
   powerHold?: { reason: string | null } | null;
+  /** Set when the task's workspace uses a repository the project no longer links. */
+  repositoryAccessRevoked?: boolean;
   /**
    * The assignments whose turns are next, each with the admission reasons it has beyond the
    * task's own. An unmapped reason is never dropped: it becomes `admission-blocked`.
    */
   assignments?: readonly {
+    assignmentId: string;
     profileId: string;
     profileName: string | null;
     reasons: readonly string[];
   }[];
 }
 
-/** Assignment-only admission reasons; `openProfile` is the Fix, the others have none. */
+/**
+ * Assignment-only admission reasons; `openProfile` is the Fix, the others have none.
+ * `recovery` links the assignment's recovery instead.
+ */
 const assignmentReasonWaits = new Map<
   string,
-  { code: WaitCode; openProfile: boolean }
+  { code: WaitCode; openProfile: boolean; recovery?: boolean }
 >([
   [
     "profile-revoked",
@@ -165,6 +179,14 @@ const assignmentReasonWaits = new Map<
     { code: "assignment-profile-not-permitted", openProfile: false },
   ],
   ["assignment-held", { code: "assignment-held", openProfile: false }],
+  [
+    "recovery-continuation-unresolved",
+    {
+      code: "assignment-recovery-unresolved",
+      openProfile: false,
+      recovery: true,
+    },
+  ],
 ]);
 
 /** Builds the ordered waits from current facts. Pure: no reads, no clocks. */
@@ -224,6 +246,11 @@ export function deriveWaits(f: WaitFacts): Wait[] {
       links: [],
       ...(f.powerHold.reason ? { detail: f.powerHold.reason } : {}),
     });
+  if (f.repositoryAccessRevoked)
+    add("repository-access-revoked", {
+      kind: "open-repositories",
+      projectId: f.projectId,
+    });
   for (const a of f.assignments ?? [])
     for (const reason of a.reasons) {
       const wait = assignmentReasonWaits.get(reason);
@@ -234,7 +261,15 @@ export function deriveWaits(f: WaitFacts): Wait[] {
           fix: wait.openProfile
             ? { kind: "open-profile", profileId: a.profileId }
             : null,
-          links: [],
+          links: wait.recovery
+            ? [
+                {
+                  kind: "recovery",
+                  assignmentId: a.assignmentId,
+                  label: "Open recovery",
+                },
+              ]
+            : [],
           ...(a.profileName ? { detail: a.profileName } : {}),
         });
     }
@@ -268,5 +303,11 @@ export function cliFix(fix: WaitFix): string[] {
       return ["Settings → Add Claude"];
     case "open-profile":
       return [`Settings → Profiles → ${fix.profileId}`];
+    case "open-repositories":
+      return [
+        `ensemble project sources ${fix.projectId}`,
+        `ensemble project prepare-source ${fix.projectId} --out source.json --edit-file EDIT_FILE`,
+        "ensemble project apply --file source.json",
+      ];
   }
 }

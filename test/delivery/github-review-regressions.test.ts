@@ -20,6 +20,7 @@ import {
 } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { StandaloneService } from "../../src/standalone/service.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type { GitHubSourceReader } from "../../src/standalone/github-source.js";
 
@@ -366,6 +367,48 @@ for (const revoke of [false, true])
           domain.githubConfiguration(projectId).repositories.length,
           revoke ? 0 : 1,
         );
+        // The task read explains the same rejection from the shared predicate.
+        assert.deepEqual(
+          (await new OperatorApi(service).readTask(taskId)).data.waits.filter(
+            (w) => w.code === "repository-access-revoked",
+          ),
+          revoke
+            ? [
+                {
+                  code: "repository-access-revoked",
+                  fix: { kind: "open-repositories", projectId },
+                  links: [],
+                },
+              ]
+            : [],
+        );
+        // A workspace still provisioning, or whose provisioning failed, has no repository
+        // identity yet; that is incomplete provisioning, not revoked access.
+        if (!revoke)
+          for (const reason of [null, "Workspace creation incomplete: probe"]) {
+            const db = (service as unknown as { db: DatabaseSync }).db;
+            const row = db
+              .prepare(
+                "SELECT repositories FROM task_workspace_bindings WHERE taskId = ?",
+              )
+              .get(taskId) as { repositories: string };
+            db.prepare(
+              "UPDATE task_workspace_bindings SET state = 'provisioning', reason = ?, repositories = ? WHERE taskId = ?",
+            ).run(
+              reason,
+              JSON.stringify(
+                (JSON.parse(row.repositories) as Record<string, unknown>[]).map(
+                  (r) => ({ ...r, gitCommonDir: null, commit: null }),
+                ),
+              ),
+              taskId,
+            );
+            assert.ok(
+              !(
+                await new OperatorApi(service).readTask(taskId)
+              ).data.waits.some((w) => w.code === "repository-access-revoked"),
+            );
+          }
         assert.equal(
           (await service.taskWorkspace(taskId))?.workspaceId,
           workspace.workspaceId,

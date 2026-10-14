@@ -242,6 +242,43 @@ test("assignment waits are hold notices in the waits' order, worded from their l
   );
 });
 
+test("revoked repository access and unresolved recovery are hold notices in the waits' order", () => {
+  const projectId = randomUUID(),
+    assignmentId = randomUUID();
+  const waits = orderWaits([
+    {
+      code: "assignment-recovery-unresolved",
+      fix: null,
+      links: [{ kind: "recovery", assignmentId, label: "Open recovery" }],
+      detail: "Worker",
+    },
+    {
+      code: "repository-access-revoked",
+      fix: { kind: "open-repositories", projectId },
+      links: [],
+    },
+  ]);
+  assert.deepEqual(
+    holdNotices(task([], { waits })).map(({ id, title, items }) => ({
+      id,
+      title,
+      items,
+    })),
+    [
+      {
+        id: "repository-access-revoked",
+        title: "Execution held (repository access revoked)",
+        items: [],
+      },
+      {
+        id: "assignment-recovery-unresolved",
+        title: "Execution held (assignment recovery unresolved)",
+        items: ["Worker"],
+      },
+    ],
+  );
+});
+
 test("answering a question words each hold notice for answers, with the same titles and items", () => {
   const source = {
     nativeBlockers: [

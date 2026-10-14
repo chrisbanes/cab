@@ -12,7 +12,8 @@ import {
 
 const projectId = "00000000-0000-4000-8000-000000000001",
   profileId = "00000000-0000-4000-8000-000000000002",
-  blockerId = "00000000-0000-4000-8000-000000000003";
+  blockerId = "00000000-0000-4000-8000-000000000003",
+  assignmentId = "00000000-0000-4000-8000-000000000005";
 const lead = {
   profileId,
   runtimeUnavailable: false,
@@ -30,8 +31,15 @@ const assignmentReasons = [
   ],
   ["profile-not-permitted", "assignment-profile-not-permitted", false],
   ["assignment-held", "assignment-held", false],
+  ["recovery-continuation-unresolved", "assignment-recovery-unresolved", false],
 ] as const;
+const recoveryLink = {
+  kind: "recovery",
+  assignmentId,
+  label: "Open recovery",
+} as const;
 const assignment = (reasons: readonly string[], profileName = "Worker") => ({
+  assignmentId,
   profileId,
   profileName,
   reasons,
@@ -89,6 +97,14 @@ test("each wait code has one input producing exactly that wait, its Fix or its l
       { powerHold: { reason: powerReason } },
       { code: "power-held", fix: null, links: [], detail: powerReason },
     ],
+    [
+      { repositoryAccessRevoked: true },
+      {
+        code: "repository-access-revoked",
+        fix: { kind: "open-repositories", projectId },
+        links: [],
+      },
+    ],
     ...assignmentReasons.map(
       ([reason, code, openProfile]): [
         Partial<Parameters<typeof deriveWaits>[0]>,
@@ -98,7 +114,8 @@ test("each wait code has one input producing exactly that wait, its Fix or its l
         {
           code,
           fix: openProfile ? { kind: "open-profile", profileId } : null,
-          links: [],
+          links:
+            code === "assignment-recovery-unresolved" ? [recoveryLink] : [],
           detail: "Worker",
         },
       ],
@@ -209,6 +226,7 @@ test("every reason present returns the flow's fixed order, and holds never carry
     approvals: [{ id: "r", label: "Review the request" }],
     capacity: "1 of 1 turns running",
     powerHold: { reason: powerReason },
+    repositoryAccessRevoked: true,
     assignments: [assignment(assignmentReasons.map(([reason]) => reason))],
   });
   const withProfile = one({ lead: { ...lead, runtimeNotConfigured: true } });
@@ -223,6 +241,7 @@ test("every reason present returns the flow's fixed order, and holds never carry
         "assignment-instructions-stale",
         "assignment-profile-not-permitted",
         "assignment-held",
+        "assignment-recovery-unresolved",
         "local-dependency",
         "imported-blockers-blocked",
         "imported-blockers-unknown",
@@ -271,26 +290,28 @@ test("a power hold is installation-wide, sits after the runtime waits and carrie
   assert.ok(!runtimeWaitCodes.includes("power-held"));
 });
 
-test("an assignment's admission reasons sit after the power hold, name its profile and keep the first per code", () => {
+test("an assignment's admission reasons sit after the power hold and revoked repository access, name its profile and keep the first per code", () => {
   const all = assignmentReasons.map(([reason]) => reason);
   assert.deepEqual(
     one({
       admissionReasons: ["project-paused", "local-dependency"],
       lead: { ...lead, runtimeUnavailable: true },
       powerHold: { reason: null },
+      repositoryAccessRevoked: true,
       assignments: [assignment(all)],
     }).map((w) => w.code),
     [
       "project-paused",
       "runtime-unavailable",
       "power-held",
+      "repository-access-revoked",
       ...assignmentReasons.map(([, code]) => code),
       "local-dependency",
     ],
   );
   assert.deepEqual(
     waitCodes.slice(
-      waitCodes.indexOf("power-held") + 1,
+      waitCodes.indexOf("repository-access-revoked") + 1,
       waitCodes.indexOf("local-dependency"),
     ),
     assignmentReasons.map(([, code]) => code),
@@ -302,6 +323,7 @@ test("an assignment's admission reasons sit after the power hold, name its profi
       assignments: [
         assignment(["profile-revoked"]),
         {
+          assignmentId: other,
           profileId: other,
           profileName: "Other",
           reasons: ["profile-revoked"],
@@ -323,6 +345,28 @@ test("an assignment's admission reasons sit after the power hold, name its profi
   });
   assert.ok(!("detail" in (unnamed[0] ?? {})));
   assert.ok(waitSchema.safeParse(unnamed[0]).success);
+  // Two unresolved recoveries keep the first assignment's link only.
+  assert.deepEqual(
+    one({
+      assignments: [
+        assignment(["recovery-continuation-unresolved"]),
+        {
+          assignmentId: other,
+          profileId: other,
+          profileName: "Other",
+          reasons: ["recovery-continuation-unresolved"],
+        },
+      ],
+    }),
+    [
+      {
+        code: "assignment-recovery-unresolved",
+        fix: null,
+        links: [recoveryLink],
+        detail: "Worker",
+      },
+    ],
+  );
   assert.deepEqual(one({ assignments: [assignment([])] }), []);
   assert.deepEqual(one({ assignments: [] }), []);
 });
@@ -376,6 +420,44 @@ test("the CLI Fix is the command or Settings path", () => {
   assert.deepEqual(cliFix({ kind: "open-profile", profileId }), [
     `Settings → Profiles → ${profileId}`,
   ]);
+  assert.deepEqual(cliFix({ kind: "open-repositories", projectId }), [
+    `ensemble project sources ${projectId}`,
+    `ensemble project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
+    "ensemble project apply --file source.json",
+  ]);
+});
+
+test("revoked repository access discloses no repository and a recovery link sends nothing", () => {
+  const [repository] = one({ repositoryAccessRevoked: true });
+  assert.ok(repository && !("detail" in repository));
+  assert.deepEqual(one({ repositoryAccessRevoked: false }), []);
+  assert.ok(
+    !waitSchema.safeParse({
+      code: "assignment-recovery-unresolved",
+      fix: null,
+      links: [{ ...recoveryLink, assignmentId: "not-a-uuid" }],
+    }).success,
+  );
+  assert.deepEqual(
+    waitLines(
+      one({ assignments: [assignment(["recovery-continuation-unresolved"])] }),
+      projectId,
+    ),
+    [
+      "Waiting: Assignment recovery unresolved",
+      "  Worker",
+      `  Recovery: ensemble recovery get ${assignmentId}`,
+    ],
+  );
+  assert.deepEqual(
+    waitLines(one({ repositoryAccessRevoked: true }), projectId),
+    [
+      "Waiting: Repository access revoked",
+      `  Fix: ensemble project sources ${projectId}`,
+      `  Fix: ensemble project prepare-source ${projectId} --out source.json --edit-file EDIT_FILE`,
+      "  Fix: ensemble project apply --file source.json",
+    ],
+  );
 });
 
 test("the CLI names the approval command for an approval wait", () => {
