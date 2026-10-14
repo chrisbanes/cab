@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { githubApi, githubFetch, nextPageLink } from "./github-http.js";
+import {
+  githubApi,
+  githubFetch,
+  githubRateLimitResumeAt,
+  nextPageLink,
+} from "./github-http.js";
 
 export type DiscoveryFailureReason =
   | "missing-credential"
@@ -129,19 +134,10 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
     }
     if (response.ok) return response;
     // Only a 403 body is read, to tell a secondary rate limit from a refusal.
-    const text =
-      response.status === 403
-        ? await response.text().catch(() => "")
-        : await response.body?.cancel().catch(() => {});
-    if (response.status === 401) throw new DiscoveryFailure("unauthorized");
-    if (
-      response.status === 429 ||
-      (response.status === 403 &&
-        (exhausted(response) ||
-          response.headers.has("retry-after") ||
-          /rate limit/i.test(String(text ?? ""))))
-    )
+    if (response.status !== 403) await response.body?.cancel().catch(() => {});
+    if ((await githubRateLimitResumeAt(response)) !== undefined)
       throw new DiscoveryFailure("rate-limited");
+    if (response.status === 401) throw new DiscoveryFailure("unauthorized");
     if (response.status === 403 || response.status === 404)
       throw new DiscoveryFailure("forbidden");
     throw new DiscoveryFailure("unreadable");

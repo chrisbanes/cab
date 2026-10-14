@@ -1350,7 +1350,8 @@ Stable operation IDs retain exact material and bound caller revisions, including
 denied outcomes. Intent commits before an effect. Successful write responses alone
 do not establish success: provider readback must prove the exact target. Ambiguous
 creates retain uncertainty across restart; a missing marker cannot authorize replay.
-Only positively confirmed transient no-effect failures receive up to two retries.
+Only positively confirmed transient no-effect failures receive up to two retries,
+each made by reconciliation once any provider rate-limit resume time has passed.
 
 The lead explicitly submits merge or issue closure with its current reviewed result
 set. Shared completion checks run with the current action intent transition, excluding

@@ -58,6 +58,15 @@ function actionKeys(record: {
     `target:${target.repositoryId}:${"number" in target ? target.number : target.headRef}`,
   ];
 }
+/** A confirmed no-effect failure the provider allows retrying, once its resume time has passed. */
+function retryDue(record: DeliveryActionRecord): boolean {
+  return (
+    record.state === "confirmed-failure" &&
+    record.observation?.retryable === true &&
+    record.attempts < 3 &&
+    (record.observation.resumeAt ?? 0) <= Date.now()
+  );
+}
 /** Serializes a task and exact target; awaits provider I/O outside SQLite transactions. */
 export class DeliveryCoordinator {
   private readonly tails = new Map<string, Promise<unknown>>();
@@ -192,17 +201,8 @@ export class DeliveryCoordinator {
         receipt: null,
       };
     }
-    const observed = this.store.recordObservation(
-      record.operationId,
-      observation,
-    );
-    if (
-      observed.state === "confirmed-failure" &&
-      observed.observation?.retryable &&
-      observed.attempts < 3
-    )
-      return this.attempt(observed);
-    return observed;
+    // A retryable failure waits for reconcile() once its resume time passes.
+    return this.store.recordObservation(record.operationId, observation);
   }
   async registerPr(input: unknown, caller: DeliveryCaller) {
     if (isOperatorDeliveryCaller(caller))
@@ -422,21 +422,12 @@ export class DeliveryCoordinator {
     for (const record of this.store.actions()) {
       if (
         !["prepared", "attempting", "uncertain"].includes(record.state) &&
-        !(
-          record.state === "confirmed-failure" &&
-          record.observation?.retryable &&
-          record.attempts < 3
-        )
+        !retryDue(record)
       )
         continue;
       await this.serialize(actionKeys(record), async () => {
         const current = this.store.action(record.operationId);
-        if (
-          current.state === "prepared" ||
-          (current.state === "confirmed-failure" &&
-            current.observation?.retryable &&
-            current.attempts < 3)
-        ) {
+        if (current.state === "prepared" || retryDue(current)) {
           await this.attempt(current);
           return;
         }

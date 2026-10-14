@@ -251,6 +251,8 @@ export const actionObservationSchema = z
       .strict()
       .nullable(),
     retryable: z.boolean().optional(),
+    /** Epoch ms before which a retryable failure is not re-attempted. */
+    resumeAt: z.number().int().positive().optional(),
   })
   .strict();
 export type ProviderActionObservation = z.output<

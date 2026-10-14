@@ -1,7 +1,13 @@
 import { isOperatorDeliveryCaller } from "../core/delivery.js";
 import { DomainPolicyError } from "../core/domain.js";
 import { z } from "zod";
-import { githubApi as api, githubFetch, nextPageLink } from "./github-http.js";
+import {
+  githubApi as api,
+  githubFetch,
+  githubPages,
+  githubRateLimitResumeAt,
+  nextPageLink,
+} from "./github-http.js";
 import {
   actionObservationSchema,
   prObservationSchema,
@@ -59,7 +65,11 @@ const page = z.object({
 });
 const prQuery = deliveryDocuments.EnsembleDeliveryPr;
 class ProviderFailure extends Error {
-  constructor(readonly status: number) {
+  constructor(
+    readonly status: number,
+    /** Set when GitHub rate-limited the request: the epoch-ms time to resume. */
+    readonly resumeAt?: number,
+  ) {
     super(`provider-http-${status}`);
   }
 }
@@ -153,7 +163,11 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       },
       () => new Error("provider-origin-mismatch"),
     );
-    if (!response.ok) throw new ProviderFailure(response.status);
+    if (!response.ok)
+      throw new ProviderFailure(
+        response.status,
+        await githubRateLimitResumeAt(response),
+      );
     return {
       json: response.status === 204 ? null : await response.json(),
       response,
@@ -170,19 +184,17 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
   }
   private async pages(path: string): Promise<unknown[]> {
     const rows: unknown[] = [];
-    let next: string | null = path;
-    const seen = new Set<string>();
-    for (let count = 0; next; count++) {
-      if (count >= 100 || seen.has(next))
-        throw new Error("provider-pagination-incomplete");
-      seen.add(next);
-      const result = await this.request(next);
-      rows.push(...z.array(z.unknown()).parse(result.json));
-      next = nextPageLink(
-        result.response,
-        () => new Error("provider-pagination-incomplete"),
-      );
-    }
+    const incomplete = () => new Error("provider-pagination-incomplete");
+    for await (const value of githubPages(
+      path,
+      async (url) => {
+        const { json, response } = await this.request(url);
+        return { value: json, response };
+      },
+      (response) => nextPageLink(response, incomplete),
+      incomplete,
+    ))
+      rows.push(...z.array(z.unknown()).parse(value));
     return rows;
   }
   private async repository(id: string) {
@@ -211,6 +223,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
       throw new Error("provider-repository-mismatch");
     return {
       path,
+      owner: data.node.nameWithOwner.split("/")[0] ?? "",
       methods: [
         ...(repo.allow_merge_commit ? ["merge"] : []),
         ...(repo.allow_squash_merge ? ["squash"] : []),
@@ -989,7 +1002,9 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           state: "confirmed-failure",
           reason: `provider-http-${error.status}`,
           receipt: null,
-          retryable: error.status === 429,
+          ...(error.resumeAt === undefined
+            ? {}
+            : { retryable: true, resumeAt: error.resumeAt }),
         };
       return {
         state: "uncertain",
@@ -1032,30 +1047,45 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
         )
           receipt = { nodeId: matching[0].node_id };
       } else if (a.kind === "pr.create") {
+        // GitHub filters by head owner:branch; the marker filter below keeps
+        // unrelated PRs (e.g. a deleted fork's null head.repo) out of strict parsing.
+        const head = encodeURIComponent(`${repo.owner}:${a.target.headRef}`);
         const pulls = (
-          await this.pages(`${repo.path}/pulls?state=all&per_page=100`)
-        ).map((v) =>
-          z
-            .object({
-              node_id: name,
-              number: z.number().int().positive(),
-              title: z.string(),
-              body: z.string().nullable(),
-              draft: z.boolean(),
-              user: z.object({ node_id: name }),
-              head: z.object({
-                sha,
-                ref: name,
-                repo: z.object({ node_id: name }),
-              }),
-              base: z.object({ ref: name, repo: z.object({ node_id: name }) }),
-            })
-            .parse(v),
-        );
-        const matches = pulls.filter((p) => p.body?.includes(marker));
-        const p = matches[0];
+          await this.pages(
+            `${repo.path}/pulls?state=all&head=${head}&base=${encodeURIComponent(a.target.baseRef)}&per_page=100`,
+          )
+        )
+          .filter((v) =>
+            z
+              .object({ body: z.string() })
+              .safeParse(v)
+              .data?.body.includes(marker),
+          )
+          .map((v) =>
+            z
+              .object({
+                node_id: name,
+                number: z.number().int().positive(),
+                title: z.string(),
+                body: z.string().nullable(),
+                draft: z.boolean(),
+                user: z.object({ node_id: name }),
+                head: z.object({
+                  sha,
+                  ref: name,
+                  // A deleted fork's head repository is null; it never matches.
+                  repo: z.object({ node_id: name }).nullable(),
+                }),
+                base: z.object({
+                  ref: name,
+                  repo: z.object({ node_id: name }),
+                }),
+              })
+              .parse(v),
+          );
+        const p = pulls[0];
         if (
-          matches.length === 1 &&
+          pulls.length === 1 &&
           p &&
           p.body === `${a.body}\n\n${marker}` &&
           p.title === a.title &&
@@ -1064,7 +1094,7 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
           p.head.sha === a.target.expectedHeadSha &&
           p.head.ref === a.target.headRef &&
           p.base.ref === a.target.baseRef &&
-          p.head.repo.node_id === a.target.repositoryId &&
+          p.head.repo?.node_id === a.target.repositoryId &&
           p.base.repo.node_id === a.target.repositoryId
         )
           receipt = {
