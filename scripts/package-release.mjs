@@ -227,6 +227,14 @@ async function build(commit, out) {
     for (const name of await readdir(scope))
       if (name.startsWith(SDK_PLATFORM_PREFIX))
         await rm(join(scope, name), { recursive: true });
+    // Prune leaves empty scope directories such as node_modules/@biomejs.
+    await run("find", [
+      join(source, "node_modules"),
+      "-type",
+      "d",
+      "-empty",
+      "-delete",
+    ]);
     await assertProductionTree(source);
 
     const name = `${pkg.name}-${pkg.version}-${PLATFORM}`;
