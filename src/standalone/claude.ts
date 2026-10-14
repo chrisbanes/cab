@@ -22,7 +22,7 @@ import type {
 import { z } from "zod";
 import {
   type FailureEvidence,
-  parseFailureEvidence,
+  terminalFailureEvidence,
   type Runtime,
   type RuntimeConversationEvent,
   RuntimeNotEnabledError,
@@ -1033,30 +1033,12 @@ export class ClaudeRuntime implements Runtime {
     threadId: string,
     turnId: string,
   ): FailureEvidence | undefined {
-    const generation = this.generation;
-    if (!threadId || !turnId || !generation) return undefined;
-    try {
-      const evidence = this.options.safety.terminal(
-        threadId,
-        turnId,
-        generation,
-      );
-      if (
-        evidence?.firstStatus !== "failed" ||
-        evidence.conflicted ||
-        !evidence.workId ||
-        !evidence.failure
-      )
-        return undefined;
-      return parseFailureEvidence({
-        threadId,
-        turnId,
-        status: "failed",
-        ...evidence.failure,
-      });
-    } catch {
-      return undefined;
-    }
+    return terminalFailureEvidence(
+      this.options.safety,
+      threadId,
+      turnId,
+      this.generation,
+    );
   }
 
   /** Keeps unwaited settled turns bounded; unsettled turns are never evicted. */
