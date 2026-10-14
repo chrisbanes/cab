@@ -534,8 +534,15 @@ no Fix and shows the supervisor's hold reason. An assignment that is waiting to 
 but is not admissible for its own reasons shows its own wait, named for its profile.
 A revoked or changed profile opens that profile, which does not re-bind the
 assignment; changed instructions, a profile that project routing does not permit and
-a held assignment have no Fix. A Fix never clears holds or grants access by
-implication. These controls must preserve existing readiness and admission rules.
+a held assignment have no Fix; a held assignment is explained whether or not a turn
+is queued for it. Revoked repository access (an imported task's workspace uses a
+repository the project no longer links) opens the project's GitHub settings, names no
+repository and grants nothing by itself. An assignment whose operator-reconciled
+recovery has no recorded continuation has no Fix and links to its recovery; opening
+it releases nothing. A request refused only because the captured task or assignment
+revisions changed is shown as held execution (`recovery-held`), not as a wait:
+clearing it is a recovery or fresh operator message decision. A Fix never clears
+holds or grants access by implication. These controls must preserve existing readiness and admission rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
 from current service state: runtime readiness, GitHub discovery, lead profile,
