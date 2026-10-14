@@ -283,6 +283,8 @@ export class GitHubSourceStore {
         JOIN project_github_sources c ON c.projectId = t.projectId
         WHERE e.taskId = ? AND t.state = 'open' AND e.observedState = 'closed'
           AND c.closedIssues = 'done'
+          AND EXISTS (SELECT 1 FROM github_source_holds h
+            WHERE h.nodeId = e.nodeId AND h.active = 1 AND h.reason = 'closed')
           AND NOT EXISTS (SELECT 1 FROM github_delivery_closures d WHERE d.nodeId = e.nodeId)`)
         .get(taskId) as Row | undefined;
       if (!task) return false;
@@ -1027,12 +1029,11 @@ export class GitHubSourceStore {
         .prepare("SELECT 1 FROM github_delivery_closures WHERE nodeId = ?")
         .get(nodeId)
     ) {
-      // Closure after import holds the task whatever its readiness; stricter text review wins.
+      // Closure after import holds the task whatever its readiness. Stricter text review
+      // and a pending own-delivery closure proof (closure-read-unavailable) keep their hold.
       if (
         !hold?.active ||
-        ["withdrawn", "readiness-lost", "closure-read-unavailable"].includes(
-          String(hold.reason),
-        )
+        ["withdrawn", "readiness-lost"].includes(String(hold.reason))
       ) {
         this.setSourceHold(nodeId, "closed");
         if (Number(row.ready) === Number(ready))

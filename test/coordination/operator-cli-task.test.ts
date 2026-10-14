@@ -929,6 +929,9 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     const human = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
     assert.equal(human.code, 0, human.err);
     assert.ok(human.out.includes(`State:   ${state}`), human.out);
+    const list = await o.h.run(["task", "list", "--connection", "ro"]);
+    assert.equal(list.code, 0, list.err);
+    assert.ok(list.out.includes(state), list.out);
     const page = new LocalOperatorUi(d, undefined, sources).task(taskId);
     assert.ok(
       page.includes(

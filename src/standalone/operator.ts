@@ -72,6 +72,13 @@ function textarea(name: string, value = ""): string {
   return `<label>${escapeHtml(name)} <textarea name="${escapeHtml(name)}">${escapeHtml(value)}</textarea></label>`;
 }
 
+const closureText = (closure: "held" | "completed" | null) =>
+  closure === "held"
+    ? ", closed on GitHub; held"
+    : closure === "completed"
+      ? ", closed on GitHub"
+      : "";
+
 function selectField(
   name: string,
   options: { value: string; label: string; disabled?: boolean }[],
@@ -265,7 +272,7 @@ export class LocalOperatorUi {
       .tasks(projectId)
       .map(
         (task) =>
-          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
+          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}${closureText(this.store.providerClosure(String(task.id)))}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
       )
       .join("");
     const candidateProfileIds = JSON.stringify(

@@ -592,6 +592,39 @@ test("a closure hold never replaces a changed-text hold", () => {
   }
 });
 
+test("a pending own-delivery closure proof is never turned into a provider completion", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    w.sources.recordDeliveryClosureUnavailable("I_1");
+    assert.equal(w.hold()?.reason, "closure-read-unavailable");
+    w.observe({ state: "closed" });
+    assert.equal(w.hold()?.reason, "closure-read-unavailable");
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    assert.equal(w.domain.task(taskId).state, "open");
+    assert.equal(w.completion(taskId), false);
+  } finally {
+    w.close();
+  }
+});
+
+test("switching skip to done imports a previously skipped closed issue as Done", () => {
+  const w = closedIssueWorld("skip");
+  try {
+    assert.equal(w.observe({ state: "closed" }), undefined);
+    w.configure("done");
+    const task = w.observe({ state: "closed" });
+    assert.equal(task?.state, "done");
+    assert.equal(w.completion(task?.id), true);
+    assert.equal(w.hold(), undefined);
+  } finally {
+    w.close();
+  }
+});
+
 test("switching done to skip reopens a provider-completed task under a closure hold", () => {
   const w = closedIssueWorld("done");
   try {

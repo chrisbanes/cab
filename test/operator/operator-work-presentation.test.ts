@@ -38,6 +38,7 @@ type Overrides = {
   codes?: string[];
   paused?: boolean;
   closure?: "held" | "completed" | null;
+  reasons?: string[];
 };
 function summary(o: Overrides = {}): TaskListSummary {
   const projectId = o.projectId ?? randomUUID();
@@ -67,7 +68,7 @@ function summary(o: Overrides = {}): TaskListSummary {
       },
       reasonCodes: [],
     },
-    admission: { eligible: true, reasons: [] },
+    admission: { eligible: !o.reasons?.length, reasons: o.reasons ?? [] },
     capacity: {
       globalUsage: 0,
       globalLimit: 10,
@@ -95,9 +96,14 @@ function summary(o: Overrides = {}): TaskListSummary {
 
 test("closure provenance places held tasks in Paused and names provider completion", () => {
   for (const ready of [true, false]) {
-    const held = summary({ ready, closure: "held" });
+    const held = summary({
+      ready,
+      closure: "held",
+      reasons: ["task-unready", "source-held"],
+    });
     assert.equal(taskColumn(held), "Paused");
     assert.ok(taskReasons(held).includes("Closed on GitHub"));
+    assert.equal(taskReasons(held).includes("Draft: not Ready"), false);
   }
   const completed = summary({ state: "done", closure: "completed" });
   assert.equal(taskColumn(completed), "Done");

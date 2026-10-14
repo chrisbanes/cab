@@ -172,9 +172,10 @@ export function taskReasons(task: TaskListSummary) {
   const terminal = task.state === "done" || task.state === "cancelled";
   const reasons: string[] = [
     ...task.attention.codes.map((code) => reasonLabels[code]),
-    ...(terminal ? [] : task.admission.reasons).map(
-      (r) => reasonLabels[r] ?? "Waiting to start",
-    ),
+    ...(terminal ? [] : task.admission.reasons)
+      // A closure-held task is Paused, never Draft.
+      .filter((r) => !(r === "task-unready" && task.source?.closure === "held"))
+      .map((r) => reasonLabels[r] ?? "Waiting to start"),
   ];
   if (task.source?.closure === "held") reasons.unshift("Closed on GitHub");
   if (task.source?.closure === "completed")

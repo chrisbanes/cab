@@ -228,7 +228,9 @@ is complete and its execution has settled, with no writer, ambiguity or unfinish
 execution; provider closure never resolves uncertain execution or clears other holds.
 Reopening returns a provider-completed task to open and recomputes readiness from the
 rule; reopening grants no readiness and keeps any closure hold. Switching a source to
-Skip reopens its provider-completed tasks under a closure hold; no mode or switch
+Skip reopens its provider-completed tasks under a closure hold. Under Treat closure
+as Done, a task the operator reopens while its issue stays closed is completed again
+once settled; switching the source to Skip keeps it open; no mode or switch
 deletes tasks or history. Harmless edits
 can be incorporated; materially changed scope holds work for clarification.
 
