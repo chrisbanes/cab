@@ -145,7 +145,7 @@ async function assertProductionTree(root) {
 
 const git = async (...args) => (await run("git", args)).stdout.trim();
 
-async function exec(command, args, options) {
+async function runInherited(command, args, options) {
   const child = spawn(command, args, { stdio: "inherit", ...options });
   const [code, signal] = await once(child, "exit");
   if (code !== 0)
@@ -203,7 +203,7 @@ async function build(commit, out) {
       throw new Error(
         `Downloaded Node reports ${reported}, expected v${nodeVersion}`,
       );
-    await exec(
+    await runInherited(
       "npx",
       [
         "--yes",
@@ -350,7 +350,9 @@ async function waitForApp(origin, child, deadline) {
         `Service exited (${child.signalCode ?? child.exitCode}) before serving /app`,
       );
     try {
-      const response = await fetch(`${origin}/app`);
+      const response = await fetch(`${origin}/app`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (response.status === 200) return await response.text();
     } catch {
       // Not listening yet.
@@ -374,9 +376,13 @@ async function verify(tarballPath) {
     if (!name || extra.length)
       throw new Error("Tarball must contain one release directory");
     const release = join(unpacked, name);
-    const manifest = JSON.parse(
-      await readFile(join(release, "manifest.json"), "utf8"),
-    );
+    const manifestText = await readFile(join(release, "manifest.json"), "utf8");
+    const outer = join(dirname(tarball), "manifest.json");
+    if (existsSync(outer) && (await readFile(outer, "utf8")) !== manifestText)
+      throw new Error(
+        "manifest.json beside the tarball differs from the release's",
+      );
+    const manifest = JSON.parse(manifestText);
     const pkg = JSON.parse(
       await readFile(join(release, "package.json"), "utf8"),
     );
