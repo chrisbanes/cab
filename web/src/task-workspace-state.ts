@@ -3,6 +3,7 @@ import type {
   OperatorCommand,
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
+import { CommitGate } from "./commit-gate.js";
 import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
@@ -228,15 +229,23 @@ export class LocalReviewState {
   /** The composer's form is on screen: its origin row is mounted on this page. */
   composerShown = false;
   private readonly listeners = new Set<() => void>();
+  /** Lets focus wait for the commit that shows the latest `notify()`. */
+  readonly gate = new CommitGate();
   /** The mounted pages to re-render; each removes itself when it unmounts. */
   subscribe(listener: () => void) {
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
+      if (this.listeners.size === 0) this.gate.discard();
     };
   }
   notify() {
+    this.gate.changed();
     for (const listener of this.listeners) listener();
+  }
+  /** Run `run` after the commit that shows the latest change; never when no page is mounted. */
+  afterRender(run: () => void) {
+    if (this.listeners.size > 0) this.gate.afterRender(run);
   }
   /**
    * A draft write whose response was lost, or whose page went away before it arrived: the

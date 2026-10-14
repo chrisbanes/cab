@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   browserSuite,
+  type BrowserJourney,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import {
@@ -10,7 +11,7 @@ import {
   startSettings,
 } from "../fixtures/operator-settings.js";
 import { randomUUID } from "node:crypto";
-import type { Page } from "playwright";
+import { webkit, type Browser, type Page } from "playwright";
 import {
   ClaudeShapedFixtureRuntime,
   OperatorFixtureRuntime,
@@ -44,7 +45,7 @@ for (const [name, viewport] of [
       .filter({ hasText: "runtime unavailable" });
     await alerts.first().waitFor();
     assert.deepEqual(await alerts.allInnerTexts(), [
-      "Claude runtime unavailable — restart the service",
+      "Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
     ]);
     const runtimes = page.locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Execution runtimes" }),
@@ -338,6 +339,150 @@ test("turning off a runtime that tasks use confirms first; Keep leaves it on and
     [1, 2],
   );
   assert.equal(await control.isChecked(), false);
+});
+
+/** Frame callbacks run before the page's own render, the order a loaded machine sometimes produces. */
+const framesBeforeCommit = (page: Page) =>
+  page.evaluate(() => {
+    window.requestAnimationFrame = (callback) => {
+      queueMicrotask(() => callback(performance.now()));
+      return 0;
+    };
+  });
+
+/** Loses the answer to the first runtime change after the service handled it. */
+const loseFirstRuntimeAnswer = (page: Page) => {
+  let lost = true;
+  return page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "runtime.configure" || !lost) return route.fallback();
+    lost = false;
+    await route.fetch();
+    await route.abort("connectionreset");
+  });
+};
+
+const unknownToggleFocusesTheCheck = async (
+  journey: BrowserJourney,
+  launch?: () => Promise<Browser>,
+) => {
+  const { f, page } = await startSettings(
+    journey,
+    "/app/settings/runtime",
+    desktop,
+    launch,
+    switchable(),
+  );
+  const posts = commandPosts(page);
+  const row = runtimeRow(page, "Claude");
+  const control = row.getByRole("switch", { name: "Claude enabled" });
+  await control.waitFor();
+  await loseFirstRuntimeAnswer(page);
+  await framesBeforeCommit(page);
+  // Locator waits only: waitForFunction would poll with the replaced frame callbacks.
+  await control.evaluate((element) => (element as HTMLElement).click());
+  const check = row.getByRole("button", {
+    name: "Check whether it saved",
+    exact: true,
+  });
+  await check.and(page.locator(":focus")).waitFor();
+  assert.equal(await control.isDisabled(), true);
+  await check.evaluate((element) => (element as HTMLElement).click());
+  await runtimesPanel(page)
+    .getByText("Claude turned off.", { exact: true })
+    .waitFor();
+  await control.and(page.locator(":focus:enabled")).waitFor();
+  // The check resent the exact command: one logical change.
+  assert.equal(posts.length, 2);
+  assert.equal(posts[0], posts[1]);
+  assert.equal(f.service.domain().runtimeEnabled("claude"), false);
+};
+
+test("an unknown runtime toggle outcome focuses 'Check whether it saved' and the check replays the same command", async (_t, journey) => {
+  await unknownToggleFocusesTheCheck(journey);
+});
+
+test(
+  "an unknown runtime toggle outcome focuses 'Check whether it saved' in WebKit",
+  { browserEngine: "webkit" },
+  async (_t, journey) => {
+    await unknownToggleFocusesTheCheck(journey, () => webkit.launch());
+  },
+);
+
+test("a refused runtime toggle returns focus to the enabled switch after frame callbacks that run before the commit", async (_t, journey) => {
+  const { f, page } = await startSettings(
+    journey,
+    "/app/settings/runtime",
+    desktop,
+    undefined,
+    {
+      ...claudeEnabled,
+      serviceOptions: {
+        runtimeHarnesses: ["codex", "claude"] as const,
+        resolveExecutable: async (harness: string) => harness !== "claude",
+      },
+    },
+  );
+  await f.service.configureRuntime({
+    key: randomUUID(),
+    harness: "claude",
+    enabled: false,
+  });
+  await page.reload();
+  const row = runtimeRow(page, "Claude");
+  const control = row.getByRole("switch", { name: "Claude enabled" });
+  await row.getByText("Disabled in Settings").waitFor();
+  await framesBeforeCommit(page);
+  await control.evaluate((element) => (element as HTMLElement).click());
+  await row.getByText("Claude was not turned on", { exact: false }).waitFor();
+  await control.and(page.locator(":focus:enabled")).waitFor();
+  assert.equal(f.service.domain().runtimeEnabled("claude"), false);
+});
+
+test("a runtime toggle answered after its page was left focuses nothing", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/settings/runtime",
+    desktop,
+    undefined,
+    switchable(),
+  );
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const row = runtimeRow(page, "Claude");
+  const control = row.getByRole("switch", { name: "Claude enabled" });
+  await control.waitFor();
+  let entered!: () => void;
+  const reached = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "runtime.configure") return route.fallback();
+    const response = await route.fetch();
+    entered();
+    await gate;
+    await route.fulfill({ response });
+  });
+  await control.click();
+  await reached;
+  await page
+    .getByRole("link", { name: "Search", exact: true })
+    .evaluate((element) => (element as HTMLElement).click());
+  release();
+  await page.waitForTimeout(250);
+  assert.equal(
+    await page.evaluate(
+      () => document.activeElement?.getAttribute("role") === "switch",
+    ),
+    false,
+  );
+  assert.deepEqual(pageErrors, []);
 });
 
 test("turning on a runtime whose executable is missing says so inline and stays off", async (_t, journey) => {

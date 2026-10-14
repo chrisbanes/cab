@@ -1665,7 +1665,7 @@ export class StandaloneService {
     if (!this.harnessEnabled(harness))
       return `${executionHarnessLabels[harness]} runtime is not configured`;
     if (this.runtimeUnavailableSince.has(harness))
-      return `${executionHarnessLabels[harness]} runtime unavailable; restart the service`;
+      return `${executionHarnessLabels[harness]} runtime unavailable; turn it off and on in Settings → Runtime, or restart the service`;
     return undefined;
   }
 
