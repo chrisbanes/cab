@@ -21,8 +21,7 @@ import {
   diagnosticRetentionDays,
   diagnosticStorageMib,
   isInBound,
-} from "../standalone/diagnostic-retention.js";
-import type { LaunchAgentConfiguration } from "../standalone/launchd.js";
+} from "../operator/diagnostic-retention.js";
 import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
@@ -382,7 +381,7 @@ class Service {
     version: string,
     root: string,
     base: Pick<
-      LaunchAgentConfiguration,
+      Configuration,
       | "dataDirectory"
       | "authFile"
       | "origin"

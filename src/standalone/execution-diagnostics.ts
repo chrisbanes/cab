@@ -1,11 +1,11 @@
 import { type Database, transaction } from "../core/store.js";
-import type { RuntimeDiagnosticEvent } from "./codex.js";
-import { sanitizeConversationText } from "./conversation-history.js";
 import {
   diagnosticRetentionDays,
   diagnosticStorageMib,
   integerFromEnv,
-} from "./diagnostic-retention.js";
+} from "../operator/diagnostic-retention.js";
+import type { RuntimeDiagnosticEvent } from "./codex.js";
+import { sanitizeConversationText } from "./conversation-history.js";
 
 export type DiagnosticKind =
   | "input"

@@ -13,7 +13,7 @@ import {
   diagnosticRetentionDays,
   diagnosticStorageMib,
   isInBound,
-} from "./diagnostic-retention.js";
+} from "../operator/diagnostic-retention.js";
 import { canonicalLoopbackOrigin } from "./operator-auth.js";
 import { isWithin } from "./workspace-inspection.js";
 
