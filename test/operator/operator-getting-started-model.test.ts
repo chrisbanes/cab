@@ -83,6 +83,7 @@ const discovery = (
   available: false,
   source: null,
   gh: { state: "not-signed-in" },
+  sourceGh: { state: "not-signed-in" },
   ...d,
 });
 const rows = (
