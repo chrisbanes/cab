@@ -466,10 +466,10 @@ partial directory, so remove it to rebuild. The output contains:
 A release directory contains `bin/ensemble` (the operator CLI), `node/bin/node` and
 its licence, `dist/src`, `dist/operator`, the production `node_modules`,
 `package.json`, `package-lock.json`, `LICENSE` and `manifest.json`. It needs `codex`
-on `PATH` like a checkout build. It does not include `claude`, so Claude turns fail
-in a release until it can resolve `claude` from `PATH`
-([#981](https://github.com/chrisbanes/ensemble/issues/981)); Codex remains the
-default harness.
+on `PATH` like a checkout build. It does not include `claude`: a release without one
+on the service `PATH` shows Claude as Not enabled, and installing `claude` on that
+`PATH` enables it after a restart (see [Claude executable](#claude-executable)).
+Codex remains the default harness.
 
 `manifest.json` records the schema `ensemble.release/v1`, name, version, platform,
 commit, the Node version with the official tarball's SHA-256, and a tree digest.
