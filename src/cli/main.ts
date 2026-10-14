@@ -20,6 +20,7 @@ import {
 } from "./connections.js";
 import { coverage } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
+import { SERVICE_USAGE, serviceCommand, snapshotCommand } from "./service.js";
 import { RequestJournal } from "./request-journal.js";
 import { waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
@@ -76,6 +77,7 @@ Commands:
   task get TASK_ID [--connection NAME]
 ${[...browseCommands.values(), ...writeCommands.values()].map((c) => `  ${c.usage}`).join("\n")}
 
+${SERVICE_USAGE}
 Options:
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
@@ -125,6 +127,9 @@ export async function main(
   argv: string[],
   deps: CliDeps = defaultDeps(),
 ): Promise<number> {
+  // Local commands on the service's own Mac, outside the operator CLI's options.
+  if (argv[0] === "service") return serviceCommand(argv.slice(1), deps);
+  if (argv[0] === "snapshot") return snapshotCommand(argv.slice(1), deps);
   let json = false;
   let jsonl = false;
   try {

@@ -1,25 +1,45 @@
+import { realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
+import { fileURLToPath } from "node:url";
 import { OperatorAuth } from "./operator-auth.js";
 import { readHiddenPassword } from "./operator-hidden-password.js";
 
-const [command, authFile, ...extra] = process.argv.slice(2);
-if (
-  command !== "init" ||
-  !authFile ||
-  extra.length > 0 ||
-  !isAbsolute(authFile)
-) {
-  process.stderr.write(
-    "Usage: npm run operator-auth -- init ABSOLUTE_AUTH_FILE\n",
-  );
-  process.exitCode = 2;
-} else {
+type Io = {
+  stdin: NodeJS.ReadStream;
+  stdout: NodeJS.WriteStream;
+  stderr: NodeJS.WritableStream;
+};
+
+/** `init ABSOLUTE_AUTH_FILE`; `ensemble service init-auth` shares it. */
+export async function runOperatorAuth(
+  argv: string[],
+  io: Io = process,
+): Promise<number> {
+  const [command, authFile, ...extra] = argv;
+  if (
+    command !== "init" ||
+    !authFile ||
+    extra.length > 0 ||
+    !isAbsolute(authFile)
+  ) {
+    io.stderr.write(
+      "Usage: npm run operator-auth -- init ABSOLUTE_AUTH_FILE\n",
+    );
+    return 2;
+  }
   try {
-    const password = await readHiddenPassword();
+    const password = await readHiddenPassword(io.stdin, io.stdout);
     await OperatorAuth.initialize(authFile, password);
-    process.stdout.write("Operator authentication initialized\n");
+    io.stdout.write("Operator authentication initialized\n");
+    return 0;
   } catch {
-    process.stderr.write("Operator authentication initialization failed\n");
-    process.exitCode = 1;
+    io.stderr.write("Operator authentication initialization failed\n");
+    return 1;
   }
 }
+
+if (
+  process.argv[1] &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  process.exitCode = await runOperatorAuth(process.argv.slice(2));
