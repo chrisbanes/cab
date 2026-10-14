@@ -644,17 +644,23 @@ test("the activation line claims only a confirmed preview at the loaded source v
         active: true,
       },
     }) as never;
-  const line = (
+  const activation = (
     wasActive: boolean,
     over: Partial<Parameters<typeof activationLine>[0]> = {},
   ) =>
     activationLine({
-      saved: { at: Date.now(), receipt: preview(), values: { wasActive } },
+      saved: {
+        at: Date.now(),
+        receipt: preview(),
+        values: { activeSelectionIds: wasActive ? ["S-1"] : [] },
+      },
       sourceVersion: 3,
-      selection: undefined,
+      selections: [],
       recorded: true,
       ...over,
     });
+  const line = (...args: Parameters<typeof activation>) =>
+    activation(...args)?.line ?? null;
   const next = "Tasks aren't imported until you refresh source observations.";
   assert.equal(line(false), `Activated S-1. ${next}`);
   assert.equal(line(true), `S-1 was already active. ${next}`);
@@ -673,11 +679,22 @@ test("the activation line claims only a confirmed preview at the loaded source v
   );
   // After a re-read the read itself must show the selection active.
   assert.equal(
-    line(false, { recorded: false, selection: { active: false } }),
+    line(false, {
+      recorded: false,
+      selections: [{ id: "S-1", active: false }],
+    }),
     "Couldn't confirm that S-1 is active. Preview it again.",
   );
   assert.equal(
-    line(false, { recorded: false, selection: { active: true } }),
+    activation(false, {
+      recorded: false,
+      selections: [{ id: "S-1", active: false }],
+    })?.refresh,
+    false,
+  );
+  assert.equal(
+    line(false, { recorded: false, selections: [{ id: "S-1", active: true }] }),
     `Activated S-1. ${next}`,
   );
+  assert.equal(activation(false)?.refresh, true);
 });

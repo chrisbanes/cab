@@ -7,7 +7,11 @@ import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import type { ConfigurationDraft } from "./settings-state.js";
-import { observationLabel, sourceCredentialCopy } from "./settings-view.js";
+import {
+  activationLine,
+  observationLabel,
+  sourceCredentialCopy,
+} from "./settings-view.js";
 import {
   DraftField,
   DraftMessage,
@@ -39,9 +43,21 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
     {
       expectedVersion: String(data.source.version),
       selectionId: data.source.selections.find((s) => s.id !== null)?.id ?? "",
+      // The receipt can't say whether a selection was already active, so the save keeps
+      // what the page showed when it was submitted.
+      activeSelectionIds: data.source.selections.flatMap((s) =>
+        s.active && s.id !== null ? [s.id] : [],
+      ),
     },
     p.loadedAt,
   );
+  const saved = p.drafts.saved(`github.preview:${p.projectId}`),
+    activation = activationLine({
+      saved,
+      sourceVersion: data.source.version,
+      selections: data.source.selections,
+      recorded: preview.phase === "recorded",
+    });
   const unsettled = p.drafts
     .unsettledPlacements(p.projectId)
     .filter((c) => !data.placements.some((row) => row.taskId === c.taskId));
@@ -102,7 +118,10 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
               saveDisabled={data.source.credential?.usable === false}
               refresh={p.refreshConfiguration}
               review={() => preview.adoptVersion(data.source.version)}
-            />
+              success={activation ? activation.line : null}
+            >
+              {activation?.refresh && <RefreshObservations {...p} />}
+            </DraftOutcome>
             {preview.phase === "conflict" && preview.errors.credentialRef && (
               <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
                 Set or change source credential
@@ -145,6 +164,40 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
         )}
       </div>
     </div>
+  );
+}
+/** The next step of an activation: one request for observations, then a read of them. */
+function RefreshObservations(
+  p: SettingsProps & { observations: ObservationResource },
+) {
+  const [notice, setNotice] = useState(""),
+    [pending, setPending] = useState(false);
+  return (
+    <>
+      <Button
+        type="button"
+        variant="secondary"
+        disabled={pending}
+        onClick={async () => {
+          setPending(true);
+          setNotice("Observation refresh requested.");
+          try {
+            await p.client.refreshSources(p.session.csrfToken);
+            setNotice("Observation request completed.");
+            p.observations.refresh();
+          } catch {
+            setNotice(
+              "Observation refresh unconfirmed. Read observations again or deliberately request another refresh.",
+            );
+          } finally {
+            setPending(false);
+          }
+        }}
+      >
+        Refresh source observations
+      </Button>
+      {notice && <p className="body">{notice}</p>}
+    </>
   );
 }
 function SourceObservations(

@@ -129,17 +129,18 @@ const tasksNotImported =
  * The sentence after "Preview and activate selection". It claims only what a confirmed
  * `github.preview` receipt at the loaded source version proves; `null` means say nothing.
  * Once the form has been re-read (`recorded` is false), the read must also show the
- * selection active.
+ * selection active. `refresh` is true when the line names the next step, so the page
+ * offers it.
  */
 export function activationLine({
   saved,
   sourceVersion,
-  selection,
+  selections,
   recorded,
 }: {
   saved: SavedRecord | undefined;
   sourceVersion: number;
-  selection: { active: boolean } | undefined;
+  selections: { id: string | null; active: boolean }[];
   recorded: boolean;
 }) {
   const r = saved?.receipt;
@@ -150,9 +151,17 @@ export function activationLine({
   )
     return null;
   const id = r.result.selectionId;
-  if (!recorded && !selection?.active)
-    return `Couldn't confirm that ${id} is active. Preview it again.`;
-  return `${saved?.values.wasActive ? `${id} was already active.` : `Activated ${id}.`} ${tasksNotImported}`;
+  if (!recorded && !selections.some((s) => s.id === id && s.active))
+    return {
+      line: `Couldn't confirm that ${id} is active. Preview it again.`,
+      refresh: false,
+    };
+  const was = saved?.values.activeSelectionIds;
+  const wasActive = Array.isArray(was) && was.includes(id);
+  return {
+    line: `${wasActive ? `${id} was already active.` : `Activated ${id}.`} ${tasksNotImported}`,
+    refresh: true,
+  };
 }
 
 /** "Ada", "Ada and Eli", "Ada, Eli and Bo". */
