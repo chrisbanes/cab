@@ -1160,3 +1160,26 @@ test("an install record written before the diagnostic fields still upgrades", as
   assert.equal(result.code, 0, result.stderr);
   assert.equal(RETENTION in environment(f.activation), false);
 });
+
+test("a record holding an out-of-range diagnostic value is refused before anything stops", async (t) => {
+  const f = await installed(t, { retentionDays: 7 });
+  const original = readFileSync(f.recordPath, "utf8");
+  for (const [field, value] of [
+    ["diagnosticRetentionDays", 366],
+    ["diagnosticRetentionDays", 0],
+    ["diagnosticStorageMib", 15],
+    ["diagnosticStorageMib", 1.5],
+  ] as const) {
+    const record = JSON.parse(original);
+    record.configuration[field] = value;
+    writeFileSync(f.recordPath, JSON.stringify(record));
+    const result = await f.upgrade();
+    assert.equal(result.code, 1);
+    assert.equal(result.report.stage, "preflight");
+    assert.match(result.report.error, /install record .* is invalid/);
+    assert.deepEqual(f.launchd.mutations(), [], `${field}=${value}`);
+  }
+  assert.equal(f.launchd.jobs.has(f.options.label), true);
+  writeFileSync(f.recordPath, original);
+  assert.equal((await f.upgrade()).code, 0);
+});

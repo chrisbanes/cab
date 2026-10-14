@@ -112,6 +112,9 @@ export type OperatorConnection = {
   readiness(signal: AbortSignal): Promise<{ id: string; status: string }[]>;
 };
 
+const boundedInteger = (bound: Parameters<typeof isInBound>[1]) =>
+  z.number().refine((value) => isInBound(value, bound));
+
 const configurationSchema = z
   .object({
     label: z.string(),
@@ -123,8 +126,8 @@ const configurationSchema = z
     port: z.number().int(),
     stdoutPath: z.string(),
     stderrPath: z.string(),
-    diagnosticRetentionDays: z.number().int().optional(),
-    diagnosticStorageMib: z.number().int().optional(),
+    diagnosticRetentionDays: boundedInteger(diagnosticRetentionDays).optional(),
+    diagnosticStorageMib: boundedInteger(diagnosticStorageMib).optional(),
   })
   .strict();
 type Configuration = z.infer<typeof configurationSchema>;
