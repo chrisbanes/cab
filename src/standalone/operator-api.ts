@@ -2166,7 +2166,8 @@ export class OperatorApi {
   /**
    * What stops each of the `next` assignments beyond the task's own admission, which the
    * task waits already carry (the lead's own reasons are a subset of them), with its
-   * profile's name.
+   * profile's name. A revoked lead keeps its assignment's wait beside `project-lead-revoked`:
+   * choosing another lead clears the task's reason, not the bound assignment's.
    */
   private assignmentWaitFacts(
     taskId: string,

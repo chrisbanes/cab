@@ -3115,6 +3115,38 @@ test("a request the scheduler refused for stale revisions keeps its assignment's
   ]);
 });
 
+test("a revoked lead keeps its own assignment's waits beside the project's lead wait", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.profileId,
+    expectedVersion: Number(d.profile(ids.profileId).version),
+    revoked: true,
+  });
+  // Choosing another lead clears the project's wait but not the bound lead assignment's.
+  const fix = { kind: "open-profile", profileId: ids.profileId };
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits, [
+    {
+      code: "project-paused",
+      fix: { kind: "resume-project", projectId: ids.projectId },
+      links: [],
+    },
+    {
+      code: "project-lead-revoked",
+      fix: { kind: "choose-lead", projectId: ids.projectId },
+      links: [],
+    },
+    { code: "assignment-profile-revoked", fix, links: [], detail: "Lead" },
+    { code: "assignment-profile-stale", fix, links: [], detail: "Lead" },
+  ]);
+});
+
 test("a lead's own task-level reasons are not repeated, and a name the exclusions redact is left out", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

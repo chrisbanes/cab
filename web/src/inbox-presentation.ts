@@ -147,13 +147,16 @@ export function holdNotices(
       });
     }
     // The request being decided is not a hold on itself.
-    else if (code !== "approval")
+    else if (code !== "approval") {
+      // A wait's detail, such as an assignment's profile, says what the hold is about.
+      const about = task.waits.find((wait) => wait.code === code)?.detail;
       notices.push({
         id: code,
         title: `Execution held (${heldLabels[code] ?? lowerFirst(waitLabels[code as WaitCode])})`,
-        items: [],
+        items: about ? [about] : [],
         detail: "Approving does not clear it.",
       });
+    }
   }
   if (!notices.length && !task.admission.eligible)
     notices.push({

@@ -33,8 +33,8 @@ waits, led by the reason to clear first and a link that fixes it.
    | Claude token unavailable            | Open [Add Claude](claude-runtime.md)                     |
    | Lead profile runtime not configured | Open the profile                                         |
    | Held by power supervision           | No Fix; shows the power supervisor's hold reason         |
-   | Assignment profile revoked          | Open the assignment's profile                            |
-   | Assignment profile changed          | Open the assignment's profile                            |
+   | Assignment profile revoked          | Open the assignment's profile; does not re-bind it       |
+   | Assignment profile changed          | Open the assignment's profile; does not re-bind it       |
    | Assignment instructions changed     | No Fix; names the assignment's profile                   |
    | Assignment profile not permitted    | No Fix; names the assignment's profile                   |
    | Assignment held                     | No Fix; names the assignment's profile                   |
