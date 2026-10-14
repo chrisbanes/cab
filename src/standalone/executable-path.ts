@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
-import { promisify } from "node:util";
-
-const execFileAsync = promisify(execFile);
 
 /**
  * The first `PATH` directory holding an executable regular file called `name`, as that
@@ -29,19 +26,59 @@ export async function resolveOnPath(
   return null;
 }
 
+/** How long a probe child gets to exit on SIGTERM before it is killed. */
+const killGraceMs = 1000;
+const maxOutputBytes = 4096;
+
 /**
  * What `path --version` prints on stdout. The child's environment is `PATH` alone, because the
- * service environment holds credentials. Rejects on a failure or after `timeoutMs`.
+ * service environment holds credentials. After `timeoutMs` the child gets SIGTERM, then SIGKILL
+ * after a grace period, and the promise settles only once it has exited, so a hung `claude`
+ * never outlives its probe. Rejects on a spawn failure, a non-zero exit or the timeout.
+ * shortcut: descendants the child started are not tracked; upgrade to a process group if a
+ * wrapper `claude` must be covered.
  */
-export async function printVersion(
+export function printVersion(
   path: string,
   searchPath: string,
   timeoutMs: number,
 ): Promise<string> {
-  const { stdout } = await execFileAsync(path, ["--version"], {
-    env: { PATH: searchPath },
-    timeout: timeoutMs,
-    maxBuffer: 4096,
+  return new Promise((resolve, reject) => {
+    const child = spawn(path, ["--version"], {
+      env: { PATH: searchPath },
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout = `${stdout}${chunk}`.slice(0, maxOutputBytes);
+    });
+    let timedOut = false;
+    let escalation: NodeJS.Timeout | undefined;
+    const settle = (error?: Error) => {
+      clearTimeout(timer);
+      clearTimeout(escalation);
+      child.stdout.destroy();
+      if (error) reject(error);
+      else resolve(stdout);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // Already gone: a descendant holds the pipe, and there is no child left to wait for.
+      if (child.exitCode !== null || child.signalCode !== null)
+        return settle(new Error("Version probe timed out"));
+      child.kill("SIGTERM");
+      escalation = setTimeout(() => child.kill("SIGKILL"), killGraceMs);
+    }, timeoutMs);
+    // A spawn failure has no exit to wait for.
+    child.once("error", settle);
+    child.once("exit", () => {
+      if (timedOut) settle(new Error("Version probe timed out"));
+    });
+    // Close, not exit, so a normal run's output is complete before it is read.
+    child.once("close", (code) =>
+      settle(
+        timedOut || code !== 0 ? new Error("Version probe failed") : undefined,
+      ),
+    );
   });
-  return stdout;
 }

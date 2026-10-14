@@ -299,9 +299,9 @@ export class Readiness {
     const timeout = this.deps.versionTimeoutMs ?? 5000;
     let version: string | undefined;
     try {
-      // `bounded` also covers a wrapper whose grandchild holds the pipe past the kill.
-      const stdout = await bounded(
-        printVersion(path, this.deps.env.PATH ?? "", timeout),
+      const stdout = await printVersion(
+        path,
+        this.deps.env.PATH ?? "",
         timeout,
       );
       const token = stdout.split("\n", 1)[0]?.trim().split(/\s+/, 1)[0];
