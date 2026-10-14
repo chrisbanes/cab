@@ -16,9 +16,17 @@ tell application "System Events" to tell process "Pen"
 		perform action "AXRaise" of w
 		delay 0.3
 		keystroke "s" using command down
-		delay 0.5
-		-- A Save dialog appears as a sheet or as an extra window.
-		if (exists sheet 1 of w) or (count of windows) > windowCount then
+		-- A Save dialog appears as a sheet or as an extra window; poll so a slow one is caught.
+		-- shortcut: a dialog slower than 2s is missed, raise the limit if Pen is that slow.
+		set hasDialog to false
+		repeat 10 times
+			delay 0.2
+			if (exists sheet 1 of w) or (count of windows) > windowCount then
+				set hasDialog to true
+				exit repeat
+			end if
+		end repeat
+		if hasDialog then
 			key code 53 -- Escape
 			delay 0.3
 			set end of unsaved to windowName
