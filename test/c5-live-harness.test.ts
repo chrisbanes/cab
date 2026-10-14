@@ -367,6 +367,113 @@ test("facet turns that follow their brief need no repair turn, and the crash fol
   }
 });
 
+test("the SDK wrapper records each query's spawn command and passes everything else through", async () => {
+  const { recordClaudeSpawns } = await import(
+    pathToFileURL(resolve("test/c5/service-child.mjs")).href
+  );
+  type QueryOptions = {
+    cwd: string;
+    pathToClaudeCodeExecutable?: string;
+    spawnClaudeCodeProcess: (spawn: {
+      command: string;
+      args: string[];
+    }) => unknown;
+  };
+  const received: QueryOptions[] = [];
+  const sdk = {
+    tool: () => "tool",
+    query: ({ options }: { options: QueryOptions }) => {
+      received.push(options);
+      return options.spawnClaudeCodeProcess({
+        command: options.pathToClaudeCodeExecutable ?? "/bundled/claude",
+        args: ["--print"],
+      });
+    },
+  };
+  const observed = { claudeSpawns: [] as unknown[] };
+  const forwarded: unknown[] = [];
+  const original = (spawnOptions: unknown) => {
+    forwarded.push(spawnOptions);
+    return "child";
+  };
+  const wrapped = recordClaudeSpawns(sdk, observed);
+  assert.equal(wrapped.tool, sdk.tool);
+  for (const executable of ["/fixture/bin/claude", undefined])
+    assert.equal(
+      wrapped.query({
+        prompt: "p",
+        options: {
+          cwd: "/work",
+          pathToClaudeCodeExecutable: executable,
+          spawnClaudeCodeProcess: original,
+        },
+      }),
+      "child",
+    );
+  assert.deepEqual(observed.claudeSpawns, [
+    {
+      command: "/fixture/bin/claude",
+      pathToClaudeCodeExecutable: "/fixture/bin/claude",
+    },
+    { command: "/bundled/claude", pathToClaudeCodeExecutable: null },
+  ]);
+  assert.deepEqual(forwarded, [
+    { command: "/fixture/bin/claude", args: ["--print"] },
+    { command: "/bundled/claude", args: ["--print"] },
+  ]);
+  assert.ok(received.every((options) => options.cwd === "/work"));
+});
+
+test("claude CLI evidence passes only for the PATH claude, never the bundled one", async () => {
+  const { claudeCliEvidence } = await harness();
+  const home = "/Users/fixture";
+  const version = () => "2.1.296 (Claude Code)";
+  const path = "/opt/homebrew/bin/claude";
+  const spawn = (command: string, option: string | null = command) => ({
+    command,
+    pathToClaudeCodeExecutable: option,
+  });
+  assert.deepEqual(
+    claudeCliEvidence([spawn(path), spawn(path)], path, { home, version }),
+    {
+      spawns: 2,
+      version: "2.1.296 (Claude Code)",
+      fromPath: true,
+      bundled: false,
+      executableDirectory: "/opt/homebrew/bin",
+    },
+  );
+  assert.equal(
+    claudeCliEvidence(
+      [spawn(`${home}/.local/bin/claude`)],
+      `${home}/.local/bin/claude`,
+      {
+        home,
+        version,
+      },
+    ).executableDirectory,
+    "~/.local/bin",
+  );
+  const bundled =
+    "/repo/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude";
+  const failures = [
+    // The SDK ignored the path and ran its bundled binary.
+    claudeCliEvidence([spawn(bundled, path)], path, { home, version }),
+    // The runtime supplied no path at all.
+    claudeCliEvidence([spawn(path, null)], path, { home, version }),
+    // No query spawned anything.
+    claudeCliEvidence([], path, { home, version }),
+    // One query ran another claude.
+    claudeCliEvidence([spawn(path), spawn("/usr/local/bin/claude")], path, {
+      home,
+      version,
+    }),
+  ];
+  for (const evidence of failures) assert.equal(evidence.fromPath, false);
+  assert.equal(failures[0]?.bundled, true);
+  assert.equal(failures[2]?.version, null);
+});
+
 test("only a passed attempt with a clean leak scan and verified shutdown exits 0", async () => {
   const { exitCode } = await harness();
   const clean = {

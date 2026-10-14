@@ -47,6 +47,31 @@ export function parseArgs(args) {
   return args[2];
 }
 
+/**
+ * Which `claude` the journey's queries spawned (#981). `resolved` is the one the service
+ * `PATH` finds; `version(command)` prints its version. The home directory shows as `~`.
+ */
+export function claudeCliEvidence(spawns, resolved, { home, version }) {
+  const commands = [...new Set(spawns.map((spawn) => spawn.command))];
+  const directory = commands[0] ? dirname(commands[0]) : null;
+  return {
+    spawns: spawns.length,
+    version: commands[0] ? version(commands[0]) : null,
+    // The runtime passed the PATH claude, and the SDK ran that very file.
+    fromPath:
+      spawns.length > 0 &&
+      spawns.every(
+        (spawn) =>
+          spawn.command === resolved &&
+          spawn.pathToClaudeCodeExecutable === resolved,
+      ),
+    bundled: commands.some((command) => command.includes("claude-agent-sdk-")),
+    executableDirectory: directory?.startsWith(home)
+      ? `~${directory.slice(home.length)}`
+      : directory,
+  };
+}
+
 export const physicalTmpdir = () => realpathSync(tmpdir());
 /** Outside any disposable root, so caps survive per-facet invocations. */
 export const ledgerPath = () =>

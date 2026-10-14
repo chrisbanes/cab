@@ -19,6 +19,7 @@ import {
   ATTEMPT_MS,
   attemptLimitMs,
   BudgetExhausted,
+  claudeCliEvidence,
   exitCode,
   facetOutcomeOf,
   ledgerPath,
@@ -58,6 +59,12 @@ delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 const launcher =
   "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex";
 if (!existsSync(launcher)) refuse("the approved Codex launcher is absent");
+// The service runs the `claude` on PATH, never the SDK's bundled binary (#981).
+const { resolveOnPath } = await import(
+  "../../dist/src/standalone/executable-path.js"
+);
+const claudeOnPath = await resolveOnPath("claude", process.env);
+if (!claudeOnPath) refuse("claude is not on PATH");
 
 // Everything that can fail before work starts runs before the attempt opens.
 const { claudeTemporaryBase, releaseClaudeTemporaryBase } = await import(
@@ -251,7 +258,34 @@ async function inProcess(run) {
     repository,
   });
   current.taskId = ids.taskId;
-  await run(current, ids, check);
+  try {
+    await run(current, ids, check);
+  } finally {
+    // Pass or fail, the evidence shows which `claude` the turns ran.
+    evidence.claudeCli = claudeCliEvidence(
+      current.observed.claudeSpawns,
+      claudeOnPath,
+      { home: homedir(), version: claudeVersion },
+    );
+  }
+  const { claudeCli } = evidence;
+  if (!claudeCli.fromPath || claudeCli.bundled)
+    throw new Error("the Claude turns did not run the claude on PATH");
+}
+
+/** The first line of `claude --version`; a model-free probe with only PATH. */
+function claudeVersion(command) {
+  try {
+    return execFileSync(command, ["--version"], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH },
+      timeout: 10_000,
+    })
+      .split("\n", 1)[0]
+      .trim();
+  } catch {
+    return null;
+  }
 }
 
 async function coordination(current, ids, check) {

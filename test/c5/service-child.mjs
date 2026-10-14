@@ -8,6 +8,31 @@ import { BudgetExhausted, reserveTurnInFile } from "./harness.mjs";
 export const TOKEN_VARIABLE = "ENSEMBLE_C5_CLAUDE_TOKEN";
 
 /**
+ * Wraps the Claude Agent SDK so each query records the `command` it asks to spawn and the
+ * `pathToClaudeCodeExecutable` it was given (#981), then spawns exactly as before.
+ */
+export function recordClaudeSpawns(sdk, observed) {
+  return {
+    ...sdk,
+    query: ({ prompt, options }) =>
+      sdk.query({
+        prompt,
+        options: {
+          ...options,
+          spawnClaudeCodeProcess: (spawnOptions) => {
+            observed.claudeSpawns.push({
+              command: spawnOptions.command,
+              pathToClaudeCodeExecutable:
+                options.pathToClaudeCodeExecutable ?? null,
+            });
+            return options.spawnClaudeCodeProcess(spawnOptions);
+          },
+        },
+      }),
+  };
+}
+
+/**
  * Starts the real service with ledger-wrapped runtimes and the token reference.
  * The token enters this process's environment only after the reference is
  * configured and the first service generation has stopped, so no runtime spawned
@@ -19,17 +44,23 @@ export async function startJourneyService({
   ledgerFile,
   token,
 }) {
-  const { StandaloneService, createRuntime } = await import(
+  const { StandaloneService } = await import(
     "../../dist/src/standalone/service.js"
   );
   const { CodexRuntime } = await import("../../dist/src/standalone/codex.js");
+  const { ClaudeRuntime } = await import("../../dist/src/standalone/claude.js");
   const observed = {
     turns: [],
     refused: [],
     calls: [],
     workspaces: [],
     runtimes: {},
+    claudeSpawns: [],
   };
+  const claudeSdk = recordClaudeSpawns(
+    await import("@anthropic-ai/claude-agent-sdk"),
+    observed,
+  );
   const wrap = (runtime, harness) => {
     observed.runtimes[harness] = runtime;
     const startTurn = runtime.startTurn.bind(runtime);
@@ -75,7 +106,11 @@ export async function startJourneyService({
       wrap(
         harness === "codex"
           ? new CodexRuntime(launcher, context)
-          : createRuntime(context, harness),
+          : new ClaudeRuntime({
+              safety: context.safety,
+              claude: context.claude,
+              sdk: claudeSdk,
+            }),
         harness,
       ),
     undefined,
