@@ -1848,3 +1848,70 @@ test("replacement composer owns recovery before a detached committed receipt or 
     );
   }
 });
+
+test("List and Board name an imported Draft task's unmet readiness condition", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const ids = await seedCatalog(f);
+  const source = {
+    providerInstance: "github.com" as const,
+    repositoryId: "R-UI03",
+    repositoryName: "fixture/source",
+    body: "Source-owned imported outcome",
+    state: "open" as const,
+    projectFields: [],
+  };
+  f.service.githubSources().reconcileSelection(ids.projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        ...source,
+        nodeId: "I-UI03",
+        number: 42,
+        title: ids.importedTitle,
+        labels: ["ready"],
+      },
+      {
+        ...source,
+        nodeId: "I-UI04",
+        number: 43,
+        title: "Unlabelled imported task",
+        labels: [],
+      },
+    ],
+  });
+  const unready = String(f.service.githubSources().issue("I-UI04")?.taskId);
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, "/app/tasks?state=all");
+  for (const surface of [".task-list", ".board-columns"]) {
+    if (surface === ".board-columns")
+      await page.getByRole("button", { name: "Board", exact: true }).click();
+    const card = page.locator(`${surface} [data-task-id="${unready}"]`);
+    await card
+      .getByText("Not Ready: missing label `ready`", { exact: true })
+      .waitFor();
+    assert.equal(
+      await card.getByText("Draft: not Ready", { exact: true }).count(),
+      0,
+    );
+    // Local Draft tasks keep the generic reason.
+    await page
+      .locator(`${surface} [data-task-id="${ids.draft}"]`)
+      .getByText("Draft: not Ready", { exact: true })
+      .waitFor();
+  }
+});
