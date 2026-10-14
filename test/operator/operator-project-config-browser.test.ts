@@ -7,11 +7,13 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import {
   createCheckout,
   noPageOverflow,
   outcomeMessages,
   phone,
+  resolve,
   savedOutcome,
   startSettings,
   trail,
@@ -834,4 +836,86 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
     await realpath(theirs),
   );
   assert.equal((await page.content()).includes("theirs-checkout"), false);
+});
+
+test("Sync and GitHub source show stored readiness counts and a zero-match warning that opens the Readiness panel", async (t, journey) => {
+  const previous = process.env.FIXTURE_GITHUB;
+  process.env.FIXTURE_GITHUB = "offline-readiness-source-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_GITHUB;
+    else process.env.FIXTURE_GITHUB = previous;
+  });
+  let complete = true;
+  const issue = (n: number) => ({
+    providerInstance: "github.com" as const,
+    nodeId: `I_${n}`,
+    repositoryId: "acme/atlas",
+    repositoryName: "acme/atlas",
+    number: n,
+    title: `Issue ${n}`,
+    body: "Scope",
+    state: "open" as const,
+    labels: [],
+    projectFields: [],
+  });
+  const reader: GitHubReaderFactory = () => ({
+    async readSelection() {
+      return complete
+        ? {
+            complete: true as const,
+            issues: [1, 2, 3].map(issue),
+            reason: null,
+          }
+        : { complete: false as const, issues: [], reason: "http-403" };
+    },
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "open" as const };
+    },
+  });
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+    undefined,
+    undefined,
+    { readerFactory: reader },
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    selectionId: "S-1",
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+  });
+  await f.service.refreshGitHub();
+  const counts = "3 observed · 3 open · 0 match label `ready`";
+  const warning =
+    "No open item matches the readiness rule (label `ready`); imported tasks stay Draft until one does.";
+  await page.goto(
+    web.origin + resolve("/app/projects/:atlas/settings?tab=sync", ids),
+  );
+  const row = page.locator("article.settings-row").filter({ hasText: counts });
+  await row.getByText(counts, { exact: true }).waitFor();
+  await row.getByText(warning, { exact: false }).waitFor();
+  await row.getByRole("link", { name: "Check readiness conditions" }).click();
+  await page.waitForURL(/tab=github#source-readiness$/);
+  await page.waitForFunction(
+    () => document.activeElement?.id === "source-readiness",
+  );
+  await page.getByText(`S-1: ${counts}`, { exact: true }).waitFor();
+  await page.getByText(warning, { exact: false }).waitFor();
+
+  complete = false;
+  await f.service.refreshGitHub();
+  await page.reload();
+  await page
+    .getByText(`S-1: ${counts} · partial read; counts may be incomplete`, {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.getByText(warning, { exact: false }).count(), 0);
 });

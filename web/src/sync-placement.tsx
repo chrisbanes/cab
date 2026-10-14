@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { sourceObservationSchema } from "../../src/operator/contracts.js";
 import { useEffect, useState } from "react";
 import { Button, ResourceStatus, StatusBadge } from "./components.js";
+import { ObservationCounts } from "./observation-counts.js";
 import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
@@ -25,7 +26,7 @@ import {
 } from "./settings.js";
 
 type Observations = z.infer<typeof sourceObservationSchema>;
-interface ObservationResource {
+export interface ObservationResource {
   state: ResourceState<Observations>;
   refresh: () => void;
 }
@@ -214,6 +215,9 @@ function SourceObservations(
   const selection = (id: string | null) =>
     id === null ? undefined : p.data.source.selections.find((s) => s.id === id);
   const descriptor = (id: string | null) => selection(id)?.descriptor;
+  const observed = resource.state.data?.data.projects.find(
+    (r) => r.projectId === p.projectId,
+  );
   return (
     <Panel
       title="Source observations"
@@ -224,43 +228,46 @@ function SourceObservations(
         state={resource.state}
         retry={resource.refresh}
       />
-      {resource.state.data?.data.projects
-        .find((r) => r.projectId === p.projectId)
-        ?.selections.map((s, i) => (
-          <article className="settings-row" key={s.selectionId ?? i}>
-            <div className="settings-row-heading">
-              <div>
-                <h3 className="small-heading">
-                  {[
-                    s.selectionId ?? "Selection unavailable",
-                    descriptor(s.selectionId),
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </h3>
-                <p className="body">
-                  {s.selectionId ?? "Selection unavailable"}: {s.state}. Newest
-                  attempt: {s.lastAttemptAt ?? "unavailable"}. Successful sync:{" "}
-                  {s.lastSuccessfulAt ?? "unavailable"}.
-                </p>
-              </div>
-              <StatusBadge>{observationLabel(s)}</StatusBadge>
-              {selection(s.selectionId) && (
-                <StatusBadge>
-                  {selection(s.selectionId)?.active ? "Active" : "Inactive"}
-                </StatusBadge>
-              )}
-              {s.credentialReason && (
-                <p className="body">
-                  {sourceCredentialCopy(s.credentialReason)}{" "}
-                  <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
-                    Set or change source credential
-                  </a>
-                </p>
-              )}
+      {observed?.selections.map((s, i) => (
+        <article className="settings-row" key={s.selectionId ?? i}>
+          <div className="settings-row-heading">
+            <div>
+              <h3 className="small-heading">
+                {[
+                  s.selectionId ?? "Selection unavailable",
+                  descriptor(s.selectionId),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </h3>
+              <p className="body">
+                {s.selectionId ?? "Selection unavailable"}: {s.state}. Newest
+                attempt: {s.lastAttemptAt ?? "unavailable"}. Successful sync:{" "}
+                {s.lastSuccessfulAt ?? "unavailable"}.
+              </p>
             </div>
-          </article>
-        ))}
+            <StatusBadge>{observationLabel(s)}</StatusBadge>
+            {selection(s.selectionId) && (
+              <StatusBadge>
+                {selection(s.selectionId)?.active ? "Active" : "Inactive"}
+              </StatusBadge>
+            )}
+            {s.credentialReason && (
+              <p className="body">
+                {sourceCredentialCopy(s.credentialReason)}{" "}
+                <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+                  Set or change source credential
+                </a>
+              </p>
+            )}
+          </div>
+          <ObservationCounts
+            projectId={p.projectId}
+            rule={observed.readiness}
+            counts={s.counts}
+          />
+        </article>
+      ))}
       <Button
         type="button"
         variant="secondary"

@@ -1,4 +1,8 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
+import {
+  selectionCountsText,
+  zeroMatchWarning,
+} from "../../src/operator/readiness-text.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { z } from "zod";
 import type {
@@ -215,6 +219,9 @@ export function selectionLine(
   return `${s.id ?? "ID unavailable"} ${kind}${s.active ? "" : " · inactive"}`;
 }
 
+export const readinessNextStep =
+  "Check the readiness conditions in GitHub source settings.";
+
 /** Phone summary of one project's configuration: what is true now and the next step. */
 export function projectStateSummary(
   c: ProjectConfigurationData,
@@ -235,10 +242,10 @@ export function projectStateSummary(
   const state = [
     `Lead: ${lead} · repository access: ${access}`,
     ...(c.source.selections.length
-      ? c.source.selections.map(
-          (s) =>
-            `GitHub ${s.id ?? "selection"} ${s.active ? "active" : "inactive"} · ${observationLabel(observed?.selections.find((o) => o.selectionId === s.id)).toLowerCase()}`,
-        )
+      ? c.source.selections.map((s) => {
+          const o = observed?.selections.find((o) => o.selectionId === s.id);
+          return `GitHub ${s.id ?? "selection"} ${s.active ? "active" : "inactive"} · ${observationLabel(o).toLowerCase()}${o?.counts && observed ? ` · ${selectionCountsText(o.counts, observed.readiness)}` : ""}`;
+        })
       : ["No GitHub source"]),
     ...c.placements.map(
       (p) =>
@@ -252,7 +259,11 @@ export function projectStateSummary(
       ? `Choose the project for ${c.placements[0]?.title ?? "the conflicting task"} in Sync & placement.`
       : c.source.selections.length && c.source.credential?.usable === false
         ? "Set or change the credential in GitHub source settings, then preview this source version."
-        : "Nothing needs attention here.";
+        : observed?.selections.some((o) =>
+              zeroMatchWarning(o.counts, observed.readiness),
+            )
+          ? readinessNextStep
+          : "Nothing needs attention here.";
   return { state, next };
 }
 

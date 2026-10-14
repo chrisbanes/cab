@@ -38,14 +38,24 @@ import {
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
+import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
+import type { ObservationResource } from "./sync-placement.js";
 
 const withKeys = (rows: object[]) =>
   JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));
 
-export function SourceTab(p: TabProps) {
+export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const { data, projectId } = p,
     draftKey = `github.configure:${projectId}`,
     d = useDraft(p.drafts, draftKey);
+  const observed = p.observations.state.data?.data.projects.find(
+    (r) => r.projectId === projectId,
+  );
+  // The panel renders after the configuration read, so the browser cannot scroll to it.
+  useEffect(() => {
+    if (location.hash === `#${readinessAnchor}`)
+      document.getElementById(readinessAnchor)?.focus();
+  }, []);
   const loaded = sourceRowsFrom(data.source);
   const initial: Values = {
     expectedVersion: String(data.source.version),
@@ -453,7 +463,18 @@ export function SourceTab(p: TabProps) {
             title="2 · Readiness matching"
             description="Readiness admits work; it never grants repository access."
           >
+            {observed?.selections.map((s, i) => (
+              <ObservationCounts
+                key={s.selectionId ?? i}
+                label={s.selectionId ?? "Selection unavailable"}
+                projectId={projectId}
+                rule={observed.readiness}
+                counts={s.counts}
+                sameTab
+              />
+            ))}
             <fieldset
+              id={readinessAnchor}
               disabled={isLocked}
               className="settings-rows"
               tabIndex={-1}
