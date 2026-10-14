@@ -151,6 +151,10 @@ export const workspaceSchema = envelope(
         z.object({ state: z.literal("unavailable"), since: time }).strict(),
       ]),
       harnesses: z.array(harnessStatusSchema),
+      /** Installation facts for the getting-started checklist. */
+      gettingStarted: z
+        .object({ turnStarted: z.boolean(), dismissed: z.boolean() })
+        .strict(),
     })
     .strict(),
 );
@@ -1841,6 +1845,13 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
     .strict(),
   z
     .object({
+      ...base,
+      type: z.literal("getting-started.configure"),
+      dismissed: z.boolean(),
+    })
+    .strict(),
+  z
+    .object({
       ...domainBase,
       type: z.literal("github.preview"),
       selectionId: z.string().trim().min(1).max(512),
@@ -2021,6 +2032,13 @@ export const configurationReceiptSchema = z
           commandType: z.literal("claude-token.configure"),
           resourceId: z.literal("system:claude-token"),
           configured: z.boolean(),
+        })
+        .strict(),
+      z
+        .object({
+          commandType: z.literal("getting-started.configure"),
+          resourceId: z.literal("system:getting-started"),
+          dismissed: z.boolean(),
         })
         .strict(),
       z
@@ -2731,6 +2749,7 @@ export const discoveryStatusSchema = envelope(
     })
     .strict(),
 );
+export type DiscoveryStatus = z.infer<typeof discoveryStatusSchema>;
 export const discoveryUnavailableReasons = [
   "unconfigured",
   "missing-credential",

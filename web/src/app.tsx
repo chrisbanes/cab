@@ -62,6 +62,11 @@ import { TaskViews } from "./task-views.js";
 import { Login, SignInBootstrap } from "./sign-in.js";
 import { NotFound, notFoundSubtitle } from "./not-found.js";
 import { AccountMenu, OPERATOR_LABEL } from "./account-menu.js";
+import {
+  configureGettingStarted,
+  GETTING_STARTED_DRAFT,
+  GettingStarted,
+} from "./getting-started.js";
 function RouteLink({
   href,
   current,
@@ -229,11 +234,15 @@ function AccountRows({
   navigate,
   pending,
   onSignOut,
+  gettingStartedDismissed,
+  onShowGettingStarted,
 }: {
   path: string;
   navigate: (path: string) => void;
   pending: boolean;
   onSignOut: () => void;
+  gettingStartedDismissed: boolean | null;
+  onShowGettingStarted: () => void;
 }) {
   const pathname = path.split(/[?#]/)[0];
   return (
@@ -257,6 +266,23 @@ function AccountRows({
       >
         Runtime
       </RouteLink>
+      {gettingStartedDismissed === false && (
+        <RouteLink
+          href="/app/getting-started"
+          current={pathname === "/app/getting-started"}
+          navigate={navigate}
+          icon={<ListChecks {...navIcon} />}
+          row
+        >
+          Getting started
+        </RouteLink>
+      )}
+      {gettingStartedDismissed && (
+        <Button variant="secondary" onClick={onShowGettingStarted}>
+          <ListChecks aria-hidden="true" />
+          Show getting started
+        </Button>
+      )}
       <Button variant="secondary" disabled={pending} onClick={onSignOut}>
         <LogOut aria-hidden="true" />
         {pending ? "Signing out…" : "Sign out"}
@@ -306,6 +332,7 @@ function knownRoute(pathname: string) {
       "/app/tasks/new",
       "/app/inbox",
       "/app/search",
+      "/app/getting-started",
       "/app/settings",
       "/app/settings/runtime",
       "/app/settings/projects/new",
@@ -619,18 +646,20 @@ export function App() {
       ? "Page not found"
       : pathname === "/app/search"
         ? "Search"
-        : pathname === "/app"
-          ? "Overview"
-          : /^\/app\/tasks\/[^/]+$/.test(pathname) &&
-              pathname !== "/app/tasks/new"
-            ? "Task"
-            : pathname === "/app/tasks"
-              ? "All tasks"
-              : pathname === "/app/tasks/new"
-                ? "Create a task"
-                : pathname === "/app/inbox"
-                  ? "Inbox"
-                  : (project?.name ?? "Project");
+        : pathname === "/app/getting-started"
+          ? "Getting started"
+          : pathname === "/app"
+            ? "Overview"
+            : /^\/app\/tasks\/[^/]+$/.test(pathname) &&
+                pathname !== "/app/tasks/new"
+              ? "Task"
+              : pathname === "/app/tasks"
+                ? "All tasks"
+                : pathname === "/app/tasks/new"
+                  ? "Create a task"
+                  : pathname === "/app/inbox"
+                    ? "Inbox"
+                    : (project?.name ?? "Project");
   const inboxCount =
     (onInboxRoute ? inboxRouteSummary : inboxSummaryOf(inboxSummary.state))
       ?.count ?? null;
@@ -737,6 +766,25 @@ export function App() {
       }
     }
   }
+  const gettingStartedMenu = {
+    gettingStartedDismissed:
+      workspace.state.data?.data.gettingStarted.dismissed ?? null,
+    onShowGettingStarted: () => {
+      navigate("/app/getting-started");
+      void configureGettingStarted(
+        drafts.current.get(GETTING_STARTED_DRAFT, () => {}),
+        { client, session, onChanged: workspace.refresh },
+        false,
+      );
+    },
+  };
+  const waitProps = {
+    client,
+    session,
+    drafts: drafts.current,
+    workspace: workspace.state.data,
+    onChanged: refreshAll,
+  };
   const navigation = (row: boolean) => (
     <>
       <ProjectNavigation
@@ -752,6 +800,7 @@ export function App() {
           navigate={navigate}
           pending={logoutPending}
           onSignOut={() => void logout()}
+          {...gettingStartedMenu}
         />
       ) : (
         <div className="account-footer">
@@ -761,6 +810,7 @@ export function App() {
             navigate={navigate}
             pending={logoutPending}
             onSignOut={() => void logout()}
+            {...gettingStartedMenu}
           />
         </div>
       )}
@@ -964,20 +1014,27 @@ export function App() {
                 entryKey,
               )}
             />
+          ) : pathname === "/app/getting-started" ? (
+            <GettingStarted mode="page" {...waitProps} />
           ) : (
-            <TaskViews
-              state={tasks.state}
-              requests={inboxSummary.state}
-              refresh={() => {
-                tasks.refresh();
-                refreshAll();
-              }}
-              workspace={workspace.state.data}
-              path={path}
-              navigate={navigate}
-              {...(projectId ? { projectId } : {})}
-              overview={pathname === "/app"}
-            />
+            <>
+              {pathname === "/app" && (
+                <GettingStarted mode="home" {...waitProps} />
+              )}
+              <TaskViews
+                state={tasks.state}
+                requests={inboxSummary.state}
+                refresh={() => {
+                  tasks.refresh();
+                  refreshAll();
+                }}
+                workspace={workspace.state.data}
+                path={path}
+                navigate={navigate}
+                {...(projectId ? { projectId } : {})}
+                overview={pathname === "/app"}
+              />
+            </>
           )}
         </main>
       </div>

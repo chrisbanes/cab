@@ -355,8 +355,14 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
       .getAttribute("href"),
     "/app/settings/runtime",
   );
+  assert.equal(
+    await menu
+      .getByRole("menuitem", { name: "Getting started", exact: true })
+      .getAttribute("href"),
+    "/app/getting-started",
+  );
   await menu.getByRole("menuitem", { name: "Sign out", exact: true }).waitFor();
-  assert.equal(await menu.getByRole("menuitem").count(), 3);
+  assert.equal(await menu.getByRole("menuitem").count(), 4);
   await captureBrowserEvidence(page, "desktop-account-menu");
   await page.locator("main h1").click();
   await menu.waitFor({ state: "detached" });
@@ -383,13 +389,15 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Runtime");
   await page.keyboard.press("ArrowDown");
+  assert.equal(await focused(), "Getting started");
+  await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Sign out");
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Settings", "wraps to the first item");
   await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), "Sign out", "wraps to the last item");
   await page.keyboard.press("ArrowUp");
-  assert.equal(await focused(), "Runtime");
+  assert.equal(await focused(), "Getting started");
   await page.keyboard.press("Home");
   assert.equal(await focused(), "Settings");
   await page.keyboard.press("End");
@@ -530,7 +538,7 @@ test("phone drawer shows the account group with Settings, Runtime and Sign out",
   await open();
   const dialog = page.getByRole("dialog");
   await dialog.getByText("Signed in as Operator", { exact: true }).waitFor();
-  for (const name of ["Settings", "Runtime"]) {
+  for (const name of ["Settings", "Runtime", "Getting started"]) {
     const row = dialog.getByRole("link", { name, exact: true });
     assert.ok(
       (await row.evaluate((el) => el.getBoundingClientRect().height)) >= 44,
@@ -557,4 +565,155 @@ test("phone drawer shows the account group with Settings, Runtime and Sign out",
     .getByRole("button", { name: "Sign out", exact: true })
     .click();
   await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
+});
+
+test("Getting started: menu entry, Dismiss and its undo, and Home after the first turn", async (_t, journey) => {
+  const { f, web, page } = await launch(journey, viewports[0]);
+  const commands: string[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      commands.push(String(r.postDataJSON()?.type));
+  });
+  // Codex is not on every test host's PATH; the Runtime row reads the check as given.
+  await page.route("**/api/operator/readiness", async (route) => {
+    const response = await route.fetch(),
+      body = await response.json();
+    for (const check of body.data.checks)
+      if (check.id === "codex-executable" || check.id === "codex-login")
+        Object.assign(check, { status: "pass", reason: null, fix: null });
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  const checklist = page.getByRole("region", { name: "Get Ensemble running" });
+  await checklist.waitFor();
+  const trigger = page.getByRole("button", {
+    name: "Operator account",
+    exact: true,
+  });
+  const menu = page.getByRole("menu");
+  await trigger.click();
+  await menu
+    .getByRole("menuitem", { name: "Getting started", exact: true })
+    .click();
+  await page.waitForURL("**/app/getting-started");
+  await page
+    .getByRole("heading", { name: "Getting started", exact: true })
+    .waitFor();
+  await checklist.getByRole("button", { name: "Dismiss", exact: true }).click();
+  await checklist
+    .getByText(
+      "Getting started dismissed. Show it again from the account menu.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(f.service.domain().gettingStartedDismissed(), true);
+  await trigger.click();
+  await menu
+    .getByRole("menuitem", { name: "Show getting started", exact: true })
+    .waitFor();
+  assert.equal(
+    await menu
+      .getByRole("menuitem", { name: "Getting started", exact: true })
+      .count(),
+    0,
+  );
+  await captureBrowserEvidence(page, "desktop-getting-started-dismissed");
+  await menu
+    .getByRole("menuitem", { name: "Show getting started", exact: true })
+    .click();
+  await checklist
+    .getByText("Getting started is back in the account menu.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(f.service.domain().gettingStartedDismissed(), false);
+  await trigger.click();
+  await menu
+    .getByRole("menuitem", { name: "Getting started", exact: true })
+    .waitFor();
+  await page.keyboard.press("Escape");
+  assert.deepEqual(commands, [
+    "getting-started.configure",
+    "getting-started.configure",
+  ]);
+
+  // Once a task starts a turn, Home drops the checklist.
+  const d = f.service.domain(),
+    profileId = randomUUID(),
+    projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Ada",
+    instructions: "Lead",
+    capabilities: "coordination",
+  });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "fixture-app",
+    leadProfileId: profileId,
+  });
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "First task",
+    outcome: "Probe",
+    ready: false,
+  });
+  await f.service.provisionTask(taskId);
+  d.execute({
+    type: "task.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    expectedVersion: 1,
+    ready: true,
+  });
+  const deadline = Date.now() + 5000;
+  while (f.runtime.turns < 1 && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(f.runtime.turns, 1);
+  await page.goto(`${web.origin}/app`);
+  await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
+  await page.getByRole("link", { name: "First task" }).first().waitFor();
+  assert.equal(await checklist.count(), 0);
+
+  // A token reference that can't be read brings Claude back as Needs attention.
+  d.execute({
+    type: "claude-token.configure",
+    actor: "operator",
+    key: randomUUID(),
+    credentialRef: "env:ENSEMBLE_GETTING_STARTED_MISSING_TOKEN",
+  });
+  await page.reload();
+  const claude = checklist.getByRole("listitem", {
+    name: "Claude (optional)",
+    exact: true,
+  });
+  await claude.getByText("Needs attention", { exact: true }).waitFor();
+  assert.equal(await checklist.getByRole("listitem").count(), 1);
+  assert.equal(
+    await claude.getByRole("link", { name: "Add Claude" }).getAttribute("href"),
+    "/app/settings/runtime",
+  );
+  await f.service.stopTask(taskId);
 });

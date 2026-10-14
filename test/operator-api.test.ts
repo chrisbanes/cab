@@ -2712,3 +2712,29 @@ test("task and composer reads return ordered waits with Fix kinds and blocker li
     ["capacity"],
   );
 });
+
+test("the workspace read carries whether a turn started and whether getting started was dismissed", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual((await api.readWorkspace()).data.gettingStarted, {
+    turnStarted: false,
+    dismissed: false,
+  });
+  const receipt = await api.execute({
+    type: "getting-started.configure",
+    key: randomUUID(),
+    dismissed: true,
+  });
+  assert.deepEqual(receipt.kind === "configuration" && receipt.result, {
+    commandType: "getting-started.configure",
+    resourceId: "system:getting-started",
+    dismissed: true,
+  });
+  // A task-bound intent that records a turn id is a started turn.
+  await seed(f, true);
+  assert.deepEqual((await api.readWorkspace()).data.gettingStarted, {
+    turnStarted: true,
+    dismissed: true,
+  });
+});

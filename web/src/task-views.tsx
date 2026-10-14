@@ -401,11 +401,17 @@ export function TaskViews({
         />
         {state.data && !tasks.length && (
           <p className="body empty-state">
-            {all.some((t) => !projectId || t.projectId === projectId)
-              ? "No tasks match these filters."
-              : workspace?.data.projects.length
-                ? "Ready for your first task. Create an outcome or save a draft."
-                : "Create a project in existing operator controls to begin."}
+            {all.some((t) => !projectId || t.projectId === projectId) ? (
+              "No tasks match these filters."
+            ) : workspace?.data.projects.length ? (
+              "Ready for your first task. Create an outcome or save a draft."
+            ) : overview ? null : (
+              // Home shows the checklist itself.
+              <>
+                No projects yet.{" "}
+                <a href="/app/getting-started">See getting started</a>
+              </>
+            )}
           </p>
         )}
         {filters.view === "board" ? (

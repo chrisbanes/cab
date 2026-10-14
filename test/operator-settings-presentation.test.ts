@@ -356,6 +356,7 @@ test("settings headers, saved lines, state cards and hold pills", () => {
       profiles: [c.profiles[0]],
       runtime: { state: "available" },
       harnesses: [],
+      gettingStarted: { turnStarted: false, dismissed: false },
     },
     observedAt: 0,
   } as never;

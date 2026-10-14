@@ -301,6 +301,7 @@ const workspace = (
     : [],
   runtime: { state: "available" },
   harnesses: [harness("codex"), harness("claude", "not-configured")],
+  gettingStarted: { turnStarted: false, dismissed: false },
   ...patch,
 });
 /** A schema-valid readiness read: everything passes except the named checks. */

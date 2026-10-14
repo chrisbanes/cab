@@ -305,6 +305,13 @@ const commandSchema = z.discriminatedUnion("type", [
         .nullable(),
     })
     .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("getting-started.configure"),
+      dismissed: z.boolean(),
+    })
+    .strict(),
 ]);
 
 function parseCommand(input: unknown) {
@@ -348,7 +355,9 @@ function scopeOf(command: ParsedCommand): string {
         ? "system:discovery"
         : command.type === "claude-token.configure"
           ? "system:claude-token"
-          : "system:capacity";
+          : command.type === "getting-started.configure"
+            ? "system:getting-started"
+            : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -481,6 +490,10 @@ export class DomainStore {
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
         );
+        CREATE TABLE IF NOT EXISTS installation_getting_started (
+          singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+          dismissed INTEGER NOT NULL CHECK(dismissed IN (0, 1))
+        );
         CREATE TABLE IF NOT EXISTS project_diagnostic_capture (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id),
           mode TEXT NOT NULL CHECK(mode IN ('enhanced', 'baseline'))
@@ -601,6 +614,11 @@ export class DomainStore {
       this.db
         .prepare(
           "INSERT OR IGNORE INTO claude_runtime_credentials (singleton, credentialRef) VALUES (1, NULL)",
+        )
+        .run();
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO installation_getting_started (singleton, dismissed) VALUES (1, 0)",
         )
         .run();
       this.db
@@ -767,6 +785,15 @@ export class DomainStore {
       "SELECT credentialRef FROM claude_runtime_credentials WHERE singleton = 1",
     );
     return row?.credentialRef ? String(row.credentialRef) : null;
+  }
+
+  /** Whether the operator dismissed the getting-started checklist for this installation. */
+  gettingStartedDismissed(): boolean {
+    return Boolean(
+      this.one(
+        "SELECT dismissed FROM installation_getting_started WHERE singleton = 1",
+      )?.dismissed,
+    );
   }
 
   recordedCommand<C extends DomainCommand>(
@@ -2363,6 +2390,15 @@ export class DomainStore {
           .run(command.credentialRef);
         // The receipt never carries the reference name.
         return { configured: command.credentialRef !== null };
+      }
+      case "getting-started.configure": {
+        this.operator(command);
+        this.db
+          .prepare(
+            "UPDATE installation_getting_started SET dismissed = ? WHERE singleton = 1",
+          )
+          .run(Number(command.dismissed));
+        return { dismissed: command.dismissed };
       }
       case "capacity.configure": {
         this.operator(command);

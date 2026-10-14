@@ -110,6 +110,7 @@ const cases = {
   "capacity.configure": capacity,
   "discovery.configure": { configured: false },
   "claude-token.configure": { configured: false },
+  "getting-started.configure": { dismissed: false },
 } satisfies { [K in DomainCommand["type"]]: DomainCommandResultMap[K] };
 
 test("validates one concrete result shape for every domain command", () => {
@@ -378,6 +379,7 @@ test("rejects malformed result fields rather than coercing them", () => {
     ],
     ["discovery.configure", { configured: "false" }],
     ["claude-token.configure", { configured: 1 }],
+    ["getting-started.configure", { dismissed: 1 }],
     ["discovery.configure", { configured: null }],
     ["assignment.apply", { ...assignment, requesterAssignmentId: "" }],
   ];

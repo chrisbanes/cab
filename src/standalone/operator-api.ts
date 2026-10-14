@@ -1829,6 +1829,10 @@ export class OperatorApi {
         })),
         runtime: this.service.runtimeStatus(),
         harnesses: this.service.harnessStatuses(),
+        gettingStarted: {
+          turnStarted: this.service.taskTurnStarted(),
+          dismissed: this.domain().gettingStartedDismissed(),
+        },
       },
       observedAt: Date.now(),
     });
@@ -5927,6 +5931,14 @@ export class OperatorApi {
           parseDomainCommandOutcome("claude-token.configure", outcome),
           c.key,
           "system:claude-token",
+        );
+      }
+      if (c.type === "getting-started.configure") {
+        const outcome = await this.executeDomain({ ...c, actor: "operator" });
+        return commandReceipt(
+          parseDomainCommandOutcome("getting-started.configure", outcome),
+          c.key,
+          "system:getting-started",
         );
       }
       if (c.type === "discovery.configure") {

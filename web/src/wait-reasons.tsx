@@ -149,10 +149,12 @@ export function ResumeProjectFix({
   p,
   projectId,
   variant = "primary",
+  label = "Fix: Resume project",
 }: {
   p: WaitProps;
   projectId: string;
   variant?: "primary" | "secondary";
+  label?: string;
 }) {
   const draft = useDraft(p.drafts, resumeKey(projectId));
   const [open, setOpen] = useState(false);
@@ -177,7 +179,7 @@ export function ResumeProjectFix({
               });
           }}
         >
-          {draft.phase === "pending" ? "Resuming…" : "Fix: Resume project"}
+          {draft.phase === "pending" ? "Resuming…" : label}
         </Button>
       </DialogTrigger>
       <DialogContent
@@ -228,7 +230,13 @@ export function ResumeProjectFix({
 }
 
 /** The one outcome line of Resume project, kept after the wait it cleared leaves. */
-function ResumeOutcome({ p, projectId }: { p: WaitProps; projectId: string }) {
+export function ResumeOutcome({
+  p,
+  projectId,
+}: {
+  p: WaitProps;
+  projectId: string;
+}) {
   const draft = useDraft(p.drafts, resumeKey(projectId));
   // A confirmation from an earlier visit no longer describes the project; an unknown
   // outcome or a conflict stays until it is resolved.
