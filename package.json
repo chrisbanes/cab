@@ -12,7 +12,8 @@
     "ensemble": "dist/src/cli/main.js"
   },
   "files": [
-    "dist/src"
+    "dist/src",
+    "dist/operator"
   ],
   "scripts": {
     "service": "node dist/src/standalone/cli.js",
