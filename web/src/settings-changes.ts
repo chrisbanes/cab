@@ -170,6 +170,7 @@ export function sourceRowsFrom(source: Source) {
       source.readiness?.conditions ?? [{ kind: "label", name: "ready" }]
     ).map((c) => ({ ...c })),
     mode: source.readiness?.mode ?? "all",
+    closedIssues: source.closedIssues,
     incomplete:
       source.selections.some((s) => s.id === null) ||
       source.repositories.some(
@@ -242,6 +243,9 @@ export function sourceChanges(source: Source, v: Values) {
     lines.push(
       `Readiness: ${v.mode === "any" ? "any" : "all"} of ${plural(conditions.length, "condition")}${readiness ? "" : " (replaces unavailable readiness)"}`,
     );
+  // A draft without the field keeps the saved mode.
+  if (v.closedIssues !== undefined && v.closedIssues !== source.closedIssues)
+    lines.push(`Closed issues: ${closedIssueLabels[String(v.closedIssues)]}`);
   for (const r of repositories) {
     if (r.keep && r.removed)
       lines.push(`− Repository access: ${r.repositoryId}`);
@@ -385,6 +389,11 @@ export const kindLabel = (kind: unknown) =>
       ? "GitHub Project"
       : "Search";
 
+export const closedIssueLabels: Record<string, string> = {
+  skip: "Skip closed issues",
+  done: "Treat closure as Done",
+};
+
 export function sourceCommand(projectId: string, v: Values) {
   return {
     type: "github.configure",
@@ -400,6 +409,7 @@ export function sourceCommand(projectId: string, v: Values) {
       mode: v.mode,
       conditions: parseRows(v.conditions).map(strip),
     },
+    closedIssues: v.closedIssues,
     repositories: live(parseRows(v.repositories)).map((r) =>
       r.keep
         ? {

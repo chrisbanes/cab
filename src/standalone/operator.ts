@@ -24,6 +24,7 @@ import {
 } from "./operator-credentials.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { closedIssuesSchema } from "../core/github-source-contracts.js";
 import {
   createServer,
   type IncomingMessage,
@@ -321,6 +322,14 @@ export class LocalOperatorUi {
         field("clearCredentialRef", "1", "checkbox") +
         textarea("selections", JSON.stringify(github.selections, null, 2)) +
         textarea("readiness", JSON.stringify(github.readiness, null, 2)) +
+        selectField(
+          "closedIssues",
+          [
+            { value: "skip", label: "Skip closed issues" },
+            { value: "done", label: "Treat closure as Done" },
+          ],
+          github.closedIssues,
+        ) +
         textarea(
           "repositories",
           JSON.stringify(
@@ -579,6 +588,9 @@ export class LocalOperatorUi {
                     : {}),
           selections: JSON.parse(required("selections")),
           readiness: JSON.parse(required("readiness")),
+          ...(fields.closedIssues === undefined
+            ? {}
+            : { closedIssues: closedIssuesSchema.parse(fields.closedIssues) }),
           repositories: JSON.parse(required("repositories")),
         };
         break;

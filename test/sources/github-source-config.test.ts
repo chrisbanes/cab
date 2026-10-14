@@ -1017,7 +1017,7 @@ test("existing standalone projects acquire inactive source configuration on migr
   }
 });
 
-test("closed-issue mode defaults to skip and changes only through keyed, versioned configuration", () => {
+test("closed-issue mode defaults to skip and changes only through keyed, versioned configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-mode-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));
   const projectId = randomUUID();
@@ -1087,6 +1087,44 @@ test("closed-issue mode defaults to skip and changes only through keyed, version
           "UPDATE project_github_sources SET closedIssues = 'closed' WHERE projectId = ?",
         )
         .run(projectId),
+    );
+    // The HTML fallback shows and saves the mode through the same command.
+    const ui = new LocalOperatorUi(domain);
+    assert.match(
+      ui.project(projectId),
+      /<select name="closedIssues">.*<option value="done" selected>Treat closure as Done<\/option>/,
+    );
+    const form = {
+      type: "github.configure",
+      projectId,
+      sourceCredentialMode: "keep",
+      selections: "[]",
+      readiness: JSON.stringify({
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      }),
+      repositories: "[]",
+    };
+    await assert.rejects(
+      ui.submit({
+        ...form,
+        key: randomUUID(),
+        expectedVersion: "3",
+        closedIssues: "closed",
+      }),
+    );
+    await ui.submit({
+      ...form,
+      key: randomUUID(),
+      expectedVersion: "3",
+      closedIssues: "skip",
+    });
+    assert.deepEqual(
+      [
+        domain.githubConfiguration(projectId).version,
+        domain.githubConfiguration(projectId).closedIssues,
+      ],
+      [4, "skip"],
     );
   } finally {
     db.close();

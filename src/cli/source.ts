@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { z } from "zod";
 import { sourceCredentialReference } from "../core/credential-reference.js";
 import {
+  closedIssuesSchema,
   readinessSchema,
   repositoryLinkSchema,
   selectionSchema,
@@ -151,6 +152,7 @@ const sourcesCommand: BrowseCommand = {
               ]
             : []),
           ["Readiness", readinessText(source.readiness)],
+          ["Closed issues", closedIssueLabels[source.closedIssues]],
         ] as [string, string][]),
         "",
         source.selections.length
@@ -210,6 +212,11 @@ const sourcesCommand: BrowseCommand = {
   },
 };
 
+const closedIssueLabels = {
+  skip: "Skip closed issues",
+  done: "Treat closure as Done",
+} as const;
+
 const editSchema = z
   .object({
     addSelections: z
@@ -218,6 +225,7 @@ const editSchema = z
       .optional(),
     removeSelections: z.array(z.string().min(1).max(512)).max(30).optional(),
     readiness: readinessSchema.optional(),
+    closedIssues: closedIssuesSchema.optional(),
     linkRepositories: z.array(repositoryLinkSchema).max(20).optional(),
     unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
     setRefs: z.record(z.string(), z.string().trim().min(1).max(512)).optional(),
@@ -364,6 +372,7 @@ export function sourceEditCommand(
       ...added,
     ],
     readiness,
+    closedIssues: edit.closedIssues ?? source.closedIssues,
     repositories,
     ...(edit.credentialRef === undefined
       ? {}
@@ -387,6 +396,13 @@ export function sourceEditCommand(
   if (readinessChanged)
     diff.push(
       `Readiness: ${edit.readiness?.mode} of ${conditions(edit.readiness?.conditions.length ?? 0)}${source.readiness ? "" : " (replaces unavailable readiness)"}`,
+    );
+  const closedIssuesChanged =
+    edit.closedIssues !== undefined &&
+    edit.closedIssues !== source.closedIssues;
+  if (closedIssuesChanged)
+    diff.push(
+      `Closed issues: ${closedIssueLabels[edit.closedIssues ?? "skip"]}`,
     );
   for (const id of unlink) diff.push(`− Repository access: ${id}`);
   for (const l of links)
@@ -418,6 +434,12 @@ export function sourceEditCommand(
       field: "readiness",
       from: source.readiness ? readinessText(source.readiness) : null,
       to: readinessText(readiness),
+    });
+  if (closedIssuesChanged)
+    changes.push({
+      field: "closedIssues",
+      from: source.closedIssues,
+      to: edit.closedIssues ?? source.closedIssues,
     });
   if (unlink.length || links.length)
     changes.push({

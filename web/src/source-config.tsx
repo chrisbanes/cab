@@ -3,6 +3,7 @@ import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
   adoptSourceRows,
+  closedIssueLabels,
   duplicateSourceIds,
   kindLabel,
   nextSelectionId,
@@ -53,6 +54,7 @@ export function SourceTab(p: TabProps) {
     selections: withKeys(loaded.selections),
     conditions: withKeys(loaded.conditions),
     mode: loaded.mode,
+    closedIssues: loaded.closedIssues,
     repositories: withKeys(loaded.repositories),
     removeAll: false,
   };
@@ -78,7 +80,10 @@ export function SourceTab(p: TabProps) {
   const adopt = () => {
     // An unsettled save keeps its own message; nothing is loaded or discarded then.
     if (locked(d)) return;
-    d.adoptLatest(data.source.version, initial, [["mode", "conditions"]]);
+    d.adoptLatest(data.source.version, initial, [
+      ["mode", "conditions"],
+      ["closedIssues"],
+    ]);
     const rows = adoptSourceRows(data.source, d.values);
     if (rows.dropped.length)
       d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
@@ -568,6 +573,21 @@ export function SourceTab(p: TabProps) {
                 </Button>
               </div>
             </fieldset>
+            <DraftField
+              draft={d}
+              field="closedIssues"
+              label="Closed GitHub issues"
+            >
+              {Object.entries(closedIssueLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </DraftField>
+            <p className="metadata muted">
+              Treat closure as Done marks the task closed on GitHub, not
+              delivered by Ensemble, once its work has stopped.
+            </p>
           </Panel>
           <ChangeList
             lines={
