@@ -5,6 +5,7 @@ import {
   failResponses,
   holdResponse,
   observedDom,
+  settleReads,
   watchDom,
 } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -101,7 +102,7 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   assert.equal(await marker(2).count(), shown);
   assert.equal(await openCount(), opened);
   historyRead.release();
-  await page.waitForLoadState("networkidle");
+  await settleReads(page);
   const quiet = await observedDom(page);
   assert.equal(quiet?.statusSeen, false);
   assert.deepEqual(quiet?.changes, []);

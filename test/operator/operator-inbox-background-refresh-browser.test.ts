@@ -5,6 +5,7 @@ import {
   failResponses,
   holdResponse,
   observedDom,
+  settleReads,
   watchDom,
 } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
@@ -59,9 +60,11 @@ test("Inbox and shell timer reads stay silent until they fail; header Refresh st
   assert.equal(await rows.count(), rowCount);
   assert.equal(await rowTop(), top);
   for (const hold of holds) hold.release();
-  await page.waitForLoadState("networkidle");
+  await settleReads(page);
   const quiet = await observedDom(page);
   assert.equal(quiet?.statusSeen, false);
+  // The poll rendered, so the minute boundary really ticked the age.
+  assert.match((await rows.first().locator("time").textContent()) ?? "", /1m$/);
   assert.deepEqual(quiet?.changes, []);
   for (const hold of holds) await hold.stop();
 
