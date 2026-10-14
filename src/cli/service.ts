@@ -315,7 +315,7 @@ class Service {
         await this.host.sleep(POLL_MS);
       }
     } catch (error) {
-      // The captured identity is lost after this, so the exit stays unconfirmed.
+      // The exit was never confirmed; cleanup must not report the job stopped.
       this.exitUnconfirmed = true;
       throw error;
     }

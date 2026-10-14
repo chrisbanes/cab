@@ -914,15 +914,12 @@ test("a launchctl failure while confirming the stop reports the exit unconfirmed
   const f = await installed(t);
   const host = f.launchd.host();
   let bootedOut = false;
+  let failed = false;
   f.launchd.overrides = {
     launchctl: async (args) => {
       if (args[0] === "bootout") bootedOut = true;
-      else if (
-        bootedOut &&
-        args[0] === "print" &&
-        !f.launchd.calls.some(([c]) => c === "failed")
-      ) {
-        f.launchd.calls.push(["failed"]);
+      else if (bootedOut && args[0] === "print" && !failed) {
+        failed = true;
         return { status: 1, stdout: "" };
       }
       return host.launchctl(args);
