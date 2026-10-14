@@ -122,6 +122,39 @@ export function savedLine(version: number, saved: SavedRecord | undefined) {
     : null;
 }
 
+const tasksNotImported =
+  "Tasks aren't imported until you refresh source observations.";
+
+/**
+ * The sentence after "Preview and activate selection". It claims only what a confirmed
+ * `github.preview` receipt at the loaded source version proves; `null` means say nothing.
+ * Once the form has been re-read (`recorded` is false), the read must also show the
+ * selection active.
+ */
+export function activationLine({
+  saved,
+  sourceVersion,
+  selection,
+  recorded,
+}: {
+  saved: SavedRecord | undefined;
+  sourceVersion: number;
+  selection: { active: boolean } | undefined;
+  recorded: boolean;
+}) {
+  const r = saved?.receipt;
+  if (
+    r?.kind !== "configuration" ||
+    r.result.commandType !== "github.preview" ||
+    r.result.configVersion !== sourceVersion
+  )
+    return null;
+  const id = r.result.selectionId;
+  if (!recorded && !selection?.active)
+    return `Couldn't confirm that ${id} is active. Preview it again.`;
+  return `${saved?.values.wasActive ? `${id} was already active.` : `Activated ${id}.`} ${tasksNotImported}`;
+}
+
 /** "Ada", "Ada and Eli", "Ada, Eli and Bo". */
 export const joinNames = (names: string[]) =>
   names.length > 1

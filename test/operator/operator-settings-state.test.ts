@@ -615,6 +615,13 @@ test("the store remembers a recorded save until purge, and never an unknown outc
   draft.startOperation({ name: "Renamed" });
   assert.equal(draft.phase, "editing");
   assert.equal(drafts.saved("profile.configure:a"), saved);
+  // The form values at save time stay with the record after the draft starts over.
+  const snap = drafts.get("profile.configure:snap", () => {});
+  snap.set("wasActive", true);
+  await snap.submit(client, command(), "csrf");
+  assert.equal(drafts.saved("profile.configure:snap")?.values.wasActive, true);
+  snap.startOperation({ wasActive: false });
+  assert.equal(drafts.saved("profile.configure:snap")?.values.wasActive, true);
   drafts.purge();
   assert.equal(drafts.saved("profile.configure:a"), undefined);
   lose = true;

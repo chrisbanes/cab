@@ -117,7 +117,10 @@ export class ConfigurationDraft {
   private afterCommit: (() => void)[] = [];
   constructor(
     private render: () => void = () => {},
-    private onSaved: (receipt: CommandReceipt) => void = () => {},
+    private onSaved: (
+      receipt: CommandReceipt,
+      values: Record<string, string | boolean | string[]>,
+    ) => void = () => {},
   ) {}
   bind(render: () => void) {
     this.render = render;
@@ -348,7 +351,7 @@ export class ConfigurationDraft {
     };
     if (disposition === "recorded") {
       this.phase = "recorded";
-      if (this.receipt) this.onSaved(this.receipt);
+      if (this.receipt) this.onSaved(this.receipt, { ...this.values });
       this.savedAt = Date.now();
       this.notice = outcomeCopy.saved;
     } else if (disposition === "unknown") {
@@ -381,6 +384,8 @@ export class ConfigurationDraft {
 export interface SavedRecord {
   at: number;
   receipt: CommandReceipt;
+  /** The form values at the moment of the save, which a later re-read no longer holds. */
+  values: Record<string, string | boolean | string[]>;
 }
 export class ConfigurationDrafts {
   private drafts = new Map<string, ConfigurationDraft>();
@@ -416,8 +421,8 @@ export class ConfigurationDrafts {
   get(key: string, render: () => void) {
     let draft = this.drafts.get(key);
     if (!draft) {
-      draft = new ConfigurationDraft(render, (receipt) =>
-        this.savedRecords.set(key, { at: Date.now(), receipt }),
+      draft = new ConfigurationDraft(render, (receipt, values) =>
+        this.savedRecords.set(key, { at: Date.now(), receipt, values }),
       );
       this.drafts.set(key, draft);
     }
