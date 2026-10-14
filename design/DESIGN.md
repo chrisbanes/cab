@@ -527,8 +527,8 @@ use the desktop copy.
 
 ### First run and onboarding
 
-Frames 143–152b draw the planned flows in [docs/user-flows](../docs/user-flows/);
-none is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
+Frames 143–152b draw the flows in [docs/user-flows](../docs/user-flows/); each flow
+document states what is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
 @fixture-user, lead Ada and task FA-1. Review notes 153 list each frame's flow and
 the open decisions.
 
@@ -539,14 +539,33 @@ the open decisions.
   outline, Optional muted outline) and one action. Only the first incomplete
   required row has the primary button; Done and optional rows use Ghost, the rest
   Outline. On phone the action moves below the explanation.
-- **Project setup (145, 145b):** with no profiles, step 1 shows an inline profile
-  form (name, runtime with Codex preselected, summary, instructions) and Create
-  profile. Afterwards the lead select shows the new profile and "Profile created.
-  Other setup values kept."
+- **Project setup (145, 145b):** with no profiles, step 1 replaces the Lead profile
+  select with an inline profile form: a help line ("No lead profiles yet. Create one
+  here, or leave this blank and choose a lead later; tasks wait for a lead before
+  starting."), Profile name and Summary side by side, Profile instructions, Runtime
+  (Codex preselected) and a secondary Create profile; the page's Create paused
+  project stays primary. In 145b the lead select is back beside Project name with the
+  new profile chosen, and the success line "Profile created. Other setup values kept."
+  (component `ugjxZ`) sits below the row.
 - **Ready check (146, 146b, 147):** replaces the "Recorded … as a paused project"
-  alert. It lists what was saved, states that the project is Paused and nothing
-  has run, and offers Resume and create first task with Keep paused. A blocking
-  item disables the primary and gives the reason beneath it.
+  alert. The frames show the region that appears below the locked setup form after
+  Create. It opens with the success line "Created fixture-app. It's paused.", then
+  plain lines (Nothing has run., Instructions saved. or No instructions yet.,
+  Repository access with its checkout checked on this Mac, a linked GitHub Project),
+  the Details toggle, and the actions: primary Resume and create first task, secondary
+  Keep paused. While anything would make work wait, the primary is disabled (50%) and
+  the reasons sit beneath it (146b), one item each: the readiness reason with its fix
+  line in Geist Mono, and a secondary link that opens in a new tab when the fix is
+  elsewhere (Add Claude for the Claude token, Edit profile when the Claude lead's
+  model or reasoning effort is not accepted). A hint follows ("Links open in a new
+  tab. Fix the item, then check again here. If you leave this page, resume later with
+  the Pause project switch in project configuration.") and a secondary Check again,
+  which re-reads readiness, the workspace and capacity. Items not drawn use the same
+  layout: no lead profile, the lead's runtime unavailable or not enabled, an
+  unreadable readiness check ("Readiness couldn't be checked."), "Checking
+  readiness…" while reads are pending, and, never blocking, "Capacity is full now, so
+  the first task will wait for capacity." On phone (147) the actions stack at full
+  width.
 - **First task (148–150):** the composer warns before Create and start that a paused
   project makes the task wait. Task detail shows "Waiting · <reason>" with one Fix;
   Fix: Resume project confirms first (149b). A dependency wait has no Fix, only a
