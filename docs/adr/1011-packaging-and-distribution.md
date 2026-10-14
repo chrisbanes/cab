@@ -24,11 +24,12 @@ blocking a later public release.
   `package.json`; pre-1.0 releases promise no CLI or API compatibility.
 - The release does not redistribute Anthropic's `claude` binary. Like `codex`,
   `claude` resolves from the LaunchAgent's fixed `PATH` and is passed to the Claude
-  Agent SDK. Readiness passes only the exact CLI version the pinned SDK declares
-  (`claudeCodeVersion`), the pairing that was qualified; any other version fails the
-  Claude check, so the host must pin that version and disable Claude's auto-update.
-  An SDK upgrade moves the required version with the release. Claude stays optional
-  (ADR-1008), so a missing or mismatched `claude` makes only that harness unavailable.
+  Agent SDK. Ensemble does not gate the CLI version: readiness reports the version
+  found, and compatibility is between the SDK and the CLI, so an incompatible CLI
+  fails at turn startup. Qualification evidence records the version used, and only
+  the version the pinned SDK declares (`claudeCodeVersion`) has been qualified.
+  Claude stays optional (ADR-1008), so a missing `claude` makes only that harness
+  unavailable.
 - An npm package is a later channel for the same build. It is not a native app:
   a desktop wrapper (Tauri or similar) would need signing, notarization and a second
   owner of the service lifecycle, and can be added later around the same install.
