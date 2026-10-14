@@ -1537,13 +1537,9 @@ test("a write answered after local review is left queues no focus", async (_t, j
     await reopenTask(page);
     await held.release(0);
     await page.waitForTimeout(250);
-    const focused = await page.evaluate(() => {
-      const element = document.activeElement;
-      return (
-        element?.closest("#local-review") !== null &&
-        element?.closest("#local-review") !== undefined
-      );
-    });
+    const focused = await page.evaluate(() =>
+      Boolean(document.activeElement?.closest("#local-review")),
+    );
     assert.equal(focused, false);
     assert.deepEqual(pageErrors, []);
   } finally {

@@ -390,6 +390,8 @@ function useLocalReviewController({
   });
   // Focus waits for the commit that shows the write's outcome: a frame callback can run
   // first, while the target is still disabled or not yet rendered.
+  // The gate waits for the latest announced change. `write()` re-notifies in a microtask after
+  // `settle`, ahead of React's commit; a `settle` branch that awaits real work would break that.
   const focusLater = (selector: string, fallback?: string) =>
     state.afterRender(() =>
       (
