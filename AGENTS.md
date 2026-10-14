@@ -58,7 +58,8 @@ authorise dispatch while paused.
   node references; refresh it through MCP after design changes.
 - Pen MCP edits stay in memory until saved. Make the target `.pen` file the active Pen
   window, then run `osascript scripts/pen-save-all.applescript` to save every open
-  window; confirm the file's modification time or hash changed.
+  window. It exits non-zero if an untitled window could not be saved; confirm the
+  target file's modification time or hash changed.
 - Keep implementation and validation proportional to the current task.
 - Keep architectural decisions with the lead and use delegation only when useful.
 - Keep development methods in agent instructions; do not recreate configured step
