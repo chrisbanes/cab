@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
   browserSuite,
   type BrowserJourney,
@@ -1420,6 +1420,135 @@ test("local review keeps focus on the selection, the next comment and the headin
   );
   await review.getByText("No review comments yet.").waitFor();
   assert.deepEqual(pageErrors, []);
+});
+
+/** Frame callbacks run before the page's own render, the order a loaded machine sometimes produces. */
+const framesBeforeCommit = (page: Page) =>
+  page.evaluate(() => {
+    window.requestAnimationFrame = (callback) => {
+      queueMicrotask(() => callback(performance.now()));
+      return 0;
+    };
+  });
+// Playwright's own clicks wait on page frames, so the click is dispatched in the page.
+const domClick = (target: Locator) =>
+  target.evaluate((element) => (element as HTMLElement).click());
+
+test("local review focus survives frame callbacks that run before the page commits", async (_t, j) => {
+  const { web, task, page, pageErrors } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  await commentOnLine(page, "Line 2: second", "Second note");
+  await commentOnLine(page, "Line 3: third", "Third note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  const items = review
+    .getByRole("list", { name: "Review comments" })
+    .locator(":scope > li");
+  await items.nth(2).waitFor();
+  const frames = await page.evaluateHandle(() => window.requestAnimationFrame);
+  try {
+    await framesBeforeCommit(page);
+    // Locator waits only: waitForFunction would poll with the replaced frame callbacks.
+    const returned = page.locator("[data-review-return]:focus", {
+      hasText: "third",
+    });
+    const addButton = files.getByRole("button", {
+      name: "Add review comment",
+      exact: true,
+    });
+    await domClick(addButton);
+    await page.keyboard.press("Escape");
+    await files.getByRole("form", { name: "Review comment" }).waitFor({
+      state: "detached",
+    });
+    await returned.waitFor();
+    // Saving returns to the line too.
+    await domClick(addButton);
+    await page.keyboard.type("Fourth note");
+    await domClick(
+      files.getByRole("button", { name: "Save comment", exact: true }),
+    );
+    await review.getByText("Fourth note").waitFor();
+    await returned.waitFor();
+
+    // Cancelling an edit returns to its Edit button; saving one to a re-enabled Edit.
+    const edit = (index: number) =>
+      items.nth(index).getByRole("button", { name: "Edit", exact: true });
+    const editFocused = page.locator("[data-review-edit]:focus:enabled");
+    await domClick(edit(0));
+    await review.getByLabel("Edit comment").fill("Unsaved edit");
+    await page.keyboard.press("Escape");
+    await review.getByLabel("Edit comment").waitFor({ state: "detached" });
+    await editFocused.waitFor();
+    await domClick(edit(0));
+    await review.getByLabel("Edit comment").fill("Edited note");
+    await domClick(review.getByRole("button", { name: "Save edit" }));
+    await review.getByText("Edited note", { exact: true }).waitFor();
+    await editFocused.waitFor();
+
+    // Removing moves focus to the next comment, the previous one when last, then the heading.
+    const remove = (index: number) =>
+      domClick(
+        items.nth(index).getByRole("button", { name: "Remove", exact: true }),
+      );
+    const commentFocused = (text: string) =>
+      page.locator("[data-comment-id]:focus", { hasText: text }).waitFor();
+    await remove(0);
+    await commentFocused("Second note");
+    await remove(2);
+    await commentFocused("Third note");
+    await remove(1);
+    await commentFocused("Second note");
+    await remove(0);
+    await page.locator("#local-review-heading:focus").waitFor();
+    await review.getByText("No review comments yet.").waitFor();
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await frames.evaluate((original) => {
+      window.requestAnimationFrame = original;
+    });
+  }
+});
+
+test("a write answered after local review is left queues no focus", async (_t, j) => {
+  const { web, task, page, pageErrors } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  await commentOnLine(page, "Line 2: second", "Second note");
+  const review = page.locator("#local-review");
+  const held = await holdSaves(page);
+  try {
+    await review
+      .getByRole("button", { name: "Remove", exact: true })
+      .first()
+      .click();
+    await held.entered(0);
+    await reopenTask(page);
+    await held.release(0);
+    await page.waitForTimeout(250);
+    const focused = await page.evaluate(() => {
+      const element = document.activeElement;
+      return (
+        element?.closest("#local-review") !== null &&
+        element?.closest("#local-review") !== undefined
+      );
+    });
+    assert.equal(focused, false);
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    held.releaseAll();
+  }
 });
 
 test("phone local review comments and sends to a receipt using the keyboard", async (_t, j) => {

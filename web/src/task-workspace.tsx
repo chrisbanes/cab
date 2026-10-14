@@ -234,6 +234,8 @@ export function TaskWorkspace({
   const auxInFlight = useRef<OperatorCommand | null>(null);
 
   const focusUnconfirmed = useRef(false);
+  // The control whose replayed check just settled, focused once the commit enables it.
+  const focusReplay = useRef<string | null>(null);
   // The message that follows a reply replaces the control the operator used, so it takes
   // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
   // that check. Results and Changes actions never take it.
@@ -348,6 +350,19 @@ export function TaskWorkspace({
       checking.current = false;
       focusUnconfirmed.current = false;
     }
+  });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new task never inherits the last one's focus request.
+  useEffect(() => {
+    focusReplay.current = null;
+  }, [taskId]);
+  useEffect(() => {
+    if (pending || !focusReplay.current) return;
+    document
+      .querySelector<HTMLElement>(
+        `[data-unconfirmed-control="${focusReplay.current}"]`,
+      )
+      ?.focus();
+    focusReplay.current = null;
   });
   const completeSourceObservation =
     !data?.source ||
@@ -835,14 +850,7 @@ export function TaskWorkspace({
         state.unconfirmed = unconfirmedOf(taskId, input, outcome.code);
       } else {
         state.unconfirmed = null;
-        if (replayed)
-          requestAnimationFrame(() =>
-            document
-              .querySelector<HTMLElement>(
-                `[data-unconfirmed-control="${input.type}"]`,
-              )
-              ?.focus(),
-          );
+        if (replayed) focusReplay.current = input.type;
         if (outcome.state === "recorded") {
           if (outcome.receipt.kind === "comment-review")
             state.commentReview = outcome.receipt;
