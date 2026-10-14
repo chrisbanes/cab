@@ -390,6 +390,12 @@ test("validated recovery requires a new operator message, processes old batch wi
       "operator-reconciled",
     );
     const api = new OperatorApi(service, [f.directory]);
+    // The recorded continuation resolves the recovery, so no recovery wait remains.
+    assert.ok(
+      !(await api.readTask(f.taskId)).data.waits.some(
+        (w) => w.code === "assignment-recovery-unresolved",
+      ),
+    );
     assert.equal(
       (await api.readTask(f.taskId)).data.messages.find(
         (m) => m.eventId === f.answer.eventId,
@@ -508,6 +514,20 @@ test("an invalidated recovery continuation keeps the successor waiting without s
     assert.equal(waiting.length, 1);
     assert.match(waiting[0]?.reason ?? "", /recovery-continuation-unresolved/);
     assert.equal(f.runtime.turns, 2);
+    // The task read explains the same rejection from the shared predicate, with no Fix.
+    const assignmentId = String(f.old.assignmentId),
+      d = f.service.domain();
+    assert.deepEqual(
+      (
+        await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+      ).data.waits.find((w) => w.code === "assignment-recovery-unresolved"),
+      {
+        code: "assignment-recovery-unresolved",
+        fix: null,
+        links: [{ kind: "recovery", assignmentId, label: "Open recovery" }],
+        detail: d.profile(String(d.assignment(assignmentId).profileId)).name,
+      },
+    );
   } finally {
     await close(f);
   }

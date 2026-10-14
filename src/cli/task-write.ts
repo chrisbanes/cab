@@ -104,7 +104,9 @@ export function waitLines(waits: readonly Wait[], taskId: string): string[] {
           ? `  Review: ensemble approval get ${taskId} ${link.id}`
           : link.kind === "source"
             ? `  ${link.label}: ${link.url}`
-            : `  ${link.label}`,
+            : link.kind === "recovery"
+              ? `  Recovery: ensemble recovery get ${link.assignmentId}`
+              : `  ${link.label}`,
     ),
   ]);
 }

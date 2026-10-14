@@ -10,6 +10,7 @@ import type {
   RuntimeToolResult,
   UnexpectedRequest,
 } from "../../src/standalone/codex.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { startedOf } from "../fixtures/service-internals.js";
 
@@ -316,6 +317,23 @@ test("fresh operator message continues a refused canonical initial with exact cu
 function proof(service: StandaloneService, workId: string) {
   return startedOf(service).state.isNeverAdmittedRefusedAssignmentWork(workId);
 }
+
+test("a request refused only because captured revisions changed reads as held execution, not as a wait", async () => {
+  const f = await refusedInitial();
+  try {
+    const read = (await new OperatorApi(f.service).readTask(f.taskId)).data;
+    assert.equal(read.execution.state, "uncertain");
+    assert.deepEqual(read.execution.reasonCodes, ["recovery-held"]);
+    // Clearing it is a recovery or fresh-message decision, so no wait implies a Fix.
+    assert.deepEqual(
+      read.waits.map((w) => w.code),
+      ["project-paused"],
+    );
+  } finally {
+    await f.service.stop();
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
 
 test("canonical initial refusal proof rejects altered identity and every admission witness", async (t) => {
   for (const witness of [
