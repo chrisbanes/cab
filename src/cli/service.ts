@@ -81,6 +81,8 @@ export type ServiceOptions = {
 export type ServiceIo = {
   stdout: NodeJS.WritableStream;
   stderr: NodeJS.WritableStream;
+  /** Aborted on SIGINT; a wait then fails at its stage, so failure handling still runs. */
+  signal?: AbortSignal | undefined;
 };
 
 /** The upgrade's view of the operator's CLI connection. */
@@ -124,16 +126,9 @@ const manifestSchema = z.object({
 });
 
 /** A failure with a fixed message; raw causes can hold paths or secrets and are never shown. */
-class ServiceFailure extends Error {
-  constructor(
-    readonly stage: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+class ServiceFailure extends Error {}
 
-const refuse = (message: string) => new ServiceFailure("preflight", message);
+const refuse = (message: string) => new ServiceFailure(message);
 const sha256 = (path: string) =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
 
@@ -147,6 +142,8 @@ class Service {
   readonly authFile: string;
   /** Set once a bootout's process exit could not be confirmed. */
   exitUnconfirmed = false;
+  /** Failure handling finishes its bounded stop even after an interrupt. */
+  cleaningUp = false;
 
   constructor(
     readonly options: ServiceOptions,
@@ -220,6 +217,12 @@ class Service {
       throw refuse(
         "The release's manifest.json does not describe its version directory",
       );
+    for (const file of [
+      join(root, "node", "bin", "node"),
+      join(root, "dist", "src", "standalone", "cli.js"),
+    ])
+      if (!lstatSync(file, { throwIfNoEntry: false })?.isFile())
+        throw refuse(`The release is incomplete: ${file} is missing`);
     return version;
   }
 
@@ -251,8 +254,7 @@ class Service {
   } | null> {
     const result = await this.host.launchctl(["print", this.target]);
     if (result.status === NOT_LOADED) return null;
-    if (result.status !== 0)
-      throw new ServiceFailure("launchd", "launchctl print failed");
+    if (result.status !== 0) throw new ServiceFailure("launchctl print failed");
     // Top-level fields are indented by exactly one tab; nested sections by more.
     const field = (name: string) =>
       new RegExp(`^\\t${name} = (.*)$`, "m").exec(result.stdout)?.[1];
@@ -281,7 +283,7 @@ class Service {
   }
 
   /** Boot out the owned job, if it is loaded, and confirm that its process exited. */
-  async stopOwned(record: InstallRecord | null, stage: string) {
+  async stopOwned(record: InstallRecord | null) {
     const job = await this.loadedJob();
     if (!job) return;
     this.requireOwned(record, job);
@@ -289,7 +291,6 @@ class Service {
       job.pid === undefined ? null : await this.host.captureIdentity(job.pid);
     if (job.pid !== undefined && !identity)
       throw new ServiceFailure(
-        stage,
         "The job's process identity could not be read; nothing was stopped",
       );
     // A bootout error can race the job's own exit; the poll below decides.
@@ -303,9 +304,9 @@ class Service {
         return;
       if (this.host.now() >= deadline) {
         this.exitUnconfirmed = true;
-        throw new ServiceFailure(stage, "process exit unconfirmed");
+        throw new ServiceFailure("process exit unconfirmed");
       }
-      await this.host.sleep(POLL_MS);
+      await this.pause();
     }
   }
 
@@ -315,8 +316,9 @@ class Service {
    */
   async leaveStopped(record: InstallRecord | null): Promise<boolean> {
     let stopped = false;
+    this.cleaningUp = true;
     try {
-      await this.stopOwned(record, "stop");
+      await this.stopOwned(record);
       stopped = !this.exitUnconfirmed;
     } catch {
       stopped = false;
@@ -374,13 +376,10 @@ class Service {
       try {
         writeLaunchAgent(configuration, staged);
       } catch {
-        throw new ServiceFailure(
-          "render",
-          "The LaunchAgent configuration is invalid",
-        );
+        throw new ServiceFailure("The LaunchAgent configuration is invalid");
       }
       if (!(await this.host.lint(staged)))
-        throw new ServiceFailure("render", "plutil -lint rejected the plist");
+        throw new ServiceFailure("plutil -lint rejected the plist");
       const record: InstallRecord = {
         schema: RECORD_SCHEMA,
         label,
@@ -403,7 +402,13 @@ class Service {
       this.activation,
     ]);
     if (result.status !== 0)
-      throw new ServiceFailure("start", "launchctl bootstrap failed");
+      throw new ServiceFailure("launchctl bootstrap failed");
+  }
+
+  async pause() {
+    if (this.io.signal?.aborted && !this.cleaningUp)
+      throw new ServiceFailure("interrupted");
+    await this.host.sleep(POLL_MS);
   }
 
   /** Poll until `probe` returns a value, or fail at `stage` after the deadline. */
@@ -420,8 +425,8 @@ class Service {
       } catch {
         // Not ready yet.
       }
-      if (this.host.now() >= deadline) throw new ServiceFailure(stage, message);
-      await this.host.sleep(POLL_MS);
+      if (this.host.now() >= deadline) throw new ServiceFailure(message);
+      await this.pause();
     }
   }
 
@@ -503,7 +508,11 @@ export async function installService(
     if (stage !== "preflight") {
       jobStopped = await service.leaveStopped(record);
       // Without a confirmed exit the record stays, so uninstall can finish the job.
-      if (jobStopped) rmSync(service.recordPath, { force: true });
+      try {
+        if (jobStopped) rmSync(service.recordPath, { force: true });
+      } catch {
+        jobStopped = false;
+      }
     }
     service.write("stderr", {
       ok: false,
@@ -555,7 +564,10 @@ export async function upgradeService(
       );
 
     stage = "stop";
-    await service.stopOwned(record, stage);
+    await service.stopOwned(record);
+    // Nothing starts the old version at login from here on, and a torn render cannot leave
+    // an activation that no longer matches the record.
+    rmSync(service.activation, { force: true });
 
     stage = "snapshot";
     service.prepareDirectories();
@@ -571,7 +583,7 @@ export async function upgradeService(
       await createSnapshot(record.configuration.dataDirectory, path);
       await verifySnapshot(path);
     } catch {
-      throw new ServiceFailure(stage, "The snapshot could not be taken");
+      throw new ServiceFailure("The snapshot could not be taken");
     }
     snapshot = path;
 
@@ -639,7 +651,6 @@ export async function uninstallService(
       service.requireOwned(record, job);
       if (!(await service.leaveStopped(record)))
         throw new ServiceFailure(
-          "stop",
           "The job could not be confirmed stopped; the install record is kept, run service uninstall again",
         );
       rmSync(service.activation, { force: true });
@@ -844,7 +855,12 @@ async function initAuth(args: string[], deps: CliDeps): Promise<number> {
   let authFile = parsed.positionals[0];
   if (authFile === undefined) {
     const auth = join(stateDir as string, "auth");
-    mkdirSync(auth, { recursive: true, mode: 0o700 });
+    try {
+      mkdirSync(auth, { recursive: true, mode: 0o700 });
+    } catch {
+      deps.stderr.write(`Could not create ${auth}\n`);
+      return 1;
+    }
     authFile = join(auth, "operator-auth.json");
   }
   const { runOperatorAuth } = await import(

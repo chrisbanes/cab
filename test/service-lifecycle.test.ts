@@ -548,7 +548,7 @@ async function installed(t: { after(fn: () => void): void }) {
       return checks;
     },
   };
-  const upgrade = async (target = releaseB) => {
+  const upgrade = async (target = releaseB, signal?: AbortSignal) => {
     const { out, io } = capture();
     const code = await upgradeService(
       // Upgrade keeps the installed port whatever --port defaults to.
@@ -556,7 +556,7 @@ async function installed(t: { after(fn: () => void): void }) {
       target,
       connection,
       f.launchd.host(),
-      io,
+      { ...io, signal },
     );
     return {
       code,
@@ -738,4 +738,41 @@ test("an upgrade fails at snapshot, job stopped, while another process owns the 
   } finally {
     owner.close();
   }
+});
+
+test("upgrade preflight refuses an unowned activation or an invalid record", async (t) => {
+  const f = await installed(t);
+  writeFileSync(f.activation, `${readFileSync(f.activation, "utf8")}\n`);
+  let result = await f.upgrade();
+  assert.equal(result.report.stage, "preflight");
+  assert.match(result.report.error, /not created by this installation/);
+  assert.deepEqual(f.launchd.mutations(), []);
+
+  writeFileSync(f.recordPath, '{"schema":"ensemble.service/v1"');
+  result = await f.upgrade();
+  assert.equal(result.report.stage, "preflight");
+  assert.match(result.report.error, /install record .* is invalid/);
+  assert.equal((await f.uninstall()).code, 1);
+  assert.deepEqual(f.launchd.mutations(), []);
+
+  const g = await installed(t);
+  rmSync(join(g.releaseB, "dist", "src", "standalone", "cli.js"));
+  result = await g.upgrade();
+  assert.equal(result.report.stage, "preflight");
+  assert.match(result.report.error, /release is incomplete/);
+  assert.deepEqual(g.launchd.mutations(), []);
+});
+
+test("an interrupted upgrade still leaves the job stopped", async (t) => {
+  const f = await installed(t);
+  const interrupt = new AbortController();
+  f.setChecks([{ id: "codex-login", status: "fail" }]);
+  f.launchd.onBootstrap = () => interrupt.abort();
+  const result = await f.upgrade(f.releaseB, interrupt.signal);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "readiness");
+  assert.equal(result.report.error, "interrupted");
+  assert.equal(result.report.jobStopped, true);
+  assert.equal(f.launchd.jobs.size, 0);
+  assert.equal(existsSync(f.activation), false);
 });

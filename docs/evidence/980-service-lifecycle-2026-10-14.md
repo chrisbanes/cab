@@ -32,7 +32,7 @@ root for every file. It does not qualify the default label, the real
 | --- | --- |
 | Preflight | `launchctl print` exited 113 for the label. |
 | Build | Both releases built and unpacked into `STATE/versions/<version>` with `--strip-components 1` (54 s). |
-| Auth | Operator auth initialized with A's bundled Node and a random password held in memory; file mode `0600`. |
+| Auth | Operator auth initialized with A's bundled Node and a random password passed to that one child process in its environment and never written to disk; file mode `0600`. |
 | Install | `versions/0.1.0/bin/ensemble service install` exited 0. `plutil -lint` OK; `ProgramArguments[0]` was `STATE/versions/0.1.0/node/bin/node`; `launchctl print` reported `path =` the throwaway plist and a pid; `/app` returned 200. |
 | CLI login | A `read` credential issued through the session route, stored in a `0600` token file and used by `ensemble auth login --connection live`. |
 | Upgrade | `versions/0.1.1-live.980/bin/ensemble service upgrade … --connection live` exited 0 in about 12 s. Release A's pid was gone (`ps -p`), the new pid ran `versions/0.1.1-live.980/node/bin/node`, and `ensemble snapshot verify` on the reported snapshot exited 0. |
@@ -85,6 +85,17 @@ comparison; afterwards no `ensemble` entry existed in `~/Library/LaunchAgents`,
 `~/Library/Application Support/Ensemble` entries kept their September and
 earlier mtimes. Upgrade now probes the recorded origin and rejects `--port`, and
 the fake-host test asserts the probed URL.
+
+## Changes after the run
+
+Review repairs after the passing run changed `src/cli/service.ts` without
+changing the commands' launchd calls or their order on a successful path:
+`init-auth` accepts an explicit file without `HOME`; upgrade preflight also
+requires the target's `node/bin/node` and `dist/src/standalone/cli.js`; upgrade
+removes the old LaunchAgent right after the confirmed stop rather than on failure
+or replacement; Ctrl-C fails a wait at its stage; and failure messages lost an
+unused field. The fake-host tests cover each change; the live run was not
+repeated.
 
 ## Not proven
 

@@ -24,7 +24,8 @@ directory. The defaults are:
 The label defaults to `local.ensemble.service` and the port to `8787`
 (`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
 `--label` and, at install only, `--port` override them; upgrade keeps the
-installed port. The state and LaunchAgents directories must
+installed port. Pass the same directory and label options to `upgrade` and
+`uninstall` as to `install`. The state and LaunchAgents directories must
 be real directories you own that no one else can write; the data, snapshot,
 install-record and log directories are created with mode `0700` and must stay
 private. The state directory may already hold unrelated files, such as the
@@ -62,6 +63,8 @@ seconds for `/app`. The plist names the release's own `node/bin/node` and
 If bootstrap or the wait fails, install boots out the job it started, confirms
 the process exited, removes the LaunchAgent and its record, keeps the data, auth
 and logs, reports the log paths and exits 1. Run it again after fixing the cause.
+If the exit cannot be confirmed, it reports `"jobStopped":false` and keeps the
+record so that `service uninstall` can finish.
 
 Then log in the operator CLI with a read credential issued in Settings →
 Credentials. Upgrade reads readiness through this connection, and `ensemble
@@ -124,7 +127,16 @@ release versions and logs, so a later install reuses them. It refuses, changing
 nothing, when the loaded job or the LaunchAgent file is not the one the record
 describes (a different plist path or a changed plist hash). If the exit cannot be
 confirmed, it removes the LaunchAgent once the label is gone, keeps the record and
-exits 1; run it again. With nothing installed it reports `"installed":false`.
+exits 1; run it again. A re-run cannot recheck the earlier process, so confirm
+with `launchctl print` and `ps` that it is gone. With nothing installed it reports
+`"installed":false`.
+
+Ctrl-C during an install or upgrade wait fails it at that stage, and the failure
+handling above still runs. If a command is killed outright, or the install record
+is unreadable, `upgrade` and `uninstall` refuse rather than guess. Recover by
+hand: boot out the label only after `launchctl print` shows the expected
+`~/Library/LaunchAgents/<label>.plist` path, confirm its process exited, then
+remove that plist and `STATE/launchd/<label>.json` and install again.
 
 ### Restart and host restarts
 
