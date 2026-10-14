@@ -610,7 +610,8 @@ test("resolution during the native write waits for its successful callback", asy
       send: (message: unknown) => Promise<void>,
     ) => {
       await send(response);
-      await new Promise((resolve) => setTimeout(resolve, 40));
+      // The fixture's resolution must be observed before this write returns.
+      await new Promise((resolve) => setTimeout(resolve, 250));
     },
   });
   assert.equal(evidence.status, "passed");
@@ -840,7 +841,13 @@ for (const mode of ["secret", "cleanup-unproved"] as const)
             }
           : {}),
       },
-      budgets: serviceBehaviourBudgets,
+      // The secret question is never published, so only the request deadline
+      // ends the `secret` run. The window also covers runtime launch, so it
+      // is short but not tight; the other budgets stay wide.
+      budgets:
+        mode === "secret"
+          ? { ...serviceBehaviourBudgets, requestMs: 3_000 }
+          : serviceBehaviourBudgets,
     });
     t.after(() => {
       rmSync(evidence.fixture.path, { recursive: true, force: true });
