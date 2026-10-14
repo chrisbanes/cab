@@ -52,6 +52,7 @@ const NOT_LOADED = 113;
 const STOP_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 120_000;
 const POLL_MS = 1_000;
+const PROBE_MS = 5_000;
 
 /** An identity from `captureIdentity`, passed back unchanged to `exited`. */
 export type ProcessIdentity = object;
@@ -68,6 +69,8 @@ export type ServiceHost = {
   fetch: typeof fetch;
   now(): number;
   sleep(ms: number): Promise<void>;
+  /** A signal that aborts after `ms`, on the same clock as `now`. */
+  timeout(ms: number): AbortSignal;
 };
 
 export type ServiceOptions = {
@@ -89,8 +92,8 @@ export type ServiceIo = {
 export type OperatorConnection = {
   /** The connection's origin once its token loads; throws when it is unusable. */
   origin(): Promise<string>;
-  /** One authenticated readiness read, after the installation identity check. */
-  readiness(): Promise<{ id: string; status: string }[]>;
+  /** One authenticated readiness read, after the installation identity check; `signal` aborts it. */
+  readiness(signal: AbortSignal): Promise<{ id: string; status: string }[]>;
 };
 
 const configurationSchema = z
@@ -405,25 +408,40 @@ class Service {
       throw new ServiceFailure("launchctl bootstrap failed");
   }
 
-  async pause() {
+  checkInterrupt() {
     if (this.io.signal?.aborted && !this.cleaningUp)
       throw new ServiceFailure("interrupted");
+  }
+
+  async pause() {
+    this.checkInterrupt();
     await this.host.sleep(POLL_MS);
   }
 
-  /** Poll until `probe` returns a value, or fail with `message` after the deadline. */
+  /**
+   * Poll until `probe` returns a value, or fail with `message` after the deadline. Each probe
+   * is bounded by the remaining deadline and the interrupt, even if it ignores its signal.
+   */
   async waitFor<T>(
     message: string,
-    probe: () => Promise<T | undefined>,
+    probe: (signal: AbortSignal) => Promise<T | undefined>,
   ): Promise<T> {
     const deadline = this.host.now() + START_TIMEOUT_MS;
     for (;;) {
+      const remaining = Math.max(1, deadline - this.host.now());
+      const signal = AbortSignal.any([
+        this.host.timeout(Math.min(PROBE_MS, remaining)),
+        ...(this.io.signal ? [this.io.signal] : []),
+      ]);
+      let value: T | undefined;
       try {
-        const value = await probe();
-        if (value !== undefined) return value;
+        value = await bounded(probe(signal), signal);
       } catch {
-        // Not ready yet.
+        value = undefined; // Not ready yet, or this probe timed out.
       }
+      // An interrupt during a probe wins over its result.
+      this.checkInterrupt();
+      if (value !== undefined) return value;
       if (this.host.now() >= deadline) throw new ServiceFailure(message);
       await this.pause();
     }
@@ -432,15 +450,26 @@ class Service {
   waitForApp(origin: string) {
     return this.waitFor(
       "The service did not serve /app within 120 s",
-      async () => {
-        const response = await this.host.fetch(`${origin}/app`, {
-          signal: AbortSignal.timeout(5_000),
-        });
+      async (signal) => {
+        const response = await this.host.fetch(`${origin}/app`, { signal });
         await response.body?.cancel();
         return response.status === 200 ? true : undefined;
       },
     );
   }
+}
+
+/** Settles with `promise`, or rejects once `signal` aborts. */
+function bounded<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  promise.catch(() => {}); // A late rejection after the abort is expected.
+  return new Promise((done, fail) => {
+    const abort = () => fail(signal.reason);
+    if (signal.aborted) return abort();
+    signal.addEventListener("abort", abort, { once: true });
+    promise
+      .then(done, fail)
+      .finally(() => signal.removeEventListener("abort", abort));
+  });
 }
 
 function portIsFree(port: number): Promise<boolean> {
@@ -599,8 +628,8 @@ export async function upgradeService(
     stage = "readiness";
     const readiness = await service.waitFor(
       "Readiness still reports a failing check",
-      async () => {
-        const checks = await connection.readiness();
+      async (signal) => {
+        const checks = await connection.readiness(signal);
         return checks.some((check) => check.status === "fail")
           ? undefined
           : checks.map(({ id, status }) => ({ id, status }));
@@ -708,6 +737,7 @@ export function defaultServiceHost(): ServiceHost {
     fetch,
     now: Date.now,
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+    timeout: (ms) => AbortSignal.timeout(ms),
   };
 }
 

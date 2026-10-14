@@ -501,8 +501,19 @@ function operatorConnection(
       await loadToken(connection, deps);
       return connection.url;
     },
-    async readiness() {
-      const session = await connect(config, requested, deps, [
+    async readiness(signal) {
+      // Every request of this read, identity included, aborts with the lifecycle wait.
+      const bound: CliDeps = {
+        ...deps,
+        fetch: (input, init) =>
+          deps.fetch(input, {
+            ...init,
+            signal: init?.signal
+              ? AbortSignal.any([init.signal, signal])
+              : signal,
+          }),
+      };
+      const session = await connect(config, requested, bound, [
         "cli.identity",
         "diagnostics.read",
       ]);

@@ -13,6 +13,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { basename, join, relative, resolve } from "node:path";
 import { test } from "node:test";
@@ -50,6 +51,7 @@ class FakeLaunchd {
   printPath: string | undefined;
   health = 200;
   onBootstrap: () => void = () => {};
+  overrides: Partial<ServiceHost> = {};
 
   constructor(readonly snapshots: string) {}
 
@@ -110,6 +112,9 @@ class FakeLaunchd {
       sleep: async (ms) => {
         this.clock += ms;
       },
+      // Probe timeouts fire almost at once; the polling sleep advances the fake clock.
+      timeout: () => AbortSignal.timeout(5),
+      ...this.overrides,
     };
   }
 
@@ -770,9 +775,85 @@ test("an interrupted upgrade still leaves the job stopped", async (t) => {
   f.launchd.onBootstrap = () => interrupt.abort();
   const result = await f.upgrade(f.releaseB, interrupt.signal);
   assert.equal(result.code, 1);
-  assert.equal(result.report.stage, "readiness");
+  // The interrupt arrives at bootstrap, so the next wait (health) fails.
+  assert.equal(result.report.stage, "health");
   assert.equal(result.report.error, "interrupted");
   assert.equal(result.report.jobStopped, true);
   assert.equal(f.launchd.jobs.size, 0);
   assert.equal(existsSync(f.activation), false);
+});
+
+test("a stalled readiness read fails at readiness on the deadline and stops the job", {
+  timeout: 20_000,
+}, async (t) => {
+  const f = await installed(t);
+  const signals: AbortSignal[] = [];
+  const stalled: OperatorConnection = {
+    origin: async () => `http://127.0.0.1:${f.options.port}`,
+    readiness: (signal) => {
+      signals.push(signal);
+      return new Promise(() => {});
+    },
+  };
+  const { out, io } = capture();
+  const code = await upgradeService(
+    f.options,
+    f.releaseB,
+    stalled,
+    f.launchd.host(),
+    io,
+  );
+  assert.equal(code, 1);
+  const report = JSON.parse(out.stderr);
+  assert.equal(report.stage, "readiness");
+  assert.equal(report.jobStopped, true);
+  assert.equal(f.launchd.jobs.size, 0);
+  assert.equal(existsSync(f.activation), false);
+  assert.ok(signals.length > 1 && signals.every((signal) => signal.aborted));
+});
+
+test("a stalled /app response fails install at health on the deadline", {
+  timeout: 20_000,
+}, async (t) => {
+  const f = await setup(t);
+  const stalled = createHttpServer(() => {});
+  t.after(() => {
+    stalled.closeAllConnections();
+    stalled.close();
+  });
+  f.launchd.onBootstrap = () => {
+    stalled.listen(f.options.port, "127.0.0.1");
+  };
+  f.launchd.overrides = { fetch };
+  const result = await f.install();
+  assert.equal(result.code, 1);
+  const report = JSON.parse(result.stderr);
+  assert.equal(report.stage, "health");
+  assert.equal(report.jobStopped, true);
+  assert.equal(existsSync(f.activation), false);
+  assert.equal(existsSync(f.recordPath), false);
+});
+
+test("an interrupt during a probe that then succeeds still fails and undoes the install", async (t) => {
+  const f = await setup(t);
+  const interrupt = new AbortController();
+  f.launchd.overrides = {
+    fetch: async () => {
+      interrupt.abort();
+      return new Response(null, { status: 200 });
+    },
+  };
+  const { out, io } = capture();
+  const code = await installService(f.options, f.releaseA, f.launchd.host(), {
+    ...io,
+    signal: interrupt.signal,
+  });
+  assert.equal(code, 1);
+  const report = JSON.parse(out.stderr);
+  assert.equal(report.stage, "health");
+  assert.equal(report.error, "interrupted");
+  assert.equal(report.jobStopped, true);
+  assert.equal(f.launchd.jobs.size, 0);
+  assert.equal(existsSync(f.activation), false);
+  assert.equal(existsSync(f.recordPath), false);
 });
