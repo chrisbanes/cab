@@ -1037,7 +1037,9 @@ export class GitHubSourceStore {
         this.setSourceHold(nodeId, "closed");
         if (Number(row.ready) === Number(ready))
           this.db
-            .prepare("UPDATE domain_tasks SET version = version + 1 WHERE id = ?")
+            .prepare(
+              "UPDATE domain_tasks SET version = version + 1 WHERE id = ?",
+            )
             .run(taskId);
       }
     } else if (Number(row.ready) === 1 && !ready)

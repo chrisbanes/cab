@@ -1490,3 +1490,234 @@ test("synchronizer scopes concrete reader pauses across refreshes and projects b
     db.close();
   }
 });
+
+async function closedIssueService(closedIssues: "skip" | "done") {
+  const root = realpathSync(
+    mkdtempSync(join(tmpdir(), "ensemble-github-closure-mode-")),
+  );
+  const projectId = randomUUID();
+  const profileId = randomUUID();
+  const reader = { state: "open" as "open" | "closed", interrupted: 0 };
+  let release!: () => void;
+  const heldTurn = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let turns = 0;
+  const service = new StandaloneService(
+    join(root, "data"),
+    (): Runtime => ({
+      async start() {},
+      async stop() {},
+      onUnexpectedRequest() {},
+      async startThread() {
+        return "thread";
+      },
+      async resumeThread() {},
+      async startTurn() {
+        turns++;
+        return `turn-${turns}`;
+      },
+      async interruptTurn() {
+        reader.interrupted++;
+      },
+      async waitForTurn() {
+        await heldTurn;
+        return "completed";
+      },
+    }),
+    undefined,
+    {
+      github: {
+        readerFactory: (): GitHubSourceReader => ({
+          async readSelection() {
+            return {
+              complete: true,
+              issues: [{ ...issue, state: reader.state }],
+              reason: null,
+            };
+          },
+          async readBlockers() {
+            return { complete: true, blockers: [], reason: null };
+          },
+          async readIssueStatus() {
+            return { status: reader.state };
+          },
+        }),
+        intervalMs: 60_000,
+      },
+      power: { enabled: false },
+    },
+  );
+  await service.start();
+  const domain = service.domain();
+  domain.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Lead",
+    instructions: "Lead",
+    capabilities: "work",
+  });
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Alpha",
+    leadProfileId: profileId,
+  });
+  domain.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    paused: false,
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:TEST_GITHUB",
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R_1",
+        owner: "org",
+        name: "repo",
+      },
+    ],
+    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    closedIssues,
+    repositories: [],
+  });
+  domain.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+  await service.refreshGitHub();
+  const taskId = String(service.githubSources().issue("I_1")?.taskId);
+  await service.provisionTask(taskId);
+  domain.execute({
+    type: "assignment.create",
+    actor: "agent",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    assignmentId: randomUUID(),
+    profileId,
+    brief: "Complete imported work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  await service.refreshGitHub();
+  for (let i = 0; i < 100 && turns === 0; i++)
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.equal(turns, 1);
+  const db = new DatabaseSync(join(root, "data", "standalone.sqlite"));
+  const unfinished = () =>
+    Number(
+      (
+        db
+          .prepare(
+            `SELECT count(*) AS count FROM task_execution_bindings b JOIN execution_intents e ON e.workId = b.workId
+            WHERE b.taskId = ? AND e.state IN ('ready','capacity-waiting','held','submitting','running')
+            AND NOT EXISTS (SELECT 1 FROM execution_request_refusals r WHERE r.workId = e.workId)`,
+          )
+          .get(taskId) as { count: number }
+      ).count,
+    );
+  return {
+    service,
+    domain,
+    taskId,
+    reader,
+    db,
+    turns: () => turns,
+    notices: () =>
+      Number(
+        (
+          db
+            .prepare(
+              "SELECT count(*) AS count FROM coordination_inbox_events WHERE taskId = ? AND eventType = 'source-hold'",
+            )
+            .get(taskId) as { count: number }
+        ).count,
+      ),
+    completion: () =>
+      service.githubSources().providerCompletion(taskId) !== undefined,
+    hold: () => service.githubSources().hold("I_1"),
+    async finishTurn() {
+      release();
+      for (let i = 0; i < 200 && unfinished() > 0; i++)
+        await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      assert.equal(unfinished(), 0);
+    },
+    async close() {
+      release();
+      db.close();
+      await service.stop();
+      rmSync(root, { recursive: true, force: true });
+    },
+  };
+}
+
+test("done mode completes a closed imported task only after its running turn settles", async () => {
+  const w = await closedIssueService("done");
+  try {
+    w.reader.state = "closed";
+    await w.service.refreshGitHub();
+    assert.equal(w.domain.task(w.taskId).state, "open");
+    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    assert.ok(w.notices() > 0, "the lead is told to stop safely");
+    assert.equal(w.reader.interrupted, 0);
+    assert.equal(w.completion(), false);
+    await w.finishTurn();
+    await w.service.refreshGitHub();
+    assert.equal(w.domain.task(w.taskId).state, "done");
+    assert.equal(w.completion(), true);
+    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+    assert.equal(w.turns(), 1);
+  } finally {
+    await w.close();
+  }
+});
+
+test("done mode leaves a stopped closed task open with its holds", async () => {
+  const w = await closedIssueService("done");
+  try {
+    w.reader.state = "closed";
+    await w.service.refreshGitHub();
+    await w.finishTurn();
+    await w.service.stopTask(w.taskId);
+    await w.service.refreshGitHub();
+    assert.equal(w.domain.task(w.taskId).state, "open");
+    assert.equal(w.completion(), false);
+    assert.equal(w.hold()?.reason, "closed");
+  } finally {
+    await w.close();
+  }
+});
+
+test("skip mode never completes a closed imported task", async () => {
+  const w = await closedIssueService("skip");
+  try {
+    w.reader.state = "closed";
+    await w.service.refreshGitHub();
+    await w.finishTurn();
+    await w.service.refreshGitHub();
+    assert.equal(w.domain.task(w.taskId).state, "open");
+    assert.equal(w.completion(), false);
+    assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
+  } finally {
+    await w.close();
+  }
+});

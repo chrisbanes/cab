@@ -563,10 +563,7 @@ for (const mode of ["skip", "done"] as const)
       const closed = w.observe({ labels: [], state: "closed" });
       assert.equal(closed?.state, "open");
       assert.equal(closed?.ready, 0);
-      assert.deepEqual(
-        [w.hold()?.active, w.hold()?.reason],
-        [1, "closed"],
-      );
+      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
       assert.ok(
         w.domain.admission(String(closed?.id)).reasons.includes("source-hold"),
       );
@@ -574,10 +571,7 @@ for (const mode of ["skip", "done"] as const)
       // Reopening keeps the closure hold and grants nothing beyond the rule.
       const reopened = w.observe({ state: "open", labels: [] });
       assert.equal(reopened?.ready, 0);
-      assert.deepEqual(
-        [w.hold()?.active, w.hold()?.reason],
-        [1, "closed"],
-      );
+      assert.deepEqual([w.hold()?.active, w.hold()?.reason], [1, "closed"]);
       assert.equal(w.observe({ state: "open" })?.ready, 1);
       assert.equal(w.hold()?.reason, "closed");
     } finally {

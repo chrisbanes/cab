@@ -1077,6 +1077,7 @@ export class StandaloneService {
         deliveryCoordinator,
       });
       await githubSynchronizer.refresh();
+      this.completeSettledProviderClosures({ githubSources, state });
       this.emitSourceHoldNotices({ githubSources, domain, coordination });
       // Nothing is published until provider reconciliation and queued-inbox
       // supersession finish; domain notifications cannot admit work.
@@ -2675,6 +2676,7 @@ export class StandaloneService {
     await started.deliveryCoordinator.refresh();
     await this.reconcileOwnDeliveryClosures(started);
     await started.githubSynchronizer.refresh();
+    this.completeSettledProviderClosures(started);
     this.emitSourceHoldNotices(started);
     await this.wakeScheduler();
   }
@@ -2725,6 +2727,18 @@ export class StandaloneService {
           );
         }
       }
+  }
+
+  /** Done-mode sources complete closure-held tasks once their execution has settled. */
+  private completeSettledProviderClosures({
+    githubSources,
+    state,
+  }: Pick<Started, "githubSources" | "state">): void {
+    for (const hold of githubSources.activeHolds())
+      if (hold.reason === "closed")
+        githubSources.completeFromProviderClosure(hold.taskId, () =>
+          state.taskExecutionSettled(hold.taskId),
+        );
   }
 
   private emitSourceHoldNotices({
