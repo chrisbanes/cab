@@ -903,6 +903,68 @@ test("completed Stop history survives Resume without becoming a new recovery gat
   }
 });
 
+test("a reconciled Stop target does not answer a later Stop of the successor", async () => {
+  const f = await heldFixture();
+  try {
+    const { state, db } = internals(f.service);
+    // Stop the held generation; its interrupted turn already ended as failed.
+    state.stopTask(f.taskId);
+    state.recordStopTerminal(
+      f.old.workId,
+      required(f.receipt.threadId),
+      required(f.receipt.turnId),
+      "failed",
+    );
+    await f.service.resumeTask(f.taskId);
+    assert.equal(state.stopTarget(f.old.workId)?.terminalState, "failed");
+    await f.service.resolveHeldExecution(f.receipt);
+    assert.equal(state.stopTarget(f.old.workId), undefined);
+    // Settled history beside the live target must not end the observation early.
+    db.prepare(`INSERT INTO execution_stop_targets
+      (workId, taskId, threadId, turnId, interruptState, terminalState, requestedAt)
+      VALUES (?, ?, ?, ?, 'acknowledged', 'completed', 1)`).run(
+      f.old.workId,
+      f.taskId,
+      f.receipt.threadId,
+      f.receipt.turnId,
+    );
+
+    f.runtime.holdSuccessor = true;
+    await f.service.coordinationView().postOperatorMessage(f.message);
+    await until(
+      () =>
+        f.runtime.turns === 3 &&
+        f.service.list().some((i) => i.state === "running"),
+      "successor admitted",
+    );
+    const successor = required(
+      f.service.list().find((i) => i.state === "running"),
+    );
+    let observed = false;
+    const stopping = f.service.stopTask(f.taskId).then((observation) => {
+      observed = true;
+      return observation;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(observed, false, "Stop waits for the successor's terminal");
+    f.runtime.successorGate.resolve();
+    const observation = await stopping;
+    assert.deepEqual(
+      observation.outcomes.find((o) => o.workId === successor.workId),
+      {
+        workId: successor.workId,
+        threadId: successor.threadId,
+        turnId: successor.turnId,
+        interrupt: "acknowledged",
+        terminal: "observed",
+      },
+    );
+  } finally {
+    f.runtime.successorGate.resolve();
+    await close(f);
+  }
+});
+
 function required<T>(value: T | null | undefined): T {
   assert.ok(
     value !== null && value !== undefined,

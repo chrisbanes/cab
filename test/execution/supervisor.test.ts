@@ -670,11 +670,12 @@ test("legacy reason-text Stop targets migrate to typed interrupt state", async (
 
     const reopen = async () => {
       const runtime = new SupervisorRuntime();
+      const clock = new ManualClock();
       const next = createService(f.dataDir, runtime, {
-        supervisor: { clock: new ManualClock(), observationMs: 3000 },
+        supervisor: { clock, observationMs: 3000 },
       });
       await next.start();
-      return { next, runtime };
+      return { next, runtime, clock };
     };
     let opened = await reopen();
     service = opened.next;
@@ -703,7 +704,11 @@ test("legacy reason-text Stop targets migrate to typed interrupt state", async (
     assert.deepEqual(select(internals(service).db), migrated);
     assert.match(storedSql(internals(service).db), /'uncertain'/);
 
-    const observation = await service.stopTask(f.taskId);
+    // Unknown terminals keep the observation open for its bounded window.
+    const stopping = service.stopTask(f.taskId);
+    assert.equal(await waitUntil(() => opened.clock.sleeping), true);
+    opened.clock.advance(3000);
+    const observation = await stopping;
     const reasonOf = (workId: string) =>
       observation.outcomes.find((outcome) => outcome.workId === workId)?.reason;
     assert.equal(reasonOf("crash"), "Interrupt request outcome is uncertain");

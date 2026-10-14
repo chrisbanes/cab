@@ -4100,6 +4100,11 @@ export class ExecutionState {
         throw new RecoveryRejectedError(
           "Recovery generation changed during receipt validation",
         );
+      // The verified receipt independently resolves a stopped generation; its
+      // target must not gate or answer later Stops of the task.
+      this.db
+        .prepare("DELETE FROM execution_stop_targets WHERE workId = ?")
+        .run(value.workId);
       this.db
         .prepare(`INSERT INTO execution_recovery_receipts
         (id, workId, workRevision, requestSequence, threadId, turnId, processId,
