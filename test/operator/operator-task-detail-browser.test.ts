@@ -19,7 +19,9 @@ const testForEngine = (
   action: (t: TestContext, journey: BrowserJourney) => Promise<void>,
 ) => test(name, { browserEngine }, action);
 const body =
-  "Let keyboard users open the command menu.\n\n- [ ] Restore focus\n- [ ] Retain drafts\n- [ ] Announce results";
+  "## Context\n\nLet keyboard users **open** the command menu. [docs](https://example.com/x) ![shot](https://example.com/a.png) <b>raw</b>\n\n```\n" +
+  "a-very-long-unbroken-code-line-".repeat(12) +
+  "\n```\n\n- [ ] Restore focus\n- [ ] Retain drafts\n- [ ] Announce results";
 
 /** A task with a lead, two delegated assignments (one completed) and a recorded result. */
 async function seed(f: Awaited<ReturnType<typeof createOperatorFixture>>) {
@@ -194,17 +196,27 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   );
   const visibleBrief = await page.locator("#brief").innerText();
   assert.ok(!visibleBrief.includes("- [ ]"), visibleBrief);
+  // Supplied prose renders as inert Markdown; the markers stay only in the disclosure.
+  const prose = page.locator("#brief .brief-prose");
+  assert.equal(
+    await prose.getByRole("heading", { name: "Context" }).count(),
+    1,
+  );
+  assert.equal(await prose.locator("strong").textContent(), "open");
+  assert.equal(await prose.locator("pre").count(), 1);
+  const proseText = await prose.innerText();
+  assert.ok(!/##|\*\*/.test(proseText), proseText);
+  assert.equal(await prose.locator("a, img, b").count(), 0);
+  assert.ok(proseText.includes("[Image omitted: shot]"), proseText);
   assert.ok(
     !/all criteria|\d+ of \d+ criteria/i.test(
       await page.locator("#review").innerText(),
     ),
   );
   await page.locator("#brief details > summary").first().click();
-  assert.ok(
-    (await page.locator("#brief details").first().innerText()).includes(
-      "- [ ] Restore focus",
-    ),
-  );
+  const disclosure = await page.locator("#brief details").first().innerText();
+  for (const literal of ["## Context", "**open**", "- [ ] Restore focus"])
+    assert.ok(disclosure.includes(literal), literal);
   assert.equal(
     await page
       .getByRole("button", { name: "Ask lead about criterion" })
@@ -220,7 +232,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   );
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
-    "Please review criterion 3 in source revision 1.",
+    "Please review criterion 9 in source revision 1.",
   );
   await page.getByLabel("Editable reply").fill("");
 
