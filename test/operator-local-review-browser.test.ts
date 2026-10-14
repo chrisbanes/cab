@@ -373,8 +373,8 @@ test("production local review composes exact multi-origin anchors and sends one 
   assert.deepEqual(pageErrors, []);
 });
 
-/** Selects one current-file line of review.txt and saves a comment on it. */
-async function commentOnLine(page: Page, line: string, text: string) {
+/** Selects one current-file line of review.txt, opening the file first when it is not open. */
+async function selectLine(page: Page, line: string) {
   const files = page.locator("#files");
   const repository = files.getByRole("button", {
     name: /repo-alpha, repository, full path/,
@@ -387,6 +387,12 @@ async function commentOnLine(page: Page, line: string, text: string) {
     await files.getByRole("button", { name: /review\.txt/ }).click();
   }
   await target.click();
+}
+
+/** Selects one current-file line of review.txt and saves a comment on it. */
+async function commentOnLine(page: Page, line: string, text: string) {
+  const files = page.locator("#files");
+  await selectLine(page, line);
   await files
     .getByRole("button", { name: "Add review comment", exact: true })
     .click();
@@ -402,6 +408,68 @@ const activeAttribute = (page: Page, name: string) =>
     (attribute) => document.activeElement?.hasAttribute(attribute),
     name,
   );
+
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
+
+/**
+ * Holds the answer to each of the first `count` draft saves after the server has committed
+ * it, so a page can go away while its write is still waiting. Every save body is recorded.
+ */
+async function holdSaves(page: Page, count = 1) {
+  const saves: string[] = [];
+  const holds = Array.from({ length: count }, () => ({
+    entered: deferred(),
+    gate: deferred(),
+  }));
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.draft.save") return route.continue();
+    const hold = holds[saves.length];
+    saves.push(route.request().postData() ?? "");
+    if (!hold) return route.continue();
+    const response = await route.fetch();
+    hold.entered.resolve();
+    await hold.gate.promise;
+    await route.fulfill({ response });
+  });
+  return {
+    saves,
+    entered: (index: number) => holds[index]?.entered.promise,
+    /** Lets the held answer through and resolves once the page has been given it. */
+    async release(index: number) {
+      const answered = page.waitForResponse(
+        (response) =>
+          response.url().endsWith("/api/operator/commands") &&
+          response.request().postData() === saves[index],
+      );
+      holds[index]?.gate.resolve();
+      await answered;
+    },
+    releaseAll() {
+      for (const hold of holds) hold.gate.resolve();
+    },
+  };
+}
+
+/** Leaves the task and opens it again through a new navigation entry. */
+async function reopenTask(page: Page) {
+  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
+  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+}
+
+/** The draft version on the server, read outside the page's own state. */
+const draftVersion = (page: Page, taskId: string) =>
+  page.evaluate(async (id) => {
+    const response = await fetch(`/api/operator/tasks/${id}/review-draft`);
+    const body = (await response.json()) as { data: { version: number } };
+    return body.data.version;
+  }, taskId);
 
 test("a refused comment save shows one plain alert, keeps the text and puts the code in Details", async (_t, j) => {
   const { web, task, page, pageErrors } = await startReview(j);
@@ -593,6 +661,153 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
   await files
     .locator("button:not([disabled])", { hasText: "Add review comment" })
     .waitFor();
+});
+
+test("a draft write still waiting when its page goes away is kept as one exact check", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  const held = await holdSaves(page);
+  try {
+    await review.getByRole("button", { name: "Edit" }).click();
+    await review.getByLabel("Edit comment").fill("Edited note");
+    await review.getByRole("button", { name: "Save edit" }).click();
+    await held.entered(0);
+    await reopenTask(page);
+    const outcome = review.locator("[data-slot=action-outcome]");
+    await outcome
+      .getByText(
+        "We couldn't confirm the change was saved. Your text is kept.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(await outcome.count(), 1);
+    assert.equal(await outcome.getAttribute("data-tone"), "warning");
+    assert.equal(await outcome.getByRole("button").count(), 1);
+    const key = (JSON.parse(held.saves[0] ?? "{}") as { key: string }).key;
+    const fields = (await outcome.locator("dl").textContent()) ?? "";
+    assert.match(fields, new RegExp(`Request key\\s*${key}`));
+    assert.match(fields, /Code\s*command-outcome-unknown/);
+    // Only the held write keeps every other write off.
+    // The unsaved edit stays open, with every control off.
+    const saveEdit = review.getByRole("button", { name: "Save edit" });
+    await saveEdit.waitFor();
+    assert.equal(await saveEdit.isDisabled(), true);
+    assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+    assert.equal(
+      await review
+        .getByRole("button", { name: "Remove", exact: true })
+        .isDisabled(),
+      true,
+    );
+    await selectLine(page, "Line 2: second");
+    assert.equal(
+      await files
+        .getByRole("button", { name: "Add review comment", exact: true })
+        .isDisabled(),
+      true,
+    );
+    assert.equal(held.saves.length, 1);
+    // The server already committed the held save: the check replays it and changes nothing.
+    const version = await draftVersion(page, task.taskId);
+    await outcome
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .click();
+    await outcome.getByText("Comment updated.", { exact: true }).waitFor();
+    assert.equal(await outcome.count(), 1);
+    assert.equal(await outcome.getAttribute("data-tone"), "success");
+    assert.equal(await outcome.getByRole("button").count(), 0);
+    await review
+      .getByRole("button", { name: "Edit", exact: true })
+      .and(page.locator(":enabled"))
+      .waitFor();
+    await files
+      .locator("button:not([disabled])", { hasText: "Add review comment" })
+      .waitFor();
+    assert.equal(held.saves.length, 2);
+    assert.equal(held.saves[0], held.saves[1]);
+    assert.equal(await draftVersion(page, task.taskId), version);
+    // The original answer arrives afterwards and changes nothing.
+    await held.release(0);
+    await page.waitForTimeout(250);
+    assert.equal(await outcome.count(), 1);
+    assert.equal(await outcome.getAttribute("data-tone"), "success");
+    assert.equal(held.saves.length, 2);
+    assert.equal(await draftVersion(page, task.taskId), version);
+    assert.equal(
+      await review.getByText("Edited note", { exact: true }).count(),
+      1,
+    );
+  } finally {
+    held.releaseAll();
+  }
+});
+
+test("a draft write answered after its page went away keeps its check and replays the same request", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  const held = await holdSaves(page);
+  try {
+    await review.getByRole("button", { name: "Edit" }).click();
+    await review.getByLabel("Edit comment").fill("Edited note");
+    await review.getByRole("button", { name: "Save edit" }).click();
+    await held.entered(0);
+    await reopenTask(page);
+    await held.release(0);
+    await page.waitForTimeout(250);
+    // The late answer is not a second result: the check, its key and the held controls stay.
+    const outcome = review.locator("[data-slot=action-outcome]");
+    await outcome
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .waitFor();
+    assert.equal(await outcome.count(), 1);
+    assert.equal(await outcome.getAttribute("data-tone"), "warning");
+    assert.equal(await outcome.getByRole("button").count(), 1);
+    const key = (JSON.parse(held.saves[0] ?? "{}") as { key: string }).key;
+    assert.match(
+      (await outcome.locator("dl").textContent()) ?? "",
+      new RegExp(`Request key\\s*${key}`),
+    );
+    // The unsaved edit stays open, with every control off.
+    const saveEdit = review.getByRole("button", { name: "Save edit" });
+    await saveEdit.waitFor();
+    assert.equal(await saveEdit.isDisabled(), true);
+    assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+    assert.equal(held.saves.length, 1, "the late answer made no request");
+    const version = await draftVersion(page, task.taskId);
+    await outcome
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .click();
+    await outcome.getByText("Comment updated.", { exact: true }).waitFor();
+    await review
+      .getByRole("button", { name: "Edit", exact: true })
+      .and(page.locator(":enabled"))
+      .waitFor();
+    await selectLine(page, "Line 2: second");
+    await files
+      .locator("button:not([disabled])", { hasText: "Add review comment" })
+      .waitFor();
+    assert.equal(held.saves.length, 2);
+    assert.equal(held.saves[0], held.saves[1]);
+    assert.equal(await draftVersion(page, task.taskId), version);
+  } finally {
+    held.releaseAll();
+  }
 });
 
 test("every draft write reports one plain success line with its receipt, cleared when the operator types", async (_t, j) => {
@@ -801,8 +1016,7 @@ test("an unconfirmed anchor stays checkable from a new navigation entry and fini
   const { web, task, page } = await startReview(j);
   const { stages, saves, review } = await loseStageAnswer(page, task, web);
   // Leave and reopen the task through a new entry: no composer is on screen any more.
-  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
-  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+  await reopenTask(page);
   const warning = review.locator("[data-slot=action-outcome]");
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -819,11 +1033,116 @@ test("an unconfirmed anchor stays checkable from a new navigation entry and fini
   await warning.getByText("Comment added.", { exact: true }).waitFor();
 });
 
+test("a stage replay stays held while no draft is loaded, then finishes the comment once", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { stages, saves, review } = await loseStageAnswer(page, task, web);
+  const readGate = deferred();
+  await page.route("**/api/operator/tasks/*/review-draft", async (route) => {
+    await readGate.promise;
+    // The refresh after the replay aborts the read that was in flight first.
+    await route.continue().catch(() => {});
+  });
+  const stageAnswered = () =>
+    page.waitForResponse(
+      (response) =>
+        response.url().endsWith("/api/operator/commands") &&
+        response.request().postData() === stages[0],
+    );
+  try {
+    await reopenTask(page);
+    const outcome = review.locator("[data-slot=action-outcome]");
+    const check = outcome.getByRole("button", {
+      name: "Check whether it saved",
+      exact: true,
+    });
+    const replayed = stageAnswered();
+    await check.click();
+    await replayed;
+    // The anchor is recorded again, but this page has no draft to save it into.
+    assert.equal(stages.length, 2);
+    assert.equal(stages[0], stages[1]);
+    assert.equal(saves.length, 0);
+    readGate.resolve();
+    await outcome
+      .getByText(
+        "We couldn't confirm the exact lines were captured. Your comment is kept.",
+        { exact: true },
+      )
+      .waitFor();
+    assert.equal(await outcome.count(), 1);
+    assert.equal(saves.length, 0, "the held replay started no save");
+    assert.equal(await review.getByText("Settled after leaving").count(), 0);
+    const finished = stageAnswered();
+    await check.click();
+    await finished;
+    await review.getByText("Settled after leaving").first().waitFor();
+    await outcome.getByText("Comment added.", { exact: true }).waitFor();
+    assert.equal(stages.length, 3);
+    assert.equal(stages[1], stages[2]);
+    assert.equal(saves.length, 1);
+    assert.equal(await review.getByText("Settled after leaving").count(), 1);
+  } finally {
+    readGate.resolve();
+  }
+});
+
+test("a late answer to a save chained after a stage does not unlock the controls while its check runs", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  const held = await holdSaves(page, 2);
+  try {
+    await selectLine(page, "Line 1: first");
+    await files
+      .getByRole("button", { name: "Add review comment", exact: true })
+      .click();
+    await page.keyboard.type("Chained note");
+    await files
+      .getByRole("button", { name: "Save comment", exact: true })
+      .click();
+    // The stage is recorded; the save chained after it is the write that is waiting.
+    await held.entered(0);
+    await reopenTask(page);
+    const outcome = review.locator("[data-slot=action-outcome]");
+    await outcome
+      .getByText(
+        "We couldn't confirm the comment was saved. Your comment is kept.",
+        {
+          exact: true,
+        },
+      )
+      .waitFor();
+    await outcome
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .click();
+    await held.entered(1);
+    // The first page's answer arrives while the check's replay is still in flight.
+    await held.release(0);
+    await page.waitForTimeout(250);
+    const edit = review.getByRole("button", { name: "Edit", exact: true });
+    await edit.waitFor();
+    assert.equal(await edit.isDisabled(), true);
+    held.releaseAll();
+    await outcome.getByText("Comment added.", { exact: true }).waitFor();
+    await edit.and(page.locator(":enabled")).waitFor();
+    assert.equal(held.saves.length, 2);
+    assert.equal(held.saves[0], held.saves[1]);
+    assert.equal(await review.getByText("Chained note").count(), 1);
+  } finally {
+    held.releaseAll();
+  }
+});
+
 test("a refused replay on a new entry is reported in the panel and does not block new comments", async (_t, j) => {
   const { web, task, page } = await startReview(j);
   const { review } = await loseStageAnswer(page, task, web, "refuse");
-  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
-  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+  await reopenTask(page);
   const panel = review.locator("[data-slot=action-outcome]");
   await panel
     .getByRole("button", { name: "Check whether it saved", exact: true })

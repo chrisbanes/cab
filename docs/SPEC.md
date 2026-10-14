@@ -1006,6 +1006,11 @@ available alongside batched reviews.
 - Preserve drafts through navigation and refresh under existing session/privacy
   rules. Confirmed failures retain editable content; uncertain submissions keep
   their original payload and identity for reconciliation without duplicate sends.
+  A draft write that is lost, or still unanswered when the operator leaves the
+  task page, stays checkable from the Local review panel on return, and the check
+  replays the same request. A browser reload discards that pending check; the
+  server draft stays authoritative, so an anchor staged for a comment that was
+  never saved is left unused.
 - A review delivers local feedback only. It does not publish to GitHub, approve
   or reject work, change readiness, grant merge authority or clear holds, and it
   never reopens or completes a task. Sent to a completed lead on an open task, it

@@ -101,6 +101,7 @@ function restoredSend(taskId: string): LocalReviewSend | null {
 }
 
 type Command = Parameters<OperatorClient["command"]>[0];
+type Unconfirmed = NonNullable<LocalReviewState["unconfirmed"]>;
 
 /** Why a draft or send write failed, in plain words; the code itself goes to Details. */
 function causeOf(code: string | undefined) {
@@ -256,9 +257,38 @@ function useLocalReviewController({
         };
   };
 
+  /** A write as the one exact request that a check replays, and the warning that offers it. */
+  const unconfirmedWrite = (
+    command: Command,
+    intent: DraftWrite,
+    result?: CommandState,
+  ): Unconfirmed => ({
+    command,
+    intent,
+    outcome: failure(
+      result?.state === "unknown"
+        ? result
+        : { state: "unknown", command, code: "command-outcome-unknown" },
+      intent,
+    ),
+  });
+
+  /** Keep a write as the one exact request that the current page's check will replay. */
+  const holdUnconfirmed = (
+    command: Command,
+    intent: DraftWrite,
+    result?: CommandState,
+  ) => {
+    state.unconfirmed = unconfirmedWrite(command, intent, result);
+    state.notice = null;
+  };
+
   // The page that started a write may be gone when its answer arrives. Every mounted
   // page re-renders from the shared state, so a write settled elsewhere still shows here.
   const alive = useRef(true);
+  // The draft write this page is awaiting an answer for, ready to be kept. If the page goes
+  // away first, its cleanup keeps that exact request, so the answer that arrives later is ignored.
+  const inFlight = useRef<Unconfirmed | null>(null);
   const rerender = useRef(changed);
   rerender.current = changed;
   useEffect(() => {
@@ -267,6 +297,13 @@ function useLocalReviewController({
     return () => {
       alive.current = false;
       unsubscribe();
+      // `pending` stays on: the page that opens next checks this request, which ends it.
+      if (inFlight.current) {
+        state.unconfirmed = inFlight.current;
+        state.notice = null;
+        inFlight.current = null;
+        state.notify();
+      }
       // A send in flight is left unknown for the page that opens next to check.
       if (state.send?.status === "sending") {
         state.send.status = "unknown";
@@ -275,53 +312,41 @@ function useLocalReviewController({
     };
   }, [state, taskId]);
 
-  /** Keep a write as the one exact request that the current page's check will replay. */
-  const holdUnconfirmed = (
-    command: Command,
-    intent: DraftWrite,
-    result?: CommandState,
-  ) => {
-    state.unconfirmed = {
-      command,
-      intent,
-      outcome: failure(
-        result?.state === "unknown"
-          ? result
-          : { state: "unknown", command, code: "command-outcome-unknown" },
-        intent,
-      ),
-    };
-    state.notice = null;
-  };
-
   /**
-   * Run a draft write. When its response is lost, or the page that sent it is gone, the exact
-   * request and what it is for are kept as plain data and the controls stay off until the
-   * current page's `check` replays it, so a write is never repeated under a new key.
+   * Run a draft write. When its response is lost, or the page that sent it goes away first,
+   * the exact request and what it is for are kept as plain data and the controls stay off until
+   * the current page's `check` replays it, so a write is never repeated under a new key.
+   * Returns false when the answer came after this page's cleanup had kept the request: that
+   * late answer is ignored, and the state is left to the page that checks it.
    */
   const write = async (
     command: Command,
     intent: DraftWrite,
     // The anchor stage skips the refresh: the save that follows refreshes.
     refreshWhenRecorded = true,
-  ) => {
+  ): Promise<boolean> => {
     state.pending = true;
+    inFlight.current = unconfirmedWrite(command, intent);
     state.notify();
     const result = await execute(command);
-    if (result.state === "unknown" || !alive.current) {
+    if (inFlight.current?.command !== command) return false;
+    inFlight.current = null;
+    if (result.state === "unknown") {
       holdUnconfirmed(command, intent, result);
-      if (alive.current) await resource.refresh();
+      await resource.refresh();
       state.notify();
-      return;
+      return true;
     }
     state.unconfirmed = null;
     if (refreshWhenRecorded || result.state !== "recorded")
       await resource.refresh();
-    await settle(command, intent, result);
+    // A chained write (the save after a stage) that was ignored settles nothing here.
+    if ((await settle(command, intent, result)) === false) return false;
     // The panel stays frozen through the refresh and the settle; only an unconfirmed
     // write (one a settle started) keeps it frozen after that.
     state.pending = state.unconfirmed !== null;
     state.notify();
+    return true;
   };
 
   /** The one success line of a draft write, with the receipt behind it in Details. */
@@ -400,12 +425,15 @@ function useLocalReviewController({
     state.notify();
   };
 
-  /** Settle a draft write by what it was for, using this page's draft and resource. */
+  /**
+   * Settle a draft write by what it was for, using this page's draft and resource. Returns
+   * false when it chained a write whose answer was ignored.
+   */
   const settle = async (
     command: Command,
     intent: DraftWrite,
     result: CommandState,
-  ) => {
+  ): Promise<boolean | undefined> => {
     switch (intent.kind) {
       case "stage": {
         if (
@@ -417,7 +445,7 @@ function useLocalReviewController({
             holdUnconfirmed(command, intent);
             return;
           }
-          await write(
+          return write(
             saveCommand(
               {
                 summary: draft.draft.summary,
@@ -434,7 +462,6 @@ function useLocalReviewController({
             ),
             { kind: "add" },
           );
-          return;
         }
         // Keep the typed text; an unvalidated anchor is never added.
         refuse(result, intent);
