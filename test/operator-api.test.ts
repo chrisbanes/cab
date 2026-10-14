@@ -1588,11 +1588,13 @@ test("global labels exclude retained private revisions without any task or proje
     profileRuntime: d.profileRuntime.bind(d),
     claudeTokenReference: () => null,
     projects: () => [],
+    gettingStartedDismissed: () => false,
   };
   const isolated = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
     harnessStatuses: () => [],
+    taskTurnStarted: () => false,
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   assert.doesNotMatch(
     JSON.stringify(await isolated.readWorkspace()),
@@ -1619,11 +1621,13 @@ test("global snapshot privacy fails closed before excessive revision lookup work
     },
     profileRuntime: () => ({ harness: "codex" }),
     claudeTokenReference: () => null,
+    gettingStartedDismissed: () => false,
   };
   const api = new OperatorApi({
     domain: () => domain,
     runtimeStatus: () => ({ state: "available" }),
     harnessStatuses: () => [],
+    taskTurnStarted: () => false,
   } as unknown as ConstructorParameters<typeof OperatorApi>[0]);
   const read = await api.readWorkspace();
   assert.equal(read.data.profiles[0]?.name, null);

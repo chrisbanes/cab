@@ -111,8 +111,8 @@ export function checklistRows(input: {
           ? "Checking readiness…"
           : "Readiness couldn't be checked."
         : runtime
-          ? "Codex login readable by the service."
-          : (failing?.reason ?? "The service can't use the Codex login."),
+          ? "Runtime login readable by the service."
+          : (failing?.reason ?? "The service can't use the runtime login."),
       { kind: "link", label: "Open readiness check", href: "/app/settings" },
     ),
     row(
