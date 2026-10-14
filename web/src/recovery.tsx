@@ -128,13 +128,13 @@ function RuntimeToggle(
     setPending(false);
     requestAnimationFrame(() => control.current?.focus());
   };
-  const command = (enabled: boolean, confirmed = false) =>
+  const command = (enabled: boolean, confirmedBoundTasks?: number) =>
     ({
       type: "runtime.configure",
       key: crypto.randomUUID(),
       harness,
       enabled,
-      ...(confirmed ? { confirmed } : {}),
+      ...(confirmedBoundTasks === undefined ? {} : { confirmedBoundTasks }),
     }) as const;
   const toggle = async (enabled: boolean) => {
     if (enabled) return send(command(true));
@@ -197,7 +197,7 @@ function RuntimeToggle(
             <Button
               type="button"
               variant="destructive"
-              onClick={() => void send(command(false, true))}
+              onClick={() => void send(command(false, confirm ?? 0))}
             >
               Turn off {label}
             </Button>

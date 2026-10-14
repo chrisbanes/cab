@@ -1876,8 +1876,11 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
       type: z.literal("runtime.configure"),
       harness: executionHarnessSchema,
       enabled: z.boolean(),
-      /** Disabling a runtime that bound tasks use is refused without it. */
-      confirmed: z.boolean().optional(),
+      /**
+       * The bound-task count the operator confirmed. Disabling a runtime that bound tasks
+       * use is refused without it, or when the service now counts more.
+       */
+      confirmedBoundTasks: z.number().int().nonnegative().safe().optional(),
     })
     .strict(),
   z

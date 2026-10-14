@@ -1323,13 +1323,14 @@ export class StandaloneService {
   /**
    * Saves the operator's setting, then brings the live runtime to it (ADR-1012). Enabling is
    * refused while the executable is missing; disabling a runtime bound tasks use is refused
-   * without `confirmed`. A recorded key skips both gates and reconciles again.
+   * unless `confirmedBoundTasks` covers the current count. A recorded key skips both gates
+   * and reconciles again.
    */
   async configureRuntime(command: {
     key: string;
     harness: ExecutionHarness;
     enabled: boolean;
-    confirmed?: boolean | undefined;
+    confirmedBoundTasks?: number | undefined;
   }): Promise<{ harness: ExecutionHarness; enabled: boolean }> {
     const { key, harness, enabled } = command;
     const domainCommand = {
@@ -1349,7 +1350,8 @@ export class StandaloneService {
             harness,
           );
         const boundTasks = state.boundTaskCount(harness);
-        if (!enabled && boundTasks > 0 && command.confirmed !== true)
+        // A task bound after the operator saw the count needs a fresh confirmation.
+        if (!enabled && boundTasks > (command.confirmedBoundTasks ?? 0))
           throw new RuntimeConfigurationRefusedError(
             "runtime-confirmation-required",
             harness,

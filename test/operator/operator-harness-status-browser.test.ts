@@ -309,13 +309,34 @@ test("turning off a runtime that tasks use confirms first; Keep leaves it on and
   assert.deepEqual(posts, [], "Cancel sends nothing");
 
   await control.click();
+  await dialog.getByText("1 task uses Claude.", { exact: false }).waitFor();
+  // A task bound while the dialog is open: the confirmation no longer covers it.
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      "INSERT INTO execution_intents (id, workId, prompt, workspace, state, accountType, sandbox, approval) VALUES (?, 'bound-probe-2', 'p', '/w', 'ready', 'chatgpt', 'workspaceWrite', 'never')",
+    ).run(randomUUID());
+    db.prepare(
+      "INSERT INTO task_execution_bindings (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision, harness) VALUES ('bound-probe-2', ?, ?, 1, 1, 1, 1, 'claude')",
+    ).run(randomUUID(), randomUUID());
+  });
+  await dialog.getByRole("button", { name: "Turn off Claude" }).click();
+  await dialog
+    .getByText(
+      "2 tasks use Claude. Running turns finish; their next turns wait until Claude is enabled again.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(f.service.domain().runtimeEnabled("claude"), true);
   await dialog.getByRole("button", { name: "Turn off Claude" }).click();
   await runtimesPanel(page)
     .getByText("Claude turned off.", { exact: true })
     .waitFor();
   assert.equal(f.service.domain().runtimeEnabled("claude"), false);
-  assert.equal(posts.length, 1);
-  assert.equal(JSON.parse(posts[0] ?? "{}").confirmed, true);
+  assert.deepEqual(
+    posts.map((p) => JSON.parse(p).confirmedBoundTasks),
+    [1, 2],
+  );
   assert.equal(await control.isChecked(), false);
 });
 

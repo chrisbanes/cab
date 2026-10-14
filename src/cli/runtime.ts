@@ -80,18 +80,24 @@ const toggle = (verb: "enable" | "disable"): [string, WriteCommand] => [
       if (!harness)
         throw new CliError("usage", "Name a runtime: codex or claude.");
       const enabled = verb === "enable";
-      const command = {
-        type: "runtime.configure",
-        harness,
-        enabled,
-        // The server asks for confirmation only when bound tasks use the runtime.
-        ...(ctx.values.yes === true ? { confirmed: true } : {}),
-      };
       const session = await connectWrite(ctx, [
         "cli.identity",
         "configuration.write",
         "capacity.read",
       ]);
+      // --yes confirms the bound-task count read now; the server refuses if it has grown.
+      const confirmedBoundTasks =
+        ctx.values.yes === true
+          ? (
+              await session.client.get(`${API}/runtime`, runtimeSettingsSchema)
+            ).data.runtimes.find((r) => r.harness === harness)?.boundTasks
+          : undefined;
+      const command = {
+        type: "runtime.configure",
+        harness,
+        enabled,
+        ...(confirmedBoundTasks === undefined ? {} : { confirmedBoundTasks }),
+      };
       const scope = `system:runtime:${harness}`;
       const type = "runtime.configure";
       const { key, digest, reused } = await chooseKey(

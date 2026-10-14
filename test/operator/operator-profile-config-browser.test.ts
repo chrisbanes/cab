@@ -354,7 +354,9 @@ test("New profile starts on the first enabled runtime: Claude when Codex is disa
     key: randomUUID(),
     harness: "codex",
     enabled: false,
-    confirmed: true,
+    confirmedBoundTasks: f.service
+      .runtimeSettings()
+      .find((r) => r.harness === "codex")?.boundTasks,
   });
   await page.reload();
   const runtime = page.getByLabel("Runtime", { exact: true });

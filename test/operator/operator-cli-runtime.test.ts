@@ -34,6 +34,34 @@ test("runtime list, enable and disable: --yes for bound work, refusal for a miss
   );
   assert.equal(s.f.service.domain().runtimeEnabled("claude"), true);
 
+  // --yes confirms the count it read; a task bound after that read is refused.
+  let grown = false;
+  r = await o.h.run(
+    ["runtime", "disable", "claude", "--yes", "--connection", "rw"],
+    {
+      fetch: async (input, init) => {
+        const response = await fetch(input, init);
+        if (!grown && String(input).endsWith("/api/operator/runtime")) {
+          grown = true;
+          s.f.seedPersistedState((db) => {
+            db.exec("PRAGMA foreign_keys = OFF");
+            db.prepare(
+              "INSERT INTO execution_intents (id, workId, prompt, workspace, state, accountType, sandbox, approval) VALUES (?, 'cli-bound-probe-2', 'p', '/w', 'ready', 'chatgpt', 'workspaceWrite', 'never')",
+            ).run(randomUUID());
+            db.prepare(
+              "INSERT INTO task_execution_bindings (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision, harness) VALUES ('cli-bound-probe-2', ?, ?, 1, 1, 1, 1, 'claude')",
+            ).run(randomUUID(), randomUUID());
+          });
+        }
+        return response;
+      },
+    },
+  );
+  assert.ok(grown);
+  assert.equal(r.code, 4, r.out + r.err);
+  assert.match(r.err, /2 tasks use Claude\. .* Re-run with --yes/);
+  assert.equal(s.f.service.domain().runtimeEnabled("claude"), true);
+
   r = await cli("rw", ["runtime", "disable", "claude", "--yes"]);
   assert.equal(r.code, 0, r.out);
   assert.deepEqual(r.json().data.receipt.result, {
@@ -47,7 +75,7 @@ test("runtime list, enable and disable: --yes for bound work, refusal for a miss
   assert.match(r.out, /codex\s+enabled\s+Available\s+0/);
   assert.match(
     r.out,
-    /claude\s+disabled\s+Not enabled \(Disabled in Settings\)\s+1/,
+    /claude\s+disabled\s+Not enabled \(Disabled in Settings\)\s+2/,
   );
   r = await cli("ro", ["runtime", "list"]);
   assert.deepEqual(r.json().data.runtimes, [
@@ -63,7 +91,7 @@ test("runtime list, enable and disable: --yes for bound work, refusal for a miss
       enabled: false,
       state: "not-configured",
       reason: "disabled",
-      boundTasks: 1,
+      boundTasks: 2,
     },
   ]);
 

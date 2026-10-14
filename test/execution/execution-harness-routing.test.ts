@@ -1588,7 +1588,7 @@ test("disabling Claude lets its running turn finish, then stops it; new Claude w
       key,
       harness: "claude" as const,
       enabled: false,
-      confirmed: true,
+      confirmedBoundTasks: 1,
     };
     assert.deepEqual(await service.configureRuntime(disable), {
       harness: "claude",
@@ -1596,7 +1596,10 @@ test("disabling Claude lets its running turn finish, then stops it; new Claude w
     });
     // A replay converges without re-asking for confirmation.
     assert.deepEqual(
-      await service.configureRuntime({ ...disable, confirmed: undefined }),
+      await service.configureRuntime({
+        ...disable,
+        confirmedBoundTasks: undefined,
+      }),
       { harness: "claude", enabled: false },
     );
     assert.deepEqual(statusOf(service, "claude"), [
@@ -1675,7 +1678,7 @@ test("re-enabling a draining runtime keeps it; disabling one with no bound work 
       key: randomUUID(),
       harness: "claude",
       enabled: false,
-      confirmed: true,
+      confirmedBoundTasks: 1,
     });
     // Work that waited while it was disabled is admitted on re-enable, before the
     // running turn ends.

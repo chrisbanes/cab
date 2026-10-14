@@ -3339,7 +3339,22 @@ test("runtime.configure refuses a missing executable, asks to confirm bound work
   };
   await refused(disable, "runtime-confirmation-required");
   assert.equal(f.service.domain().runtimeEnabled("claude"), true);
-  const receipt = await api.execute({ ...disable, confirmed: true });
+  // A task bound after the operator saw one is not covered by that confirmation.
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      "INSERT INTO execution_intents (id, workId, prompt, workspace, state, accountType, sandbox, approval) VALUES (?, 'bound-probe-2', 'p', '/w', 'ready', 'chatgpt', 'workspaceWrite', 'never')",
+    ).run(randomUUID());
+    db.prepare(
+      "INSERT INTO task_execution_bindings (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision, harness) VALUES ('bound-probe-2', ?, ?, 1, 1, 1, 1, 'claude')",
+    ).run(randomUUID(), randomUUID());
+  });
+  await refused(
+    { ...disable, confirmedBoundTasks: 1 },
+    "runtime-confirmation-required",
+  );
+  assert.equal(f.service.domain().runtimeEnabled("claude"), true);
+  const receipt = await api.execute({ ...disable, confirmedBoundTasks: 2 });
   assert.deepEqual(receipt, {
     kind: "configuration",
     key: disable.key,
@@ -3396,6 +3411,6 @@ test("runtime.configure refuses a missing executable, asks to confirm bound work
   });
   assert.deepEqual(await runtimes(), [
     { harness: "codex", enabled: false, boundTasks: 0 },
-    { harness: "claude", enabled: false, boundTasks: 1 },
+    { harness: "claude", enabled: false, boundTasks: 2 },
   ]);
 });
