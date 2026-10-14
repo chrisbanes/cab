@@ -2189,7 +2189,10 @@ export class OperatorApi {
       sourceUrl: this.sourceSummary(taskId, excluded)?.url ?? null,
       approvals: approvals
         .filter((a) => a.status === "open")
-        .map((a) => ({ id: a.interactionId, label: "Review the request" })),
+        .map((a) => ({
+          id: a.interactionId,
+          label: "Review material & decide",
+        })),
       capacity:
         admission.eligible && waiting ? this.capacityWait(projectId) : null,
     });

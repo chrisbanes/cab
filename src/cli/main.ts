@@ -425,7 +425,7 @@ async function run(
         `Project: ${task.projectId}`,
         `State:   ${task.state}${task.ready ? " (ready)" : ""}`,
         `Version: ${task.version}`,
-        ...waitLines(read.data.waits),
+        ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),
       ].join("\n"),
     };

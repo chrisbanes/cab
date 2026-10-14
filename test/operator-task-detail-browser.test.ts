@@ -7,7 +7,7 @@ import {
 } from "./fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { guideForm } from "./fixtures/question-data.js";
-import { seedOwnQuestion } from "./fixtures/questions.js";
+import { seedOwnApproval, seedOwnQuestion } from "./fixtures/questions.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 
 const test = browserSuite("ui-task-detail");
@@ -796,4 +796,39 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   assert.equal(commands.length, 3);
   assert.deepEqual(commands[2], commands[1]);
   assert.equal(d.project(claudeProject).paused, 0);
+});
+
+test("An approval wait opens the approval review, not the question form", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnApproval(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const waits = page.locator(".wait-reasons");
+  const review = waits.getByRole("link", { name: "Review material & decide" });
+  assert.equal(
+    await review.getAttribute("href"),
+    `/coordination/task/${a.taskId}#${a.interactionId}`,
+  );
+  await review.click();
+  await page.waitForURL(
+    (url) => url.pathname === `/coordination/task/${a.taskId}`,
+  );
+  // The coordination view decides the exact approval material.
+  await page
+    .getByRole("button", { name: "Approve this exact material" })
+    .waitFor();
 });

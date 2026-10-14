@@ -90,7 +90,7 @@ export function taskStatusLines(task: TaskData): [string, string][] {
 }
 
 /** One `Waiting:` line per wait in the flow's order, then its Fix command or path, or what blocks it. */
-export function waitLines(waits: readonly Wait[]): string[] {
+export function waitLines(waits: readonly Wait[], taskId: string): string[] {
   return waits.flatMap((w) => [
     `Waiting: ${waitLabels[w.code]}`,
     ...(w.fix ? cliFix(w.fix).map((line) => `  Fix: ${line}`) : []),
@@ -98,7 +98,7 @@ export function waitLines(waits: readonly Wait[]): string[] {
       link.kind === "task"
         ? `  Blocked by task ${link.id} (${link.label})`
         : link.kind === "request"
-          ? `  Request ${link.id}`
+          ? `  Review: ensemble approval get ${taskId} ${link.id}`
           : link.kind === "source"
             ? `  ${link.label}: ${link.url}`
             : `  ${link.label}`,

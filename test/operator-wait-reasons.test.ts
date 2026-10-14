@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { waitLines } from "../src/cli/task-write.js";
 import {
   cliFix,
   deriveWaits,
@@ -224,4 +225,19 @@ test("the CLI Fix is the command or Settings path", () => {
   assert.deepEqual(cliFix({ kind: "open-profile", profileId }), [
     `Settings → Profiles → ${profileId}`,
   ]);
+});
+
+test("the CLI names the approval command for an approval wait", () => {
+  assert.deepEqual(
+    waitLines(
+      one({
+        approvals: [{ id: "request-1", label: "Review material & decide" }],
+      }),
+      projectId,
+    ),
+    [
+      "Waiting: Approval needs a decision",
+      `  Review: ensemble approval get ${projectId} request-1`,
+    ],
+  );
 });
