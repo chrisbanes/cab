@@ -2144,9 +2144,10 @@ export class OperatorApi {
   }
   /**
    * The assignments waiting to run: each whose current turn request is queued, each pending
-   * assignment not yet requested, and each `refused` for stale captured revisions, which
-   * holds it until it is re-bound. Each assignment's current request only, so the read
-   * stays bounded by assignments.
+   * assignment not yet requested, each `refused` for stale captured revisions, which holds
+   * it until it is re-bound, and each held assignment whatever its last request. Only the
+   * queued or unrequested (`runtime`) run next on their profile's runtime. Each
+   * assignment's current request only, so the read stays bounded by assignments.
    */
   private nextAssignments(taskId: string) {
     return this.domain()
@@ -2156,13 +2157,14 @@ export class OperatorApi {
           String(assignment.id),
           Number(assignment.version),
         );
+        const runtime =
+          request?.state === "queued" ||
+          (assignment.state === "pending" && !request);
         const refused =
           request?.state === "held" &&
           !!request.reason?.startsWith(refusedRevisionPrefix);
-        return request?.state === "queued" ||
-          (assignment.state === "pending" && !request) ||
-          refused
-          ? [{ assignment, request, refused }]
+        return runtime || refused || assignment.state === "held"
+          ? [{ assignment, request, runtime }]
           : [];
       });
   }
@@ -2177,7 +2179,7 @@ export class OperatorApi {
     next: ReturnType<OperatorApi["nextAssignments"]>,
   ) {
     const candidates = next
-      .filter((w) => !w.refused)
+      .filter((w) => w.runtime)
       .map(({ assignment, request }) =>
         this.profileWaitFacts(
           String(assignment.profileId),
@@ -2210,13 +2212,24 @@ export class OperatorApi {
     if (!next.length) return [];
     const d = this.domain(),
       task = new Set(d.admission(taskId).reasons);
-    return next.flatMap(({ assignment }) => {
-      const reasons = d
-        .assignmentAdmission(String(assignment.id))
-        .reasons.filter((r) => !task.has(r));
+    return next.flatMap(({ assignment, request }) => {
+      const assignmentId = String(assignment.id);
+      const reasons = [
+        ...d
+          .assignmentAdmission(assignmentId)
+          .reasons.filter((r) => !task.has(r)),
+        // Scheduler-only: the same check admission runs for the queued request.
+        ...(this.service.recoveryContinuationUnresolved(
+          assignmentId,
+          request?.workId ?? "",
+        )
+          ? ["recovery-continuation-unresolved"]
+          : []),
+      ];
       return reasons.length
         ? [
             {
+              assignmentId,
               profileId: String(assignment.profileId),
               profileName: this.exact(
                 d.profile(String(assignment.profileId)).name,
@@ -2324,6 +2337,7 @@ export class OperatorApi {
       capacity:
         admission.eligible && waiting ? this.capacityWait(projectId) : null,
       powerHold: this.powerHold(),
+      repositoryAccessRevoked: this.service.repositoryAccessRevoked(taskId),
     });
   }
   private admission(taskId: string) {

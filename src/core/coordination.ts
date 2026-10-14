@@ -3391,6 +3391,26 @@ export class CoordinationStore {
       : undefined;
   }
 
+  /**
+   * Whether a held turn of the assignment other than `excludeWorkId` was reconciled by the
+   * operator without a valid recorded continuation. Only operator-reconciled held turns are
+   * read, so ordinary held history adds no per-turn lookups.
+   */
+  hasUnresolvedRecoveryContinuation(
+    assignmentId: string,
+    excludeWorkId: string,
+  ): boolean {
+    return (
+      this.db
+        .prepare(`SELECT request.workId FROM turn_requests request
+          JOIN coordination_recovery_continuations continuation
+            ON continuation.workId = request.workId
+          WHERE request.assignmentId = ? AND request.state = 'held' AND request.workId <> ?
+          ORDER BY request.sequence`)
+        .all(assignmentId, excludeWorkId) as Array<{ workId: string }>
+    ).some(({ workId }) => !this.hasRecoveryContinuation(workId));
+  }
+
   recoveryDispositionForWork(
     workId: string,
   ): "operator-reconciled" | undefined {

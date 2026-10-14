@@ -7,6 +7,7 @@ import {
   captureBrowserEvidence,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
@@ -905,6 +906,167 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
     `/app/profiles/${revokedWorker}/settings`,
   );
   assert.equal(await revoked.locator(".wait-detail").innerText(), "Linus");
+});
+
+test("Task detail explains a held assignment, revoked repository access and unresolved recovery without sending anything", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain();
+  const lead = randomUUID(),
+    worker = randomUUID(),
+    projectId = randomUUID(),
+    taskId = randomUUID(),
+    assignmentId = randomUUID();
+  for (const [profileId, name] of [
+    [lead, "Grace"],
+    [worker, "Linus"],
+  ] as const)
+    d.execute({
+      type: "profile.create",
+      actor: "operator",
+      key: randomUUID(),
+      profileId,
+      name,
+      instructions: "Work carefully",
+      capabilities: "code",
+    });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "held-app",
+    leadProfileId: lead,
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [worker],
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Held task",
+    outcome: "Probe",
+    ready: true,
+  });
+  await f.service.provisionTask(taskId);
+  d.execute({
+    type: "assignment.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    assignmentId,
+    profileId: worker,
+    brief: "Delegated work",
+    resultDestination: "lead",
+    requesterAssignmentId: null,
+  });
+  // A failed reporting repair holds the assignment after its last turn completed.
+  f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_assignments SET state='held' WHERE id=?").run(
+      assignmentId,
+    );
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, state)
+        VALUES ('done-key', 'done-work', 'assignment', ?, ?, ?, ?, ?, 1, 1, 'probe', 'completed')`,
+    ).run(
+      taskId,
+      projectId,
+      assignmentId,
+      Number(d.task(taskId).version),
+      Number(d.assignment(assignmentId).version),
+    );
+  });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: unknown[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      commands.push(request.postDataJSON());
+  });
+  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  const waits = page.locator(".wait-reasons");
+  const list = waits.locator(".wait-list li");
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
+    "Assignment held",
+  ]);
+  assert.equal(await list.nth(0).locator(".wait-detail").innerText(), "Linus");
+
+  // The scheduler-only causes, added to this task's read as the service would report them.
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.waits = orderWaits([
+        ...(json.data.waits as Wait[]),
+        {
+          code: "repository-access-revoked",
+          fix: { kind: "open-repositories", projectId },
+          links: [],
+        },
+        {
+          code: "assignment-recovery-unresolved",
+          fix: null,
+          links: [{ kind: "recovery", assignmentId, label: "Open recovery" }],
+          detail: "Linus",
+        },
+      ]);
+      await route.fulfill({ response, json });
+    },
+  );
+  await page.reload();
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  await list.nth(2).waitFor();
+  assert.deepEqual(await list.locator("> span:first-child").allInnerTexts(), [
+    "Repository access revoked",
+    "Assignment held",
+    "Assignment recovery unresolved",
+  ]);
+  assert.equal(
+    await list
+      .nth(0)
+      .getByRole("link", { name: "Fix: Open repositories" })
+      .getAttribute("href"),
+    `/app/projects/${projectId}/settings?tab=github`,
+  );
+  const recovery = list.nth(2);
+  assert.equal(
+    await recovery
+      .getByRole("link", { name: "Open recovery" })
+      .getAttribute("href"),
+    `/app/assignments/${assignmentId}/recovery`,
+  );
+  assert.equal(await recovery.getByText(/^Fix:/).count(), 0);
+  assert.equal(await recovery.locator(".wait-detail").innerText(), "Linus");
+  assert.deepEqual(commands, []);
 });
 
 test("An approval wait opens the approval review, not the question form", async (_t, j) => {
