@@ -28,8 +28,8 @@ export type LaunchAgentConfiguration = {
   stdoutPath: string;
   stderrPath: string;
   /** Written only when set; the service's own defaults apply otherwise. */
-  diagnosticRetentionDays?: number;
-  diagnosticStorageMib?: number;
+  diagnosticRetentionDays?: number | undefined;
+  diagnosticStorageMib?: number | undefined;
 };
 
 const LABEL =

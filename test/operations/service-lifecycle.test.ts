@@ -220,9 +220,14 @@ async function setup(t: { after(fn: () => void): void }, data = false) {
   const activation = join(options.agentsDir, `${options.label}.plist`);
   const recordPath = join(stateDir, "launchd", `${options.label}.json`);
   const record = () => JSON.parse(readFileSync(recordPath, "utf8"));
-  const install = async () => {
+  const install = async (diagnostic?: ServiceOptions["diagnostic"]) => {
     const { out, io } = capture();
-    const code = await installService(options, releaseA, launchd.host(), io);
+    const code = await installService(
+      diagnostic ? { ...options, diagnostic } : options,
+      releaseA,
+      launchd.host(),
+      io,
+    );
     return { code, ...out };
   };
   const uninstall = async () => {
@@ -549,10 +554,31 @@ test("plutil accepts the installed plist", {
   execFileSync("/usr/bin/plutil", ["-lint", f.activation]);
 });
 
+/** The EnvironmentVariables dictionary of a rendered plist. */
+function environment(plist: string): Record<string, string> {
+  const dict =
+    /<key>EnvironmentVariables<\/key>\s*<dict>([\s\S]*?)<\/dict>/.exec(
+      readFileSync(plist, "utf8"),
+    )?.[1];
+  return Object.fromEntries(
+    [
+      ...(dict ?? "").matchAll(
+        /<key>([^<]*)<\/key>\s*<string>([^<]*)<\/string>/g,
+      ),
+    ].map((m) => [m[1], m[2]]),
+  );
+}
+
+const RETENTION = "ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS";
+const STORAGE = "ENSEMBLE_DIAGNOSTIC_STORAGE_MIB";
+
 /** Installs 0.1.0 over marked data and adds release 0.2.0. */
-async function installed(t: { after(fn: () => void): void }) {
+async function installed(
+  t: { after(fn: () => void): void },
+  diagnostic?: ServiceOptions["diagnostic"],
+) {
   const f = await setup(t, true);
-  assert.equal((await f.install()).code, 0);
+  assert.equal((await f.install(diagnostic)).code, 0);
   const releaseB = release(f.stateDir, "0.2.0");
   let checks = [
     { id: "codex-login", status: "pass" },
@@ -569,11 +595,15 @@ async function installed(t: { after(fn: () => void): void }) {
       return checks;
     },
   };
-  const upgrade = async (target = releaseB, signal?: AbortSignal) => {
+  const upgrade = async (
+    target = releaseB,
+    signal?: AbortSignal,
+    diagnostic?: ServiceOptions["diagnostic"],
+  ) => {
     const { out, io } = capture();
     const code = await upgradeService(
       // Upgrade keeps the installed port whatever --port defaults to.
-      { ...f.options, port: 1 },
+      { ...f.options, port: 1, ...(diagnostic ? { diagnostic } : {}) },
       target,
       connection,
       f.launchd.host(),
@@ -1019,4 +1049,114 @@ test("the plist is staged on the LaunchAgents volume, and a failed move leaves n
   assert.deepEqual(readdirSync(f.options.agentsDir), []);
   assert.equal(existsSync(f.recordPath), false);
   assert.deepEqual(f.launchd.mutations(), []);
+});
+
+test("install writes and records the diagnostic retention values only when given", async (t) => {
+  const plain = await setup(t);
+  assert.equal((await plain.install()).code, 0);
+  assert.equal(RETENTION in environment(plain.activation), false);
+  assert.equal(STORAGE in environment(plain.activation), false);
+  assert.equal(
+    "diagnosticRetentionDays" in plain.record().configuration,
+    false,
+  );
+
+  const f = await setup(t);
+  const result = await f.install({ retentionDays: 7, storageMib: 256 });
+  assert.equal(result.code, 0, result.stderr);
+  const env = environment(f.activation);
+  assert.equal(env[RETENTION], "7");
+  assert.equal(env[STORAGE], "256");
+  assert.equal(f.record().configuration.diagnosticRetentionDays, 7);
+  assert.equal(f.record().configuration.diagnosticStorageMib, 256);
+  assert.equal(f.record().plistSha256, sha256(f.activation));
+});
+
+test("upgrade keeps, changes and clears the recorded diagnostic values", async (t) => {
+  const f = await installed(t, { retentionDays: 7, storageMib: 256 });
+  let result = await f.upgrade();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(environment(f.activation)[RETENTION], "7");
+  assert.equal(environment(f.activation)[STORAGE], "256");
+  assert.equal(f.record().configuration.diagnosticRetentionDays, 7);
+
+  // The same release directory is the reload route; advance past the snapshot stamp.
+  f.launchd.clock += 60_000;
+  result = await f.upgrade(f.releaseB, undefined, { retentionDays: null });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(RETENTION in environment(f.activation), false);
+  assert.equal(environment(f.activation)[STORAGE], "256");
+  assert.equal("diagnosticRetentionDays" in f.record().configuration, false);
+
+  f.launchd.clock += 60_000;
+  result = await f.upgrade(f.releaseB, undefined, { storageMib: 512 });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(environment(f.activation)[STORAGE], "512");
+  assert.equal(f.record().plistSha256, sha256(f.activation));
+});
+
+test("upgrade to the installed release re-renders a changed value through every stage", async (t) => {
+  const f = await installed(t);
+  f.launchd.events = [];
+  const result = await f.upgrade(f.releaseA, undefined, { retentionDays: 90 });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.launchd.events, [
+    "bootout",
+    "exited",
+    "bootstrap snapshots=1",
+    "readiness",
+  ]);
+  assert.equal(environment(f.activation)[RETENTION], "90");
+  assert.equal(f.record().version, "0.1.0");
+  assert.equal(verifySnapshot(result.report.snapshot), 0);
+});
+
+test("service install, upgrade and uninstall validate diagnostic options before acting", async (t) => {
+  const f = await setup(t);
+  const fake = new FakeLaunchd(f.snapshots);
+  const { io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const unused = (): OperatorConnection => ({
+    origin: async () => {
+      throw new Error("unused");
+    },
+    readiness: async () => {
+      throw new Error("unused");
+    },
+  });
+  const run = (args: string[]) =>
+    serviceCommand(args, deps, unused, () => fake.host());
+  for (const bad of [
+    ["--diagnostic-retention-days", "0"],
+    ["--diagnostic-retention-days", "366"],
+    ["--diagnostic-retention-days", "abc"],
+    ["--diagnostic-retention-days", "1.5"],
+    ["--diagnostic-retention-days", "007x"],
+    ["--diagnostic-storage-mib", "15"],
+    ["--diagnostic-storage-mib", "1048577"],
+  ]) {
+    assert.equal(await run(["install", ...bad]), 2, bad.join(" "));
+    assert.equal(await run(["upgrade", "/x", ...bad]), 2, bad.join(" "));
+  }
+  for (const flag of [
+    "--diagnostic-retention-days",
+    "--diagnostic-storage-mib",
+  ])
+    assert.equal(await run(["uninstall", flag, "default"]), 2);
+  assert.deepEqual(fake.calls, []);
+
+  // `default` parses; the failure is the unusable release, not a usage error.
+  assert.notEqual(
+    await run(["upgrade", "/x", "--diagnostic-retention-days", "default"]),
+    2,
+  );
+});
+
+test("an install record written before the diagnostic fields still upgrades", async (t) => {
+  const f = await installed(t);
+  const record = f.record();
+  assert.equal("diagnosticRetentionDays" in record.configuration, false);
+  const result = await f.upgrade();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(RETENTION in environment(f.activation), false);
 });
