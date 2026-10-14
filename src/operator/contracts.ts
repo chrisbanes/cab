@@ -1764,6 +1764,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .object({ projectNodeId: z.string().trim().min(1).max(512) })
         .strict()
         .optional(),
+      sourceCredentialRef: z.literal("gh:github.com").optional(),
     })
     .strict(),
   z

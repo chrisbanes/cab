@@ -79,6 +79,8 @@ const commandSchema = z.discriminatedUnion("type", [
       instructions: prose.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
+      // Guided setup's default: the detected GitHub CLI login, stated before creation.
+      sourceCredentialRef: z.literal("gh:github.com").optional(),
     })
     .strict(),
   z
@@ -1878,10 +1880,11 @@ export class DomainStore {
           .run(command.projectId);
         this.db
           .prepare(
-            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, NULL, ?, ?, ?)",
+            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, ?, ?, ?, ?)",
           )
           .run(
             command.projectId,
+            command.sourceCredentialRef ?? null,
             // A linked GitHub Project is an inactive source: nothing is active until preview.
             JSON.stringify(
               command.githubProject

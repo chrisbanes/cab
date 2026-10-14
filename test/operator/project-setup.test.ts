@@ -156,6 +156,108 @@ test("guided create records instructions, verified repositories and one inactive
   assert.equal(f.runtime.turns, 0);
 });
 
+test("guided create records the setup source credential at version 1 and replays", async (t) => {
+  const { f, home, api, db } = await setupWorld(t);
+  const command = create({
+    githubProject: { projectNodeId: "PVT_1" },
+    sourceCredentialRef: "gh:github.com",
+  });
+  const receipt = await api.execute(command);
+  const id = String(command.projectId);
+  const read = () => f.service.domain().githubConfiguration(id);
+  assert.equal(read().credentialRef, "gh:github.com");
+  assert.equal(read().version, 1);
+  assert.equal(
+    Number(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM project_github_active WHERE projectId = ?",
+          )
+          .get(id) as { n: number }
+      ).n,
+    ),
+    0,
+  );
+  await f.service.stop();
+  await f.service.start();
+  assert.equal(read().credentialRef, "gh:github.com");
+  assert.equal(read().version, 1);
+  const reopened = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    { home: home.home },
+  );
+  assert.deepEqual(await reopened.execute(command), receipt);
+});
+
+test("creates without the setup credential, and existing sources, are never re-defaulted", async (t) => {
+  const { f, home, api, counts } = await setupWorld(t);
+  const legacy = create({});
+  assert.equal("sourceCredentialRef" in legacy, false);
+  const receipt = await api.execute(legacy);
+  const d = () => f.service.domain();
+  const configure = (projectId: string, credentialRef: string | null) =>
+    d().execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: d().githubConfiguration(projectId).version,
+      credentialRef,
+      selections: [],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
+  const cleared = create({ sourceCredentialRef: "gh:github.com" });
+  await api.execute(cleared);
+  configure(String(cleared.projectId), null);
+  const env = create({});
+  await api.execute(env);
+  configure(String(env.projectId), "env:SOURCE_TOKEN");
+  const before = [legacy, cleared, env].map((c) =>
+    d().githubConfiguration(String(c.projectId)),
+  );
+  assert.equal(before[0]?.credentialRef, null);
+  await f.service.stop();
+  await f.service.start();
+  assert.deepEqual(
+    [legacy, cleared, env].map((c) =>
+      d().githubConfiguration(String(c.projectId)),
+    ),
+    before,
+  );
+  const reopened = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    { home: home.home },
+  );
+  assert.deepEqual(await reopened.execute(legacy), receipt);
+  const recorded = counts();
+  // Invalid input at both the operator and domain schemas; HTTP reports it as 400.
+  for (const sourceCredentialRef of ["env:X", "gh:other.host", null]) {
+    await assert.rejects(
+      api.execute(create({ sourceCredentialRef })),
+      (e) => e instanceof Error && e.name === "ZodError",
+    );
+    await assert.rejects(
+      f.service.domain().createProject({
+        ...create({ sourceCredentialRef }),
+        actor: "operator",
+      } as never),
+      (e) => e instanceof Error && e.name === "ZodError",
+    );
+  }
+  assert.deepEqual(counts(), recorded);
+});
+
 test("origin and ref checks report one field, keep nothing and never echo credentials", async (t) => {
   const { home, api, counts, db } = await setupWorld(t);
   const src = join(home.home, "src");
