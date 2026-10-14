@@ -23,7 +23,8 @@ export const waitCodes = [
 export type WaitCode = (typeof waitCodes)[number];
 
 const id = z.string().uuid();
-const label = z.string().min(1).max(512);
+// Redaction can lengthen a title, so this matches the task read's text bound.
+const label = z.string().min(1).max(16000);
 /** A Fix performs exactly one named command (Resume project) or opens one screen. */
 export const waitFixSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("resume-project"), projectId: id }).strict(),
