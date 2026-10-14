@@ -599,8 +599,9 @@ The production service runs both runtimes; profiles default to Codex. The Claude
 runtime is qualified, with limits, by bounded live journeys
 ([evidence](evidence/issue-827-claude-journeys-2026-10-12.md)). Claude work without
 an available token reference waits visibly. It runs the `claude` that resolves on the
-service's fixed `PATH`, looked up when the service starts; without one only the
-Claude runtime is unavailable. Readiness reports the version it finds and never
+service's fixed `PATH`, looked up when the service starts; without one the Claude
+runtime is not enabled for that run (Claude work waits as not configured and never
+falls back), and Codex is unaffected. Readiness reports the version it finds and never
 compares it: only the Claude Code version the pinned SDK declares was qualified, and
 another version is a disclosed limit
 ([ADR-1011](adr/1011-packaging-and-distribution.md)). Its execution policy differs from

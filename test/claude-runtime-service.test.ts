@@ -1206,7 +1206,7 @@ test("operator token status for a file reference names neither its path nor its 
   assert.equal(await state(), "missing-value");
 });
 
-test("a service whose host has no claude starts with only Claude unavailable", async (t) => {
+test("a service whose host has no claude starts with Claude not enabled, and its work waits without a query", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-claude-missing-"));
   const missing = claudeHarness(join(root, "missing"), [], {
     selfTest: true,
@@ -1230,12 +1230,20 @@ test("a service whose host has no claude starts with only Claude unavailable", a
     );
   assert.deepEqual(states(missing.service), {
     codex: "available",
-    claude: "unavailable",
+    claude: "not-configured",
   });
   assert.deepEqual(states(present.service), {
     codex: "available",
     claude: "available",
   });
+  // Claude work holds with the not-enabled reason; no query could reach a bundled binary.
+  const { projectId, worker } = missing.setup();
+  const { workId } = await missing.claudeTask(projectId, worker);
+  await waitUntil(
+    () => missing.intent(workId)?.reason === "Claude runtime is not configured",
+    missing.describe,
+  );
+  assert.deepEqual(missing.queries, []);
 });
 
 test("a started Claude runtime's supported settings and effective policy parse into the harness status", async (t) => {

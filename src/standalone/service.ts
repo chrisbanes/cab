@@ -60,6 +60,7 @@ import {
   type Runtime,
   type RuntimeConversationEvent,
   type RuntimeDiagnosticEvent,
+  RuntimeNotEnabledError,
   type RuntimeToolCall,
   type RuntimeToolResult,
   type RuntimeTurnSettings,
@@ -492,6 +493,8 @@ export class StandaloneService {
     number
   >();
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
+  /** Harnesses whose runtime said at start that it cannot run here; see RuntimeNotEnabledError. */
+  private readonly runtimeNotEnabled = new Set<ExecutionHarness>();
   /** Settles when a non-default runtime reports failure; see untilFailure. */
   private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
   /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
@@ -977,6 +980,7 @@ export class StandaloneService {
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       spawnEnvironment.spawnEnvironment();
       this.runtimeUnavailableSince.clear();
+      this.runtimeNotEnabled.clear();
       for (const harness of this.runtimeHarnesses) {
         let runtime: Runtime;
         try {
@@ -1043,7 +1047,9 @@ export class StandaloneService {
         } catch (error) {
           if (harness === defaultExecutionHarness) throw error;
           this.runtimes.delete(harness);
-          this.runtimeUnavailableSince.set(harness, Date.now());
+          if (error instanceof RuntimeNotEnabledError)
+            this.runtimeNotEnabled.add(harness);
+          else this.runtimeUnavailableSince.set(harness, Date.now());
           // Healthy start-up never waits on a failed secondary's cleanup.
           const cleanup = stopRuntime(runtime);
           cleanup.catch(() => {});
@@ -1457,9 +1463,17 @@ export class StandaloneService {
     return failed ? Promise.race([work, failed.then(onFailure)]) : work;
   }
 
+  /** In the service's harness list, and its runtime did not report at start that it cannot run. */
+  private harnessEnabled(harness: ExecutionHarness): boolean {
+    return (
+      this.runtimeHarnesses.includes(harness) &&
+      !this.runtimeNotEnabled.has(harness)
+    );
+  }
+
   /** Why work bound to this harness cannot be admitted now, if anything. */
   private runtimeWaitReason(harness: ExecutionHarness): string | undefined {
-    if (!this.runtimeHarnesses.includes(harness))
+    if (!this.harnessEnabled(harness))
       return `${executionHarnessLabels[harness]} runtime is not configured`;
     if (this.runtimeUnavailableSince.has(harness))
       return `${executionHarnessLabels[harness]} runtime unavailable; restart the service`;
@@ -1853,7 +1867,7 @@ export class StandaloneService {
     return executionHarnessSchema.options.map((harness) => {
       const policy = this.harnessPolicy(harness),
         settings = this.harnessSettings(harness);
-      if (!this.runtimeHarnesses.includes(harness))
+      if (!this.harnessEnabled(harness))
         return { harness, state: "not-configured", policy, settings };
       const since = this.runtimeUnavailableSince.get(harness);
       return since === undefined

@@ -25,6 +25,7 @@ import {
   parseFailureEvidence,
   type Runtime,
   type RuntimeConversationEvent,
+  RuntimeNotEnabledError,
   type RuntimeToolCall,
   type RuntimeToolDefinition,
   type RuntimeToolResult,
@@ -761,7 +762,9 @@ export class ClaudeRuntime implements Runtime {
       (() => resolveOnPath("claude", process.env))
     )();
     if (executable === null)
-      throw new Error("Claude executable is not on the service PATH");
+      throw new RuntimeNotEnabledError(
+        "Claude executable is not on the service PATH",
+      );
     await mkdir(this.options.claude.configDirectory, {
       recursive: true,
       mode: 0o700,

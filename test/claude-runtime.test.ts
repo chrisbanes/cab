@@ -23,10 +23,11 @@ import {
   releaseClaudeTemporaryBase,
 } from "../src/standalone/claude.js";
 import { coordinationTools } from "../src/standalone/coordination-tools.js";
-import type {
-  RuntimeConversationEvent,
-  RuntimeToolCall,
-  UnexpectedRequest,
+import {
+  type RuntimeConversationEvent,
+  RuntimeNotEnabledError,
+  type RuntimeToolCall,
+  type UnexpectedRequest,
 } from "../src/standalone/codex.js";
 import type { ClaudeTurnEnvironment } from "../src/standalone/service.js";
 import {
@@ -384,9 +385,12 @@ test("the settings read and every turn run the PATH-resolved claude, resolved on
 test("a missing claude rejects start before any query and leaves the runtime stopped", async () => {
   const f = fixture({ resolveExecutable: async () => null });
   try {
+    // Not a failure: the service treats this harness as not enabled for the run.
     await assert.rejects(
       f.runtime.start(),
-      /Claude executable is not on the service PATH/,
+      (error) =>
+        error instanceof RuntimeNotEnabledError &&
+        error.message === "Claude executable is not on the service PATH",
     );
     await assert.rejects(
       f.runtime.startThread(f.workspace, []),
