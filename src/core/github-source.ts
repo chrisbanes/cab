@@ -1108,7 +1108,7 @@ export class GitHubSourceStore {
       .get(projectId, selectionId) as Row | undefined;
     if (!sync) return null;
     const rows = this.db
-      .prepare(`SELECT e.observedState, e.labels, m.projectFields FROM github_memberships m
+      .prepare(`SELECT e.nodeId, e.observedState, e.labels, m.projectId FROM github_memberships m
         JOIN github_external_issues e ON e.nodeId = m.nodeId
         WHERE m.projectId = ? AND m.selectionId = ?`)
       .all(projectId, selectionId) as Row[];
@@ -1119,17 +1119,9 @@ export class GitHubSourceStore {
       observed: rows.length + closedSkipped,
       open: open.length,
       closedSkipped,
-      // This selection's own fields, so one issue counts once in each selection.
+      // The issue's fields from every membership in the project, as `updateReadiness` reads them.
       matching: open.filter(
-        (r) =>
-          evaluateReadiness(rule, {
-            labels: z
-              .array(z.string())
-              .parse(JSON.parse(String(r.labels)) as unknown),
-            fields: projectFieldsSchema.parse(
-              JSON.parse(String(r.projectFields)),
-            ),
-          }).satisfied,
+        (r) => evaluateReadiness(rule, this.readinessFacts(r)).satisfied,
       ).length,
       complete: Number(sync.complete) === 1,
     };

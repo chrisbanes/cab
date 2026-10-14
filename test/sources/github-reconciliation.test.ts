@@ -1065,3 +1065,38 @@ test("migration adds the skipped-closed count to existing sync state rows", () =
     db.close();
   }
 });
+
+test("matching counts a Project field from another selection's membership, as Ready does", () => {
+  const f = readinessFixture(
+    {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "P_1",
+          fieldNodeId: "F_1",
+          optionNodeId: "O_1",
+        },
+      ],
+    },
+    ["repo", "board"],
+  );
+  try {
+    f.read("repo", [f.at("I_1")]);
+    f.read("board", [
+      f.at("I_1", {
+        projectFields: [
+          { projectNodeId: "P_1", fieldNodeId: "F_1", optionNodeId: "O_1" },
+        ],
+      }),
+    ]);
+    assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
+    for (const selectionId of ["repo", "board"])
+      assert.equal(
+        f.sources.selectionCounts(f.projectId, selectionId)?.matching,
+        1,
+      );
+  } finally {
+    f.db.close();
+  }
+});
