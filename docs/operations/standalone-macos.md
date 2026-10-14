@@ -74,17 +74,19 @@ or shell wrapper. Before bootstrap, inspect and lint the exact plist:
 The `PATH` is deliberately fixed to
 `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin`; launchctl's observed GUI
 domain does not provide the interactive shell's PATH, while `CodexRuntime`
-starts the installed `codex` executable by name and the runtime may use `git`
-or `caffeinate`. This avoids inheriting arbitrary interactive environment
-variables. Confirm `codex`, Node, the compiled CLI, `git`, and `caffeinate`
-resolve to the intended installed executables before loading the job. A host
-whose Codex installation is outside this fixed PATH needs a reviewed renderer
-change; do not patch launchctl's shared environment or add arbitrary plist
-variables locally.
+starts the installed `codex` executable by name, `ClaudeRuntime` resolves
+`claude` from the same `PATH` once when the service starts, and the runtime may
+use `git` or `caffeinate`. This avoids inheriting arbitrary interactive
+environment variables. Confirm `codex`, `claude` (if Claude is used), Node, the
+compiled CLI, `git`, and `caffeinate` resolve to the intended installed
+executables before loading the job. A host whose Codex or Claude installation is
+outside this fixed PATH, such as Claude Code's native installer in `~/.local/bin`,
+needs a Homebrew install in `/opt/homebrew/bin` or a reviewed renderer change; do
+not patch launchctl's shared environment or add arbitrary plist variables locally.
 
 After the service starts, run `ensemble doctor` or open Settings → Readiness. Both
 show what the running service sees: Codex executable and login, git, GitHub
-discovery, the Claude token, runtime harness and data and auth paths, each as Pass,
+discovery, the Claude executable and token, runtime harness and data and auth paths, each as Pass,
 Fail or Not configured with one fix line and no token value or path. The checks
 change nothing and request no model turn; re-run them after any fix.
 
@@ -220,6 +222,23 @@ exact results and limits. Later sync-pause/status-fanout/account-offer repairs
 use controlled fake and full-check evidence; they have not received another live
 run. Its single allowance is consumed; rerunning requires separate authorization
 and a fresh bound preparation.
+
+### Claude executable
+
+Claude profiles run the `claude` command (Claude Code) that resolves on the
+service's fixed `PATH`; Ensemble does not redistribute it. Install it so it
+resolves there (Homebrew puts it in `/opt/homebrew/bin`), then restart the service
+after installing or upgrading it: the runtime looks `claude` up once when it starts.
+A missing `claude` makes only the Claude runtime unavailable, so Claude work waits
+visibly while Codex and the service are unaffected. Readiness shows the Claude
+executable as Not configured while Claude is unused, and as Fail with the fix once a
+token reference or an active Claude profile needs it.
+
+Ensemble reports the version `claude --version` prints and never compares it. Only
+the Claude Code version the pinned SDK declares was qualified; another version may
+fail at startup or enforce the sandbox, tool and permission controls differently.
+That is a disclosed limit, not a fail-closed boundary
+([ADR-1011](../adr/1011-packaging-and-distribution.md)).
 
 ### Claude subscription token
 
