@@ -157,7 +157,7 @@ export function ProjectSetup(
     discovery.state === "unavailable" && discovery.reason === "unconfigured";
   const [ghLogin, setGhLogin] = useState<GhLogin | null>(null);
   // The login a new project's source would use; a failed read counts as not signed in.
-  const [sourceGh, setSourceGh] = useState<GhLogin | null>(null);
+  const [sourceGh, setSourceGh] = useState<GhLogin | null | undefined>();
   useEffect(() => {
     let live = true;
     p.client.read("/api/operator/discovery", discoveryStatusSchema).then(

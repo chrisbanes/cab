@@ -571,9 +571,8 @@ the open decisions.
     "Repository access: fixture-org/fixture-app (main), checked on this Mac." (or
     "none · repository-free"), when linked, the GitHub Project, and the recorded
     source credential, "GitHub source credential: GitHub CLI · @fixture-user"; the
-    Details
-    toggle; the actions, primary Resume and create first task and secondary Keep
-    paused. On phone (147) the actions stack at full width.
+    Details toggle; the actions, primary Resume and create first task and secondary
+    Keep paused. On phone (147) the actions stack at full width.
   - Drawn in 146b: a source without a credential reads "GitHub source credential:
     not set. The source won't sync until one is set." with a GitHub source settings
     link that opens in a new tab. The line is informational and never disables

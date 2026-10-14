@@ -594,7 +594,7 @@ Project GitHub sources independently choose `env:NAME` or exactly `gh:github.com
 Guided setup shows the GitHub CLI login a new project's source would use and, when
 it is signed in, records `gh:github.com` as that source's credential at creation;
 otherwise the source starts without one and the ready check says it cannot sync
-until one is set. Creates from the HTML fallback or CLI record none. Existing,
+until one is set. Creates from the HTML fallback or CLI record no default. Existing,
 environment-selected and cleared sources are never re-defaulted.
 The discovery credential never supplies a missing source credential. Source settings
 offer the detected GitHub CLI account or an environment variable, with Change,

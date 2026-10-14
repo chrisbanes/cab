@@ -116,7 +116,7 @@ export function buildProjectCreate(
   rows: SetupRow[],
   githubProjectNodeId: string,
   /** The source login setup showed as signed in; anything else records no credential. */
-  sourceGh: z.infer<typeof ghLoginStateSchema> | null = null,
+  sourceGh: z.infer<typeof ghLoginStateSchema> | null | undefined = null,
 ) {
   const included = rows.flatMap((r, i) => (blankRow(r) ? [] : [i]));
   const command = {
@@ -364,11 +364,13 @@ export function readyCheckItems(input: {
 
 /** Frames 115–117b: the source credential guided setup will record, stated before Create. */
 export function setupSourceCredentialCopy(
-  sourceGh: z.infer<typeof ghLoginStateSchema> | null,
+  /** `undefined` while the read is pending; `null` after a failed read. */
+  sourceGh: z.infer<typeof ghLoginStateSchema> | null | undefined,
 ) {
+  if (sourceGh === undefined) return "GitHub source credential: checking…";
   return sourceGh?.state === "signed-in"
     ? `GitHub source credential: GitHub CLI · @${sourceGh.login}. Change or clear it later in the project's GitHub source settings.`
-    : "GitHub source credential: none. No usable GitHub CLI login was detected, so the source starts without a credential and won't sync until one is set in its GitHub source settings.";
+    : `GitHub source credential: none. ${sourceGh ? "No usable GitHub CLI login was detected" : "The GitHub CLI login could not be checked"}, so the source starts without a credential and won't sync until one is set in its GitHub source settings.`;
 }
 
 /**

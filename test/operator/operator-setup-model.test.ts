@@ -607,7 +607,12 @@ test("setup sends the source credential only for a signed-in source login", () =
     "gh:github.com",
   );
   assert.equal(operatorCommandSchema.safeParse(signedIn).success, true);
+  assert.equal(
+    setupSourceCredentialCopy(undefined),
+    "GitHub source credential: checking…",
+  );
   for (const gh of [
+    undefined,
     null,
     { state: "not-signed-in" as const },
     { state: "unreadable" as const },
@@ -619,7 +624,9 @@ test("setup sends the source credential only for a signed-in source login", () =
     );
     assert.match(
       setupSourceCredentialCopy(gh),
-      /^GitHub source credential: none\./,
+      gh === undefined
+        ? /^GitHub source credential: checking…$/
+        : /^GitHub source credential: none\./,
     );
   }
   assert.match(
