@@ -74,14 +74,19 @@ export class GitHubSynchronizer {
       this.pausedUntil.set(credentialRef, result.resumeAt);
   }
 
-  /** Admission consults imported blockers of a closed issue only while its open task continues from its own delivery closure. */
-  private readsBlockers(issue: IssueSnapshot): boolean {
-    if (issue.state !== "closed") return true;
+  /**
+   * Admission consults imported blockers only for a ready open task, or a closed
+   * issue's open task continuing from its own delivery closure. Other issues are
+   * not read, which keeps a pass within GitHub's hourly request budget.
+   */
+  private readsBlockers(issue: IssueSnapshot): boolean | "unneeded" {
     const taskId = this.sources.issue(issue.nodeId)?.taskId;
+    if (taskId === undefined) return false;
+    const task = this.domain.task(String(taskId));
+    if (issue.state !== "closed")
+      return task.state === "open" && task.ready ? true : "unneeded";
     return (
-      taskId !== undefined &&
-      this.domain.task(String(taskId)).state === "open" &&
-      this.domain.hasOwnDeliveryClosure(String(taskId))
+      task.state === "open" && this.domain.hasOwnDeliveryClosure(String(taskId))
     );
   }
 
@@ -122,23 +127,27 @@ export class GitHubSynchronizer {
         if (!committed) continue;
         if (!snapshot.complete) continue;
         for (const issue of snapshot.issues) {
-          if (!this.readsBlockers(issue)) continue;
+          const reads = this.readsBlockers(issue);
+          if (!reads) continue;
           const reference: IssueReference = {
             nodeId: issue.nodeId,
             repositoryId: issue.repositoryId,
             repositoryName: issue.repositoryName,
             number: issue.number,
           };
-          // Paused issues are recorded as unknown, never left with an earlier "clear".
+          // Paused and unread issues are recorded as unknown, never left with an
+          // earlier "clear" that a later readiness could admit before its read.
           const blockers: BlockerSnapshot =
-            !(reader instanceof CredentialGitHubSourceReader) &&
-            this.paused(credentialRef)
-              ? { complete: false, blockers: [], reason: "rate-limited" }
-              : await reader.readBlockers(reference).catch(() => ({
-                  complete: false,
-                  blockers: [],
-                  reason: "reader-error",
-                }));
+            reads === "unneeded"
+              ? { complete: false, blockers: [], reason: "task-unready" }
+              : !(reader instanceof CredentialGitHubSourceReader) &&
+                  this.paused(credentialRef)
+                ? { complete: false, blockers: [], reason: "rate-limited" }
+                : await reader.readBlockers(reference).catch(() => ({
+                    complete: false,
+                    blockers: [],
+                    reason: "reader-error",
+                  }));
           if (this.stopped) return;
           if (!(reader instanceof CredentialGitHubSourceReader))
             this.notePause(credentialRef, blockers);

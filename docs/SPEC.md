@@ -205,7 +205,9 @@ Local Done clears a blocker; cancellation does not. Imported GitHub tasks follow
 native dependency edges, including blockers outside the selection, without importing
 those blockers or granting repository access. No duplicate local edge or bypass is
 provided for an extant native edge. Closure or edge removal releases that blocker;
-reopening reapplies it. Unknown or incomplete state holds dispatch even on first
+reopening reapplies it. Native edges are read only for Ready open tasks (and a
+task continuing from its own delivery closure); other imported tasks hold them as
+unknown. Unknown or incomplete state holds dispatch even on first
 observation or after prior clearance. Current turns may finish when a new blocker
 appears; results and ownership remain. Clearance rechecks every other control.
 
