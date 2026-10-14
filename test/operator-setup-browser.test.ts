@@ -1178,6 +1178,16 @@ test("Setup's ready check stays usable on a phone", async (_t, journey) => {
         .filter((e) => e.height < 44),
     );
   assert.deepEqual(small, []);
+  // Frame 147: Resume and Keep paused stack at the full width of the check.
+  const width = (await ready.boundingBox())?.width ?? 0;
+  const actions = await ready
+    .locator(".setup-inline-actions > *")
+    .evaluateAll((els) => els.map((el) => el.getBoundingClientRect().width));
+  assert.equal(actions.length, 2);
+  assert.ok(
+    actions.every((w) => w >= width - 1),
+    JSON.stringify({ width, actions }),
+  );
   await captureBrowserEvidence(page, "390-setup-ready-check");
 });
 
