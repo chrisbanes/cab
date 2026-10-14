@@ -658,7 +658,7 @@ test("an unconfigured or failed harness holds its work visibly without fallback"
     await waitUntil(
       () =>
         intent(service, blocked)?.reason ===
-        "Claude runtime unavailable; restart the service",
+        "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
       describe,
     );
     assert.deepEqual(service.runtimeStatus(), { state: "available" });
@@ -839,7 +839,7 @@ for (const failure of ["construction", "start"] as const)
       await waitUntil(
         () =>
           intent(service, claudeWork)?.reason ===
-          "Claude runtime unavailable; restart the service",
+          "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
         describe,
       );
       const codexTask = await task(service, projectId, [lead]);
@@ -1093,7 +1093,7 @@ test("a failed harness with a hung identity blocks neither other work nor shutdo
     await waitUntil(
       () =>
         intent(service, claudeWork)?.reason ===
-        "Claude runtime unavailable; restart the service",
+        "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
       describe,
     );
     const codexTask = await task(service, projectId, [lead]);
@@ -1189,7 +1189,7 @@ test("start-up does not wait for a failed secondary runtime's cleanup, and shutd
     await waitUntil(
       () =>
         intent(service, initial(claudeTask.assignmentIds[0] ?? ""))?.reason ===
-        "Claude runtime unavailable; restart the service",
+        "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
       describe,
     );
     const codexTask = await task(service, projectId, [lead]);
@@ -1412,7 +1412,7 @@ test("a secondary runtime with pending startup does not block healthy work", asy
     await waitUntil(
       () =>
         intent(service, claudeWork)?.reason ===
-        "Claude runtime unavailable; restart the service",
+        "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
       describe,
     );
     // A late resolution never returns the detached runtime to admission.
@@ -1429,7 +1429,7 @@ test("a secondary runtime with pending startup does not block healthy work", asy
     assert.deepEqual(runtimes.claude.calls, []);
     assert.equal(
       intent(service, claudeWork)?.reason,
-      "Claude runtime unavailable; restart the service",
+      "Claude runtime unavailable; turn it off and on in Settings → Runtime, or restart the service",
     );
   } finally {
     if (deadline) clearTimeout(deadline);

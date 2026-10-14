@@ -30,6 +30,14 @@ export function harnessReason(status: HarnessStatus) {
 export const executableMissingMessage = (harness: HarnessStatus["harness"]) =>
   `${executionHarnessLabels[harness]} was not turned on: \`${harness}\` not found on the service PATH.`;
 
+/** Recovery for a runtime whose executable is not on the service PATH: install it, then restart the runtime. */
+const installAdvice = (harness: HarnessStatus["harness"]) =>
+  `Install \`${harness}\` on the service PATH, then turn it off and on in Settings → Runtime.`;
+
+/** A wait reason does not say which cause: the runtime is off, or on but its executable is missing. */
+const notEnabledAdvice = (harness: HarnessStatus["harness"]) =>
+  `If it is off, turn it on in Settings → Runtime; if that is refused, install \`${harness}\` on the service PATH first. If it is already on, install \`${harness}\` on the service PATH, then turn it off and on there.`;
+
 /** The confirmation body for disabling a runtime that tasks use. */
 export const disableConfirmation = (
   harness: HarnessStatus["harness"],
@@ -39,9 +47,9 @@ export const disableConfirmation = (
   return `${tasks === 1 ? "1 task uses" : `${tasks} tasks use`} ${label}. Running turns finish; their next turns wait until ${label} is enabled again.`;
 };
 
-/** Exact shell alert copy; Codex wording is retained byte-for-byte. */
+/** Shell alert copy; the server-rendered Runtime page repeats it. */
 export const unavailableAlert = (status: Pick<HarnessStatus, "harness">) =>
-  `${executionHarnessLabels[status.harness]} runtime unavailable — restart the service`;
+  `${executionHarnessLabels[status.harness]} runtime unavailable — turn it off and on in Settings → Runtime, or restart the service`;
 
 /** Draft values of the profile runtime fields. */
 export const runtimeValues = (runtime: ProfileRuntime): Values => ({
@@ -109,8 +117,8 @@ export function harnessNote(status: HarnessStatus | undefined) {
   if (!status || status.state === "available") return null;
   const label = executionHarnessLabels[status.harness];
   return status.state === "not-configured"
-    ? `The ${label} runtime is not enabled on this service. Assignments using this profile wait until it is; they never fall back to another runtime.`
-    : `The ${label} runtime is unavailable; restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.`;
+    ? `The ${label} runtime is not enabled on this service. ${status.reason === "disabled" ? "Turn it on in Settings → Runtime." : installAdvice(status.harness)} Assignments using this profile wait until it is; they never fall back to another runtime.`
+    : `The ${label} runtime is unavailable; turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.`;
 }
 
 type Assignment = TaskRead["data"]["assignments"][number];
@@ -163,7 +171,7 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
   const label = executionHarnessLabels[harness];
   if (reason === `${label} runtime is not configured`)
     return {
-      message: `The ${label} runtime is not enabled on this service. This work waits and never falls back to another runtime; Stop the task from its header to end it, or change the profile's runtime for new conversations.`,
+      message: `The ${label} runtime is not enabled on this service. ${notEnabledAdvice(harness)} This work waits and never falls back to another runtime; Stop the task from its header to end it, or change the profile's runtime for new conversations.`,
       routes: [
         {
           label: "Edit profile",
@@ -172,9 +180,14 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
         runtimeStatusRoute,
       ],
     };
-  if (reason === `${label} runtime unavailable; restart the service`)
+  // The legacy text may still be stored on rows persisted before the off/on recovery.
+  if (
+    reason === `${label} runtime unavailable; restart the service` ||
+    reason ===
+      `${label} runtime unavailable; turn it off and on in Settings → Runtime, or restart the service`
+  )
     return {
-      message: `The ${label} runtime is unavailable; restart the service. Queued work waits; running work is held, see Recovery.`,
+      message: `The ${label} runtime is unavailable. Turn it off and on in Settings → Runtime to start a fresh one; if it stays unavailable, restart the service. Queued work waits; running work is held, see Recovery.`,
       routes: [runtimeStatusRoute, recoveryRoute(a)],
     };
   if (reason.startsWith(`${label} runtime unavailable: `))

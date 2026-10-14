@@ -452,7 +452,7 @@ test("the ready check names a runtime that cannot run the lead's work in fixed w
           runtime: { state: "unavailable", since: 1 },
         }),
       }),
-      "Codex runtime unavailable — restart the service",
+      "Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
     ],
     [
       input({
@@ -460,7 +460,7 @@ test("the ready check names a runtime that cannot run the lead's work in fixed w
           harnesses: [harness("codex"), harness("claude", "unavailable")],
         }),
       }),
-      "Claude runtime unavailable — restart the service",
+      "Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
     ],
     [
       input({ readiness: { state: "unavailable" } }),
@@ -587,6 +587,8 @@ test("the ready check judges the lead's own model and effort against the support
   });
   assert.deepEqual(
     down.items.map((i) => i.text),
-    ["Claude runtime unavailable — restart the service"],
+    [
+      "Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+    ],
   );
 });
