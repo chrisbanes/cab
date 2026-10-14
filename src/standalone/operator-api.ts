@@ -152,6 +152,7 @@ import {
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
 import type { StandaloneService } from "./service.js";
+import { refusedRevisionPrefix } from "./state.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
 import {
   compareRepository,
@@ -2109,30 +2110,47 @@ export class OperatorApi {
     };
   }
   /**
-   * Runtime facts of the profiles whose turns are next: each assignment whose current turn
-   * request is queued, at the request's bound profile revision, and each pending assignment
-   * not yet requested. With neither,
-   * the lead takes the next turn. The first candidate with a runtime wait is reported.
+   * The assignments waiting to run: each whose current turn request is queued, each pending
+   * assignment not yet requested, and each `refused` for stale captured revisions, which
+   * holds it until it is re-bound. Each assignment's current request only, so the read
+   * stays bounded by assignments.
    */
-  private executingWaitFacts(t: Row, excluded: readonly string[] | undefined) {
-    // Each assignment's current request only, so the read stays bounded by assignments.
-    const candidates = this.domain()
-      .assignments(String(t.id))
-      .flatMap((a) => {
+  private nextAssignments(taskId: string) {
+    return this.domain()
+      .assignments(taskId)
+      .flatMap((assignment) => {
         const request = this.service.currentTurnRequest(
-          String(a.id),
-          Number(a.version),
+          String(assignment.id),
+          Number(assignment.version),
         );
+        const refused =
+          request?.state === "held" &&
+          !!request.reason?.startsWith(refusedRevisionPrefix);
         return request?.state === "queued" ||
-          (a.state === "pending" && !request)
-          ? [
-              this.profileWaitFacts(
-                String(a.profileId),
-                request?.profileRevision ?? Number(a.profileRevision),
-              ),
-            ]
+          (assignment.state === "pending" && !request) ||
+          refused
+          ? [{ assignment, request, refused }]
           : [];
       });
+  }
+  /**
+   * Runtime facts of the profiles whose turns are next: the queued or unrequested of
+   * `next`, at the request's bound profile revision or else the assignment's. With none,
+   * the lead takes the next turn. The first candidate with a runtime wait is reported.
+   */
+  private executingWaitFacts(
+    t: Row,
+    excluded: readonly string[] | undefined,
+    next: ReturnType<OperatorApi["nextAssignments"]>,
+  ) {
+    const candidates = next
+      .filter((w) => !w.refused)
+      .map(({ assignment, request }) =>
+        this.profileWaitFacts(
+          String(assignment.profileId),
+          request?.profileRevision ?? Number(assignment.profileRevision),
+        ),
+      );
     if (!candidates.length)
       return this.profileWaitFacts(this.taskLead(t, excluded)?.profileId);
     return (
@@ -2144,6 +2162,37 @@ export class OperatorApi {
             f.claudeTokenUnavailable),
       ) ?? candidates[0]
     );
+  }
+  /**
+   * What stops each of the `next` assignments beyond the task's own admission, which the
+   * task waits already carry (the lead's own reasons are a subset of them), with its
+   * profile's name.
+   */
+  private assignmentWaitFacts(
+    taskId: string,
+    excluded: readonly string[] | undefined,
+    next: ReturnType<OperatorApi["nextAssignments"]>,
+  ) {
+    if (!next.length) return [];
+    const d = this.domain(),
+      task = new Set(d.admission(taskId).reasons);
+    return next.flatMap(({ assignment }) => {
+      const reasons = d
+        .assignmentAdmission(String(assignment.id))
+        .reasons.filter((r) => !task.has(r));
+      return reasons.length
+        ? [
+            {
+              profileId: String(assignment.profileId),
+              profileName: this.exact(
+                d.profile(String(assignment.profileId)).name,
+                excluded,
+              ),
+              reasons,
+            },
+          ]
+        : [];
+    });
   }
   /** What is using capacity when the project or installation is at its limit. */
   private capacityWait(projectId: string) {
@@ -2206,11 +2255,13 @@ export class OperatorApi {
           : null,
       waiting = ["idle", "queued", "selected", "waiting"].includes(
         execution.state,
-      );
+      ),
+      next = this.nextAssignments(taskId);
     return deriveWaits({
       projectId,
       admissionReasons: admission.reasons,
-      lead: this.executingWaitFacts(t, excluded),
+      lead: this.executingWaitFacts(t, excluded, next),
+      assignments: this.assignmentWaitFacts(taskId, excluded, next),
       // The same predicate as admission, so an imported blocker marked done keeps its link.
       dependencies: d.blockingDependencies(taskId).map((id) => ({
         id,
