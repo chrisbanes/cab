@@ -274,3 +274,84 @@ test("Composer never claims on-device saving when storage fails", async (_t, j) 
     0,
   );
 });
+
+test("Composer predicts start or wait before submission from the same waits", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId } = seed(f);
+  const d = f.service.domain();
+  const configure = (paused: boolean) =>
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(d.project(projectId).version),
+      paused,
+    });
+  configure(false);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 820 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  let commands = 0;
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      new URL(r.url()).pathname === "/api/operator/commands"
+    )
+      commands++;
+  });
+  await open(page, web.origin, web.password, projectId);
+  const prediction = page.locator(".composer-prediction");
+  await prediction.getByText("Starts now.", { exact: true }).waitFor();
+
+  // A not-done dependency makes it wait; removing it restores the start.
+  await page.getByText(/^Optional settings/).click();
+  await page.getByLabel("Command menu task").check();
+  await prediction
+    .getByText("It will wait: Blocked by a task dependency", { exact: true })
+    .waitFor();
+  await prediction.getByRole("link", { name: "Command menu task" }).waitFor();
+  await page.getByLabel("Command menu task").uncheck();
+  await prediction.getByText("Starts now.", { exact: true }).waitFor();
+
+  // A paused project leads with its Fix; the dependency is listed beneath it.
+  configure(true);
+  await page.reload();
+  // The selections kept in this tab come back first.
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .click();
+  await prediction
+    .getByText("It will wait: Project paused", { exact: true })
+    .waitFor();
+  await prediction
+    .getByRole("button", { name: "Fix: Resume project" })
+    .waitFor();
+  await page.getByText(/^Optional settings/).click();
+  await page.getByLabel("Command menu task").check();
+  assert.deepEqual(
+    await prediction
+      .locator(".wait-list li > span:first-child")
+      .allInnerTexts(),
+    ["Blocked by a task dependency"],
+  );
+  assert.equal(commands, 0);
+  // Save draft is unchanged by the prediction.
+  await page.getByLabel("Task title").fill("Predicted draft");
+  await page.getByLabel("Desired outcome").fill("Probe");
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByText("Draft saved.", { exact: true }).waitFor();
+  assert.equal(commands, 1);
+});

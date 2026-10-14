@@ -1,0 +1,25 @@
+.wait-reasons {
+  display: grid;
+  gap: var(--space-8);
+}
+.wait-primary,
+.wait-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+}
+.wait-primary .small-heading {
+  margin: 0;
+}
+.wait-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: var(--space-8);
+}
+.wait-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}

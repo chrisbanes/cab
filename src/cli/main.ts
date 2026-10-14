@@ -8,11 +8,9 @@ import {
   taskSchema,
 } from "../operator/contracts.js";
 import { readHiddenPassword } from "../standalone/operator-hidden-password.js";
-import { coverage } from "./browse.js";
-import { browseCommands, writeCommands } from "./commands.js";
 import {
-  type CliConfig,
   CliError,
+  type CliConfig,
   type Connection,
   ConnectionConfig,
   configDirectory,
@@ -20,6 +18,8 @@ import {
   KeychainCredentialStore,
   readTokenFile,
 } from "./connections.js";
+import { coverage } from "./browse.js";
+import { browseCommands, writeCommands } from "./commands.js";
 import { RequestJournal } from "./request-journal.js";
 import { waitLines } from "./task-write.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";

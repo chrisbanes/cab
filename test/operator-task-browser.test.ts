@@ -293,7 +293,7 @@ test("Save draft and Create and start record real task outcomes without claiming
   );
   assert.equal(f.runtime.turns, 0);
   await page
-    .getByText("Waiting on a task dependency", { exact: true })
+    .getByText("Blocked by a task dependency", { exact: true })
     .waitFor();
   await screenshot(page, "1366-confirmed-ready-held");
   const dependent = d

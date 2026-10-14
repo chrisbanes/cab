@@ -21,7 +21,9 @@ import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import { ComposerState, type ComposerInput } from "./composer-state.js";
 import { useOperatorResource } from "./resource.js";
-import { reasonLabels } from "./tasks.js";
+import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
+import type { ConfigurationDrafts } from "./settings-state.js";
+import { WaitReasons } from "./wait-reasons.js";
 import { optionalFields, optionalSummary } from "./composer-summary.js";
 import "./composer.css";
 export function TaskComposer({
@@ -30,12 +32,17 @@ export function TaskComposer({
   workspace,
   initialProject = "",
   onRecorded,
+  drafts,
+  refresh,
 }: {
   client: OperatorClient;
   session: Session;
   workspace: Workspace | null;
   initialProject?: string;
   onRecorded: () => void;
+  drafts: ConfigurationDrafts;
+  /** Re-reads the workspace after a Fix changes a project. */
+  refresh: () => void;
 }) {
   const [, render] = useState(0);
   const [state] = useState(() => {
@@ -208,11 +215,20 @@ export function TaskComposer({
                 {current.state.data.data.execution.state}
               </StatusBadge>
             </p>
-            {current.state.data.data.admission.reasons.map((r) => (
-              <p className="body muted" key={r}>
-                {reasonLabels[r]}
-              </p>
-            ))}
+            <WaitReasons
+              waits={current.state.data.data.waits}
+              taskId={current.state.data.data.task.id}
+              projectId={current.state.data.data.task.projectId}
+              prefix={state.frozen?.ready ? "It will wait: " : "Waiting · "}
+              client={client}
+              session={session}
+              drafts={drafts}
+              workspace={workspace}
+              onChanged={() => {
+                current.refresh();
+                refresh();
+              }}
+            />
           </>
         )}
         <a className="control" href="/app/tasks">
@@ -235,6 +251,29 @@ export function TaskComposer({
     ? workspace?.data.profiles.find((p) => p.id === o.lead?.profileId)
     : undefined;
   const optional = optionalSummary(input, o, unavailable, state.errors);
+  // The same waits the task would show, from the project's and the selected dependencies.
+  const blocking = (o?.dependencies ?? []).filter(
+    (d) => input.blockerTaskIds.includes(d.id) && d.state !== "done",
+  );
+  const prediction: Wait[] | null =
+    o && options.state.status === "fresh"
+      ? orderWaits([
+          ...o.waits,
+          ...(blocking.length
+            ? [
+                {
+                  code: "local-dependency" as const,
+                  fix: null,
+                  links: blocking.map((d) => ({
+                    kind: "task" as const,
+                    id: d.id,
+                    label: d.title ?? "Title unavailable",
+                  })),
+                },
+              ]
+            : []),
+        ])
+      : null;
   // A refused or unconfirmed creation sits beside the action that made it.
   const outcomeShown = state.failed || state.phase === "unknown";
   const optionalError = Object.keys(optionalFields).some(
@@ -314,16 +353,6 @@ export function TaskComposer({
                       ? "Routing chooses an assignee unless you pick one."
                       : "The project lead is assigned unless you pick one."}
                   </p>
-                  {o.project.paused && (
-                    <p className="body">
-                      This project is paused, so the task will wait.
-                    </p>
-                  )}
-                  {!o.lead && (
-                    <p className="body">
-                      Configure a project lead before execution can begin.
-                    </p>
-                  )}
                   <p className="body muted">
                     Capacity: {o.capacity.projectUsage}/
                     {o.capacity.projectLimit} project · {o.capacity.globalUsage}
@@ -519,6 +548,27 @@ export function TaskComposer({
         ) : (
           !locked && (
             <div className="composer-actions">
+              {prediction && (
+                <div className="composer-prediction" aria-live="polite">
+                  {prediction.length ? (
+                    <WaitReasons
+                      waits={prediction}
+                      projectId={input.projectId}
+                      prefix="It will wait: "
+                      client={client}
+                      session={session}
+                      drafts={drafts}
+                      workspace={workspace}
+                      onChanged={() => {
+                        void options.refresh();
+                        refresh();
+                      }}
+                    />
+                  ) : (
+                    <p className="small-heading">Starts now.</p>
+                  )}
+                </div>
+              )}
               <Button type="submit">Create and start</Button>
               <Button
                 type="button"
@@ -530,7 +580,9 @@ export function TaskComposer({
               <p className="metadata muted">
                 {optionalError
                   ? "Check the optional settings to continue. Your input is still here."
-                  : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
+                  : prediction
+                    ? "Save draft keeps it without starting."
+                    : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
               </p>
             </div>
           )

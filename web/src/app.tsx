@@ -921,6 +921,8 @@ export function App() {
                 ""
               }
               onRecorded={tasks.refresh}
+              drafts={drafts.current}
+              refresh={workspace.refresh}
             />
           ) : pathname === "/app/inbox" ? (
             <Inbox
@@ -950,6 +952,7 @@ export function App() {
               key={`${session.csrfToken}:${entryKey}`}
               client={client}
               session={session}
+              drafts={drafts.current}
               taskId={pathname.split("/")[3] ?? ""}
               path={path}
               onRefresh={refreshAll}
