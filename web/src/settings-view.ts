@@ -156,8 +156,7 @@ export function activationLine({
       line: `Couldn't confirm that ${id} is active. Preview it again.`,
       refresh: false,
     };
-  const was = saved?.values.activeSelectionIds;
-  const wasActive = Array.isArray(was) && was.includes(id);
+  const wasActive = saved?.activeSelectionIds.includes(id);
   return {
     line: `${wasActive ? `${id} was already active.` : `Activated ${id}.`} ${tasksNotImported}`,
     refresh: true,

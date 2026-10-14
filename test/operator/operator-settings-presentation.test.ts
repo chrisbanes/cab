@@ -402,11 +402,14 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   } as never;
   assert.equal(savedLine(3, undefined), null);
   assert.match(
-    savedLine(3, { at: Date.now(), receipt, values: {} }) ?? "",
+    savedLine(3, { at: Date.now(), receipt, activeSelectionIds: [] }) ?? "",
     /^Saved \d\d:\d\d$/,
   );
   // A save at another version never reads as the current one, and no version is shown.
-  assert.equal(savedLine(4, { at: Date.now(), receipt, values: {} }), null);
+  assert.equal(
+    savedLine(4, { at: Date.now(), receipt, activeSelectionIds: [] }),
+    null,
+  );
   assert.equal(joinNames(["Ada"]), "Ada");
   assert.equal(joinNames(["Ada", "Eli"]), "Ada and Eli");
   assert.equal(joinNames(["Ada", "Eli", "Bo"]), "Ada, Eli and Bo");
@@ -652,7 +655,7 @@ test("the activation line claims only a confirmed preview at the loaded source v
       saved: {
         at: Date.now(),
         receipt: preview(),
-        values: { activeSelectionIds: wasActive ? ["S-1"] : [] },
+        activeSelectionIds: wasActive ? ["S-1"] : [],
       },
       sourceVersion: 3,
       selections: [],
@@ -672,7 +675,7 @@ test("the activation line claims only a confirmed preview at the loaded source v
       saved: {
         at: Date.now(),
         receipt: preview("project.configure"),
-        values: {},
+        activeSelectionIds: [],
       },
     }),
     null,
