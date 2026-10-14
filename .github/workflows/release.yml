@@ -61,6 +61,19 @@ jobs:
           path: release
       - env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # gh creates a draft, uploads and then publishes, so a failed run can leave a
+        # draft behind; a rerun completes that draft but never replaces a published release.
         run: |
-          gh release create "$GITHUB_REF_NAME" release/*.tar.gz release/SHA256SUMS release/manifest.json \
-            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          set -euo pipefail
+          files=(release/*.tar.gz release/SHA256SUMS release/manifest.json)
+          if draft=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft); then
+            if [ "$draft" != true ]; then
+              echo "Release $GITHUB_REF_NAME is already published" >&2
+              exit 1
+            fi
+            gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+            gh release edit "$GITHUB_REF_NAME" --draft=false --verify-tag
+          else
+            gh release create "$GITHUB_REF_NAME" "${files[@]}" --verify-tag --generate-notes
+          fi
