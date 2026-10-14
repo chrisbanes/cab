@@ -1541,8 +1541,7 @@ export class DomainStore {
     );
     if (row?.state === "done" && Number(row.completed) === 1)
       return "completed";
-    // A pending proof of Ensemble's own closure is re-checked by the service; it is not
-    // provider closure and needs no reopen.
+    // Ensemble's own closure awaits proof; it is not provider closure.
     return row?.state === "open" &&
       row.observedState === "closed" &&
       Number(row.ownProofPending) === 0 &&

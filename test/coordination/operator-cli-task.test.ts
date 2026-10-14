@@ -1013,12 +1013,15 @@ test("a pending own-delivery closure proof is not shown as GitHub closure on any
     assert.equal(human.code, 0, human.err);
     assert.ok(!human.out.includes("closed on GitHub"), human.out);
   }
-  for (const page of [
-    new LocalOperatorUi(d, undefined, sources).task(taskId),
-    new LocalOperatorUi(d, undefined, sources).project(s.projectId),
-  ])
+  const ui = new LocalOperatorUi(d, undefined, sources);
+  for (const [page, marker] of [
+    [ui.task(taskId), "Source hold: closure-read-unavailable"],
+    [ui.project(s.projectId), "Imported task"],
+  ] as const) {
+    assert.ok(page.includes(marker), marker);
     assert.ok(
       !/closed on GitHub|issue reopens/.test(page),
       "no reopen guidance for a pending own-delivery proof",
     );
+  }
 });
