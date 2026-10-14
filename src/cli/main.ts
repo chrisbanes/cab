@@ -508,9 +508,7 @@ function operatorConnection(
         fetch: (input, init) =>
           deps.fetch(input, {
             ...init,
-            signal: init?.signal
-              ? AbortSignal.any([init.signal, signal])
-              : signal,
+            signal,
           }),
       };
       const session = await connect(config, requested, bound, [

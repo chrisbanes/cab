@@ -52,7 +52,9 @@ const NOT_LOADED = 113;
 const STOP_TIMEOUT_MS = 30_000;
 const START_TIMEOUT_MS = 120_000;
 const POLL_MS = 1_000;
-const PROBE_MS = 5_000;
+const HEALTH_PROBE_MS = 5_000;
+// Above the service's own 10 s bound on its slowest readiness checks.
+const READINESS_PROBE_MS = 20_000;
 
 /** An identity from `captureIdentity`, passed back unchanged to `exited`. */
 export type ProcessIdentity = object;
@@ -69,7 +71,7 @@ export type ServiceHost = {
   fetch: typeof fetch;
   now(): number;
   sleep(ms: number): Promise<void>;
-  /** A signal that aborts after `ms`, on the same clock as `now`. */
+  /** A signal that aborts after `ms`; tests shorten it. */
   timeout(ms: number): AbortSignal;
 };
 
@@ -309,7 +311,9 @@ class Service {
         this.exitUnconfirmed = true;
         throw new ServiceFailure("process exit unconfirmed");
       }
-      await this.pause();
+      // Once bootout is issued the bounded confirmation runs to the end, even after an
+      // interrupt; the next stage then fails with the exit confirmed or reported unconfirmed.
+      await this.host.sleep(POLL_MS);
     }
   }
 
@@ -424,13 +428,15 @@ class Service {
    */
   async waitFor<T>(
     message: string,
+    probeMs: number,
     probe: (signal: AbortSignal) => Promise<T | undefined>,
   ): Promise<T> {
     const deadline = this.host.now() + START_TIMEOUT_MS;
     for (;;) {
+      this.checkInterrupt();
       const remaining = Math.max(1, deadline - this.host.now());
       const signal = AbortSignal.any([
-        this.host.timeout(Math.min(PROBE_MS, remaining)),
+        this.host.timeout(Math.min(probeMs, remaining)),
         ...(this.io.signal ? [this.io.signal] : []),
       ]);
       let value: T | undefined;
@@ -450,6 +456,7 @@ class Service {
   waitForApp(origin: string) {
     return this.waitFor(
       "The service did not serve /app within 120 s",
+      HEALTH_PROBE_MS,
       async (signal) => {
         const response = await this.host.fetch(`${origin}/app`, { signal });
         await response.body?.cancel();
@@ -597,6 +604,7 @@ export async function upgradeService(
     rmSync(service.activation, { force: true });
 
     stage = "snapshot";
+    service.checkInterrupt();
     service.prepareDirectories();
     const path = join(
       options.stateDir,
@@ -615,6 +623,8 @@ export async function upgradeService(
     snapshot = path;
 
     stage = "render";
+    // Nothing new starts once the operator has interrupted.
+    service.checkInterrupt();
     ({ record, logs } = await service.activate(
       version,
       target,
@@ -627,7 +637,8 @@ export async function upgradeService(
     await service.waitForApp(record.configuration.origin);
     stage = "readiness";
     const readiness = await service.waitFor(
-      "Readiness still reports a failing check",
+      "Readiness did not answer without a failing check within 120 s",
+      READINESS_PROBE_MS,
       async (signal) => {
         const checks = await connection.readiness(signal);
         return checks.some((check) => check.status === "fail")

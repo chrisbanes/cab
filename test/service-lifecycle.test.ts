@@ -112,8 +112,8 @@ class FakeLaunchd {
       sleep: async (ms) => {
         this.clock += ms;
       },
-      // Probe timeouts fire almost at once; the polling sleep advances the fake clock.
-      timeout: () => AbortSignal.timeout(5),
+      // Probe timeouts run 1000 times faster; the polling sleep advances the fake clock.
+      timeout: (ms) => AbortSignal.timeout(Math.max(1, ms / 1000)),
       ...this.overrides,
     };
   }
@@ -856,4 +856,44 @@ test("an interrupt during a probe that then succeeds still fails and undoes the 
   assert.equal(f.launchd.jobs.size, 0);
   assert.equal(existsSync(f.activation), false);
   assert.equal(existsSync(f.recordPath), false);
+});
+
+test("each readiness read may run longer than the service's own 10 s check bound", async (t) => {
+  const f = await installed(t);
+  const fake = f.launchd.host();
+  const limits: number[] = [];
+  f.launchd.overrides = {
+    timeout: (ms) => {
+      limits.push(ms);
+      return fake.timeout(ms);
+    },
+  };
+  const result = await f.upgrade();
+  assert.equal(result.code, 0, result.stderr);
+  // One health probe capped at 5 s, then one readiness read allowed over 10 s.
+  assert.deepEqual(limits, [5_000, 20_000]);
+});
+
+test("an interrupt during the stop poll still confirms the exit before failing", async (t) => {
+  const f = await installed(t);
+  const interrupt = new AbortController();
+  let polls = 0;
+  f.launchd.stuck = true;
+  f.launchd.overrides = {
+    exited: async () => {
+      interrupt.abort();
+      return ++polls > 2;
+    },
+  };
+  const result = await f.upgrade(f.releaseB, interrupt.signal);
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "snapshot");
+  assert.equal(result.report.error, "interrupted");
+  assert.equal(result.report.jobStopped, true);
+  assert.equal(polls, 3);
+  assert.equal(result.report.snapshot, null);
+  assert.deepEqual(
+    f.launchd.mutations().map(([command]) => command),
+    ["bootout"],
+  );
 });
