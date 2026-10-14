@@ -97,6 +97,7 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   assert.equal(await marker(2).count(), shown);
   assert.equal(await openCount(), opened);
   assert.equal(await top(), refreshTop);
+  assert.deepEqual((await observedDom(page))?.changes, []);
   taskRead.release();
   await historyRead.entered;
   assert.equal(await marker(2).count(), shown);

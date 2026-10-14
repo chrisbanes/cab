@@ -59,6 +59,7 @@ test("Inbox and shell timer reads stay silent until they fail; header Refresh st
   assert.equal(await page.locator(".resource-status").count(), 0);
   assert.equal(await rows.count(), rowCount);
   assert.equal(await rowTop(), top);
+  assert.deepEqual((await observedDom(page))?.changes, []);
   for (const hold of holds) hold.release();
   await settleReads(page);
   const quiet = await observedDom(page);

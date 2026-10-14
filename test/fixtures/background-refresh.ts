@@ -46,7 +46,7 @@ declare global {
   }
 }
 
-const reads = new WeakMap<Page, { inflight: number; started: number }>();
+const reads = new WeakMap<Page, { open: Set<Request>; started: number }>();
 
 /**
  * Records the net DOM changes a viewer could see, and whether a `.resource-status` alert ever
@@ -55,17 +55,17 @@ const reads = new WeakMap<Page, { inflight: number; started: number }>();
  * ages (`<time>`) legitimately tick when the fake clock advances, so neither counts.
  */
 export async function watchDom(page: Page) {
-  const reading = { inflight: 0, started: 0 };
+  const reading = { open: new Set<Request>(), started: 0 };
   reads.set(page, reading);
   const read = (request: Request) =>
     ["fetch", "xhr"].includes(request.resourceType());
   page.on("request", (request) => {
     if (!read(request)) return;
     reading.started++;
-    reading.inflight++;
+    reading.open.add(request);
   });
   const finished = (request: Request) => {
-    if (read(request)) reading.inflight--;
+    reading.open.delete(request);
   };
   page.on("requestfinished", finished);
   page.on("requestfailed", finished);
@@ -129,8 +129,8 @@ export async function settleReads(page: Page) {
   if (!reading) throw Error("watchDom must be installed first");
   for (let seen = -1; seen !== reading.started; ) {
     seen = reading.started;
-    while (reading.inflight > 0) await new Promise((r) => setTimeout(r, 10));
-    // Macrotask turns, not timers: the page clock is faked.
+    while (reading.open.size > 0) await new Promise((r) => setTimeout(r, 10));
+    // Macrotask turns rather than timers, which the page clock controls.
     await page.evaluate(async () => {
       for (let turn = 0; turn < 20; turn++)
         await new Promise((resolve) => {
