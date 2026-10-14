@@ -24,7 +24,7 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
 | Lead profile      | At least one non-revoked profile exists                                            | Create in [project setup](project-setup.md)                                           |
 | Project           | At least one project exists and is enabled                                         | Create project, or **Resume** a paused one                                            |
 | First task        | A task has started a turn                                                          | Create task ([first task](first-task.md))                                             |
-| Claude (optional) | A Claude token reference is readable                                               | [Add Claude](claude-runtime.md)                                                       |
+| Claude (optional) | A Claude token reference is readable and `claude` is on the service `PATH`         | [Add Claude](claude-runtime.md); Open readiness check when `claude` is not runnable   |
 
 - Only the first incomplete required row is primary; the rest are secondary.
 - GitHub is optional for a repository-free project: the row says so and never blocks

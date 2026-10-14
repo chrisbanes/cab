@@ -392,6 +392,33 @@ test("the ready check lists only what would make this lead's work wait", () => {
     },
   ]);
   assert.equal(token.blocked, true);
+  // A missing claude is its own item with its fix, no Add Claude link; the token item keeps it.
+  const executable = readyCheckItems(
+    input({
+      workspace: workspace("claude", {
+        harnesses: [harness("codex"), harness("claude")],
+      }),
+      readiness: readiness({
+        "claude-executable": "fail",
+        "claude-token": "not-configured",
+      }),
+    }),
+  );
+  assert.deepEqual(executable.items, [
+    { text: "claude-executable reason", fix: "claude-executable fix" },
+    {
+      text: "claude-token reason",
+      fix: "claude-token fix",
+      link: { label: "Add Claude", href: "/app/settings/runtime" },
+    },
+  ]);
+  // A Codex lead ignores it.
+  assert.deepEqual(
+    readyCheckItems(
+      input({ readiness: readiness({ "claude-executable": "fail" }) }),
+    ).items,
+    [],
+  );
 });
 
 test("the ready check names a runtime that cannot run the lead's work in fixed words", () => {

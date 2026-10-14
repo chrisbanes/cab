@@ -574,12 +574,16 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
     if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
       commands.push(String(r.postDataJSON()?.type));
   });
-  // Codex is not on every test host's PATH; the Runtime row reads the check as given.
+  // Codex and claude are not on every test host's PATH; the rows read the checks as given.
   await page.route("**/api/operator/readiness", async (route) => {
     const response = await route.fetch(),
       body = await response.json();
     for (const check of body.data.checks)
-      if (check.id === "codex-executable" || check.id === "codex-login")
+      if (
+        check.id === "codex-executable" ||
+        check.id === "codex-login" ||
+        check.id === "claude-executable"
+      )
         Object.assign(check, { status: "pass", reason: null, fix: null });
     await route.fulfill({ response, json: body });
   });

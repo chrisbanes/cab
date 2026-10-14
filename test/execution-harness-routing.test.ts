@@ -4,13 +4,14 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  FailureEvidence,
-  Runtime,
-  RuntimeConversationEvent,
-  RuntimeToolCall,
-  RuntimeToolResult,
-  UnexpectedRequest,
+import {
+  type FailureEvidence,
+  type Runtime,
+  type RuntimeConversationEvent,
+  RuntimeNotEnabledError,
+  type RuntimeToolCall,
+  type RuntimeToolResult,
+  type UnexpectedRequest,
 } from "../src/standalone/codex.js";
 import type { RuntimeSafetyPort } from "../src/standalone/runtime-retention.js";
 import type { ExecutionHarness } from "../src/standalone/execution-harness.js";
@@ -27,6 +28,8 @@ class HarnessRuntime implements Runtime {
   holdTurns = false;
   failNextTurn = false;
   failStart = false;
+  /** Start reports the harness cannot run on this host, like Claude without `claude`. */
+  notEnabled = false;
   hangIdentity = false;
   /** When set, stop() waits for it, like a child slow to exit. */
   stopGate: Promise<void> | undefined;
@@ -59,6 +62,7 @@ class HarnessRuntime implements Runtime {
   constructor(private readonly name: ExecutionHarness) {}
 
   async start() {
+    if (this.notEnabled) throw new RuntimeNotEnabledError("Not on this host");
     if (this.failStart) throw new Error("Runtime failed to start");
   }
   /** Like a lost App Server: pending waits reject without a terminal status. */
@@ -669,6 +673,62 @@ test("an unconfigured or failed harness holds its work visibly without fallback"
     // follow-up admitted just before the crash may still have started.)
     assert.equal(intent(service, blocked)?.state, "ready");
     assert.equal(intent(service, blocked)?.threadId, null);
+  } finally {
+    await service.stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a runtime that cannot run on this host is not enabled, not failed, and holds its work without fallback", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-harness-not-enabled-"));
+  const dataDir = join(root, "data");
+  let runtimes = fakes();
+  runtimes.claude.notEnabled = true;
+  let service = open(dataDir, runtimes);
+  let describe = diagnostics(service, runtimes);
+  try {
+    await service.start();
+    await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+    // Not enabled, exactly like a harness outside the configured list: no unavailable state.
+    assert.deepEqual(
+      service.harnessStatuses().map(({ harness, state }) => [harness, state]),
+      [
+        ["codex", "available"],
+        ["claude", "not-configured"],
+      ],
+    );
+    assert.equal(runtimes.claude.stops, 1, "the failed start is cleaned up");
+    const lead = profile(service, "codex");
+    const worker = profile(service, "claude");
+    const projectId = project(service, lead, [lead, worker]);
+    const claudeTask = await task(service, projectId, [worker]);
+    const claudeWork = initial(claudeTask.assignmentIds[0] ?? "");
+    await waitUntil(
+      () =>
+        intent(service, claudeWork)?.reason ===
+        "Claude runtime is not configured",
+      describe,
+    );
+    const codexTask = await task(service, projectId, [lead]);
+    await waitUntil(
+      () =>
+        intent(service, initial(codexTask.assignmentIds[0] ?? ""))?.state ===
+        "completed",
+      describe,
+    );
+    assert.deepEqual(runtimes.claude.calls, []);
+    assert.equal(intent(service, claudeWork)?.state, "ready");
+    // A restart re-checks the host; the held work then runs on Claude.
+    await service.stop();
+    runtimes = fakes();
+    service = open(dataDir, runtimes);
+    describe = diagnostics(service, runtimes);
+    await service.start();
+    assert.equal(service.harnessStatuses()[1]?.state, "available");
+    await waitUntil(
+      () => intent(service, claudeWork)?.state === "completed",
+      describe,
+    );
   } finally {
     await service.stop();
     rmSync(root, { recursive: true, force: true });

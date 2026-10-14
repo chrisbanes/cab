@@ -132,7 +132,8 @@ owns delivery scope and status.
   ([evidence](docs/evidence/issue-827-claude-journeys-2026-10-12.md)): a Claude-only
   task, a Codex lead with a Claude worker, Stop and a service crash with explicit
   recovery. Its execution policy and disclosed limits differ from Codex's (see the
-  [specification](docs/SPEC.md)), and untested surfaces remain limits. It uses the
+  [specification](docs/SPEC.md)), and untested surfaces remain limits. It runs the
+  `claude` on the service `PATH` without gating its version. It uses the
   operator's own Claude subscription, and Anthropic's
   [terms](https://code.claude.com/docs/en/legal-and-compliance) do not explicitly
   address a self-hosted single-operator service.

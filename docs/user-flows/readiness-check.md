@@ -27,11 +27,18 @@ service sees rather than the operator's interactive shell.
 | Codex login         | App Server initializes authenticated, without a model turn                                         | Run `codex login` as the service user. If Codex's approval policy or sandbox mode is not the one Ensemble requires, set it to `never` and `workspace-write` and restart the service.                                                                                  |
 | Git                 | Resolves on the service `PATH`                                                                     | Install git                                                                                                                                                                                                                                                          |
 | GitHub discovery    | Configured and readable, or not configured                                                         | Run `gh auth login`, or Settings → discovery credential                                                                                                                                                                                                              |
+| Claude executable   | Not configured, or `claude` resolves on the service `PATH` and reports a version                   | Install Claude Code into the fixed `PATH`, then restart the service. If `claude --version` fails, run it as the service user or reinstall Claude Code.                                                                                                               |
 | Claude token        | Not configured, or the reference is readable and safe                                              | Not configured: add a token in [Add Claude](claude-runtime.md). A `file:` problem: make it a private regular file you own (mode 600), or clear the reference. An `env:` variable: set it and restart the service, or clear the reference. Restart required: restart. |
-| Runtime harness     | Each runtime a profile uses is running, and each profile's model and reasoning effort are accepted | Restart the service, or edit the profile's model or reasoning effort                                                                                                                                                                                                 |
+| Runtime harness     | Each runtime a profile uses is running, and each profile's model and reasoning effort are accepted | Restart the service, or edit the profile's model or reasoning effort. A runtime that is not enabled needs its executable installed into the fixed `PATH` instead, as for Claude executable.                                                                          |
 | Data and auth paths | Private, canonical, owned by the service user                                                      | Named path rule, without the path value in shared output                                                                                                                                                                                                             |
 
-- A check that is not configured is reported as such, not as a failure.
+- A check that is not configured is reported as such, not as a failure. Claude
+  executable is not configured while Claude is unused (no token reference and no
+  active Claude profile); once either exists, a missing `claude` is a failure.
+- Claude executable shows the version that `claude --version` prints, as in
+  `Claude executable (2.1.296)`. Ensemble reports it and never compares it. Only the
+  Claude Code version the pinned SDK declares was qualified; any other version is a
+  [disclosed limit](../adr/1011-packaging-and-distribution.md).
 - Every row that is not a pass shows its fix line, in the CLI and in Settings. A
   failed re-run keeps the last results visible, marked as the last fetched, with a
   warning; Run again is never disabled, so keyboard focus stays on it.
