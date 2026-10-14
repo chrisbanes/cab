@@ -48,18 +48,23 @@ export function parseArgs(args) {
 }
 
 /**
- * Which `claude` the journey's queries spawned (#981). `resolved` is the one the service
- * `PATH` finds; `version(command)` prints its version. The home directory shows as `~`.
+ * Which `claude` the journey's queries spawned (#981). `runs` holds the recorded spawns of
+ * each service generation (the crash facet has two); every generation must have run at least
+ * one query. `resolved` is the one the service `PATH` finds; `version(command)` prints its
+ * version. The home directory shows as `~`.
  */
-export function claudeCliEvidence(spawns, resolved, { home, version }) {
+export function claudeCliEvidence(runs, resolved, { home, version }) {
+  const spawns = runs.flat();
   const commands = [...new Set(spawns.map((spawn) => spawn.command))];
   const directory = commands[0] ? dirname(commands[0]) : null;
   return {
+    services: runs.length,
     spawns: spawns.length,
     version: commands[0] ? version(commands[0]) : null,
-    // The runtime passed the PATH claude, and the SDK ran that very file.
+    // Every generation ran the PATH claude, and the SDK ran that very file.
     fromPath:
-      spawns.length > 0 &&
+      runs.length > 0 &&
+      runs.every((run) => run.length > 0) &&
       spawns.every(
         (spawn) =>
           spawn.command === resolved &&

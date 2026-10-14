@@ -424,33 +424,34 @@ test("the SDK wrapper records each query's spawn command and passes everything e
   assert.ok(received.every((options) => options.cwd === "/work"));
 });
 
-test("claude CLI evidence passes only for the PATH claude, never the bundled one", async () => {
+test("claude CLI evidence passes only when every service generation ran the PATH claude, never the bundled one", async () => {
   const { claudeCliEvidence } = await harness();
   const home = "/Users/fixture";
   const version = () => "2.1.296 (Claude Code)";
   const path = "/opt/homebrew/bin/claude";
+  const evidenceOf = (runs: unknown[][], resolved = path) =>
+    claudeCliEvidence(runs, resolved, { home, version });
   const spawn = (command: string, option: string | null = command) => ({
     command,
     pathToClaudeCodeExecutable: option,
   });
-  assert.deepEqual(
-    claudeCliEvidence([spawn(path), spawn(path)], path, { home, version }),
-    {
-      spawns: 2,
-      version: "2.1.296 (Claude Code)",
-      fromPath: true,
-      bundled: false,
-      executableDirectory: "/opt/homebrew/bin",
-    },
-  );
+  assert.deepEqual(evidenceOf([[spawn(path), spawn(path)]]), {
+    services: 1,
+    spawns: 2,
+    version: "2.1.296 (Claude Code)",
+    fromPath: true,
+    bundled: false,
+    executableDirectory: "/opt/homebrew/bin",
+  });
+  // The crash facet: the killed service's queries and the recovered service's.
+  const crash = evidenceOf([[spawn(path), spawn(path)], [spawn(path)]]);
+  assert.equal(crash.services, 2);
+  assert.equal(crash.spawns, 3);
+  assert.equal(crash.fromPath, true);
   assert.equal(
-    claudeCliEvidence(
-      [spawn(`${home}/.local/bin/claude`)],
+    evidenceOf(
+      [[spawn(`${home}/.local/bin/claude`)]],
       `${home}/.local/bin/claude`,
-      {
-        home,
-        version,
-      },
     ).executableDirectory,
     "~/.local/bin",
   );
@@ -458,20 +459,43 @@ test("claude CLI evidence passes only for the PATH claude, never the bundled one
     "/repo/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude";
   const failures = [
     // The SDK ignored the path and ran its bundled binary.
-    claudeCliEvidence([spawn(bundled, path)], path, { home, version }),
+    evidenceOf([[spawn(bundled, path)]]),
     // The runtime supplied no path at all.
-    claudeCliEvidence([spawn(path, null)], path, { home, version }),
+    evidenceOf([[spawn(path, null)]]),
     // No query spawned anything.
-    claudeCliEvidence([], path, { home, version }),
+    evidenceOf([[]]),
+    evidenceOf([]),
     // One query ran another claude.
-    claudeCliEvidence([spawn(path), spawn("/usr/local/bin/claude")], path, {
-      home,
-      version,
-    }),
+    evidenceOf([[spawn(path), spawn("/usr/local/bin/claude")]]),
+    // Crash facet: one generation recorded nothing, or only the recovered one used the bundle.
+    evidenceOf([[spawn(path)], []]),
+    evidenceOf([[], [spawn(path)]]),
+    evidenceOf([[spawn(path)], [spawn(bundled, path)]]),
   ];
   for (const evidence of failures) assert.equal(evidence.fromPath, false);
   assert.equal(failures[0]?.bundled, true);
+  assert.equal(failures[7]?.bundled, true);
   assert.equal(failures[2]?.version, null);
+});
+
+test("a service child's snapshot carries the spawn evidence the parent needs for the crash facet", async () => {
+  const { snapshot } = await import(
+    pathToFileURL(resolve("test/c5/service-child.mjs")).href
+  );
+  const spawns = [
+    {
+      command: "/opt/homebrew/bin/claude",
+      pathToClaudeCodeExecutable: "/opt/homebrew/bin/claude",
+    },
+  ];
+  const service = { list: () => [], recoveryForTask: () => [] };
+  const observed = {
+    turns: [],
+    refused: [],
+    workspaces: [],
+    claudeSpawns: spawns,
+  };
+  assert.deepEqual(snapshot(service, observed, "task").claudeSpawns, spawns);
 });
 
 test("only a passed attempt with a clean leak scan and verified shutdown exits 0", async () => {

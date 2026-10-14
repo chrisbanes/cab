@@ -261,13 +261,21 @@ async function inProcess(run) {
   try {
     await run(current, ids, check);
   } finally {
-    // Pass or fail, the evidence shows which `claude` the turns ran.
-    evidence.claudeCli = claudeCliEvidence(
-      current.observed.claudeSpawns,
-      claudeOnPath,
-      { home: homedir(), version: claudeVersion },
-    );
+    recordClaudeCli([current.observed.claudeSpawns]);
   }
+  assertPathClaude();
+}
+
+/** Pass or fail, the evidence shows which `claude` each service generation's queries ran. */
+function recordClaudeCli(runs) {
+  evidence.claudeCli = claudeCliEvidence(runs, claudeOnPath, {
+    home: homedir(),
+    version: claudeVersion,
+  });
+}
+
+/** Every facet that runs Claude turns fails unless they all ran the `claude` on PATH. */
+function assertPathClaude() {
   const { claudeCli } = evidence;
   if (!claudeCli.fromPath || claudeCli.bundled)
     throw new Error("the Claude turns did not run the claude on PATH");
@@ -539,12 +547,23 @@ async function stopChild(entry) {
 
 /** SIGKILLs the exact child service mid-turn, restarts it, then recovers by receipt. */
 async function crash() {
+  try {
+    await crashJourney();
+  } finally {
+    // The killed service's last snapshot and the recovered service's both count.
+    recordClaudeCli(active.children.map((entry) => entry.claudeSpawns ?? []));
+  }
+  assertPathClaude();
+}
+
+async function crashJourney() {
   const repository = gitFixture();
   const snapshot = async (entry, taskId) => {
     const s = await entry.call("snapshot", { taskId });
     for (const workspace of s.workspaces) active.workspaces.add(workspace);
     noteClaude(s.recovery);
     entry.refused = s.refused;
+    entry.claudeSpawns = s.claudeSpawns;
     return s;
   };
   const first = await spawnChild();

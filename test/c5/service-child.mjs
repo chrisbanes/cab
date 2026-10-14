@@ -271,6 +271,7 @@ export function snapshot(service, observed, taskId) {
     turns: observed.turns,
     refused: observed.refused,
     workspaces: observed.workspaces,
+    claudeSpawns: observed.claudeSpawns,
   };
 }
 

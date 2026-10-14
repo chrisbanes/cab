@@ -125,6 +125,12 @@ const fixes = {
   unknown: "Run the check again, or restart the service",
 };
 
+/** The fix for a used runtime that is not enabled, which is its executable missing from the PATH. */
+const notEnabledFixes: Record<ExecutionHarness, string> = {
+  codex: fixes.codex,
+  claude: fixes.claudeInstall,
+};
+
 class TimedOut extends Error {}
 
 /** Settles with the promise or rejects after `ms`; the timer never outlives the race. */
@@ -373,14 +379,22 @@ export class Readiness {
     const reasons: string[] = [];
     let rejected = 0;
     let unknownSettings = false;
+    // A runtime that failed, or a profile it rejects: only these call for a restart.
     let other = false;
-    for (const harness of new Set(used.map((p) => p.runtime.harness)))
-      if (states.get(harness) !== "available") {
+    let notEnabledFix: string | undefined;
+    for (const harness of new Set(used.map((p) => p.runtime.harness))) {
+      const state = states.get(harness);
+      if (state === "available") continue;
+      const label = executionHarnessLabels[harness];
+      if (state === "not-configured") {
+        // Not enabled (Claude without `claude` on the PATH) is fixed by installing, not restarting.
+        reasons.push(`${label} runtime is not enabled on this service`);
+        notEnabledFix = notEnabledFixes[harness];
+      } else {
         other = true;
-        reasons.push(
-          `${executionHarnessLabels[harness]} runtime is not running`,
-        );
+        reasons.push(`${label} runtime is not running`);
       }
+    }
     const settings =
       states.get("claude") === "available"
         ? this.deps.harnessSettings("claude")
@@ -412,7 +426,10 @@ export class Readiness {
       id,
       "fail",
       reasons.join("; "),
-      unknownSettings && !other ? fixes.harnessSettings : fixes.harness,
+      other
+        ? fixes.harness
+        : (notEnabledFix ??
+            (unknownSettings ? fixes.harnessSettings : fixes.harness)),
     );
   }
 

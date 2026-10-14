@@ -542,14 +542,42 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   assert.equal(unknown.reason, "Claude's supported models are not known yet");
   assert.match(unknown.fix ?? "", /^Run a Claude task/);
 
-  const notRunning = await harness({
+  // A runtime that failed is restarted; one that is not enabled is installed, never restarted.
+  const states = (claudeState: "unavailable" | "not-configured") => ({
     ...withClaude(claudeProfile()),
     harnessStatuses: () => [
-      { harness: "codex", state: "available" },
-      { harness: "claude", state: "not-configured" },
+      { harness: "codex" as const, state: "available" as const },
+      { harness: "claude" as const, state: claudeState },
     ],
   });
+  const notRunning = await harness(states("unavailable"));
+  assert.equal(notRunning.status, "fail");
   assert.equal(notRunning.reason, "Claude runtime is not running");
+  assert.equal(
+    notRunning.fix,
+    "Restart the service, or edit the profile's model or reasoning effort",
+  );
+  const notEnabled = await harness(states("not-configured"));
+  assert.equal(notEnabled.status, "fail");
+  assert.equal(
+    notEnabled.reason,
+    "Claude runtime is not enabled on this service",
+  );
+  assert.equal(notEnabled.fix, MISSING.fix);
+  assert.doesNotMatch(notEnabled.fix ?? "", /^Restart/);
+  // Both at once: the failed runtime still calls for the restart.
+  const both = await harness({
+    ...withClaude(codexProfile(), claudeProfile()),
+    harnessStatuses: () => [
+      { harness: "codex" as const, state: "unavailable" as const },
+      { harness: "claude" as const, state: "not-configured" as const },
+    ],
+  });
+  assert.equal(
+    both.reason,
+    "Codex runtime is not running; Claude runtime is not enabled on this service",
+  );
+  assert.match(both.fix ?? "", /^Restart the service/);
 });
 
 test("the data and auth paths check names the rule, not the path", async (t) => {
