@@ -123,6 +123,10 @@ test("Runtime is Next, Done, Needs attention after a later row is Done, or Check
     byId(rows(workspace(), { state: "loading" })).runtime?.status,
     "checking",
   );
+  assert.equal(
+    byId(rows(workspace(), { state: "unavailable" })).runtime?.status,
+    "unknown",
+  );
 });
 
 test("GitHub is optional, never primary, and offers the signed-in gh login", () => {

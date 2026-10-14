@@ -2152,13 +2152,11 @@ export class OperatorApi {
       taskId = String(t.id),
       projectId = String(t.projectId),
       identity = this.identity(taskId),
-      issue = identity
-        ? this.service.githubSources().issue(identity.nodeId)
-        : undefined,
-      sourceName =
-        issue &&
-        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(issue.repositoryName))
-          ? String(issue.repositoryName)
+      // As the source summary discloses it: a valid name that passes the exclusions.
+      repository = (value: unknown) =>
+        /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(String(value)) &&
+        this.disclosable(value, excluded)
+          ? String(value)
           : null,
       waiting = ["idle", "queued", "selected", "waiting"].includes(
         execution.state,
@@ -2169,10 +2167,11 @@ export class OperatorApi {
       lead: this.leadWaitFacts(this.taskLead(t, excluded)?.profileId),
       dependencies: d
         .dependencies(taskId)
-        .filter((id) => d.task(id).state !== "done")
-        .map((id) => ({
+        .map((id) => ({ id, task: d.task(id) }))
+        .filter(({ task }) => task.state !== "done")
+        .map(({ id, task }) => ({
           id,
-          label: this.safe(d.task(id).title, excluded) ?? "Unavailable task",
+          label: this.safe(task.title, excluded) ?? "Unavailable task",
         })),
       nativeBlockers: identity
         ? this.service
@@ -2180,21 +2179,14 @@ export class OperatorApi {
             .nativeBlockers(identity.nodeId)
             .filter((b) => b.status === "open")
             .map((b) => {
-              const name = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(
-                String(b.repositoryName),
-              )
-                ? String(b.repositoryName)
-                : null;
+              const name = repository(b.repositoryName);
               return {
                 url: githubIssueUrl(name, Number(b.issueNumber) || null),
                 label: `${name ?? "GitHub"}#${Number(b.issueNumber)}`,
               };
             })
         : [],
-      sourceUrl: githubIssueUrl(
-        sourceName,
-        Number(issue?.issueNumber) > 0 ? Number(issue?.issueNumber) : null,
-      ),
+      sourceUrl: this.sourceSummary(taskId, excluded)?.url ?? null,
       approvals: approvals
         .filter((a) => a.status === "open")
         .map((a) => ({ id: a.interactionId, label: "Review the request" })),

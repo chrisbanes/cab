@@ -267,7 +267,7 @@ export function TaskComposer({
                   links: blocking.map((d) => ({
                     kind: "task" as const,
                     id: d.id,
-                    label: d.title ?? "Title unavailable",
+                    label: d.title ?? "Unavailable task",
                   })),
                 },
               ]

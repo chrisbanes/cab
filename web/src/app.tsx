@@ -11,6 +11,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useReducer,
   useState,
   useRef,
   type ReactNode,
@@ -365,6 +366,8 @@ function pushAppEntry(href: string, navigationScope: string) {
 }
 export function App() {
   const drafts = useRef(new ConfigurationDrafts());
+  // Re-renders the shell, so the open page re-binds a draft the shell started.
+  const [, rerender] = useReducer((n: number) => n + 1, 0);
   const acceptedIdentity = useRef<string | null>(null);
   const navigationScope = useRef(crypto.randomUUID());
   const clearPrivateNavigation = () => {
@@ -772,7 +775,7 @@ export function App() {
     onShowGettingStarted: () => {
       navigate("/app/getting-started");
       void configureGettingStarted(
-        drafts.current.get(GETTING_STARTED_DRAFT, () => {}),
+        drafts.current.get(GETTING_STARTED_DRAFT, rerender),
         { client, session, onChanged: workspace.refresh },
         false,
       );

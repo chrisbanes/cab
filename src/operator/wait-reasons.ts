@@ -23,7 +23,7 @@ export const waitCodes = [
 export type WaitCode = (typeof waitCodes)[number];
 
 const id = z.string().uuid();
-const label = z.string().min(1).max(500);
+const label = z.string().min(1).max(512);
 /** A Fix performs exactly one named command (Resume project) or opens one screen. */
 export const waitFixSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("resume-project"), projectId: id }).strict(),
@@ -51,7 +51,7 @@ export const waitSchema = z
   .object({
     code: z.enum(waitCodes),
     fix: waitFixSchema.nullable(),
-    links: z.array(waitLinkSchema).max(100),
+    links: z.array(waitLinkSchema).max(10000),
   })
   .strict();
 export type Wait = z.infer<typeof waitSchema>;

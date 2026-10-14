@@ -399,21 +399,23 @@ export function TaskViews({
           refresh={refresh}
           pending={state.pending}
         />
-        {state.data && !tasks.length && (
-          <p className="body empty-state">
-            {all.some((t) => !projectId || t.projectId === projectId) ? (
-              "No tasks match these filters."
-            ) : workspace?.data.projects.length ? (
-              "Ready for your first task. Create an outcome or save a draft."
-            ) : overview ? null : (
-              // Home shows the checklist itself.
-              <>
-                No projects yet.{" "}
-                <a href="/app/getting-started">See getting started</a>
-              </>
-            )}
-          </p>
-        )}
+        {/* Home with no project shows the getting-started checklist instead. */}
+        {state.data &&
+          !tasks.length &&
+          !(overview && !workspace?.data.projects.length) && (
+            <p className="body empty-state">
+              {all.some((t) => !projectId || t.projectId === projectId) ? (
+                "No tasks match these filters."
+              ) : workspace?.data.projects.length ? (
+                "Ready for your first task. Create an outcome or save a draft."
+              ) : (
+                <>
+                  No projects yet.{" "}
+                  <a href="/app/getting-started">See getting started</a>
+                </>
+              )}
+            </p>
+          )}
         {filters.view === "board" ? (
           <TaskBoard
             // A new State filter picks its column again; other filters keep the operator's tab.

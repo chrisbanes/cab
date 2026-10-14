@@ -14,7 +14,10 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button } from "./components.js";
 import { DraftMessage, key, useDraft } from "./settings.js";
-import type { ConfigurationDrafts } from "./settings-state.js";
+import type {
+  ConfigurationDraft,
+  ConfigurationDrafts,
+} from "./settings-state.js";
 import {
   Dialog,
   DialogClose,
@@ -58,17 +61,20 @@ function WaitAction({
   taskId,
   primary,
   p,
+  resume,
 }: {
   wait: Wait;
   taskId: string | null;
   primary: boolean;
   p: WaitProps;
+  resume: ConfigurationDraft;
 }) {
   const variant = primary ? "primary" : "secondary";
   if (wait.fix?.kind === "resume-project")
     return (
       <ResumeProjectFix
         p={p}
+        draft={resume}
         projectId={wait.fix.projectId}
         variant={variant}
       />
@@ -112,6 +118,8 @@ export function WaitReasons({
   prefix?: string;
 }) {
   const [first, ...rest] = waits;
+  // One owner for the draft: its store notifies a single listener.
+  const resume = useResumeDraft(p, projectId);
   return (
     <div className="wait-reasons">
       {first && (
@@ -121,7 +129,13 @@ export function WaitReasons({
             {waitLabels[first.code]}
           </p>
           <div className="wait-actions">
-            <WaitAction wait={first} taskId={taskId} primary p={p} />
+            <WaitAction
+              wait={first}
+              taskId={taskId}
+              primary
+              p={p}
+              resume={resume}
+            />
           </div>
         </div>
       )}
@@ -131,32 +145,50 @@ export function WaitReasons({
             <li key={wait.code}>
               <span>{waitLabels[wait.code]}</span>
               <span className="wait-actions">
-                <WaitAction wait={wait} taskId={taskId} primary={false} p={p} />
+                <WaitAction
+                  wait={wait}
+                  taskId={taskId}
+                  primary={false}
+                  p={p}
+                  resume={resume}
+                />
               </span>
             </li>
           ))}
         </ul>
       )}
-      <ResumeOutcome p={p} projectId={projectId} />
+      <ResumeOutcome p={p} draft={resume} projectId={projectId} />
     </div>
   );
 }
 
-const resumeKey = (projectId: string) => `project.resume-fix:${projectId}`;
+/**
+ * The Resume project draft for `projectId`. Call it once per screen and pass it to both
+ * the Fix and its outcome. A confirmation from an earlier visit no longer describes the
+ * project, so it is cleared; an unknown outcome or a conflict stays until resolved.
+ */
+export function useResumeDraft(p: WaitProps, projectId: string) {
+  const draft = useDraft(p.drafts, `project.resume-fix:${projectId}`);
+  useEffect(() => {
+    if (draft.phase === "recorded") draft.purge();
+  }, [draft]);
+  return draft;
+}
 
 /** Confirms, then sends exactly one `project.configure {paused:false}` and nothing else. */
 export function ResumeProjectFix({
   p,
+  draft,
   projectId,
   variant = "primary",
   label = "Fix: Resume project",
 }: {
   p: WaitProps;
+  draft: ConfigurationDraft;
   projectId: string;
   variant?: "primary" | "secondary";
   label?: string;
 }) {
-  const draft = useDraft(p.drafts, resumeKey(projectId));
   const [open, setOpen] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
   const project = p.workspace?.data.projects.find((x) => x.id === projectId);
@@ -232,17 +264,13 @@ export function ResumeProjectFix({
 /** The one outcome line of Resume project, kept after the wait it cleared leaves. */
 export function ResumeOutcome({
   p,
+  draft,
   projectId,
 }: {
   p: WaitProps;
+  draft: ConfigurationDraft;
   projectId: string;
 }) {
-  const draft = useDraft(p.drafts, resumeKey(projectId));
-  // A confirmation from an earlier visit no longer describes the project; an unknown
-  // outcome or a conflict stays until it is resolved.
-  useEffect(() => {
-    if (draft.phase === "recorded") draft.purge();
-  }, [draft]);
   return (
     <DraftMessage
       draft={draft}

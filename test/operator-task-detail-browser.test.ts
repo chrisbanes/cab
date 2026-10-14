@@ -782,4 +782,18 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   await waits.getByRole("button", { name: "Fix: Resume project" }).waitFor();
   assert.ok(await noHorizontalScroll(page));
   assert.equal(commands.length, 1);
+
+  // A lost reply is an unknown outcome: the Fix leaves, and Check resends it exactly.
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await waits.getByRole("button", { name: "Fix: Resume project" }).click();
+  await dialog.getByRole("button", { name: "Resume", exact: true }).click();
+  const check = waits.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.equal(await waits.getByRole("button", { name: /Resum/ }).count(), 0);
+  await page.unroute("**/api/operator/commands");
+  await check.click();
+  await waits.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(commands.length, 3);
+  assert.deepEqual(commands[2], commands[1]);
+  assert.equal(d.project(claudeProject).paused, 0);
 });

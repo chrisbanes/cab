@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   discoveryStatusSchema,
   type OperatorCommand,
@@ -19,6 +19,7 @@ import { Badge } from "./ui/badge.js";
 import {
   ResumeOutcome,
   ResumeProjectFix,
+  useResumeDraft,
   type WaitProps,
 } from "./wait-reasons.js";
 import "./getting-started.css";
@@ -36,6 +37,7 @@ const badges: Record<
   "not-started": { label: "Not started", variant: "outline" },
   optional: { label: "Optional", variant: "outline" },
   checking: { label: "Checking", variant: "outline" },
+  unknown: { label: "Couldn't check", variant: "outline" },
 };
 
 /** The draft both the page and the account menu use, so either shows the other's outcome. */
@@ -74,8 +76,12 @@ export function GettingStarted({
       [p.client],
     ),
   );
+  const workspace = p.workspace?.data;
+  // After the first turn Home shows only rows needing attention, which GitHub never is.
+  const needsDiscovery =
+    mode === "page" || workspace?.gettingStarted.turnStarted === false;
   const discovery = useOperatorResource(
-    scope,
+    needsDiscovery ? scope : null,
     useCallback(
       (signal: AbortSignal) =>
         p.client.read("/api/operator/discovery", discoveryStatusSchema, signal),
@@ -90,18 +96,28 @@ export function GettingStarted({
     if (mode === "home" && dismissDraft.phase === "recorded")
       dismissDraft.purge();
   }, [ghDraft, dismissDraft, mode]);
-  const workspace = p.workspace?.data;
-  if (!workspace) return null;
   const read: ReadinessRead = readiness.state.error
     ? { state: "unavailable" }
     : readiness.state.data
       ? { state: "ready", checks: readiness.state.data.data.checks }
       : { state: "loading" };
-  const all = checklistRows({
-    workspace,
-    readiness: read,
-    discovery: discovery.state.data?.data ?? null,
-  });
+  const all = workspace
+    ? checklistRows({
+        workspace,
+        readiness: read,
+        discovery: discovery.state.data?.data ?? null,
+      })
+    : [];
+  // The project the Resume row last offered, so its outcome stays after the row changes.
+  const offered = all.flatMap((r) =>
+    r.action.kind === "resume" ? [r.action.projectId] : [],
+  )[0];
+  const [target, setTarget] = useState(offered ?? null);
+  useEffect(() => {
+    if (offered) setTarget(offered);
+  }, [offered]);
+  const resume = useResumeDraft(p, target ?? "none");
+  if (!workspace) return null;
   const { turnStarted, dismissed } = workspace.gettingStarted;
   const rows = mode === "home" ? homeRows(all, turnStarted) : all;
   const changed = () => {
@@ -143,6 +159,7 @@ export function GettingStarted({
                 row={row}
                 p={{ ...p, onChanged: changed }}
                 ghDraft={ghDraft}
+                resume={resume}
               />
             </div>
           </li>
@@ -156,14 +173,13 @@ export function GettingStarted({
           if (ghDraft.phase === "recorded") changed();
         }}
       />
-      {/* Every project, so a Resume outcome stays after its row changes. */}
-      {workspace.projects.map((project) => (
+      {target && (
         <ResumeOutcome
-          key={project.id}
           p={{ ...p, onChanged: changed }}
-          projectId={project.id}
+          draft={resume}
+          projectId={target}
         />
-      ))}
+      )}
       {mode === "page" && (
         <div className="getting-started-dismiss">
           {dismissDraft.phase !== "unknown" && (
@@ -175,7 +191,11 @@ export function GettingStarted({
                 void configureGettingStarted(dismissDraft, p, !dismissed)
               }
             >
-              {dismissed ? "Show getting started" : "Dismiss"}
+              {dismissDraft.phase === "pending"
+                ? "Saving…"
+                : dismissed
+                  ? "Show getting started"
+                  : "Dismiss"}
             </Button>
           )}
           <p className="metadata muted">
@@ -205,10 +225,12 @@ function RowAction({
   row,
   p,
   ghDraft,
+  resume,
 }: {
   row: ChecklistRow;
   p: WaitProps;
   ghDraft: ConfigurationDraft;
+  resume: ConfigurationDraft;
 }) {
   const variant = row.primary ? "primary" : "secondary";
   const { action } = row;
@@ -216,6 +238,7 @@ function RowAction({
     return (
       <ResumeProjectFix
         p={p}
+        draft={resume}
         projectId={action.projectId}
         variant={variant}
         label="Resume"
@@ -241,7 +264,9 @@ function RowAction({
           if (ghDraft.phase === "recorded") p.onChanged();
         }}
       >
-        {`Use GitHub CLI login (@${action.login})`}
+        {ghDraft.phase === "pending"
+          ? "Saving…"
+          : `Use GitHub CLI login (@${action.login})`}
       </Button>
     );
   return (

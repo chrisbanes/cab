@@ -600,7 +600,19 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   await page
     .getByRole("heading", { name: "Getting started", exact: true })
     .waitFor();
+  // A lost reply is an unknown outcome; Check whether it saved resends it exactly.
+  await page.route("**/api/operator/commands", (route) => route.abort());
   await checklist.getByRole("button", { name: "Dismiss", exact: true }).click();
+  const check = checklist.getByRole("button", {
+    name: "Check whether it saved",
+  });
+  await check.waitFor();
+  assert.equal(
+    await checklist.getByRole("button", { name: "Dismiss" }).count(),
+    0,
+  );
+  await page.unroute("**/api/operator/commands");
+  await check.click();
   await checklist
     .getByText(
       "Getting started dismissed. Show it again from the account menu.",
@@ -634,6 +646,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
     .waitFor();
   await page.keyboard.press("Escape");
   assert.deepEqual(commands, [
+    "getting-started.configure",
     "getting-started.configure",
     "getting-started.configure",
   ]);

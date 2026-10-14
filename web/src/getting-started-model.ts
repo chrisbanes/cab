@@ -17,7 +17,8 @@ export type RowStatus =
   | "attention"
   | "not-started"
   | "optional"
-  | "checking";
+  | "checking"
+  | "unknown";
 export type RowAction =
   | { kind: "link"; label: string; href: string }
   | { kind: "resume"; projectId: string }
@@ -72,7 +73,8 @@ export function checklistRows(input: {
   const status = (id: RowId): RowStatus => {
     const index = required.findIndex(([row]) => row === id),
       done = required[index]?.[1];
-    if (done === null) return "checking";
+    if (done === null)
+      return readiness.state === "loading" ? "checking" : "unknown";
     if (done) return "done";
     const regressed =
       turnStarted || required.slice(index + 1).some(([, d]) => d === true);
@@ -204,7 +206,9 @@ export function checklistRows(input: {
             : (claude.reason ?? "The Claude token isn't readable."),
       { kind: "link", label: "Add Claude", href: "/app/settings/runtime" },
       !claude
-        ? "checking"
+        ? readiness.state === "loading"
+          ? "checking"
+          : "unknown"
         : claude.status === "pass"
           ? "done"
           : claude.status === "not-configured"

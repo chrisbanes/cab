@@ -18,7 +18,8 @@ waits, led by the reason to clear first and a link that fixes it.
 1. Composer opens with the project selected. Before submission it states "Starts
    now." or "It will wait: <reason>", using the same reasons and order as step 3
    for the project and the chosen dependencies.
-2. **Create and start** opens the new task's detail page.
+2. **Create and start** shows "Task created." with **Open task**, the execution state
+   and the same wait reasons, the first with its Fix.
 3. Task detail shows the current state. A waiting task shows its reasons in the
    table's order: the first is primary and carries its **Fix**, and the rest are
    listed beneath it with their own Fix or link. Inbox and CLI use the same order.
