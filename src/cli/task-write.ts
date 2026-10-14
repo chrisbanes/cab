@@ -81,7 +81,9 @@ export function taskStatusLines(task: TaskData): [string, string][] {
     [
       "Waiting",
       task.waits.length
-        ? task.waits.map((w) => waitLabels[w.code]).join(", ")
+        ? task.waits
+            .map((w) => waitLabels[w.code] + (w.detail ? ` (${w.detail})` : ""))
+            .join(", ")
         : "none",
     ],
     ["Execution", task.execution.state],

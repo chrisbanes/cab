@@ -419,6 +419,27 @@ test("Composer, post-create line and task detail show a power-supervision hold",
     expectedVersion: Number(d.project(projectId).version),
     paused: false,
   });
+  // A permitted, healthy assignee: choosing it replaces only runtime waits.
+  const worker = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: worker,
+    name: "Healthy worker",
+    instructions: "build",
+    capabilities: "code",
+  });
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    enabled: false,
+    guidance: "",
+    candidateProfileIds: [worker],
+  });
   await until(() => f.service.powerStatus()?.admissionHeld === true);
   const reason = "Power-event history is incomplete or ambiguous";
   const web = await j.start("fixture.web", () => f.startWeb());
@@ -438,6 +459,13 @@ test("Composer, post-create line and task detail show a power-supervision hold",
   await prediction.getByText(reason, { exact: true }).waitFor();
   assert.equal(await prediction.getByText("Starts now.").count(), 0);
   assert.equal(await prediction.getByText(/^Fix:/).count(), 0);
+  await page.getByText(/^Optional settings/).click();
+  await page.getByLabel("Assignee").selectOption(worker);
+  await prediction
+    .getByText("It will wait: Held by power supervision", { exact: true })
+    .waitFor();
+  assert.equal(await prediction.getByText("Starts now.").count(), 0);
+  await page.getByLabel("Assignee").selectOption("");
 
   // The post-create line shows the same hold.
   await page.getByLabel("Task title").fill("Held by power");

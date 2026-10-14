@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { waitLines } from "../src/cli/task-write.js";
+import { taskStatusLines, waitLines } from "../src/cli/task-write.js";
 import {
   cliFix,
   deriveWaits,
   orderWaits,
+  runtimeWaitCodes,
   waitCodes,
   waitSchema,
 } from "../src/operator/wait-reasons.js";
@@ -232,6 +233,8 @@ test("a power hold is installation-wide, sits after the runtime waits and carrie
   assert.ok(!("detail" in (unknown[0] ?? {})));
   assert.deepEqual(one({ powerHold: null }), []);
   assert.deepEqual(one({}), []);
+  // Not a runtime wait, so an explicit composer assignee never replaces it.
+  assert.ok(!runtimeWaitCodes.includes("power-held"));
 });
 
 test("a wait detail is bounded like a label", () => {
@@ -285,4 +288,27 @@ test("the CLI prints a power hold's reason under its label, with no Fix", () => 
   assert.deepEqual(waitLines(one({ powerHold: { reason: null } }), projectId), [
     "Waiting: Held by power supervision",
   ]);
+});
+
+test("a write command's status row carries the power hold's reason", () => {
+  const status = (waits: ReturnType<typeof one>) =>
+    taskStatusLines({
+      task: { id: projectId, state: "open", ready: true, version: 3 },
+      waits,
+      execution: { state: "queued", holds: {} },
+    } as never).find(([name]) => name === "Waiting")?.[1];
+  assert.equal(
+    status(
+      one({
+        powerHold: { reason: powerReason },
+        capacity: "1 of 1 turns running",
+      }),
+    ),
+    `Held by power supervision (${powerReason}), Capacity full`,
+  );
+  assert.equal(
+    status(one({ powerHold: { reason: null } })),
+    "Held by power supervision",
+  );
+  assert.equal(status([]), "none");
 });
