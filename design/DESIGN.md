@@ -1625,6 +1625,13 @@ frames 114 and 118–128 as follows:
   tasks aren't imported until source observations are refreshed, and offers
   "Refresh source observations" inside that outcome. Selections and Source
   observation rows also read active or inactive.
+- Frames 118–121 draw no readiness counts. Production adds, as body text after each
+  Source observation row heading and in the GitHub source Readiness panel, the
+  selection's stored counts ("9 observed · 9 open · 0 match label `ready`"); a
+  complete read with no match adds a warning `StatusBadge` and a "Check readiness
+  conditions" link, and the phone "Current state" card appends the counts. Task
+  List and Board name an imported Draft task's unmet conditions instead of "Draft:
+  not Ready".
 - Removing every linked repository shows a warning and a required "Remove all
   repository access" checkbox inside "Changes to save" (no frame draws it).
 - Profile Revoke and Restore are one draft field saved by Save profile, so the

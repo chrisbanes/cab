@@ -2407,7 +2407,36 @@ export class OperatorApi {
       url: githubIssueUrl(repositoryName, number),
       state: issue?.observedState ?? null,
       closure: this.domain().providerClosure(taskId),
+      readiness: this.taskReadiness(
+        String(this.domain().task(taskId).projectId),
+        taskId,
+        excluded,
+      ),
     };
+  }
+  /** A stored null rule is `none`; a rule the exclusions withhold is `unavailable`. */
+  private readinessRuleView(
+    projectId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const rule = this.service.githubSources().readinessRule(projectId);
+    if (rule === null) return { kind: "none" as const };
+    if (this.exact(JSON.stringify(rule), excluded) === null)
+      return { kind: "unavailable" as const };
+    return { kind: "rule" as const, ...rule };
+  }
+  private taskReadiness(
+    projectId: string,
+    taskId: string | undefined,
+    excluded: readonly string[] | undefined,
+  ) {
+    const rule = this.readinessRuleView(projectId, excluded),
+      result = taskId
+        ? this.service.githubSources().taskReadiness(taskId)
+        : null;
+    return rule.kind === "unavailable" || !result
+      ? { rule, outcome: "not-evaluated" as const, unmet: [] }
+      : { rule, ...result };
   }
   private async taskSummary(taskId: string, base?: ExclusionBase) {
     return (await this.taskSummaryRead(taskId, base)).summary;
@@ -3984,6 +4013,11 @@ export class OperatorApi {
       closure: issue
         ? this.domain().providerClosure(String(issue.taskId))
         : null,
+      readiness: this.taskReadiness(
+        projectId,
+        issue ? String(issue.taskId) : undefined,
+        excluded,
+      ),
       memberships: store
         .memberships(identity.nodeId)
         .filter((m) => m.projectId === projectId)
@@ -5083,31 +5117,48 @@ export class OperatorApi {
     const excluded = await this.exclusions();
     return sourceObservationSchema.parse({
       data: {
-        projects: projects.map(({ projectId, credential }) => ({
-          projectId,
-          credential,
-          selections: d.githubConfiguration(projectId).selections.map((s) => {
-            const sync = this.service
-              .githubSources()
-              .syncState(projectId, s.id);
-            const at =
-              sync?.refreshedAt === undefined ? null : String(sync.refreshedAt);
-            return {
-              selectionId: this.safe(s.id, excluded),
-              state:
+        projects: projects.map(({ projectId, credential }) => {
+          const readiness = this.readinessRuleView(projectId, excluded);
+          return {
+            projectId,
+            credential,
+            readiness,
+            selections: d.githubConfiguration(projectId).selections.map((s) => {
+              const store = this.service.githubSources(),
+                sync = store.syncState(projectId, s.id);
+              const at =
+                sync?.refreshedAt === undefined
+                  ? null
+                  : String(sync.refreshedAt);
+              const state =
                 excluded === undefined || !credential.usable
                   ? "unavailable"
                   : sync
                     ? sync.complete
                       ? "complete"
                       : "partial"
-                    : "never",
-              credentialReason: credential.reason,
-              lastAttemptAt: at,
-              lastSuccessfulAt: sync?.complete && credential.usable ? at : null,
-            };
-          }),
-        })),
+                    : "never";
+              // Counts only for stored reads; never and unavailable claim nothing.
+              const counts =
+                state === "complete" || state === "partial"
+                  ? store.selectionCounts(projectId, s.id)
+                  : null;
+              return {
+                selectionId: this.safe(s.id, excluded),
+                state,
+                credentialReason: credential.reason,
+                lastAttemptAt: at,
+                lastSuccessfulAt:
+                  sync?.complete && credential.usable ? at : null,
+                counts: counts && {
+                  ...counts,
+                  matching:
+                    readiness.kind === "unavailable" ? null : counts.matching,
+                },
+              };
+            }),
+          };
+        }),
       },
       observedAt: Date.now(),
     });

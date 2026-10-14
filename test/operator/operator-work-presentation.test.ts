@@ -194,6 +194,11 @@ test("source summaries only accept https links", () => {
       url,
       state: "open",
       closure: null,
+      readiness: {
+        rule: { kind: "none" },
+        outcome: "not-evaluated",
+        unmet: [],
+      },
     }).success;
   assert.equal(source("https://github.com/a/b/issues/1"), true);
   assert.equal(source(null), true);

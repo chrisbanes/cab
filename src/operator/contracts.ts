@@ -5,6 +5,7 @@ import {
   closedIssuesSchema,
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
+  readinessConditionSchema,
   readinessSchema,
   setupRepositoriesSchema,
   setupRepositorySchema,
@@ -805,6 +806,40 @@ function taskSchemaAdmission() {
 const sourceUrl = z.url().startsWith("https://");
 /** Provider-closure provenance: closed on GitHub while held, or completed by that closure. */
 const sourceClosure = z.enum(["held", "completed"]).nullable();
+/**
+ * A project's readiness rule as a read may show it: `none` only for a stored null rule
+ * (no filtering); `unavailable` when disclosure is withheld, so no condition text leaves.
+ */
+export const readinessRuleViewSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({ kind: z.literal("unavailable") }).strict(),
+  z
+    .object({
+      kind: z.literal("rule"),
+      mode: readinessSchema.shape.mode,
+      conditions: readinessSchema.shape.conditions,
+    })
+    .strict(),
+]);
+/** Why an imported task is Draft under the rule; matching is never Ready or admissible. */
+export const taskReadinessSchema = z
+  .object({
+    rule: readinessRuleViewSchema,
+    outcome: z.enum(["matched", "unmet", "not-evaluated"]),
+    unmet: z.array(readinessConditionSchema).max(20),
+  })
+  .strict();
+const observationCount = z.number().int().nonnegative();
+/** Per-selection counts from stored observations; never summed across selections. */
+export const selectionCountsSchema = z
+  .object({
+    observed: observationCount,
+    open: observationCount,
+    closedSkipped: observationCount,
+    matching: observationCount.nullable(),
+    complete: z.boolean(),
+  })
+  .strict();
 export const taskSourceSummarySchema = z
   .object({
     identity: sourceIdentity,
@@ -816,6 +851,7 @@ export const taskSourceSummarySchema = z
     url: sourceUrl.nullable(),
     state: z.enum(["open", "closed"]).nullable(),
     closure: sourceClosure,
+    readiness: taskReadinessSchema,
   })
   .strict()
   .nullable();
@@ -1061,6 +1097,7 @@ const source = z
     body: safeText,
     state: z.enum(["open", "closed"]).nullable(),
     closure: sourceClosure,
+    readiness: taskReadinessSchema,
     memberships: z.array(
       z
         .object({
@@ -2372,6 +2409,7 @@ export const sourceObservationSchema = envelope(
           .object({
             projectId: uuid,
             credential: sourceCredentialStatusSchema.optional(),
+            readiness: readinessRuleViewSchema,
             selections: z.array(
               z
                 .object({
@@ -2387,6 +2425,7 @@ export const sourceObservationSchema = envelope(
                     .optional(),
                   lastAttemptAt: z.string().nullable(),
                   lastSuccessfulAt: z.string().nullable(),
+                  counts: selectionCountsSchema.nullable(),
                 })
                 .strict(),
             ),

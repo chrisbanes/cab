@@ -1056,7 +1056,7 @@ export class GitHubSourceStore {
   }
 
   /** The stored readiness rule; `null` filters nothing. */
-  private readinessRule(projectId: string): Readiness | null {
+  readinessRule(projectId: string): Readiness | null {
     const row = this.db
       .prepare(
         "SELECT readiness FROM project_github_sources WHERE projectId = ?",

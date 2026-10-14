@@ -197,8 +197,13 @@ GitHub, allow simple all/any label and Project-field conditions; nested expressi
 are deferred. Each GitHub source also has a closed-issue mode, changed only through
 its versioned configuration: **Skip closed issues** (the default) never imports an
 issue first observed closed, and **Treat closure as Done** imports one as Done from a
-complete read only. Membership in another source cannot grant admission. Ready authorizes
-work within scope, without a universal per-task plan approval. Material ambiguity,
+complete read only. Membership in another source cannot grant admission. Each selection's
+source observation counts its observed items (including closed issues skipped without a
+task), open items and open items matching the readiness rule, and warns when a complete
+read matches none; an imported open Draft task names the conditions it does not meet.
+These explanations are read-only projections of stored observations: they make no
+provider read and grant no readiness, and matching the rule is neither Ready nor
+admission. Ready authorizes work within scope, without a universal per-task plan approval. Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
 Dependencies gate execution separately from Ready. A blocked task remains visible
