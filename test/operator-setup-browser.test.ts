@@ -193,8 +193,8 @@ test("Setup creates a paused project from discovered repositories and Projects",
   await savedOutcome(page, /^Created Fieldnotes\. It's paused\./);
 });
 
-test("Setup keeps every value on a checkout mismatch and rechecks on create", async (_t, journey) => {
-  const { f, home, page } = await setupJourney(journey);
+/** Fills a project for acme/atlas and points it at a checkout of acme/relay. */
+async function enterMismatchedCheckout(page: Page) {
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   await page
     .getByLabel("Lead profile", { exact: true })
@@ -205,6 +205,12 @@ test("Setup keeps every value on a checkout mismatch and rechecks on create", as
   await path.fill("~/src/relay");
   await path.blur();
   await page.getByText(mismatch).waitFor();
+  return path;
+}
+
+test("Setup keeps every value on a checkout mismatch and rechecks on create", async (_t, journey) => {
+  const { f, home, page } = await setupJourney(journey);
+  const path = await enterMismatchedCheckout(page);
   assert.equal(await path.getAttribute("aria-invalid"), "true");
   await page
     .getByRole("button", { name: "Create paused project", exact: true })
@@ -262,6 +268,33 @@ test("Setup keeps every value on a checkout mismatch and rechecks on create", as
     .getByText("This folder no longer matches. Choose it again.")
     .waitFor();
   assert.equal(f.service.domain().projects().length, 0);
+});
+
+test("Setup moves focus to the rejected path field even when frame callbacks run before the page commits", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  const path = await enterMismatchedCheckout(page);
+  const frames = await page.evaluateHandle(() => window.requestAnimationFrame);
+  try {
+    // From the click on, frame callbacks run ahead of the page's own render, the order a
+    // loaded machine sometimes produces.
+    await page
+      .getByRole("button", { name: "Create paused project", exact: true })
+      .evaluate((button) => {
+        window.requestAnimationFrame = (callback) => {
+          queueMicrotask(() => callback(performance.now()));
+          return 0;
+        };
+        (button as HTMLElement).click();
+      });
+    await page.getByText(fixFields).waitFor();
+    // A locator wait: waitForFunction would poll with the page's replaced frame callbacks.
+    await path.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+    assert.equal(await path.inputValue(), "~/src/relay");
+  } finally {
+    await frames.evaluate((original) => {
+      window.requestAnimationFrame = original;
+    });
+  }
 });
 
 test("Setup falls back to typed entry without discovery and on first run", async (_t, journey) => {
