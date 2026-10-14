@@ -259,8 +259,6 @@ export function TaskWorkspace({
   const scope = useRef(true),
     anchor = useRef<{ id: string; y: number } | null>(null),
     anchorElement = useRef<HTMLElement | null>(null),
-    // True while the last task read was a timer poll: shown history stays until its revalidation settles.
-    quietHistory = useRef(false),
     bottom = useRef(false),
     first = useRef(true),
     restoreReadingFocus = useRef(true),
@@ -447,14 +445,12 @@ export function TaskWorkspace({
   };
   const refresh = () => {
     capture();
-    quietHistory.current = false;
     invalidateHistory();
     resource.refresh();
   };
   // The timer read: nothing blanks or announces progress unless it fails.
   const poll = () => {
     capture();
-    if (!resource.state.pending) quietHistory.current = true;
     resource.poll();
   };
   // Manual re-reads also refresh the shell's workspace and Inbox count; the poll below does not.
@@ -778,17 +774,13 @@ export function TaskWorkspace({
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: pending/error invalidates the current history ownership before any late batch can publish.
   useEffect(() => {
+    // A timer poll never publishes pending, so only an explicit read clears what is shown.
     if (resource.state.pending || resource.state.error) {
-      invalidateHistory(!quietHistory.current);
+      invalidateHistory(resource.state.pending);
       return;
     }
     for (const a of data?.assignments ?? [])
-      void loadHistory(
-        a.assignmentId,
-        undefined,
-        undefined,
-        quietHistory.current,
-      );
+      void loadHistory(a.assignmentId, undefined, undefined, true);
   }, [data, loadHistory, resource.state.pending, resource.state.error]);
   async function command(input: OperatorCommand) {
     if (pending) return;

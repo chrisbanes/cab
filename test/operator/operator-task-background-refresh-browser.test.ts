@@ -163,4 +163,13 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   late.release();
   await page.waitForLoadState("networkidle");
   assert.ok((await marker("NEW").count()) > 0);
+
+  // 5. History that a poll cannot revalidate is hidden rather than kept.
+  const unreadable = await failResponses(
+    page,
+    `**/api/operator/assignments/${r.assignmentId}/history*`,
+  );
+  await page.clock.runFor(15000);
+  await marker(2).first().waitFor({ state: "detached" });
+  await unreadable.stop();
 });
