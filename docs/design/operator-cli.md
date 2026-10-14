@@ -266,7 +266,8 @@ Command names follow Ensemble's domain: task, assignment, agent profile and
 execution. There is no workflow graph or new assignment-stage system.
 Provide a packaged `ensemble` executable usable outside this repository, keeping
 the existing local operations CLI compatible. Reuse the repository's supported
-Node.js version and package tooling; publish/distribution is a delivery decision.
+Node.js version and package tooling; distribution follows
+[ADR-1011](../adr/1011-packaging-and-distribution.md).
 
 | Area | First-release operations |
 | --- | --- |
