@@ -102,6 +102,13 @@ export function checklistRows(input: {
     readiness.state === "ready"
       ? readiness.checks.find((c) => c.id === "claude-token")
       : undefined;
+  // Found must mean runnable: a `claude` that is on the PATH but fails its probe needs attention.
+  const unrunnable =
+    readiness.state === "ready"
+      ? readiness.checks.find(
+          (c) => c.id === "claude-executable" && c.status === "fail",
+        )
+      : undefined;
   const gh = discovery?.gh;
   const githubDone = Boolean(discovery?.configured && discovery.available);
   return [
@@ -195,25 +202,31 @@ export function checklistRows(input: {
     row(
       "claude",
       "Claude (optional)",
-      !claude
-        ? readiness.state === "loading"
-          ? "Checking readiness…"
-          : "Readiness couldn't be checked."
-        : claude.status === "pass"
-          ? "The Claude token reference is readable."
-          : claude.status === "not-configured"
-            ? "Not configured."
-            : (claude.reason ?? "The Claude token isn't readable."),
-      { kind: "link", label: "Add Claude", href: "/app/settings/runtime" },
-      !claude
-        ? readiness.state === "loading"
-          ? "checking"
-          : "unknown"
-        : claude.status === "pass"
-          ? "done"
-          : claude.status === "not-configured"
-            ? "optional"
-            : "attention",
+      unrunnable
+        ? (unrunnable.reason ?? "Claude Code isn't runnable.")
+        : !claude
+          ? readiness.state === "loading"
+            ? "Checking readiness…"
+            : "Readiness couldn't be checked."
+          : claude.status === "pass"
+            ? "The Claude token reference is readable."
+            : claude.status === "not-configured"
+              ? "Not configured."
+              : (claude.reason ?? "The Claude token isn't readable."),
+      unrunnable
+        ? { kind: "link", label: "Open readiness check", href: "/app/settings" }
+        : { kind: "link", label: "Add Claude", href: "/app/settings/runtime" },
+      unrunnable
+        ? "attention"
+        : !claude
+          ? readiness.state === "loading"
+            ? "checking"
+            : "unknown"
+          : claude.status === "pass"
+            ? "done"
+            : claude.status === "not-configured"
+              ? "optional"
+              : "attention",
     ),
   ];
 }

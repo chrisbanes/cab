@@ -290,7 +290,7 @@ export function readyCheckItems(input: {
         });
       const own: readonly string[] =
         harness === "claude"
-          ? ["claude-token"]
+          ? ["claude-executable", "claude-token"]
           : ["codex-executable", "codex-login"];
       if (readiness.state === "ready")
         for (const c of readiness.checks)

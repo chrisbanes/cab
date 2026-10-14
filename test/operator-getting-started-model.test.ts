@@ -10,24 +10,32 @@ import type { ReadinessRead } from "../web/src/setup-model.js";
 
 const projectId = "00000000-0000-4000-8000-000000000001",
   profileId = "00000000-0000-4000-8000-000000000002";
-type Check = "codex-executable" | "codex-login" | "claude-token";
+type Check =
+  | "codex-executable"
+  | "codex-login"
+  | "claude-executable"
+  | "claude-token";
 const readiness = (
   status: Partial<Record<Check, "pass" | "fail" | "not-configured">> = {},
 ): ReadinessRead => ({
   state: "ready",
-  checks: (["codex-executable", "codex-login", "claude-token"] as const).map(
-    (id) => {
-      const s =
-        status[id] ?? (id === "claude-token" ? "not-configured" : "pass");
-      return {
-        id,
-        label: id,
-        status: s,
-        reason: s === "pass" ? null : `${id} reason`,
-        fix: s === "pass" ? null : `${id} fix`,
-      };
-    },
-  ),
+  checks: (
+    [
+      "codex-executable",
+      "codex-login",
+      "claude-executable",
+      "claude-token",
+    ] as const
+  ).map((id) => {
+    const s = status[id] ?? (id === "claude-token" ? "not-configured" : "pass");
+    return {
+      id,
+      label: id,
+      status: s,
+      reason: s === "pass" ? null : `${id} reason`,
+      fix: s === "pass" ? null : `${id} fix`,
+    };
+  }),
 });
 const workspace = (
   o: {
@@ -196,6 +204,43 @@ test("First task is Done once a turn has started, and earlier gaps then need att
   );
   assert.deepEqual(homeRows(healthy, true), []);
   assert.equal(homeRows(healthy, false).length, 6);
+});
+
+test("a claude that is not runnable needs attention even when the token is readable", () => {
+  const claude = (executable: "pass" | "fail" | "not-configured") =>
+    byId(
+      rows(
+        workspace(),
+        readiness({ "claude-executable": executable, "claude-token": "pass" }),
+      ),
+    ).claude;
+  const failing = claude("fail");
+  assert.equal(failing?.status, "attention");
+  assert.equal(failing?.detail, "claude-executable reason");
+  assert.deepEqual(failing?.action, {
+    kind: "link",
+    label: "Open readiness check",
+    href: "/app/settings",
+  });
+  assert.equal(failing?.primary, false);
+  // Claude unused: no token and no claude is still optional; both passing is done.
+  assert.equal(
+    byId(
+      rows(workspace(), readiness({ "claude-executable": "not-configured" })),
+    ).claude?.status,
+    "optional",
+  );
+  assert.equal(claude("pass")?.status, "done");
+  assert.deepEqual(
+    homeRows(
+      rows(
+        workspace({ profile: true, project: "enabled", turnStarted: true }),
+        readiness({ "claude-executable": "fail" }),
+      ),
+      true,
+    ).map((r) => r.id),
+    ["claude"],
+  );
 });
 
 test("Claude is Optional, Done, or Needs attention with Add Claude", () => {
