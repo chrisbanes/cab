@@ -24,7 +24,9 @@ directory. The defaults are:
 The label defaults to `local.ensemble.service` and the port to `8787`
 (`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
 `--label` and, at install only, `--port` override them; upgrade keeps the
-installed port. Pass the same directory and label options to `upgrade` and
+installed port. `--diagnostic-retention-days` and `--diagnostic-storage-mib`
+(install and upgrade) set the [diagnostic retention](#execution-diagnostic-retention)
+limits. Pass the same directory and label options to `upgrade` and
 `uninstall` as to `install`. The state and LaunchAgents directories must
 be real directories you own that no one else can write; the data, snapshot,
 install-record and log directories are created with mode `0700` and must stay
@@ -400,8 +402,20 @@ untested; the bounded live journeys ran the service outside launchd.
 Execution diagnostics expire after `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` days
 (1–365, default 30), checked hourly; past `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB` (16–1048576,
 default 1024) the oldest items are evicted. An invalid value stops the service
-at startup. The rendered LaunchAgent sets neither variable, so a LaunchAgent
-service uses the defaults; changing them there needs a reviewed renderer change.
+at startup. The supported LaunchAgent route is
+`service install` or `service upgrade` with `--diagnostic-retention-days N|default`
+and `--diagnostic-storage-mib N|default`. A value is written into the
+LaunchAgent environment and recorded, so a later upgrade keeps it unless an
+option changes it; `default` removes the variable and the service default
+applies. An out-of-range value is refused before anything changes. To change a
+value on an installed service, run `service upgrade` with the installed release
+directory and the new option: it stops the job, takes a verified snapshot,
+re-renders the plist, restarts the job and checks readiness. A hand-edited
+plist is unsupported: upgrade refuses an activation that no longer matches its
+recorded hash. A release built before these options rejects an install record
+that holds them, so before moving to such a release run `service upgrade` with
+`default` for each value.
+
 The quota counts stored diagnostic payload text only, not the database, WAL or
 filesystem. Pruning deletes payload items only and keeps per-execution gap
 counts. There is no manual purge, and older snapshots keep any payloads they
@@ -652,10 +666,29 @@ npm run operations -- render-launch-agent \
   /absolute/private/launch-agents/com.example.ensemble.plist
 ```
 
+To set the diagnostic retention limits, append the two optional flags after the
+plist path (1–365 days, 16–1048576 MiB); omitted, the service defaults apply.
+Malformed or out-of-range values print usage and exit 2:
+
+```sh
+npm run operations -- render-launch-agent \
+  com.example.ensemble \
+  /absolute/path/to/node \
+  /absolute/path/to/ensemble/dist/src/standalone/cli.js \
+  /absolute/private/ensemble-data \
+  /absolute/private/auth/operator-auth.json \
+  http://127.0.0.1:8787 8787 \
+  /absolute/private/logs/operator.stdout.log \
+  /absolute/private/logs/operator.stderr.log \
+  /absolute/private/launch-agents/com.example.ensemble.plist \
+  --diagnostic-retention-days 14 --diagnostic-storage-mib 512
+```
+
 The current renderer sets `RunAtLoad=true` and `KeepAlive=false`; launchctl,
 not automatic crash relaunch, owns restart. The plist contains the Node/CLI,
 operator command, data directory, port, separate auth-file path, canonical
-origin, fixed non-secret PATH, and private log paths. It contains no password
+origin, fixed non-secret PATH, the diagnostic retention variables when set,
+and private log paths. It contains no password
 or shell wrapper. Before bootstrap, inspect and lint the exact plist:
 
 ```sh

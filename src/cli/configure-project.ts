@@ -43,7 +43,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID --out FILE [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID --out FILE [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--instructions-file PATH | --restore-revision N]",
       positionals: 1,
       flags: [
         "out",
@@ -51,6 +51,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "name",
         "paused",
         "lead-profile",
+        "diagnostic-capture",
         "instructions-file",
         "restore-revision",
       ],
@@ -63,6 +64,16 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         );
         const paused = boolFlag(ctx.values.paused, "paused");
         const lead = uuidOrNone(ctx.values["lead-profile"], "lead-profile");
+        const capture = ctx.values["diagnostic-capture"];
+        if (
+          capture !== undefined &&
+          capture !== "enhanced" &&
+          capture !== "baseline"
+        )
+          throw new CliError(
+            "invalid-input",
+            "--diagnostic-capture must be enhanced or baseline.",
+          );
         const session = await ctx.connect([
           "cli.identity",
           "workspace.read",
@@ -122,6 +133,19 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
             from: p.leadProfileId ?? "none",
             to: lead ?? "none",
           });
+        }
+        const currentCapture = config.data.diagnosticCapture;
+        if (capture !== undefined && capture !== currentCapture) {
+          if (currentCapture === undefined) gaps.push("content-unavailable");
+          command.diagnosticCapture = capture;
+          changes.push({
+            field: "diagnosticCapture",
+            from: currentCapture ?? null,
+            to: capture,
+          });
+          notes.push(
+            "The capture mode applies to executions started after the change; it erases no stored diagnostics.",
+          );
         }
         instructionChange(current, proposed, changes, diff, gaps, notes);
         if (proposed !== undefined) command.instructions = proposed;
