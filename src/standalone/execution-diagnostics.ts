@@ -1,6 +1,11 @@
 import { type Database, transaction } from "../core/store.js";
 import type { RuntimeDiagnosticEvent } from "./codex.js";
 import { sanitizeConversationText } from "./conversation-history.js";
+import {
+  diagnosticRetentionDays,
+  diagnosticStorageMib,
+  integerFromEnv,
+} from "./diagnostic-retention.js";
 
 export type DiagnosticKind =
   | "input"
@@ -133,38 +138,14 @@ export class DiagnosticCursorError extends Error {
   }
 }
 
-function integerFromEnv(
-  env: NodeJS.ProcessEnv,
-  name: string,
-  min: number,
-  max: number,
-  fallback: number,
-): number {
-  const raw = env[name];
-  if (raw === undefined || raw === "") return fallback;
-  const value = /^\d{1,10}$/.test(raw) ? Number(raw) : Number.NaN;
-  if (!(value >= min && value <= max))
-    throw new Error(`${name} must be an integer from ${min} to ${max}`);
-  return value;
-}
-
 /** Throws on an invalid value so startup fails rather than silently using defaults. */
 export function diagnosticLimitsFromEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): DiagnosticLimits {
   return {
     ...defaultDiagnosticLimits,
-    ageMs:
-      integerFromEnv(env, "ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS", 1, 365, 30) *
-      day,
-    installationBytes:
-      integerFromEnv(
-        env,
-        "ENSEMBLE_DIAGNOSTIC_STORAGE_MIB",
-        16,
-        1048576,
-        1024,
-      ) * mib,
+    ageMs: integerFromEnv(env, diagnosticRetentionDays) * day,
+    installationBytes: integerFromEnv(env, diagnosticStorageMib) * mib,
   };
 }
 

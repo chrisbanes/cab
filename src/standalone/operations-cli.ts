@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import {
   createSnapshot,
   restoreSnapshot,
@@ -12,7 +13,7 @@ import {
 } from "./launchd.js";
 
 const USAGE =
-  "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST>\n";
+  "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST [--diagnostic-retention-days N] [--diagnostic-storage-mib N]>\n";
 
 function parsePort(value: string): number {
   if (!/^(?:[1-9]\d{0,4})$/.test(value)) throw new Error("invalid port");
@@ -20,6 +21,23 @@ function parsePort(value: string): number {
   if (!Number.isSafeInteger(port) || port > 65_535)
     throw new Error("invalid port");
   return port;
+}
+
+function parseDecimal(value: string): number {
+  if (!/^\d{1,10}$/.test(value)) throw new Error("invalid number");
+  return Number(value);
+}
+
+function parseRenderArgs(args: string[]) {
+  return parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      "diagnostic-retention-days": { type: "string" },
+      "diagnostic-storage-mib": { type: "string" },
+    },
+  });
 }
 
 type Io = { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
@@ -66,19 +84,39 @@ async function operate(argv: string[], io: Io): Promise<number> {
     });
     return 0;
   }
-  if (command === "render-launch-agent" && args.length === 10) {
+  if (command === "render-launch-agent" && args.length >= 10) {
+    let parsed: ReturnType<typeof parseRenderArgs>;
+    try {
+      parsed = parseRenderArgs(args);
+    } catch {
+      io.stderr.write(USAGE);
+      return 2;
+    }
+    const { values, positionals } = parsed;
+    if (positionals.length !== 10) {
+      io.stderr.write(USAGE);
+      return 2;
+    }
+    const retention = values["diagnostic-retention-days"];
+    const storage = values["diagnostic-storage-mib"];
     const configuration: LaunchAgentConfiguration = {
-      label: args[0] as string,
-      nodePath: args[1] as string,
-      cliPath: args[2] as string,
-      dataDirectory: args[3] as string,
-      authFile: args[4] as string,
-      origin: args[5] as string,
-      port: parsePort(args[6] as string),
-      stdoutPath: args[7] as string,
-      stderrPath: args[8] as string,
+      label: positionals[0] as string,
+      nodePath: positionals[1] as string,
+      cliPath: positionals[2] as string,
+      dataDirectory: positionals[3] as string,
+      authFile: positionals[4] as string,
+      origin: positionals[5] as string,
+      port: parsePort(positionals[6] as string),
+      stdoutPath: positionals[7] as string,
+      stderrPath: positionals[8] as string,
+      ...(retention === undefined
+        ? {}
+        : { diagnosticRetentionDays: parseDecimal(retention) }),
+      ...(storage === undefined
+        ? {}
+        : { diagnosticStorageMib: parseDecimal(storage) }),
     };
-    const plistPath = args[9] as string;
+    const plistPath = positionals[9] as string;
     // Validate before creating the destination. The rendered text is written
     // with exclusive mode by the same renderer used by tests and the CLI.
     renderLaunchAgent(configuration);
