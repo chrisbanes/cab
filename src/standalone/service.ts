@@ -4521,7 +4521,8 @@ export class StandaloneService {
 
   /**
    * Whether an imported task's workspace uses a repository the project no longer links
-   * exactly. Admission and the task read share this check; it defaults to the stored binding.
+   * exactly. Admission and the task read share this check; it defaults to the stored binding
+   * once that is ready, as admission only checks a ready workspace.
    */
   repositoryAccessRevoked(
     taskId: string,
@@ -4529,8 +4530,12 @@ export class StandaloneService {
   ): boolean {
     const domain = this.domain();
     if (!domain.importedTask(taskId)) return false;
-    repositories ??=
-      this.current?.workspaceBindings.get(taskId)?.repositories ?? [];
+    if (!repositories) {
+      // As admission sees it: only a ready workspace, whose repositories are all bound.
+      // A workspace still provisioning, or whose provisioning failed, has no identity yet.
+      const binding = this.current?.workspaceBindings.get(taskId);
+      repositories = binding?.state === "ready" ? binding.repositories : [];
+    }
     const linked = domain.githubConfiguration(
       String(domain.task(taskId).projectId),
     ).repositories;

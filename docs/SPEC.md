@@ -535,7 +535,7 @@ but is not admissible for its own reasons shows its own wait, named for its prof
 A revoked or changed profile opens that profile, which does not re-bind the
 assignment; changed instructions, a profile that project routing does not permit and
 a held assignment have no Fix; a held assignment is explained whether or not a turn
-is queued for it. Revoked repository access (an imported task's workspace uses a
+is queued for it. Revoked repository access (an imported task's ready workspace uses a
 repository the project no longer links) opens the project's GitHub settings, names no
 repository and grants nothing by itself. An assignment whose operator-reconciled
 recovery has no recorded continuation has no Fix and links to its recovery; opening
