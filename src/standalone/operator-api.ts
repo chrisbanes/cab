@@ -2154,6 +2154,11 @@ export class OperatorApi {
         ? `${c.globalUsage} of ${c.globalLimit} turns running`
         : null;
   }
+  /** Set while the power supervisor holds admission; null when held by nothing or unsupervised. */
+  private powerHold() {
+    const status = this.service.powerStatus();
+    return status?.admissionHeld ? { reason: status.admissionReason } : null;
+  }
   /** Waits a new task in this project would have before its own dependencies. */
   private projectWaits(p: Row) {
     const projectId = String(p.id);
@@ -2177,6 +2182,7 @@ export class OperatorApi {
         p.leadProfileId ? String(p.leadProfileId) : undefined,
       ),
       capacity: this.capacityWait(projectId),
+      powerHold: this.powerHold(),
     });
   }
   /** The task's ordered waits; a closed task has none. Labels pass the exclusion check. */
@@ -2232,6 +2238,7 @@ export class OperatorApi {
         })),
       capacity:
         admission.eligible && waiting ? this.capacityWait(projectId) : null,
+      powerHold: this.powerHold(),
     });
   }
   private admission(taskId: string) {
