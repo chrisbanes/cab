@@ -223,6 +223,7 @@ test("a claude that does not print a version fails as not runnable", async (t) =
     ["exit 1", {}],
     ["", {}],
     ['echo "v2.1.296"', {}],
+    ['echo "11111111111.2.3"', {}],
     ["exec sleep 30", { versionTimeoutMs: 200 }],
   ] as const) {
     installClaude(f, body);

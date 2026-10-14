@@ -1,7 +1,5 @@
-import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import { dirname, isAbsolute } from "node:path";
-import { promisify } from "node:util";
 import type { z } from "zod";
 import {
   type ExecutionHarness,
@@ -26,7 +24,7 @@ import {
 } from "../operator/readiness.js";
 import { claudeTokenSource, readClaudeToken } from "./claude-token.js";
 import { assertExistingCanonicalDirectoryPath } from "./data-directory.js";
-import { resolveOnPath } from "./executable-path.js";
+import { printVersion, resolveOnPath } from "./executable-path.js";
 import type { OperatorApi } from "./operator-api.js";
 import type { StandaloneService } from "./service.js";
 
@@ -138,9 +136,8 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
-const execFileAsync = promisify(execFile);
-/** A release number such as `2.1.296`, possibly with a pre-release or build suffix. */
-const versionToken = /^\d+\.\d+\.\d+[0-9A-Za-z.+-]{0,32}$/;
+/** A release number such as `2.1.296`, possibly with a suffix; short enough to fit the label. */
+const versionToken = /^\d{1,4}\.\d{1,4}\.\d{1,6}[0-9A-Za-z.+-]{0,32}$/;
 
 /**
  * Eight read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
@@ -303,13 +300,8 @@ export class Readiness {
     let version: string | undefined;
     try {
       // `bounded` also covers a wrapper whose grandchild holds the pipe past the kill.
-      const { stdout } = await bounded(
-        execFileAsync(path, ["--version"], {
-          // PATH only: the service environment holds credentials.
-          env: { PATH: this.deps.env.PATH ?? "" },
-          timeout,
-          maxBuffer: 4096,
-        }),
+      const stdout = await bounded(
+        printVersion(path, this.deps.env.PATH ?? "", timeout),
         timeout,
       );
       const token = stdout.split("\n", 1)[0]?.trim().split(/\s+/, 1)[0];

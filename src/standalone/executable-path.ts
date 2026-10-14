@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 /**
  * The first `PATH` directory holding an executable regular file called `name`, as that
@@ -23,4 +27,21 @@ export async function resolveOnPath(
     }
   }
   return null;
+}
+
+/**
+ * What `path --version` prints on stdout. The child's environment is `PATH` alone, because the
+ * service environment holds credentials. Rejects on a failure or after `timeoutMs`.
+ */
+export async function printVersion(
+  path: string,
+  searchPath: string,
+  timeoutMs: number,
+): Promise<string> {
+  const { stdout } = await execFileAsync(path, ["--version"], {
+    env: { PATH: searchPath },
+    timeout: timeoutMs,
+    maxBuffer: 4096,
+  });
+  return stdout;
 }

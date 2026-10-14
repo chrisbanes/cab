@@ -230,9 +230,11 @@ service's fixed `PATH`; Ensemble does not redistribute it. Install it so it
 resolves there (Homebrew puts it in `/opt/homebrew/bin`), then restart the service
 after installing or upgrading it: the runtime looks `claude` up once when it starts.
 A missing `claude` makes only the Claude runtime unavailable, so Claude work waits
-visibly while Codex and the service are unaffected. Readiness shows the Claude
-executable as Not configured while Claude is unused, and as Fail with the fix once a
-token reference or an active Claude profile needs it.
+visibly while Codex and the service are unaffected. The operator UI shows that
+runtime as unavailable, with its alert and Settings → Runtime status, until `claude`
+is installed and the service restarted, even when no profile uses Claude. Readiness
+shows the Claude executable as Not configured while Claude is unused, and as Fail
+with the fix once a token reference or an active Claude profile needs it.
 
 Ensemble reports the version `claude --version` prints and never compares it. Only
 the Claude Code version the pinned SDK declares was qualified; another version may

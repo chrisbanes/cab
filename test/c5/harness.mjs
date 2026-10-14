@@ -66,7 +66,7 @@ export function claudeCliEvidence(spawns, resolved, { home, version }) {
           spawn.pathToClaudeCodeExecutable === resolved,
       ),
     bundled: commands.some((command) => command.includes("claude-agent-sdk-")),
-    executableDirectory: directory?.startsWith(home)
+    executableDirectory: directory?.startsWith(`${home}/`)
       ? `~${directory.slice(home.length)}`
       : directory,
   };
