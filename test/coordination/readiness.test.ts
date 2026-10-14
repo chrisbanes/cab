@@ -261,6 +261,28 @@ test("a disabled or missing runtime reports its own checks Not configured; only 
 
   const missing = await read(statuses("available", "missing"));
   assert.equal(missing.get("runtime-enabled")?.status, "pass");
+  // Enabled but no binary anywhere: nothing can run, so the first check fails.
+  const noBinary = await read({
+    harnessStatuses: () => [
+      {
+        harness: "codex",
+        enabled: true,
+        state: "not-configured",
+        reason: "executable-missing",
+      },
+      {
+        harness: "claude",
+        enabled: false,
+        state: "not-configured",
+        reason: "disabled",
+      },
+    ],
+  });
+  assert.equal(noBinary.get("runtime-enabled")?.status, "fail");
+  assert.equal(
+    noBinary.get("runtime-enabled")?.reason,
+    "No enabled runtime's binary is on the service PATH",
+  );
   assert.equal(missing.get("claude-token")?.status, "not-configured");
   assert.equal(
     missing.get("claude-token")?.reason,

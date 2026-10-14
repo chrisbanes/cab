@@ -32,7 +32,8 @@ blocking a later public release.
   Qualification evidence records the version used.
   Claude stays optional (ADR-1008), so a missing `claude` on the service `PATH` leaves
   only that harness Not enabled (`not-configured`), with no alert: Claude work waits
-  and never falls back, and installing `claude` and restarting the service enables it.
+  and never falls back, and installing `claude`, then turning Claude off and on in
+  Settings → Runtime or restarting the service, enables it.
   A `claude` that resolves but whose runtime fails is unavailable instead. The
   operator turns each runtime on or off in Settings → Runtime (ADR-1012).
 - An npm package is a later channel for the same build. It is not a native app:

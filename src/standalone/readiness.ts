@@ -131,6 +131,8 @@ const fixes = {
     "Run a Claude task; supported models are read before its first turn, then run the check again",
   unknown: "Run the check again, or restart the service",
   runtimeEnabled: "Enable a runtime in Settings → Runtime",
+  runtimeBinary:
+    "Install Codex or Claude Code into the fixed PATH, then turn it off and on in Settings → Runtime",
 };
 
 /** The fix for an enabled runtime whose executable is missing from the PATH. */
@@ -197,15 +199,27 @@ export class Readiness {
 
   private async check(id: ReadinessCheckId): Promise<ReadinessCheck> {
     switch (id) {
-      case "runtime-enabled":
-        return this.deps.harnessStatuses().some((s) => s.enabled)
-          ? pass(id)
+      case "runtime-enabled": {
+        // A missing binary is a cause of not enabled too (CONTEXT.md, ADR-1012).
+        const statuses = this.deps.harnessStatuses();
+        if (
+          statuses.some((s) => s.enabled && s.reason !== "executable-missing")
+        )
+          return pass(id);
+        return statuses.some((s) => s.enabled)
+          ? outcome(
+              id,
+              "fail",
+              "No enabled runtime's binary is on the service PATH",
+              fixes.runtimeBinary,
+            )
           : outcome(
               id,
               "fail",
               "No execution runtime is enabled",
               fixes.runtimeEnabled,
             );
+      }
       case "codex-executable":
         return (
           this.notEnabled(id, "codex") ??
