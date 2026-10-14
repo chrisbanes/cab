@@ -199,6 +199,20 @@ async function save(page: Page, form: Locator): Promise<void> {
   assert.equal((await response).status(), 303);
 }
 
+/** The runtime page's Task controls copy: two plain sentences, no service vocabulary. */
+async function assertTaskControlsCopy(page: Page) {
+  const copy = await page
+    .locator("section", {
+      has: page.getByRole("heading", { name: "Task controls" }),
+    })
+    .locator("p")
+    .innerText();
+  assert.equal(copy.match(/[^.]+\./g)?.length, 2, copy);
+  assert.doesNotMatch(copy, /observ|admission|bounded|never releases/i);
+  assert.match(copy, /some effects may still finish/);
+  assert.match(copy, /Resume clears only the Stop/);
+}
+
 async function submitControl(
   page: Page,
   form: Locator,
@@ -1370,6 +1384,7 @@ test("Chromium submits coordination and runtime controls with durable readback",
   assert.match(runtimeText, /Operator Stop remains active/);
   assert.match(runtimeText, /Writer ownership remains held/);
   assert.match(runtimeText, /Effects may continue/);
+  await assertTaskControlsCopy(page);
   const stoppedRecoveryRecord = service
     .recoveryView()
     .find((record) => record.binding?.taskId === taskId);
@@ -1406,6 +1421,7 @@ test("Chromium submits coordination and runtime controls with durable readback",
   assert.match(runtimeText, /Operator Stop is not active/);
   assert.match(runtimeText, /Writer ownership remains held/);
   assert.match(runtimeText, /Effects may continue/);
+  await assertTaskControlsCopy(page);
 
   await journey.closeStep("http.stop", http.stop.bind(http));
   http = undefined;

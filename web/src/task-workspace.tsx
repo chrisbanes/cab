@@ -8,6 +8,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import type { z } from "zod";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
@@ -25,7 +26,16 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ResourceStatus } from "./components.js";
 import { useOperatorResource } from "./resource.js";
-import type { TaskWorkspaceState } from "./task-workspace-state.js";
+import type {
+  ReplyOutcome,
+  TaskWorkspaceState,
+} from "./task-workspace-state.js";
+import {
+  ActionOutcome,
+  type OutcomeField,
+  detailRows,
+} from "./action-feedback.js";
+import { failureCause } from "./outcome-copy.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
 import { TaskFiles } from "./task-files.js";
@@ -134,6 +144,62 @@ function Disclosure({
     </details>
   );
 }
+/** What each task-side write is called in its failure and unknown messages. */
+const writeCopy = (type: OperatorCommand["type"]) => {
+  switch (type) {
+    case "message":
+      return { failed: "Couldn't send the reply", unknown: "it was sent" };
+    case "comment.send":
+      return {
+        failed: "Couldn't post the comment",
+        unknown: "the comment was posted",
+      };
+    case "comment.review":
+      return {
+        failed: "Couldn't prepare the comment for review",
+        unknown: "the review was saved",
+      };
+    case "comment.confirm":
+      return {
+        failed: "Couldn't save your decision",
+        unknown: "your decision was saved",
+      };
+    case "review.view":
+      return {
+        failed: "Couldn't set the viewing reference",
+        unknown: "the viewing reference was saved",
+      };
+    default:
+      return {
+        failed: "Couldn't refresh delivery status",
+        unknown: "the refresh went through",
+      };
+  }
+};
+const unknownMessage = (type: OperatorCommand["type"]) =>
+  `We couldn't confirm ${writeCopy(type).unknown}. Your draft is kept.`;
+const rejectedMessage = (type: OperatorCommand["type"], code: string) =>
+  `${writeCopy(type).failed}: ${failureCause(code)}. Your draft is kept.`;
+/** A Results or Changes write whose response was lost: its exact request and the warning. */
+const unconfirmedOf = (
+  taskId: string,
+  input: OperatorCommand,
+  code?: string,
+) => ({
+  input: structuredClone(input),
+  outcome: {
+    tone: "warning" as const,
+    message: unknownMessage(input.type),
+    details: detailRows({
+      command: input.type,
+      resource: taskId,
+      requestKey: input.key,
+      ...(code ? { code } : {}),
+    }),
+  },
+});
+const changedMessage =
+  "This task changed since you opened it. Your draft is kept.";
 export function TaskWorkspace({
   client,
   session,
@@ -157,7 +223,19 @@ export function TaskWorkspace({
   /** Receives the shell header's data (title, status line, Back, Stop); null on unmount. */
   onHeader?: (report: TaskHeaderReport | null) => void;
 }) {
-  const [auxNotice, setAuxNotice] = useState("");
+  const [aux, setAux] = useState<ReplyOutcome | null>(null);
+  // A Results or Changes write whose response was lost keeps its exact request in the
+  // task's state, replayed by its check, so a later click never builds a different request
+  // from the current selection, even after the page is left and reopened.
+  const unconfirmed = state.unconfirmed;
+  const auxInFlight = useRef<OperatorCommand | null>(null);
+
+  const focusUnconfirmed = useRef(false);
+  // The message that follows a reply replaces the control the operator used, so it takes
+  // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
+  // that check. Results and Changes actions never take it.
+  const sent = useRef(false);
+  const checking = useRef(false);
   const setSourceObservation = (value: "known" | "pending" | "unknown") => {
     state.sourceObservation = value;
     changed();
@@ -260,6 +338,14 @@ export function TaskWorkspace({
     if (headerReport) onHeader?.(JSON.parse(headerReport));
   }, [headerReport, onHeader]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
+  // The answer to a send or a check has had its turn at the focus.
+  useEffect(() => {
+    if (!pending) {
+      sent.current = false;
+      checking.current = false;
+      focusUnconfirmed.current = false;
+    }
+  });
   const completeSourceObservation =
     !data?.source ||
     (data.source.memberships.length > 0 &&
@@ -393,9 +479,18 @@ export function TaskWorkspace({
         state.frozen?.key === replyInFlight.current
       ) {
         state.uncertain = true;
-        state.notice =
-          "Operation outcome unknown after navigation; original operation retained for reconciliation.";
+        state.notice = {
+          tone: "warning",
+          message: unknownMessage(state.frozen.type),
+          details: detailRows({
+            command: state.frozen.type,
+            resource: taskId,
+            requestKey: state.frozen.key,
+          }),
+        };
       }
+      if (auxInFlight.current)
+        state.unconfirmed = unconfirmedOf(taskId, auxInFlight.current);
       sourceRequest.current++;
       sourceRead.current = null;
       if (state.sourceObservation === "pending") {
@@ -406,7 +501,7 @@ export function TaskWorkspace({
       document.removeEventListener("click", leave, true);
       document.removeEventListener("focusin", intentionalFocus);
     };
-  }, [state]);
+  }, [state, taskId]);
   const readingFocusTarget = () => {
     const record = state.focusRecord
       ? [...document.querySelectorAll<HTMLElement>("[data-record-id]")].find(
@@ -667,15 +762,44 @@ export function TaskWorkspace({
   }, [data, loadHistory, resource.state.pending, resource.state.error]);
   async function command(input: OperatorCommand) {
     if (pending) return;
+    if (
+      unconfirmed &&
+      (input.type === "review.view" || input.type === "delivery.refresh") &&
+      input.key !== unconfirmed.input.key
+    )
+      return;
     const normalized = operatorCommandSchema.safeParse(input);
     if (!normalized.success) {
       if (state.frozen?.key === input.key) state.frozen = null;
-      state.notice =
-        "Invalid command material. Draft retained; correct it before trying again.";
+      setAux(null);
+      state.notice = {
+        tone: "error",
+        message: "That draft can't be sent as written. Your draft is kept.",
+        details: detailRows({
+          command: input.type,
+          resource: taskId,
+          requestKey: input.key,
+          code: "invalid-input",
+        }),
+      };
       changed();
       return;
     }
     input = normalized.data;
+    const rows = (
+      receipt?: CommandReceipt,
+      code?: string,
+      more: OutcomeField[] = [],
+    ) => [
+      ...detailRows({
+        command: input.type,
+        resource: taskId,
+        requestKey: input.key,
+        ...(receipt ? { kind: receipt.kind } : {}),
+        ...(code ? { code } : {}),
+      }),
+      ...more,
+    ];
     setPending(true);
     const current = client.captureAuthenticationScope();
     const reviewIntent =
@@ -689,28 +813,65 @@ export function TaskWorkspace({
       }
       state.frozen = structuredClone(input);
     }
-    if (reply) replyInFlight.current = input.key;
+    if (reply) {
+      replyInFlight.current = input.key;
+      sent.current = true;
+      setAux(null);
+    } else auxInFlight.current = structuredClone(input);
+    const replayed = unconfirmed?.input.key === input.key;
     const outcome = await client.command(input, session.csrfToken);
     if (!scope.current || !current()) return;
     setPending(false);
+    auxInFlight.current = null;
     if (replyInFlight.current === input.key) replyInFlight.current = null;
     if (!reply) {
-      if (outcome.state === "recorded") {
-        if (outcome.receipt.kind === "comment-review")
-          state.commentReview = outcome.receipt;
-        setAuxNotice("Observation / review receipt recorded");
-        refresh();
-      } else
-        setAuxNotice(
-          `${outcome.state}: ${outcome.code}. Reply draft and original operation retained.`,
-        );
+      if (outcome.state === "unknown") {
+        setAux(null);
+        // The control is off now, so the check takes the focus it held.
+        focusUnconfirmed.current = true;
+        state.unconfirmed = unconfirmedOf(taskId, input, outcome.code);
+      } else {
+        state.unconfirmed = null;
+        if (replayed)
+          requestAnimationFrame(() =>
+            document
+              .querySelector<HTMLElement>(
+                `[data-unconfirmed-control="${input.type}"]`,
+              )
+              ?.focus(),
+          );
+        if (outcome.state === "recorded") {
+          if (outcome.receipt.kind === "comment-review")
+            state.commentReview = outcome.receipt;
+          setAux({
+            tone: "success",
+            message:
+              input.type === "review.view"
+                ? "Viewing reference set."
+                : "Delivery status refreshed.",
+            details: rows(outcome.receipt),
+          });
+          refresh();
+        } else
+          setAux({
+            tone: "error",
+            message:
+              outcome.state === "conflict"
+                ? changedMessage
+                : rejectedMessage(input.type, outcome.code),
+            details: rows(undefined, outcome.code),
+          });
+      }
       changed();
       return;
     }
     if (state.frozen?.key !== input.key) {
-      setAuxNotice(
-        "Unrelated reply receipt ignored; original operation retained.",
-      );
+      setAux({
+        tone: "warning",
+        message:
+          "A late answer to an earlier request was ignored. Your draft is kept.",
+        details: rows(),
+      });
       return;
     }
     if (reviewIntent) {
@@ -732,20 +893,38 @@ export function TaskWorkspace({
               receipt.revision === input.expectedRevision + 1);
         if (!matches) {
           state.uncertain = true;
-          state.notice =
-            "Unknown review receipt identity; original operation retained for reconciliation.";
+          state.notice = {
+            tone: "warning",
+            message: unknownMessage(input.type),
+            details: rows(receipt),
+          };
         } else {
           state.commentReview = receipt;
           state.frozen = null;
           state.uncertain = false;
-          state.notice =
-            "Exact comment review receipt recorded. Draft retained.";
-          setAuxNotice("Observation / review receipt recorded");
+          state.notice = {
+            tone: "success",
+            message:
+              input.type === "comment.review"
+                ? "Comment ready for your approval."
+                : receipt.decision === "approved"
+                  ? "Comment approved. You can post it now."
+                  : "Comment denied.",
+            details: rows(receipt),
+          };
           refresh();
         }
       } else {
         state.uncertain = outcome.state === "unknown";
-        state.notice = `${outcome.state}: ${outcome.code}. ${state.uncertain ? "Draft and original review operation retained for reconciliation." : "Draft retained; operation rejected."}`;
+        state.notice = {
+          tone: state.uncertain ? "warning" : "error",
+          message: state.uncertain
+            ? unknownMessage(input.type)
+            : outcome.state === "conflict"
+              ? changedMessage
+              : rejectedMessage(input.type, outcome.code),
+          details: rows(undefined, outcome.code),
+        };
         if (!state.uncertain) state.frozen = null;
       }
       changed();
@@ -762,40 +941,70 @@ export function TaskWorkspace({
             outcome.receipt.operationId !== input.key))
     ) {
       state.uncertain = true;
-      state.notice =
-        "Unknown receipt identity; original reply retained for reconciliation.";
+      state.notice = {
+        tone: "warning",
+        message: unknownMessage(input.type),
+        details: rows(outcome.receipt),
+      };
       changed();
       return;
     }
     if (outcome.state === "recorded") {
-      state.receipt = outcome.receipt;
+      const receipt = outcome.receipt;
       state.uncertain = false;
-      state.notice =
-        outcome.receipt.kind === "delivery"
-          ? `${outcome.receipt.state}: ${outcome.receipt.reason ?? "provider receipt recorded"}`
-          : outcome.receipt.kind === "coordination" &&
-              outcome.receipt.resumedLead
-            ? `Receipt recorded. ${data?.lead?.name ?? "Project lead"} resumed with this feedback.`
-            : "Receipt recorded";
+      const delivery = receipt.kind === "delivery" ? receipt : null;
+      const open =
+        delivery &&
+        ["uncertain", "attempting", "prepared"].includes(delivery.state);
+      const failed =
+        delivery && ["confirmed-failure", "denied"].includes(delivery.state);
+      state.notice = {
+        tone: open ? "warning" : failed ? "error" : "success",
+        message: open
+          ? unknownMessage(input.type)
+          : failed
+            ? "The comment wasn't posted. Your draft is kept."
+            : delivery
+              ? "Comment posted."
+              : receipt.kind === "coordination" && receipt.resumedLead
+                ? `Sent. ${data?.lead?.name ?? "The lead"} resumed with this feedback.`
+                : `Sent to ${data?.lead?.name ?? "the lead"}.`,
+        details: rows(
+          receipt,
+          undefined,
+          delivery
+            ? [
+                ["State", delivery.state],
+                ...(delivery.reason
+                  ? ([["Reason", delivery.reason]] as OutcomeField[])
+                  : []),
+              ]
+            : [],
+        ),
+      };
       if (
-        outcome.receipt.kind === "coordination" ||
-        (outcome.receipt.kind === "delivery" &&
-          outcome.receipt.state === "confirmed-success")
+        receipt.kind === "coordination" ||
+        (delivery && delivery.state === "confirmed-success")
       ) {
         state.draft = "";
         if (input.type === "message") state.reference = undefined;
         state.commentReview = null;
       }
-      if (
-        outcome.receipt.kind === "delivery" &&
-        ["uncertain", "attempting", "prepared"].includes(outcome.receipt.state)
-      ) {
+      if (open) {
         state.uncertain = true;
       } else state.frozen = null;
       refresh();
     } else {
-      state.notice = `${outcome.state}: ${outcome.code}. Draft retained.`;
       state.uncertain = outcome.state === "unknown";
+      state.notice = {
+        tone: state.uncertain ? "warning" : "error",
+        message: state.uncertain
+          ? unknownMessage(input.type)
+          : outcome.state === "conflict"
+            ? changedMessage
+            : rejectedMessage(input.type, outcome.code),
+        details: rows(undefined, outcome.code),
+      };
       if (!state.uncertain) state.frozen = null;
     }
     changed();
@@ -804,13 +1013,18 @@ export function TaskWorkspace({
     if (state.uncertain || pending) return;
     state.destination = "lead";
     if (state.draft.length) {
-      state.notice =
-        "Existing lead draft and reference retained. Finish or clear it before starting a new contextual reply.";
+      state.notice = {
+        tone: "warning",
+        message:
+          "Existing lead draft and reference retained. Finish or clear it before starting a new contextual reply.",
+        details: [],
+      };
     } else {
       state.reference = reference;
       state.draft = `Please review ${label}.`;
-      state.notice = "";
+      state.notice = null;
     }
+    setAux(null);
     changed();
     requestAnimationFrame(() =>
       document.getElementById("workspace-reply")?.focus(),
@@ -884,7 +1098,16 @@ export function TaskWorkspace({
       if (!owned()) return;
       state.sourceRefreshFailed = true;
       setSourceObservation("unknown");
-      state.notice = "Source refresh failed. Last successful source retained.";
+      // An unconfirmed reply keeps its message and its one action; otherwise the failure
+      // replaces an earlier Results or Changes outcome.
+      if (!state.uncertain) {
+        setAux(null);
+        state.notice = {
+          tone: "warning",
+          message: "Source refresh failed. Last successful source retained.",
+          details: [],
+        };
+      }
       changed();
     }
   }
@@ -930,6 +1153,29 @@ export function TaskWorkspace({
   const changes = review?.viewed
     ? `${newestViewed >= 0 ? `${data.results.length - newestViewed - 1} new result(s)` : "Newer results unknown; no retained viewed result ordering"}; ${sourceObservation === "pending" ? "source comparison pending" : sourceObservation === "unknown" ? "source comparison unknown; current observation unavailable" : review.viewed.sourceId !== latestSource?.sourceId ? "source requirements changed" : "source unchanged"}`
     : "No viewing baseline. Comparison with previously viewed material is unknown.";
+  // An unknown reply outcome stays until it is checked; otherwise the latest message wins.
+  const outcome: ReplyOutcome | null = state.uncertain
+    ? (state.notice ?? {
+        tone: "warning",
+        message: unknownMessage(state.frozen?.type ?? "message"),
+        details: [],
+      })
+    : (aux ?? state.notice);
+  // The check sits beside the control whose response was lost, which stays off meanwhile.
+  const unconfirmedCheck = (type: "review.view" | "delivery.refresh") =>
+    !pending &&
+    unconfirmed?.input.type === type && (
+      <ActionOutcome
+        tone="warning"
+        message={unconfirmed.outcome.message}
+        details={unconfirmed.outcome.details}
+        focus={focusUnconfirmed.current}
+        action={{
+          label: "Check whether it saved",
+          onClick: () => command(unconfirmed.input),
+        }}
+      />
+    );
   return (
     <LocalReviewProvider
       client={client}
@@ -1249,6 +1495,7 @@ export function TaskWorkspace({
             <p className="metadata muted">{changes}</p>
             <Button
               variant="secondary"
+              data-unconfirmed-control="review.view"
               onClick={() =>
                 void command({
                   type: "review.view",
@@ -1264,11 +1511,13 @@ export function TaskWorkspace({
               }
               disabled={
                 Boolean(state.selectedResult && !selected) ||
-                Boolean(state.selectedSource && !source)
+                Boolean(state.selectedSource && !source) ||
+                Boolean(unconfirmed)
               }
             >
               Set viewing reference
             </Button>
+            {unconfirmedCheck("review.view")}
             <p>
               Viewing records availability only; it does not approve work or
               clear holds. Retained records may be incomplete.
@@ -1352,6 +1601,8 @@ export function TaskWorkspace({
               taskId,
             })
           }
+          refreshDisabled={Boolean(unconfirmed)}
+          unconfirmed={unconfirmedCheck("delivery.refresh")}
         />
         <LocalReviewPanel />
         <section id="context">
@@ -1701,6 +1952,7 @@ export function TaskWorkspace({
             disabled={pending || state.uncertain}
             onChange={(e) => {
               state.draft = e.target.value;
+              if (state.notice?.tone === "success") state.notice = null;
               if (state.destination === "github") state.commentReview = null;
               changed();
             }}
@@ -1745,30 +1997,29 @@ export function TaskWorkspace({
                 )}
               </>
             )}
-          <Button
-            disabled={
-              pending ||
-              !state.draft.trim() ||
-              (state.destination === "lead" &&
-                (!lead || leadMode === "unavailable") &&
-                !state.uncertain) ||
-              (state.destination === "github" &&
-                (!data.commentPolicy?.available ||
-                  (data.commentPolicy.mode === "approval" &&
-                    state.commentReview?.decision !== "approved")) &&
-                !state.uncertain)
-            }
-            onClick={() => void send()}
-          >
-            {pending
-              ? "Sending…"
-              : state.uncertain
-                ? "Reconcile original operation"
+          {(pending || !state.uncertain) && (
+            <Button
+              disabled={
+                pending ||
+                !state.draft.trim() ||
+                (state.destination === "lead" &&
+                  (!lead || leadMode === "unavailable") &&
+                  !state.uncertain) ||
+                (state.destination === "github" &&
+                  (!data.commentPolicy?.available ||
+                    (data.commentPolicy.mode === "approval" &&
+                      state.commentReview?.decision !== "approved")) &&
+                  !state.uncertain)
+              }
+              onClick={() => void send()}
+            >
+              {pending
+                ? "Sending…"
                 : state.destination === "lead"
                   ? "Send to task lead"
                   : "Post comment"}
-          </Button>
-          {auxNotice && <p role="status">{auxNotice}</p>}
+            </Button>
+          )}
           {state.destination === "lead" &&
             lead &&
             leadMode === "unavailable" && (
@@ -1778,16 +2029,27 @@ export function TaskWorkspace({
                 Existing coordination controls retain the lifecycle boundary.
               </p>
             )}
-          {state.notice && <p role="status">{state.notice}</p>}
-          {state.receipt && (
-            <p className="metadata">
-              Receipt key {state.receipt.key} · {state.receipt.kind}
-            </p>
+          {!pending && outcome && (
+            <ActionOutcome
+              // A new message starts with Details collapsed.
+              key={`${outcome.tone}:${outcome.details.find(([label]) => label === "Request key")?.[1]}`}
+              tone={outcome.tone}
+              message={outcome.message}
+              focus={(sent.current && state.uncertain) || checking.current}
+              details={outcome.details}
+              action={
+                state.uncertain
+                  ? {
+                      label: "Check whether it saved",
+                      onClick: () => {
+                        checking.current = true;
+                        return send();
+                      },
+                    }
+                  : undefined
+              }
+            />
           )}
-          <p>
-            Failed or uncertain operations retain the draft. Reconciliation uses
-            the original operation identity.
-          </p>
         </section>
       </article>
     </LocalReviewProvider>
@@ -2120,6 +2382,8 @@ function Changes({
   state,
   changed,
   refresh,
+  refreshDisabled,
+  unconfirmed,
 }: {
   data: TaskRead["data"];
   selected:
@@ -2131,6 +2395,9 @@ function Changes({
   state: TaskWorkspaceState;
   changed: () => void;
   refresh: () => void;
+  refreshDisabled: boolean;
+  /** The check for a refresh whose response was lost, shown beside its button. */
+  unconfirmed: ReactNode;
 }) {
   const changes = selected?.metadata.changes,
     d = data.delivery;
@@ -2231,9 +2498,15 @@ function Changes({
       {d?.blockers.map((b) => (
         <p key={b}>{b}</p>
       ))}
-      <Button variant="secondary" onClick={refresh}>
+      <Button
+        variant="secondary"
+        data-unconfirmed-control="delivery.refresh"
+        onClick={refresh}
+        disabled={refreshDisabled}
+      >
         Refresh delivery observation
       </Button>
+      {unconfirmed}
       <p>
         Refresh reads provider state; it does not post, approve, merge or clear
         a hold.

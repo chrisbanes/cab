@@ -366,7 +366,7 @@ test("production Changes preserves exact repository baselines and last-good refr
     "exact alpha branch comparison read by comparisonId",
   );
   await changes
-    .locator(".changes-observation")
+    .locator(".changes-observation .identifier")
     .getByText(`Comparison ${alphaBody.data.comparisonId}`, { exact: true })
     .waitFor();
   const alphaRequestUrl = new URL(alphaResponse.url());
@@ -805,7 +805,7 @@ test("production Changes preserves exact repository baselines and last-good refr
   assert.equal(failedRefresh.url(), controlledFailureUrl);
   await changes
     .getByRole("alert")
-    .getByText(/Refresh failed/)
+    .getByText(/Couldn't refresh the comparison: the service is unavailable\./)
     .waitFor();
   expected503WindowEndedAt = Date.now();
   consoleState.expected503Window = false;
@@ -821,7 +821,8 @@ test("production Changes preserves exact repository baselines and last-good refr
     afterFailure.comparison,
     new RegExp(alphaBody.data.comparisonId),
   );
-  assert.match(afterFailure.comparison, /Refresh failed/);
+  assert.match(afterFailure.comparison, /Couldn't refresh the comparison/);
+  assert.match(afterFailure.comparison, /The last one is still shown\./);
   assert.doesNotMatch(afterFailure.comparison, /Refreshing…/);
   assert.equal(afterFailure.selection, beforeFailure.selection);
   assert.equal(afterFailure.anchor.label, beforeFailure.anchor.label);
@@ -1101,7 +1102,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
   assert.equal(allBody.data.comparison.truncated, false);
   await changes
     .getByText(
-      "This observation contains gaps; unavailable or unsupported entries remain identified as such.",
+      "This comparison has gaps; unavailable or unsupported entries stay marked as such.",
       { exact: true },
     )
     .waitFor();
@@ -1220,7 +1221,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
   await page.getByLabel("Change set").selectOption("all");
   await changes
     .getByText(
-      "This observation contains gaps; unavailable or unsupported entries remain identified as such.",
+      "This comparison has gaps; unavailable or unsupported entries stay marked as such.",
       { exact: true },
     )
     .waitFor();
@@ -1292,7 +1293,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
   await list.getByRole("button", { name: /added later\.txt/ }).waitFor();
   assert.equal(
     await changes.locator(".changes-refresh-notice").innerText(),
-    "Refresh found a different comparison since the previous observation: 2 added, 0 removed, 0 changed file entries.",
+    "Refresh found a different comparison since you last looked: 2 added, 0 removed, 0 changed file entries.",
   );
   await changes.getByText(/Selected After lines 1–1 · unstaged\.txt/).waitFor();
   await list.getByRole("button", { name: /added long\.txt/ }).click();
@@ -1597,14 +1598,14 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
     "outcome completed",
     "capture available",
     "Capture started",
-    "before observation",
-    "after observation",
+    "before the turn",
+    "after the turn",
   ])
     assert.ok(finishedText.includes(expected), expected);
   assert.doesNotMatch(finishedText, /Capture incomplete/);
   assert.match(
     await changes.locator(".changes-refresh-notice").innerText(),
-    /^Refresh found a different comparison since the previous observation: \d+ added, \d+ removed, \d+ changed file entries\.$/,
+    /^Refresh found a different comparison since you last looked: \d+ added, \d+ removed, \d+ changed file entries\.$/,
   );
   await captureBrowserEvidence(page, "1366-finished-last-turn-identity");
 
@@ -1636,7 +1637,7 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
     .getByRole("button", { name: "Refresh comparison", exact: true })
     .click();
   await finishedTurn.getByText(/capture gap/).waitFor();
-  await finishedTurn.getByText(/Capture incomplete: time-limit\./).waitFor();
+  await finishedTurn.getByText(/Capture incomplete \(time-limit\)\./).waitFor();
   await page.unroute(gapRoute);
   assert.equal(fixture.service.taskHold(task.taskId), undefined);
   assert.deepEqual(consoleErrors, []);

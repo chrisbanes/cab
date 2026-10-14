@@ -5,12 +5,14 @@ import {
   type Session,
   type WorkspaceComparisonRead,
 } from "../../src/operator/contracts.js";
-import type { OperatorClient } from "./api.js";
+import { ClientError, type OperatorClient } from "./api.js";
 import {
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
+import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
+import { failureCause } from "./outcome-copy.js";
 import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
@@ -185,7 +187,7 @@ function refreshSummary(
   next: Snapshot | undefined,
 ) {
   if (!previous || !next)
-    return "Refresh found a different comparison; it could not be compared with the previous observation.";
+    return "Refresh found a different comparison; it could not be compared with the one you last looked at.";
   const identity = (entry: Entry) =>
     [entry.repositoryId ?? "", entry.path, entry.changeSet ?? ""].join(
       "\u0000",
@@ -204,7 +206,7 @@ function refreshSummary(
     else if (old !== signature) changed++;
   }
   const removed = [...before.keys()].filter((key) => !after.has(key)).length;
-  return `Refresh found a different comparison since the previous observation: ${added} added, ${removed} removed, ${changed} changed file entries.`;
+  return `Refresh found a different comparison since you last looked: ${added} added, ${removed} removed, ${changed} changed file entries.`;
 }
 
 function useTaskRepositories(
@@ -431,7 +433,7 @@ export function TaskWorkspaceChanges({
         setRequest({
           key,
           pending: false,
-          error: error instanceof Error ? error.message : "unavailable",
+          error: error instanceof ClientError ? error.code : "unavailable",
         });
       });
     return () => controller.abort();
@@ -658,7 +660,7 @@ export function TaskWorkspaceChanges({
       )}
       {repositoriesResource.state.error && (
         <p role="alert">
-          Repository listing refresh failed. The last observation is retained.
+          Repository listing refresh failed. The last listing is kept.
         </p>
       )}
       {state.target !== "last-turn" && !repositoryId && (
@@ -685,7 +687,7 @@ export function TaskWorkspaceChanges({
               ? "Current turn unsettled"
               : current.state}
           </StatusBadge>
-          {id && <span>Comparison {id}</span>}
+          {id && <span className="identifier">Comparison {id}</span>}
           {snapshot && <span>Observed {dateLabel(snapshot.observedAt)}</span>}
           {snapshot && snapshot.target !== "turn" && (
             <span className="changes-baseline">
@@ -698,8 +700,9 @@ export function TaskWorkspaceChanges({
           {currentRequest?.pending && <span>Refreshing…</span>}
           {currentRequest?.error && (
             <span role="alert">
-              Refresh failed ({currentRequest.error}); the last successful
-              comparison remains shown.
+              Couldn't refresh the comparison:{" "}
+              {failureCause(currentRequest.error)}. The last one is still shown.{" "}
+              <span className="identifier">{currentRequest.error}</span>
             </span>
           )}
           {current.state === "unavailable" &&
@@ -713,7 +716,7 @@ export function TaskWorkspaceChanges({
               <span>The selected local branch has no usable merge base.</span>
             )}
           {"reason" in current && current.reason && (
-            <span>Reason: {current.reason}</span>
+            <span className="identifier">Reason: {current.reason}</span>
           )}
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
@@ -746,7 +749,12 @@ export function TaskWorkspaceChanges({
         <p role="status">Reading the selected comparison…</p>
       )}
       {currentRequest?.error && !current && (
-        <p role="alert">Comparison is unavailable ({currentRequest.error}).</p>
+        <div role="alert">
+          <p>
+            Comparison is unavailable: {failureCause(currentRequest.error)}.
+          </p>
+          <OutcomeDetails fields={[["Code", currentRequest.error]]} />
+        </div>
       )}
       {current?.state === "unavailable" && (
         <p role="status">
@@ -755,8 +763,8 @@ export function TaskWorkspaceChanges({
       )}
       {current?.state === "gap" && (
         <p role="status">
-          This observation contains gaps; unavailable or unsupported entries
-          remain identified as such.
+          This comparison has gaps; unavailable or unsupported entries stay
+          marked as such.
         </p>
       )}
       {current?.target === "last-turn" &&
@@ -809,7 +817,7 @@ export function TaskWorkspaceChanges({
               })}
             </ul>
             {snapshot.entries.length === 0 && (
-              <p>No changed entries in this observation.</p>
+              <p>No changed files in this comparison.</p>
             )}
           </aside>
           <div
@@ -836,16 +844,18 @@ export function TaskWorkspaceChanges({
                   <p>
                     {selected.change.toUpperCase()} · {selected.state}
                     {selected.changeSet ? ` · ${selected.changeSet}` : ""}
-                    {selected.reason ? ` · ${selected.reason}` : ""}
+                    {selected.reason && (
+                      <>
+                        {" · "}
+                        <span className="identifier">{selected.reason}</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 {selected.state === "binary" ||
                 selected.state === "unsupported" ||
                 selected.state === "gap" ? (
-                  <p role="status">
-                    Text diff is unavailable; the entry state and observation
-                    identity are retained.
-                  </p>
+                  <p role="status">Text diff is unavailable for this file.</p>
                 ) : (
                   <>
                     <DiffLayoutControls
@@ -882,8 +892,11 @@ export function TaskWorkspaceChanges({
                     Selected{" "}
                     {state.selection.side === "left" ? "Before" : "After"} lines{" "}
                     {state.selection.startLine}–{state.selection.endLine} ·{" "}
-                    {state.selection.path} · {state.selection.contentSha256} ·
-                    comparison {state.selection.comparisonId}
+                    {state.selection.path} ·{" "}
+                    <span className="identifier">
+                      {state.selection.contentSha256} · comparison{" "}
+                      {state.selection.comparisonId}
+                    </span>
                   </p>
                 )}
                 <RangeControls

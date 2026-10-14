@@ -1,13 +1,14 @@
 # Action feedback
 
-**Status:** implemented for configuration saves in Settings: projects, profiles,
+**Status:** implemented for configuration saves in Settings (projects, profiles,
 routing, GitHub source, sync preview and placement, discovery credential, Claude
-token, capacity and project setup. They share `web/src/action-feedback.tsx`: one
-message per save, with the receipt in a collapsed Details disclosure. Planned: the
-task composer, Stop and Resume, question answers, approvals, replies, comment
-review, local review, sign-out and CLI credentials, and the read-only status, empty
-and error copy. Those surfaces still use receipt vocabulary and raw codes in their
-messages.
+token, capacity and project setup) and for the task-side writes: the task composer,
+question answers, replies, comment review, local review, sign-out, CLI credentials
+and the Stop confirmation, plus the read-only status copy of the task screens. They
+share `web/src/action-feedback.tsx`: one message per action, with the receipt in a
+collapsed Details disclosure. The server-rendered `/runtime` Task controls follow
+the same wording; its recovery and admission sections keep their service
+vocabulary. Planned: approvals.
 
 ## Goal
 

@@ -259,9 +259,13 @@ test("Save draft and Create and start record real task outcomes without claiming
   await page.getByLabel("Assignee").selectOption(workerId);
   await page.getByLabel("Open blocker", { exact: true }).check();
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
-  await page
-    .getByText("Draft task saved in Ensemble.", { exact: true })
-    .waitFor();
+  await page.getByText("Draft saved.", { exact: true }).waitFor();
+  // One quiet success line, with no receipt vocabulary anywhere on the page.
+  assert.equal(await page.locator("[data-slot=action-outcome]").count(), 1);
+  assert.doesNotMatch(
+    await page.locator("main").innerText(),
+    /receipt|submission|admission|observation/i,
+  );
   const draft = d.tasks(projectId).find((t) => t.title === "Saved outcome");
   assert.ok(draft);
   assert.equal(draft.ready, 0);
@@ -282,12 +286,7 @@ test("Save draft and Create and start record real task outcomes without claiming
   await page
     .getByRole("button", { name: "Create and start", exact: true })
     .click();
-  await page
-    .getByText(
-      "Task recorded as Ready. Creation does not establish execution.",
-      { exact: true },
-    )
-    .waitFor();
+  await page.getByText("Task created.", { exact: true }).waitFor();
   assert.equal(
     d.tasks(projectId).find((t) => t.title === "Ready dependent")?.ready,
     1,
@@ -565,7 +564,7 @@ test("browser frozen storage failure sends zero commands and restores only last 
   await page
     .getByRole("button", { name: "Create and start", exact: true })
     .click();
-  await page.getByText(/Submission not sent/).waitFor();
+  await page.getByText(/nothing was sent/).waitFor();
   assert.equal(posts, 0);
   assert.equal(d.tasks(projectId).length, 0);
   assert.equal(
@@ -667,16 +666,27 @@ test("committed lost-response creation survives reload expiry and exact reconcil
     .getByRole("button", { name: "Create and start", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(sent.length, 1);
   assert.equal(d.tasks(projectId).length, 2);
+  // An unknown outcome is one warning with one action; the request key is in Details.
+  const unknown = page.locator("[data-slot=action-outcome]");
+  assert.equal(await unknown.count(), 1);
+  assert.equal(await unknown.getAttribute("data-tone"), "warning");
+  assert.equal(
+    await unknown.locator("> p").innerText(),
+    "We couldn't confirm the task was created. Your input is kept until you check.",
+  );
   const material = JSON.parse(sent[0] ?? "{}");
+  await unknown.getByText("Details", { exact: true }).click();
+  await unknown.getByText(material.key, { exact: true }).waitFor();
+  await unknown.getByText("Details", { exact: true }).click();
   assert.equal(d.assignments(material.taskId).length, 1);
   await screenshot(page, "1366-unknown-submission");
   await page.reload();
   await page
-    .getByRole("button", { name: "Reconcile submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(sent.length, 1);
   assert.equal(
@@ -704,10 +714,10 @@ test("committed lost-response creation survives reload expiry and exact reconcil
       });
     });
     await page
-      .getByRole("button", { name: "Reconcile submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "Reconcile submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .waitFor();
     assert.equal(
       await page.getByLabel("Task title", { exact: true }).isDisabled(),
@@ -721,7 +731,7 @@ test("committed lost-response creation survives reload expiry and exact reconcil
   });
   f.advanceClock(70000);
   await page
-    .getByRole("button", { name: "Reconcile submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   await page.getByLabel("Password").waitFor();
   assert.equal(
@@ -731,21 +741,18 @@ test("committed lost-response creation survives reload expiry and exact reconcil
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page
-    .getByRole("button", { name: "Reconcile submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   await page.route(`**/api/operator/tasks/${material.taskId}`, (route) =>
     route.abort("failed"),
   );
   await page
-    .getByRole("button", { name: "Reconcile submission", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
+  await page.getByText("Task created.", { exact: true }).waitFor();
   await page
-    .getByText(
-      "Task recorded as Ready. Creation does not establish execution.",
-      { exact: true },
-    )
+    .getByText("Execution updates are unavailable. Try again.", { exact: true })
     .waitFor();
-  await page.getByText(/original creation receipt remains confirmed/).waitFor();
   assert.equal(sent.length, 6);
   assert.ok(sent.every((bytes) => bytes === sent[0]));
   assert.equal(d.tasks(projectId).length, 2);
@@ -1132,7 +1139,7 @@ for (const viewport of [
     assert.equal(
       await work
         .locator(`[data-task-id="${ids.running.id}"]`)
-        .getByText(/Capacity currently full/)
+        .getByText(/Capacity is full/)
         .count(),
       1,
       "occupied project limit preserves eligible Ready work in its real capacity queue",
@@ -1220,10 +1227,7 @@ for (const viewport of [
           await terminal.getByText("Draft: not Ready", { exact: true }).count(),
           0,
         );
-        assert.equal(
-          await terminal.getByText(/Capacity currently full/).count(),
-          0,
-        );
+        assert.equal(await terminal.getByText(/Capacity is full/).count(), 0);
       }
       await screenshot(page, `${viewport.width}-board-${column.toLowerCase()}`);
     }
@@ -1240,7 +1244,7 @@ for (const viewport of [
     await page.getByRole("button", { name: /^Running · / }).click();
     await page
       .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText("Capacity currently full; admission rechecks usage", {
+      .getByText("Capacity is full; it rechecks as turns finish", {
         exact: true,
       })
       .waitFor({ state: "visible" });
@@ -1248,7 +1252,7 @@ for (const viewport of [
     await page.getByRole("button", { name: "List", exact: true }).click();
     await page
       .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText("Capacity currently full; admission rechecks usage", {
+      .getByText("Capacity is full; it rechecks as turns finish", {
         exact: true,
       })
       .waitFor({ state: "visible" });
@@ -1265,7 +1269,7 @@ for (const viewport of [
       .click();
     await page
       .locator(`[data-task-id="${ids.running.id}"]`)
-      .getByText(/Capacity currently full/)
+      .getByText(/Capacity is full/)
       .waitFor({ state: "hidden" });
     await page.getByRole("button", { name: "Board", exact: true }).click();
     await page.getByRole("button", { name: /^Waiting · / }).click();
@@ -1632,10 +1636,18 @@ test("composer switches scoped options despite delayed prior response and preser
     .getByRole("button", { name: "Create and start", exact: true })
     .click();
   await page
-    .getByText("Submission rejected (forbidden). Input retained.", {
-      exact: true,
-    })
+    .getByText(
+      "Couldn't create the task: you don't have permission. Your input is still here.",
+      { exact: true },
+    )
     .waitFor();
+  // One alert; the code is in Details, not in the message.
+  const refused = page.locator("[data-slot=action-outcome]");
+  assert.equal(await refused.count(), 1);
+  assert.equal(await refused.getAttribute("role"), "alert");
+  assert.doesNotMatch(await refused.innerText(), /forbidden/);
+  await refused.getByText("Details", { exact: true }).click();
+  await refused.getByText("forbidden", { exact: true }).waitFor();
   assert.equal(
     await page.getByLabel("Task title", { exact: true }).inputValue(),
     "Preserved outcome",
@@ -1731,6 +1743,10 @@ test("replacement composer owns recovery before a detached committed receipt or 
     });
     await page.getByRole("button", { name: "Save draft", exact: true }).click();
     await held;
+    // In progress is the button label alone: no status line, no outcome.
+    await page.getByRole("button", { name: "Saving…", exact: true }).waitFor();
+    assert.equal(await page.locator("[data-slot=action-outcome]").count(), 0);
+    assert.equal(await page.getByRole("status").count(), 0);
     const recovery = await page.evaluate(() =>
       sessionStorage.getItem("ensemble.ui03.composer.v1"),
     );
@@ -1751,7 +1767,7 @@ test("replacement composer owns recovery before a detached committed receipt or 
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
     }
     await page
-      .getByRole("button", { name: "Reconcile submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .waitFor();
     assert.equal(sent.length, 1);
     const delivered = page.waitForResponse((r) =>
@@ -1760,7 +1776,7 @@ test("replacement composer owns recovery before a detached committed receipt or 
     release();
     await delivered;
     await page
-      .getByRole("button", { name: "Reconcile submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .waitFor();
     assert.equal(
       await page.getByLabel("Task title", { exact: true }).inputValue(),
@@ -1788,11 +1804,9 @@ test("replacement composer owns recovery before a detached committed receipt or 
         sent.push(r.postData() ?? "");
     });
     await page
-      .getByRole("button", { name: "Reconcile submission", exact: true })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .click();
-    await page
-      .getByText("Draft task saved in Ensemble.", { exact: true })
-      .waitFor();
+    await page.getByText("Draft saved.", { exact: true }).waitFor();
     assert.deepEqual(sent, [sent[0], sent[0]]);
     assert.equal(
       await page.evaluate(() =>

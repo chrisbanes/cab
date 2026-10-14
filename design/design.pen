@@ -23625,7 +23625,7 @@
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Submission failed",
+                  "content": "Send failed",
                   "lineHeight": 1.25,
                   "fontFamily": "$font-sans",
                   "fontSize": 18,
@@ -23638,7 +23638,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Couldn't send your answers. Your answers are still here.",
+                  "content": "Couldn't send the answer: the service is unavailable. Your answer is still here.",
                   "lineHeight": 1.5,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -23680,7 +23680,7 @@
                       "enabled": false
                     },
                     "X:8tnXG": {
-                      "content": "Retry submission",
+                      "content": "Retry answer",
                       "textGrowth": "auto",
                       "fill": "$X:--primary-foreground",
                       "fontFamily": "$font-sans"
@@ -23722,7 +23722,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Couldn't send your answer: the question was replaced. Your answer is still here.",
+                  "content": "This question was already answered, changed or withdrawn. Your answer is still here.",
                   "lineHeight": 1.5,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -41406,10 +41406,10 @@
               "width": "fill_container",
               "descendants": {
                 "E4Apxu": {
-                  "content": "Couldn't send your answer: the connection failed."
+                  "content": "Couldn't send the answer: the service is unavailable."
                 },
                 "T7OnsT": {
-                  "content": "Your selection is still here."
+                  "content": "Your answer is still here."
                 }
               }
             },
@@ -42726,7 +42726,7 @@
               "alignItems": "start",
               "descendants": {
                 "dQMvl": {
-                  "content": "Answer sent to Nora. She'll see it on her next turn.",
+                  "content": "Answer sent. It reaches the requester on its next turn.",
                   "textGrowth": "fixed-width",
                   "width": "fill_container"
                 }
@@ -66327,7 +66327,7 @@
           "alignItems": "start",
           "descendants": {
             "dQMvl": {
-              "content": "Sent to Mira. She'll see it on her next turn.",
+              "content": "Sent to Mira.",
               "textGrowth": "fixed-width",
               "width": "fill_container"
             }
@@ -90728,28 +90728,17 @@
               ]
             },
             {
-              "id": "Cdn6q",
-              "type": "ref",
-              "ref": "X:VSnC2",
-              "name": "Sending…",
+              "type": "text",
+              "id": "qccHz",
+              "name": "Sending status",
+              "fill": "$X:--muted-foreground",
+              "textGrowth": "fixed-width",
               "width": "fill_container",
-              "height": 40,
-              "cornerRadius": "$radius-lg",
-              "padding": [
-                6,
-                10
-              ],
-              "gap": 6,
-              "opacity": 0.6,
-              "descendants": {
-                "X:8jVfJ": {
-                  "enabled": false
-                },
-                "X:8tnXG": {
-                  "content": "Sending…",
-                  "fontFamily": "$font-sans"
-                }
-              }
+              "content": "Sending review to Mira…",
+              "lineHeight": 1.4,
+              "fontFamily": "$font-sans",
+              "fontSize": 14,
+              "fontWeight": "normal"
             },
             {
               "type": "text",
@@ -91004,10 +90993,13 @@
                 {
                   "type": "text",
                   "id": "h834v",
+                  "x": 12,
+                  "y": 36,
                   "name": "Ensemble confirmed that no review was delivered. Your 2 comments and summar",
+                  "enabled": false,
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": "fill_container(334)",
                   "content": "Ensemble confirmed that no review was delivered. Your 2 comments and summary remain editable.",
                   "lineHeight": 1.4,
                   "fontFamily": "$font-sans",
@@ -91017,13 +91009,49 @@
               ]
             },
             {
+              "id": "ZsqOB",
+              "type": "ref",
+              "ref": "NaPr2",
+              "name": "Send refused alert",
+              "width": "fill_container",
+              "descendants": {
+                "E4Apxu": {
+                  "content": "The review wasn't sent: the lead can no longer receive a review."
+                },
+                "T7OnsT": {
+                  "content": "Your comments are kept."
+                },
+                "CohoX": {
+                  "enabled": true
+                },
+                "CohoX/X:poRwU": {
+                  "content": "Return to draft"
+                },
+                "Zyyh5/pMN71": {
+                  "content": "review.send"
+                },
+                "Zyyh5/DfcEu": {
+                  "content": "AT-142"
+                },
+                "Zyyh5/KLIpp": {
+                  "content": "3"
+                },
+                "Zyyh5/SYYuE": {
+                  "content": "9d2e…"
+                },
+                "Zyyh5/E9I4M": {
+                  "content": "local-review-recipient-unavailable"
+                }
+              }
+            },
+            {
               "type": "text",
               "id": "cUmqB",
               "name": "Submission RV-42 · original payload",
               "fill": "$X:--muted-foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "Submission RV-42 · original payload",
+              "content": "Your review · 2 comments and summary",
               "lineHeight": 1.4,
               "fontFamily": "$font-mono",
               "fontSize": 12,
@@ -91054,6 +91082,7 @@
                 10
               ],
               "gap": 6,
+              "enabled": false,
               "descendants": {
                 "X:8jVfJ": {
                   "enabled": false
@@ -91078,6 +91107,7 @@
               "gap": 6,
               "effect": [],
               "fill": "$nova-outline-bg",
+              "enabled": false,
               "descendants": {
                 "X:l8v2I": {
                   "enabled": false
@@ -91091,10 +91121,13 @@
             {
               "type": "text",
               "id": "l1szLl",
+              "x": 16,
+              "y": 475,
               "name": "Edit draft before retrying if needed.",
+              "enabled": false,
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
-              "width": "fill_container",
+              "width": "fill_container(358)",
               "content": "Edit draft before retrying if needed.",
               "lineHeight": 1.4,
               "fontFamily": "$font-sans",
@@ -91311,13 +91344,13 @@
               "width": "fill_container",
               "descendants": {
                 "E8Uyng": {
-                  "content": "We couldn't confirm the review was sent."
+                  "content": "We couldn't confirm the review reached Mira."
                 },
                 "R4kmG": {
-                  "content": "Your review is still here."
+                  "content": "Your draft is kept."
                 },
                 "m9nZn2/X:poRwU": {
-                  "content": "Check whether it was sent"
+                  "content": "Check whether it saved"
                 }
               }
             },
@@ -91580,7 +91613,7 @@
                   "alignItems": "start",
                   "descendants": {
                     "dQMvl": {
-                      "content": "Sent to Mira. She'll see it on her next turn.",
+                      "content": "Review sent to Mira.",
                       "textGrowth": "fixed-width",
                       "width": "fill_container"
                     }
@@ -94903,7 +94936,7 @@
                       "name": "Success line",
                       "descendants": {
                         "dQMvl": {
-                          "content": "Sent to Mira. She'll see it on her next turn."
+                          "content": "Review sent to Mira."
                         }
                       }
                     }
@@ -123837,7 +123870,7 @@
               "fill": "$X:--foreground",
               "textGrowth": "fixed-width",
               "width": "fill_container",
-              "content": "· 113: the account menu opens from the sidebar footer over unchanged Overview 01 content. Settings → /app/settings; Runtime → /app/settings/runtime. Sign out ends the session and clears private local state; it shows “Signing out…” while pending, and an unknown outcome reads “Sign-out outcome is unknown. Session status has been checked; review before retrying.”",
+              "content": "· 113: the account menu opens from the sidebar footer over unchanged Overview 01 content. Settings → /app/settings; Runtime → /app/settings/runtime. Sign out ends the session and clears private local state; it shows “Signing out…” while pending. An unconfirmed sign-out re-reads the session: signed out is success and shows nothing; a session that survived shows one warning, “We couldn't sign you out. You're still signed in.”, in the shell only, with no Details.",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 14,
@@ -126801,11 +126834,11 @@
                 {
                   "type": "text",
                   "id": "hsswf",
-                  "name": "Consequence 1",
+                  "name": "Stop effects",
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "· Holds queued and new turns for the lead and every delegated assignment.",
+                  "content": "Stops new work and asks running turns to end; some effects may still finish, and files, history and results are kept.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 14,
@@ -126814,10 +126847,13 @@
                 {
                   "type": "text",
                   "id": "qaTfl",
+                  "x": 24,
+                  "y": 26,
                   "name": "Consequence 2",
+                  "enabled": false,
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": "fill_container(512)",
                   "content": "· Requests cancellation of active turns. Effects may continue for a short time after.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
@@ -126827,10 +126863,13 @@
                 {
                   "type": "text",
                   "id": "O2A0o1",
+                  "x": 24,
+                  "y": 72,
                   "name": "Consequence 3",
+                  "enabled": false,
                   "fill": "$X:--foreground",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": "fill_container(512)",
                   "content": "· Stop, writer and capacity holds stay until termination is verified. Resume clears only Stop.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
@@ -126840,10 +126879,13 @@
                 {
                   "type": "text",
                   "id": "OVznd",
+                  "x": 24,
+                  "y": 118,
                   "name": "Stop boundary",
+                  "enabled": false,
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
-                  "width": "fill_container",
+                  "width": "fill_container(512)",
                   "content": "Stop is not cancellation or completion. Files, history and results are kept.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
@@ -143132,10 +143174,10 @@
                               "content": "We couldn't confirm the credential was created."
                             },
                             "R4kmG": {
-                              "content": "Your changes are still here."
+                              "content": "We're reloading the list below."
                             },
                             "m9nZn2/X:poRwU": {
-                              "content": "Check whether it saved"
+                              "content": "Check the list"
                             }
                           }
                         },
@@ -154721,7 +154763,7 @@
                   "fill": "$X:--destructive",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "The request failed. Check the list below before retrying.",
+                  "content": "Couldn't revoke Laptop CLI: the service is unavailable. We're reloading the list below.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 12,
@@ -158109,7 +158151,7 @@
                   "fill": "$X:--destructive",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "The outcome is unknown. Check the list below before retrying.",
+                  "content": "We couldn't confirm Laptop CLI was revoked. We're reloading the list below.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 12,
@@ -197106,7 +197148,7 @@
                               "name": "Sent line",
                               "descendants": {
                                 "dQMvl": {
-                                  "content": "Answer sent to Ada. She'll see it on her next turn."
+                                  "content": "Answer sent. It reaches the requester on its next turn."
                                 }
                               }
                             }
@@ -199181,16 +199223,16 @@
                           "width": "fill_container",
                           "descendants": {
                             "E4Apxu": {
-                              "content": "Couldn't send your answer: the question was replaced."
+                              "content": "Couldn't send the answer: the service is unavailable."
                             },
                             "T7OnsT": {
                               "content": "Your answer is still here."
                             },
                             "CohoX": {
-                              "enabled": true
+                              "enabled": false
                             },
                             "CohoX/X:poRwU": {
-                              "content": "Open the current question"
+                              "content": "Action"
                             },
                             "OqhqK/y4CiJx": {
                               "icon": "chevron-down"
@@ -199199,7 +199241,7 @@
                               "enabled": true
                             },
                             "Zyyh5/pMN71": {
-                              "content": "question.answer"
+                              "content": "question.form.answer"
                             },
                             "Zyyh5/DfcEu": {
                               "content": "Q-204"
@@ -199211,7 +199253,7 @@
                               "content": "5c07…"
                             },
                             "Zyyh5/E9I4M": {
-                              "content": "question_replaced"
+                              "content": "unavailable"
                             }
                           }
                         },
@@ -199261,7 +199303,7 @@
                                   "enabled": false
                                 },
                                 "X:8tnXG": {
-                                  "content": "Submit answers",
+                                  "content": "Retry answer",
                                   "textGrowth": "auto",
                                   "fill": "$X:--primary-foreground",
                                   "fontFamily": "$font-sans"
@@ -199271,10 +199313,13 @@
                             {
                               "type": "text",
                               "id": "z296nz",
+                              "x": 137,
+                              "y": 10.5,
                               "name": "Unsubmitted status",
+                              "enabled": false,
                               "fill": "$X:--muted-foreground",
                               "textGrowth": "fixed-width",
-                              "width": "fill_container",
+                              "width": "fill_container(617)",
                               "content": "Not sent",
                               "lineHeight": 1.25,
                               "fontFamily": "$font-sans",
@@ -200765,7 +200810,7 @@
                                       "name": "Sent line",
                                       "descendants": {
                                         "dQMvl": {
-                                          "content": "Sent to Ada. She's picking it up now."
+                                          "content": "Sent to Ada."
                                         }
                                       }
                                     }
@@ -202447,7 +202492,7 @@
               "fontFamily": "$font-sans"
             },
             "X:jBiwY": {
-              "content": "Ada stops after her current step. Other holds stay until it has fully stopped.",
+              "content": "Ada (lead) and 2 delegated assignments are affected. Stops new work and asks running turns to end; some effects may still finish, and files, history and results are kept.",
               "fontFamily": "$font-sans"
             },
             "X:frWPV": {
@@ -202473,7 +202518,7 @@
                   "enabled": false
                 },
                 "X:NDadS": {
-                  "content": "Stop",
+                  "content": "Stop task",
                   "fontFamily": "$font-sans",
                   "fill": "$nova-destructive-fg"
                 }
@@ -202483,7 +202528,7 @@
               "enabled": false
             },
             "X:RCXBi/X:poRwU": {
-              "content": "Cancel"
+              "content": "Keep running"
             }
           }
         }
@@ -205666,7 +205711,7 @@
                                   "name": "Revoked line",
                                   "descendants": {
                                     "dQMvl": {
-                                      "content": "Revoked. Commands using this credential will stop working."
+                                      "content": "Revoked Laptop CLI."
                                     }
                                   }
                                 },
@@ -208067,7 +208112,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Question answered · “Answer sent to Ada. She'll see it on her next turn.” Base 19, requester changed to Ada.",
+                  "content": "Question answered · “Answer sent. It reaches the requester on its next turn.” Base 19, requester changed to Ada.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 13,
@@ -208102,7 +208147,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Question send failed · destructive Alert “Couldn't send your answer: the question was replaced.” + Open the current question; Details expanded with code question_replaced.",
+                  "content": "Question send failed · destructive Alert “Couldn't send the answer: the service is unavailable.” + “Your answer is still here.”; Details expanded with code unavailable; the Submit button reads Retry answer and no second action is offered.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 13,
@@ -208137,7 +208182,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Task reply sent · “Sent to Ada. She's picking it up now.” Base 149's task workspace (the only Ada reply composer); it had no “Receipt key” line or reconciliation note. Paused wait Alert removed so “picking it up now” holds.",
+                  "content": "Task reply sent · “Sent to Ada.” Base 149's task workspace (the only Ada reply composer); it had no “Receipt key” line or reconciliation note. Paused wait Alert removed so the line reads as sent.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 13,
@@ -208172,7 +208217,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "Stop confirmation · one sentence + Stop / Cancel. Base 132, lead shown as Ada.",
+                  "content": "Stop confirmation · the affected-assignments sentence plus one sentence on what Stop does + Stop task / Keep running. Base 132, lead shown as Ada.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 13,
@@ -208207,7 +208252,7 @@
                   "fill": "$X:--muted-foreground",
                   "textGrowth": "fixed-width",
                   "width": "fill_container",
-                  "content": "CLI credential revoked · inline “Revoked. Commands using this credential will stop working.” Base 134.",
+                  "content": "CLI credential revoked · inline “Revoked Laptop CLI.” Base 134.",
                   "lineHeight": 1.45,
                   "fontFamily": "$font-sans",
                   "fontSize": 13,
@@ -208840,7 +208885,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Lifecycle state copy rewritten to the new messages (sent, couldn’t send, question replaced, withdrawn, answered elsewhere).",
+                          "content": "Lifecycle state copy rewritten to the new messages (sent, couldn’t send, question replaced, withdrawn, answered elsewhere); the failed and stale examples use the build's failure and conflict wording.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -208945,7 +208990,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Two failure lines → one destructive Alert: connection failed, selection still here.",
+                          "content": "Two failure lines → one destructive Alert: “Couldn't send the answer: the service is unavailable.” + “Your answer is still here.”",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -210460,7 +210505,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "In-progress sentence and lock note removed; a disabled “Sending…” button carries the state; RV-42 removed from visible copy.",
+                          "content": "In-progress copy is one status line, “Sending review to Mira…”, in place of the Send button; lock note removed; RV-42 removed from visible copy. 95 (confirmed failure): one error Alert “The review wasn't sent: …” with Return to draft replaces the explanation, Retry and Edit draft.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -210495,7 +210540,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Title, explanation, lock note and two buttons → one warning Alert with “Check whether it was sent”; RV-42 removed.",
+                          "content": "Title, explanation, lock note and two buttons → one warning Alert “We couldn't confirm the review reached Mira.” + “Your draft is kept.” + Check whether it saved; RV-42 removed.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -211195,7 +211240,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Stop consequence no longer mentions the observation window.",
+                          "content": "The three Stop consequence lines are replaced by one sentence on what Stop does; the observation window is gone.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -211335,7 +211380,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Unknown-outcome sentence → one warning Alert with “Check whether it saved”. Renamed.",
+                          "content": "Unknown-outcome sentence → one warning Alert with “Check the list”: create and rotate have no request key, so the action re-reads the credentials and never resends. Renamed.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -211440,7 +211485,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Wording: “recorded” → sent / assigned / saved / “yet”; “revision” → version.",
+                          "content": "Wording: “recorded” → sent / assigned / saved / “yet”; “revision” → version. 139 and 142: a failed or unconfirmed revoke reads “Couldn't revoke Laptop CLI: …” / “We couldn't confirm Laptop CLI was revoked.” + “We're reloading the list below.” inside the dialog.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -211850,6 +211895,19 @@
               "textGrowth": "fixed-width",
               "width": "fill_container",
               "content": "· Frame 133–139 and 114b inherit the settings-index wording (“version 4”, “execution hold in place”).",
+              "lineHeight": 1.45,
+              "fontFamily": "$font-sans",
+              "fontSize": 13,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "text",
+              "id": "p9wVHr",
+              "name": "Gap · wait line and Fix",
+              "fill": "$X:--muted-foreground",
+              "textGrowth": "fixed-width",
+              "width": "fill_container",
+              "content": "· 161 and 166c draw “It will wait: …” in the success line beside the Resume project Fix; 39 draws “It will wait for capacity.” there. The build shows the wait reason on its own line below “Task created.” until the Fix actions ship (#950).",
               "lineHeight": 1.45,
               "fontFamily": "$font-sans",
               "fontSize": 13,

@@ -16,6 +16,9 @@ import {
 } from "../web/src/lead-feedback.js";
 import { seedReviewTask } from "./fixtures/task-review.js";
 const test = browserSuite("ui04-workspace");
+/** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
+const serviceWords =
+  /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
 test("production workspace retains literal history, pending request, focused reply and exact result through updates and failed reads on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -488,34 +491,69 @@ test("production workspace retains literal history, pending request, focused rep
   await page
     .getByRole("button", { name: "Send to task lead", exact: true })
     .click();
-  await page.getByText(/unknown: command-outcome-unknown/).waitFor();
-  assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
-  await page
-    .getByRole("button", { name: "Set viewing reference", exact: true })
-    .click();
-  await page
-    .getByText("Observation / review receipt recorded", { exact: true })
+  // One warning, in plain words: the draft is kept, the code is only in Details, and the
+  // single action is the exact-request check.
+  const outcome = page.locator("[data-slot=action-outcome]");
+  await outcome
+    .getByText("We couldn't confirm it was sent. Your draft is kept.")
     .waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.equal(await outcome.getByRole("button").count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  assert.equal(
+    await page.getByRole("button", { name: "Send to task lead" }).count(),
+    0,
+  );
+  assert.equal(await page.getByLabel("Editable reply").isDisabled(), true);
+  await outcome.getByText("Details", { exact: true }).click();
+  const fields = await outcome.locator("dl").innerText();
+  assert.match(fields, /Command\s+message/);
+  assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
+  assert.match(fields, /Code\s+command-outcome-unknown/);
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/operator/commands") &&
+        (r.request().postData() ?? "").includes("review.view"),
+    ),
+    page
+      .getByRole("button", { name: "Set viewing reference", exact: true })
+      .click(),
+  ]);
+  // A different action's outcome never replaces an unknown reply outcome, or takes the focus.
+  await outcome.waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Set viewing reference",
+  );
   assert.ok(
     await page
-      .getByRole("button", {
-        name: "Reconcile original operation",
-        exact: true,
-      })
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .isEnabled(),
   );
-  await page
-    .getByRole("button", { name: "Refresh delivery observation", exact: true })
-    .click();
-  await page
-    .getByText("Observation / review receipt recorded", { exact: true })
-    .waitFor();
-  assert.ok(
-    await page
+  await Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/operator/commands") &&
+        (r.request().postData() ?? "").includes("delivery.refresh"),
+    ),
+    page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Refresh delivery observation",
         exact: true,
       })
+      .click(),
+  ]);
+  await outcome.waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Refresh delivery observation",
+  );
+  assert.ok(
+    await page
+      .getByRole("button", { name: "Check whether it saved", exact: true })
       .isEnabled(),
   );
   await page.getByLabel("Editable reply").scrollIntoViewIfNeeded();
@@ -523,9 +561,13 @@ test("production workspace retains literal history, pending request, focused rep
     fullPage: false,
   });
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
-  await page.getByText("Receipt recorded", { exact: true }).waitFor();
+  await page.getByText("Sent to Task lead.", { exact: true }).waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  assert.match(await outcome.locator("dl").innerText(), /Kind\s+coordination/);
   assert.equal(replyRequests.length, 2);
   assert.equal(replyRequests[0], replyRequests[1]);
   assert.equal(f.service.domain().task(a.taskId).version, taskBefore);
@@ -536,6 +578,86 @@ test("production workspace retains literal history, pending request, focused rep
     .messages.filter((m) => m.text === "Unfinished contextual reply");
   assert.equal(local.length, 1);
   assert.equal(local[0]?.reference?.resultId, r.resultId);
+  // Results and Changes writes whose response is lost stay one exact request: their control is
+  // off, the check replays the same request, and nothing builds a new one from the selection.
+  await page.setViewportSize({ width: 1366, height: 900 });
+  for (const [type, control, done] of [
+    ["review.view", "Set viewing reference", "Viewing reference set."],
+    [
+      "delivery.refresh",
+      "Refresh delivery observation",
+      "Delivery status refreshed.",
+    ],
+  ] as const) {
+    const bodies: string[] = [];
+    let lost = true;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = route.request().postDataJSON() as { type?: string };
+      if (body.type !== type) return route.fallback();
+      bodies.push(route.request().postData() ?? "");
+      if (lost) {
+        lost = false;
+        await route.fetch();
+        await route.abort("connectionreset");
+      } else await route.continue();
+    });
+    await page.getByRole("button", { name: control, exact: true }).click();
+    const lostOutcome = page
+      .locator("[data-slot=action-outcome]")
+      .filter({ hasText: "We couldn't confirm" });
+    await lostOutcome.waitFor();
+    assert.equal(await lostOutcome.count(), 1);
+    assert.equal(await lostOutcome.getByRole("button").count(), 1);
+    assert.equal(
+      await page
+        .getByRole("button", { name: control, exact: true })
+        .isDisabled(),
+      true,
+    );
+    await lostOutcome.getByText("Details", { exact: true }).click();
+    assert.match(
+      await lostOutcome.locator("dl").innerText(),
+      /Request key\s+[0-9a-f-]{36}/,
+    );
+    if (type === "review.view") {
+      // The exact request is kept with the task, not the page: leaving and coming back
+      // finds the control still off and the check still there.
+      await page
+        .getByRole("link", { name: "Search", exact: true })
+        .evaluate((el) => (el as HTMLElement).click());
+      await page
+        .getByRole("button", {
+          name: "Back to originating workspace",
+          exact: true,
+        })
+        .click();
+      await page.getByRole("button", { name: control, exact: true }).waitFor();
+      assert.equal(
+        await page
+          .getByRole("button", { name: control, exact: true })
+          .isDisabled(),
+        true,
+      );
+    }
+    await lostOutcome
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .click();
+    await page.getByText(done, { exact: true }).waitFor();
+    // Focus returns to the control once its request is settled.
+    await page.waitForFunction(
+      (label) => document.activeElement?.textContent === label,
+      control,
+    );
+    assert.equal(bodies.length, 2);
+    assert.equal(bodies[0], bodies[1]);
+    assert.equal(
+      await page
+        .getByRole("button", { name: control, exact: true })
+        .isEnabled(),
+      true,
+    );
+    await page.unroute("**/api/operator/commands");
+  }
   // A running lead receives feedback on its next eligible turn (frame 03a).
   assert.equal(
     await page

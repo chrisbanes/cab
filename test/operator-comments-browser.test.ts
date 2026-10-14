@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, type Request, chromium } from "playwright";
+import { type Browser, type Page, type Request, chromium } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -9,6 +9,21 @@ import { createOperatorFixture } from "./fixtures/operator-web.js";
 import { signOutFromSidebar } from "./fixtures/operator-account.js";
 
 const test = browserSuite("ui04-comments");
+/** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
+const serviceWords =
+  /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
+/** Sets the viewing reference and waits for the service to answer it. */
+const setViewingReference = (page: Page) =>
+  Promise.all([
+    page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/operator/commands") &&
+        (r.request().postData() ?? "").includes("review.view"),
+    ),
+    page
+      .getByRole("button", { name: "Set viewing reference", exact: true })
+      .click(),
+  ]);
 test("approval-mode exact operator review and unknown remote comment retain original intent through viewing and provider read reconciliation", async (_t, j) => {
   const previousSource = process.env.FIXTURE_SOURCE;
   process.env.FIXTURE_SOURCE = "offline-comment-source-value";
@@ -239,18 +254,27 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       .isEnabled(),
     false,
   );
+  // An earlier viewing-reference outcome must not hide the refusal of a draft that cannot be sent.
+  await page
+    .getByRole("button", { name: "Set viewing reference", exact: true })
+    .click();
+  await page.getByText("Viewing reference set.", { exact: true }).waitFor();
   // Lose actual committed review and confirmation responses, retaining normalized
   // immutable commands independently of the editable whitespace in the draft.
   await page.getByLabel("Editable reply").fill("x".repeat(16001));
   await page
     .getByRole("button", { name: "Review exact GitHub comment", exact: true })
     .click();
-  await page
-    .getByText(
-      "Invalid command material. Draft retained; correct it before trying again.",
-      { exact: true },
-    )
+  const outcome = page.locator("[data-slot=action-outcome]");
+  await outcome
+    .getByText("That draft can't be sent as written. Your draft is kept.", {
+      exact: true,
+    })
     .waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  assert.match(await outcome.locator("dl").innerText(), /Code\s+invalid-input/);
   assert.equal(await page.getByLabel("Editable reply").isEnabled(), true);
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
@@ -298,8 +322,19 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByRole("button", { name: "Review exact GitHub comment", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
+  // One warning with one action; the review stays frozen and the code stays in Details.
+  await outcome
+    .getByText(
+      "We couldn't confirm the review was saved. Your draft is kept.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.equal(await outcome.getByRole("button").count(), 1);
   const originalReview = reviewCommands[0]!;
   assert.equal(originalReview.body, "Exact operator comment body");
   const storedReview = f.service
@@ -323,20 +358,15 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       .isEnabled(),
     false,
   );
+  await setViewingReference(page);
   await page
-    .getByRole("button", { name: "Set viewing reference", exact: true })
-    .click();
-  await page
-    .getByText("Observation / review receipt recorded", { exact: true })
-    .waitFor();
-  await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   await replayEntry;
   await page.locator(".page-header-back").click();
   await page.locator(`a[href="/app/tasks/${taskId}"]`).first().click();
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
@@ -353,14 +383,14 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   assert.equal(
     await page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Check whether it saved",
         exact: true,
       })
       .isEnabled(),
     true,
   );
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   assert.deepEqual(reviewCommands[1], originalReview);
   assert.deepEqual(reviewCommands[2], originalReview);
@@ -389,8 +419,17 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByRole("button", { name: "Confirm exact comment", exact: true })
     .click();
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .waitFor();
+  await outcome
+    .getByText(
+      "We couldn't confirm your decision was saved. Your draft is kept.",
+      {
+        exact: true,
+      },
+    )
+    .waitFor();
+  assert.equal(await outcome.count(), 1);
   const originalConfirm = confirmCommands[0]!;
   const confirmed = f.service
     .delivery()
@@ -409,7 +448,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await captureBrowserEvidence(page, "390-unknown-comment-confirm");
   await page.setViewportSize({ width: 1366, height: 900 });
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
   await page
     .getByRole("button", { name: "Post comment", exact: true })
@@ -426,22 +465,29 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await page.unroute("**/api/operator/commands");
   // Existing send journey uses the same exact normalized approved material.
   await page.getByRole("button", { name: "Post comment", exact: true }).click();
-  await page.getByText(/uncertain: response-lost/).waitFor();
+  await outcome
+    .getByText(
+      "We couldn't confirm the comment was posted. Your draft is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  assert.match(
+    await outcome.locator("dl").innerText(),
+    /Reason\s+response-lost/,
+  );
   assert.equal(effects, 1);
   const operation = f.service.delivery().actions()[0];
   assert.ok(operation);
   assert.ok("actor" in operation.binding);
   assert.equal(operation.binding.actor, "operator");
-  await page
-    .getByRole("button", { name: "Set viewing reference", exact: true })
-    .click();
-  await page
-    .getByText("Observation / review receipt recorded", { exact: true })
-    .waitFor();
+  await setViewingReference(page);
   assert.ok(
     await page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Check whether it saved",
         exact: true,
       })
       .isEnabled(),
@@ -457,11 +503,15 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     "  Exact operator comment body  ",
   );
   await page
-    .getByRole("button", { name: "Reconcile original operation", exact: true })
+    .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
-  await page
-    .getByText(/confirmed-success: provider receipt recorded/)
-    .waitFor();
+  await outcome.getByText("Comment posted.", { exact: true }).waitFor();
+  assert.equal(await outcome.count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  const posted = await outcome.locator("dl").innerText();
+  assert.match(posted, /Kind\s+delivery/);
+  assert.match(posted, /State\s+confirmed-success/);
   assert.equal(effects, 1);
   assert.equal(f.service.delivery().actions().length, 1);
   assert.equal(
@@ -891,6 +941,12 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   releaseSource();
   await page
     .getByText(/source comparison unknown; current observation unavailable/)
+    .waitFor({ state: "attached" });
+  // The failed refresh speaks even though an earlier viewing-reference outcome is still set.
+  await page
+    .getByText("Source refresh failed. Last successful source retained.", {
+      exact: true,
+    })
     .waitFor({ state: "attached" });
   assert.equal(
     await page

@@ -61,9 +61,8 @@ export function RuntimeSettings(p: SettingsProps) {
           <p className="introduction muted">
             {data.globalUsage} of {data.globalLimit} active turns in use;
             projects default to {data.defaultProjectLimit}. Lowering a cap stops
-            new starts until usage fits; active turns keep running. Capacity
-            uses a keyed command with no configuration version or
-            compare-and-swap guarantee.
+            new starts until usage fits; active turns keep running. Two saves at
+            the same time can overwrite each other.
           </p>
           <div className="settings-split">
             <div className="settings-column">
@@ -291,9 +290,9 @@ export function AssignmentRecovery(
           {data.holds.uncertainty && (
             <Alert variant="destructive" role="alert">
               <strong>Execution may still be active.</strong> No replacement,
-              successor or follow-up can start until this execution is
-              reconciled. Resume does not clear it; time, acknowledgement or a
-              newer receipt is not proof that it ended.
+              successor or follow-up can start until this execution is confirmed
+              ended. Resume does not clear this, and neither does time passing
+              or an acknowledgement.
             </Alert>
           )}
           <div className="settings-phone-cards">
@@ -326,33 +325,32 @@ export function AssignmentRecovery(
                 </ul>
                 <p className="metadata muted">
                   Resume does not release writer ownership, capacity or
-                  uncertainty. A newer receipt, elapsed time or interruption
-                  acknowledgement provides no termination proof.
+                  uncertainty. Elapsed time or an interruption acknowledgement
+                  does not prove the execution ended.
                 </p>
               </Panel>
-              <Panel title="Revisions and actual admitted generation">
+              <Panel title="Versions and generation in use">
                 <p className="body">
-                  {`Configured assignment version ${data.assignment.version}; captured instruction revision `}
-                  {data.assignment.instructionsRevision}, profile revision{" "}
-                  {data.assignment.profileRevision}. Current next-turn
-                  instruction revision{" "}
-                  {data.assignment.currentInstructionsRevision}, profile
-                  revision {data.assignment.currentProfileRevision}.
+                  {`Configured assignment version ${data.assignment.version}; captured instructions version `}
+                  {data.assignment.instructionsRevision}, profile version{" "}
+                  {data.assignment.profileRevision}. Next-turn instructions
+                  version {data.assignment.currentInstructionsRevision}, profile
+                  version {data.assignment.currentProfileRevision}.
                 </p>
                 {data.assignment.executionGeneration ? (
                   <p className="body">
-                    Actual admitted generation: assignment version{" "}
+                    Generation in use: assignment version{" "}
                     {data.assignment.executionGeneration.assignmentVersion},
                     request sequence{" "}
                     {data.assignment.executionGeneration.requestSequence},
-                    instruction revision{" "}
+                    instructions version{" "}
                     {data.assignment.executionGeneration.instructionsRevision},
-                    profile revision{" "}
+                    profile version{" "}
                     {data.assignment.executionGeneration.profileRevision}.
                   </p>
                 ) : (
                   <p className="body">
-                    Admitted generation unavailable. This does not prove
+                    The generation in use is unavailable. This does not prove
                     execution ended.
                   </p>
                 )}

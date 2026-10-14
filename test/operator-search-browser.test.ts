@@ -131,7 +131,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page
     .getByRole("button", { name: "Refresh results", exact: true })
     .click();
-  await page.getByText(/Last successful matches retained/).waitFor();
+  await page.getByText(/Refresh failed\. Showing the last matches/).waitFor();
   assert.equal(
     await page.locator(`[data-search-record="${r.resultId}"]`).count(),
     1,
@@ -582,7 +582,7 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
       .click();
     await page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Check whether it saved",
         exact: true,
       })
       .waitFor();
@@ -605,11 +605,26 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
     );
     await page
       .getByRole("button", {
-        name: "Reconcile original operation",
+        name: "Check whether it saved",
         exact: true,
       })
       .click();
-    await page.getByText(new RegExp(`Receipt key ${originalKey}`)).waitFor();
+    // The original request key stays reachable, but only inside Details.
+    const sentOutcome = page.locator("[data-slot=action-outcome]");
+    await sentOutcome.waitFor();
+    assert.equal(await sentOutcome.count(), 1);
+    assert.equal(
+      await sentOutcome.innerText().then((t) => t.includes(originalKey)),
+      false,
+    );
+    await sentOutcome.getByText("Details", { exact: true }).click();
+    assert.equal(
+      await sentOutcome
+        .locator("dt", { hasText: "Request key" })
+        .locator("xpath=following-sibling::dd")
+        .innerText(),
+      originalKey,
+    );
     assert.equal(await page.getByLabel("Editable reply").inputValue(), "");
     assert.equal(
       f.service

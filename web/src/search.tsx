@@ -220,7 +220,7 @@ export function Search({
       {!query && <p>Enter a phrase to search across projects.</p>}
       {query && resource.state.error && data && (
         <p role="status">
-          Failed refresh. Last successful matches retained from{" "}
+          Refresh failed. Showing the last matches, from{" "}
           {new Date(data.observedAt).toLocaleString()}.
         </p>
       )}

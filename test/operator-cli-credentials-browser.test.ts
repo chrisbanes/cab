@@ -117,6 +117,15 @@ test("Settings issues, rotates and revokes CLI credentials without keeping the t
   const next = await reveal();
   assert.notEqual(next.token, old.token);
   await next.dialog.getByRole("button", { name: "Done" }).click();
+  // Rotate confirms with one line naming the credential and what happens to the old one.
+  const outcomes = panel.locator("[data-slot=action-outcome]");
+  await outcomes
+    .getByText(
+      "Rotated agent-rw. The old credential stays active until you revoke it.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await outcomes.count(), 1);
   await named.nth(1).waitFor();
   assert.equal(await named.count(), 2);
   assert.match(await named.nth(1).innerText(), /Replaces\s*agent-rw \(/);
@@ -138,6 +147,9 @@ test("Settings issues, rotates and revokes CLI credentials without keeping the t
   );
   await confirm.getByRole("button", { name: "Revoke credential" }).click();
   await confirm.waitFor({ state: "detached" });
+  // Revoke closes its dialog and leaves one success line on the panel.
+  await outcomes.getByText("Revoked agent-rw.", { exact: true }).waitFor();
+  assert.equal(await outcomes.count(), 1);
   await named.nth(0).getByText("Revoked", { exact: true }).first().waitFor();
   assert.match(await named.nth(1).innerText(), /Active/);
   assert.equal(await bearer(old.token), 401);
@@ -146,6 +158,89 @@ test("Settings issues, rotates and revokes CLI credentials without keeping the t
     for (const token of [first.token, old.token, next.token])
       assert.equal(body.includes(token), false);
   await assertNoStoredToken(page, [first.token, old.token, next.token]);
+
+  // 8. A refused request names the cause; the code is in Details, never in the message.
+  const writes = "**/api/operator/credentials**";
+  const postsBefore = () => posts.length;
+  await page.route(writes, (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "forbidden", message: "Refused" },
+          }),
+        })
+      : route.fallback(),
+  );
+  await create("denied");
+  const refused = outcomes.filter({ hasText: "Couldn't create" });
+  await refused
+    .getByText(
+      "Couldn't create the credential: you don't have permission. Your entries are still here; we're reloading the list below.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await outcomes.count(), 1);
+  assert.doesNotMatch(await refused.innerText(), /forbidden/);
+  await refused.getByText("Details", { exact: true }).click();
+  await refused.getByText("forbidden", { exact: true }).waitFor();
+  assert.equal(
+    await panel.getByLabel("Credential name").inputValue(),
+    "denied",
+  );
+  await page.unroute(writes);
+
+  // 9. An unconfirmed create or rotate offers Check the list, which re-reads and never resends.
+  await page.route(writes, (route) =>
+    route.request().method() === "POST" ? route.abort() : route.fallback(),
+  );
+  for (const act of [
+    () => create("maybe"),
+    () => named.nth(1).getByRole("button", { name: "Rotate agent-rw" }).click(),
+  ]) {
+    await act();
+    const unknown = outcomes.filter({ hasText: "We couldn't confirm" });
+    await unknown.waitFor();
+    assert.equal(await outcomes.count(), 1);
+    assert.equal(await unknown.getAttribute("data-tone"), "warning");
+    assert.equal(await unknown.getByRole("button").count(), 1);
+    const sentBefore = postsBefore();
+    const reread = page.waitForResponse(
+      (r) =>
+        r.request().method() === "GET" &&
+        r.url().endsWith("/api/operator/credentials"),
+    );
+    await unknown.getByRole("button", { name: "Check the list" }).click();
+    await reread;
+    assert.equal(postsBefore(), sentBefore);
+  }
+  await page.unroute(writes);
+
+  // 10. A refused revoke stays inside its dialog.
+  await page.route(writes, (route) =>
+    route.request().method() === "POST" || route.request().method() === "DELETE"
+      ? route.fulfill({
+          status: 403,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: { code: "forbidden", message: "Refused" },
+          }),
+        })
+      : route.fallback(),
+  );
+  await named.nth(1).getByRole("button", { name: "Revoke agent-rw" }).click();
+  const again = page.getByRole("dialog", { name: "Revoke agent-rw?" });
+  await again.getByRole("button", { name: "Revoke credential" }).click();
+  await again
+    .getByText(
+      "Couldn't revoke agent-rw: you don't have permission. We're reloading the list below.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await again.locator("[data-slot=action-outcome]").count(), 1);
+  await page.unroute(writes);
+  await again.getByRole("button", { name: "Cancel" }).click();
 });
 
 /** The token must not reach web storage or the URL. */

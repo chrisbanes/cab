@@ -8,7 +8,9 @@ import type {
   QuestionRead,
   CommandReceipt,
 } from "../../src/operator/contracts.js";
+import type { CommandState } from "./api.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
+import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
 
 /** Validation issues by question id (`""` for the form), empty when the answers are valid. */
 function answerIssues(form: QuestionForm, answers: QuestionAnswers) {
@@ -56,25 +58,39 @@ export function answerSummary(form: QuestionForm, answers: QuestionAnswers) {
   return { lines, missing };
 }
 
+/** The plain outcome copy of an answer; Details, not these lines, carry the codes. */
+export const answerCopy = {
+  sent: "Answer sent. It reaches the requester on its next turn.",
+  unknown:
+    "We couldn't confirm your answer was sent. Your answer is kept until you check.",
+  conflict:
+    "This question was already answered, changed or withdrawn. Your answer is still here.",
+  failed: (code: string) =>
+    `Couldn't send the answer: ${failureCause(code)}. Your answer is still here.`,
+};
+
 export type QuestionOutcome = "recorded" | "unknown" | "conflict" | "failed";
 export class QuestionResponseState {
   readonly lifecycle = new CommandLifecycle<OperatorCommand>();
   readonly form: QuestionForm;
   readonly revision: number;
+  readonly interactionId: string;
   answers: QuestionAnswers;
   errors: Record<string, string> = Object.create(null);
+  /** The plain message the last settled send left behind; empty while none has. */
   notice = "";
+  /** The receipt fields behind `notice`, shown only in its collapsed Details. */
+  details: ReceiptDetails = {};
   sending = false;
   scrollTop = 0;
   focusId: string | null = null;
   /** How the last submission ended; null until one settles. */
   outcome: QuestionOutcome | null = null;
-  /** The code behind a failed submission, shown beside the retry. */
-  failureCode: string | null = null;
   constructor(data: QuestionRead["data"]) {
     if (!data.form) throw Error("Unavailable form");
     this.form = structuredClone(data.form);
     this.revision = data.revision;
+    this.interactionId = data.interactionId;
     this.answers = data.answers
       ? structuredClone(data.answers)
       : Object.fromEntries(
@@ -104,6 +120,33 @@ export class QuestionResponseState {
           receipt.taskId === command.taskId &&
           receipt.eventType === "question-answer")
     );
+  }
+  /** Settle the send of `command`: the disposition, plain message and receipt fields. */
+  settle(command: OperatorCommand, result: CommandState) {
+    this.sending = false;
+    const disposition = this.lifecycle.settle(result, (c, r) =>
+      this.matches(c, r),
+    );
+    this.outcome = disposition === "rejected" ? "failed" : disposition;
+    const code = result.state === "recorded" ? undefined : result.code;
+    const receipt = this.lifecycle.receipt;
+    this.details = {
+      command: command.type,
+      resource: this.interactionId,
+      version: this.revision,
+      requestKey: command.key,
+      ...(receipt ? { kind: receipt.kind } : {}),
+      ...(code ? { code } : {}),
+    };
+    this.notice =
+      disposition === "recorded"
+        ? answerCopy.sent
+        : disposition === "unknown"
+          ? answerCopy.unknown
+          : disposition === "conflict"
+            ? answerCopy.conflict
+            : answerCopy.failed(code ?? "command-outcome-unknown");
+    return disposition;
   }
   setAnswer(id: string, value: QuestionAnswers[string]) {
     if (this.sending || this.lifecycle.uncertain || this.lifecycle.receipt)

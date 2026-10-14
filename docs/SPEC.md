@@ -1144,7 +1144,7 @@ Contract details:
 - The task Reply composer (including contextual "Ask lead about …" drafts) and
   the Local review panel show one status line from `web/src/lead-feedback.ts`:
   "<Lead> has completed its assignment and will resume to address this
-  feedback." A resumed send reports "Receipt recorded. <Lead> resumed with this
+  feedback." A resumed send reports "Sent. <Lead> resumed with this
   feedback." in the composer and "<Lead> was resumed with this review as a
   follow-up." in Local review. Local review shows the recovery-continuation
   copy while `awaitingRecoveryMessage` is true; Send stays enabled.

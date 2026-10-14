@@ -17,6 +17,9 @@ import {
 import { seedReviewTask } from "./fixtures/task-review.js";
 
 const test = browserSuite("ui10-local-review");
+/** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
+const serviceWords =
+  /recorded|receipt|observation|admission|reconcile|submission|revision|\d|project\.|conflict|invalid/i;
 
 function git(root: string, ...args: string[]) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" });
@@ -277,14 +280,33 @@ test("production local review composes exact multi-origin anchors and sends one 
   await review
     .getByRole("button", { name: /^Send review \(2 comments\)/ })
     .click();
-  await review.getByText(/Delivery to .* is unknown/).waitFor();
+  const outcome = review.locator("[data-slot=action-outcome]");
+  await outcome
+    .getByText(
+      "We couldn't confirm the review reached Task lead. Your draft is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  // One warning with one action; the code is only in Details.
+  assert.equal(await outcome.count(), 1);
+  assert.equal(await outcome.getByRole("button").count(), 1);
+  assert.doesNotMatch(await outcome.locator("p").innerText(), serviceWords);
+  await outcome.getByText("Details", { exact: true }).click();
+  const fields = await outcome.locator("dl").innerText();
+  assert.match(fields, /Command\s+review\.send/);
+  assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
+  assert.match(fields, /Code\s+command-outcome-unknown/);
   await page.unroute("**/api/operator/commands");
   assert.equal(events(), 1);
-  await review.getByRole("button", { name: "Check delivery" }).click();
-  await review
-    .getByText(/Review sent to .*One local message was queued/)
-    .waitFor();
+  await review.getByRole("button", { name: "Check whether it saved" }).click();
+  await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1, "reconciliation never sends a second event");
+  // The confirmed send keeps its request key in Details but not the earlier unknown code.
+  const confirmed = review.locator("[data-slot=action-outcome]");
+  await confirmed.getByText("Details", { exact: true }).click();
+  const confirmedFields = await confirmed.locator("dl").innerText();
+  assert.match(confirmedFields, /Request key\s+[0-9a-f-]{36}/);
+  assert.doesNotMatch(confirmedFields, /Code|command-outcome-unknown/);
   const sent = review.getByRole("region", { name: "Sent review", exact: true });
   await sent.getByText("Edited file comment").waitFor();
   await sent.getByText(/diff\.txt · lines 2–3/).waitFor();
@@ -380,6 +402,523 @@ const activeAttribute = (page: Page, name: string) =>
     (attribute) => document.activeElement?.hasAttribute(attribute),
     name,
   );
+
+test("a refused comment save shows one plain alert, keeps the text and puts the code in Details", async (_t, j) => {
+  const { web, task, page, pageErrors } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Refused comment");
+  await page.route("**/api/operator/commands", (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.draft.save") return route.continue();
+    return route.fulfill({
+      status: 403,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "forbidden", message: "Refused" },
+      }),
+    });
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  const alert = files.locator("[data-slot=action-outcome]");
+  await alert
+    .getByText(
+      "Couldn't save the comment: you don't have permission. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await alert.count(), 1);
+  assert.equal(await alert.getAttribute("role"), "alert");
+  assert.doesNotMatch(await alert.locator("p").innerText(), serviceWords);
+  assert.equal(
+    await files.getByLabel("Comment", { exact: true }).inputValue(),
+    "Refused comment",
+  );
+  await alert.getByText("Details", { exact: true }).click();
+  const fields = await alert.locator("dl").innerText();
+  assert.match(fields, /Command\s+review\.draft\.save/);
+  assert.match(fields, /Code\s+forbidden/);
+  assert.deepEqual(
+    pageErrors.filter((text) => !/status of 403/.test(text)),
+    [],
+  );
+});
+
+test("a comment save whose response is lost stays one exact request until it is checked", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Lost response comment");
+  const stages: string[] = [];
+  const saves: string[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type === "review.anchor.stage")
+      stages.push(route.request().postData() ?? "");
+    if (body.type !== "review.draft.save") return route.continue();
+    saves.push(route.request().postData() ?? "");
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  // The check lives in the Local review panel, reachable from anywhere in the task.
+  const review = page.locator("#local-review");
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByText(
+      "We couldn't confirm the comment was saved. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await warning.count(), 1);
+  assert.equal(await warning.getAttribute("data-tone"), "warning");
+  assert.equal(await warning.getByRole("button").count(), 1);
+  assert.equal(
+    await files.getByLabel("Comment", { exact: true }).inputValue(),
+    "Lost response comment",
+  );
+  assert.equal(
+    await files.getByLabel("Comment", { exact: true }).isDisabled(),
+    true,
+  );
+  // The composer points to the check instead of repeating the warning.
+  await files.getByText("Check whether it saved in Local review.").waitFor();
+  assert.equal(await files.locator("[data-slot=action-outcome]").count(), 0);
+  await warning.getByText("Details", { exact: true }).click();
+  assert.match(
+    await warning.locator("dl").innerText(),
+    /Request key\s+[0-9a-f-]{36}/,
+  );
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Lost response comment").first().waitFor();
+  // The check replayed the same save and the same anchor: one comment, no second request.
+  assert.equal(saves.length, 2);
+  assert.equal(saves[0], saves[1]);
+  assert.equal(stages.length, 1);
+  assert.equal(await review.getByText("Lost response comment").count(), 1);
+  await files
+    .getByLabel("Comment", { exact: true })
+    .waitFor({ state: "detached" });
+});
+
+test("an unconfirmed edit keeps its request and blocks new comments and edits until it is checked", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  const saves: string[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.draft.save") return route.continue();
+    saves.push(route.request().postData() ?? "");
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  await review.getByRole("button", { name: "Edit" }).click();
+  await review.getByLabel("Edit comment").fill("Edited note");
+  await review.getByRole("button", { name: "Save edit" }).click();
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByText("We couldn't confirm the change was saved. Your text is kept.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await warning.getByRole("button").count(), 1);
+  // Other edits stay blocked: the textarea is off and no new comment can start.
+  assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  assert.equal(
+    await files
+      .getByRole("button", { name: "Add review comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Edited note", { exact: true }).waitFor();
+  assert.equal(saves.length, 2);
+  assert.equal(saves[0], saves[1]);
+  // The checked edit settles to one success line, with no check left to press.
+  await warning.getByText("Comment updated.", { exact: true }).waitFor();
+  assert.equal(await warning.count(), 1);
+  assert.equal(await warning.getAttribute("data-tone"), "success");
+  assert.equal(await warning.getByRole("button").count(), 0);
+  await files
+    .locator("button:not([disabled])", { hasText: "Add review comment" })
+    .waitFor();
+});
+
+test("every draft write reports one plain success line with its receipt, cleared when the operator types", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const review = page.locator("#local-review");
+  const success = review.locator("[data-slot=action-outcome]");
+  const expectSuccess = async (message: string) => {
+    await success.getByText(message, { exact: true }).waitFor();
+    assert.equal(await success.count(), 1);
+    assert.equal(await success.getAttribute("data-tone"), "success");
+    assert.doesNotMatch(await success.locator("p").innerText(), serviceWords);
+    await success.getByText("Details", { exact: true }).click();
+    const fields = await success.locator("dl").innerText();
+    assert.match(fields, /Command\s+review\.draft\.save/);
+    assert.match(fields, /Request key\s+[0-9a-f-]{36}/);
+    assert.match(fields, /Kind\s+local-review-draft/);
+  };
+  await commentOnLine(page, "Line 1: first", "First note");
+  await expectSuccess("Comment added.");
+  await review.getByRole("button", { name: "Edit" }).click();
+  await review.getByLabel("Edit comment").fill("Edited note");
+  assert.equal(await success.count(), 0, "typing clears the success line");
+  await review.getByRole("button", { name: "Save edit" }).click();
+  await expectSuccess("Comment updated.");
+  await review.getByLabel("Summary (optional)").fill("A summary");
+  await review.getByRole("button", { name: "Save summary" }).click();
+  await expectSuccess("Summary saved.");
+  await review.getByRole("button", { name: "Remove", exact: true }).click();
+  await expectSuccess("Comment removed.");
+});
+
+test("the review controls stay off until the refresh after a draft write has finished", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const review = page.locator("#local-review");
+  await review.getByRole("button", { name: "Edit" }).click();
+  await review.getByLabel("Edit comment").fill("Edited note");
+  let entered!: () => void;
+  let release!: () => void;
+  const readEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/tasks/*/review-draft", async (route) => {
+    entered();
+    await gate;
+    await route.continue();
+  });
+  await review.getByRole("button", { name: "Save edit" }).click();
+  await readEntered;
+  // The write is recorded and the draft read is still on its way: nothing may start.
+  await page.waitForTimeout(200);
+  assert.equal(
+    await review.getByRole("button", { name: "Save edit" }).isDisabled(),
+    true,
+  );
+  assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+  assert.equal(
+    await review.getByRole("button", { name: "Cancel edit" }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await review.getByLabel("Summary (optional)").isDisabled(),
+    true,
+  );
+  release();
+  await review
+    .locator("[data-slot=action-outcome]")
+    .getByText("Comment updated.", { exact: true })
+    .waitFor();
+  await page.unroute("**/api/operator/tasks/*/review-draft");
+  await review
+    .getByRole("button", { name: "Edit" })
+    .and(page.locator(":enabled"))
+    .waitFor();
+});
+
+test("the review controls are off from the first request of a new comment until it has settled", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const files = page.locator("#files");
+  const review = page.locator("#local-review");
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Second note");
+  let entered!: () => void;
+  let release!: () => void;
+  const stageEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.anchor.stage") return route.continue();
+    entered();
+    await gate;
+    await route.continue();
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  await stageEntered;
+  // The first request is in flight and nothing has been re-read yet: no other write may start.
+  await page.waitForTimeout(200);
+  assert.equal(
+    await review.getByRole("button", { name: "Edit" }).first().isDisabled(),
+    true,
+  );
+  assert.equal(
+    await review
+      .getByRole("button", { name: "Remove", exact: true })
+      .first()
+      .isDisabled(),
+    true,
+  );
+  release();
+  await review.getByText("Second note").waitFor();
+  await page.unroute("**/api/operator/commands");
+});
+
+/** A new comment whose anchor request was committed but whose answer was lost. */
+async function loseStageAnswer(
+  page: Page,
+  task: { taskId: string },
+  web: { origin: string; password: string },
+  replay: "continue" | "refuse" = "continue",
+) {
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /review\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 2: second" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await page.keyboard.type("Settled after leaving");
+  const stages: string[] = [];
+  const saves: string[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type === "review.draft.save")
+      saves.push(route.request().postData() ?? "");
+    if (body.type !== "review.anchor.stage") return route.continue();
+    stages.push(route.request().postData() ?? "");
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else if (replay === "refuse")
+      await route.fulfill({
+        status: 403,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "forbidden", message: "Refused" },
+        }),
+      });
+    else await route.continue();
+  });
+  await files
+    .getByRole("button", { name: "Save comment", exact: true })
+    .click();
+  const review = page.locator("#local-review");
+  await review
+    .locator("[data-slot=action-outcome]")
+    .getByText(
+      "We couldn't confirm the exact lines were captured. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  return { stages, saves, review };
+}
+
+test("an unconfirmed anchor stays checkable from a new navigation entry and finishes the comment once", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { stages, saves, review } = await loseStageAnswer(page, task, web);
+  // Leave and reopen the task through a new entry: no composer is on screen any more.
+  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
+  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .waitFor();
+  assert.equal(await page.getByLabel("Comment", { exact: true }).count(), 0);
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Settled after leaving").first().waitFor();
+  assert.equal(stages.length, 2);
+  assert.equal(stages[0], stages[1]);
+  assert.equal(saves.length, 1);
+  assert.equal(await review.getByText("Settled after leaving").count(), 1);
+  await warning.getByText("Comment added.", { exact: true }).waitFor();
+});
+
+test("a refused replay on a new entry is reported in the panel and does not block new comments", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { review } = await loseStageAnswer(page, task, web, "refuse");
+  await page.getByRole("link", { name: "Tasks", exact: true }).first().click();
+  await page.getByRole("link", { name: "Review exact lines" }).first().click();
+  const panel = review.locator("[data-slot=action-outcome]");
+  await panel
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  // The composer's form is not on this page, so the refusal is said in the panel, once.
+  await panel
+    .getByText(
+      "Couldn't capture the exact lines: you don't have permission. Your comment is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await panel.count(), 1);
+  // The leftover composer does not hold the Add button: a new comment can start here.
+  const files = page.locator("#files");
+  await files
+    .getByRole("button", { name: /repo-alpha, repository, full path/ })
+    .click();
+  await files.getByRole("button", { name: /diff\.txt/ }).click();
+  await files.getByRole("button", { name: "Line 1: keep" }).click();
+  await files
+    .getByRole("button", { name: "Add review comment", exact: true })
+    .click();
+  await files.getByLabel("Comment", { exact: true }).waitFor();
+});
+
+test("a review send in flight when its page goes away is left for the next page to check", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  await signIn(
+    page,
+    web.origin,
+    `/app/tasks/${task.taskId}?section=files`,
+    web.password,
+  );
+  await commentOnLine(page, "Line 1: first", "First note");
+  const review = page.locator("#local-review");
+  let entered!: () => void;
+  let release!: () => void;
+  const sendEntered = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as { type?: string };
+    if (body.type !== "review.send") return route.continue();
+    entered();
+    await gate;
+    await route.continue();
+  });
+  const sendAnswered = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/operator/commands") &&
+      (response.request().postData() ?? "").includes("review.send"),
+  );
+  await review
+    .getByRole("button", { name: /^Send review \(1 comment\)/ })
+    .click();
+  await sendEntered;
+  await page
+    .getByRole("link", { name: "Search", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await page
+    .getByRole("button", { name: "Back to originating workspace", exact: true })
+    .click();
+  release();
+  await sendAnswered;
+  // The old page's answer is not applied to a page that is gone; the new page checks it.
+  await review
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await review.getByText("Review sent to Task lead.").waitFor();
+  await review.getByRole("button", { name: "Start a new review" }).waitFor();
+});
+
+test("an unconfirmed anchor is settled by the page that checks it after a remount", async (_t, j) => {
+  const { web, task, page } = await startReview(j);
+  const { stages, saves, review } = await loseStageAnswer(page, task, web);
+  await page
+    .getByRole("link", { name: "Search", exact: true })
+    .evaluate((el) => (el as HTMLElement).click());
+  await page
+    .getByRole("button", { name: "Back to originating workspace", exact: true })
+    .click();
+  const warning = review.locator("[data-slot=action-outcome]");
+  await warning
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  // The current page saves and reads the draft back: the comment shows without a reload.
+  await review.getByText("Settled after leaving").first().waitFor();
+  assert.equal(stages.length, 2);
+  assert.equal(stages[0], stages[1]);
+  assert.equal(saves.length, 1);
+  await warning.getByText("Comment added.", { exact: true }).waitFor();
+});
 
 test("local review keeps focus on the selection, the next comment and the heading", async (_t, j) => {
   const { web, task, page, pageErrors } = await startReview(j);
@@ -516,9 +1055,7 @@ test("phone local review comments and sends to a receipt using the keyboard", as
   });
   await send.focus();
   await page.keyboard.press("Enter");
-  await review
-    .getByText(/Review sent to .*One local message was queued/)
-    .waitFor();
+  await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1);
   const sent = review.getByRole("region", { name: "Sent review", exact: true });
   await sent.getByText("Phone keyboard comment").waitFor();
@@ -621,9 +1158,11 @@ test("a lead that completes after the page loaded is resumed; a held lead is a d
     .click();
   await review
     .getByText(
-      /not delivered \(the project lead can no longer receive a review\)/,
+      "The review wasn't sent: the lead can no longer receive a review. Your comments are kept.",
+      { exact: true },
     )
     .waitFor();
+  assert.equal(await review.locator("[data-slot=action-outcome]").count(), 1);
   await review.getByRole("button", { name: "Return to draft" }).click();
   await review.getByText("Comment for a held lead").waitFor();
   assert.equal(
@@ -732,9 +1271,7 @@ test("sent reviews stay inspectable after reload and Start a new review", async 
   await review
     .getByRole("button", { name: /^Send review \(1 comment\)/ })
     .click();
-  await review
-    .getByText(/Review sent to .*One local message was queued/)
-    .waitFor();
+  await review.getByText("Review sent to Task lead.").waitFor();
   assert.equal(events(), 1);
 
   await page.reload();
@@ -793,7 +1330,17 @@ test("a stored comment without line context can be removed so the review can be 
   await review.getByRole("button", { name: "Edit" }).first().click();
   await review.getByLabel("Edit comment").fill("Edited while legacy remains");
   await review.getByRole("button", { name: "Save edit" }).click();
-  await review.getByText(/Draft change failed \(invalid-input\)/).waitFor();
+  const refused = review.locator("[data-slot=action-outcome]");
+  await refused
+    .getByText(
+      "Couldn't save the change: the service didn't accept it. Your text is kept.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await refused.count(), 1);
+  assert.doesNotMatch(await refused.locator("p").innerText(), serviceWords);
+  await refused.getByText("Details", { exact: true }).click();
+  assert.match(await refused.locator("dl").innerText(), /Code\s+invalid-input/);
   await review.getByRole("button", { name: "Cancel edit" }).click();
   // Leave an editor open on a legacy comment; bulk removal must clear it.
   await review.getByRole("button", { name: "Edit" }).last().click();

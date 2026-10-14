@@ -3,6 +3,7 @@ import type {
   OperatorCommand,
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
+import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
   workspaceDirectoryReadSchema,
@@ -74,6 +75,8 @@ export class TaskFileTabState {
   }
   /** Notice for a refreshed preview whose bytes differ from the previous observation. */
   changeNotice = "";
+  /** The hashes and raw states behind `changeNotice`, shown only in Details. */
+  changeDetails: OutcomeField[] = [];
   get selectedRange() {
     if (this.selectedLine === null) return null;
     const anchor = this.rangeAnchorLine ?? this.selectedLine;
@@ -140,6 +143,30 @@ export class TaskChangesState {
   readingScrollTop = 0;
 }
 
+/** The one message a reply or comment review leaves behind, with its receipt fields. */
+export type ReplyOutcome = {
+  tone: OutcomeTone;
+  message: string;
+  details: readonly OutcomeField[];
+};
+
+/**
+ * What a draft write is for, as plain data: enough for whichever controller is current to
+ * settle the write, so nothing here ties a pending write to the page that started it.
+ */
+export type DraftWrite =
+  | { kind: "stage"; body: string }
+  | { kind: "add" }
+  | {
+      kind: "edit";
+      commentId: string;
+      remove: boolean;
+      neighbourId: string | null;
+    }
+  | { kind: "summary" }
+  | { kind: "unanchored"; commentIds: string[] }
+  | { kind: "discard" };
+
 class TaskReplyState {
   sourceObservation: "known" | "pending" | "unknown" = "known";
   sourceRefreshFailed = false;
@@ -153,23 +180,18 @@ class TaskReplyState {
   destination: "lead" | "github" = "lead";
   reference: FeedbackReference | undefined;
   frozen: OperatorCommand | null = null;
-  private receipts: {
-    lead: CommandReceipt | null;
-    github: CommandReceipt | null;
-  } = { lead: null, github: null };
-  get receipt() {
-    return this.receipts[this.destination];
-  }
-  set receipt(value: CommandReceipt | null) {
-    this.receipts[this.destination] = value;
-  }
+  /** A Results or Changes write whose response was lost: its exact request and warning. */
+  unconfirmed: { input: OperatorCommand; outcome: ReplyOutcome } | null = null;
   commentReview: Extract<CommandReceipt, { kind: "comment-review" }> | null =
     null;
-  private notices = { lead: "", github: "" };
+  private notices: Record<"lead" | "github", ReplyOutcome | null> = {
+    lead: null,
+    github: null,
+  };
   get notice() {
     return this.notices[this.destination];
   }
-  set notice(value: string) {
+  set notice(value: ReplyOutcome | null) {
     this.notices[this.destination] = value;
   }
   uncertain = false;
@@ -195,14 +217,33 @@ export class LocalReviewState {
     label: string;
     anchor: ReviewAnchorCandidate;
     body: string;
-    error: string;
+    error: ReplyOutcome | null;
     saving: boolean;
     returnFocus: HTMLElement | null;
   } | null = null;
   editing: Record<string, string> = {};
   summary: string | null = null;
   pending = false;
-  notice = "";
+  /** The composer's form is on screen: its origin row is mounted on this page. */
+  composerShown = false;
+  private readonly listeners = new Set<() => void>();
+  /** The mounted pages to re-render; each removes itself when it unmounts. */
+  subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+  notify() {
+    for (const listener of this.listeners) listener();
+  }
+  /** A draft write whose response was lost: the exact request, replayed by the check. */
+  unconfirmed: {
+    command: OperatorCommand;
+    intent: DraftWrite;
+    outcome: ReplyOutcome;
+  } | null = null;
+  notice: ReplyOutcome | null = null;
   send: LocalReviewSend | null = null;
   inspectKey: string | null = null;
 }
@@ -276,11 +317,11 @@ export class TaskWorkspaceState {
   set frozen(value: TaskReplyState["frozen"]) {
     this.reply.frozen = value;
   }
-  get receipt() {
-    return this.reply.receipt;
+  get unconfirmed() {
+    return this.reply.unconfirmed;
   }
-  set receipt(value: TaskReplyState["receipt"]) {
-    this.reply.receipt = value;
+  set unconfirmed(value: TaskReplyState["unconfirmed"]) {
+    this.reply.unconfirmed = value;
   }
   get commentReview() {
     return this.reply.commentReview;
