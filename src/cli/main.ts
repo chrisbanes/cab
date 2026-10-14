@@ -178,6 +178,7 @@ export async function main(
         revoked: { type: "string" },
         paused: { type: "string" },
         "lead-profile": { type: "string" },
+        "diagnostic-capture": { type: "string" },
         id: { type: "string" },
         enabled: { type: "string" },
         "guidance-file": { type: "string" },

@@ -9,6 +9,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
+import {
+  diagnosticRetentionDays,
+  diagnosticStorageMib,
+  isInBound,
+} from "../operator/diagnostic-retention.js";
 import { canonicalLoopbackOrigin } from "./operator-auth.js";
 import { isWithin } from "./workspace-inspection.js";
 
@@ -22,6 +27,9 @@ export type LaunchAgentConfiguration = {
   port: number;
   stdoutPath: string;
   stderrPath: string;
+  /** Written only when set; the service's own defaults apply otherwise. */
+  diagnosticRetentionDays?: number | undefined;
+  diagnosticStorageMib?: number | undefined;
 };
 
 const LABEL =
@@ -110,6 +118,20 @@ function validateConfiguration(configuration: LaunchAgentConfiguration): void {
   )
     throw new Error("Operator port is invalid");
   validateOrigin(configuration.origin);
+  for (const [value, bound, label] of [
+    [
+      configuration.diagnosticRetentionDays,
+      diagnosticRetentionDays,
+      "Diagnostic retention days",
+    ],
+    [
+      configuration.diagnosticStorageMib,
+      diagnosticStorageMib,
+      "Diagnostic storage MiB",
+    ],
+  ] as const)
+    if (value !== undefined && !isInBound(value, bound))
+      throw new Error(`${label} is invalid`);
   requireRegularFile(configuration.nodePath, "Node executable", true);
   requireRegularFile(configuration.cliPath, "Compiled CLI", false);
   requirePrivateDirectory(configuration.dataDirectory, "Data directory");
@@ -149,6 +171,19 @@ function stringElement(value: string): string {
   return `<string>${xml(value)}</string>`;
 }
 
+function diagnosticEntries(configuration: LaunchAgentConfiguration): string {
+  return [
+    [diagnosticRetentionDays.name, configuration.diagnosticRetentionDays],
+    [diagnosticStorageMib.name, configuration.diagnosticStorageMib],
+  ]
+    .filter(([, value]) => value !== undefined)
+    .map(
+      ([name, value]) =>
+        `\n    <key>${name}</key>\n    ${stringElement(String(value))}`,
+    )
+    .join("");
+}
+
 export function renderLaunchAgent(
   configuration: LaunchAgentConfiguration,
 ): string {
@@ -177,7 +212,7 @@ ${argumentsList.map((argument) => `    ${stringElement(argument)}`).join("\n")}
     <key>ENSEMBLE_OPERATOR_AUTH_FILE</key>
     ${stringElement(configuration.authFile)}
     <key>ENSEMBLE_OPERATOR_ORIGIN</key>
-    ${stringElement(configuration.origin)}
+    ${stringElement(configuration.origin)}${diagnosticEntries(configuration)}
   </dict>
   <key>StandardOutPath</key>
   ${stringElement(configuration.stdoutPath)}
