@@ -518,6 +518,6 @@ the CI `check` job, refuses a tag other than `v` plus the `package.json` version
 builds and verifies the release on a macOS arm64 runner, and attaches the tarball,
 `SHA256SUMS` and `manifest.json` to a GitHub Release for that tag. Rerunning a failed
 release job finishes a draft release that the failed run left behind; it refuses to
-replace a published release. Manual runs and
-pull requests that change the packaging files build and verify the same tarball and
-upload it only as a workflow artifact. No release has been published yet.
+replace a published release. Manual runs and pull requests that change the packaging
+files build and verify the same tarball and upload it only as a workflow artifact. No
+release has been published yet.
