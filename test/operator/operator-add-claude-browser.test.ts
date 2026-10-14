@@ -55,6 +55,13 @@ async function open(
     journey,
     "/app/settings/runtime",
     viewport,
+    undefined,
+    {
+      serviceOptions: {
+        runtimeHarnesses: ["codex", "claude"],
+        resolveExecutable: async () => true,
+      },
+    },
   );
   const panel = started.page.locator(".settings-panel", {
     has: started.page.getByRole("heading", { name: "Add Claude", exact: true }),
