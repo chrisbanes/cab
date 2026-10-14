@@ -176,9 +176,6 @@ export function credentialReferenceExclusions(
   };
 }
 
-/** Compatibility name for discovery callers; lifetime values survive a cleared reference. */
-export const discoveryCredentialExclusions = credentialReferenceExclusions;
-
 /**
  * The environment for this explicit gh operation, independent of discovery's identity.
  * Remove unrelated source, discovery, delivery and Claude credentials and value aliases.

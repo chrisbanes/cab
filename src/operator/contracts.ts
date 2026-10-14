@@ -2959,9 +2959,12 @@ export const operatorCredentialIssueRequestSchema = z
     expiresInDays: z.number().int().min(1).max(90).optional(),
   })
   .strict();
+/** Capture groups: credential id, secret. */
+export const OPERATOR_CREDENTIAL_TOKEN_PATTERN =
+  /^ens_([0-9a-f-]{36})_([A-Za-z0-9_-]{43})$/;
 export const operatorCredentialTokenSchema = z
   .string()
-  .regex(/^ens_[0-9a-f-]{36}_[A-Za-z0-9_-]{43}$/);
+  .regex(OPERATOR_CREDENTIAL_TOKEN_PATTERN);
 export const operatorCredentialIssuedSchema = z
   .object({
     credential: operatorCredentialSchema,

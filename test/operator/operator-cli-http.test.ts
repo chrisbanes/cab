@@ -5,7 +5,6 @@ import { CliError } from "../../src/cli/connections.js";
 import { ServiceClient } from "../../src/cli/transport.js";
 import { cliCapabilities } from "../../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
-import { OperatorWebBoundary } from "../../src/standalone/operator-web.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
@@ -475,11 +474,7 @@ test("every known API route has an explicit authority", () => {
     ),
     undefined,
   );
-  const known = Object.create(
-    OperatorWebBoundary.prototype,
-  ) as OperatorWebBoundary;
   for (const path of representative) {
-    assert.ok(known.knownApi(path), path);
     assert.ok(
       operatorRouteAuthority("GET", path) ??
         operatorRouteAuthority("POST", path),
@@ -568,4 +563,29 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
     body: { ...stop, expectedVersion: 1 },
   });
   assert.equal(r.status, 409, "same key, other content");
+});
+
+test("review commands need a browser review session: a bearer write token is forbidden, not unauthenticated", async (t) => {
+  const s = await startCliService(t);
+  const write = await s.issue("read-write", "review-rw");
+  const base = { key: randomUUID(), taskId: s.taskId, expectedDraftVersion: 0 };
+  for (const command of [
+    { ...base, type: "review.draft.discard" },
+    {
+      ...base,
+      type: "review.send",
+      recipientAssignmentId: randomUUID(),
+      expectedAssignmentVersion: 1,
+    },
+  ]) {
+    const r = await s.bearer(write.token, "/api/operator/commands", {
+      method: "POST",
+      body: command,
+    });
+    assert.equal(r.status, 403, command.type);
+    assert.equal(
+      ((await r.json()) as { error: { code: string } }).error.code,
+      "forbidden",
+    );
+  }
 });

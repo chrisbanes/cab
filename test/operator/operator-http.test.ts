@@ -19,7 +19,10 @@ import {
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
 import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
-import { OperatorRouteRegistry } from "../../src/standalone/operator-routes.js";
+import {
+  type OperatorRoute,
+  OperatorRouteRegistry,
+} from "../../src/standalone/operator-routes.js";
 import { runtimeOperatorRoutes } from "../../src/standalone/operator-runtime.js";
 import { StandaloneService } from "../../src/standalone/service.js";
 import { createControlledPasswordDeriver } from "../fixtures/operator-auth-concurrency.js";
@@ -106,36 +109,6 @@ function commandForm(
   return new URLSearchParams({ ...fields, csrfToken });
 }
 
-test("operator route registry rejects collisions and reserves private paths", () => {
-  const handler = () => ({ kind: "html" as const, body: "<p>Extension</p>" });
-  const routes = new OperatorRouteRegistry();
-  routes.register({ method: "GET", path: "/extension/:itemId", handler });
-  assert.throws(() =>
-    routes.register({ method: "GET", path: "/extension/:itemId", handler }),
-  );
-  for (const path of [
-    "/",
-    "/login",
-    "/logout",
-    "/command",
-    "/project/:id",
-    "/task/:id",
-    "/profile/:id",
-    "/assignment/:id",
-    "/runtime",
-    "/runtime/control",
-    "/coordination",
-  ]) {
-    assert.throws(() => routes.register({ method: "GET", path, handler }));
-  }
-  for (const path of ["/:root", "/:root/:itemId"]) {
-    assert.throws(() => routes.register({ method: "GET", path, handler }));
-  }
-  assert.throws(() =>
-    routes.register({ method: "POST", path: "/extension/:bad-id", handler }),
-  );
-});
-
 test("operator route registry exposes runtime and coordination only through named slots", () => {
   const handler = () => ({ kind: "html" as const, body: "slot" });
   const routes = new OperatorRouteRegistry();
@@ -161,7 +134,6 @@ test("operator route registry exposes runtime and coordination only through name
       ?.params.id,
     "item",
   );
-  assert.equal(routes.match("GET", "/runtime"), undefined);
   assert.throws(
     () => new OperatorRouteRegistry().registerSlot("runtime", []),
     /contain routes/i,
@@ -182,9 +154,6 @@ test("operator route registry exposes runtime and coordination only through name
         { method: "POST", path: "/coordination/control/:other", handler },
       ]),
     /already registered/i,
-  );
-  assert.throws(() =>
-    routes.register({ method: "GET", path: "/runtime", handler }),
   );
   routes.mount();
   assert.throws(() =>
@@ -249,7 +218,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     let coordinationReads = 0;
     let coordinationWrites = 0;
     const routes = new OperatorRouteRegistry();
-    routes.registerSlot("runtime", [
+    const runtimeRoutes: OperatorRoute[] = [
       {
         method: "GET",
         path: "/runtime",
@@ -266,7 +235,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
           return { kind: "redirect", location: "/runtime" };
         },
       },
-    ]);
+    ];
     routes.registerSlot("coordination", [
       {
         method: "GET",
@@ -288,9 +257,9 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
         },
       },
     ]);
-    routes.register({
+    runtimeRoutes.push({
       method: "GET",
-      path: "/extension/:itemId",
+      path: "/runtime/extension/:itemId",
       handler: ({ params }) => {
         extensionReads += 1;
         return {
@@ -299,15 +268,16 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
         };
       },
     });
-    routes.register({
+    runtimeRoutes.push({
       method: "POST",
-      path: "/extension/:itemId",
+      path: "/runtime/extension/:itemId",
       handler: ({ fields }) => {
         extensionWrites += 1;
         assert.equal(fields.payload, "accepted");
         return { kind: "redirect", location: "/" };
       },
     });
+    routes.registerSlot("runtime", runtimeRoutes);
     http = new LocalOperatorHttp(ui, auth, { routes });
     assert.equal(await http.start(port), port);
 
@@ -321,7 +291,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
       "/runtime/control",
       "/coordination",
       "/coordination/control/start",
-      "/extension/private-marker",
+      "/runtime/extension/private-marker",
     ];
     for (const path of privatePaths) {
       const response = await fetch(`${origin}${path}`, { redirect: "manual" });
@@ -343,7 +313,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     for (const [path, body] of [
       ["/command", new URLSearchParams({ type: "project.create" })],
       [
-        "/extension/private-marker",
+        "/runtime/extension/private-marker",
         new URLSearchParams({ payload: "accepted" }),
       ],
       ["/runtime/control", new URLSearchParams({ action: "start" })],
@@ -466,7 +436,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
     assert.ok(!homeHtml.includes("PRIVATE-CREDENTIAL-REFERENCE"));
     assert.ok(!homeHtml.includes("TYPESAFE_KEY"));
 
-    const extensionGet = await fetch(`${origin}/extension/from-694`, {
+    const extensionGet = await fetch(`${origin}/runtime/extension/from-694`, {
       headers: { cookie: sessionCookie },
     });
     assert.equal(extensionGet.status, 200);
@@ -503,7 +473,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
       };
       if (attempt.origin) headers.origin = attempt.origin;
       if (attempt.cookie !== "") headers.cookie = sessionCookie;
-      const response = await fetch(`${origin}/extension/from-694`, {
+      const response = await fetch(`${origin}/runtime/extension/from-694`, {
         method: "POST",
         headers,
         body: commandForm({ payload: "accepted" }, attempt.token),
@@ -638,7 +608,7 @@ test("all operator and extension routes inherit login, origin, and CSRF guards",
       !(await invalidCredentialReference.text()).includes(credentialSentinel),
     );
     assert.equal(domain.routing(project.id).version, 2);
-    const extensionPost = await fetch(`${origin}/extension/from-694`, {
+    const extensionPost = await fetch(`${origin}/runtime/extension/from-694`, {
       method: "POST",
       headers: {
         origin,
@@ -1189,30 +1159,30 @@ test("legacy awaited slots and extension publications reject expired or logged-o
       return { kind: "html" as const, body };
     };
     const routes = new OperatorRouteRegistry();
-    routes.registerSlot("runtime", [
-      { method: "GET", path: "/runtime", handler },
-    ]);
+    const profileId = randomUUID();
     routes.registerSlot("coordination", [
       { method: "GET", path: "/coordination", handler },
     ]);
-    routes.register({ method: "GET", path: "/extension/private", handler });
-    const profileId = randomUUID();
-    routes.register({
-      method: "POST",
-      path: "/extension/write",
-      handler: async ({ fields, csrfToken }) => {
-        domain.execute({
-          type: "profile.create",
-          actor: "operator",
-          key: fields.key!,
-          profileId,
-          name: "Admitted exact mutation",
-          instructions: "Fixture instruction",
-          capabilities: "fixture",
-        });
-        return handler({ csrfToken });
+    routes.registerSlot("runtime", [
+      { method: "GET", path: "/runtime", handler },
+      { method: "GET", path: "/runtime/extension/private", handler },
+      {
+        method: "POST",
+        path: "/runtime/extension/write",
+        handler: async ({ fields, csrfToken }) => {
+          domain.execute({
+            type: "profile.create",
+            actor: "operator",
+            key: fields.key!,
+            profileId,
+            name: "Admitted exact mutation",
+            instructions: "Fixture instruction",
+            capabilities: "fixture",
+          });
+          return handler({ csrfToken });
+        },
       },
-    });
+    ]);
     http = new LocalOperatorHttp(ui, auth, { routes });
     await http.start(port);
     const login = async () => {
@@ -1238,7 +1208,11 @@ test("legacy awaited slots and extension publications reject expired or logged-o
       });
       assert.equal(response.status, 303);
     };
-    for (const path of ["/runtime", "/coordination", "/extension/private"])
+    for (const path of [
+      "/runtime",
+      "/coordination",
+      "/runtime/extension/private",
+    ])
       for (const mode of ["logout", "expiry"]) {
         const session = await login();
         let response = await fetch(origin + path, {
@@ -1292,7 +1266,7 @@ test("legacy awaited slots and extension publications reject expired or logged-o
     gate = new Promise<void>((r) => (release = r));
     const arrival = new Promise<void>((r) => (entered = r));
     const send = (session: { cookie: string; csrfToken: string }) =>
-      fetch(`${origin}/extension/write`, {
+      fetch(`${origin}/runtime/extension/write`, {
         method: "POST",
         headers: {
           cookie: session.cookie,

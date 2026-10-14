@@ -559,6 +559,7 @@ async function installed(t: { after(fn: () => void): void }) {
     { id: "claude-token", status: "not-configured" },
   ];
   let origin: string | Error = `http://127.0.0.1:${f.options.port}`;
+  let readFailure: Error | undefined;
   const connection: OperatorConnection = {
     origin: async () => {
       if (origin instanceof Error) throw origin;
@@ -566,6 +567,7 @@ async function installed(t: { after(fn: () => void): void }) {
     },
     readiness: async () => {
       f.launchd.events.push("readiness");
+      if (readFailure) throw readFailure;
       return checks;
     },
   };
@@ -595,6 +597,9 @@ async function installed(t: { after(fn: () => void): void }) {
     setChecks: (value: typeof checks) => {
       checks = value;
     },
+    setReadFailure: (value: Error | undefined) => {
+      readFailure = value;
+    },
     setOrigin: (value: string | Error) => {
       origin = value;
     },
@@ -615,6 +620,7 @@ test("upgrade stops, snapshots, re-renders, starts and checks readiness in order
   const result = await f.upgrade();
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(f.launchd.events, [
+    "readiness", // Preflight read while the old job still runs.
     "bootout",
     "exited",
     "bootstrap snapshots=1",
@@ -744,6 +750,19 @@ test("upgrade preflight refusals make no launchd change", async (t) => {
   assert.ok(before.length < after.length);
 });
 
+test("upgrade preflight refuses a credential that cannot read readiness before stopping the old job", async (t) => {
+  const f = await installed(t);
+  f.setReadFailure(new Error("401 unauthenticated"));
+  const result = await f.upgrade();
+  assert.equal(result.code, 1);
+  assert.equal(result.report.stage, "preflight");
+  assert.equal(result.report.jobStopped, null);
+  assert.match(result.report.error, /cannot read readiness/);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.equal(f.launchd.jobs.size, 1);
+  assert.equal(existsSync(f.activation), true);
+});
+
 test("an upgrade fails at snapshot, job stopped, while another process owns the data", async (t) => {
   const f = await installed(t);
   const owner = StandaloneDataDirectory.openExclusive(join(f.stateDir, "data"));
@@ -807,6 +826,11 @@ test("a stalled readiness read fails at readiness on the deadline and stops the 
   const stalled: OperatorConnection = {
     origin: async () => `http://127.0.0.1:${f.options.port}`,
     readiness: (signal) => {
+      // The preflight read succeeds; only the post-start reads stall.
+      if (!signals.length) {
+        signals.push(signal);
+        return Promise.resolve([]);
+      }
       signals.push(signal);
       return new Promise(() => {});
     },
@@ -825,7 +849,7 @@ test("a stalled readiness read fails at readiness on the deadline and stops the 
   assert.equal(report.jobStopped, true);
   assert.equal(f.launchd.jobs.size, 0);
   assert.equal(existsSync(f.activation), false);
-  assert.ok(signals.length > 1 && signals.every((signal) => signal.aborted));
+  assert.ok(signals.length > 2 && signals.slice(1).every((s) => s.aborted));
 });
 
 test("a stalled /app response fails install at health on the deadline", {
@@ -886,8 +910,8 @@ test("each readiness read may run longer than the service's own 10 s check bound
   };
   const result = await f.upgrade();
   assert.equal(result.code, 0, result.stderr);
-  // One health probe capped at 5 s, then one readiness read allowed over 10 s.
-  assert.deepEqual(limits, [5_000, 20_000]);
+  // The preflight read, one health probe capped at 5 s, then one readiness read allowed over 10 s.
+  assert.deepEqual(limits, [20_000, 5_000, 20_000]);
 });
 
 test("an interrupt during the stop poll still confirms the exit before failing", async (t) => {

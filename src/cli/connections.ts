@@ -1,6 +1,5 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
 import { chmod, mkdir, open, readFile, rename } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +8,7 @@ import {
   operatorCredentialTokenSchema,
   type sourceCredentialReasonSchema,
 } from "../operator/contracts.js";
+import { readOwnerOnlyFile } from "./change-document.js";
 import type { RequestIdentity } from "./types.js";
 
 export class CliError extends Error {
@@ -224,41 +224,17 @@ export async function readTokenFile(
   path: string,
   uid = process.getuid?.(),
 ): Promise<string> {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    // O_NOFOLLOW refuses a symlink; O_NONBLOCK keeps a FIFO from hanging until isFile() rejects it.
-    handle = await open(
-      path,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
-  } catch {
+  const text = await readOwnerOnlyFile(
+    path,
+    uid,
+    (why) => new CliError("invalid-token-file", `Token file rejected: ${why}.`),
+  );
+  const token = text.trim();
+  // The token schema is fixed-length, so an oversized file fails here too.
+  if (!operatorCredentialTokenSchema.safeParse(token).success)
     throw new CliError(
       "invalid-token-file",
-      "Token file must be a readable regular file, not a symlink.",
+      "Token file does not hold one Ensemble token.",
     );
-  }
-  try {
-    const stat = await handle.stat();
-    if (!stat.isFile())
-      throw new CliError(
-        "invalid-token-file",
-        "Token file must be a regular file.",
-      );
-    if ((uid !== undefined && stat.uid !== uid) || (stat.mode & 0o077) !== 0)
-      throw new CliError(
-        "invalid-token-file",
-        "Token file must be owned by you with mode 0600 or stricter.",
-      );
-    if (stat.size > 4096)
-      throw new CliError("invalid-token-file", "Token file is too large.");
-    const token = (await handle.readFile("utf8")).trim();
-    if (!operatorCredentialTokenSchema.safeParse(token).success)
-      throw new CliError(
-        "invalid-token-file",
-        "Token file does not hold one Ensemble token.",
-      );
-    return token;
-  } finally {
-    await handle.close();
-  }
+  return token;
 }

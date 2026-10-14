@@ -122,8 +122,8 @@ import {
   type ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
+  credentialReferenceExclusions,
   detectGh,
-  discoveryCredentialExclusions,
   GhLoginScope,
   type GhOptions,
   ghEnvironment,
@@ -481,7 +481,7 @@ export class OperatorApi {
       discovery
         ? [
             discovery,
-            digest(discoveryCredentialExclusions(discovery).values.join("\0")),
+            digest(credentialReferenceExclusions(discovery).values.join("\0")),
           ]
         : null,
       claude && claudeRead
@@ -5341,7 +5341,9 @@ export class OperatorApi {
   private requireReviewSession(
     context: OperatorReviewSessionContext | undefined,
   ): OperatorReviewSessionContext {
-    if (!context?.current()) throw new OperatorApiError(401, "unauthenticated");
+    // Bearer credentials carry no browser review session: that is a refusal, not a login failure.
+    if (!context) throw new OperatorApiError(403, "forbidden");
+    if (!context.current()) throw new OperatorApiError(401, "unauthenticated");
     if (context.ownerKey.length < 32 || context.ownerKey.length > 128)
       throw new OperatorApiError(403, "forbidden");
     return context;

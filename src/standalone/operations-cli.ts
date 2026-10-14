@@ -5,11 +5,7 @@ import {
   restoreSnapshot,
   verifySnapshot,
 } from "./operations.js";
-import {
-  renderLaunchAgent,
-  writeLaunchAgent,
-  type LaunchAgentConfiguration,
-} from "./launchd.js";
+import { writeLaunchAgent, type LaunchAgentConfiguration } from "./launchd.js";
 
 const USAGE =
   "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST>\n";
@@ -79,9 +75,6 @@ async function operate(argv: string[], io: Io): Promise<number> {
       stderrPath: args[8] as string,
     };
     const plistPath = args[9] as string;
-    // Validate before creating the destination. The rendered text is written
-    // with exclusive mode by the same renderer used by tests and the CLI.
-    renderLaunchAgent(configuration);
     writeLaunchAgent(configuration, plistPath);
     writeResult({
       ok: true,
