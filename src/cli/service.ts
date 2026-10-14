@@ -824,8 +824,16 @@ export async function serviceCommand(
 }
 
 async function initAuth(args: string[], deps: CliDeps): Promise<number> {
-  const parsed = lifecycleOptions(args, deps.env);
+  const parsed = parseLifecycleArgs(args);
   if (!parsed || parsed.positionals.length > 1) return usage(deps);
+  const home = deps.env.HOME;
+  const stateDir =
+    parsed.values["state-dir"] !== undefined
+      ? resolve(parsed.values["state-dir"])
+      : home && isAbsolute(home)
+        ? join(home, STATE_DIR)
+        : undefined;
+  if (parsed.positionals[0] === undefined && !stateDir) return usage(deps);
   // Checked first so that a non-interactive run creates nothing.
   if (!deps.stdin.isTTY || !(deps.stdout as NodeJS.WriteStream).isTTY) {
     deps.stderr.write(
@@ -835,7 +843,7 @@ async function initAuth(args: string[], deps: CliDeps): Promise<number> {
   }
   let authFile = parsed.positionals[0];
   if (authFile === undefined) {
-    const auth = join(parsed.options.stateDir, "auth");
+    const auth = join(stateDir as string, "auth");
     mkdirSync(auth, { recursive: true, mode: 0o700 });
     authFile = join(auth, "operator-auth.json");
   }
