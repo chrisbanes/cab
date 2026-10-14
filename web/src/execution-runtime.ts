@@ -16,6 +16,29 @@ export const harnessStateLabel: Record<HarnessStatus["state"], string> = {
   unavailable: "Unavailable",
 };
 
+/** Why a runtime is in its state and what to do about it; null when it is available. */
+export function harnessReason(status: HarnessStatus) {
+  if (status.state === "unavailable")
+    return "Turn it off and on, or restart the service";
+  if (status.state === "available") return null;
+  return status.reason === "disabled"
+    ? "Disabled in Settings"
+    : `\`${status.harness}\` not found on PATH`;
+}
+
+/** Message for an enable the service refused because the executable is missing. */
+export const executableMissingMessage = (harness: HarnessStatus["harness"]) =>
+  `${executionHarnessLabels[harness]} was not turned on: \`${harness}\` not found on the service PATH.`;
+
+/** The confirmation body for disabling a runtime that tasks use. */
+export const disableConfirmation = (
+  harness: HarnessStatus["harness"],
+  tasks: number,
+) => {
+  const label = executionHarnessLabels[harness];
+  return `${tasks === 1 ? "1 task uses" : `${tasks} tasks use`} ${label}. Running turns finish; their next turns wait until ${label} is enabled again.`;
+};
+
 /** Exact shell alert copy; Codex wording is retained byte-for-byte. */
 export const unavailableAlert = (status: Pick<HarnessStatus, "harness">) =>
   `${executionHarnessLabels[status.harness]} runtime unavailable — restart the service`;

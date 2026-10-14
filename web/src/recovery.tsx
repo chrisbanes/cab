@@ -1,14 +1,37 @@
-import { useCallback } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import {
   executionHarnessLabels,
   runtimeSettingsSchema,
   assignmentRecoverySchema,
+  type HarnessStatus,
+  type OperatorCommand,
 } from "../../src/operator/contracts.js";
+import { ActionOutcome, detailRows } from "./action-feedback.js";
+import { failureCause } from "./outcome-copy.js";
+import { Input } from "./ui/input.js";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./ui/dialog.js";
 import { AddClaudePanel } from "./add-claude.js";
-import { executionSummary, harnessStateLabel } from "./execution-runtime.js";
+import {
+  disableConfirmation,
+  executableMissingMessage,
+  executionSummary,
+  harnessReason,
+  harnessStateLabel,
+} from "./execution-runtime.js";
 import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
 import { useOperatorResource } from "./resource.js";
-import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
+import {
+  ActionLink,
+  Button,
+  ResourceStatus,
+  StatusBadge,
+} from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
 import { holdPills, plural } from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
@@ -26,6 +49,167 @@ import {
   submitDraft,
   type SettingsProps,
 } from "./settings.js";
+type Outcome = {
+  tone: "success" | "error" | "warning";
+  message: string;
+  details: ReturnType<typeof detailRows>;
+  /** Resend the exact original command. */
+  retry?: () => void;
+};
+
+/**
+ * The on/off control of one execution runtime and its one outcome. Turning off a runtime
+ * that tasks use confirms first, with the count read fresh; an unknown outcome resends the
+ * exact same command (a replayed key returns the stored receipt).
+ */
+function RuntimeToggle(
+  p: SettingsProps & { status: HarnessStatus; reload: () => void },
+) {
+  const { harness } = p.status,
+    label = executionHarnessLabels[harness],
+    [pending, setPending] = useState(false),
+    [outcome, setOutcome] = useState<Outcome | null>(null),
+    [confirm, setConfirm] = useState<number | null>(null),
+    control = useRef<HTMLInputElement>(null),
+    id = useId();
+  const boundTasks = async () =>
+    (
+      await p.client
+        .read("/api/operator/runtime", runtimeSettingsSchema)
+        .catch(() => null)
+    )?.data.runtimes.find((r) => r.harness === harness)?.boundTasks ?? 0;
+  const send = async (
+    command: Extract<OperatorCommand, { type: "runtime.configure" }>,
+  ) => {
+    setPending(true);
+    setConfirm(null);
+    setOutcome(null);
+    const result = await p.client.command(command, p.session.csrfToken);
+    const details = (code?: string) =>
+      detailRows({
+        command: command.type,
+        resource: `system:runtime:${harness}`,
+        requestKey: command.key,
+        ...(code ? { code } : {}),
+      });
+    if (result.state === "recorded") {
+      setOutcome({
+        tone: "success",
+        message: `${label} turned ${command.enabled ? "on" : "off"}.`,
+        details: details(),
+      });
+      p.refresh();
+      p.reload();
+    } else if (result.state === "unknown")
+      setOutcome({
+        tone: "warning",
+        message: "We couldn't confirm the change.",
+        details: details(result.code),
+        retry: () => void send(command),
+      });
+    else if (result.code === "runtime-confirmation-required") {
+      const tasks = await boundTasks();
+      if (tasks > 0) setConfirm(tasks);
+      else
+        setOutcome({
+          tone: "error",
+          message: `Couldn't turn off ${label}: it changed elsewhere.`,
+          details: details(result.code),
+        });
+    } else
+      setOutcome({
+        tone: "error",
+        message:
+          result.code === "runtime-executable-missing"
+            ? executableMissingMessage(harness)
+            : `Couldn't turn ${command.enabled ? "on" : "off"} ${label}: ${failureCause(result.code)}.`,
+        details: details(result.code),
+      });
+    setPending(false);
+    requestAnimationFrame(() => control.current?.focus());
+  };
+  const command = (enabled: boolean, confirmed = false) =>
+    ({
+      type: "runtime.configure",
+      key: crypto.randomUUID(),
+      harness,
+      enabled,
+      ...(confirmed ? { confirmed } : {}),
+    }) as const;
+  const toggle = async (enabled: boolean) => {
+    if (enabled) return send(command(true));
+    setPending(true);
+    const tasks = await boundTasks();
+    setPending(false);
+    if (tasks > 0) setConfirm(tasks);
+    else void send(command(false));
+  };
+  const reason = harnessReason(p.status);
+  return (
+    <>
+      <label className="body check-field" htmlFor={id}>
+        <Input
+          id={id}
+          ref={control}
+          type="checkbox"
+          role="switch"
+          className="native-check settings-switch size-5 shrink-0 p-0 accent-foreground"
+          checked={p.status.enabled}
+          disabled={pending || confirm !== null}
+          aria-busy={pending}
+          onChange={(e) => void toggle(e.target.checked)}
+        />
+        {label} enabled
+      </label>
+      {reason && <p className="metadata muted">{reason}</p>}
+      {outcome && (
+        <ActionOutcome
+          tone={outcome.tone}
+          message={outcome.message}
+          details={outcome.details}
+          action={
+            outcome.retry && { label: "Try again", onClick: outcome.retry }
+          }
+        />
+      )}
+      <Dialog
+        open={confirm !== null}
+        onOpenChange={(open) => !open && setConfirm(null)}
+      >
+        <DialogContent
+          role="alertdialog"
+          className="stop-dialog"
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement)
+              .querySelector<HTMLElement>("[data-keep]")
+              ?.focus();
+          }}
+        >
+          <DialogTitle>Turn off {label}?</DialogTitle>
+          <DialogDescription className="body">
+            {confirm !== null && disableConfirmation(harness, confirm)}
+          </DialogDescription>
+          <div className="stop-dialog-actions">
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void send(command(false, true))}
+            >
+              Turn off {label}
+            </Button>
+            <DialogClose asChild>
+              <Button type="button" variant="secondary" data-keep>
+                Keep {label} on
+              </Button>
+            </DialogClose>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export function RuntimeSettings(p: SettingsProps) {
   const loader = useCallback(
       (signal: AbortSignal) =>
@@ -170,11 +354,11 @@ export function RuntimeSettings(p: SettingsProps) {
                         {harnessStateLabel[h.state]}
                       </StatusBadge>
                     </div>
-                    {h.state === "unavailable" && (
-                      <p className="metadata muted">
-                        Restart the service to retry this runtime.
-                      </p>
-                    )}
+                    <RuntimeToggle
+                      {...p}
+                      status={h}
+                      reload={resource.refresh}
+                    />
                     <h4 className="small-heading">
                       Effective execution policy
                     </h4>

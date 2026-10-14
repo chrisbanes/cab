@@ -41,12 +41,19 @@ import {
 } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 
-export const emptyProfile = () => ({
+/** New profiles start on the first enabled runtime (Codex, then Claude), else Codex. */
+export const defaultHarness = (workspace: SettingsProps["workspace"]) =>
+  (["codex", "claude"] as const).find((harness) =>
+    workspace?.data.harnesses.some((h) => h.harness === harness && h.enabled),
+  ) ?? "codex";
+
+export const emptyProfile = (workspace?: SettingsProps["workspace"]) => ({
   name: "",
   summary: "",
   instructions: "",
   capabilities: "",
   ...runtimeValues({ harness: "codex" }),
+  runtimeHarness: defaultHarness(workspace ?? null),
   profileId: key(),
   key: key(),
 });
@@ -170,7 +177,9 @@ export function RuntimeFields({
 
 export function ProfileCreate(p: SettingsProps) {
   const d = useDraft(p.drafts, "profile.create");
-  useEffect(() => d.initialize(emptyProfile()), [d]);
+  const harness = defaultHarness(p.workspace);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-initialise only when the default runtime changes; dirty input is never replaced.
+  useEffect(() => d.initialize(emptyProfile(p.workspace)), [d, harness]);
   return (
     <div className="settings-page">
       <p className="introduction muted">
@@ -226,7 +235,7 @@ export function ProfileCreate(p: SettingsProps) {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={() => d.startOperation(emptyProfile())}
+                  onClick={() => d.startOperation(emptyProfile(p.workspace))}
                 >
                   Create another profile
                 </Button>

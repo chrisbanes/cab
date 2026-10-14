@@ -53,15 +53,27 @@ export function checklistRows(input: {
   const profiles = workspace.profiles.filter((p) => !p.revoked),
     enabled = workspace.projects.find((p) => !p.paused),
     paused = workspace.projects.find((p) => p.paused);
-  const runtime = passes(readiness, ["codex-executable", "codex-login"]);
+  // A runtime row passes when some runtime is enabled and that runtime's own checks pass; a
+  // disabled runtime's checks report not-configured, so they never pass.
+  const enabledRuntime = passes(readiness, ["runtime-enabled"]);
+  const runtime =
+    enabledRuntime === null
+      ? null
+      : enabledRuntime &&
+        (passes(readiness, ["codex-executable", "codex-login"]) ||
+          passes(readiness, ["claude-executable", "claude-token"]));
+  const checks = readiness.state === "ready" ? readiness.checks : [];
   const failing =
-    readiness.state === "ready"
-      ? readiness.checks.find(
-          (c) =>
-            (c.id === "codex-executable" || c.id === "codex-login") &&
-            c.status !== "pass",
-        )
-      : undefined;
+    checks.find((c) => c.id === "runtime-enabled" && c.status !== "pass") ??
+    checks.find(
+      (c) =>
+        [
+          "codex-executable",
+          "codex-login",
+          "claude-executable",
+          "claude-token",
+        ].includes(c.id) && c.status === "fail",
+    );
   // Required rows in order; null is not known yet (readiness still loading or unreadable).
   const required: [RowId, boolean | null][] = [
     ["runtime", runtime],
@@ -122,7 +134,17 @@ export function checklistRows(input: {
         : runtime
           ? "Runtime login readable by the service."
           : (failing?.reason ?? "The service can't use the runtime login."),
-      { kind: "link", label: "Open readiness check", href: "/app/settings" },
+      failing?.id === "runtime-enabled"
+        ? {
+            kind: "link",
+            label: "Open runtime settings",
+            href: "/app/settings/runtime",
+          }
+        : {
+            kind: "link",
+            label: "Open readiness check",
+            href: "/app/settings",
+          },
     ),
     row(
       "github",
