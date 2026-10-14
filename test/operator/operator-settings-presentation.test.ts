@@ -26,6 +26,7 @@ import {
   holdPills,
   projectStateSummary,
   joinNames,
+  activationLine,
   savedLine,
   settingsHeader,
 } from "../../web/src/settings-view.js";
@@ -401,11 +402,14 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   } as never;
   assert.equal(savedLine(3, undefined), null);
   assert.match(
-    savedLine(3, { at: Date.now(), receipt }) ?? "",
+    savedLine(3, { at: Date.now(), receipt, activeSelectionIds: [] }) ?? "",
     /^Saved \d\d:\d\d$/,
   );
   // A save at another version never reads as the current one, and no version is shown.
-  assert.equal(savedLine(4, { at: Date.now(), receipt }), null);
+  assert.equal(
+    savedLine(4, { at: Date.now(), receipt, activeSelectionIds: [] }),
+    null,
+  );
   assert.equal(joinNames(["Ada"]), "Ada");
   assert.equal(joinNames(["Ada", "Eli"]), "Ada and Eli");
   assert.equal(joinNames(["Ada", "Eli", "Bo"]), "Ada, Eli and Bo");
@@ -627,4 +631,73 @@ test("the warning colours stay legible on the page and on a warning alert", () =
   );
   assert.ok(contrast(rgb(fg[1]), rgb(page[1])) >= 4.5, "text on the page");
   assert.ok(contrast(rgb(fg[1]), surface) >= 4.5, "text on a warning alert");
+});
+
+test("the activation line claims only a confirmed preview at the loaded source version", () => {
+  const preview = (commandType = "github.preview") =>
+    ({
+      kind: "configuration",
+      key: randomUUID(),
+      recorded: true,
+      result: {
+        commandType,
+        resourceId: randomUUID(),
+        selectionId: "S-1",
+        configVersion: 3,
+        active: true,
+      },
+    }) as never;
+  const activation = (
+    wasActive: boolean,
+    over: Partial<Parameters<typeof activationLine>[0]> = {},
+  ) =>
+    activationLine({
+      saved: {
+        at: Date.now(),
+        receipt: preview(),
+        activeSelectionIds: wasActive ? ["S-1"] : [],
+      },
+      sourceVersion: 3,
+      selections: [],
+      recorded: true,
+      ...over,
+    });
+  const line = (...args: Parameters<typeof activation>) =>
+    activation(...args)?.line ?? null;
+  const next = "Tasks aren't imported until you refresh source observations.";
+  assert.equal(line(false), `Activated S-1. ${next}`);
+  assert.equal(line(true), `S-1 was already active. ${next}`);
+  // A receipt for another source version never reads as current activation.
+  assert.equal(line(false, { sourceVersion: 4 }), null);
+  assert.equal(line(false, { saved: undefined }), null);
+  assert.equal(
+    line(false, {
+      saved: {
+        at: Date.now(),
+        receipt: preview("project.configure"),
+        activeSelectionIds: [],
+      },
+    }),
+    null,
+  );
+  // After a re-read the read itself must show the selection active.
+  assert.equal(
+    line(false, {
+      recorded: false,
+      selections: [{ id: "S-1", active: false }],
+    }),
+    "Couldn't confirm that S-1 is active. Preview it again.",
+  );
+  assert.equal(
+    activation(false, {
+      recorded: false,
+      selections: [{ id: "S-1", active: false }],
+    })?.refresh,
+    false,
+  );
+  assert.equal(
+    line(false, { recorded: false, selections: [{ id: "S-1", active: true }] }),
+    `Activated S-1. ${next}`,
+  );
+  assert.equal(activation(false)?.refresh, true);
 });
