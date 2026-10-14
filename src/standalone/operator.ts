@@ -891,7 +891,9 @@ function apiFailure(
         message:
           error instanceof OperatorApiError && error.credentialReason
             ? sourceCredentialExplanation(error.credentialReason)
-            : publicMessage(code),
+            : error instanceof OperatorApiError && error.publicMessage
+              ? error.publicMessage
+              : publicMessage(code),
         ...(error instanceof z.ZodError
           ? {
               fieldPaths: [

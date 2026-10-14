@@ -31,7 +31,9 @@ async function loggedIn(
 }
 
 test("doctor reports the service's readiness checks, equal to the API read and without secrets", async (t) => {
-  const s = await startCliService(t);
+  const s = await startCliService(t, {
+    service: { runtimeHarnesses: ["codex", "claude"] },
+  });
   const root = mkdtempSync(join(tmpdir(), "ensemble-doctor-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const tokenPath = join(root, "claude-token");
@@ -79,6 +81,23 @@ test("doctor reports the service's readiness checks, equal to the API read and w
   const everything = [json.out, json.err, human.out, human.err].join("\n");
   for (const secret of [CANARY, tokenPath, root, s.f.directory])
     assert.ok(!everything.includes(secret), secret);
+  // With no runtime enabled the first row fails with its Settings fix.
+  for (const harness of ["codex", "claude"] as const)
+    await s.f.service.configureRuntime({
+      key: randomUUID(),
+      harness,
+      enabled: false,
+    });
+  const none = await h.run(["doctor"]);
+  assert.match(
+    none.out,
+    /An execution runtime is enabled\s+Fail\s+No execution runtime is enabled/,
+  );
+  assert.match(
+    none.out,
+    /Fix An execution runtime is enabled: Enable a runtime in Settings → Runtime/,
+  );
+  assert.match(none.out, /Codex login\s+Not configured\s+Disabled in Settings/);
 });
 
 test("doctor exits 5 when the service is unavailable and takes no arguments", async (t) => {

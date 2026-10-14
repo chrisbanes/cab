@@ -57,7 +57,12 @@ export type ReadinessDeps = {
       | "restart-required"
       | "available";
   };
-  harnessStatuses: () => Pick<HarnessStatus, "harness" | "state">[];
+  harnessStatuses: () => (Pick<
+    HarnessStatus,
+    "harness" | "state" | "enabled"
+  > & {
+    reason?: "disabled" | "executable-missing";
+  })[];
   harnessSettings: (
     harness: ExecutionHarness,
   ) => SupportedRuntimeSettings | null;
@@ -70,6 +75,7 @@ export type ReadinessDeps = {
 };
 
 const labels: Record<ReadinessCheckId, string> = {
+  "runtime-enabled": "An execution runtime is enabled",
   "codex-executable": "Codex executable",
   "codex-login": "Codex login",
   git: "Git",
@@ -123,13 +129,16 @@ const fixes = {
   harnessSettings:
     "Run a Claude task; supported models are read before its first turn, then run the check again",
   unknown: "Run the check again, or restart the service",
+  runtimeEnabled: "Enable a runtime in Settings → Runtime",
 };
 
-/** The fix for a used runtime that is not enabled, which is its executable missing from the PATH. */
+/** The fix for an enabled runtime whose executable is missing from the PATH. */
 const notEnabledFixes: Record<ExecutionHarness, string> = {
   codex: fixes.codex,
   claude: fixes.claudeInstall,
 };
+const enableFix = (harness: ExecutionHarness) =>
+  `Enable ${executionHarnessLabels[harness]} in Settings → Runtime`;
 
 class TimedOut extends Error {}
 
@@ -146,7 +155,7 @@ function bounded<T>(promise: Promise<T>, ms: number): Promise<T> {
 const versionToken = /^\d{1,4}\.\d{1,4}\.\d{1,6}[0-9A-Za-z.+-]{0,32}$/;
 
 /**
- * Eight read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
+ * Nine read-only readiness checks. Nothing here writes, spawns a model turn or caches; each
  * `read()` runs fresh, and the only spawn is the bounded `claude --version` probe. Reasons and
  * fixes are literals, never a caught error or a path; the one dynamic string is the version
  * that probe printed, which is shown and never compared.
@@ -187,18 +196,30 @@ export class Readiness {
 
   private async check(id: ReadinessCheckId): Promise<ReadinessCheck> {
     switch (id) {
+      case "runtime-enabled":
+        return this.deps.harnessStatuses().some((s) => s.enabled)
+          ? pass(id)
+          : outcome(
+              id,
+              "fail",
+              "No execution runtime is enabled",
+              fixes.runtimeEnabled,
+            );
       case "codex-executable":
-        return this.executable(id, "codex", fixes.codex);
+        return (
+          this.notEnabled(id, "codex") ??
+          this.executable(id, "codex", fixes.codex)
+        );
       case "git":
         return this.executable(id, "git", fixes.git);
       case "codex-login":
-        return this.codexLogin();
+        return this.notEnabled(id, "codex") ?? this.codexLogin();
       case "github-discovery":
         return this.discovery();
       case "claude-executable":
-        return this.claudeExecutable();
+        return this.notEnabled(id, "claude") ?? this.claudeExecutable();
       case "claude-token":
-        return this.claudeTokenCheck();
+        return this.notEnabled(id, "claude") ?? this.claudeTokenCheck();
       case "runtime-harness":
         return this.runtimeHarness();
       case "data-paths":
@@ -206,14 +227,43 @@ export class Readiness {
     }
   }
 
+  /**
+   * A runtime's own checks report Not configured while the operator has it disabled, or while
+   * its executable is not on the service PATH (ADR-1012); only an enabled runtime can fail.
+   */
+  private notEnabled(
+    id: ReadinessCheckId,
+    harness: ExecutionHarness,
+  ): ReadinessCheck | undefined {
+    const status = this.deps
+      .harnessStatuses()
+      .find((s) => s.harness === harness);
+    if (status?.reason === "disabled")
+      return outcome(
+        id,
+        "not-configured",
+        "Disabled in Settings",
+        enableFix(harness),
+      );
+    if (status?.reason === "executable-missing")
+      return outcome(
+        id,
+        "not-configured",
+        `\`${harness}\` not found on PATH`,
+        notEnabledFixes[harness],
+      );
+    return undefined;
+  }
+
   private async executable(
     id: "codex-executable" | "git",
     name: string,
     fix: string,
   ): Promise<ReadinessCheck> {
-    return (await resolveOnPath(name, this.deps.env))
-      ? pass(id)
-      : outcome(id, "fail", `${labels[id]} is not on the service PATH`, fix);
+    if (await resolveOnPath(name, this.deps.env)) return pass(id);
+    return id === "git"
+      ? outcome(id, "fail", `${labels[id]} is not on the service PATH`, fix)
+      : outcome(id, "not-configured", `\`${name}\` not found on PATH`, fix);
   }
 
   private async codexLogin(): Promise<ReadinessCheck> {
@@ -240,7 +290,14 @@ export class Readiness {
       unavailable: "The Codex runtime is not running",
       timeout: "Codex did not answer in time",
     }[result];
-    return outcome(id, "fail", reason, fixes.codexLogin);
+    return outcome(
+      id,
+      "fail",
+      reason,
+      result === "unavailable"
+        ? "Turn Codex off and on in Settings → Runtime, or restart the service"
+        : fixes.codexLogin,
+    );
   }
 
   private async discovery(): Promise<ReadinessCheck> {
@@ -277,31 +334,19 @@ export class Readiness {
   }
 
   /**
-   * Claude is optional (ADR-1008): a missing `claude` fails only when a token reference or an
-   * active Claude profile makes it needed. Found must mean runnable, but the version is only
-   * reported (ADR-1011).
+   * A missing `claude` is Not configured (ADR-1012); an active Claude profile fails the runtime
+   * harness check instead. Found must mean runnable, but the version is only reported (ADR-1011).
    */
   private async claudeExecutable(): Promise<ReadinessCheck> {
     const id = "claude-executable";
     const path = await resolveOnPath("claude", this.deps.env);
-    if (path === null) {
-      let inUse = true;
-      try {
-        inUse =
-          this.deps.claudeTokenReference() !== null ||
-          this.deps
-            .profiles()
-            .some((p) => !p.revoked && p.runtime.harness === "claude");
-      } catch {
-        // An unreadable configuration counts as in use.
-      }
+    if (path === null)
       return outcome(
         id,
-        inUse ? "fail" : "not-configured",
-        "Claude Code is not on the service PATH",
+        "not-configured",
+        "`claude` not found on PATH",
         fixes.claudeInstall,
       );
-    }
     const timeout = this.deps.versionTimeoutMs ?? 5000;
     let version: string | undefined;
     try {
@@ -373,9 +418,8 @@ export class Readiness {
         "No active profile uses a runtime",
         "Add a profile in Settings",
       );
-    const states = new Map(
-      this.deps.harnessStatuses().map((s) => [s.harness, s.state]),
-    );
+    const statuses = this.deps.harnessStatuses();
+    const states = new Map(statuses.map((s) => [s.harness, s.state]));
     const reasons: string[] = [];
     let rejected = 0;
     let unknownSettings = false;
@@ -387,9 +431,12 @@ export class Readiness {
       if (state === "available") continue;
       const label = executionHarnessLabels[harness];
       if (state === "not-configured") {
-        // Not enabled (Claude without `claude` on the PATH) is fixed by installing, not restarting.
+        // Disabled is fixed in Settings; a missing executable by installing, not restarting.
         reasons.push(`${label} runtime is not enabled on this service`);
-        notEnabledFix = notEnabledFixes[harness];
+        notEnabledFix =
+          statuses.find((s) => s.harness === harness)?.reason === "disabled"
+            ? enableFix(harness)
+            : notEnabledFixes[harness];
       } else {
         other = true;
         reasons.push(`${label} runtime is not running`);

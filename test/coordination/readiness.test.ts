@@ -69,8 +69,8 @@ function deps(f: Fixture, over: Partial<ReadinessDeps> = {}): ReadinessDeps {
     claudeTokenReference: () => null,
     claudeTokenStatus: () => ({ state: "not-configured" }),
     harnessStatuses: () => [
-      { harness: "codex", state: "available" },
-      { harness: "claude", state: "not-configured" },
+      { harness: "codex", enabled: true, state: "available" },
+      { harness: "claude", enabled: true, state: "available" },
     ],
     harnessSettings: () => null,
     profiles: () => [],
@@ -109,22 +109,23 @@ test("codex and git pass when an executable regular file is on the service PATH"
   }
 });
 
-test("codex and git fail with the contract fix when missing, not executable or not a file", async (t) => {
+test("a missing codex is not configured and git fails, with the contract fix, when missing, not executable or not a file", async (t) => {
   const f = fixture(t);
   rmSync(join(f.bin, "codex"));
   chmodSync(join(f.bin, "git"), 0o644);
   const codex = await check(f, "codex-executable");
-  assert.equal(codex.status, "fail");
+  assert.equal(codex.status, "not-configured");
+  assert.equal(codex.reason, "`codex` not found on PATH");
   assert.equal(codex.fix, "Install Codex into the fixed PATH");
   const git = await check(f, "git");
   assert.equal(git.status, "fail");
   assert.equal(git.fix, "Install git");
 
   mkdirSync(join(f.bin, "codex"));
-  assert.equal((await check(f, "codex-executable")).status, "fail");
+  assert.equal((await check(f, "codex-executable")).status, "not-configured");
   assert.equal(
     (await check(f, "codex-executable", { env: {} })).status,
-    "fail",
+    "not-configured",
     "an unset PATH finds nothing",
   );
   assert.equal(
@@ -144,7 +145,7 @@ function installClaude(f: Fixture, body: string) {
 const claudeExecutable = (f: Fixture, over: Partial<ReadinessDeps> = {}) =>
   check(f, "claude-executable", { versionTimeoutMs: 1000, ...over });
 const MISSING = {
-  reason: "Claude Code is not on the service PATH",
+  reason: "`claude` not found on PATH",
   fix: "Install Claude Code into the fixed PATH, then restart the service",
 };
 const UNRUNNABLE = {
@@ -177,43 +178,117 @@ test("the claude version is reported and never compared", async (t) => {
   }
 });
 
-test("a missing claude is not configured while Claude is unused and fails once it is needed", async (t) => {
+test("a missing claude is not configured whether or not Claude is used (ADR-1012)", async (t) => {
   const f = fixture(t);
-  const unused = await claudeExecutable(f);
-  assert.equal(unused.status, "not-configured");
-  assert.equal(unused.label, "Claude executable");
-  assert.equal(unused.reason, MISSING.reason);
-  assert.equal(unused.fix, MISSING.fix);
-  assert.equal(
-    (await claudeExecutable(f, profiles(codexProfile()))).status,
-    "not-configured",
-    "a Codex-only host shows no red row",
-  );
-  assert.equal(
-    (
-      await claudeExecutable(
-        f,
-        profiles({ revoked: true, runtime: claude(null) }),
-      )
-    ).status,
-    "not-configured",
-    "a revoked Claude profile does not need it",
-  );
   for (const over of [
+    {},
+    profiles(codexProfile()),
     { claudeTokenReference: () => "file:/x" },
     profiles({ revoked: false, runtime: claude(null) }),
-    {
-      profiles: () => {
-        throw new Error("unreadable");
-      },
-    },
   ]) {
-    const needed = await claudeExecutable(f, over);
-    assert.equal(needed.status, "fail");
-    assert.equal(needed.label, "Claude executable");
-    assert.equal(needed.reason, MISSING.reason);
-    assert.equal(needed.fix, MISSING.fix);
+    const missing = await claudeExecutable(f, over);
+    assert.equal(missing.status, "not-configured");
+    assert.equal(missing.label, "Claude executable");
+    assert.equal(missing.reason, MISSING.reason);
+    assert.equal(missing.fix, MISSING.fix);
   }
+});
+
+test("a disabled or missing runtime reports its own checks Not configured; only no runtime enabled fails", async (t) => {
+  const f = fixture(t);
+  const statuses = (
+    codex: "available" | "disabled" | "missing" | "unavailable",
+    claudeState: "available" | "disabled" | "missing",
+  ): Partial<ReadinessDeps> => {
+    const status = (
+      harness: "codex" | "claude",
+      s: "available" | "disabled" | "missing" | "unavailable",
+    ) =>
+      s === "available"
+        ? { harness, enabled: true, state: "available" as const }
+        : s === "unavailable"
+          ? { harness, enabled: true, state: "unavailable" as const }
+          : {
+              harness,
+              enabled: s !== "disabled",
+              state: "not-configured" as const,
+              reason:
+                s === "disabled"
+                  ? ("disabled" as const)
+                  : ("executable-missing" as const),
+            };
+    return {
+      harnessStatuses: () => [
+        status("codex", codex),
+        status("claude", claudeState),
+      ],
+    };
+  };
+  const read = async (over: Partial<ReadinessDeps>) =>
+    new Map(
+      (await new Readiness(deps(f, over)).read()).data.checks.map((c) => [
+        c.id,
+        c,
+      ]),
+    );
+
+  const none = await read(statuses("disabled", "disabled"));
+  assert.deepEqual(
+    [...none.values()][0],
+    {
+      id: "runtime-enabled",
+      label: "An execution runtime is enabled",
+      status: "fail",
+      reason: "No execution runtime is enabled",
+      fix: "Enable a runtime in Settings → Runtime",
+    },
+    "the no-runtime check comes first",
+  );
+  for (const id of [
+    "codex-executable",
+    "codex-login",
+    "claude-executable",
+    "claude-token",
+  ] as const) {
+    const c = none.get(id);
+    assert.equal(c?.status, "not-configured", id);
+    assert.equal(c?.reason, "Disabled in Settings", id);
+    assert.match(c?.fix ?? "", /^Enable (Codex|Claude) in Settings → Runtime$/);
+  }
+
+  const missing = await read(statuses("available", "missing"));
+  assert.equal(missing.get("runtime-enabled")?.status, "pass");
+  assert.equal(missing.get("claude-token")?.status, "not-configured");
+  assert.equal(
+    missing.get("claude-token")?.reason,
+    "`claude` not found on PATH",
+  );
+  assert.equal(missing.get("codex-login")?.status, "pass");
+
+  const failed = await read(statuses("unavailable", "disabled"));
+  assert.equal(failed.get("runtime-enabled")?.status, "pass");
+  const login = await check(f, "codex-login", {
+    ...statuses("unavailable", "disabled"),
+    codexLogin: async () => "unavailable",
+  });
+  assert.equal(
+    login.status,
+    "fail",
+    "only an enabled, unavailable runtime fails",
+  );
+  assert.equal(
+    login.fix,
+    "Turn Codex off and on in Settings → Runtime, or restart the service",
+  );
+
+  // An active profile on a disabled runtime fails the harness check with the Settings fix.
+  const harness = await check(f, "runtime-harness", {
+    ...statuses("available", "disabled"),
+    ...profiles({ revoked: false, runtime: claude(null) }),
+  });
+  assert.equal(harness.status, "fail");
+  assert.equal(harness.reason, "Claude runtime is not enabled on this service");
+  assert.equal(harness.fix, "Enable Claude in Settings → Runtime");
 });
 
 test("a claude that does not print a version fails as not runnable", async (t) => {
@@ -298,7 +373,13 @@ test("codex login passes when verified and fails otherwise with the login fix", 
   for (const [name, codexLogin] of cases) {
     const result = await check(f, "codex-login", { codexLogin });
     assert.equal(result.status, "fail", name);
-    assert.equal(result.fix, "Run `codex login` as the service user", name);
+    assert.equal(
+      result.fix,
+      name === "unavailable"
+        ? "Turn Codex off and on in Settings → Runtime, or restart the service"
+        : "Run `codex login` as the service user",
+      name,
+    );
     assert.ok(!JSON.stringify(result).includes(TOKEN), name);
   }
 });
@@ -471,8 +552,8 @@ test("the Claude token check reports each reference state without path or value"
 test("the runtime harness check follows the profiles in use", async (t) => {
   const f = fixture(t);
   const claudeUp = [
-    { harness: "codex", state: "available" },
-    { harness: "claude", state: "available" },
+    { harness: "codex", enabled: true, state: "available" },
+    { harness: "claude", enabled: true, state: "available" },
   ] as const;
   const harness = (over: Partial<ReadinessDeps>) =>
     check(f, "runtime-harness", over);
@@ -490,8 +571,13 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   const down = await harness({
     ...profiles(codexProfile()),
     harnessStatuses: () => [
-      { harness: "codex", state: "unavailable" },
-      { harness: "claude", state: "not-configured" },
+      { harness: "codex", enabled: true, state: "unavailable" },
+      {
+        harness: "claude",
+        enabled: true,
+        state: "not-configured",
+        reason: "executable-missing",
+      },
     ],
   });
   assert.equal(down.status, "fail");
@@ -546,8 +632,13 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   const states = (claudeState: "unavailable" | "not-configured") => ({
     ...withClaude(claudeProfile()),
     harnessStatuses: () => [
-      { harness: "codex" as const, state: "available" as const },
-      { harness: "claude" as const, state: claudeState },
+      { harness: "codex" as const, enabled: true, state: "available" as const },
+      {
+        harness: "claude" as const,
+        enabled: true,
+        state: claudeState,
+        reason: "executable-missing" as const,
+      },
     ],
   });
   const notRunning = await harness(states("unavailable"));
@@ -569,8 +660,17 @@ test("the runtime harness check follows the profiles in use", async (t) => {
   const both = await harness({
     ...withClaude(codexProfile(), claudeProfile()),
     harnessStatuses: () => [
-      { harness: "codex" as const, state: "unavailable" as const },
-      { harness: "claude" as const, state: "not-configured" as const },
+      {
+        harness: "codex" as const,
+        enabled: true,
+        state: "unavailable" as const,
+      },
+      {
+        harness: "claude" as const,
+        enabled: true,
+        state: "not-configured" as const,
+        reason: "executable-missing" as const,
+      },
     ],
   });
   assert.equal(
@@ -628,7 +728,7 @@ test("the data and auth paths check names the rule, not the path", async (t) => 
       assert.ok(!JSON.stringify(result).includes(path));
 });
 
-test("read returns all eight checks in fixed order and parses with the shared schema", async (t) => {
+test("read returns all nine checks in fixed order and parses with the shared schema", async (t) => {
   const f = fixture(t);
   const result = await new Readiness(deps(f)).read();
   assert.deepEqual(
@@ -648,8 +748,8 @@ test("read returns all eight checks in fixed order and parses with the shared sc
 test("failing profiles are counted, never named, and stay inside the schema", async (t) => {
   const f = fixture(t);
   const claudeUp = [
-    { harness: "codex", state: "available" },
-    { harness: "claude", state: "available" },
+    { harness: "codex", enabled: true, state: "available" },
+    { harness: "claude", enabled: true, state: "available" },
   ] as const;
   const wrong = (): ReadinessProfile => ({
     revoked: false,
@@ -670,7 +770,7 @@ test("failing profiles are counted, never named, and stay inside the schema", as
     const harness = checks.find((c) => c.id === "runtime-harness");
     assert.equal(harness?.status, "fail");
     assert.equal(harness?.reason, REJECTED(count));
-    assert.equal(checks.length, 8, "the other checks are unaffected");
+    assert.equal(checks.length, 9, "the other checks are unaffected");
   }
 });
 
@@ -679,7 +779,7 @@ test("an invalid check result degrades to that check's failure, not a failed rea
   const { data } = await new Readiness(
     deps(f, { codexLogin: async () => "weird" as never }),
   ).read();
-  assert.equal(data.checks.length, 8);
+  assert.equal(data.checks.length, 9);
   assert.equal(
     data.checks.filter((c) => c.status === "pass").length >= 3,
     true,
@@ -698,7 +798,7 @@ test("a throwing dependency fails that check only, without its message", async (
   const harness = data.checks.find((c) => c.id === "runtime-harness");
   assert.equal(harness?.status, "fail");
   assert.ok(!JSON.stringify(data).includes(TOKEN));
-  assert.equal(data.checks.filter((c) => c.status === "pass").length, 4);
+  assert.equal(data.checks.filter((c) => c.status === "pass").length, 5);
 });
 
 test("the shared schema rejects a pass with a fix and a failure without one", () => {

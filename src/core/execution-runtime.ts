@@ -37,7 +37,14 @@ export const profileRuntimeSchema = z.discriminatedUnion("harness", [
     .strict(),
 ]);
 export type ProfileRuntime = z.infer<typeof profileRuntimeSchema>;
-export const defaultProfileRuntime: ProfileRuntime = { harness: "codex" };
+/** A new profile's runtime: the first enabled harness, else Codex, with default settings. */
+export function defaultProfileRuntime(
+  enabled: readonly ExecutionHarness[],
+): ProfileRuntime {
+  return enabled[0] === "claude"
+    ? { harness: "claude", model: null, reasoningEffort: null }
+    : { harness: "codex" };
+}
 
 /** Operator-facing harness names, shared by waits, alerts and the UI. */
 export const executionHarnessLabels: Record<ExecutionHarness, string> = {

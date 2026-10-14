@@ -3346,6 +3346,33 @@ export class ExecutionState {
       .map((row) => intentSchema.parse(row));
   }
 
+  /** Distinct tasks with unfinished work bound to this harness: what a disable makes wait. */
+  boundTaskCount(harness: ExecutionHarness): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT b.taskId) AS count
+        FROM task_execution_bindings b JOIN execution_intents e ON e.workId = b.workId
+        WHERE b.harness = ?
+          AND e.state IN ('ready','capacity-waiting','held','submitting','running')`,
+      )
+      .get(harness) as { count: number };
+    return row.count;
+  }
+
+  /** Whether an execution this harness owns may still need its runtime, held ones included. */
+  hasRuntimeOwnedExecution(harness: ExecutionHarness): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM execution_intents e
+          LEFT JOIN task_execution_bindings b ON b.workId = e.workId
+          WHERE e.state IN ('submitting','running','held')
+            AND COALESCE(b.harness, 'codex') = ? LIMIT 1`,
+        )
+        .get(harness) !== undefined
+    );
+  }
+
   activeOrLastCompleted(lastCompletedWorkId?: string): ExecutionIntent[] {
     const rows = this.db
       .prepare(`SELECT * FROM execution_intents

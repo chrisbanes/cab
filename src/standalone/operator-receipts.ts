@@ -129,6 +129,18 @@ export function commandReceipt(
             dismissed: outcome.result.dismissed,
           },
         };
+      case "runtime.configure":
+        return {
+          kind: "configuration" as const,
+          key,
+          recorded: true as const,
+          result: {
+            commandType: outcome.type,
+            resourceId: `system:runtime:${outcome.result.harness}` as const,
+            harness: outcome.result.harness,
+            enabled: outcome.result.enabled,
+          },
+        };
       case "discovery.configure":
       case "claude-token.configure":
         return {

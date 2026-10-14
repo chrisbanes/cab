@@ -34,7 +34,10 @@ import {
   type QuestionAnswers,
   questionFormSchema,
 } from "../core/question-forms.js";
-import { executionIntentStateSchema } from "../core/execution-runtime.js";
+import {
+  executionHarnessLabels,
+  executionIntentStateSchema,
+} from "../core/execution-runtime.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
@@ -151,7 +154,10 @@ import {
 } from "./operator-setup.js";
 import { RecoveryRejectedError } from "./recovery-types.js";
 import { retainedReviewAnchorStageRequestSchema } from "./retained-evidence.js";
-import type { StandaloneService } from "./service.js";
+import {
+  RuntimeConfigurationRefusedError,
+  type StandaloneService,
+} from "./service.js";
 import { refusedRevisionPrefix } from "./state.js";
 import { ArtifactUnavailable, previewRecordedArtifact } from "./task-review.js";
 import {
@@ -335,9 +341,13 @@ export class OperatorApiError extends Error {
       | "command-outcome-unknown"
       | "local-review-batch-too-large"
       | "local-review-recipient-unavailable"
-      | "local-review-comment-anchor-required",
+      | "local-review-comment-anchor-required"
+      | "runtime-executable-missing"
+      | "runtime-confirmation-required",
     readonly fieldPaths?: readonly string[],
     readonly credentialReason?: SourceCredentialReason,
+    /** Fixed copy that replaces the code's generic public message. */
+    readonly publicMessage?: string,
   ) {
     super(code);
   }
@@ -359,6 +369,29 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
       error.fieldPaths,
     );
   return undefined;
+}
+
+/** The refusal's fixed public copy; the CLI prints it and the web names the same cause. */
+function runtimeRefusal(error: RuntimeConfigurationRefusedError) {
+  const label = executionHarnessLabels[error.harness];
+  if (error.code === "unavailable")
+    return new OperatorApiError(503, "unavailable");
+  if (error.code === "runtime-executable-missing")
+    return new OperatorApiError(
+      409,
+      error.code,
+      undefined,
+      undefined,
+      `${label} was not turned on: \`${error.harness}\` not found on the service PATH.`,
+    );
+  const n = error.boundTasks;
+  return new OperatorApiError(
+    409,
+    error.code,
+    undefined,
+    undefined,
+    `${n} ${n === 1 ? "task uses" : "tasks use"} ${label}. Running turns finish; their next turns wait until ${label} is enabled again.`,
+  );
 }
 
 export type OperatorReviewSessionContext = {
@@ -4631,7 +4664,7 @@ export class OperatorApi {
       }
     }
     const expected =
-      type.data === "capacity.configure"
+      type.data === "capacity.configure" || type.data === "runtime.configure"
         ? "system"
         : type.data.startsWith("profile.")
           ? "profile"
@@ -4642,6 +4675,11 @@ export class OperatorApi {
       type.data === "github.preview" ? "github.activate" : type.data;
     let data: unknown = { state: "not-recorded" };
     try {
+      if (
+        (type.data === "runtime.configure") !==
+        scope.data.startsWith("system:runtime:")
+      )
+        throw new OperatorApiError(400, "invalid-input");
       const raw = this.domain().recordedResult(
         kind === "project" ? id : scope.data,
         key.data,
@@ -4790,6 +4828,7 @@ export class OperatorApi {
       limits = this.service.capacityLimits(projects.map((p) => String(p.id)));
     const response = {
       data: {
+        runtimes: this.service.runtimeSettings(),
         globalLimit: limits.globalLimit,
         defaultProjectLimit: limits.defaultProjectLimit,
         globalUsage: limits.currentUsage.global,
@@ -6033,6 +6072,20 @@ export class OperatorApi {
           parseDomainCommandOutcome("claude-token.configure", outcome),
           c.key,
           "system:claude-token",
+        );
+      }
+      if (c.type === "runtime.configure") {
+        const result = await this.service
+          .configureRuntime(c)
+          .catch((error: unknown) => {
+            throw error instanceof RuntimeConfigurationRefusedError
+              ? runtimeRefusal(error)
+              : (domainApiError(error) ?? error);
+          });
+        return commandReceipt(
+          { type: "runtime.configure", result },
+          c.key,
+          `system:runtime:${c.harness}`,
         );
       }
       if (c.type === "getting-started.configure") {

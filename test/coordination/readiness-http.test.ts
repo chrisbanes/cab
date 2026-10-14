@@ -74,7 +74,9 @@ test("reading readiness changes no persisted state and runs no model turn", asyn
 });
 
 test("the readiness read reports a Claude token the service cannot use without its path", async (t) => {
-  const s = await startCliService(t);
+  const s = await startCliService(t, {
+    service: { runtimeHarnesses: ["codex", "claude"] },
+  });
   const root = mkdtempSync(join(tmpdir(), "ensemble-ready-http-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const tokenPath = join(root, "claude-token");

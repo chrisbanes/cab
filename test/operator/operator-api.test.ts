@@ -3292,3 +3292,110 @@ test("a running assignment with a queued turn reports its own runtime waits", as
     ],
   );
 });
+
+test("runtime.configure refuses a missing executable, asks to confirm bound work and reads its receipt back", async (t) => {
+  let claudeOnPath = true;
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    undefined,
+    {
+      runtimeHarnesses: ["codex", "claude"],
+      resolveExecutable: async (harness) =>
+        harness !== "claude" || claudeOnPath,
+    },
+  );
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const ids = await seed(f);
+  // A Claude-bound turn that has not run yet: bound work, not running.
+  f.seedPersistedState((db) => {
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare(
+      "INSERT INTO execution_intents (id, workId, prompt, workspace, state, accountType, sandbox, approval) VALUES (?, 'bound-probe', 'p', '/w', 'ready', 'chatgpt', 'workspaceWrite', 'never')",
+    ).run(randomUUID());
+    db.prepare(
+      "INSERT INTO task_execution_bindings (workId, taskId, assignmentId, assignmentVersion, instructionsRevision, profileRevision, conversationRevision, harness) VALUES ('bound-probe', ?, ?, 1, 1, 1, 1, 'claude')",
+    ).run(ids.taskId, randomUUID());
+  });
+  const runtimes = async () => (await api.readRuntimeSettings()).data.runtimes;
+  assert.deepEqual(await runtimes(), [
+    { harness: "codex", enabled: true, boundTasks: 0 },
+    { harness: "claude", enabled: true, boundTasks: 1 },
+  ]);
+  const refused = async (command: object, code: string) => {
+    await assert.rejects(
+      api.execute(command),
+      (error: OperatorApiError) => error.status === 409 && error.code === code,
+    );
+  };
+  const disable = {
+    type: "runtime.configure",
+    key: randomUUID(),
+    harness: "claude",
+    enabled: false,
+  };
+  await refused(disable, "runtime-confirmation-required");
+  assert.equal(f.service.domain().runtimeEnabled("claude"), true);
+  const receipt = await api.execute({ ...disable, confirmed: true });
+  assert.deepEqual(receipt, {
+    kind: "configuration",
+    key: disable.key,
+    recorded: true,
+    result: {
+      commandType: "runtime.configure",
+      resourceId: "system:runtime:claude",
+      harness: "claude",
+      enabled: false,
+    },
+  });
+  assert.deepEqual(await api.execute(disable), receipt, "a replay converges");
+  assert.deepEqual(
+    (
+      await api.readOperation(
+        new URLSearchParams({
+          scope: "system:runtime:claude",
+          type: "runtime.configure",
+          key: disable.key,
+        }),
+      )
+    ).data,
+    { state: "recorded", receipt },
+  );
+  await assert.rejects(
+    api.readOperation(
+      new URLSearchParams({
+        scope: "system:capacity",
+        type: "runtime.configure",
+        key: disable.key,
+      }),
+    ),
+    (error: OperatorApiError) => error.code === "invalid-input",
+  );
+
+  claudeOnPath = false;
+  await refused(
+    {
+      type: "runtime.configure",
+      key: randomUUID(),
+      harness: "claude",
+      enabled: true,
+    },
+    "runtime-executable-missing",
+  );
+  assert.equal(f.service.domain().runtimeEnabled("claude"), false);
+
+  // Codex has no bound work: disabling needs no confirmation.
+  await api.execute({
+    type: "runtime.configure",
+    key: randomUUID(),
+    harness: "codex",
+    enabled: false,
+  });
+  assert.deepEqual(await runtimes(), [
+    { harness: "codex", enabled: false, boundTasks: 0 },
+    { harness: "claude", enabled: false, boundTasks: 1 },
+  ]);
+});

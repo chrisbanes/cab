@@ -6,6 +6,7 @@ import {
   commandReceiptSchema,
   localReviewOperationReadSchema,
   operatorCommandSchema,
+  operationScopeSchema,
   materialSchema,
   workspaceComparisonReadSchema,
   workspaceSchema,
@@ -69,6 +70,7 @@ test("read envelopes reject row fields and invalid states", () => {
         harnesses: [
           {
             harness: "codex",
+            enabled: true,
             state: "unavailable",
             since: 5,
             policy: { lines: ["a"], limits: [] },
@@ -76,7 +78,9 @@ test("read envelopes reject row fields and invalid states", () => {
           },
           {
             harness: "claude",
+            enabled: false,
             state: "not-configured",
+            reason: "disabled",
             policy: null,
             settings: { models: [{ model: "default", efforts: ["high"] }] },
           },
@@ -108,6 +112,19 @@ test("read envelopes reject row fields and invalid states", () => {
       false,
     );
   for (const invalid of [
+    {
+      harness: "codex",
+      enabled: true,
+      state: "not-configured",
+      policy: null,
+      settings: null,
+    },
+    {
+      harness: "codex",
+      state: "available",
+      policy: null,
+      settings: null,
+    },
     { harness: "codex", state: "unavailable", policy: null, settings: null },
     {
       harness: "codex",
@@ -682,4 +699,36 @@ test("workspace comparison reads stay stricter than persistence at every nested 
     ],
   ] as const)
     assert.equal(accepts(doc), false, name);
+});
+
+test("runtime enablement receipts and commands name a known harness", () => {
+  const receipt = {
+    kind: "configuration",
+    key: "00000000-0000-4000-8000-000000000001",
+    recorded: true,
+    result: {
+      commandType: "runtime.configure",
+      resourceId: "system:runtime:claude",
+      harness: "claude",
+      enabled: false,
+    },
+  };
+  assert.equal(commandReceiptSchema.safeParse(receipt).success, true);
+  for (const result of [
+    { ...receipt.result, harness: "pi" },
+    { ...receipt.result, resourceId: "system:runtime:pi" },
+    { ...receipt.result, confirmed: true },
+  ])
+    assert.equal(
+      commandReceiptSchema.safeParse({ ...receipt, result }).success,
+      false,
+    );
+  assert.equal(
+    operationScopeSchema.safeParse("system:runtime:claude").success,
+    true,
+  );
+  assert.equal(
+    operationScopeSchema.safeParse("system:runtime:pi").success,
+    false,
+  );
 });

@@ -71,7 +71,14 @@ _Avoid_: Assignment when referring only to its conversation history
 **Execution runtime**:
 The agent harness or execution engine that carries out admitted agent turns and
 reports their observations to Ensemble.
-_Avoid_: Scheduler when referring to the system executing one agent turn
+_Avoid_: Scheduler when referring to the system executing one agent turn; runtime provider
+
+**Disabled runtime**:
+An execution runtime the operator turned off for the installation. It is one cause of
+**Not enabled**, the effective state in which a runtime admits no work; a missing
+executable is another. Work bound to a runtime that is not enabled waits and never
+falls back to another runtime.
+_Avoid_: Unavailable, which is an enabled runtime that failed
 
 **Credential reference**:
 Where the service reads a credential, never the credential itself. `env:NAME` names

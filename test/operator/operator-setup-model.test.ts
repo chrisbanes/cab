@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
   operatorCommandSchema,
+  type HarnessStatus,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import {
@@ -275,10 +276,26 @@ const leadId = randomUUID();
 const harness = (
   name: "codex" | "claude",
   state: "available" | "not-configured" | "unavailable" = "available",
-) =>
+): HarnessStatus =>
   state === "unavailable"
-    ? { harness: name, state, since: 1, policy: null, settings: null }
-    : { harness: name, state, policy: null, settings: null };
+    ? {
+        harness: name,
+        enabled: true,
+        state,
+        since: 1,
+        policy: null,
+        settings: null,
+      }
+    : state === "not-configured"
+      ? {
+          harness: name,
+          enabled: true,
+          state,
+          reason: "executable-missing",
+          policy: null,
+          settings: null,
+        }
+      : { harness: name, enabled: true, state, policy: null, settings: null };
 const workspace = (
   lead: "codex" | "claude" | null,
   patch: Partial<Workspace["data"]> = {},

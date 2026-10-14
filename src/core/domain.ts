@@ -19,6 +19,8 @@ import {
 } from "./domain-errors.js";
 import {
   defaultProfileRuntime,
+  type ExecutionHarness,
+  executionHarnessSchema,
   type ProfileRuntime,
   profileRuntimeSchema,
 } from "./execution-runtime.js";
@@ -312,6 +314,14 @@ const commandSchema = z.discriminatedUnion("type", [
       dismissed: z.boolean(),
     })
     .strict(),
+  z
+    .object({
+      ...commandBase,
+      type: z.literal("runtime.configure"),
+      harness: executionHarnessSchema,
+      enabled: z.boolean(),
+    })
+    .strict(),
 ]);
 
 function parseCommand(input: unknown) {
@@ -363,7 +373,9 @@ function scopeOf(command: ParsedCommand): string {
           ? "system:claude-token"
           : command.type === "getting-started.configure"
             ? "system:getting-started"
-            : "system:capacity";
+            : command.type === "runtime.configure"
+              ? `system:runtime:${command.harness}`
+              : "system:capacity";
 }
 
 function canonical(value: unknown): string {
@@ -495,6 +507,10 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS claude_runtime_credentials (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
           credentialRef TEXT
+        );
+        CREATE TABLE IF NOT EXISTS installation_runtimes (
+          harness TEXT PRIMARY KEY,
+          enabled INTEGER NOT NULL CHECK(enabled IN (0, 1))
         );
         CREATE TABLE IF NOT EXISTS installation_getting_started (
           singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
@@ -791,6 +807,21 @@ export class DomainStore {
       "SELECT credentialRef FROM claude_runtime_credentials WHERE singleton = 1",
     );
     return row?.credentialRef ? String(row.credentialRef) : null;
+  }
+
+  /** The operator's installation-wide setting; a missing row means enabled. */
+  runtimeEnabled(harness: ExecutionHarness): boolean {
+    return (
+      this.one(
+        "SELECT enabled FROM installation_runtimes WHERE harness = ?",
+        harness,
+      )?.enabled !== 0
+    );
+  }
+
+  /** Enabled harnesses in `executionHarnessSchema` order. */
+  enabledRuntimes(): ExecutionHarness[] {
+    return executionHarnessSchema.options.filter((h) => this.runtimeEnabled(h));
   }
 
   /** Whether the operator dismissed the getting-started checklist for this installation. */
@@ -1943,7 +1974,9 @@ export class DomainStore {
             command.summary ?? "",
             command.instructions,
             command.capabilities,
-            canonical(command.runtime ?? defaultProfileRuntime),
+            canonical(
+              command.runtime ?? defaultProfileRuntime(this.enabledRuntimes()),
+            ),
           );
         this.snapshotProfile(command.profileId);
         return this.profile(command.profileId);
@@ -2416,6 +2449,15 @@ export class DomainStore {
           )
           .run(Number(command.dismissed));
         return { dismissed: command.dismissed };
+      }
+      case "runtime.configure": {
+        this.operator(command);
+        this.db
+          .prepare(
+            "INSERT INTO installation_runtimes (harness, enabled) VALUES (?, ?) ON CONFLICT(harness) DO UPDATE SET enabled = excluded.enabled",
+          )
+          .run(command.harness, Number(command.enabled));
+        return { harness: command.harness, enabled: command.enabled };
       }
       case "capacity.configure": {
         this.operator(command);
