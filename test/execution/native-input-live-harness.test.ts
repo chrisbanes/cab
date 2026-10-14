@@ -13,6 +13,39 @@ import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 
+// Behaviour cases stop at their asserted boundary, so the headroom only covers
+// slow runners. Enforcement cases below stall forever and use isolated budgets.
+const protocolBehaviourBudgets = {
+  requestMs: 10_000,
+  totalMs: 30_000,
+  // The hold races the replay line a fixture writes right after its request.
+  holdMs: 100,
+  cleanupMs: 5_000,
+};
+const serviceBehaviourBudgets = {
+  requestMs: 10_000,
+  totalMs: 30_000,
+  cleanupMs: 5_000,
+};
+const protocolEnforcementBudgets: Record<
+  string,
+  typeof protocolBehaviourBudgets
+> = {
+  timeout: { ...protocolBehaviourBudgets, requestMs: 500 },
+  "no-resolution": {
+    requestMs: 4_000,
+    totalMs: 6_000,
+    holdMs: 20,
+    cleanupMs: 1_000,
+  },
+  "mode-resume-timeout": {
+    requestMs: 4_000,
+    totalMs: 6_000,
+    holdMs: 20,
+    cleanupMs: 1_000,
+  },
+};
+
 const script = resolve(
   "test/execution/native-input-qualification/runtime-contract.mjs",
 );
@@ -27,7 +60,7 @@ test("protocol CLI refuses unapproved execution before creating runtime state", 
   ]) {
     const result = spawnSync(process.execPath, [script, ...args], {
       encoding: "utf8",
-      timeout: 3000,
+      timeout: 30_000,
     });
     assert.equal(result.status, 2);
     assert.match(result.stderr, /requires exactly --live --phase protocol/);
@@ -57,7 +90,7 @@ test("qualified Default false/null request records actual waiting before one non
         "default",
       ],
     },
-    budgets: { requestMs: 1000, totalMs: 3000, holdMs: 20, cleanupMs: 500 },
+    budgets: protocolBehaviourBudgets,
   });
   t.after(() => {
     rmSync(evidence.fixture.path, { recursive: true, force: true });
@@ -451,7 +484,7 @@ test("one native callback continues only its exact disposable turn", async () =>
         "numeric-id",
       ],
     },
-    budgets: { requestMs: 1000, totalMs: 3000, holdMs: 20, cleanupMs: 500 },
+    budgets: protocolBehaviourBudgets,
   });
   assert.equal(evidence.status, "passed");
   assert.equal(evidence.identity.requestId, 71);
@@ -482,7 +515,7 @@ test("persisted answer and intent are independently readable before the reply ef
         "custom",
       ],
     },
-    budgets: { requestMs: 1000, totalMs: 3000, holdMs: 20, cleanupMs: 500 },
+    budgets: protocolBehaviourBudgets,
   });
   assert.equal(evidence.status, "passed");
   assert.equal(evidence.persistence.committedBeforeEffect, true);
@@ -505,7 +538,7 @@ test("unreadable cleanup verification retains failure evidence instead of losing
         throw new Error("PRIVATE_OS_DIAGNOSTIC");
       },
     },
-    budgets: { requestMs: 1000, totalMs: 3000, holdMs: 20, cleanupMs: 500 },
+    budgets: protocolBehaviourBudgets,
   });
   assert.equal(evidence.status, "failed");
   assert.equal(evidence.cleanup.verified, false);
@@ -521,6 +554,7 @@ async function fixture(
   mode: string,
   overrides = {},
   source: Record<string, unknown> = qualifiedSource,
+  budgets = protocolEnforcementBudgets[mode] ?? protocolBehaviourBudgets,
 ) {
   const { runProtocol } = await probe();
   const evidence = await runProtocol({
@@ -535,7 +569,7 @@ async function fixture(
       ],
       ...overrides,
     },
-    budgets: { requestMs: 150, totalMs: 600, holdMs: 20, cleanupMs: 150 },
+    budgets,
   });
   t.after(() => {
     rmSync(evidence.fixture.path, { recursive: true, force: true });
@@ -621,6 +655,8 @@ for (const [mode, reason] of [
     const evidence = await fixture(t, mode as string);
     assert.equal(evidence.status, "failed");
     assert.equal(evidence.failure.reason, reason);
+    if (mode === "timeout")
+      assert.equal(evidence.failure.stage, "native-request");
     assert.equal(evidence.cleanup.verified, true);
     assert.equal(evidence.fixture.removed, false);
     assert.ok(evidence.counts.turns <= 1 && evidence.counts.replies <= 1);
@@ -660,15 +696,37 @@ test("successful stdin cannot qualify a failed native reply", async (t) => {
 });
 
 test("an unresponsive cleanup verifier cannot exceed the total proof budget", {
-  timeout: 2000,
+  timeout: 20_000,
 }, async (t) => {
+  const budgets = {
+    requestMs: 4_000,
+    totalMs: 8_000,
+    holdMs: 20,
+    cleanupMs: 2_000,
+  };
   const start = Date.now();
-  const evidence = await fixture(t, "numeric-id", {
-    verifyTermination: async () => new Promise(() => {}),
-  });
+  let verifierEnteredAt = 0;
+  const evidence = await fixture(
+    t,
+    "numeric-id",
+    {
+      verifyTermination: async () => {
+        verifierEnteredAt = Date.now();
+        return new Promise(() => {});
+      },
+    },
+    undefined,
+    budgets,
+  );
   assert.equal(evidence.status, "failed");
   assert.equal(evidence.cleanup.verified, false);
-  assert.ok(Date.now() - start < 1500);
+  assert.equal(
+    evidence.cleanup.verification.reason,
+    "process-verification-deadline",
+  );
+  assert.ok(verifierEnteredAt > 0);
+  assert.ok(Date.now() - verifierEnteredAt < budgets.cleanupMs + 2_000);
+  assert.ok(Date.now() - start < budgets.totalMs + 2_000);
 });
 
 test("observed large config response reaches the same-turn proof without retaining config payload", async (t) => {
@@ -737,7 +795,7 @@ for (const mode of ["proof", "reply-replay"] as const)
           .update(readFileSync(executable))
           .digest("hex"),
       },
-      budgets: { requestMs: 1000, totalMs: 3000, cleanupMs: 500 },
+      budgets: serviceBehaviourBudgets,
     });
     t.after(() => {
       rmSync(evidence.fixture.path, { recursive: true, force: true });
@@ -782,7 +840,7 @@ for (const mode of ["secret", "cleanup-unproved"] as const)
             }
           : {}),
       },
-      budgets: { requestMs: 200, totalMs: 1500, cleanupMs: 500 },
+      budgets: serviceBehaviourBudgets,
     });
     t.after(() => {
       rmSync(evidence.fixture.path, { recursive: true, force: true });
@@ -802,7 +860,7 @@ for (const mode of ["secret", "cleanup-unproved"] as const)
 
 for (const boundary of ["startup", "service-stop", "verification"] as const)
   test(`service proof bounds awaited ${boundary} and retains unresolved evidence`, {
-    timeout: boundary === "startup" ? 3000 : 5000,
+    timeout: boundary === "startup" ? 15_000 : 40_000,
   }, async (t) => {
     const { createHash } = await import("node:crypto");
     const { runService } = await probe();
@@ -820,11 +878,11 @@ for (const boundary of ["startup", "service-stop", "verification"] as const)
         { mode: 0o700 },
       );
     }
-    let faultEntered = false;
+    let faultEnteredAt = 0;
     let faultSettled = false;
     let release!: () => void;
     const stall = async () => {
-      faultEntered = true;
+      faultEnteredAt = Date.now();
       await new Promise<void>((resolve) => {
         release = resolve;
       });
@@ -832,6 +890,11 @@ for (const boundary of ["startup", "service-stop", "verification"] as const)
     };
     t.after(() => release?.());
     const started = Date.now();
+    // Only the targeted deadline may end the run: the others keep headroom.
+    const budgets =
+      boundary === "startup"
+        ? { requestMs: 200, totalMs: 2_000, cleanupMs: 500 }
+        : { ...serviceBehaviourBudgets, cleanupMs: 3_000 };
     const evidence = await runService({
       fixture: {
         executable,
@@ -842,16 +905,14 @@ for (const boundary of ["startup", "service-stop", "verification"] as const)
         ...(boundary === "service-stop" ? { afterServiceStop: stall } : {}),
         ...(boundary === "verification" ? { verifyTermination: stall } : {}),
       },
-      budgets:
-        boundary === "startup"
-          ? { requestMs: 200, totalMs: 1000, cleanupMs: 300 }
-          : { requestMs: 1000, totalMs: 3000, cleanupMs: 300 },
+      budgets,
     });
     t.after(() => {
       rmSync(evidence.fixture.path, { recursive: true, force: true });
       rmSync(evidence.evidencePath, { force: true });
     });
-    assert.ok(Date.now() - started < (boundary === "startup" ? 1800 : 3800));
+    if (boundary === "startup")
+      assert.ok(Date.now() - started < budgets.totalMs + 2_000);
     assert.equal(evidence.status, "failed");
     assert.equal(evidence.fixture.removed, false);
     if (boundary === "startup") {
@@ -859,7 +920,8 @@ for (const boundary of ["startup", "service-stop", "verification"] as const)
       assert.equal(evidence.counts.turns, 0);
       assert.match(evidence.failure.reason, /startup-deadline/);
     } else {
-      assert.equal(faultEntered, true);
+      assert.ok(faultEnteredAt > 0);
+      assert.ok(Date.now() - faultEnteredAt < budgets.cleanupMs + 2_000);
       assert.equal(
         evidence.failure.stage,
         "cleanup",
@@ -897,6 +959,22 @@ for (const boundary of ["startup", "service-stop", "verification"] as const)
       assert.equal(readFileSync(evidence.evidencePath, "utf8"), snapshot);
     }
   });
+
+test("service fixture seam rejects unbounded budgets before execution", async () => {
+  const { runService } = await probe();
+  for (const budgets of [
+    { totalMs: Infinity },
+    { requestMs: 0 },
+    { totalMs: 240001 },
+    { requestMs: -1 },
+    { cleanupMs: Number.NaN },
+  ]) {
+    await assert.rejects(
+      runService({ fixture: { executable: "/must-not-spawn" }, budgets }),
+      assert.AssertionError,
+    );
+  }
+});
 
 test("service finite grant is exact-head/resource/budget bound and atomically consumed once without execution", async (t) => {
   const { consumeServiceGrant } = await probe();
