@@ -964,6 +964,7 @@ test("verified GitHub command duplicates share correlation and replay without re
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
+      closedIssues: "skip",
       repositories: [
         {
           repositoryId: "R_1",
@@ -1010,6 +1011,83 @@ test("existing standalone projects acquire inactive source configuration on migr
     domain.migrate();
     assert.equal(domain.githubConfiguration(projectId).version, 1);
     assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closed-issue mode defaults to skip and changes only through keyed, versioned configuration", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-mode-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Modes",
+      leadProfileId: null,
+    });
+    assert.equal(domain.githubConfiguration(projectId).closedIssues, "skip");
+    // A source saved before the mode existed reads as skip without a rewrite.
+    db.exec("ALTER TABLE project_github_sources DROP COLUMN closedIssues");
+    domain.migrate();
+    const legacy = domain.githubConfiguration(projectId);
+    assert.equal(legacy.closedIssues, "skip");
+    assert.equal(legacy.version, 1);
+
+    const configure = (
+      key: string,
+      expectedVersion: number,
+      closedIssues?: "skip" | "done",
+    ) =>
+      domain.execute({
+        type: "github.configure",
+        actor: "operator",
+        key,
+        projectId,
+        expectedVersion,
+        credentialRef: null,
+        selections: [],
+        readiness: {
+          mode: "all",
+          conditions: [{ kind: "label", name: "ready" }],
+        },
+        ...(closedIssues ? { closedIssues } : {}),
+        repositories: [],
+      });
+    const key = randomUUID();
+    configure(key, 1, "done");
+    assert.deepEqual(
+      [
+        domain.githubConfiguration(projectId).version,
+        domain.githubConfiguration(projectId).closedIssues,
+      ],
+      [2, "done"],
+    );
+    configure(key, 1, "done");
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.throws(() => configure(randomUUID(), 1, "skip"));
+    configure(randomUUID(), 2);
+    assert.deepEqual(
+      [
+        domain.githubConfiguration(projectId).version,
+        domain.githubConfiguration(projectId).closedIssues,
+      ],
+      [3, "done"],
+    );
+    assert.throws(() =>
+      db
+        .prepare(
+          "UPDATE project_github_sources SET closedIssues = 'closed' WHERE projectId = ?",
+        )
+        .run(projectId),
+    );
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });

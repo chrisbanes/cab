@@ -2,6 +2,7 @@ import { z } from "zod";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
+  closedIssuesSchema,
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
   readinessSchema,
@@ -2452,6 +2453,7 @@ export const projectConfigurationSchema = envelope(
               .strict(),
           ),
           readiness: readinessSchema.nullable(),
+          closedIssues: closedIssuesSchema,
           repositories: z.array(
             z.object({ repositoryId: safeText, ref: safeText }).strict(),
           ),

@@ -53,6 +53,9 @@ export const readinessSchema = z
   })
   .strict();
 
+/** How a GitHub source treats issues closed on GitHub. */
+export const closedIssuesSchema = z.enum(["skip", "done"]);
+
 export const repositoryLinkSchema = z
   .object({
     repositoryId: nonempty,
@@ -113,6 +116,7 @@ export const githubConfigurationSchema = z
         "Selection IDs must be unique",
       ),
     readiness: readinessSchema,
+    closedIssues: closedIssuesSchema,
     repositories: z
       .array(repositoryLinkSchema)
       .max(20)
@@ -127,6 +131,8 @@ export const githubConfigurationSchema = z
 
 export const githubConfigurationCommandSchema =
   githubConfigurationSchema.extend({
+    /** Omitted keeps the saved mode, so older clients and replays cannot reset it. */
+    closedIssues: closedIssuesSchema.optional(),
     selections: z
       .array(z.union([selectionSchema, selectionKeepSchema]))
       .max(30)

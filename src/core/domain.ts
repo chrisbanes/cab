@@ -35,7 +35,10 @@ import {
   readinessSchema,
   selectionSchema,
 } from "./github-source.js";
-import { setupRepositoriesSchema } from "./github-source-contracts.js";
+import {
+  closedIssuesSchema,
+  setupRepositoriesSchema,
+} from "./github-source-contracts.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -453,7 +456,8 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS project_github_sources (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
           credentialRef TEXT, selections TEXT NOT NULL, readiness TEXT NOT NULL,
-          repositories TEXT NOT NULL
+          repositories TEXT NOT NULL,
+          closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))
         );
         CREATE TABLE IF NOT EXISTS project_github_active (
           projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
@@ -575,6 +579,16 @@ export class DomainStore {
           this.db.exec(
             `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,
           );
+      if (
+        !(
+          this.db
+            .prepare("PRAGMA table_info(project_github_sources)")
+            .all() as Row[]
+        ).some((column) => column.name === "closedIssues")
+      )
+        this.db.exec(
+          "ALTER TABLE project_github_sources ADD COLUMN closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))",
+        );
       if (!routingColumns.some((column) => column.name === "brief"))
         this.db.exec(
           "ALTER TABLE routing_operations ADD COLUMN brief TEXT NOT NULL DEFAULT ''",
@@ -984,11 +998,12 @@ export class DomainStore {
     credentialRef: string | null;
     selections: z.output<typeof selectionSchema>[];
     readiness: z.output<typeof readinessSchema>;
+    closedIssues: z.output<typeof closedIssuesSchema>;
     repositories: LinkedRepository[];
   } {
     this.project(projectId);
     const row = this.required(
-      "SELECT version, credentialRef, selections, readiness, repositories FROM project_github_sources WHERE projectId = ?",
+      "SELECT version, credentialRef, selections, readiness, closedIssues, repositories FROM project_github_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return {
@@ -999,6 +1014,7 @@ export class DomainStore {
         .array(selectionSchema)
         .parse(JSON.parse(String(row.selections))),
       readiness: readinessSchema.parse(JSON.parse(String(row.readiness))),
+      closedIssues: closedIssuesSchema.parse(row.closedIssues),
       repositories: z
         .array(linkedRepositorySchema)
         .parse(JSON.parse(String(row.repositories))),
@@ -2066,7 +2082,7 @@ export class DomainStore {
         });
         this.db
           .prepare(
-            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, repositories = ? WHERE projectId = ?",
+            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ?, repositories = ? WHERE projectId = ?",
           )
           .run(
             command.credentialRef === undefined
@@ -2074,6 +2090,7 @@ export class DomainStore {
               : command.credentialRef,
             JSON.stringify(selections),
             JSON.stringify(command.readiness),
+            command.closedIssues ?? current.closedIssues,
             JSON.stringify(repositories),
             command.projectId,
           );

@@ -4802,6 +4802,7 @@ export class OperatorApi {
             this.exact(JSON.stringify(g.readiness), excluded) === null
               ? null
               : g.readiness,
+          closedIssues: g.closedIssues,
           repositories: g.repositories.map((r) => ({
             repositoryId: this.safe(r.repositoryId, excluded),
             ref: this.safe(r.ref, excluded),

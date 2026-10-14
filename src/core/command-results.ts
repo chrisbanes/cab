@@ -134,6 +134,14 @@ export const githubConfigurationCommandResultSchema = githubConfigurationSchema
       ),
   })
   .strict();
+// Receipts recorded before the closed-issue mode omit it.
+const legacyGithubConfigurationCommandResultSchema =
+  githubConfigurationCommandResultSchema
+    .extend({
+      closedIssues:
+        githubConfigurationCommandResultSchema.shape.closedIssues.optional(),
+    })
+    .strict();
 
 export const githubActivationCommandResultSchema = z
   .object({
@@ -179,7 +187,9 @@ export interface DomainCommandResultMap {
   "profile.create": z.output<typeof legacyProfileCommandResultSchema>;
   "profile.configure": z.output<typeof legacyProfileCommandResultSchema>;
   "routing.configure": z.output<typeof routingCommandResultSchema>;
-  "github.configure": z.output<typeof githubConfigurationCommandResultSchema>;
+  "github.configure": z.output<
+    typeof legacyGithubConfigurationCommandResultSchema
+  >;
   "github.activate": z.output<typeof githubActivationCommandResultSchema>;
   "github.place": z.output<typeof taskCommandResultSchema>;
   "source.review": z.output<typeof taskCommandResultSchema>;
@@ -299,7 +309,12 @@ function parseCommandOutcome(
     case "github.configure":
       return {
         type,
-        result: parseUnchanged(githubConfigurationCommandResultSchema, value),
+        result: parseUnchanged(
+          fresh
+            ? githubConfigurationCommandResultSchema
+            : legacyGithubConfigurationCommandResultSchema,
+          value,
+        ),
       };
     case "github.activate":
       return {

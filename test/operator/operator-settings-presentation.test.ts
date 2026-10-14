@@ -84,6 +84,7 @@ const config = (): ProjectConfigurationData =>
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
+      closedIssues: "skip",
       repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
     },
   }) as ProjectConfigurationData;

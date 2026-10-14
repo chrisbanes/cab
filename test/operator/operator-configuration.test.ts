@@ -877,6 +877,7 @@ test("GitHub keep markers and pathless links resolve from the saved configuratio
   // so the read and sync treat S-1 as inactive until it is previewed again.
   assert.deepEqual(d.githubActiveSelectionIds(projectId), []);
   const configuration = await api.readProjectConfiguration(projectId);
+  assert.equal(configuration.data.source.closedIssues, "skip");
   assert.deepEqual(
     configuration.data.source.selections.map((s) => [s.id, s.active]),
     [
@@ -982,6 +983,24 @@ test("GitHub configuration command contract accepts only exact keep markers and 
     githubConfigurationCommandSchema.safeParse({ ...base, selections }).success;
   assert.equal(parse([{ id: "S-1", keep: true }]), true);
   assert.equal(parse([{ id: "S-1", keep: false }]), false);
+  const mode = (closedIssues: unknown) =>
+    githubConfigurationCommandSchema.safeParse({
+      ...base,
+      selections: [],
+      closedIssues,
+    }).success;
+  assert.equal(mode("done"), true);
+  assert.equal(mode("skip"), true);
+  assert.equal(mode(undefined), true);
+  assert.equal(mode("closed"), false);
+  assert.equal(
+    githubConfigurationCommandSchema.safeParse({
+      ...base,
+      selections: [],
+      closedIssueMode: "done",
+    }).success,
+    false,
+  );
   assert.equal(parse([{ id: "S-1", keep: true, query: "x" }]), false);
   assert.equal(
     parse([
