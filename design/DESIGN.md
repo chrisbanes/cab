@@ -577,15 +577,16 @@ the open decisions.
     Keep paused. On phone (147) the actions stack at full width.
   - Drawn in 146b: a source without a credential reads "GitHub source credential:
     not set. The source won't sync until one is set." with a GitHub source settings
-    link that opens in a new tab. The line is informational and never disables
-    Resume. While anything would make work wait, the primary is disabled (50%)
+    link that opens in a new tab; the hint and Check again below also appear for
+    it. The line is informational and never disables Resume. While anything would make work wait, the primary is disabled (50%)
     and the reasons sit beneath it, one item each: the readiness reason with its fix
     line in Geist Mono, and a secondary link that opens in a new tab when the fix is
     elsewhere (Add Claude for the Claude token, Edit profile when the Claude lead's
     model or reasoning effort is not accepted). Under the items, a hint ("Links open
     in a new tab. Fix the item, then check again here. If you leave this page, resume
     later with the Pause project switch in project configuration.") and a secondary
-    Check again, which re-reads readiness, the workspace and capacity. The hint's
+    Check again, which re-reads readiness, the workspace, capacity and the source
+    credential. The hint's
     first sentence appears only when an item has a link.
   - Not drawn, same layout: the items no lead profile, the lead's runtime unavailable
     or not enabled, and an unreadable readiness check ("Readiness couldn't be

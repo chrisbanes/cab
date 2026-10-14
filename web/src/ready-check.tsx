@@ -72,6 +72,9 @@ export function ReadyCheck({
     projectId,
     configuration.state.error ? null : configuration.state.data?.data.source,
   );
+  // A source fixed in another tab is re-read by Check again, as readiness items are.
+  const recheckCredential =
+    Boolean(credential.link) || Boolean(configuration.state.error);
   // Its own key: the project configuration General tab loads into `project.configure:<id>`.
   const resume = useDraft(p.drafts, `project.resume:${projectId}`);
   // A recorded create is version 1 (see matchesConfigurationReceipt).
@@ -189,29 +192,32 @@ export function ReadyCheck({
         {(checking || readiness.state.pending) && (
           <p className="metadata muted">Checking readiness…</p>
         )}
-        {items.length > 0 && (
+        {(items.length > 0 || recheckCredential) && (
           <>
-            <ul className="body">
-              {items.map((item) => (
-                <li key={item.text}>
-                  {item.text}
-                  {item.fix && <p className="identifier">{item.fix}</p>}
-                  {item.link && (
-                    // A new tab, so this check is still here to check again.
-                    <ActionLink
-                      variant="secondary"
-                      href={item.link.href}
-                      target="_blank"
-                      rel="noopener"
-                    >
-                      {item.link.label}
-                    </ActionLink>
-                  )}
-                </li>
-              ))}
-            </ul>
+            {items.length > 0 && (
+              <ul className="body">
+                {items.map((item) => (
+                  <li key={item.text}>
+                    {item.text}
+                    {item.fix && <p className="identifier">{item.fix}</p>}
+                    {item.link && (
+                      // A new tab, so this check is still here to check again.
+                      <ActionLink
+                        variant="secondary"
+                        href={item.link.href}
+                        target="_blank"
+                        rel="noopener"
+                      >
+                        {item.link.label}
+                      </ActionLink>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
             <p className="metadata muted">
-              {items.some((item) => item.link) && "Links open in a new tab. "}
+              {(items.some((item) => item.link) || credential.link) &&
+                "Links open in a new tab. "}
               Fix the item, then check again here. If you leave this page,
               resume later with the Pause project switch in project
               configuration.

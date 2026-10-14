@@ -1062,7 +1062,8 @@ test("Setup lets the operator check again after fixing a failed item", async (_t
   const check = ready.getByRole("button", { name: "Check again", exact: true });
   await check.click();
   await ready.getByText("codex-login fix").waitFor({ state: "detached" });
-  await check.waitFor({ state: "detached" });
+  // Check again stays for the unset source credential, which never blocks Resume.
+  assert.equal(await check.count(), 1);
   await resume.click();
   await composer();
   assert.equal(f.service.domain().project(projectId).paused, 0);
@@ -1561,5 +1562,29 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     null,
   );
   await resume.waitFor();
+  assert.equal(await resume.isEnabled(), true);
+  // Fixed in another tab: Check again re-reads the credential, as it does readiness.
+  gh.set("signed-in");
+  const d = f.service.domain();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "gh:github.com",
+    selections: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  });
+  await ready.getByRole("button", { name: "Check again" }).click();
+  await ready
+    .getByText("GitHub source credential: GitHub CLI · @octo", { exact: true })
+    .waitFor();
+  await line.waitFor({ state: "detached" });
+  assert.equal(
+    await ready.getByRole("button", { name: "Check again" }).count(),
+    0,
+  );
   assert.equal(await resume.isEnabled(), true);
 });
