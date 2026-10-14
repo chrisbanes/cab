@@ -34,9 +34,10 @@ startup and imports; new files use the selected profile's median fallback. The r
 `check` context aggregates static checks and all applicable test jobs, including
 their failure evidence uploads. Superseded PR runs are cancelled.
 
-Daily CI at 05:00 UTC runs only when the commit differs from the previous scheduled
-run on the same branch (or there is no previous run). An unchanged night skips the
-build and tests; a history lookup failure fails CI. Manual workflow runs always
+Daily CI at 05:00 UTC skips the build and tests only when the previous scheduled
+run on the same branch completed successfully on the same commit. Changed commits,
+first nights and failed, cancelled or unfinished previous runs execute all checks;
+a history lookup failure fails CI. Manual workflow runs always
 run the complete checks. Nightly, manual and release-tag runs include WebKit on
 Node 24 and the complete suite and build on Node 26. These triggers become available when the
 workflow reaches the default branch. Local `npm run check` continues to run all

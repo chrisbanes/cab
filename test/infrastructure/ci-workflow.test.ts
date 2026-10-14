@@ -14,11 +14,28 @@ const { previousNightlyRun, nightlyChanged } = (await import(
   previousNightlyRun(
     id: string,
     fetchPage: (page: number) => Promise<{
-      runs: Array<{ id: number; head_sha?: string }>;
+      runs: Array<{
+        id: number;
+        head_sha?: string;
+        status?: string;
+        conclusion?: string | null;
+      }>;
       hasNext: boolean;
     }>,
-  ): Promise<{ id: number; head_sha: string } | null>;
-  nightlyChanged(sha: string, previous: { head_sha: string } | null): boolean;
+  ): Promise<{
+    id: number;
+    head_sha: string;
+    status?: string;
+    conclusion?: string | null;
+  } | null>;
+  nightlyChanged(
+    sha: string,
+    previous: {
+      head_sha: string;
+      status?: string;
+      conclusion?: string | null;
+    } | null,
+  ): boolean;
 };
 
 test("nightly commit comparison excludes the current run and newer runs, including on reruns", async () => {
@@ -27,7 +44,12 @@ test("nightly commit comparison excludes the current run and newer runs, includi
       { id: 21, head_sha: "newer" },
       { id: 20, head_sha: "current" },
       { id: 18, head_sha: "older" },
-      { id: 19, head_sha: "previous" },
+      {
+        id: 19,
+        head_sha: "previous",
+        status: "completed",
+        conclusion: "success",
+      },
     ],
     hasNext: false,
   }));
@@ -35,6 +57,61 @@ test("nightly commit comparison excludes the current run and newer runs, includi
   assert.equal(nightlyChanged("previous", previous), false);
   assert.equal(nightlyChanged("current", previous), true);
   assert.equal(nightlyChanged("first", null), true);
+});
+
+test("unchanged nightlies rerun after failure, cancellation or incomplete qualification", () => {
+  for (const conclusion of [
+    "failure",
+    "cancelled",
+    "timed_out",
+    "action_required",
+    "neutral",
+    "skipped",
+    "stale",
+    null,
+  ])
+    assert.equal(
+      nightlyChanged("same", {
+        head_sha: "same",
+        status: "completed",
+        conclusion,
+      }),
+      true,
+    );
+  for (const status of ["queued", "in_progress", "waiting", "pending"])
+    assert.equal(
+      nightlyChanged("same", { head_sha: "same", status, conclusion: null }),
+      true,
+    );
+  assert.equal(nightlyChanged("same", { head_sha: "same" }), true);
+  assert.equal(
+    nightlyChanged("same", {
+      head_sha: "same",
+      status: "in_progress",
+      conclusion: "success",
+    }),
+    true,
+  );
+  assert.equal(
+    nightlyChanged("same", {
+      head_sha: "same",
+      status: "completed",
+      conclusion: "success",
+    }),
+    false,
+  );
+});
+
+test("a failed nearest nightly cannot be masked by an older successful run", async () => {
+  const previous = await previousNightlyRun("20", async () => ({
+    runs: [
+      { id: 18, head_sha: "same", status: "completed", conclusion: "success" },
+      { id: 19, head_sha: "same", status: "completed", conclusion: "failure" },
+    ],
+    hasNext: false,
+  }));
+  assert.equal(previous?.id, 19);
+  assert.equal(nightlyChanged("same", previous), true);
 });
 
 test("nightly history pagination finds the previous run and lookup errors cannot skip CI", async () => {

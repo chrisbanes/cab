@@ -17,7 +17,12 @@ export async function previousNightlyRun(runId, fetchPage) {
 }
 
 export function nightlyChanged(sha, previous) {
-  return !previous || previous.head_sha !== sha;
+  return (
+    !previous ||
+    previous.head_sha !== sha ||
+    previous.status !== "completed" ||
+    previous.conclusion !== "success"
+  );
 }
 
 if (
@@ -71,6 +76,6 @@ if (
   console.log(
     run
       ? "Run CI checks"
-      : "Commit unchanged since previous nightly; skip checks",
+      : "Commit unchanged after successful previous nightly; skip checks",
   );
 }

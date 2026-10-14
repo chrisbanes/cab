@@ -177,7 +177,7 @@ Use the Node and npm versions pinned in [`.node-version`](.node-version) and
 `packageManager` in [`package.json`](package.json). Node 26 is tested for
 compatibility: `node26-service-*` jobs run service coverage on PRs and main pushes;
 `node26-full-compatibility` runs the complete build and Chromium/WebKit suite on
-changed-commit nights, manual runs and release tags. Both use the latest 26.x; 26.9.0 has
+nightlies requiring validation, manual runs and release tags. Both use the latest 26.x; 26.9.0 has
 [local evidence](docs/evidence/node-26-compatibility-2026-10-09.md). Node 26 is not
 the deployment baseline. `engines.node` is `>=24` as permissive metadata; later
 majors are not qualified.
