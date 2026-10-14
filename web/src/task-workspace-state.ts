@@ -223,6 +223,7 @@ export class LocalReviewState {
   } | null = null;
   editing: Record<string, string> = {};
   summary: string | null = null;
+  /** A draft write is in flight or awaiting its check: every Local review write stays off. */
   pending = false;
   /** The composer's form is on screen: its origin row is mounted on this page. */
   composerShown = false;
@@ -237,7 +238,10 @@ export class LocalReviewState {
   notify() {
     for (const listener of this.listeners) listener();
   }
-  /** A draft write whose response was lost: the exact request, replayed by the check. */
+  /**
+   * A draft write whose response was lost, or whose page went away before it arrived: the
+   * exact request, replayed by the check.
+   */
   unconfirmed: {
     command: OperatorCommand;
     intent: DraftWrite;

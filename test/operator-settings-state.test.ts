@@ -942,3 +942,27 @@ test("another writer committing before the first re-read means the save is not c
   credential.startOperation({ key: "next" }, true);
   assert.equal(typeof credential.savedAt, "number");
 });
+
+test("a callback after render runs at once when nothing is waiting to show, else on the commit that shows the rejection", () => {
+  const draft = new ConfigurationDraft();
+  const runs: string[] = [];
+  draft.afterRender(() => runs.push("fresh"));
+  assert.deepEqual(runs, ["fresh"]);
+
+  const before = draft.revision;
+  draft.reject({ name: "Required" });
+  assert.equal(draft.phase, "rejected");
+  assert.ok(draft.revision > before);
+  draft.afterRender(() => runs.push("rejected"));
+  // A commit that predates the rejection does not show it.
+  draft.committed(before);
+  assert.deepEqual(runs, ["fresh"]);
+  draft.committed(draft.revision);
+  assert.deepEqual(runs, ["fresh", "rejected"]);
+  // Each callback runs once, and a later commit has nothing left to run.
+  draft.committed(draft.revision);
+  assert.deepEqual(runs, ["fresh", "rejected"]);
+  // With every change committed, the next callback runs at once.
+  draft.afterRender(() => runs.push("settled"));
+  assert.deepEqual(runs, ["fresh", "rejected", "settled"]);
+});
