@@ -1573,7 +1573,24 @@ The web app is the ground truth for these items.
   navigation beside the field. The capacity meter reads global turn usage from the
   task list, so it is absent while there are no tasks. Not found shows no
   breadcrumb or New task.
-- **Not yet adopted:** per-surface layouts — the three-pane Inbox.
+- **Implemented Inbox (`02-inbox-approval`):** from 1280px three panes edge to
+  edge under the top bar: the 340px queue, the flexible request pane and the 280px
+  task-context inspector; from 761px to 1279px the queue (300px) and the request
+  pane (`800b-tablet-inbox-question`); at or below 760px the single-column queue →
+  request → queue. At the sidebar shell (1121px and wider) the queue header holds the
+  page's one heading "Inbox", the unresolved summary and Refresh; below it the page
+  header keeps them. The queue groups Intervention, then Questions & approvals
+  oldest first, under compact Project and Request kind filters; the selected row is
+  the `--overlay` fill with a 2px indigo left edge. The request pane shows the kind
+  badge, position, Open task and Previous/Next request, then the project, task
+  title, the "requester · version N · HH:MM" line, the reason, the request's own
+  material and a sticky response bar. The inspector lists the task with its source
+  and, while the request is still open in the queue, the next action; Lead (or "No
+  lead configured"), Requester, the assignment Chain, Holds and Evidence. A field
+  the task read cannot supply reads unavailable. A deep link to a request that is
+  no longer in the queue shows no inspector. One
+  task read per selection serves the holds, the approval facts and the inspector.
+  The page itself never scrolls at 761px and wider.
 
 ### Question actions, composer and test matrix
 
@@ -1623,10 +1640,11 @@ Production Inbox and shared question response
 - Evidence stays the existing "Question evidence" and "Task evidence" links; the read has no excerpt field, so frame 27's in-pane excerpt is not drawn. Returning from the task restores the selection, scroll position and the link's focus.
 - A single question's choice cards stay in the reading flow (frame 06 pins them); only the submit area is sticky, inside the one scroll owner `.inbox-detail`, so a pinned option list cannot trap scrolling or cover a field.
 - Queue rows use read-model facts only: "PROJECT / KIND", the task title, the reason, the action ("Answer question", "Review material & decide", "Inspect execution") and "Requester · HH:MM · age". There are no short identifiers (Q-204, A-201: U3 #837), no "Execution uncertain" versus "Intervention problems" subtype (one "Interventions" option), and no grouped-question title on a phone.
-- Kept or omitted on purpose: the shell Refresh stays on the Inbox; the frame's "Today · 11:00" clock and the phone "Search" header action are not built; the header title is 18/600, not the older large title of frames 07 and 08.
+- Kept or omitted on purpose: Refresh stays on the Inbox (in the queue header at the sidebar shell, in the page header below it); the frame's "Today · 11:00" clock and the phone "Search" header action are not built; the header title is 18/600, not the older large title of frames 07 and 08.
+- Three-pane workbench against frame 02 (composed from the read model, with no new contract): there are no short identifiers (AP-17, A-104, C-104), so the identity line reads "requester · version N · HH:MM" and the Chain row uses assignment names ("Operator → Mira → Jonas"). The request headline stays the task title, because an approval's prompt and reason are system-composed and a question's text is its form's own legends. There is no reviewed-material excerpt, tabs or file counts, no "Version N is out of date" note and no approved state: the exact action, target and version facts and the one Review link stand in for them. The kind badge reads "Approval", "Question" or "Intervention" (no "Pending approval" or execution-uncertain subtype in the Inbox read). The breadcrumb stays "Inbox"; the bar statement keeps the existing bound-decision sentence. Grouped questions read in two columns only where the request pane is at least 640px wide (1121–1279px, and from about 1530px with the inspector); at 1366 beside the inspector they are one column. The inspector shows no task state badge or synced-at time, and its Evidence section has the request's "Task evidence" and "Requesting conversation" links, which appear there instead of in the request pane from 1280px.
 - "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
-- Entry points that apply: Inbox desktop and phone; the shared `QuestionResponse` at `/app/tasks/:id?request=` (it does not show question holds yet); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
+- Entry points that apply: Inbox desktop three-pane, tablet two-pane and phone, and the `/app/inbox?task=&request=` deep link (it opens the request pane and the inspector); the shared `QuestionResponse` at `/app/tasks/:id?request=` (it does not show question holds yet); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
 - Hold copy in the approval pane, from the task read's `admission.reasons`; each reads "Approval does not clear it" or "Approving does not clear it":
   - Blocked GitHub dependencies: "Execution blocked by dependency", the open blockers as `owner/repo#n`, and "Source-owned hold … execution still waits for the GitHub blocker."
   - Unconfirmed dependencies (`imported-blockers-unknown`): "Execution held: dependencies unconfirmed", "GitHub blockers could not be confirmed." It never claims a blocker that was not found.

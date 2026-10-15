@@ -1,5 +1,6 @@
 import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
 import { inboxSummaryOf } from "./request-presentation.js";
+import { useMediaQuery } from "./use-media-query.js";
 import { QuestionResponseStates } from "./question-response-state.js";
 import {
   useCallback,
@@ -622,6 +623,8 @@ export function App() {
   );
   // The Inbox route polls its own full read and reports its total, so the shell reads only elsewhere.
   const onInboxRoute = path.split(/[?#]/)[0] === "/app/inbox";
+  // At the sidebar shell the Inbox queue header owns the heading, summary and Refresh.
+  const inboxOwnsHeader = useMediaQuery("(min-width: 1121px)") && onInboxRoute;
   const [inboxRouteSummary, setInboxRouteSummary] =
     useState<ReturnType<typeof inboxSummaryOf>>(null);
   const [inboxHeader, setInboxHeader] = useState<InboxHeader | null>(null);
@@ -963,51 +966,53 @@ export function App() {
           }
         />
         <main className={onInboxRoute ? "page page-inbox" : "page"}>
-          <PageHeader
-            title={title}
-            subtitle={headerSubtitle}
-            plain={unknownRoute || Boolean(settingsPage)}
-            {...(settingsPage ? { shortTitle: settingsPage.shortTitle } : {})}
-            badge={
-              onInboxRoute && inboxCount !== null
-                ? `${inboxCount} unresolved`
-                : undefined
-            }
-            {...(parent
-              ? { back: parent }
-              : {
-                  menu: (
-                    <MobileNavigation open={drawer} onOpenChange={setDrawer}>
-                      {navigation(true)}
-                    </MobileNavigation>
-                  ),
-                })}
-            action={
-              taskRoute ? (
-                // The top bar carries New task on desktop; this one serves the drawer shell.
-                <ActionLink
-                  variant="primary"
-                  href={newTaskHref}
-                  className="page-header-new-task"
-                >
-                  New task
-                </ActionLink>
-              ) : ownsRefresh ? undefined : (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    refreshAll();
-                    if (pathname === "/app/inbox") tasks.refresh();
-                  }}
-                  disabled={workspace.state.pending}
-                >
-                  Refresh
-                </Button>
-              )
-            }
-            {...inboxHeaderProps}
-            {...taskHeaderProps}
-          />
+          {!inboxOwnsHeader && (
+            <PageHeader
+              title={title}
+              subtitle={headerSubtitle}
+              plain={unknownRoute || Boolean(settingsPage)}
+              {...(settingsPage ? { shortTitle: settingsPage.shortTitle } : {})}
+              badge={
+                onInboxRoute && inboxCount !== null
+                  ? `${inboxCount} unresolved`
+                  : undefined
+              }
+              {...(parent
+                ? { back: parent }
+                : {
+                    menu: (
+                      <MobileNavigation open={drawer} onOpenChange={setDrawer}>
+                        {navigation(true)}
+                      </MobileNavigation>
+                    ),
+                  })}
+              action={
+                taskRoute ? (
+                  // The top bar carries New task on desktop; this one serves the drawer shell.
+                  <ActionLink
+                    variant="primary"
+                    href={newTaskHref}
+                    className="page-header-new-task"
+                  >
+                    New task
+                  </ActionLink>
+                ) : ownsRefresh ? undefined : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      refreshAll();
+                      if (pathname === "/app/inbox") tasks.refresh();
+                    }}
+                    disabled={workspace.state.pending}
+                  >
+                    Refresh
+                  </Button>
+                )
+              }
+              {...inboxHeaderProps}
+              {...taskHeaderProps}
+            />
+          )}
           {stillSignedIn && (
             <ActionOutcome
               tone="warning"
@@ -1121,6 +1126,17 @@ export function App() {
               observation={workspace.state.data}
               onSummary={setInboxRouteSummary}
               onHeader={setInboxHeader}
+              chrome={
+                inboxOwnsHeader
+                  ? {
+                      onRefresh: () => {
+                        refreshAll();
+                        tasks.refresh();
+                      },
+                      refreshing: workspace.state.pending,
+                    }
+                  : undefined
+              }
             />
           ) : pathname === "/app/search" ? (
             <Search

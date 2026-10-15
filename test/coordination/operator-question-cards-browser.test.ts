@@ -66,8 +66,9 @@ for (const [name, engine] of engines) {
     `${name}: choices are cards with the control beside the label, constraint lines, progress and keyboard use`,
     { browserEngine: name },
     async (_t, j) => {
+      // Wide enough for a 640px request pane beside the queue and the inspector.
       const { page, group } = await openQuestions(j, engine, {
-        width: 1366,
+        width: 1600,
         height: 900,
       });
       const form = page.getByRole("region", {
@@ -185,9 +186,18 @@ for (const [name, engine] of engines) {
         "questions 2 and 3 share the right column",
       );
       assert.ok(q3.y > q2.y, "question 3 follows question 2");
-      await captureBrowserEvidence(page, `${name}-1366-grouped-cards`, {
+      await captureBrowserEvidence(page, `${name}-1600-grouped-cards`, {
         fullPage: false,
       });
+      // At 1366 the request pane beside the inspector is under 640px: one column.
+      await page.setViewportSize({ width: 1366, height: 900 });
+      await settle(page);
+      const narrow = [await left("audience"), await left("sections")];
+      assert.ok(
+        Math.abs(narrow[0]!.x - narrow[1]!.x) < 2 &&
+          narrow[1]!.y > narrow[0]!.y,
+        JSON.stringify(narrow),
+      );
       // Phone: one column.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.locator(".inbox-row").click();
@@ -219,10 +229,11 @@ for (const [name, engine] of engines) {
     `${name}: a single question lays options in two columns, reads Submit answer, and a recorded answer stays in context`,
     { browserEngine: name },
     async (_t, j) => {
+      // Wide enough for a 640px request pane beside the queue and the inspector.
       const { page, f, more } = await openQuestions(
         j,
         engine,
-        { width: 1366, height: 900 },
+        { width: 1600, height: 900 },
         [choiceForm],
       );
       const rows = page.locator(".inbox-row");
@@ -271,14 +282,14 @@ for (const [name, engine] of engines) {
           ?.status,
         "answered",
       );
-      await captureBrowserEvidence(page, `${name}-1366-recorded`, {
+      await captureBrowserEvidence(page, `${name}-1600-recorded`, {
         fullPage: false,
       });
       // After a reload this session did not record the answer: neutral header copy, full context.
       await page.reload();
       await form.locator(".question-recorded").waitFor();
       assert.equal(
-        await page.locator(".page-header-title p").textContent(),
+        await page.locator(".inbox-summary").textContent(),
         "1 unresolved across 1 project",
       );
       await form.getByText(/^Requester: assignment /).waitFor();
@@ -496,9 +507,11 @@ for (const [name, engine] of engines) {
           .isChecked(),
         true,
       );
-      assert.ok(
-        Math.abs((await detail.evaluate((e) => e.scrollTop)) - 60) <= 1,
-      );
+      const restored = await detail.evaluate((e) => [
+        e.scrollTop,
+        e.scrollHeight - e.clientHeight,
+      ]);
+      assert.ok(Math.abs(restored[0]! - 60) <= 1, JSON.stringify(restored));
       assert.equal(
         await evidence.evaluate((el) => document.activeElement === el),
         true,

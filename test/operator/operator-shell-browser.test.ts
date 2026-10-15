@@ -443,6 +443,14 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     await sidebar.locator('a[href="/app/inbox"] .nav-count').textContent(),
     "2",
   );
+  // At the sidebar shell the queue header owns the heading and summary; no page header.
+  assert.equal(
+    await page.locator(".inbox-summary").textContent(),
+    "2 unresolved across 2 projects",
+  );
+  assert.equal(await page.locator(".page-header").count(), 0);
+  // At the drawer shell the page header carries them, with the count badge.
+  await page.setViewportSize({ width: 1024, height: 900 });
   assert.equal(
     await page.locator(".page-header-title p").textContent(),
     "2 unresolved across 2 projects",
@@ -451,6 +459,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     await page.locator(".page-header-count").textContent(),
     "2 unresolved",
   );
+  await page.setViewportSize({ width: 1366, height: 900 });
 
   await page.goto(`${web.origin}/app/tasks?view=board`);
   await page.locator("main.page h1").waitFor();

@@ -1,0 +1,561 @@
+/* The Inbox workbench: queue, request pane and, from 1280px, the task-context inspector. */
+.action-inbox {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "queue"
+    "detail";
+  align-items: start;
+}
+.inbox-queue,
+.inbox-detail,
+.inbox-context {
+  /* Each pane contains its own absolutely positioned content, such as screen-reader text. */
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+.inbox-queue {
+  grid-area: queue;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+.inbox-queue-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: 14px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4) var(--space-8);
+}
+.inbox-heading {
+  margin: 0;
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: var(--weight-semibold);
+}
+.inbox-summary {
+  margin: 0;
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+.inbox-title button {
+  margin-left: auto;
+  align-self: center;
+}
+.inbox-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inbox-filters > span {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.inbox-filters select {
+  width: auto;
+  height: 28px;
+  min-height: 28px;
+  max-width: 100%;
+  font-size: var(--type-xs);
+  color: var(--fg-2);
+}
+.inbox-queue > [role="alert"],
+.inbox-queue > [role="status"] {
+  margin: var(--space-8) 14px 0;
+}
+.inbox-rows {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.inbox-group {
+  margin: 0;
+  padding: 10px 14px 4px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.inbox-row {
+  flex: none;
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 18px;
+}
+.inbox-row:hover {
+  background: var(--raised);
+}
+.inbox-row[aria-pressed="true"] {
+  padding-left: 12px;
+  border-left: 2px solid var(--accent-edge);
+  background: var(--overlay);
+}
+.inbox-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.inbox-row strong {
+  font-weight: var(--weight-medium);
+}
+.inbox-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: var(--type-xs);
+  color: var(--attn);
+}
+.inbox-row[data-kind="intervention"] .inbox-row-label {
+  color: var(--risk);
+}
+.inbox-row-label svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.inbox-row-reason {
+  font-size: var(--type-xs);
+  color: var(--fg-2);
+}
+.inbox-row-action {
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  color: var(--accent-text);
+}
+.inbox-row-meta {
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+.inbox-row-meta time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.inbox-empty-card {
+  align-items: center;
+  margin: var(--space-12) 14px;
+  padding: var(--space-24);
+  text-align: center;
+}
+.inbox-empty-card > * {
+  margin: 0;
+}
+.inbox-caption {
+  margin: auto 0 0;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+.inbox-advanced {
+  align-self: flex-start;
+  margin: 0 14px 12px;
+}
+
+/* The request pane. */
+.inbox-detail {
+  grid-area: detail;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bg);
+}
+.inbox-detail > p {
+  margin: 0;
+  padding: 18px 22px;
+  color: var(--fg-2);
+}
+.inbox-detail-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  /* Room for Previous/Next before the queue read lands, so a restored scroll does not shift. */
+  min-height: 50px;
+  padding: 14px 22px 8px;
+  background: var(--bg);
+}
+.inbox-kind svg {
+  width: 12px;
+  height: 12px;
+}
+.inbox-position {
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+.inbox-detail-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-left: auto;
+}
+.inbox-step {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+}
+.inbox-open-task {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-right: var(--space-4);
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+.inbox-open-task svg {
+  width: 14px;
+  height: 14px;
+}
+.inbox-detail-body {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+  padding: 4px 22px 0;
+}
+.inbox-detail-intro {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.inbox-detail-intro > p,
+.inbox-detail-intro > h2 {
+  margin: 0;
+}
+.inbox-detail-project {
+  font-size: var(--type-xs);
+  color: var(--fg-2);
+}
+.inbox-detail-intro h2 {
+  font-size: 18px;
+  line-height: 26px;
+  font-weight: var(--weight-semibold);
+}
+.inbox-identity {
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+.inbox-detail-intro > .inbox-reason {
+  margin-top: var(--space-4);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--fg-2);
+}
+.inbox-detail-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin-top: var(--space-8);
+}
+.inbox-detail-links a {
+  margin: 0;
+}
+.inbox-approval {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.inbox-approval-body {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.inbox-approval-body > p {
+  margin: 0;
+}
+/* In the request pane the facts are one bordered grid, as the review frame draws them. */
+.inbox-detail .inbox-approval-facts {
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+.inbox-detail .inbox-approval-facts dt,
+.inbox-detail .inbox-approval-facts dd {
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-detail .inbox-approval-facts dd {
+  font-size: 13px;
+  line-height: 18px;
+}
+.inbox-detail .inbox-approval-facts dt {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+}
+.inbox-detail .inbox-approval-facts > :nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+/* The decision bar keeps what a decision covers and the way to decide in view. */
+.inbox-decision {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: auto -22px 0;
+  padding: 12px 22px
+    calc(
+      12px +
+      var(--operator-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))
+    );
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.inbox-decision p {
+  flex: 1 1 280px;
+  margin: 0;
+  font-size: var(--type-xs);
+  color: var(--fg-2);
+}
+/* Short forms keep the submit area at the foot of the pane; long ones scroll under it. */
+.inbox-detail-body > .question-response {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+.inbox-detail-body > .question-response > form {
+  display: flex;
+  flex: 1 0 auto;
+  flex-direction: column;
+}
+.inbox-detail .question-content {
+  flex: 1 0 auto;
+}
+.inbox-detail .question-submit {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin-inline: -22px;
+  padding-inline: 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+/* The bounded detail is the only scroll owner; a nested bound traps scrolling. */
+.inbox-detail .question-content {
+  max-height: none;
+  overflow: visible;
+}
+
+/* The task-context inspector. */
+.inbox-context {
+  grid-area: context;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+  font-size: var(--type-xs);
+}
+.inbox-context > section,
+.inbox-context > dl {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-context > dl {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: var(--space-8);
+}
+.inbox-context dt {
+  color: var(--fg-3);
+}
+.inbox-context dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.inbox-context h2,
+.inbox-context h3 {
+  margin: 0;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.inbox-context p {
+  margin: 0;
+}
+.inbox-context-task {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  font-size: 13px;
+  font-weight: var(--weight-medium);
+  color: var(--fg);
+  text-decoration: none;
+}
+.inbox-context .muted {
+  color: var(--fg-3);
+}
+.inbox-context-next {
+  color: var(--attn);
+}
+.inbox-context-chain {
+  font-family: var(--font-mono);
+}
+.inbox-context-hold {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.inbox-context-hold span {
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+.inbox-context-evidence a {
+  text-decoration: none;
+}
+
+/* Nothing unresolved and nothing open: the card owns the whole body. */
+.action-inbox.inbox-empty {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "queue";
+}
+.inbox-empty .inbox-detail {
+  display: none;
+}
+.inbox-empty .inbox-rows {
+  flex: 1;
+  justify-content: center;
+}
+.inbox-empty .inbox-empty-card {
+  align-self: center;
+  width: min(100%, 520px);
+}
+
+@media (min-width: 761px) {
+  /* Desktop and tablet: the page never scrolls; the queue and the request pane scroll alone. */
+  .page-inbox {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .page-inbox .action-inbox {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: 300px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "queue detail";
+    align-items: stretch;
+  }
+  .page-inbox .action-inbox.inbox-empty {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "queue";
+  }
+  .page-inbox .inbox-queue {
+    border-right: 1px solid var(--line);
+  }
+  .page-inbox .inbox-empty .inbox-queue {
+    border-right: 0;
+  }
+  .page-inbox .inbox-rows {
+    flex: 1;
+  }
+}
+@media (min-width: 1280px) {
+  .page-inbox .action-inbox:not(.inbox-empty) {
+    grid-template-columns: 340px minmax(0, 1fr) 280px;
+    grid-template-areas: "queue detail context";
+  }
+}
+@media (max-width: 760px) {
+  .action-inbox:not(.inbox-selected) .inbox-detail,
+  .action-inbox.inbox-selected .inbox-queue {
+    display: none;
+  }
+  .inbox-queue {
+    background: transparent;
+  }
+  .inbox-queue-head {
+    padding: 0 0 10px;
+  }
+  .inbox-filters select {
+    height: 44px;
+    min-height: 44px;
+    font-size: 13px;
+  }
+  .inbox-advanced {
+    min-height: 44px;
+    margin-inline: 0;
+  }
+  /* Phone: the header and compact filters leave about 10rem; the page scrolls to the link below. */
+  .inbox-rows {
+    max-height: calc(100dvh - 10rem);
+  }
+  .inbox-group,
+  .inbox-row,
+  .inbox-caption {
+    padding-inline: 0;
+  }
+  .inbox-row[aria-pressed="true"] {
+    padding-left: var(--space-8);
+  }
+  /* The phone header already reads "Question · N of M". */
+  .inbox-position {
+    display: none;
+  }
+  .inbox-detail {
+    max-height: calc(100dvh - 8rem);
+    background: transparent;
+  }
+  .inbox-detail-header,
+  .inbox-detail-body,
+  .inbox-decision,
+  .inbox-detail .question-submit {
+    padding-inline: 0;
+  }
+  .inbox-decision,
+  .inbox-detail .question-submit {
+    margin-inline: 0;
+  }
+  .question-submit button {
+    min-height: 44px;
+  }
+}

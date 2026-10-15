@@ -84,6 +84,11 @@ const answerDetails: Record<string, string> = {
 export function holdNotices(
   task: TaskRead["data"],
   action: "approve" | "answer" = "approve",
+  /**
+   * The approval in view, which is not a hold on itself: its interaction id, or true for any
+   * approval. Null when the request in view is not an approval, so pending approvals hold too.
+   */
+  deciding: string | true | null = true,
 ): HoldNotice[] {
   const notices: HoldNotice[] = [],
     openBlockers = (task.source?.nativeBlockers ?? [])
@@ -146,8 +151,17 @@ export function holdNotices(
         detail: "Approving does not clear it.",
       });
     }
-    // The request being decided is not a hold on itself.
-    else if (code !== "approval") {
+    // The request being decided is not a hold on itself; other open approvals still are.
+    else if (
+      code !== "approval" ||
+      deciding === null ||
+      (deciding !== true &&
+        task.waits
+          .find((wait) => wait.code === code)
+          ?.links.some(
+            (link) => link.kind !== "request" || link.id !== deciding,
+          ))
+    ) {
       // A wait's detail, such as an assignment's profile, says what the hold is about.
       const about = task.waits.find((wait) => wait.code === code)?.detail;
       notices.push({
@@ -172,3 +186,82 @@ export function holdNotices(
       }))
     : notices;
 }
+
+/** The queue's two groups in server order: interventions, then questions and approvals oldest first. */
+export function queueGroups<T extends Pick<InboxItem, "kind">>(
+  rows: readonly T[],
+) {
+  const interventions = rows.filter((row) => row.kind === "intervention"),
+    requests = rows.filter((row) => row.kind !== "intervention");
+  return [
+    {
+      id: "intervention",
+      heading: `Intervention · ${interventions.length}`,
+      items: interventions,
+    },
+    {
+      id: "requests",
+      heading: "Questions & approvals · oldest first",
+      items: requests,
+    },
+  ].filter((group) => group.items.length);
+}
+
+/** "requester · version N · HH:MM": the identities the read model has for a request. */
+export const requestIdentity = (
+  item: Pick<InboxItem, "requesterName" | "revision" | "createdAt">,
+) =>
+  [
+    item.requesterName ?? "Responsibility unknown",
+    ...(item.revision === null ? [] : [`version ${item.revision}`]),
+    item.createdAt === null ? "Age unknown" : clockLabel(item.createdAt),
+  ].join(" · ");
+
+/** Who asked whom, from the root to the requesting assignment ("Operator → Mira → Jonas"). */
+export function assignmentChain(
+  task: Pick<TaskRead["data"], "assignments">,
+  requestingAssignmentId: string | null,
+) {
+  const byId = new Map(task.assignments.map((a) => [a.assignmentId, a])),
+    chain: string[] = [],
+    seen = new Set<string>();
+  let id: string | null | undefined = requestingAssignmentId;
+  while (id) {
+    const assignment = byId.get(id);
+    if (!assignment || seen.has(id)) {
+      if (chain.length) chain.unshift("Requester unknown");
+      return chain;
+    }
+    seen.add(id);
+    chain.unshift(assignment.name ?? "Name unavailable");
+    id = assignment.requesterAssignmentId;
+  }
+  if (chain.length)
+    chain.unshift(id === null ? "Operator" : "Requester unknown");
+  return chain;
+}
+
+/**
+ * The inspector's task facts; before the task read lands only the item's facts are known. The
+ * next action is the operator's only while the request is still open in the queue.
+ */
+export const taskContext = (
+  task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
+  item: Pick<InboxItem, "kind">,
+  open: boolean,
+) => ({
+  source: !task
+    ? null
+    : task.source
+      ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
+      : "Local task",
+  // Lead accountability stays visible, in the task views' wording when there is none.
+  lead: !task
+    ? "Unavailable"
+    : task.lead
+      ? (task.lead.name ?? "Name unavailable")
+      : "No lead configured",
+  next: open
+    ? `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`
+    : null,
+});
