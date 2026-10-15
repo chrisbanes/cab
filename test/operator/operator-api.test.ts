@@ -88,6 +88,41 @@ test("API preserves original durable task receipts independently of current vers
   );
 });
 
+test("a committed command whose result fails validation has an unknown outcome", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const projectId = randomUUID();
+  const domain = f.service.domain();
+  domain.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Real project",
+    leadProfileId: null,
+  });
+  const execute = domain.execute.bind(domain);
+  domain.execute = ((command: Parameters<typeof execute>[0]) => {
+    execute(command);
+    return { corrupt: true };
+  }) as typeof domain.execute;
+  const api = new OperatorApi(f.service, [f.directory]);
+  await assert.rejects(
+    api.execute({
+      type: "task.create",
+      key: randomUUID(),
+      projectId,
+      taskId: randomUUID(),
+      title: "Committed task",
+      outcome: "Finish",
+      ready: false,
+    }),
+    (error) =>
+      error instanceof Error && error.message === "command-outcome-unknown",
+  );
+  assert.equal(domain.tasks(projectId).length, 1);
+});
+
 test("operator API maps the issue.comment-only policy by type, not its message", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   CommandResultValidationError,
   type DomainCommandResultMap,
+  LinkedRepositoryValidationError,
   parseDomainCommandOutcome,
 } from "../core/command-results.js";
 import type {
@@ -354,8 +355,11 @@ export class OperatorApiError extends Error {
 }
 
 function domainApiError(error: unknown): OperatorApiError | undefined {
-  if (error instanceof CommandResultValidationError)
+  if (error instanceof LinkedRepositoryValidationError)
     return new OperatorApiError(503, "unavailable");
+  // Any other result failed validation after its command ran, so its effect is unknown.
+  if (error instanceof CommandResultValidationError)
+    return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainConflictError)

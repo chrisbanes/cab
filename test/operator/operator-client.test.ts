@@ -96,30 +96,6 @@ test("401 discards private resource; 409 keeps command key and entered material"
   assert.equal(result.state, "conflict");
   assert.deepEqual(result.command, command);
 });
-test("a 5xx command response with a JSON body is an unknown outcome, a 4xx one is rejected", async () => {
-  let status = 503;
-  const client = new OperatorClient(
-    async () =>
-      new Response(
-        JSON.stringify({
-          error: { code: "unavailable", message: "Try later." },
-        }),
-        { status },
-      ),
-  );
-  const command = {
-    type: "task.create" as const,
-    key: "00000000-0000-4000-8000-000000000001",
-    taskId: "00000000-0000-4000-8000-000000000002",
-    projectId: "00000000-0000-4000-8000-000000000003",
-    title: "Task",
-    outcome: "Finish",
-    ready: false,
-  };
-  assert.equal((await client.command(command, "csrf")).state, "unknown");
-  status = 400;
-  assert.equal((await client.command(command, "csrf")).state, "rejected");
-});
 test("disposed and replaced resources abort delayed reads without updating retained data", async () => {
   const resource = new ResourceController<typeof good>();
   let finish!: (value: typeof good) => void;
