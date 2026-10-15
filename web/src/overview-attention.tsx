@@ -391,7 +391,9 @@ function ApprovalCard({
       {task && (
         <div className="overview-evidence">
           <ApprovalFacts task={task} item={item} />
-          <QuestionHolds holds={holdNotices(task)} />
+          <QuestionHolds
+            holds={holdNotices(task, "approve", item.interactionId ?? item.id)}
+          />
         </div>
       )}
       {respond}

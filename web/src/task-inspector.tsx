@@ -2,7 +2,7 @@ import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick } from "./components.js";
-import { holdNotices } from "./inbox-presentation.js";
+import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   executionFacts,
   sourceFacts,
@@ -29,9 +29,12 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
  */
 export function TaskInspector({
   data,
+  deciding,
   selectResult,
 }: {
   data: Data;
+  /** The interaction id of the approval in view, or null when none is. */
+  deciding: string | null;
   /** Shows one recorded result as the latest-result card, in place. */
   selectResult: (resultId: string) => void;
 }) {
@@ -40,7 +43,7 @@ export function TaskInspector({
     requests = [...data.approvals, ...data.questions].filter(
       (q) => q.status === "open",
     ),
-    holds = holdNotices(data);
+    holds = holdNoticesBesideRequests(data, "approve", deciding);
   const show = (resultId: string) => (event: MouseEvent<HTMLAnchorElement>) => {
     if (!isPlainClick(event)) return;
     event.preventDefault();

@@ -7,6 +7,7 @@ import {
   clockLabel,
   filterCounts,
   holdNotices,
+  holdNoticesBesideRequests,
   queueGroups,
   requestActionLabel,
   requestIdentity,
@@ -98,7 +99,7 @@ const task = (
   }) as unknown as TaskRead["data"];
 
 test("hold notices name each independent hold and what approval does not clear", () => {
-  assert.deepEqual(holdNotices(task([])), []);
+  assert.deepEqual(holdNotices(task([]), "approve", null), []);
   const source = {
     nativeBlockers: [
       {
@@ -117,7 +118,11 @@ test("hold notices name each independent hold and what approval does not clear",
       },
     ],
   } as unknown as TaskRead["data"]["source"];
-  const blocked = holdNotices(task(["imported-blockers-blocked"], { source }));
+  const blocked = holdNotices(
+    task(["imported-blockers-blocked"], { source }),
+    "approve",
+    null,
+  );
   assert.deepEqual(blocked, [
     {
       id: "blocked",
@@ -128,13 +133,17 @@ test("hold notices name each independent hold and what approval does not clear",
     },
   ]);
   // Unknown blockers never claim a GitHub blocker that was not found.
-  const unknown = holdNotices(task(["imported-blockers-unknown"]));
+  const unknown = holdNotices(
+    task(["imported-blockers-unknown"]),
+    "approve",
+    null,
+  );
   assert.equal(unknown.length, 1);
   assert.equal(unknown[0]?.title, "Execution held: dependencies unconfirmed");
   assert.deepEqual(unknown[0]?.items, []);
   assert.ok(!unknown[0]?.detail.includes("waits for the GitHub blocker"));
   // A source review or hold is its own hold, not a dependency.
-  const held = holdNotices(task(["source-held"]));
+  const held = holdNotices(task(["source-held"]), "approve", null);
   assert.equal(held.length, 1);
   assert.equal(held[0]?.title, "Execution held by the source");
   assert.ok(!held[0]?.detail.includes("GitHub blocker"));
@@ -145,6 +154,8 @@ test("hold notices name each independent hold and what approval does not clear",
         { id: randomUUID(), title: "Done already", state: "done" },
       ],
     }),
+    "approve",
+    null,
   );
   assert.deepEqual(local[0]?.items, ["Build the base"]);
   assert.equal(
@@ -155,10 +166,12 @@ test("hold notices name each independent hold and what approval does not clear",
   assert.deepEqual(
     holdNotices(
       task(["source-held", "local-dependency", "project-paused"]),
+      "approve",
+      null,
     ).map((notice) => notice.id),
     ["paused", "dependency", "source-held"],
   );
-  const paused = holdNotices(task(["project-paused"]));
+  const paused = holdNotices(task(["project-paused"]), "approve", null);
   assert.equal(paused[0]?.title, "Project paused");
   assert.equal(paused[0]?.detail, "Approval does not resume work.");
 });
@@ -171,15 +184,21 @@ test("every other admission reason still produces a hold notice", () => {
     ["project-lead-revoked", "project lead revoked"],
     ["admission-blocked", "admission blocked"],
   ] as const) {
-    const notices = holdNotices(task([reason]));
+    const notices = holdNotices(task([reason]), "approve", null);
     assert.equal(notices.length, 1, reason);
     assert.equal(notices[0]?.title, `Execution held (${label})`);
     assert.equal(notices[0]?.detail, "Approving does not clear it.");
   }
   // Several reasons give several notices; an ineligible task with no known reason still says so.
-  assert.equal(holdNotices(task(["task-unready", "project-paused"])).length, 2);
+  assert.equal(
+    holdNotices(task(["task-unready", "project-paused"]), "approve", null)
+      .length,
+    2,
+  );
   const unexplained = holdNotices(
     task([], { admission: { eligible: false, reasons: [] } }),
+    "approve",
+    null,
   );
   assert.equal(unexplained.length, 1);
   assert.equal(unexplained[0]?.title, "Execution held");
@@ -199,6 +218,8 @@ test("a power hold notice lists the supervisor's reason in the waits' order", ()
     });
   const notices = holdNotices(
     withPower(["local-dependency", "project-paused"], reason),
+    "approve",
+    null,
   );
   assert.deepEqual(
     notices.map((notice) => notice.id),
@@ -210,9 +231,9 @@ test("a power hold notice lists the supervisor's reason in the waits' order", ()
     items: [reason],
     detail: "Approving does not clear it.",
   });
-  assert.deepEqual(holdNotices(withPower([]))[0]?.items, []);
+  assert.deepEqual(holdNotices(withPower([]), "approve", null)[0]?.items, []);
   assert.equal(
-    holdNotices(withPower([], reason), "answer")[0]?.detail,
+    holdNotices(withPower([], reason), "answer", null)[0]?.detail,
     "Answering does not clear it.",
   );
 });
@@ -222,7 +243,7 @@ test("assignment waits are hold notices in the waits' order, worded from their l
     { code: "assignment-held", fix: null, links: [], detail: "Worker" },
     { code: "assignment-profile-revoked", fix: null, links: [] },
   ]);
-  const notices = holdNotices(task([], { waits }));
+  const notices = holdNotices(task([], { waits }), "approve", null);
   assert.deepEqual(
     notices.map(({ id, title, items }) => ({ id, title, items })),
     [
@@ -240,7 +261,7 @@ test("assignment waits are hold notices in the waits' order, worded from their l
   );
   assert.ok(notices.every((n) => n.detail === "Approving does not clear it."));
   assert.ok(
-    holdNotices(task([], { waits }), "answer").every(
+    holdNotices(task([], { waits }), "answer", null).every(
       (n) => n.detail === "Answering does not clear it.",
     ),
   );
@@ -263,11 +284,13 @@ test("revoked repository access and unresolved recovery are hold notices in the 
     },
   ]);
   assert.deepEqual(
-    holdNotices(task([], { waits })).map(({ id, title, items }) => ({
-      id,
-      title,
-      items,
-    })),
+    holdNotices(task([], { waits }), "approve", null).map(
+      ({ id, title, items }) => ({
+        id,
+        title,
+        items,
+      }),
+    ),
     [
       {
         id: "repository-access-revoked",
@@ -283,39 +306,89 @@ test("revoked repository access and unresolved recovery are hold notices in the 
   );
 });
 
+const approvalWait = (
+  extra: TaskRead["data"]["admission"]["reasons"],
+  ...ids: string[]
+) =>
+  task(extra, {
+    waits: orderWaits([
+      ...task(extra).waits,
+      {
+        code: "approval",
+        fix: null,
+        links: ids.map((id) => ({
+          kind: "request" as const,
+          id,
+          label: "Review material & decide",
+        })),
+      },
+    ]),
+  });
+const held = ["Execution held (approval needs a decision)"];
+const titles = (notices: ReturnType<typeof holdNotices>) =>
+  notices.map((n) => n.title);
+
 test("a pending approval is a hold unless it is the approval being decided", () => {
-  const approvalWait = (...ids: string[]) =>
-    task([], {
-      waits: [
-        {
-          code: "approval",
-          fix: null,
-          links: ids.map((id) => ({
-            kind: "request" as const,
-            id,
-            label: "Review material & decide",
-          })),
-        },
-      ],
-    } as Partial<TaskRead["data"]>);
-  const titles = (notices: ReturnType<typeof holdNotices>) =>
-      notices.map((n) => n.title),
-    held = ["Execution held (approval needs a decision)"];
-  // Any approval in view (the approval pane and Overview card) is not a hold on itself.
-  assert.deepEqual(holdNotices(approvalWait("a1")), []);
-  // The selected approval alone is not a hold; another open approval still is.
-  assert.deepEqual(holdNotices(approvalWait("a1"), "approve", "a1"), []);
+  // The selected approval alone is not a hold on itself.
+  assert.deepEqual(holdNotices(approvalWait([], "a1"), "approve", "a1"), []);
+  // Two open approvals, one in view: the other still holds.
   assert.deepEqual(
-    titles(holdNotices(approvalWait("a1", "a2"), "approve", "a1")),
+    titles(holdNotices(approvalWait([], "a1", "a2"), "approve", "a1")),
     held,
   );
-  // Beside an intervention or question, every pending approval holds execution.
+  // With no approval in view, every pending approval holds execution.
   assert.deepEqual(
-    titles(holdNotices(approvalWait("a1"), "approve", null)),
+    titles(holdNotices(approvalWait([], "a1"), "approve", null)),
     held,
   );
   // Also when the wait names no request.
-  assert.deepEqual(titles(holdNotices(approvalWait(), "approve", null)), held);
+  assert.deepEqual(
+    titles(holdNotices(approvalWait([]), "approve", null)),
+    held,
+  );
+});
+
+test("a question beside an open approval lists the approval as a hold in the answering wording", () => {
+  const [notice, ...rest] = holdNotices(approvalWait([], "a1"), "answer", null);
+  assert.equal(rest.length, 0);
+  assert.equal(notice?.title, held[0]);
+  assert.equal(notice?.detail, "Answering does not clear it.");
+  assert.equal(
+    holdNotices(approvalWait([], "a1"), "approve", null)[0]?.detail,
+    "Approving does not clear it.",
+  );
+});
+
+test("surfaces that list every open approval drop the merged approval hold unless one is in view", () => {
+  // No approval in view: the approvals are rows already, so only the other holds remain.
+  assert.deepEqual(
+    holdNoticesBesideRequests(
+      approvalWait(["task-unready"], "a1", "a2"),
+      "approve",
+      null,
+    ).map((n) => n.id),
+    ["task-unready"],
+  );
+  // One in view: the other approval is the hold.
+  assert.deepEqual(
+    titles(
+      holdNoticesBesideRequests(approvalWait([], "a1", "a2"), "approve", "a1"),
+    ),
+    held,
+  );
+  assert.deepEqual(
+    holdNoticesBesideRequests(approvalWait([], "a1"), "approve", "a1"),
+    [],
+  );
+  // The remaining notices keep the action's wording.
+  const wording = (action: "approve" | "answer") =>
+    holdNoticesBesideRequests(
+      approvalWait(["task-unready"], "a1"),
+      action,
+      null,
+    ).map((n) => n.detail);
+  assert.deepEqual(wording("approve"), ["Approving does not clear it."]);
+  assert.deepEqual(wording("answer"), ["Answering does not clear it."]);
 });
 
 test("answering a question words each hold notice for answers, with the same titles and items", () => {
@@ -331,7 +404,7 @@ test("answering a question words each hold notice for answers, with the same tit
     ],
   } as unknown as TaskRead["data"]["source"];
   const answer = (...args: Parameters<typeof task>) =>
-    holdNotices(task(...args), "answer");
+    holdNotices(task(...args), "answer", null);
   const shape = (notices: ReturnType<typeof holdNotices>) =>
     notices.map(({ id, title, items }) => ({ id, title, items }));
   const cases: [
@@ -408,7 +481,7 @@ test("answering a question words each hold notice for answers, with the same tit
     // Wording is the only difference from the approval notices.
     assert.deepEqual(
       shape(notices),
-      shape(holdNotices(task(reasons, extra))),
+      shape(holdNotices(task(reasons, extra), "approve", null)),
       id,
     );
     assert.deepEqual(shape(notices), [{ id, title, items }], id);
@@ -418,6 +491,7 @@ test("answering a question words each hold notice for answers, with the same tit
   const unexplained = holdNotices(
     task([], { admission: { eligible: false, reasons: [] } }),
     "answer",
+    null,
   );
   assert.equal(unexplained[0]?.id, "held");
   assert.equal(unexplained[0]?.detail, "Answering does not clear it.");

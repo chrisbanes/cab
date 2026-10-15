@@ -49,7 +49,7 @@ import {
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
 import { AssignmentRows, EntryLinks, showSection } from "./task-detail.js";
 import { TaskInspector } from "./task-inspector.js";
-import { holdNotices } from "./inbox-presentation.js";
+import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   type TaskHeaderReport,
   TaskStrip,
@@ -1201,7 +1201,11 @@ export function TaskWorkspace({
   const openRequests = [...data.questions, ...data.approvals].filter(
       (q) => q.status === "open",
     ),
-    nextActor = taskNextActor(data);
+    nextActor = taskNextActor(data),
+    inView = openRequests.find(
+      (q) => q.interactionId === params.get("request"),
+    ),
+    deciding = inView?.kind === "approval" ? inView.interactionId : null;
   const requesterOf = (interactionId: string | null) => {
     const request = [...data.questions, ...data.approvals].find(
       (q) => q.interactionId === interactionId,
@@ -1642,17 +1646,16 @@ export function TaskWorkspace({
                     the Inbox's wording. */}
                 {openRequests.length > 0 && (
                   <QuestionHolds
-                    holds={holdNotices(
+                    holds={holdNoticesBesideRequests(
                       data,
                       // The selected request's action names the wording; otherwise any approval.
-                      (openRequests.find(
-                        (q) => q.interactionId === params.get("request"),
-                      )?.kind ??
+                      (inView?.kind ??
                         (openRequests.some((q) => q.kind === "approval")
                           ? "approval"
                           : "question")) === "approval"
                         ? "approve"
                         : "answer",
+                      deciding,
                     )}
                   />
                 )}
@@ -1914,6 +1917,7 @@ export function TaskWorkspace({
             </div>
             <TaskInspector
               data={data}
+              deciding={deciding}
               selectResult={(resultId) => {
                 state.selectedResult = resultId;
                 changed();

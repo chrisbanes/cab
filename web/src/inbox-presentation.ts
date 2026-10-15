@@ -85,10 +85,10 @@ export function holdNotices(
   task: TaskRead["data"],
   action: "approve" | "answer" = "approve",
   /**
-   * The approval in view, which is not a hold on itself: its interaction id, or true for any
-   * approval. Null when the request in view is not an approval, so pending approvals hold too.
+   * The approval in view, which is not a hold on itself: its interaction id. Null when no
+   * approval is in view, so every pending approval holds.
    */
-  deciding: string | true | null = true,
+  deciding: string | null,
 ): HoldNotice[] {
   const notices: HoldNotice[] = [],
     openBlockers = (task.source?.nativeBlockers ?? [])
@@ -155,12 +155,9 @@ export function holdNotices(
     else if (
       code !== "approval" ||
       deciding === null ||
-      (deciding !== true &&
-        task.waits
-          .find((wait) => wait.code === code)
-          ?.links.some(
-            (link) => link.kind !== "request" || link.id !== deciding,
-          ))
+      task.waits
+        .find((wait) => wait.code === code)
+        ?.links.some((link) => link.kind !== "request" || link.id !== deciding)
     ) {
       // A wait's detail, such as an assignment's profile, says what the hold is about.
       const about = task.waits.find((wait) => wait.code === code)?.detail;
@@ -185,6 +182,20 @@ export function holdNotices(
         detail: answerDetails[notice.id] ?? "Answering does not clear it.",
       }))
     : notices;
+}
+
+/**
+ * `holdNotices` for surfaces that list every open approval as its own row: the merged approval
+ * hold is dropped unless an approval is in view, so no approval is listed twice.
+ */
+export function holdNoticesBesideRequests(
+  task: TaskRead["data"],
+  action: "approve" | "answer",
+  deciding: string | null,
+): HoldNotice[] {
+  return holdNotices(task, action, deciding).filter(
+    (notice) => notice.id !== "approval" || deciding !== null,
+  );
 }
 
 /** The queue's two groups in server order: interventions, then questions and approvals oldest first. */

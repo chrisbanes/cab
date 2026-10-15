@@ -49,7 +49,9 @@ type TaskResource = ReturnType<typeof useInboxTask>;
 
 /** The holds answering does not clear; a read still loading or failed shows none and never gates answering. */
 export const answerHolds = (state: TaskResource["state"]) =>
-  state.data && !state.error ? holdNotices(state.data.data, "answer") : [];
+  state.data && !state.error
+    ? holdNotices(state.data.data, "answer", null)
+    : [];
 
 /**
  * An Inbox question with the independent holds that answering does not clear. The read lives here,
