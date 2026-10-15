@@ -119,7 +119,7 @@ export function taskStatusLine(
               ? `${terminal} · closed on GitHub`
               : terminal
           : data.source?.closure === "held"
-            ? `Paused · closed on GitHub${active ? ` · ${execution.state}` : ""}`
+            ? `Held · closed on GitHub${active ? ` · ${execution.state}` : ""}`
             : paused
               ? `${task.ready ? "Ready" : "Draft"} · project paused`
               : !task.ready

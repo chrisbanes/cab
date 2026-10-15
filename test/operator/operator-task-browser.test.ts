@@ -163,6 +163,114 @@ test("List and Board preserve identical filtered task IDs and never submit comma
   assert.equal(posts, 0);
 });
 
+test("a closure-held task reads Held and a project-paused task reads Paused, side by side", async (_t, journey) => {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain();
+  f.service.githubSources(); // Creates the GitHub source tables the closure read needs.
+  const project = (name: string, paused: boolean) => {
+    const projectId = randomUUID(),
+      taskId = randomUUID();
+    d.execute({
+      type: "project.create",
+      key: randomUUID(),
+      actor: "operator",
+      projectId,
+      name,
+      leadProfileId: null,
+    });
+    d.execute({
+      type: "project.configure",
+      key: randomUUID(),
+      actor: "operator",
+      projectId,
+      expectedVersion: 1,
+      paused,
+    });
+    d.execute({
+      type: "task.create",
+      key: randomUUID(),
+      actor: "operator",
+      projectId,
+      taskId,
+      title: `${name} task`,
+      outcome: "Work",
+      ready: false,
+    });
+    return { projectId, taskId };
+  };
+  const held = project("Held project", false),
+    paused = project("Paused project", true);
+  d.markImportedTask(held.taskId, "I_HELD", "R_HELD");
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO github_external_issues VALUES ('github.com','I_HELD',?,'R_HELD','owner/repo',7,'Closed upstream','Body','closed','[]')",
+    ).run(held.taskId);
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 820 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password);
+  await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
+  const facts = async (taskId: string) => ({
+    state: await page
+      .locator(`[data-task-id="${taskId}"] .task-state`)
+      .innerText(),
+    reasons: await page
+      .locator(`[data-task-id="${taskId}"] .task-reason`)
+      .allInnerTexts(),
+  });
+  // Both group in the Paused column; only the reason tells them apart.
+  const closureHeld = await facts(held.taskId);
+  assert.equal(closureHeld.state, "Paused");
+  assert.equal(closureHeld.reasons[0], "Held · closed on GitHub");
+  assert.ok(!closureHeld.reasons.includes("Project paused"));
+  const projectPaused = await facts(paused.taskId);
+  assert.equal(projectPaused.state, "Paused");
+  assert.ok(projectPaused.reasons.includes("Project paused"));
+  assert.ok(!projectPaused.reasons.some((r) => r.includes("Held")));
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  assert.equal(
+    await page
+      .locator(`#column-Paused [data-task-id="${held.taskId}"] .task-reason`)
+      .first()
+      .innerText(),
+    "Held · closed on GitHub",
+  );
+  assert.equal(
+    await page
+      .locator(`#column-Paused [data-task-id="${paused.taskId}"]`)
+      .count(),
+    1,
+  );
+  // The status line renders once the task read loads, so wait for it by text.
+  const statusLine = async (taskId: string, text: RegExp) => {
+    await page.goto(`${web.origin}/app/tasks/${taskId}`);
+    const line = page.getByText(text);
+    await line.waitFor();
+    return line.innerText();
+  };
+  assert.match(
+    await statusLine(held.taskId, /^Held · closed on GitHub \/ /),
+    /^Held · closed on GitHub \/ Accountable project lead/,
+  );
+  assert.match(
+    await statusLine(paused.taskId, /^Draft · project paused \/ /),
+    /^Draft · project paused \/ Accountable project lead/,
+  );
+  assert.equal(await page.getByText("closed on GitHub").count(), 0);
+});
 test("Save draft and Create and start record real task outcomes without claiming running", async (_t, journey) => {
   let routeCalls = 0;
   const f = await journey.start("fixture.create", () =>

@@ -138,7 +138,7 @@ test("an imported Draft task names its unmet readiness conditions; other tasks k
     assert.equal(taskColumn(task), "Draft");
   }
   const held = draft({ rule, outcome: "not-evaluated", unmet: [] }, "held");
-  assert.deepEqual(taskReasons(held), ["Closed on GitHub"]);
+  assert.deepEqual(taskReasons(held), ["Held · closed on GitHub"]);
   assert.equal(
     taskColumn(draft({ rule, outcome: "unmet", unmet: [label("a")] })),
     "Draft",
@@ -153,7 +153,7 @@ test("closure provenance places held tasks in Paused and names provider completi
       reasons: ["task-unready", "source-held"],
     });
     assert.equal(taskColumn(held), "Paused");
-    assert.ok(taskReasons(held).includes("Closed on GitHub"));
+    assert.ok(taskReasons(held).includes("Held · closed on GitHub"));
     assert.equal(taskReasons(held).includes("Draft: not Ready"), false);
   }
   const completed = summary({ state: "done", closure: "completed" });

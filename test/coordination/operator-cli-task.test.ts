@@ -936,7 +936,7 @@ test("task get, the task read, the catalog and the HTML page agree on GitHub clo
     assert.ok(
       page.includes(
         closure === "held"
-          ? "Paused · closed on GitHub"
+          ? "Held · closed on GitHub"
           : "Done · closed on GitHub, not delivered by Ensemble",
       ),
       page,
