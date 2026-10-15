@@ -23,7 +23,7 @@ word (`unpairedBadges` in `test/fixtures/operator-settings.ts`). Count and label
 
 | File | Shows |
 | --- | --- |
-| [1366-sidebar-paused-project.png](ui-workbench-badges/1366-sidebar-paused-project.png) | Sidebar with Relay paused: idle badge with a pause symbol |
+| [1366-sidebar-paused-project.png](ui-workbench-badges/1366-sidebar-paused-project.png) | Sidebar (left of the page) with Relay paused: idle badge with a pause symbol; a full-page capture of the same page as 1366-settings |
 | [390-drawer-paused-project.png](ui-workbench-badges/390-drawer-paused-project.png) | Phone drawer with the same Paused badge |
 | [1366-settings.png](ui-workbench-badges/1366-settings.png) | Settings index with a symbol on every state badge |
 | [390-settings.png](ui-workbench-badges/390-settings.png) | Settings index on a phone |

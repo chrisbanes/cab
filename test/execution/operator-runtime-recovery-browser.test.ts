@@ -34,6 +34,8 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
   await page
     .getByText("Usage 1 / effective limit 2 · Project paused", { exact: false })
     .waitFor();
+  // Wait for the runtime rows too, so the guard does not run before their badges exist.
+  await page.getByText("Available", { exact: true }).first().waitFor();
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await page
     .getByText(
