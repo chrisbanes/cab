@@ -174,16 +174,22 @@ export function Inbox({
           : null
         : implicit))
     : null;
-  const rows = items.filter(
-    (item) =>
-      (!state.project || item.projectId === state.project) &&
-      (!state.kind || item.kind === state.kind),
-  );
+  // The queue's display order (grouped) is the one order for position, Previous/Next and focus.
+  const rows = queueGroups(
+    items.filter(
+      (item) =>
+        (!state.project || item.projectId === state.project) &&
+        (!state.kind || item.kind === state.kind),
+    ),
+  ).flatMap((group) => group.items);
   // One read of the selected request's task serves its holds, approval facts and the inspector.
   const task = useInboxTask(
     client,
     session,
-    selectedId && taskId ? taskId : null,
+    // An intervention below the inspector width shows nothing from the task read.
+    selectedId && taskId && (inspector || selected?.kind !== "intervention")
+      ? taskId
+      : null,
     resource.state.fetchedAt,
     "request",
   );

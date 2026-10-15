@@ -234,8 +234,8 @@ export const taskContext = (
 ) => ({
   source: !task
     ? null
-    : task.source?.repositoryName && task.source.number !== null
-      ? `${task.source.repositoryName}#${task.source.number}`
+    : task.source
+      ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
       : "Local task",
   lead: task?.lead ? (task.lead.name ?? "Name unavailable") : null,
   next: `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`,

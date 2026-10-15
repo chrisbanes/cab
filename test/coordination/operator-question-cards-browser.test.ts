@@ -189,6 +189,15 @@ for (const [name, engine] of engines) {
       await captureBrowserEvidence(page, `${name}-1600-grouped-cards`, {
         fullPage: false,
       });
+      // At 1366 the request pane beside the inspector is under 640px: one column.
+      await page.setViewportSize({ width: 1366, height: 900 });
+      await settle(page);
+      const narrow = [await left("audience"), await left("sections")];
+      assert.ok(
+        Math.abs(narrow[0]!.x - narrow[1]!.x) < 2 &&
+          narrow[1]!.y > narrow[0]!.y,
+        JSON.stringify(narrow),
+      );
       // Phone: one column.
       await page.setViewportSize({ width: 390, height: 844 });
       await page.locator(".inbox-row").click();

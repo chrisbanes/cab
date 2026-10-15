@@ -893,7 +893,7 @@ test("phone: the question hold sits in the sticky submit area without covering f
   }
 });
 
-const rgb = (page: Page, selector: string, property: string) =>
+const computed = (page: Page, selector: string, property: string) =>
   page
     .locator(selector)
     .first()
@@ -937,17 +937,17 @@ test("three panes: a grouped queue under its filters, with the overlay and indig
   const selected = '.inbox-row[aria-pressed="true"]';
   await page.locator(selected).waitFor();
   assert.equal(
-    await rgb(page, selected, "background-color"),
+    await computed(page, selected, "background-color"),
     "rgb(30, 34, 53)",
   );
-  assert.equal(await rgb(page, selected, "border-left-width"), "2px");
+  assert.equal(await computed(page, selected, "border-left-width"), "2px");
   assert.equal(
-    await rgb(page, selected, "border-left-color"),
+    await computed(page, selected, "border-left-color"),
     "rgb(99, 102, 241)",
   );
   assert.equal((await page.locator(".inbox-queue").boundingBox())!.width, 340);
   assert.equal(
-    await rgb(page, ".inbox-queue", "background-color"),
+    await computed(page, ".inbox-queue", "background-color"),
     "rgb(13, 15, 23)",
   );
   assert.equal(
@@ -1028,7 +1028,11 @@ test("the request pane shows kind, position, identities and a sticky response ba
     /^.+ · version \d+ · \d\d:\d\d$/,
   );
   assert.equal(
-    await rgb(page, ".inbox-detail .inbox-approval-facts", "border-top-width"),
+    await computed(
+      page,
+      ".inbox-detail .inbox-approval-facts",
+      "border-top-width",
+    ),
     "1px",
   );
   // What a decision covers and the one way to decide sit in the sticky bar.
@@ -1117,7 +1121,7 @@ test("the request pane shows kind, position, identities and a sticky response ba
   const submit = page.locator(".inbox-detail .question-submit");
   await submit.waitFor();
   assert.equal(
-    await rgb(page, ".inbox-detail .question-submit", "position"),
+    await computed(page, ".inbox-detail .question-submit", "position"),
     "sticky",
   );
   await captureBrowserEvidence(page, "1366-inbox-question", {

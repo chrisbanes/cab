@@ -501,6 +501,17 @@ test("task context reads the source, lead and the operator's next action", () =>
     lead: null,
     next: "Next: you · review material & decide",
   });
+  // An imported task with an unreadable identity is never called local.
+  assert.equal(
+    taskContext(
+      {
+        source: { repositoryName: null, number: null },
+        lead: null,
+      } as unknown as TaskRead["data"],
+      item("approval", "p"),
+    ).source,
+    "repository unavailable#?",
+  );
   assert.deepEqual(taskContext(undefined, item("intervention", "p")), {
     source: null,
     lead: null,

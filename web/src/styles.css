@@ -1995,6 +1995,24 @@ textarea[data-auto-grow="true"] {
   }
 }
 
+/* Approval facts, shared by the Inbox request pane and the Overview approval card. */
+.inbox-approval-facts {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-12);
+}
+.inbox-approval-facts dt {
+  margin-top: var(--space-8);
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.inbox-approval-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
 .retained-evidence {
   display: grid;
   gap: 12px;
