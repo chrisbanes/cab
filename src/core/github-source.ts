@@ -843,10 +843,24 @@ export class GitHubSourceStore {
             .run(String(issue.taskId));
         }
       }
+      // A complete read replaces the skipped issues; a partial read adds to them, as it
+      // adds memberships without pruning.
+      if (!snapshot.complete) {
+        const stored = this.db
+          .prepare(
+            "SELECT skippedClosedNodeIds FROM github_sync_state WHERE projectId = ? AND selectionId = ?",
+          )
+          .get(projectId, selectionId) as Row | undefined;
+        for (const id of z
+          .array(z.string())
+          .parse(
+            JSON.parse(String(stored?.skippedClosedNodeIds ?? "[]")) as unknown,
+          ))
+          skipped.add(id);
+      }
       this.db
         .prepare(
-          // A partial read keeps the last complete read's skipped issues, as it keeps memberships.
-          "INSERT INTO github_sync_state (projectId, selectionId, complete, reason, refreshedAt, skippedClosedNodeIds) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET complete = excluded.complete, reason = excluded.reason, refreshedAt = excluded.refreshedAt, skippedClosedNodeIds = CASE WHEN excluded.complete = 1 THEN excluded.skippedClosedNodeIds ELSE skippedClosedNodeIds END",
+          "INSERT INTO github_sync_state (projectId, selectionId, complete, reason, refreshedAt, skippedClosedNodeIds) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET complete = excluded.complete, reason = excluded.reason, refreshedAt = excluded.refreshedAt, skippedClosedNodeIds = excluded.skippedClosedNodeIds",
         )
         .run(
           projectId,
@@ -854,7 +868,7 @@ export class GitHubSourceStore {
           Number(snapshot.complete),
           snapshot.reason,
           new Date().toISOString(),
-          JSON.stringify(snapshot.complete ? [...skipped] : []),
+          JSON.stringify([...skipped]),
         );
       if (
         previousSync &&

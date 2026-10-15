@@ -911,7 +911,7 @@ test("selection counts come from stored observations, with skipped closed issues
   }
 });
 
-test("partial reads keep the skipped count and memberships; zero match and never-read selections", () => {
+test("partial reads keep memberships and skipped issues; zero match and never-read selections", () => {
   const f = readinessFixture(
     { mode: "all", conditions: [{ kind: "label", name: "nope" }] },
     ["repo", "other"],
@@ -925,9 +925,9 @@ test("partial reads keep the skipped count and memberships; zero match and never
     ]);
     f.read("repo", [f.at("I_8", { state: "closed" })], false);
     assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
-      observed: 3,
+      observed: 4,
       open: 2,
-      closedSkipped: 1,
+      closedSkipped: 2,
       matching: 0,
       complete: false,
     });
@@ -1208,6 +1208,37 @@ test("after a rule change and before the next read, explanations never disagree 
         f.sources.taskReadiness(String(task.id))?.outcome === "matched",
         Number(task.ready) === 1,
       );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a partial read adds the closed issues it skips; a complete read replaces them", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    const counts = () => f.sources.selectionCounts(f.projectId).get("repo");
+    f.read("repo", [f.at("I_1", { state: "closed" })], false);
+    assert.equal(counts()?.observed, 1);
+    assert.equal(counts()?.closedSkipped, 1);
+    f.read("repo", [f.at("I_2"), f.at("I_3", { state: "closed" })], false);
+    assert.deepEqual(counts(), {
+      observed: 3,
+      open: 1,
+      closedSkipped: 2,
+      matching: 1,
+      complete: false,
+    });
+    f.read("repo", [f.at("I_2"), f.at("I_4", { state: "closed" })]);
+    assert.deepEqual(counts(), {
+      observed: 2,
+      open: 1,
+      closedSkipped: 1,
+      matching: 1,
+      complete: true,
+    });
   } finally {
     f.db.close();
   }
