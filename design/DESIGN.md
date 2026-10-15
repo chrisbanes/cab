@@ -1746,7 +1746,8 @@ frames 114 and 118–128 as follows:
   inactive. Search queries and Project filters stay private: a row reads "Private
   query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
   Readiness Project-field conditions pick the Project, field and option by name from
-  discovery and fall back to typed node IDs when discovery is unavailable or truncated. A GitHub source save deletes the stored activation of each
+  discovery and fall back to typed node IDs when discovery is unavailable or truncated.
+  A GitHub source save deletes the stored activation of each
   removed selection and keeps the stored activation of each kept one. The save
   raises the source version, and activation counts only at the version it was
   previewed, so every kept selection reads "Inactive" and is not synced until it

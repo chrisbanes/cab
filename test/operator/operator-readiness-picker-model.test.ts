@@ -156,7 +156,11 @@ test("a row shows selects for empty or fully listed IDs and keeps typed IDs othe
     rowState(ids("PVT_atlas", "F_status", "O_ready"), ready, read).state,
     "picker",
   );
-  assert.equal(rowState(ids("PVT_atlas"), ready, {}).state, "loading");
+  // The Project list stays selectable while its fields load.
+  assert.deepEqual(rowState(ids("PVT_atlas"), ready, {}), {
+    state: "loading",
+    projects: [{ projectNodeId: "PVT_atlas", title: "Atlas roadmap" }],
+  });
   assert.equal(rowState(ids(), { state: "loading" }, {}).state, "loading");
   for (const unlisted of [
     ids("PVT_gone"),

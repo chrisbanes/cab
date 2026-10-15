@@ -146,7 +146,7 @@ export function ProjectFieldPicker(p: {
       </>
     );
   const loading = state.state === "loading";
-  const projects = state.state === "picker" ? state.projects : [];
+  const projects = state.state === "typed" ? [] : (state.projects ?? []);
   const fields = state.state === "picker" ? state.fields : [];
   const field = fields.find((f) => f.fieldNodeId === ids.fieldNodeId);
   const select = (
@@ -191,6 +191,7 @@ export function ProjectFieldPicker(p: {
         "Choose a Project",
         projects.map((x) => ({ id: x.projectNodeId, name: x.title })),
         (v) => p.onChange(selectProject(v)),
+        loading && !state.projects,
       )}
       {select(
         "fieldNodeId",

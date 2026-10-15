@@ -1,6 +1,5 @@
 /** Pure rules for the readiness Project-field picker; no React. */
 import type {
-  DiscoveryUnavailableReason,
   discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
@@ -27,7 +26,7 @@ export type ConditionIds = {
 };
 /** `loading` waits on a read; `typed` falls back to node-ID inputs with a note, if any. */
 export type PickerState =
-  | { state: "loading" }
+  | { state: "loading"; projects?: ProjectChoice[] }
   | { state: "typed"; note: string }
   | { state: "picker"; projects: ProjectChoice[]; fields: ReadyFields };
 
@@ -40,7 +39,7 @@ const unavailableNote = (
 ) =>
   (read.reason === "unconfigured"
     ? "GitHub discovery is unavailable: no discovery credential is configured, so Projects and fields can't be listed."
-    : discoveryReasonCopy(read.reason as DiscoveryUnavailableReason)) + typeIds;
+    : discoveryReasonCopy(read.reason)) + typeIds;
 const truncatedNote =
   "GitHub discovery is unavailable: there are too many results to list in full." +
   typeIds;
@@ -116,7 +115,8 @@ export function rowState(
   if (!choices.projects.some((p) => p.projectNodeId === projectNodeId))
     return { state: "typed", note: unlistedNote };
   const read = fieldReads[projectNodeId];
-  if (!read) return { state: "loading" };
+  // The Project list is known, so its select stays usable while the fields load.
+  if (!read) return { state: "loading", projects: choices.projects };
   if (read.state === "unavailable")
     return { state: "typed", note: unavailableNote(read) };
   if (read.truncated) return { state: "typed", note: truncatedNote };
