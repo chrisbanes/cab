@@ -478,187 +478,193 @@ import {
   GitHubSourceStore,
   type IssueSnapshot,
 } from "../../src/core/github-source.js";
-test("only confirmed own closure continues a withdrawn open-issue selection while independent source gates remain", () => {
-  const db = new DatabaseSync(":memory:");
-  new Store(db).ensureHost("test");
-  const domain = new DomainStore(db);
-  domain.migrate();
-  const sources = new GitHubSourceStore(db);
-  sources.migrate();
-  const projectId = randomUUID(),
-    profileId = randomUUID();
-  const execute = (command: object) =>
-    domain.execute({
-      actor: "operator",
-      key: randomUUID(),
-      ...command,
-    } as never);
-  try {
-    execute({
-      type: "profile.create",
-      profileId,
-      name: "Lead",
-      instructions: "Lead",
-      capabilities: "work",
-    });
-    execute({
-      type: "project.create",
-      projectId,
-      name: "P",
-      leadProfileId: profileId,
-    });
-    execute({
-      type: "project.configure",
-      projectId,
-      expectedVersion: 1,
-      paused: false,
-    });
-    execute({
-      type: "github.configure",
-      projectId,
-      expectedVersion: 1,
-      credentialRef: null,
-      selections: [
-        {
-          id: "repo",
-          kind: "repository",
-          repositoryId: "R1",
-          owner: "org",
-          name: "repo",
-        },
-      ],
-      readiness: {
-        mode: "any",
-        conditions: [{ kind: "label", name: "ready" }],
-      },
-      repositories: [],
-    });
-    execute({
-      type: "github.activate",
-      projectId,
-      selectionId: "repo",
-      expectedVersion: 2,
-    });
-    const issue: IssueSnapshot = {
-      providerInstance: "github.com",
-      nodeId: "I1",
-      repositoryId: "R1",
-      repositoryName: "org/repo",
-      number: 1,
-      title: "T",
-      body: "O",
-      state: "open",
-      labels: ["ready"],
-      projectFields: [],
-    };
-    sources.reconcileSelection(projectId, "repo", {
-      complete: true,
-      issues: [issue],
-      reason: null,
-    });
-    sources.reconcileBlockers("I1", {
-      complete: true,
-      blockers: [],
-      reason: null,
-    });
-    const taskId = String(sources.issue("I1")?.taskId);
-    assert.equal(domain.admission(taskId).eligible, true);
-    execute({
-      type: "delivery.configure",
-      projectId,
-      expectedVersion: 1,
-      mode: "reviewable-pr",
-      credentialRef: null,
-      grants: [{ action: "issue.close", repositoryId: "R1", mode: "allow" }],
-      requiredChecks: [],
-    });
-    const delivery = new DeliveryStore(db),
-      operationId = randomUUID();
-    delivery.prepareAction(
-      {
-        operationId,
-        action: {
-          kind: "issue.close",
-          target: { repositoryId: "R1", nodeId: "I1", number: 1 },
-          reviewedResultIds: [],
-        },
-      },
-      {
+for (const readiness of [
+  { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+  null,
+] as const)
+  test(`only confirmed own closure continues a withdrawn open-issue selection while independent source gates remain (${readiness ? "label rule" : "no rule"})`, () => {
+    const db = new DatabaseSync(":memory:");
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const sources = new GitHubSourceStore(db);
+    sources.migrate();
+    const projectId = randomUUID(),
+      profileId = randomUUID();
+    const execute = (command: object) =>
+      domain.execute({
+        actor: "operator",
+        key: randomUUID(),
+        ...command,
+      } as never);
+    try {
+      execute({
+        type: "profile.create",
+        profileId,
+        name: "Lead",
+        instructions: "Lead",
+        capabilities: "work",
+      });
+      execute({
+        type: "project.create",
         projectId,
-        taskId,
-        taskVersion: Number(domain.task(taskId).version),
-        assignmentId: randomUUID(),
-        assignmentVersion: 1,
-        workId: "w",
-        workRevision: 1,
-        conversationRevision: 1,
-      },
-      false,
-    );
-    delivery.beginAttempt(operationId, { state: "open" });
-    sources.reconcileSelection(projectId, "repo", {
-      complete: true,
-      issues: [{ ...issue, state: "closed" }],
-      reason: null,
-    });
-    sources.reconcileSelection(projectId, "repo", {
-      complete: true,
-      issues: [],
-      reason: null,
-    });
-    assert.ok(
-      domain.admission(taskId, true).reasons.includes("source-withdrawn"),
-    );
-    delivery.recordObservation(operationId, {
-      state: "confirmed-success",
-      reason: null,
-      receipt: { nodeId: "I1", issueClosed: true },
-    });
-    sources.recordDeliveryClosure(
-      projectId,
-      2,
-      { ...issue, state: "closed" },
-      operationId,
-      null,
-    );
-    assert.equal(domain.admission(taskId, true).eligible, true);
-    assert.ok(domain.admission(taskId).reasons.includes("task-unready"));
-    assert.equal(domain.task(taskId).ready, 0);
-    sources.recordDeliveryClosure(
-      projectId,
-      2,
-      { ...issue, state: "closed", labels: [] },
-      operationId,
-      null,
-    );
-    assert.ok(domain.admission(taskId, true).reasons.includes("source-hold"));
-    sources.reconcileBlockers("I1", {
-      complete: false,
-      blockers: [],
-      reason: "unavailable",
-    });
-    assert.ok(
-      domain
-        .admission(taskId, true)
-        .reasons.includes("imported-blockers-unknown"),
-    );
-    sources.reconcileBlockers("I1", {
-      complete: true,
-      blockers: [],
-      reason: null,
-    });
-    sources.reconcileSelection(projectId, "repo", {
-      complete: false,
-      issues: [],
-      reason: "unavailable",
-    });
-    assert.ok(
-      domain.admission(taskId, true).reasons.includes("source-withdrawn"),
-    );
-  } finally {
-    db.close();
-  }
-});
+        name: "P",
+        leadProfileId: profileId,
+      });
+      execute({
+        type: "project.configure",
+        projectId,
+        expectedVersion: 1,
+        paused: false,
+      });
+      execute({
+        type: "github.configure",
+        projectId,
+        expectedVersion: 1,
+        credentialRef: null,
+        selections: [
+          {
+            id: "repo",
+            kind: "repository",
+            repositoryId: "R1",
+            owner: "org",
+            name: "repo",
+          },
+        ],
+        readiness,
+        repositories: [],
+      });
+      execute({
+        type: "github.activate",
+        projectId,
+        selectionId: "repo",
+        expectedVersion: 2,
+      });
+      const issue: IssueSnapshot = {
+        providerInstance: "github.com",
+        nodeId: "I1",
+        repositoryId: "R1",
+        repositoryName: "org/repo",
+        number: 1,
+        title: "T",
+        body: "O",
+        state: "open",
+        labels: ["ready"],
+        projectFields: [],
+      };
+      sources.reconcileSelection(projectId, "repo", {
+        complete: true,
+        issues: [issue],
+        reason: null,
+      });
+      sources.reconcileBlockers("I1", {
+        complete: true,
+        blockers: [],
+        reason: null,
+      });
+      const taskId = String(sources.issue("I1")?.taskId);
+      assert.equal(domain.admission(taskId).eligible, true);
+      execute({
+        type: "delivery.configure",
+        projectId,
+        expectedVersion: 1,
+        mode: "reviewable-pr",
+        credentialRef: null,
+        grants: [{ action: "issue.close", repositoryId: "R1", mode: "allow" }],
+        requiredChecks: [],
+      });
+      const delivery = new DeliveryStore(db),
+        operationId = randomUUID();
+      delivery.prepareAction(
+        {
+          operationId,
+          action: {
+            kind: "issue.close",
+            target: { repositoryId: "R1", nodeId: "I1", number: 1 },
+            reviewedResultIds: [],
+          },
+        },
+        {
+          projectId,
+          taskId,
+          taskVersion: Number(domain.task(taskId).version),
+          assignmentId: randomUUID(),
+          assignmentVersion: 1,
+          workId: "w",
+          workRevision: 1,
+          conversationRevision: 1,
+        },
+        false,
+      );
+      delivery.beginAttempt(operationId, { state: "open" });
+      sources.reconcileSelection(projectId, "repo", {
+        complete: true,
+        issues: [{ ...issue, state: "closed" }],
+        reason: null,
+      });
+      sources.reconcileSelection(projectId, "repo", {
+        complete: true,
+        issues: [],
+        reason: null,
+      });
+      assert.ok(
+        domain.admission(taskId, true).reasons.includes("source-withdrawn"),
+      );
+      delivery.recordObservation(operationId, {
+        state: "confirmed-success",
+        reason: null,
+        receipt: { nodeId: "I1", issueClosed: true },
+      });
+      sources.recordDeliveryClosure(
+        projectId,
+        2,
+        { ...issue, state: "closed" },
+        operationId,
+        null,
+      );
+      assert.equal(domain.admission(taskId, true).eligible, true);
+      assert.ok(domain.admission(taskId).reasons.includes("task-unready"));
+      assert.equal(domain.task(taskId).ready, 0);
+      sources.recordDeliveryClosure(
+        projectId,
+        2,
+        { ...issue, state: "closed", labels: [] },
+        operationId,
+        null,
+      );
+      // Lost labels only lose readiness under a label rule; with no rule the closure stands.
+      if (readiness)
+        assert.ok(
+          domain.admission(taskId, true).reasons.includes("source-hold"),
+        );
+      else assert.equal(domain.admission(taskId, true).eligible, true);
+      sources.reconcileBlockers("I1", {
+        complete: false,
+        blockers: [],
+        reason: "unavailable",
+      });
+      assert.ok(
+        domain
+          .admission(taskId, true)
+          .reasons.includes("imported-blockers-unknown"),
+      );
+      sources.reconcileBlockers("I1", {
+        complete: true,
+        blockers: [],
+        reason: null,
+      });
+      sources.reconcileSelection(projectId, "repo", {
+        complete: false,
+        issues: [],
+        reason: "unavailable",
+      });
+      assert.ok(
+        domain.admission(taskId, true).reasons.includes("source-withdrawn"),
+      );
+    } finally {
+      db.close();
+    }
+  });
 
 test("imported service completes after own merge with actual open-only discovery and current closure label proof", async () => {
   const f = await deliveryFixture("through-merge", true);

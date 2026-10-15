@@ -128,10 +128,7 @@ test("guided create records instructions, verified repositories and one inactive
     { id: "S-1", kind: "project", projectNodeId: "PVT_1", filter: "" },
   ]);
   assert.equal(github.version, 1);
-  assert.deepEqual(github.readiness, {
-    mode: "all",
-    conditions: [{ kind: "label", name: "ready" }],
-  });
+  assert.equal(github.readiness, null);
   assert.equal(
     Number(
       (

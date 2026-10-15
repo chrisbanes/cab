@@ -789,18 +789,7 @@ test("manual state changes never carry a provider-completion record", () => {
 });
 
 function readinessFixture(
-  readiness: {
-    mode: "all" | "any";
-    conditions: (
-      | { kind: "label"; name: string }
-      | {
-          kind: "project-field";
-          projectNodeId: string;
-          fieldNodeId: string;
-          optionNodeId: string;
-        }
-    )[];
-  },
+  readiness: Parameters<typeof evaluateReadiness>[0],
   selectionIds = ["repo"],
 ) {
   const db = new DatabaseSync(":memory:");
@@ -958,6 +947,7 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
     mode: "any",
     conditions: [{ kind: "label", name: "a" }, field],
   });
+  const none = readinessFixture(null);
   try {
     const fields = [
       { projectNodeId: "P_1", fieldNodeId: "F_1", optionNodeId: "O_1" },
@@ -999,7 +989,20 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
       any.sources.taskReadiness(any.task("I_2"))?.outcome,
       "matched",
     );
-    for (const f of [all, any])
+    none.read("repo", [
+      none.at("I_1", { labels: [] }),
+      none.at("I_2", { labels: ["other"], projectFields: fields }),
+    ]);
+    for (const nodeId of ["I_1", "I_2"])
+      assert.deepEqual(none.sources.taskReadiness(none.task(nodeId)), {
+        outcome: "matched",
+        unmet: [],
+      });
+    assert.equal(
+      none.sources.selectionCounts(none.projectId).get("repo")?.matching,
+      2,
+    );
+    for (const f of [all, any, none])
       for (const task of f.domain.tasks(f.projectId))
         assert.equal(
           f.sources.taskReadiness(String(task.id))?.outcome === "matched",
@@ -1009,6 +1012,7 @@ test("task readiness names unmet conditions and agrees with the stored Ready fla
   } finally {
     all.db.close();
     any.db.close();
+    none.db.close();
   }
 });
 
@@ -1040,6 +1044,109 @@ test("the readiness predicate filters nothing without a rule and follows all/any
     ),
     { satisfied: false, unmet: [label("b"), label("c")] },
   );
+});
+
+test("without a readiness rule, open source issues are Ready whatever their labels; closed and withdrawn are not", () => {
+  const f = readinessFixture(null);
+  try {
+    f.read("repo", [
+      f.at("I_1", { labels: [] }),
+      f.at("I_2", { labels: ["unrelated"] }),
+      f.at("I_3", { state: "closed" }),
+    ]);
+    for (const nodeId of ["I_1", "I_2"]) {
+      assert.equal(Number(f.domain.task(f.task(nodeId)).ready), 1);
+      assert.ok(
+        !f.domain.admission(f.task(nodeId)).reasons.includes("task-unready"),
+      );
+    }
+    // Skip mode leaves the closed issue unimported, so nothing is Ready for it.
+    assert.equal(f.sources.issue("I_3"), undefined);
+    f.read("repo", [f.at("I_1", { labels: [], state: "closed" })]);
+    assert.equal(Number(f.domain.task(f.task("I_1")).ready), 0);
+    assert.equal(Number(f.domain.task(f.task("I_2")).ready), 0);
+    assert.ok(
+      f.domain.admission(f.task("I_2")).reasons.includes("source-withdrawn"),
+    );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("without a readiness rule, Ready tasks still wait on incomplete reads, blockers and source review", () => {
+  const f = readinessFixture(null);
+  try {
+    f.read("repo", [f.at("I_1", { labels: [] })]);
+    const taskId = f.task("I_1");
+    assert.equal(Number(f.domain.task(taskId).ready), 1);
+    const reasons = () => f.domain.admission(taskId).reasons;
+    assert.ok(reasons().includes("imported-blockers-unknown"));
+    f.sources.reconcileBlockers("I_1", {
+      complete: true,
+      blockers: [],
+      reason: null,
+    });
+    assert.ok(!reasons().includes("imported-blockers-unknown"));
+    f.read("repo", [f.at("I_1", { labels: [] })], false);
+    assert.equal(Number(f.domain.task(taskId).ready), 1);
+    assert.ok(reasons().includes("source-unknown"));
+    f.read("repo", [f.at("I_1", { labels: [] })]);
+    assert.ok(!reasons().includes("source-unknown"));
+    // An open GitHub blocker keeps the dependent waiting.
+    f.sources.reconcileBlockers("I_1", {
+      complete: true,
+      blockers: [f.at("I_7")],
+      reason: null,
+    });
+    assert.ok(reasons().includes("imported-blockers-blocked"));
+    // Changed text still needs operator review.
+    f.read("repo", [f.at("I_1", { labels: [], body: "Changed" })]);
+    assert.equal(Number(f.domain.task(taskId).ready), 1);
+    assert.ok(reasons().includes("source-review-required"));
+  } finally {
+    f.db.close();
+  }
+});
+
+test("adding a readiness rule filters again; removing it stops filtering but keeps the readiness-lost hold", () => {
+  const f = readinessFixture(null);
+  const configure = (readiness: Parameters<typeof evaluateReadiness>[0]) => {
+    f.domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [{ id: "repo", keep: true }],
+      readiness,
+      repositories: [],
+    });
+    f.domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      selectionId: "repo",
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+    });
+  };
+  try {
+    f.read("repo", [f.at("I_1", { labels: ["next"] })]);
+    const taskId = f.task("I_1");
+    assert.equal(Number(f.domain.task(taskId).ready), 1);
+    configure({ mode: "all", conditions: [{ kind: "label", name: "ready" }] });
+    f.read("repo", [f.at("I_1", { labels: ["next"] })]);
+    assert.equal(Number(f.domain.task(taskId).ready), 0);
+    assert.equal(f.sources.hold("I_1")?.reason, "readiness-lost");
+    configure(null);
+    f.read("repo", [f.at("I_1", { labels: ["next"] })]);
+    assert.equal(Number(f.domain.task(taskId).ready), 1);
+    assert.equal(f.sources.hold("I_1")?.reason, "readiness-lost");
+    assert.ok(f.domain.admission(taskId).reasons.includes("source-hold"));
+  } finally {
+    f.db.close();
+  }
 });
 
 test("migration adds the skipped closed issues to existing sync state rows", () => {

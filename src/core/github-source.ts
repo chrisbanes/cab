@@ -957,16 +957,18 @@ export class GitHubSourceStore {
         .prepare("SELECT active,reason FROM github_source_holds WHERE nodeId=?")
         .get(snapshot.nodeId) as Row | undefined;
       this.updateReadiness(String(issue.taskId), true);
-      const rule = readinessSchema.parse(JSON.parse(String(config.readiness)));
+      const rule = parseRule(config.readiness);
+      // Without a rule, readiness cannot be lost: the closure is plainly closed.
       const labelProof =
-        rule.conditions.every((c) => c.kind === "label") &&
-        (rule.mode === "all"
-          ? rule.conditions.every(
-              (c) => c.kind === "label" && snapshot.labels.includes(c.name),
-            )
-          : rule.conditions.some(
-              (c) => c.kind === "label" && snapshot.labels.includes(c.name),
-            ));
+        rule === null ||
+        (rule.conditions.every((c) => c.kind === "label") &&
+          (rule.mode === "all"
+            ? rule.conditions.every(
+                (c) => c.kind === "label" && snapshot.labels.includes(c.name),
+              )
+            : rule.conditions.some(
+                (c) => c.kind === "label" && snapshot.labels.includes(c.name),
+              )));
       const hold = priorHold;
       if (
         labelProof &&

@@ -1039,12 +1039,143 @@ test("existing standalone projects acquire inactive source configuration on migr
       name: "Existing",
       leadProfileId: null,
     });
+    const rawReadiness = (id: string) =>
+      String(
+        (
+          db
+            .prepare(
+              "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+            )
+            .get(id) as { readiness: string }
+        ).readiness,
+      );
+    // A new project stores no readiness rule, not a hardcoded label.
+    assert.equal(rawReadiness(projectId), "null");
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
     db.prepare("DELETE FROM project_github_sources WHERE projectId = ?").run(
       projectId,
     );
     domain.migrate();
     assert.equal(domain.githubConfiguration(projectId).version, 1);
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    assert.equal(rawReadiness(projectId), "null");
     assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("saved readiness rules, including label ready, are untouched by migration and restart", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-saved-rules-"));
+  const file = join(root, "db.sqlite");
+  let db = new DatabaseSync(file);
+  const rules = {
+    [randomUUID()]:
+      '{"mode":"all","conditions":[{"kind":"label","name":"ready"}]}',
+    [randomUUID()]:
+      '{"mode":"any","conditions":[{"kind":"label","name":"ready-for-agent"}]}',
+  };
+  const raw = () =>
+    Object.keys(rules).map((id) =>
+      String(
+        (
+          db
+            .prepare(
+              "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+            )
+            .get(id) as { readiness: string }
+        ).readiness,
+      ),
+    );
+  try {
+    new Store(db).ensureHost("test");
+    let domain = new DomainStore(db);
+    domain.migrate();
+    for (const [projectId, rule] of Object.entries(rules)) {
+      domain.execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        name: projectId,
+        leadProfileId: null,
+      });
+      // Rows written before no-rule defaults, stored exactly as they were.
+      db.prepare(
+        "UPDATE project_github_sources SET readiness = ? WHERE projectId = ?",
+      ).run(rule, projectId);
+    }
+    domain.migrate();
+    assert.deepEqual(raw(), Object.values(rules));
+    db.close();
+    db = new DatabaseSync(file);
+    domain = new DomainStore(db);
+    new Store(db).ensureHost("test");
+    domain.migrate();
+    assert.deepEqual(raw(), Object.values(rules));
+    assert.deepEqual(
+      Object.keys(rules).map((id) => domain.githubConfiguration(id).readiness),
+      Object.values(rules).map((rule) => JSON.parse(rule) as unknown),
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readiness rule is added, removed and re-added through keyed, versioned configuration", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-readiness-cycle-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Cycle",
+      leadProfileId: null,
+    });
+    const rule = {
+      mode: "all" as const,
+      conditions: [{ kind: "label" as const, name: "ready" }],
+    };
+    const configure = (
+      expectedVersion: number,
+      readiness: typeof rule | null,
+      key: string = randomUUID(),
+    ) =>
+      domain.execute({
+        type: "github.configure",
+        actor: "operator",
+        key,
+        projectId,
+        expectedVersion,
+        credentialRef: null,
+        selections: [],
+        readiness,
+        repositories: [],
+      });
+    configure(1, rule);
+    assert.deepEqual(domain.githubConfiguration(projectId).readiness, rule);
+    const key = randomUUID();
+    const removed = configure(2, null, key);
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    assert.equal(domain.githubConfiguration(projectId).version, 3);
+    // An exact keyed replay of the removal returns its receipt without another bump.
+    assert.deepEqual(configure(2, null, key), removed);
+    assert.equal(domain.githubConfiguration(projectId).version, 3);
+    assert.throws(() => configure(2, rule), /Version conflict/);
+    configure(3, rule);
+    assert.deepEqual(domain.githubConfiguration(projectId).readiness, rule);
+    assert.equal(domain.githubConfiguration(projectId).version, 4);
+    // No-rule is only ever null, never an empty condition list.
+    assert.throws(() => configure(4, { mode: "all", conditions: [] as never }));
+    assert.equal(domain.githubConfiguration(projectId).version, 4);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
