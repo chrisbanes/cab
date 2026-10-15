@@ -1680,13 +1680,13 @@ as follows:
 - The 3 October task overview (46/`46a-task-overview-laptop`/`03-task-detail`, `57-task-revised-result`, `47-phone-task-overview`)
   governs every task, local or imported, over the earlier 03a `03-task-detail`, `12-imported-task-source-execution`
   and 36/37/45 generation. The build has no holds side panel yet; holds and
-  admission reasons are lines in the decision card. It still offers Stop… on
-  finished tasks ([#1030](https://github.com/chrisbanes/ensemble/issues/1030)).
+  admission reasons are lines in the decision card.
   Imported tasks keep source/execution separation through the "Requirements · GitHub" label, the source line ("Open GitHub to edit source",
   "Refresh source observation") and the hold lines, not separate panes or tabs.
 - The header shows Back, the title, a status line ("Ready · waiting on
-  acme/design-system#87 / Accountable project lead: Mira") and two actions,
-  Execution and Stop…, at every width. Back is the only back control: with an
+  acme/design-system#87 / Accountable project lead: Mira") and Execution plus,
+  while the task is open, Stop…, at every width. A finished task offers no Stop…;
+  an existing Stop stays as a disabled "Stop requested". Back is the only back control: with an
   in-session origin it reads the origin view ("Board", "Overview", "Inbox",
   "Search", "Tasks"; named "Back to originating view") and returns to that entry;
   otherwise it is "Back to <project>". The breadcrumb ("Atlas / List · Waiting ·

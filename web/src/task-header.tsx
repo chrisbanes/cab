@@ -21,7 +21,7 @@ export interface TaskHeaderReport {
   title: string;
   subtitle: string;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
-  stop: { affected: string; held: boolean };
+  stop: { affected: string; held: boolean; open: boolean };
 }
 
 export function taskHeaderReport(
@@ -49,7 +49,7 @@ export function taskHeaderReport(
           ariaLabel: `Back to ${project}`,
           history: false,
         },
-    stop: { affected, held },
+    stop: { affected, held, open: data.task.state === "open" },
   };
 }
 
@@ -84,7 +84,7 @@ export function TaskHeaderActions({
         <Button variant="destructive" disabled>
           Stop requested
         </Button>
-      ) : (
+      ) : report.stop.open ? (
         <Dialog
           open={open}
           onOpenChange={(next) => {
@@ -134,7 +134,7 @@ export function TaskHeaderActions({
             </form>
           </DialogContent>
         </Dialog>
-      )}
+      ) : null}
     </div>
   );
 }

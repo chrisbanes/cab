@@ -254,7 +254,9 @@ result continuations. Results, observations and answers persist. Other projects
 continue. Stop durably holds pending work and requests best-effort cancellation of
 every active execution in the task, including its lead turn and delegated
 assignments. Observe for a predeclared bounded interval;
-effects may continue afterwards. Stop is not task cancellation or completion.
+effects may continue afterwards. Stop applies only to an open task; a Done or
+Cancelled task refuses `task.stop`, and an existing Stop on it stays visible and
+resumable. Stop is not task cancellation or completion.
 Unverified termination retains Stop, writer and capacity holds and remains visibly
 stopping/uncertain. Explicit resume clears only the operator Stop, never unresolved
 execution ownership. Preserve files/history; time and acknowledgements cannot unlock.

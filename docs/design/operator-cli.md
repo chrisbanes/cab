@@ -412,7 +412,9 @@ receipts, `task-stop {taskId, cancellationRequested}` and `task-resume {taskId,
 stopCleared, requeued}`, are recorded in one transaction with the Stop hold change,
 scoped to the task: the same key and content replays with no effect, other content
 conflicts. `expectedVersion` is optional, so an unrelated task edit cannot block a
-Stop. The keyless web Stop and retained Resume forms share the same hold. JSON
+Stop. `task.stop` on a Done or Cancelled task is refused with `409 conflict` and the
+reason "Only an open task can be stopped. This task is Done." (or Cancelled), after
+receipt replay; `task.resume` still clears an existing Stop on such a task. The keyless web Stop and retained Resume forms share the same hold. JSON
 `data.effect` is `saved`, `queued`, `cancellation-requested`, `none` or `completed`
 (a synchronous operation, such as recovery). Because these intents are repeatable, the
 CLI reuses a journal key only while it is unresolved (latest state `sending` or

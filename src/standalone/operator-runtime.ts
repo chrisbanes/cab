@@ -444,13 +444,16 @@ function taskPage(
         )
         .join("")
     : "<li>No local task blockers.</li>";
-  const stopForm = operationForm(
-    "/runtime/control/stop",
-    [["taskId", taskId]],
-    csrfToken,
-    "Best-effort Stop",
-    false,
-  );
+  const isOpen = task.state === "open";
+  const stopForm = isOpen
+    ? operationForm(
+        "/runtime/control/stop",
+        [["taskId", taskId]],
+        csrfToken,
+        "Best-effort Stop",
+        false,
+      )
+    : "";
   const resumeForm = operationForm(
     "/runtime/control/resume",
     [["taskId", taskId]],
@@ -514,7 +517,7 @@ function taskPage(
   const admissionStatus = taskAdmission.eligible
     ? "Task admission gates are clear"
     : `Task admission blocked: ${taskAdmission.reasons.map(admissionReason).map(escapeHtml).join(", ")}`;
-  return `<main><h1>${escapeHtml(task.title)}</h1><p>Project: ${escapeHtml(project.name)}. Project state: ${project.paused ? "Paused" : "Active"}. Task state: ${escapeHtml(task.state)}; ${task.ready ? "Ready" : "Not ready"}.</p><p>${admissionStatus}.</p>${lead}<p>Execution status: ${escapeHtml(status)}.</p><p>Local dependencies gate new execution independently of readiness.</p><section><h2>Task-scoped assignments</h2>${assignments.length ? `<ul>${rows}</ul>` : "<p>No assignments have been selected.</p>"}</section><section><h2>Task dependencies</h2><ul>${dependencyRows}</ul>${dependencyForm(task, candidates, dependencyIds, csrfToken)}</section>${executionHoldSection(taskId, api)}<section><h2>Task controls</h2><p>Stop holds new work and asks running turns to end; some effects may still finish. Resume clears only the Stop, not any other hold on this task.</p>${stopForm}${resumeForm}</section></main>`;
+  return `<main><h1>${escapeHtml(task.title)}</h1><p>Project: ${escapeHtml(project.name)}. Project state: ${project.paused ? "Paused" : "Active"}. Task state: ${escapeHtml(task.state)}; ${task.ready ? "Ready" : "Not ready"}.</p><p>${admissionStatus}.</p>${lead}<p>Execution status: ${escapeHtml(status)}.</p><p>Local dependencies gate new execution independently of readiness.</p><section><h2>Task-scoped assignments</h2>${assignments.length ? `<ul>${rows}</ul>` : "<p>No assignments have been selected.</p>"}</section><section><h2>Task dependencies</h2><ul>${dependencyRows}</ul>${dependencyForm(task, candidates, dependencyIds, csrfToken)}</section>${executionHoldSection(taskId, api)}<section><h2>Task controls</h2><p>${isOpen ? "Stop holds new work and asks running turns to end; some effects may still finish." : "Only an open task can be stopped."} Resume clears only the Stop, not any other hold on this task.</p>${stopForm}${resumeForm}</section></main>`;
 }
 
 /** The persisted binding harness when bound, else the captured revision's runtime. */
