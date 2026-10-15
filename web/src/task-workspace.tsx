@@ -1563,14 +1563,6 @@ export function TaskWorkspace({
                     states={questionStates}
                     onRecorded={refreshAll}
                     requesterName={requesterOf(params.get("request"))}
-                    // The card lists these once when another request is open too.
-                    holds={
-                      openRequests.some(
-                        (q) => q.interactionId !== params.get("request"),
-                      )
-                        ? []
-                        : holdNotices(data, "answer")
-                    }
                   />
                 )}
                 {openRequests
@@ -1654,10 +1646,9 @@ export function TaskWorkspace({
                       Inspect uncertain execution
                     </ActionLink>
                   )}
-                {/* The holds the open request does not clear, once, as Inbox shows them. */}
-                {openRequests.some(
-                  (q) => q.interactionId !== params.get("request"),
-                ) && (
+                {/* The holds the open requests, the selected one included, do not clear: once, in
+                    the Inbox's wording. */}
+                {openRequests.length > 0 && (
                   <QuestionHolds
                     holds={holdNotices(
                       data,

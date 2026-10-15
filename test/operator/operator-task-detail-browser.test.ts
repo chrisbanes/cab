@@ -1896,8 +1896,16 @@ test("A question opened on the task page keeps the holds an answer does not clea
   await form.getByText("Recommended by Task lead", { exact: true }).waitFor();
   const holds = page.locator("section#decisions .question-holds");
   await holds.first().waitFor();
-  // Once, inside the selected question, in the answer's wording.
+  // Once, in the decision card after the selected question, in the answer's wording.
   assert.equal(await holds.count(), 1);
-  assert.equal(await form.locator(".question-holds").count(), 1);
+  assert.ok(
+    await form.evaluate(
+      (f, h) =>
+        Boolean(
+          h && f.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      await holds.elementHandle(),
+    ),
+  );
   assert.match(await holds.innerText(), /Answering does not clear it\./);
 });
