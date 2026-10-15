@@ -115,8 +115,11 @@ test("queue rows are request cards with kind, action and relative age; filters a
       "Interventions · 0",
     ],
   );
+  // One group heading for questions and approvals, in server order under the filters.
   await page
-    .getByText("Intervention first · then oldest", { exact: true })
+    .locator(".inbox-queue .inbox-group", {
+      hasText: "Questions & approvals · oldest first",
+    })
     .waitFor();
   // Filters are compact controls, not full-width labelled fields.
   assert.ok((await project.boundingBox())!.width < 260);
@@ -204,7 +207,7 @@ test("an Inbox with nothing unresolved says so and links to Overview", async (_t
     "/app",
   );
   assert.equal(
-    await page.locator(".page-header-title p").textContent(),
+    await page.locator(".inbox-summary").textContent(),
     "0 unresolved across your projects",
   );
   await captureBrowserEvidence(page, "1366-inbox-empty", { fullPage: false });
@@ -229,6 +232,50 @@ test("queue rows are full-width touch targets without horizontal scroll (phone)"
   );
   await captureBrowserEvidence(page, "390-inbox-queue", { fullPage: false });
 });
+
+/** Serves the task read with an open source-owned GitHub blocker, as a contract-valid read. */
+async function serveSourceHold(page: Page, taskId: string) {
+  const taskUrl = `**/api/operator/tasks/${taskId}`;
+  await page.route(taskUrl, async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as TaskRead;
+    body.data.source = {
+      identity: { provider: "github.com", nodeId: "I_1", repositoryId: "R_1" },
+      repositoryName: "acme/atlas",
+      number: 12,
+      url: "https://github.com/acme/atlas/issues/12",
+      title: "Imported task",
+      body: "",
+      state: "open",
+      closure: null,
+      readiness: {
+        rule: { kind: "none" },
+        outcome: "not-evaluated",
+        unmet: [],
+      },
+      memberships: [],
+      nativeBlockers: [
+        {
+          nodeId: "B_1",
+          repositoryId: "R_2",
+          repositoryName: "acme/design-system",
+          number: 87,
+          state: "open",
+        },
+      ],
+      review: null,
+      hold: null,
+    };
+    body.data.admission.eligible = false;
+    body.data.admission.reasons = ["imported-blockers-blocked"];
+    body.data.waits = [
+      { code: "imported-blockers-blocked", fix: null, links: [] },
+    ];
+    taskSchema.parse(body);
+    await route.fulfill({ response, json: body });
+  });
+  return taskUrl;
+}
 
 const settle = (page: Page) =>
   page.evaluate(
@@ -286,7 +333,7 @@ test("a wide Inbox opens the first request by itself without navigating, and kee
   // Top-level header stays on a wide layout.
   assert.equal(await page.locator("main h1").textContent(), "Inbox");
   assert.equal(
-    await page.locator(".page-header-title p").textContent(),
+    await page.locator(".inbox-summary").textContent(),
     "3 unresolved across 3 projects",
   );
 
@@ -338,7 +385,7 @@ test("the Inbox is two independent scroll regions in one viewport, with the deta
     true,
     "the page itself does not scroll",
   );
-  assert.equal((await page.locator(".inbox-queue").boundingBox())!.width, 368);
+  assert.equal((await page.locator(".inbox-queue").boundingBox())!.width, 340);
   const metrics = (el: typeof queue) =>
     el.evaluate((e) => ({
       client: e.clientHeight,
@@ -463,6 +510,14 @@ test("phone: queue to detail to queue restores the anchor and focus without sele
     await page.getByRole("button", { name: "Back to queue" }).count(),
     0,
   );
+  // Previous/Next and the inspector are wide-layout tools.
+  assert.equal(
+    await page
+      .getByRole("button", { name: /^(Previous|Next) request$/ })
+      .count(),
+    0,
+  );
+  assert.equal(await page.locator(".inbox-context").count(), 0);
   await captureBrowserEvidence(page, "390-inbox-detail", { fullPage: false });
 
   await page.getByRole("link", { name: "Back to Inbox", exact: true }).click();
@@ -492,7 +547,7 @@ test("sign-out clears the Inbox filters and in-memory selection; the header is n
   await rows.first().click();
   await page.getByText("1 of 1", { exact: true }).waitFor();
   assert.equal(
-    await page.locator(".page-header-title p").textContent(),
+    await page.locator(".inbox-summary").textContent(),
     "3 unresolved across 3 projects",
   );
   await signOutFromSidebar(page);
@@ -508,7 +563,7 @@ test("sign-out clears the Inbox filters and in-memory selection; the header is n
   await page.getByText(/^\d of 3$/).waitFor();
   assert.equal(await page.locator("main h1").textContent(), "Inbox");
   assert.equal(
-    await page.locator(".page-header-title p").textContent(),
+    await page.locator(".inbox-summary").textContent(),
     "3 unresolved across 3 projects",
   );
 });
@@ -552,8 +607,9 @@ test("an approval shows its exact action, target and independent holds, and deci
     await decide.getAttribute("href"),
     `/coordination/task/${approval.taskId}#${approval.interactionId}`,
   );
+  // Nothing on the page decides: not the request pane, not the inspector.
   assert.equal(
-    await detail.getByRole("button", { name: /approve|deny/i }).count(),
+    await page.getByRole("button", { name: /^(approve|deny)\b/i }).count(),
     0,
   );
   assert.equal(
@@ -565,45 +621,7 @@ test("an approval shows its exact action, target and independent holds, and deci
   });
 
   // A source-owned hold, served as a contract-valid task read, shows beside the decision.
-  const taskUrl = `**/api/operator/tasks/${approval.taskId}`;
-  await page.route(taskUrl, async (route) => {
-    const response = await route.fetch(),
-      body = (await response.json()) as TaskRead;
-    body.data.source = {
-      identity: { provider: "github.com", nodeId: "I_1", repositoryId: "R_1" },
-      repositoryName: "acme/atlas",
-      number: 12,
-      url: "https://github.com/acme/atlas/issues/12",
-      title: "Imported task",
-      body: "",
-      state: "open",
-      closure: null,
-      readiness: {
-        rule: { kind: "none" },
-        outcome: "not-evaluated",
-        unmet: [],
-      },
-      memberships: [],
-      nativeBlockers: [
-        {
-          nodeId: "B_1",
-          repositoryId: "R_2",
-          repositoryName: "acme/design-system",
-          number: 87,
-          state: "open",
-        },
-      ],
-      review: null,
-      hold: null,
-    };
-    body.data.admission.eligible = false;
-    body.data.admission.reasons = ["imported-blockers-blocked"];
-    body.data.waits = [
-      { code: "imported-blockers-blocked", fix: null, links: [] },
-    ];
-    taskSchema.parse(body);
-    await route.fulfill({ response, json: body });
-  });
+  const taskUrl = await serveSourceHold(page, approval.taskId);
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page.reload();
   await page.locator(".inbox-row").click();
@@ -873,4 +891,359 @@ test("phone: the question hold sits in the sticky submit area without covering f
     release();
     await page.unroute(taskUrl);
   }
+});
+
+const rgb = (page: Page, selector: string, property: string) =>
+  page
+    .locator(selector)
+    .first()
+    .evaluate(
+      (el, name) => getComputedStyle(el).getPropertyValue(name),
+      property,
+    );
+
+test("three panes: a grouped queue under its filters, with the overlay and indigo-edge selection, and a page that does not scroll (1366)", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    2,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    async (f) => {
+      await seedOwnIntervention(f);
+      await seedOwnApproval(f);
+    },
+  );
+  const rows = page.locator(".inbox-row");
+  await rows.nth(3).waitFor();
+  // Group headings precede their rows: interventions, then questions and approvals.
+  // Requests created in the same second have no stable order, so compare the second group as a set.
+  const order = await page
+    .locator(".inbox-rows > *")
+    .evaluateAll((els) =>
+      els.map((el) =>
+        el.classList.contains("inbox-group")
+          ? el.textContent
+          : (el as HTMLElement).dataset.kind,
+      ),
+    );
+  assert.deepEqual(order.slice(0, 3), [
+    "Intervention · 1",
+    "intervention",
+    "Questions & approvals · oldest first",
+  ]);
+  assert.deepEqual(order.slice(3).sort(), ["approval", "question", "question"]);
+  assert.equal(await page.locator(".inbox-queue .inbox-filters").count(), 1);
+  // The wide layout opened the first request: overlay fill and a 2px indigo left edge.
+  const selected = '.inbox-row[aria-pressed="true"]';
+  await page.locator(selected).waitFor();
+  assert.equal(
+    await rgb(page, selected, "background-color"),
+    "rgb(30, 34, 53)",
+  );
+  assert.equal(await rgb(page, selected, "border-left-width"), "2px");
+  assert.equal(
+    await rgb(page, selected, "border-left-color"),
+    "rgb(99, 102, 241)",
+  );
+  assert.equal((await page.locator(".inbox-queue").boundingBox())!.width, 340);
+  assert.equal(
+    await rgb(page, ".inbox-queue", "background-color"),
+    "rgb(13, 15, 23)",
+  );
+  assert.equal(
+    (await page.locator(".inbox-context").boundingBox())!.width,
+    280,
+  );
+  // The queue header owns the only heading; there is no page header.
+  assert.equal(await page.locator(".page-header").count(), 0);
+  assert.deepEqual(await page.locator("main h1").allTextContents(), ["Inbox"]);
+  await settle(page);
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollHeight <= innerHeight,
+    ),
+    true,
+    "the page itself does not scroll",
+  );
+  // Refresh in the queue header rereads the Inbox.
+  const reread = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/operator/inbox" && r.ok(),
+  );
+  await page
+    .locator(".inbox-queue")
+    .getByRole("button", { name: "Refresh", exact: true })
+    .click();
+  await reread;
+
+  // The drawer shell: two panes under the page header, which has the menu and the one h1.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.locator(".page-header").waitFor();
+  assert.equal(await page.locator(".phone-nav").isVisible(), true);
+  assert.deepEqual(await page.locator("main h1").allTextContents(), ["Inbox"]);
+  assert.equal(await page.locator(".inbox-context").count(), 0);
+  assert.equal((await page.locator(".inbox-queue").boundingBox())!.width, 300);
+  await settle(page);
+  assert.deepEqual(
+    await page.evaluate(() => ({
+      x: document.documentElement.scrollWidth <= innerWidth,
+      y: document.documentElement.scrollHeight <= innerHeight,
+    })),
+    { x: true, y: true },
+  );
+});
+
+test("the request pane shows kind, position, identities and a sticky response bar from one task read", async (_t, j) => {
+  const { page, more: approval } = await openInbox(
+    j,
+    3,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnApproval(f),
+    true,
+  );
+  await serveSourceHold(page, approval.taskId);
+  const taskReads: string[] = [];
+  page.on("request", (request) => {
+    if (
+      new URL(request.url()).pathname ===
+      `/api/operator/tasks/${approval.taskId}`
+    )
+      taskReads.push(request.url());
+  });
+  const rows = page.locator(".inbox-row"),
+    detail = page.getByRole("region", { name: "Selected request" });
+  await rows.nth(3).waitFor();
+  await page.locator('.inbox-row[data-kind="approval"]').click();
+  await detail
+    .getByText("Execution blocked by dependency", { exact: true })
+    .waitFor();
+  await detail.getByText(/^\d of 4$/).waitFor();
+  assert.equal(await detail.getByText("Approval", { exact: true }).count(), 1);
+  assert.equal(
+    await detail.getByRole("link", { name: "Open task" }).getAttribute("href"),
+    `/app/tasks/${approval.taskId}`,
+  );
+  assert.match(
+    (await detail.locator(".inbox-identity").textContent())!,
+    /^.+ · version \d+ · \d\d:\d\d$/,
+  );
+  assert.equal(
+    await rgb(page, ".inbox-detail .inbox-approval-facts", "border-top-width"),
+    "1px",
+  );
+  // What a decision covers and the one way to decide sit in the sticky bar.
+  const bar = page.locator(".inbox-decision");
+  await bar
+    .getByText(
+      "Your decision is bound to the action, target and version in the exact approval. Changed material requires a new review.",
+    )
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Review material & decide", exact: true })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await bar
+      .getByRole("link", { name: "Review material & decide", exact: true })
+      .getAttribute("href"),
+    `/coordination/task/${approval.taskId}#${approval.interactionId}`,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: /^(approve|deny)\b/i }).count(),
+    0,
+  );
+  const pane = page.locator(".inbox-detail");
+  for (const where of [0, 0.5, 1]) {
+    await pane.evaluate((e, f) => {
+      e.scrollTop = (e.scrollHeight - e.clientHeight) * f;
+    }, where);
+    await settle(page);
+    const p = (await pane.boundingBox())!,
+      b = (await bar.boundingBox())!;
+    assert.ok(
+      Math.abs(b.y + b.height - (p.y + p.height)) <= 1,
+      `bar at the pane's foot at ${where}`,
+    );
+  }
+  await captureBrowserEvidence(page, "1366-inbox-approval-pane", {
+    fullPage: false,
+  });
+  // One task read per selection, and at most one more per Inbox read (a poll, or a reread
+  // after the workspace changes), however many parts of the page show the task.
+  await settle(page);
+  assert.equal(taskReads.length, 1, taskReads.join());
+  let inboxReads = 0;
+  page.on("response", (r) => {
+    if (new URL(r.url()).pathname === "/api/operator/inbox" && r.ok())
+      inboxReads++;
+  });
+  const reread = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === `/api/operator/tasks/${approval.taskId}`,
+  );
+  await page.clock.runFor(15000);
+  await reread;
+  await settle(page);
+  assert.ok(
+    taskReads.length - 1 >= 1 && taskReads.length - 1 <= inboxReads,
+    `${taskReads.length - 1} task rereads for ${inboxReads} Inbox reads`,
+  );
+
+  // Previous/Next move through the filtered queue as a row click does.
+  await rows.first().click();
+  await detail.getByText("1 of 4", { exact: true }).waitFor();
+  const previous = page.getByRole("button", { name: "Previous request" }),
+    next = page.getByRole("button", { name: "Next request" });
+  assert.equal(await previous.isDisabled(), true);
+  const entries = await page.evaluate(() => history.length);
+  await next.click();
+  await detail.getByText("2 of 4", { exact: true }).waitFor();
+  assert.equal(await rows.nth(1).getAttribute("aria-pressed"), "true");
+  assert.equal(await page.evaluate(() => history.length), entries + 1);
+  assert.equal(
+    new URL(page.url()).searchParams.get("request"),
+    await rows.nth(1).getAttribute("data-record-id"),
+  );
+  await previous.click();
+  await detail.getByText("1 of 4", { exact: true }).waitFor();
+  await rows.last().click();
+  await detail.getByText("4 of 4", { exact: true }).waitFor();
+  assert.equal(await next.isDisabled(), true);
+
+  // A question's sticky bar is its submit area.
+  await page.locator('.inbox-row[data-kind="question"]').first().click();
+  const submit = page.locator(".inbox-detail .question-submit");
+  await submit.waitFor();
+  assert.equal(
+    await rgb(page, ".inbox-detail .question-submit", "position"),
+    "sticky",
+  );
+  await captureBrowserEvidence(page, "1366-inbox-question", {
+    fullPage: false,
+  });
+});
+
+test("the inspector lists task, lead, requester, assignment chain, holds and evidence for the selected request (1366) and is absent on the tablet", async (_t, j) => {
+  const {
+    page,
+    web,
+    more: approval,
+  } = await openInbox(j, 1, { width: 1366, height: 900 }, "/app/inbox", (f) =>
+    seedOwnApproval(f),
+  );
+  const taskUrl = await serveSourceHold(page, approval.taskId);
+  const aside = page.getByRole("complementary", { name: "Task context" }),
+    row = page.locator('.inbox-row[data-kind="approval"]');
+  await row.click();
+  await aside.getByText("Execution blocked by dependency").waitFor();
+  const item = (
+    (await (
+      await page.request.get(`${web.origin}/api/operator/inbox`)
+    ).json()) as {
+      data: {
+        items: Array<{
+          taskId: string;
+          kind: string;
+          taskTitle: string;
+          projectName: string;
+          requesterName: string;
+          conversation: string | null;
+        }>;
+      };
+    }
+  ).data.items.find((i) => i.kind === "approval")!;
+  const task = taskSchema.parse(
+    await (
+      await page.request.get(
+        `${web.origin}/api/operator/tasks/${approval.taskId}`,
+      )
+    ).json(),
+  ).data;
+  const link = aside.getByRole("link", { name: item.taskTitle });
+  assert.equal(
+    await link.getAttribute("href"),
+    `/app/tasks/${approval.taskId}`,
+  );
+  await aside
+    .getByText(`${item.projectName} · acme/atlas#12`, { exact: true })
+    .waitFor();
+  await aside
+    .getByText("Next: you · review material & decide", { exact: true })
+    .waitFor();
+  const facts = await aside
+    .locator("dl")
+    .evaluate((dl) =>
+      Object.fromEntries(
+        [...dl.querySelectorAll("dt")].map((dt) => [
+          dt.textContent,
+          dt.nextElementSibling?.textContent,
+        ]),
+      ),
+    );
+  assert.equal(facts.Requester, item.requesterName);
+  if (task.lead) assert.equal(facts.Lead, task.lead.name ?? "Name unavailable");
+  else assert.equal(facts.Lead, undefined);
+  // The chain ends at the requesting assignment and starts at its root.
+  assert.match(
+    facts.Chain ?? "",
+    new RegExp(`^(Operator|Requester unknown) → .*${item.requesterName}$`),
+  );
+  await aside.getByText("Holds · 1", { exact: true }).waitFor();
+  await aside.getByText("acme/design-system#87", { exact: true }).waitFor();
+  // Evidence links appear once on the page, in the inspector.
+  assert.equal(
+    await page.getByRole("link", { name: "Task evidence" }).count(),
+    1,
+  );
+  assert.equal(
+    await aside.getByRole("link", { name: "Task evidence" }).count(),
+    1,
+  );
+  assert.equal(
+    await page.getByRole("link", { name: "Requesting conversation" }).count(),
+    item.conversation ? 1 : 0,
+  );
+  await captureBrowserEvidence(page, "1366-inbox-inspector", {
+    fullPage: false,
+  });
+
+  // Selecting another request updates it.
+  await page.locator('.inbox-row[data-kind="question"]').click();
+  await aside.getByRole("link", { name: "Request 1" }).waitFor();
+  await aside
+    .getByText("Next: you · answer question", { exact: true })
+    .waitFor();
+
+  // A failed task read still shows the request's own facts and evidence, with Try again.
+  await page.unroute(taskUrl);
+  await page.route(taskUrl, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  await row.click();
+  await aside.getByRole("button", { name: "Try again" }).waitFor();
+  await aside.getByRole("link", { name: item.taskTitle }).waitFor();
+  await aside.getByText(item.requesterName, { exact: true }).first().waitFor();
+  assert.equal(
+    await aside.getByRole("link", { name: "Task evidence" }).count(),
+    1,
+  );
+  await page.unroute(taskUrl);
+
+  // Below 1280px there is no inspector; the evidence links return to the request pane.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page
+    .getByRole("region", { name: "Selected request" })
+    .getByRole("link", { name: "Task evidence" })
+    .waitFor();
+  assert.equal(await aside.count(), 0);
+  assert.equal(
+    await page.getByRole("link", { name: "Task evidence" }).count(),
+    1,
+  );
 });

@@ -1,3 +1,9 @@
+import {
+  CircleQuestionMark,
+  Diamond,
+  TriangleAlert,
+  type LucideIcon,
+} from "lucide-react";
 import type { InboxItem } from "../../src/operator/contracts.js";
 import {
   clockLabel,
@@ -5,6 +11,12 @@ import {
   requestKindLabel,
 } from "./inbox-presentation.js";
 export { requestActionLabel, requestKindLabel };
+/** One symbol per request kind, shared by the Inbox and the Overview cards. */
+export const requestKindIcons: Record<InboxItem["kind"], LucideIcon> = {
+  question: CircleQuestionMark,
+  approval: Diamond,
+  intervention: TriangleAlert,
+};
 type Request = Pick<
   InboxItem,
   "id" | "kind" | "taskId" | "destination" | "requesterName" | "createdAt"
