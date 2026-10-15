@@ -85,6 +85,7 @@ test("project sources reads selections, links and observations without private t
   );
   assert.match(human.out, /S-2 +Search +\(query private\)/);
   assert.match(human.out, /acme\/atlas +main/);
+  assert.match(human.out, /Closed issues:? +Skip closed issues/);
   assert.equal(databaseDigest(w.s.f), before);
   // A partial provider read is an evidence gap, not a complete observation.
   const activated = await w.s.sessionPost("/api/operator/commands", {
@@ -95,7 +96,49 @@ test("project sources reads selections, links and observations without private t
     expectedVersion: json.data.source.version,
   });
   assert.equal(activated.status, 200);
-  w.s.f.service.githubSources().reconcileSelection(w.ids.atlas, "S-1", {
+  const sources = w.s.f.service.githubSources();
+  sources.reconcileSelection(w.ids.atlas, "S-1", {
+    complete: true,
+    issues: [1, 2, 3].map((n) => ({
+      providerInstance: "github.com" as const,
+      nodeId: `I_${n}`,
+      repositoryId: "acme/atlas",
+      repositoryName: "acme/atlas",
+      number: n,
+      title: `Issue ${n}`,
+      body: "Scope",
+      state: "open" as const,
+      labels: [],
+      projectFields: [],
+    })),
+    reason: null,
+  });
+  const counted = databaseDigest(w.s.f);
+  const complete = await w.ok("ro", ["project", "sources", w.ids.atlas]);
+  const humanCounts = await w.h.run([
+    "project",
+    "sources",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.deepEqual(complete.data.observations[0].counts, {
+    observed: 3,
+    open: 3,
+    closedSkipped: 0,
+    matching: 0,
+    complete: true,
+  });
+  assert.equal(complete.data.readinessRule.kind, "rule");
+  assert.match(humanCounts.out, /3 observed · 3 open · 0 match label `ready`/);
+  assert.match(
+    humanCounts.out,
+    /^S-1: No open item matches the readiness rule \(label `ready`\); imported tasks stay Draft until one does\. Change readiness with 'ensemble project prepare-source'\.$/m,
+  );
+  for (const secret of [...PRIVATE, w.ids.checkout])
+    assert.ok(!humanCounts.out.includes(secret), secret);
+  assert.equal(databaseDigest(w.s.f), counted);
+  sources.reconcileSelection(w.ids.atlas, "S-1", {
     complete: false,
     issues: [],
     reason: "rate-limited",
@@ -103,7 +146,98 @@ test("project sources reads selections, links and observations without private t
   const partial = await w.ok("ro", ["project", "sources", w.ids.atlas]);
   assert.equal(partial.data.observations[0].state, "partial");
   assert.deepEqual(partial.coverage.gaps, ["evidence-gap"]);
+  const humanPartial = await w.h.run([
+    "project",
+    "sources",
+    w.ids.atlas,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(humanPartial.out, /partial read; counts may be incomplete/);
+  assert.doesNotMatch(humanPartial.out, /No open item matches/);
   assert.equal(existsSync(w.journal), false);
+});
+
+test("project sources and prepare-source show and round-trip no readiness rule, never inferring it from an unavailable rule", async (t) => {
+  const w = await world(t);
+  const prepare = async (projectId: string, edit: unknown) => {
+    const out = join(w.h.dir, `${randomUUID()}.json`);
+    const r = await w.cli("ro", [
+      "project",
+      "prepare-source",
+      projectId,
+      "--out",
+      out,
+      "--edit-file",
+      w.file(`${randomUUID()}.edit`, JSON.stringify(edit)),
+    ]);
+    return {
+      code: r.code,
+      out,
+      document: r.code === 0 ? JSON.parse(readFileSync(out, "utf8")) : null,
+    };
+  };
+  // A project never given a rule shows none and keeps none.
+  const relay = await w.ok("ro", ["project", "sources", w.ids.relay]);
+  assert.deepEqual(relay.data.source.readiness, { kind: "none" });
+  assert.ok(!relay.coverage.gaps.includes("content-unavailable"));
+  const relayHuman = await w.h.run([
+    "project",
+    "sources",
+    w.ids.relay,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(relayHuman.out, /No readiness rule/);
+  const kept = await prepare(w.ids.relay, { closedIssues: "done" });
+  assert.equal(kept.document.command.readiness, null);
+  // An omitted readiness keeps a saved rule as a command value, without the read's kind.
+  const keptRule = await prepare(w.ids.atlas, { closedIssues: "done" });
+  assert.deepEqual(keptRule.document.command.readiness, {
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  // `null` removes the rule, and applying it reads back as none.
+  const removed = await prepare(w.ids.atlas, { readiness: null });
+  assert.equal(removed.document.command.readiness, null);
+  assert.deepEqual(removed.document.preview.diff.lines, [
+    "Readiness: no readiness rule",
+  ]);
+  await w.ok("rw", ["project", "apply", "--file", removed.out]);
+  assert.deepEqual((await w.config()).source.readiness, { kind: "none" });
+  // A rule naming private text is withheld: unknown, and an edit must replace it.
+  const r = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: w.ids.relay,
+    expectedVersion: (await w.config(w.ids.relay)).source.version,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: [],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", name: "FIXTURE_GITHUB" }],
+    },
+    repositories: [],
+  });
+  assert.equal(r.status, 200);
+  const hidden = await w.ok("ro", ["project", "sources", w.ids.relay]);
+  assert.deepEqual(hidden.data.source.readiness, { kind: "unavailable" });
+  assert.ok(hidden.coverage.gaps.includes("content-unavailable"));
+  const hiddenHuman = await w.h.run([
+    "project",
+    "sources",
+    w.ids.relay,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(hiddenHuman.out, /\(unavailable\)/);
+  assert.doesNotMatch(hiddenHuman.out, /No readiness rule/);
+  assert.equal((await prepare(w.ids.relay, { closedIssues: "done" })).code, 4);
+  const replaced = await prepare(w.ids.relay, { readiness: null });
+  assert.equal(replaced.document.command.readiness, null);
+  assert.deepEqual(replaced.document.preview.diff.lines, [
+    "Readiness: no readiness rule (replaces unavailable readiness)",
+  ]);
 });
 
 test("prepare-source writes the exact UI command with redacted preview lines", async (t) => {
@@ -154,6 +288,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
       { id: "S-5", kind: "search", query: "NEW PRIVATE QUERY" },
     ],
     readiness: edit.readiness,
+    closedIssues: "skip",
     repositories: [{ repositoryId: "acme/atlas", ref: "dev" }],
   });
   assert.deepEqual(document.preview.diff.lines, [
@@ -180,6 +315,22 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
   );
   assert.equal(databaseDigest(w.s.f), before);
   assert.equal(existsSync(w.journal), false);
+
+  const modeOut = join(w.h.dir, "mode-source.json");
+  await w.ok("ro", [
+    "project",
+    "prepare-source",
+    w.ids.atlas,
+    "--out",
+    modeOut,
+    "--edit-file",
+    w.file("mode.json", JSON.stringify({ closedIssues: "done" })),
+  ]);
+  const mode = JSON.parse(readFileSync(modeOut, "utf8"));
+  assert.equal(mode.command.closedIssues, "done");
+  assert.deepEqual(mode.preview.diff.lines, [
+    "Closed issues: Treat closure as Done",
+  ]);
 
   // Parity: the operator UI builds the same command for the same edit.
   const rows = sourceRowsFrom(source);
@@ -208,6 +359,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     ),
     conditions: JSON.stringify(edit.readiness.conditions),
     mode: "any",
+    closedIssues: rows.closedIssues,
   });
   const { key: _key, ...uiCommand } = ui;
   assert.deepEqual(uiCommand, document.command);
@@ -248,6 +400,7 @@ test("prepare-source writes the exact UI command with redacted preview lines", a
     linkRepositories: [{ repositoryId: "acme/atlas", path: "/x", ref: "main" }],
   });
   await reject(2, { surprise: true });
+  await reject(2, { closedIssues: "closed" });
   await reject(2, { credentialRef: "gh:example.com" });
   await reject(2, { credentialRef: "gh:" });
   await reject(2, { credentialRef: "GH:github.com" });
@@ -390,7 +543,7 @@ test("project apply sends the prepared source change once, deactivating selectio
       { id: "S-1", keep: true },
       { id: "S-2", keep: true },
     ],
-    readiness: (await w.config()).source.readiness,
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(r.status, 200);

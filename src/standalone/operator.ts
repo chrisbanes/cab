@@ -25,6 +25,17 @@ import {
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import {
+  closedIssuesSchema,
+  type Readiness,
+} from "../core/github-source-contracts.js";
+import {
+  noRuleText,
+  ruleText,
+  selectionCountsText,
+  unmetText,
+  zeroMatchWarning,
+} from "../operator/readiness-text.js";
+import {
   createServer,
   type IncomingMessage,
   type Server,
@@ -70,6 +81,17 @@ function field(
 function textarea(name: string, value = ""): string {
   return `<label>${escapeHtml(name)} <textarea name="${escapeHtml(name)}">${escapeHtml(value)}</textarea></label>`;
 }
+
+/** The stored rule as the shared readiness text reads it; this page shows the whole rule. */
+const ruleView = (rule: Readiness | null) =>
+  rule ? { kind: "rule" as const, ...rule } : { kind: "none" as const };
+
+const closureText = (closure: "held" | "completed" | null) =>
+  closure === "held"
+    ? ", closed on GitHub; held"
+    : closure === "completed"
+      ? ", closed on GitHub"
+      : "";
 
 function selectField(
   name: string,
@@ -198,10 +220,21 @@ export class LocalOperatorUi {
     const activeGithub = new Set(
       this.store.githubActiveSelectionIds(projectId),
     );
+    const rule = ruleView(this.githubSources?.readinessRule(projectId) ?? null),
+      counted = this.githubSources?.selectionCounts(projectId);
     const previewForms = github.selections
       .map((raw) => {
         const selection = selectionSchema.parse(raw);
         const sync = this.githubSources?.syncState(projectId, selection.id);
+        // An unusable credential claims no observation, so no counts either.
+        const counts =
+          credential?.usable === false
+            ? null
+            : (counted?.get(selection.id) ?? null);
+        const warning = zeroMatchWarning(counts, rule);
+        const items = counts
+          ? ` ${escapeHtml(selectionCountsText(counts, rule))}.${warning ? ` ${escapeHtml(warning)} <a href="#github-readiness">Check readiness conditions</a>` : ""}`
+          : "";
         const status =
           credential?.usable === false
             ? escapeHtml(
@@ -214,7 +247,7 @@ export class LocalOperatorUi {
               : Number(sync.complete) === 1
                 ? "complete"
                 : `partial: ${escapeHtml(sync.reason)}`;
-        return `<li>${escapeHtml(selection.id)} (${escapeHtml(selection.kind)}; ${activeGithub.has(selection.id) ? "active" : "inactive"}; ${status}; ${escapeHtml(sync?.refreshedAt ?? "never")})${credential?.usable === false ? '<a href="#github-source-credential">Set or change source credential</a>' : ""}${form("github.preview", field("projectId", projectId, "hidden") + field("selectionId", selection.id, "hidden") + field("expectedVersion", String(github.version), "hidden"), undefined, csrfToken)}</li>`;
+        return `<li>${escapeHtml(selection.id)} (${escapeHtml(selection.kind)}; ${activeGithub.has(selection.id) ? "active" : "inactive"}; ${status}; ${escapeHtml(sync?.refreshedAt ?? "never")})${items}${credential?.usable === false ? '<a href="#github-source-credential">Set or change source credential</a>' : ""}${form("github.preview", field("projectId", projectId, "hidden") + field("selectionId", selection.id, "hidden") + field("expectedVersion", String(github.version), "hidden"), undefined, csrfToken)}</li>`;
       })
       .join("");
     const conflicts =
@@ -264,7 +297,7 @@ export class LocalOperatorUi {
       .tasks(projectId)
       .map(
         (task) =>
-          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
+          `<li><a href="/app/tasks/${escapeHtml(task.id)}">${escapeHtml(task.title)}</a> (${task.ready ? "ready" : "unready"}; ${escapeHtml(task.state)}${closureText(this.store.providerClosure(String(task.id)))}; blockers ${escapeHtml(task.importedBlockers)}). <a href="/runtime/task/${escapeHtml(task.id)}">Runtime</a> · <a href="/coordination/task/${escapeHtml(task.id)}">Coordination</a></li>`,
       )
       .join("");
     const candidateProfileIds = JSON.stringify(
@@ -297,7 +330,7 @@ export class LocalOperatorUi {
         ),
       undefined,
       csrfToken,
-    )}<h2 id="github-source-credential">GitHub source</h2><p>${github.credentialRef ? "Credential reference configured" : "Credential reference not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}; choosing it is explicit.` : ""} Selections require preview before activation at the current source version.</p>${form(
+    )}<h2 id="github-source-credential">GitHub source</h2><p>Credential: ${credential?.source === "gh" ? "GitHub CLI" : credential?.source === "env" ? "environment variable" : github.credentialRef ? "configured" : "not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}.` : ""} Selections require preview before activation at the current source version.</p><p>${github.readiness ? `Readiness rule: ${escapeHtml(ruleText({ kind: "rule", ...github.readiness }))}. Set readiness to null to remove it.` : noRuleText}</p>${form(
       "github.configure",
       field("projectId", projectId, "hidden") +
         field("expectedVersion", String(github.version), "hidden") +
@@ -320,7 +353,15 @@ export class LocalOperatorUi {
         ) +
         field("clearCredentialRef", "1", "checkbox") +
         textarea("selections", JSON.stringify(github.selections, null, 2)) +
-        textarea("readiness", JSON.stringify(github.readiness, null, 2)) +
+        `<div id="github-readiness">${textarea("readiness", JSON.stringify(github.readiness, null, 2))}</div>` +
+        selectField(
+          "closedIssues",
+          [
+            { value: "skip", label: "Skip closed issues" },
+            { value: "done", label: "Treat closure as Done" },
+          ],
+          github.closedIssues,
+        ) +
         textarea(
           "repositories",
           JSON.stringify(
@@ -352,11 +393,22 @@ export class LocalOperatorUi {
     const review = imported
       ? this.githubSources?.review(String(imported.nodeId))
       : undefined;
+    const readiness = imported
+      ? this.githubSources?.readinessByTask([taskId]).get(taskId)
+      : undefined;
+    const unmet =
+      readiness &&
+      unmetText({
+        rule: ruleView(readiness.rule),
+        outcome: readiness.outcome,
+        unmet: readiness.unmet,
+      });
     const hold = imported
       ? this.githubSources?.hold(String(imported.nodeId))
       : undefined;
+    const closure = this.store.providerClosure(taskId);
     const provenance = external
-      ? `<h2>GitHub source</h2><p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
+      ? `<h2>GitHub source</h2>${closure ? `<p>${closure === "held" ? "Paused · closed on GitHub. Resolve the source hold after the issue reopens." : "Done · closed on GitHub, not delivered by Ensemble."}</p>` : ""}<p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
           review &&
           (review.observedDigest !== review.acceptedDigest || hold?.active)
             ? form(
@@ -392,7 +444,7 @@ export class LocalOperatorUi {
             : ""
         }`
       : "";
-    return `<main><h1>${escapeHtml(task.title)}</h1><p>Outcome: ${escapeHtml(task.outcome)}</p><p>${task.ready ? "Ready" : "Not ready"}; ${escapeHtml(task.state)}.</p><p>Configuration eligibility only: ${admission.eligible ? "eligible for future admission" : `held: ${escapeHtml(admission.reasons.join(", "))}`}.</p><p>Readiness and configuration eligibility do not confirm runtime admission or execution.</p>${provenance}<p><a href="/runtime/task/${escapeHtml(taskId)}">Runtime status, controls and recovery evidence</a> · <a href="/coordination/task/${escapeHtml(taskId)}">Task-scoped coordination and history</a></p>${imported ? "" : form("task.configure", field("projectId", String(task.projectId), "hidden") + field("taskId", taskId, "hidden") + field("expectedVersion", String(task.version), "hidden") + field("title", String(task.title)) + textarea("outcome", String(task.outcome)) + field("ready", "1", "checkbox", Boolean(task.ready)), undefined, csrfToken)}</main>`;
+    return `<main><h1>${escapeHtml(task.title)}</h1><p>Outcome: ${escapeHtml(task.outcome)}</p><p>${task.ready ? "Ready" : `Not ready${unmet ? ` (${escapeHtml(unmet)})` : ""}`}; ${escapeHtml(task.state)}.</p><p>Configuration eligibility only: ${admission.eligible ? "eligible for future admission" : `held: ${escapeHtml(admission.reasons.join(", "))}`}.</p><p>Readiness and configuration eligibility do not confirm runtime admission or execution.</p>${provenance}<p><a href="/runtime/task/${escapeHtml(taskId)}">Runtime status, controls and recovery evidence</a> · <a href="/coordination/task/${escapeHtml(taskId)}">Task-scoped coordination and history</a></p>${imported ? "" : form("task.configure", field("projectId", String(task.projectId), "hidden") + field("taskId", taskId, "hidden") + field("expectedVersion", String(task.version), "hidden") + field("title", String(task.title)) + textarea("outcome", String(task.outcome)) + field("ready", "1", "checkbox", Boolean(task.ready)), undefined, csrfToken)}</main>`;
   }
 
   profile(profileId: string, csrfToken = ""): string {
@@ -578,6 +630,9 @@ export class LocalOperatorUi {
                     : {}),
           selections: JSON.parse(required("selections")),
           readiness: JSON.parse(required("readiness")),
+          ...(fields.closedIssues === undefined
+            ? {}
+            : { closedIssues: closedIssuesSchema.parse(fields.closedIssues) }),
           repositories: JSON.parse(required("repositories")),
         };
         break;

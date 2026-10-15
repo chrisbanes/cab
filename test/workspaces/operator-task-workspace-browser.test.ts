@@ -785,6 +785,134 @@ test("production workspace retains literal history, pending request, focused rep
   );
 });
 
+test("a replayed auxiliary request focuses its control after the page commits", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(f),
+    r = a.delegatedResult("Result to view");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto(`${web.origin}/app/tasks/${a.taskId}?result=${r.resultId}`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page
+    .getByRole("heading", { name: "Latest result", exact: true })
+    .waitFor();
+  // Playwright's own clicks wait on page frames, so these are dispatched in the page.
+  const click = (name: string) =>
+    page
+      .getByRole("button", { name, exact: true })
+      .evaluate((el) => (el as HTMLElement).click());
+  const frames = await page.evaluateHandle(() => window.requestAnimationFrame);
+  try {
+    for (const [type, control, done] of [
+      ["review.view", "Set viewing reference", "Viewing reference set."],
+      [
+        "delivery.refresh",
+        "Refresh delivery observation",
+        "Delivery status refreshed.",
+      ],
+    ] as const) {
+      const bodies: string[] = [];
+      let lost = true;
+      await page.route("**/api/operator/commands", async (route) => {
+        const body = route.request().postDataJSON() as { type?: string };
+        if (body.type !== type) return route.fallback();
+        bodies.push(route.request().postData() ?? "");
+        if (lost) {
+          lost = false;
+          await route.fetch();
+          await route.abort("connectionreset");
+        } else await route.continue();
+      });
+      await click(control);
+      const check = page
+        .locator("[data-slot=action-outcome]")
+        .getByRole("button", { name: "Check whether it saved", exact: true });
+      await check.waitFor();
+      // From the check on, frame callbacks run ahead of the page's own render.
+      await page.evaluate(() => {
+        window.requestAnimationFrame = (callback) => {
+          queueMicrotask(() => callback(performance.now()));
+          return 0;
+        };
+      });
+      await click("Check whether it saved");
+      await page.getByText(done, { exact: true }).waitFor();
+      // Locator waits only: waitForFunction would poll with the replaced frame callbacks.
+      await page
+        .locator(`[data-unconfirmed-control="${type}"]:focus:enabled`)
+        .waitFor();
+      assert.equal(bodies.length, 2);
+      assert.equal(bodies[0], bodies[1]);
+      await frames.evaluate((original) => {
+        window.requestAnimationFrame = original;
+      });
+      await page.unroute("**/api/operator/commands");
+    }
+
+    // A replay answered after the page was left focuses nothing on the page that is open.
+    let entered!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let sent = 0;
+    await page.route("**/api/operator/commands", async (route) => {
+      const body = route.request().postDataJSON() as { type?: string };
+      if (body.type !== "review.view") return route.fallback();
+      sent++;
+      if (sent === 1) {
+        await route.fetch();
+        return route.abort("connectionreset");
+      }
+      const response = await route.fetch();
+      entered();
+      await gate;
+      await route.fulfill({ response });
+    });
+    await click("Set viewing reference");
+    await page
+      .getByRole("button", { name: "Check whether it saved", exact: true })
+      .waitFor();
+    await click("Check whether it saved");
+    await reached;
+    await page
+      .getByRole("link", { name: "Search", exact: true })
+      .evaluate((el) => (el as HTMLElement).click());
+    release();
+    await page.waitForTimeout(250);
+    assert.equal(
+      await page.evaluate(() =>
+        document.activeElement?.hasAttribute("data-unconfirmed-control"),
+      ),
+      false,
+    );
+    assert.deepEqual(pageErrors, []);
+  } finally {
+    await frames.evaluate((original) => {
+      window.requestAnimationFrame = original;
+    });
+  }
+});
+
 test("mounted Inbox discovers new requests and holds through timer and header refresh while retaining known detail focus", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),

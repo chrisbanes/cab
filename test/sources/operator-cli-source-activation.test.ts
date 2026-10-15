@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { test } from "node:test";
 import type { SourceCredentialReason } from "../../src/standalone/github-source-credential.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { createFakeGh } from "../fixtures/fake-gh.js";
+import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import { startCliOperator } from "../fixtures/operator-cli.js";
 import {
   seedImportedConflict,
@@ -15,6 +15,9 @@ process.env.FIXTURE_GITHUB = "test-only-github-source-token";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
+/** A read's readiness view as the `github.configure` value that keeps it. */
+const ruleOf = (r: Json) =>
+  r.kind === "rule" ? { mode: r.mode, conditions: r.conditions } : null;
 
 async function world(
   t: Parameters<typeof startCliOperator>[0],
@@ -108,7 +111,7 @@ test("service and advanced HTML source status use only the configured fake gh ex
         id: selection.id,
         keep: true,
       })),
-      readiness: source.readiness,
+      readiness: ruleOf(source.readiness),
       repositories: source.repositories,
     },
   );
@@ -148,7 +151,7 @@ test("preview reports each unusable GitHub CLI credential with actionable safe g
           id: selection.id,
           keep: true,
         })),
-        readiness: source.readiness,
+        readiness: ruleOf(source.readiness),
         repositories: source.repositories,
       });
       assert.equal(configured.status, 200);
@@ -290,7 +293,7 @@ test("preview-source activates after a complete read and reports the live state"
     expectedVersion: noCredentialSource.version,
     credentialRef: "gh:github.com",
     selections: [{ id: "S-1", keep: true }],
-    readiness: noCredentialSource.readiness,
+    readiness: ruleOf(noCredentialSource.readiness),
     repositories: [],
   });
   assert.equal(ghConfigured.status, 200);
@@ -335,7 +338,7 @@ test("preview-source activates after a complete read and reports the live state"
     projectId: atlas,
     expectedVersion: version,
     selections: ["S-1", "S-2", "S-3"].map((id) => ({ id, keep: true })),
-    readiness: (await w.config()).source.readiness,
+    readiness: ruleOf((await w.config()).source.readiness),
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(saved.status, 200);
@@ -366,7 +369,7 @@ test("preview-source activates after a complete read and reports the live state"
       id: s.id,
       keep: true,
     })),
-    readiness: current.source.readiness,
+    readiness: ruleOf(current.source.readiness),
     repositories: current.source.repositories,
   });
   assert.equal(clear.status, 200);
@@ -493,4 +496,59 @@ test("place-task chooses a matching project once, with the domain's placement ru
   assert.equal(rerun.data.receipt, null);
   assert.equal(rerun.data.current.projectId, relay);
   assert.equal(version(third), applied, "placed once");
+});
+
+test("a setup-recorded GitHub CLI source credential reads back the same in JSON, HTML and the CLI, and after Clear", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const w = await world(t, gh.executable);
+  const projectId = randomUUID();
+  const created = await w.s.sessionPost("/api/operator/commands", {
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Defaulted",
+    leadProfileId: null,
+    sourceCredentialRef: "gh:github.com",
+  });
+  assert.equal(created.status, 200);
+  const readBack = async () => {
+    const source = (await w.config(projectId)).source;
+    const html = await (await w.s.sessionGet(`/project/${projectId}`)).text();
+    const human = await w.h.run([
+      "project",
+      "sources",
+      projectId,
+      "--connection",
+      "ro",
+    ]);
+    assert.equal(human.code, 0, human.err);
+    assert.ok(!html.includes(fakeGhToken) && !human.out.includes(fakeGhToken));
+    return { source, html, cli: human.out };
+  };
+  const defaulted = await readBack();
+  assert.equal(defaulted.source.version, 1);
+  assert.equal(defaulted.source.credential.source, "gh");
+  assert.equal(defaulted.source.credential.usable, true);
+  assert.match(defaulted.html, /Credential: GitHub CLI\. Usable\./);
+  assert.match(defaulted.html, /Detected GitHub CLI account @octo\./);
+  assert.match(defaulted.cli, /Credential:\s+GitHub CLI\n/);
+  assert.match(defaulted.cli, /Detected GitHub CLI account:\s+@octo/);
+  const cleared = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: null,
+    selections: [],
+    readiness: ruleOf(defaulted.source.readiness),
+    repositories: [],
+  });
+  assert.equal(cleared.status, 200);
+  const after = await readBack();
+  assert.equal(after.source.version, 2);
+  assert.equal(after.source.credentialConfigured, false);
+  assert.equal(after.source.credential.configured, false);
+  assert.match(after.html, /Credential: not configured\./);
+  assert.match(after.cli, /Credential:\s+not configured\n/);
 });

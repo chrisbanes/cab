@@ -3105,6 +3105,34 @@ test("a held assignment with a queued turn waits as assignment-held, without a F
   ]);
 });
 
+test("a held assignment without a queued turn still waits as assignment-held, naming its profile", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seedPendingWorker(f),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]);
+  // A failed reporting repair holds the assignment after its last turn completed.
+  f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_assignments SET state='held' WHERE id=?").run(
+      ids.assignmentId,
+    );
+    db.prepare(
+      `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+        taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, state)
+        VALUES ('done-key', 'done-work', 'assignment', ?, ?, ?, ?, ?, 1, 1, 'probe', 'completed')`,
+    ).run(
+      ids.taskId,
+      ids.projectId,
+      ids.assignmentId,
+      Number(d.task(ids.taskId).version),
+      Number(d.assignment(ids.assignmentId).version),
+    );
+  });
+  assert.deepEqual((await api.readTask(ids.taskId)).data.waits.slice(1), [
+    { code: "assignment-held", fix: null, links: [], detail: "Worker" },
+  ]);
+});
+
 test("a request the scheduler refused for stale revisions keeps its assignment's waits, and any other hold adds none", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

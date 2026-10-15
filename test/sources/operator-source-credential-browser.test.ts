@@ -115,7 +115,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
       .count(),
     0,
   );
-  assert.equal(d.githubConfiguration(projectId).readiness.mode, "all");
+  assert.equal(d.githubConfiguration(projectId).readiness?.mode, "all");
   await page.getByRole("button", { name: "Set source credential" }).click();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
@@ -359,4 +359,88 @@ test("Source and sync recover from an explicitly missing GitHub CLI executable",
     "explicit missing path never runs the available fake or host gh",
   );
   assert.equal(f.runtime.turns, 0);
+});
+
+test("A setup-defaulted GitHub CLI source credential can be cancelled, cleared without re-defaulting and changed", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      journey.fixtureOptions,
+      undefined,
+      { ghExecutable: gh.executable },
+    ),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const projectId = randomUUID(),
+    d = f.service.domain();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Setup default",
+    leadProfileId: null,
+    sourceCredentialRef: "gh:github.com",
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  await page.goto(
+    `${web.origin}/app/projects/${projectId}/settings?tab=github`,
+  );
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const change = page.getByRole("button", { name: "Change source credential" });
+  await change.waitFor();
+  await page.getByText("@octo", { exact: false }).first().waitFor();
+  await page.getByRole("button", { name: "Clear source credential" }).waitFor();
+  await change.click();
+  await page.getByRole("button", { name: "Cancel credential change" }).click();
+  assert.deepEqual(
+    [
+      d.githubConfiguration(projectId).credentialRef,
+      d.githubConfiguration(projectId).version,
+    ],
+    ["gh:github.com", 1],
+  );
+  await page.getByRole("button", { name: "Clear source credential" }).click();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByRole("button", { name: "Set source credential" }).waitFor();
+  assert.deepEqual(
+    [
+      d.githubConfiguration(projectId).credentialRef,
+      d.githubConfiguration(projectId).version,
+    ],
+    [null, 2],
+  );
+  await page.reload();
+  await page.getByRole("button", { name: "Set source credential" }).click();
+  assert.equal(d.githubConfiguration(projectId).credentialRef, null);
+  await page.getByLabel("Source credential choice").selectOption("set");
+  await page
+    .getByLabel("New environment reference")
+    .fill("env:FIXTURE_SOURCE_DEFAULT_NAME");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await change.waitFor();
+  assert.deepEqual(
+    [
+      d.githubConfiguration(projectId).credentialRef,
+      d.githubConfiguration(projectId).version,
+    ],
+    ["env:FIXTURE_SOURCE_DEFAULT_NAME", 3],
+  );
+  assert.ok(!(await page.locator("body").innerText()).includes(fakeGhToken));
 });

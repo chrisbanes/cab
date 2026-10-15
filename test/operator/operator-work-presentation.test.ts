@@ -14,7 +14,9 @@ import {
   columns,
   filterTasks,
   parseTaskFilters,
+  taskColumn,
   taskNext,
+  taskReasons,
   taskRouteSubtitle,
   visibleColumns,
 } from "../../web/src/tasks.js";
@@ -35,6 +37,9 @@ type Overrides = {
   execution?: string;
   codes?: string[];
   paused?: boolean;
+  closure?: "held" | "completed" | null;
+  reasons?: string[];
+  readiness?: object | undefined;
 };
 function summary(o: Overrides = {}): TaskListSummary {
   const projectId = o.projectId ?? randomUUID();
@@ -64,17 +69,111 @@ function summary(o: Overrides = {}): TaskListSummary {
       },
       reasonCodes: [],
     },
-    admission: { eligible: true, reasons: [] },
+    admission: { eligible: !o.reasons?.length, reasons: o.reasons ?? [] },
     capacity: {
       globalUsage: 0,
       globalLimit: 10,
       projectUsage: 0,
       projectLimit: 10,
     },
-    source: null,
+    source:
+      o.closure === undefined
+        ? null
+        : {
+            identity: {
+              provider: "github.com",
+              nodeId: "I_1",
+              repositoryId: "R_1",
+            },
+            repositoryName: "acme/atlas",
+            number: 1,
+            url: "https://github.com/acme/atlas/issues/1",
+            state: o.readiness ? "open" : "closed",
+            closure: o.closure,
+            readiness: o.readiness ?? {
+              rule: { kind: "none" },
+              outcome: "not-evaluated",
+              unmet: [],
+            },
+          },
     attention: { codes: o.codes ?? [], count: o.codes?.length ?? 0 },
   });
 }
+
+test("an imported Draft task names its unmet readiness conditions; other tasks keep the generic reason", () => {
+  const label = (name: string) => ({ kind: "label", name });
+  const field = {
+    kind: "project-field",
+    projectNodeId: "P_1",
+    fieldNodeId: "F_1",
+    optionNodeId: "O_1",
+  };
+  const draft = (readiness?: object, closure: "held" | null = null) =>
+    summary({ ready: false, closure, reasons: ["task-unready"], readiness });
+  const unmet = (mode: string, conditions: object[], missing: object[]) =>
+    taskReasons(
+      draft({
+        rule: { kind: "rule", mode, conditions },
+        outcome: "unmet",
+        unmet: missing,
+      }),
+    );
+  assert.deepEqual(unmet("all", [label("ready")], [label("ready")]), [
+    "Not Ready: missing label `ready`",
+  ]);
+  assert.deepEqual(unmet("all", [label("a"), field], [label("a"), field]), [
+    "Not Ready: missing label `a`, Project field F_1 = O_1",
+  ]);
+  assert.deepEqual(
+    unmet("any", [label("a"), label("b")], [label("a"), label("b")]),
+    ["Not Ready: needs any of label `a`, label `b`"],
+  );
+  const rule = { kind: "rule", mode: "all", conditions: [label("a")] };
+  for (const task of [
+    draft({ rule, outcome: "matched", unmet: [] }),
+    draft({ rule, outcome: "not-evaluated", unmet: [] }),
+    summary({ ready: false, reasons: ["task-unready"] }),
+  ]) {
+    assert.deepEqual(taskReasons(task), ["Draft: not Ready"]);
+    assert.equal(taskColumn(task), "Draft");
+  }
+  const held = draft({ rule, outcome: "not-evaluated", unmet: [] }, "held");
+  assert.deepEqual(taskReasons(held), ["Closed on GitHub"]);
+  assert.equal(
+    taskColumn(draft({ rule, outcome: "unmet", unmet: [label("a")] })),
+    "Draft",
+  );
+});
+
+test("closure provenance places held tasks in Paused and names provider completion", () => {
+  for (const ready of [true, false]) {
+    const held = summary({
+      ready,
+      closure: "held",
+      reasons: ["task-unready", "source-held"],
+    });
+    assert.equal(taskColumn(held), "Paused");
+    assert.ok(taskReasons(held).includes("Closed on GitHub"));
+    assert.equal(taskReasons(held).includes("Draft: not Ready"), false);
+  }
+  const completed = summary({ state: "done", closure: "completed" });
+  assert.equal(taskColumn(completed), "Done");
+  assert.ok(
+    taskReasons(completed).includes(
+      "Closed on GitHub, not delivered by Ensemble",
+    ),
+  );
+  for (const plain of [
+    summary({ state: "done", closure: null }),
+    summary({ state: "done" }),
+  ]) {
+    assert.equal(taskColumn(plain), "Done");
+    assert.equal(
+      taskReasons(plain).some((reason) => reason.includes("GitHub")),
+      false,
+    );
+  }
+});
 
 test("columns follow the design order and Active tasks hides only terminal work", () => {
   assert.deepEqual(
@@ -145,6 +244,12 @@ test("source summaries only accept https links", () => {
       number: 1,
       url,
       state: "open",
+      closure: null,
+      readiness: {
+        rule: { kind: "none" },
+        outcome: "not-evaluated",
+        unmet: [],
+      },
     }).success;
   assert.equal(source("https://github.com/a/b/issues/1"), true);
   assert.equal(source(null), true);

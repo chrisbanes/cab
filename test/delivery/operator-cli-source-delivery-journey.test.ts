@@ -140,7 +140,14 @@ test("sources and delivery journey through the CLI, read back as the operator UI
         keep: true,
       }),
     ),
-    readiness: saved.source.readiness,
+    // The read's view, back as the command value that keeps it.
+    readiness:
+      saved.source.readiness.kind === "rule"
+        ? {
+            mode: saved.source.readiness.mode,
+            conditions: saved.source.readiness.conditions,
+          }
+        : null,
     repositories: saved.source.repositories,
   });
   assert.equal(clearCredential.status, 200);

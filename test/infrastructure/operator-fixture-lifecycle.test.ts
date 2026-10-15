@@ -60,12 +60,17 @@ test("rejected disconnected browser close retains dependent fixture resources", 
 
 test("initial service and web startup share one fixture deadline", async () => {
   let finishProbe!: () => void;
+  // A reset budget would give the stalled probe the full startup timeout; a
+  // shared one leaves it less than the service delay. The rest is headroom for
+  // the real service start on a loaded runner.
+  const startupTimeoutMs = 4000,
+    serviceDelayMs = 2200;
   const fixture = await createOperatorFixture(null, undefined, undefined, {
-    startupTimeoutMs: 1200,
+    startupTimeoutMs,
     operation: async (name, operation) => {
       await operation();
       if (name === "service.start")
-        await new Promise((resolve) => setTimeout(resolve, 750));
+        await new Promise((resolve) => setTimeout(resolve, serviceDelayMs));
       if (name === "probe-1.start")
         await new Promise<void>((resolve) => {
           finishProbe = resolve;
@@ -79,7 +84,7 @@ test("initial service and web startup share one fixture deadline", async () => {
     );
     assert.ok(step);
     assert.ok(
-      step.elapsedMs < 750,
+      step.elapsedMs < serviceDelayMs,
       `Initial startup budget was reset: ${step.elapsedMs} ms`,
     );
     await assert.rejects(fixture.close(), /probe-1.close: dependency-skipped/);
@@ -95,7 +100,8 @@ test("a stalled service startup preserves backing state until startup settles", 
   let failure: unknown;
   try {
     await createOperatorFixture(null, undefined, undefined, {
-      startupTimeoutMs: 150,
+      // Headroom for the real service start before the injected stall.
+      startupTimeoutMs: 2000,
       operation: async (name, operation) => {
         await operation();
         if (name === "service.start")
@@ -138,7 +144,8 @@ test("a stalled service startup preserves backing state until startup settles", 
 test("a stalled web startup retains its resources while an independent listener closes", async () => {
   let finish!: () => void;
   const fixture = await createOperatorFixture(null, undefined, undefined, {
-    startupTimeoutMs: 1000,
+    // Headroom for the first web startup on a loaded runner.
+    startupTimeoutMs: 4000,
     operation: async (name, operation) => {
       await operation();
       if (name === "listener-2.start")
@@ -275,7 +282,8 @@ test("a timed-out directory allocation retains ownership for eventual cleanup", 
     let failure: unknown;
     try {
       await createOperatorFixture(null, undefined, undefined, {
-        startupTimeoutMs: 25,
+        // Headroom for the real allocation before the injected stall.
+        startupTimeoutMs: 1000,
         operation: async (name, operation) => {
           await operation();
           if (name === "directory.create")

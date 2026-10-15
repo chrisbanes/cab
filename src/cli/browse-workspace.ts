@@ -21,6 +21,7 @@ import {
   uuidArg,
 } from "./browse.js";
 import { CliError } from "./connections.js";
+import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
 
 const API = "/api/operator";
@@ -249,7 +250,7 @@ const taskListCommand: BrowseCommand = {
             page.tasks.map((t) => [
               t.id,
               t.projectId,
-              t.state,
+              `${t.state}${closureSuffix(t.source?.closure)}`,
               t.execution.state,
               t.attention.codes.join(",") || "-",
               oneLine(t.title),

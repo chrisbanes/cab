@@ -71,6 +71,7 @@ test("the discovery credential reference is set, shown only as configured and cl
     available: false,
     source: "env",
     gh: { state: "not-installed" },
+    sourceGh: { state: "not-installed" },
   });
   const previous = process.env.FIXTURE_DISCOVERY;
   process.env.FIXTURE_DISCOVERY = "PRIVATE DISCOVERY TOKEN";
@@ -81,6 +82,7 @@ test("the discovery credential reference is set, shown only as configured and cl
       available: true,
       source: "env",
       gh: { state: "not-installed" },
+      sourceGh: { state: "not-installed" },
     });
     const text = JSON.stringify([
       status,
@@ -115,6 +117,7 @@ test("the discovery credential reference is set, shown only as configured and cl
     available: false,
     source: null,
     gh: { state: "not-installed" },
+    sourceGh: { state: "not-installed" },
   });
   assert.deepEqual(await reopened.execute(set), receipt);
   assert.equal(f.service.domain().discoveryCredentialReference(), null);
@@ -757,6 +760,7 @@ test("a gh discovery reference reads with the gh login on every read and never r
     available: false,
     source: null,
     gh: { state: "signed-in", login: "octo" },
+    sourceGh: { state: "signed-in", login: "octo" },
   });
   const receipt = await api.execute(configure("gh:github.com"));
   assert.equal(
@@ -769,6 +773,7 @@ test("a gh discovery reference reads with the gh login on every read and never r
     available: true,
     source: "gh",
     gh: { state: "signed-in", login: "octo" },
+    sourceGh: { state: "signed-in", login: "octo" },
   });
   const repositories = await api.readDiscoveryRepositories();
   assert.equal(repositories.data.state, "ready");
@@ -792,6 +797,7 @@ test("a gh discovery reference reads with the gh login on every read and never r
       available: state === "invalid-token",
       source: "gh",
       gh: detected,
+      sourceGh: detected,
     });
   }
   const missing = new OperatorApi(
@@ -857,4 +863,67 @@ test("routing and delivery stay env-only while sources accept the exact gh login
   assert.equal(source.safeParse("gh:github.com").success, true);
   assert.equal(source.safeParse("gh:other.host").success, false);
   assert.equal(source.safeParse(null).success, true);
+});
+
+test("discovery status reports the login a new project's gh source would use, by status only", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  for (const key of ["GH_TOKEN", "GITHUB_TOKEN"]) {
+    const previous = process.env[key];
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+    delete process.env[key];
+  }
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    ghExecutable: gh.executable,
+  });
+  const read = async () => (await api.readDiscoveryStatus()).data;
+  const texts: string[] = [];
+  const status = async () => {
+    const data = await read();
+    texts.push(JSON.stringify(data));
+    return data;
+  };
+  assert.deepEqual((await status()).sourceGh, {
+    state: "signed-in",
+    login: "octo",
+  });
+  gh.set("not-signed-in");
+  assert.deepEqual((await status()).sourceGh, { state: "not-signed-in" });
+  gh.set("signed-in");
+  gh.setAccounts({
+    stored: { login: "stored", token: "t-stored" },
+    tokens: { "t-good": "override" },
+  });
+  process.env.GH_TOKEN = "t-good";
+  // Discovery is unconfigured, so its own probe keeps excluding the override.
+  assert.deepEqual(await status(), {
+    configured: false,
+    available: false,
+    source: null,
+    gh: { state: "signed-in", login: "stored" },
+    sourceGh: { state: "signed-in", login: "override" },
+  });
+  // An invalid override never falls back to GITHUB_TOKEN or the stored account.
+  process.env.GH_TOKEN = "bad";
+  process.env.GITHUB_TOKEN = "t-good";
+  assert.deepEqual((await status()).sourceGh, { state: "unreadable" });
+  const missing = new OperatorApi(
+    f.service,
+    [f.directory],
+    undefined,
+    undefined,
+    { ghExecutable: gh.missing },
+  );
+  assert.deepEqual((await missing.readDiscoveryStatus()).data.sourceGh, {
+    state: "not-installed",
+  });
+  assert.equal(gh.commands().includes("token"), false);
+  for (const text of texts)
+    for (const secret of ["t-good", "t-stored", "bad", "GH_TOKEN"])
+      assert.equal(text.includes(secret), false, secret);
 });

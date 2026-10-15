@@ -2,8 +2,10 @@ import { z } from "zod";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
+  closedIssuesSchema,
   githubConfigurationSchema,
   githubConfigurationCommandSchema,
+  readinessConditionSchema,
   readinessSchema,
   setupRepositoriesSchema,
   setupRepositorySchema,
@@ -802,6 +804,42 @@ function taskSchemaAdmission() {
 }
 // The server only builds https GitHub URLs; reject javascript: and data: links.
 const sourceUrl = z.url().startsWith("https://");
+/** Provider-closure provenance: closed on GitHub while held, or completed by that closure. */
+const sourceClosure = z.enum(["held", "completed"]).nullable();
+/**
+ * A project's readiness rule as a read may show it: `none` only for a stored null rule
+ * (no filtering); `unavailable` when disclosure is withheld, so no condition text leaves.
+ */
+export const readinessRuleViewSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }).strict(),
+  z.object({ kind: z.literal("unavailable") }).strict(),
+  z
+    .object({
+      kind: z.literal("rule"),
+      mode: readinessSchema.shape.mode,
+      conditions: readinessSchema.shape.conditions,
+    })
+    .strict(),
+]);
+/** Why an imported task is Draft under the rule; matching is never Ready or admissible. */
+export const taskReadinessSchema = z
+  .object({
+    rule: readinessRuleViewSchema,
+    outcome: z.enum(["matched", "unmet", "not-evaluated"]),
+    unmet: z.array(readinessConditionSchema).max(20),
+  })
+  .strict();
+const observationCount = z.number().int().nonnegative();
+/** Per-selection counts from stored observations; never summed across selections. */
+export const selectionCountsSchema = z
+  .object({
+    observed: observationCount,
+    open: observationCount,
+    closedSkipped: observationCount,
+    matching: observationCount.nullable(),
+    complete: z.boolean(),
+  })
+  .strict();
 export const taskSourceSummarySchema = z
   .object({
     identity: sourceIdentity,
@@ -812,6 +850,8 @@ export const taskSourceSummarySchema = z
     number: revision.nullable(),
     url: sourceUrl.nullable(),
     state: z.enum(["open", "closed"]).nullable(),
+    closure: sourceClosure,
+    readiness: taskReadinessSchema,
   })
   .strict()
   .nullable();
@@ -1056,6 +1096,8 @@ const source = z
     title: safeText,
     body: safeText,
     state: z.enum(["open", "closed"]).nullable(),
+    closure: sourceClosure,
+    readiness: taskReadinessSchema,
     memberships: z.array(
       z
         .object({
@@ -1759,6 +1801,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .object({ projectNodeId: z.string().trim().min(1).max(512) })
         .strict()
         .optional(),
+      sourceCredentialRef: z.literal("gh:github.com").optional(),
     })
     .strict(),
   z
@@ -2367,6 +2410,7 @@ export const sourceObservationSchema = envelope(
           .object({
             projectId: uuid,
             credential: sourceCredentialStatusSchema.optional(),
+            readiness: readinessRuleViewSchema,
             selections: z.array(
               z
                 .object({
@@ -2382,6 +2426,7 @@ export const sourceObservationSchema = envelope(
                     .optional(),
                   lastAttemptAt: z.string().nullable(),
                   lastSuccessfulAt: z.string().nullable(),
+                  counts: selectionCountsSchema.nullable(),
                 })
                 .strict(),
             ),
@@ -2451,7 +2496,8 @@ export const projectConfigurationSchema = envelope(
               })
               .strict(),
           ),
-          readiness: readinessSchema.nullable(),
+          readiness: readinessRuleViewSchema,
+          closedIssues: closedIssuesSchema,
           repositories: z.array(
             z.object({ repositoryId: safeText, ref: safeText }).strict(),
           ),
@@ -2790,7 +2836,7 @@ export const claudeTokenStatusSchema = envelope(
 );
 /**
  * Installation discovery credential: whether a reference is set, its kind and whether it
- * resolves, plus the detected GitHub CLI login. Never the variable name or a token.
+ * resolves, plus the detected GitHub CLI logins. Never the variable name or a token.
  */
 export const discoveryStatusSchema = envelope(
   z
@@ -2799,6 +2845,8 @@ export const discoveryStatusSchema = envelope(
       available: z.boolean(),
       source: z.enum(["env", "gh"]).nullable(),
       gh: ghLoginStateSchema,
+      /** The login a new project's `gh:github.com` source would use; status only. */
+      sourceGh: ghLoginStateSchema,
     })
     .strict(),
 );

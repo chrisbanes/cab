@@ -191,11 +191,25 @@ boundaries. Typed judgments and confidence are not proof of correctness or autho
 
 ## Admission, project placement and task dependencies
 
-The operator admits local work or defines an authoritative source readiness rule.
+The operator admits local work or configures the source's optional readiness rule.
 The lead may inspect and triage unready tasks but cannot grant readiness. For
-GitHub, allow simple all/any label and Project-field conditions; nested expressions
-are deferred. Membership in another source cannot grant admission. Ready authorizes
-work within scope, without a universal per-task plan approval. Material ambiguity,
+GitHub, a rule uses simple all/any label and Project-field conditions; nested
+expressions are deferred. A new project's source has no rule, and the operator may
+add or remove one: with no rule, every open imported issue with current source
+membership satisfies readiness whatever its labels or Project fields. Absence of a
+rule is stored explicitly (`null`), never as an empty condition list, and a rule
+withheld from a read is shown as unavailable, never as no rule. Readiness alone is
+not admission: activation, complete source observations, placement, repository
+access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub source also has a closed-issue mode, changed only through
+its versioned configuration: **Skip closed issues** (the default) never imports an
+issue first observed closed, and **Treat closure as Done** imports one as Done from a
+complete read only. Membership in another source cannot grant admission. Each selection's
+source observation counts its observed items (including closed issues skipped without a
+task), open items and open items matching the readiness rule, and warns when a complete
+read matches none; an imported open Draft task names the conditions it does not meet.
+These explanations are read-only projections of stored observations: they make no
+provider read and grant no readiness, and matching the rule is neither Ready nor
+admission. Ready authorizes work within scope, without a universal per-task plan approval. Material ambiguity,
 scope expansion or ungranted actions require operator input.
 
 Dependencies gate execution separately from Ready. A blocked task remains visible
@@ -220,7 +234,17 @@ between projects are deferred. Discovery grants no additional repository access.
 
 Losing readiness, leaving all selections or external closure holds new delegation
 and notifies the lead and active assignees to reach a safe stopping point. Operator resolution is needed
-to resume, except confirmed closure from this task's own delivery. Harmless edits
+to resume, except confirmed closure from this task's own delivery. External closure
+after import holds the task in both closed-issue modes, whatever its readiness. Under
+Treat closure as Done, the service then completes it once current membership evidence
+is complete and its execution has settled, with no writer, ambiguity or unfinished
+execution; provider closure never resolves uncertain execution or clears other holds.
+Reopening returns a provider-completed task to open and recomputes readiness from the
+rule; reopening grants no readiness and keeps any closure hold. Switching a source to
+Skip reopens its provider-completed tasks under a closure hold. Under Treat closure
+as Done, a task the operator reopens while its issue stays closed is completed again
+once settled; switching the source to Skip keeps it open; no mode or switch
+deletes tasks or history. Harmless edits
 can be incorporated; materially changed scope holds work for clarification.
 
 ## Execution and recovery
@@ -502,7 +526,8 @@ view. Provide readable narrow-screen navigation between columns.
 Attention appears alongside work state rather than replacing it. Keep actionable
 readiness, successful completion, cancellation and provider closure without
 delivery visibly distinguishable. Provider closure alone does not establish task
-completion. Prioritise the task's meaning, current situation and next actor;
+completion, except under a source's Treat closure as Done mode, which records the task
+as completed by provider closure, distinct from Ensemble or manual completion. Prioritise the task's meaning, current situation and next actor;
 supporting identifiers and timestamps must remain readable and accessible without
 competing with that information. These refinements do not change the existing
 board state mapping.
@@ -536,8 +561,16 @@ no Fix and shows the supervisor's hold reason. An assignment that is waiting to 
 but is not admissible for its own reasons shows its own wait, named for its profile.
 A revoked or changed profile opens that profile, which does not re-bind the
 assignment; changed instructions, a profile that project routing does not permit and
-a held assignment have no Fix. A Fix never clears holds or grants access by
-implication. These controls must preserve existing readiness and admission rules.
+a held assignment have no Fix; a held assignment is explained whether or not a turn
+is queued for it. Revoked repository access (an imported task's ready workspace uses a
+repository the project no longer links) opens the project's GitHub settings, names no
+repository and grants nothing by itself. An assignment whose operator-reconciled
+recovery has no recorded continuation has no Fix and links to its recovery; opening
+it releases nothing. A request refused only because the captured task or assignment
+revisions changed is shown as held execution (`recovery-held`), not as a wait:
+clearing it is a recovery or fresh operator message decision. A Fix never clears
+holds or grants access by implication. These controls must preserve existing
+readiness and admission rules.
 
 Until a task has started a turn, Home shows a getting-started checklist derived
 from current service state: runtime readiness, GitHub discovery, lead profile,
@@ -564,13 +597,18 @@ whose primary action resumes the project and opens the composer, and whose
 secondary action keeps it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends and setup offers in one step
-when the service detects it. The service never uses a login the operator did not
-choose. The discovery credential is excluded from agent and helper environments.
+when the service detects it. Discovery never reads with a login the operator did
+not choose for it. The discovery credential is excluded from agent and helper environments.
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
 
 Project GitHub sources independently choose `env:NAME` or exactly `gh:github.com`.
+Guided setup shows the GitHub CLI login a new project's source would use and, when
+it is signed in, records `gh:github.com` as that source's credential at creation;
+otherwise the source starts without one and the ready check says it cannot sync
+until one is set. Creates from the HTML fallback or CLI record no default. Existing,
+environment-selected and cleared sources are never re-defaulted.
 The discovery credential never supplies a missing source credential. Source settings
 offer the detected GitHub CLI account or an environment variable, with Change,
 Cancel and Clear. Every selection, preview, issue-status and blocker read resolves
@@ -1366,8 +1404,9 @@ comment/review/check identities also wake it; unchanged polls are deduplicated.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;
-merge attribution requires the exact PR in GitHub's latest ClosedEvent. Current
-label readiness and repository-selection proof must still hold. Field/search cases
+merge attribution requires the exact PR in GitHub's latest ClosedEvent. When a
+readiness rule exists, current label readiness must still hold, and
+repository-selection proof must hold in every case. Field/search cases
 without that proof, independent holds and changed source text remain held. Explicit
 issue closure requires observed open before the effect; a concurrent independent
 closure between that read and write remains an attribution limit.

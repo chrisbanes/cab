@@ -66,10 +66,10 @@ capability.
 | A17 | Complete/archive work in each cleanup mode | Retain until archive by default; automatic cleanup waits for confirmed delivery and preservation checks; conversations cannot silently delete workspaces; missing or replaced workspaces are held at startup recovery, before execution and explicit workspace inspection (uncertain Git stays held); polled list, project and Inbox reads redact from the stored last-known binding without refreshing it or launching Git | Service + Git |
 | A18 | Runtime cannot resume a conversation | Resolve old ownership independently or use qualified normal-success handoff before replacement; reconstruct context in a new generation; late result cannot override; historical resume is not live reattachment | Service + runtime |
 | A19 | Repository and Project sources return same issue | One task with two memberships; deleting one membership preserves other and history | Adapter + SQLite |
-| A20 | Pagination, missed observation, duplicate event or partial outage | Full selection converges; no false withdrawal from partial data; no duplicate task execution | Adapter |
+| A20 | Pagination, missed observation, duplicate event or partial outage | Full selection converges; no false withdrawal from partial data; no duplicate task execution; per-selection observed/open/matching counts and the zero-match warning come from stored observations, and a partial read never implies a complete total | Adapter |
 | A21 | Source includes PR, draft, or issue from disallowed repository | PR/draft excluded; discovered issue grants no repository execution access | Adapter + runtime |
 | A22 | Same issue appears in two Ensemble projects | Operator chooses placement; existing project placement and execution retained; newly conflicted work cannot start; no transfer of tasks with established assignments; no permission union | UI + SQLite |
-| A23 | Lose all memberships/readiness, close issue, or edit scope during execution | Hold new delegation and notify lead and active assignees to stop safely; operator resolves resumption except confirmed own-delivery closure; harmless clarification proceeds, material outcome/scope change holds affected work for input | Service + adapter |
+| A23 | Lose all memberships/readiness, close issue, or edit scope during execution | Hold new delegation and notify lead and active assignees to stop safely; operator resolves resumption except confirmed own-delivery closure; harmless clarification proceeds, material outcome/scope change holds affected work for input; in both closed-issue modes, closure after import holds the task, a first-observed closed issue is skipped or imported as Done by mode, Done mode completes held work only after settlement, and reopening or a mode switch never deletes tasks or history | Service + adapter |
 | A24 | External edit or PR write times out after success | Confirm remote identity/state before retry; UI never reports unconfirmed success | Adapter fault injection |
 | A25 | Configure permissions; attempt denied Ensemble action | Ensemble action is rejected; runtime/deployment controls are passed correctly and their shell/API limits are disclosed | Service + UI |
 | A26 | Hand back PR, receive feedback, restart, then merge or explicitly accept/close | Task-scoped lead resumes on CI/review feedback; task remains waiting until settled; only through-merge projects merge autonomously; history persists | UI + Service + adapter |
@@ -213,8 +213,8 @@ each operation's state: those the host live journey ran are passed, except
 `assignment apply-current`, which the live journey ran only after a follow-up under
 Stop; adoption followed by a follow-up on a completed lead is covered by a
 deterministic test ([#935](https://github.com/chrisbanes/ensemble/issues/935)); the rest are
-bounded to deterministic fixtures, and the `project prepare` write for
-`diagnosticCapture` is **Unproved** because the CLI has no flag for it.
+bounded to deterministic fixtures, including the `project prepare` write for
+`diagnosticCapture`.
 
 | Area | Operations requiring evidence | Scenarios |
 | --- | --- | --- |
@@ -349,7 +349,12 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
 - **GitHub discovery** (A19–A23, A29 and the GitHub portion of A30) — **Bounded.**
   Discovery of selected repository issues, searches and Projects is read-only and
   grants no repository access. Complete and incomplete selection and native dependency
-  reads are retained separately, and incomplete reads hold new admission.
+  reads are retained separately, and incomplete reads hold new admission. A source
+  without a readiness rule makes its open selected issues Ready while every other
+  admission control still holds; adding or removing a rule, keeping saved rules
+  unchanged and showing a withheld rule as unavailable are covered by
+  `github-reconciliation`, `github-source-config`, `operator-configuration`,
+  `operator-cli-source` and the GitHub settings browser tests.
   Deterministic tests and a bounded live fixture pass. Evidence:
   [GitHub discovery](evidence/s06-github-discovery.md).
 - **GitHub delivery and release candidate** (A24, A26 and the A01–A30/R01–R10

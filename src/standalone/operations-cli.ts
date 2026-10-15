@@ -1,14 +1,20 @@
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
+import {
+  diagnosticRetentionDays,
+  diagnosticStorageMib,
+  isInBound,
+} from "../operator/diagnostic-retention.js";
+import { type LaunchAgentConfiguration, writeLaunchAgent } from "./launchd.js";
 import {
   createSnapshot,
   restoreSnapshot,
   verifySnapshot,
 } from "./operations.js";
-import { writeLaunchAgent, type LaunchAgentConfiguration } from "./launchd.js";
 
 const USAGE =
-  "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST>\n";
+  "Usage: npm run operations -- <backup SOURCE SNAPSHOT | verify SNAPSHOT | restore SNAPSHOT DESTINATION | render-launch-agent LABEL NODE CLI DATA AUTH ORIGIN PORT STDOUT STDERR PLIST [--diagnostic-retention-days N] [--diagnostic-storage-mib N]>\n";
 
 function parsePort(value: string): number {
   if (!/^(?:[1-9]\d{0,4})$/.test(value)) throw new Error("invalid port");
@@ -16,6 +22,42 @@ function parsePort(value: string): number {
   if (!Number.isSafeInteger(port) || port > 65_535)
     throw new Error("invalid port");
   return port;
+}
+
+/** A bounded decimal integer; throws so a malformed flag becomes a usage error. */
+function parseBounded(
+  value: string | undefined,
+  bound: Parameters<typeof isInBound>[1],
+): number | undefined {
+  if (value === undefined) return undefined;
+  const number = /^\d{1,10}$/.test(value) ? Number(value) : Number.NaN;
+  if (!isInBound(number, bound)) throw new Error("invalid diagnostic option");
+  return number;
+}
+
+function parseRenderArgs(args: string[]) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    strict: true,
+    options: {
+      "diagnostic-retention-days": { type: "string" },
+      "diagnostic-storage-mib": { type: "string" },
+    },
+  });
+  const retention = parseBounded(
+    values["diagnostic-retention-days"],
+    diagnosticRetentionDays,
+  );
+  const storage = parseBounded(
+    values["diagnostic-storage-mib"],
+    diagnosticStorageMib,
+  );
+  return {
+    positionals,
+    ...(retention === undefined ? {} : { diagnosticRetentionDays: retention }),
+    ...(storage === undefined ? {} : { diagnosticStorageMib: storage }),
+  };
 }
 
 type Io = { stdout: NodeJS.WritableStream; stderr: NodeJS.WritableStream };
@@ -62,19 +104,33 @@ async function operate(argv: string[], io: Io): Promise<number> {
     });
     return 0;
   }
-  if (command === "render-launch-agent" && args.length === 10) {
+  if (command === "render-launch-agent" && args.length >= 10) {
+    let parsed: ReturnType<typeof parseRenderArgs>;
+    try {
+      parsed = parseRenderArgs(args);
+    } catch {
+      io.stderr.write(USAGE);
+      return 2;
+    }
+    const { positionals, ...diagnostic } = parsed;
+    if (positionals.length !== 10) {
+      io.stderr.write(USAGE);
+      return 2;
+    }
     const configuration: LaunchAgentConfiguration = {
-      label: args[0] as string,
-      nodePath: args[1] as string,
-      cliPath: args[2] as string,
-      dataDirectory: args[3] as string,
-      authFile: args[4] as string,
-      origin: args[5] as string,
-      port: parsePort(args[6] as string),
-      stdoutPath: args[7] as string,
-      stderrPath: args[8] as string,
+      label: positionals[0] as string,
+      nodePath: positionals[1] as string,
+      cliPath: positionals[2] as string,
+      dataDirectory: positionals[3] as string,
+      authFile: positionals[4] as string,
+      origin: positionals[5] as string,
+      port: parsePort(positionals[6] as string),
+      stdoutPath: positionals[7] as string,
+      stderrPath: positionals[8] as string,
+      ...diagnostic,
     };
-    const plistPath = args[9] as string;
+    // writeLaunchAgent validates by rendering before it creates the destination.
+    const plistPath = positionals[9] as string;
     writeLaunchAgent(configuration, plistPath);
     writeResult({
       ok: true,

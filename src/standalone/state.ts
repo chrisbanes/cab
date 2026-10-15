@@ -1126,6 +1126,16 @@ export class ExecutionState {
     });
   }
 
+  /** No writer or ambiguity hold and no unfinished bound execution: a safe stopping point. */
+  taskExecutionSettled(taskId: string): boolean {
+    const id = z.string().uuid().parse(taskId);
+    return (
+      this.db
+        .prepare(`SELECT 1 WHERE ${archiveUnblockedClause}`)
+        .get(id, id, id) !== undefined
+    );
+  }
+
   isArchiveHeld(taskId: string): boolean {
     return (
       this.db

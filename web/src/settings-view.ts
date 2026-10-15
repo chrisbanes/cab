@@ -1,4 +1,8 @@
 /** Pure presentation for the settings routes: headers, index lines, saved lines and holds. */
+import {
+  selectionCountsText,
+  zeroMatchWarning,
+} from "../../src/operator/readiness-text.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { z } from "zod";
 import type {
@@ -122,6 +126,47 @@ export function savedLine(version: number, saved: SavedRecord | undefined) {
     : null;
 }
 
+const tasksNotImported =
+  "Tasks aren't imported until you refresh source observations.";
+
+/**
+ * The sentence after "Preview and activate selection". It claims only what a confirmed
+ * `github.preview` receipt at the loaded source version proves; `null` means say nothing.
+ * Once the form has been re-read (`recorded` is false), the read must also show the
+ * selection active. `refresh` is true when the line names the next step, so the page
+ * offers it.
+ */
+export function activationLine({
+  saved,
+  sourceVersion,
+  selections,
+  recorded,
+}: {
+  saved: SavedRecord | undefined;
+  sourceVersion: number;
+  selections: { id: string | null; active: boolean }[];
+  recorded: boolean;
+}) {
+  const r = saved?.receipt;
+  if (
+    r?.kind !== "configuration" ||
+    r.result.commandType !== "github.preview" ||
+    r.result.configVersion !== sourceVersion
+  )
+    return null;
+  const id = r.result.selectionId;
+  if (!recorded && !selections.some((s) => s.id === id && s.active))
+    return {
+      line: `Couldn't confirm that ${id} is active. Preview it again.`,
+      refresh: false,
+    };
+  const wasActive = saved?.activeSelectionIds.includes(id);
+  return {
+    line: `${wasActive ? `${id} was already active.` : `Activated ${id}.`} ${tasksNotImported}`,
+    refresh: true,
+  };
+}
+
 /** "Ada", "Ada and Eli", "Ada, Eli and Bo". */
 export const joinNames = (names: string[]) =>
   names.length > 1
@@ -174,6 +219,9 @@ export function selectionLine(
   return `${s.id ?? "ID unavailable"} ${kind}${s.active ? "" : " · inactive"}`;
 }
 
+export const readinessNextStep =
+  "Check the readiness conditions in GitHub source settings.";
+
 /** Phone summary of one project's configuration: what is true now and the next step. */
 export function projectStateSummary(
   c: ProjectConfigurationData,
@@ -194,10 +242,10 @@ export function projectStateSummary(
   const state = [
     `Lead: ${lead} · repository access: ${access}`,
     ...(c.source.selections.length
-      ? c.source.selections.map(
-          (s) =>
-            `GitHub ${s.id ?? "selection"} ${s.active ? "active" : "inactive"} · ${observationLabel(observed?.selections.find((o) => o.selectionId === s.id)).toLowerCase()}`,
-        )
+      ? c.source.selections.map((s) => {
+          const o = observed?.selections.find((o) => o.selectionId === s.id);
+          return `GitHub ${s.id ?? "selection"} ${s.active ? "active" : "inactive"} · ${observationLabel(o).toLowerCase()}${o?.counts && observed ? ` · ${selectionCountsText(o.counts, observed.readiness)}` : ""}`;
+        })
       : ["No GitHub source"]),
     ...c.placements.map(
       (p) =>
@@ -211,7 +259,11 @@ export function projectStateSummary(
       ? `Choose the project for ${c.placements[0]?.title ?? "the conflicting task"} in Sync & placement.`
       : c.source.selections.length && c.source.credential?.usable === false
         ? "Set or change the credential in GitHub source settings, then preview this source version."
-        : "Nothing needs attention here.";
+        : observed?.selections.some((o) =>
+              zeroMatchWarning(o.counts, observed.readiness),
+            )
+          ? readinessNextStep
+          : "Nothing needs attention here.";
   return { state, next };
 }
 

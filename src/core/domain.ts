@@ -35,7 +35,10 @@ import {
   readinessSchema,
   selectionSchema,
 } from "./github-source.js";
-import { setupRepositoriesSchema } from "./github-source-contracts.js";
+import {
+  closedIssuesSchema,
+  setupRepositoriesSchema,
+} from "./github-source-contracts.js";
 import { type Database, transaction } from "./store.js";
 import { TaskReviewStore } from "./task-review.js";
 
@@ -76,6 +79,8 @@ const commandSchema = z.discriminatedUnion("type", [
       instructions: prose.optional(),
       repositories: setupRepositoriesSchema.optional(),
       githubProject: z.object({ projectNodeId: label }).strict().optional(),
+      // Guided setup's default: the detected GitHub CLI login, stated before creation.
+      sourceCredentialRef: z.literal("gh:github.com").optional(),
     })
     .strict(),
   z
@@ -411,6 +416,23 @@ export class DomainStore {
     private readonly verifyRepository: RepositoryVerifier = unconfiguredVerifier,
   ) {}
 
+  /** Credential references a command selected but has not recorded yet; see select. */
+  private readonly selecting: string[] = [];
+
+  /** Helpers exclude these as if recorded: verification Git runs before the command commits. */
+  pendingCredentialReferences(): readonly string[] {
+    return [...this.selecting];
+  }
+
+  /** Marks `credentialRef` selected until `release()`; spans verification through commit. */
+  private select(credentialRef: string | null | undefined) {
+    if (!credentialRef) return () => {};
+    this.selecting.push(credentialRef);
+    return () => {
+      this.selecting.splice(this.selecting.indexOf(credentialRef), 1);
+    };
+  }
+
   migrate(): void {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
@@ -453,7 +475,8 @@ export class DomainStore {
         CREATE TABLE IF NOT EXISTS project_github_sources (
           projectId TEXT PRIMARY KEY REFERENCES domain_projects(id), version INTEGER NOT NULL,
           credentialRef TEXT, selections TEXT NOT NULL, readiness TEXT NOT NULL,
-          repositories TEXT NOT NULL
+          repositories TEXT NOT NULL,
+          closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))
         );
         CREATE TABLE IF NOT EXISTS project_github_active (
           projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
@@ -575,6 +598,16 @@ export class DomainStore {
           this.db.exec(
             `ALTER TABLE ${table} ADD COLUMN runtime TEXT NOT NULL DEFAULT '{"harness":"codex"}'`,
           );
+      if (
+        !(
+          this.db
+            .prepare("PRAGMA table_info(project_github_sources)")
+            .all() as Row[]
+        ).some((column) => column.name === "closedIssues")
+      )
+        this.db.exec(
+          "ALTER TABLE project_github_sources ADD COLUMN closedIssues TEXT NOT NULL DEFAULT 'skip' CHECK(closedIssues IN ('skip','done'))",
+        );
       if (!routingColumns.some((column) => column.name === "brief"))
         this.db.exec(
           "ALTER TABLE routing_operations ADD COLUMN brief TEXT NOT NULL DEFAULT ''",
@@ -647,12 +680,8 @@ export class DomainStore {
         .prepare(
           "INSERT OR IGNORE INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) SELECT id, 1, NULL, '[]', ?, '[]' FROM domain_projects",
         )
-        .run(
-          JSON.stringify({
-            mode: "all",
-            conditions: [{ kind: "label", name: "ready" }],
-          }),
-        );
+        // No readiness rule: a backfilled source filters nothing.
+        .run(JSON.stringify(null));
     });
   }
 
@@ -698,41 +727,47 @@ export class DomainStore {
       return prior.result;
     }
     this.operator(command);
-    this.version(
-      { version: this.githubConfiguration(command.projectId).version },
-      command.expectedVersion,
-    );
-    const saved = this.githubConfiguration(command.projectId).repositories;
-    let verified: LinkedRepository[];
+    const release = this.select(command.credentialRef);
     try {
-      verified = await Promise.all(
-        // Async, so a missing saved path rejects like a failed verification instead of
-        // throwing past `Promise.all` and leaving earlier verifications unhandled.
-        command.repositories.map(async (link) => {
-          // A link without `path` keeps the saved path for that repository.
-          const path =
-            link.path ??
-            saved.find((item) => item.repositoryId === link.repositoryId)?.path;
-          if (path === undefined) throw new Error("No saved repository path");
-          return parseLinkedRepositoryResult(
-            await this.verifyRepository({ ...link, path }),
-          );
-        }),
+      this.version(
+        { version: this.githubConfiguration(command.projectId).version },
+        command.expectedVersion,
       );
-    } catch (error) {
-      if (error instanceof CommandResultValidationError) throw error;
-      throw new DomainPolicyError(
-        "invalid-input",
-        "Repository verification failed",
-        ["repositories"],
-      );
+      const saved = this.githubConfiguration(command.projectId).repositories;
+      let verified: LinkedRepository[];
+      try {
+        verified = await Promise.all(
+          // Async, so a missing saved path rejects like a failed verification instead of
+          // throwing past `Promise.all` and leaving earlier verifications unhandled.
+          command.repositories.map(async (link) => {
+            // A link without `path` keeps the saved path for that repository.
+            const path =
+              link.path ??
+              saved.find((item) => item.repositoryId === link.repositoryId)
+                ?.path;
+            if (path === undefined) throw new Error("No saved repository path");
+            return parseLinkedRepositoryResult(
+              await this.verifyRepository({ ...link, path }),
+            );
+          }),
+        );
+      } catch (error) {
+        if (error instanceof CommandResultValidationError) throw error;
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Repository verification failed",
+          ["repositories"],
+        );
+      }
+      const outcome = this.executeParsed(command, verified);
+      if (outcome.type !== "github.configure")
+        throw new CommandResultValidationError(
+          "GitHub configuration result has the wrong command type",
+        );
+      return outcome.result;
+    } finally {
+      release();
     }
-    const outcome = this.executeParsed(command, verified);
-    if (outcome.type !== "github.configure")
-      throw new CommandResultValidationError(
-        "GitHub configuration result has the wrong command type",
-      );
-    return outcome.result;
   }
 
   /** Guided setup: verify every repository, then record the whole project in one transaction. */
@@ -756,42 +791,51 @@ export class DomainStore {
       return prior.result;
     }
     this.operator(command);
-    const verified: LinkedRepository[] = [];
-    // In order, so the first failing row is the one reported; nothing is recorded on failure.
-    for (const [index, link] of (command.repositories ?? []).entries()) {
-      try {
-        const repository = parseLinkedRepositoryResult(
-          await this.verifyRepository(
-            { repositoryId: link.repositoryId, path: link.path, ref: link.ref },
-            { owner: link.owner, name: link.name },
-          ),
-        );
-        verified.push({
-          repositoryId: repository.repositoryId,
-          path: repository.path,
-          ref: repository.ref,
-          gitCommonDirectory: repository.gitCommonDirectory,
-        });
-      } catch (error) {
-        if (error instanceof CommandResultValidationError) throw error;
-        const field =
-          error instanceof RepositoryVerificationError &&
-          error.reason === "ref-unavailable"
-            ? "ref"
-            : "path";
-        throw new DomainPolicyError(
-          "invalid-input",
-          "Repository verification failed",
-          [`repositories.${index}.${field}`],
-        );
+    const release = this.select(command.sourceCredentialRef);
+    try {
+      const verified: LinkedRepository[] = [];
+      // In order, so the first failing row is the one reported; nothing is recorded on failure.
+      for (const [index, link] of (command.repositories ?? []).entries()) {
+        try {
+          const repository = parseLinkedRepositoryResult(
+            await this.verifyRepository(
+              {
+                repositoryId: link.repositoryId,
+                path: link.path,
+                ref: link.ref,
+              },
+              { owner: link.owner, name: link.name },
+            ),
+          );
+          verified.push({
+            repositoryId: repository.repositoryId,
+            path: repository.path,
+            ref: repository.ref,
+            gitCommonDirectory: repository.gitCommonDirectory,
+          });
+        } catch (error) {
+          if (error instanceof CommandResultValidationError) throw error;
+          const field =
+            error instanceof RepositoryVerificationError &&
+            error.reason === "ref-unavailable"
+              ? "ref"
+              : "path";
+          throw new DomainPolicyError(
+            "invalid-input",
+            "Repository verification failed",
+            [`repositories.${index}.${field}`],
+          );
+        }
       }
+      const outcome = this.executeParsed(command, verified);
+      if (outcome.type !== "project.create")
+        throw new CommandResultValidationError(
+          "Project creation result has the wrong command type",
+        );
+      return outcome.result;
+    } finally {
+      release();
     }
-    const outcome = this.executeParsed(command, verified);
-    if (outcome.type !== "project.create")
-      throw new CommandResultValidationError(
-        "Project creation result has the wrong command type",
-      );
-    return outcome.result;
   }
 
   discoveryCredentialReference(): string | null {
@@ -983,12 +1027,13 @@ export class DomainStore {
     version: number;
     credentialRef: string | null;
     selections: z.output<typeof selectionSchema>[];
-    readiness: z.output<typeof readinessSchema>;
+    readiness: z.output<typeof readinessSchema> | null;
+    closedIssues: z.output<typeof closedIssuesSchema>;
     repositories: LinkedRepository[];
   } {
     this.project(projectId);
     const row = this.required(
-      "SELECT version, credentialRef, selections, readiness, repositories FROM project_github_sources WHERE projectId = ?",
+      "SELECT version, credentialRef, selections, readiness, closedIssues, repositories FROM project_github_sources WHERE projectId = ?",
       id.parse(projectId),
     );
     return {
@@ -998,7 +1043,10 @@ export class DomainStore {
       selections: z
         .array(selectionSchema)
         .parse(JSON.parse(String(row.selections))),
-      readiness: readinessSchema.parse(JSON.parse(String(row.readiness))),
+      readiness: readinessSchema
+        .nullable()
+        .parse(JSON.parse(String(row.readiness))),
+      closedIssues: closedIssuesSchema.parse(row.closedIssues),
       repositories: z
         .array(linkedRepositorySchema)
         .parse(JSON.parse(String(row.repositories))),
@@ -1507,6 +1555,32 @@ export class DomainStore {
       )
     );
   }
+  /** Provider-closure provenance shared by every task view. */
+  providerClosure(taskId: string): "held" | "completed" | null {
+    if (
+      !this.one(
+        "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
+      )
+    )
+      return null;
+    const row = this.one(
+      `SELECT t.state, e.observedState,
+        EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed,
+        EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
+          AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending
+      FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
+      taskId,
+    );
+    if (row?.state === "done" && Number(row.completed) === 1)
+      return "completed";
+    // Ensemble's own closure awaits proof; it is not provider closure.
+    return row?.state === "open" &&
+      row.observedState === "closed" &&
+      Number(row.ownProofPending) === 0 &&
+      !this.hasOwnDeliveryClosure(taskId)
+      ? "held"
+      : null;
+  }
   admission(
     taskId: string,
     deliveryContinuation = false,
@@ -1836,10 +1910,11 @@ export class DomainStore {
           .run(command.projectId);
         this.db
           .prepare(
-            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, NULL, ?, ?, ?)",
+            "INSERT INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) VALUES (?, 1, ?, ?, ?, ?)",
           )
           .run(
             command.projectId,
+            command.sourceCredentialRef ?? null,
             // A linked GitHub Project is an inactive source: nothing is active until preview.
             JSON.stringify(
               command.githubProject
@@ -1853,10 +1928,8 @@ export class DomainStore {
                   ]
                 : [],
             ),
-            JSON.stringify({
-              mode: "all",
-              conditions: [{ kind: "label", name: "ready" }],
-            }),
+            // No readiness rule until the operator adds one.
+            JSON.stringify(null),
             JSON.stringify(repositories),
           );
         return this.project(command.projectId);
@@ -1960,6 +2033,17 @@ export class DomainStore {
             command.state ?? present(current, "state"),
             command.taskId,
           );
+        // A manual state change replaces any provider-closure completion.
+        if (
+          command.state !== undefined &&
+          command.state !== current.state &&
+          this.one(
+            "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
+          )
+        )
+          this.db
+            .prepare("DELETE FROM github_provider_completions WHERE taskId = ?")
+            .run(command.taskId);
         return this.task(command.taskId);
       }
       case "profile.create": {
@@ -2066,7 +2150,7 @@ export class DomainStore {
         });
         this.db
           .prepare(
-            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, repositories = ? WHERE projectId = ?",
+            "UPDATE project_github_sources SET version = version + 1, credentialRef = ?, selections = ?, readiness = ?, closedIssues = ?, repositories = ? WHERE projectId = ?",
           )
           .run(
             command.credentialRef === undefined
@@ -2074,6 +2158,7 @@ export class DomainStore {
               : command.credentialRef,
             JSON.stringify(selections),
             JSON.stringify(command.readiness),
+            command.closedIssues ?? current.closedIssues,
             JSON.stringify(repositories),
             command.projectId,
           );
@@ -2103,6 +2188,17 @@ export class DomainStore {
               .run(command.projectId, selectionIds);
           const sources = new GitHubSourceStore(this.db);
           for (const taskId of affectedTasks) sources.updateReadiness(taskId);
+          // Skip never leaves a provider closure as Done: reopen those tasks under their
+          // closure hold now, since retained selections stay inactive until previewed.
+          if (
+            current.closedIssues === "done" &&
+            command.closedIssues === "skip"
+          )
+            for (const row of this.db
+              .prepare(`SELECT p.taskId FROM github_provider_completions p
+              JOIN domain_tasks t ON t.id = p.taskId WHERE t.projectId = ?`)
+              .all(command.projectId) as Row[])
+              sources.updateReadiness(String(row.taskId));
           this.db
             .prepare(
               "UPDATE github_sync_state SET complete = 0, reason = 'configuration-changed' WHERE projectId = ?",

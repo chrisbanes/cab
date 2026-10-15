@@ -550,8 +550,11 @@ export class DeliveryStore {
             ]),
           ),
         })
+        .nullable()
         .parse(JSON.parse(source.readiness));
+      // No readiness rule protects no label or field.
       if (
+        readiness &&
         action.kind === "issue.labels" &&
         readiness.conditions.some(
           (c) =>
@@ -561,6 +564,7 @@ export class DeliveryStore {
       )
         throw new Error("Agent cannot change readiness labels");
       if (
+        readiness &&
         action.kind === "project.field" &&
         readiness.conditions.some(
           (c) =>

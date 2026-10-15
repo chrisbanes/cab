@@ -262,6 +262,7 @@ export function DraftOutcome({
   refresh,
   review,
   success,
+  children,
 }: {
   draft: ConfigurationDraft;
   client: OperatorClient;
@@ -281,6 +282,8 @@ export function DraftOutcome({
   review?: (() => void) | undefined;
   /** A plain sentence for the success line, or `null` when the caller shows its own. */
   success?: string | null | undefined;
+  /** More under the success line, passed to `DraftMessage`. */
+  children?: ReactNode;
 }) {
   const idle = draft.phase !== "unknown";
   return (
@@ -316,7 +319,9 @@ export function DraftOutcome({
           if (draft.phase === "recorded" || draft.phase === "conflict")
             refresh();
         }}
-      />
+      >
+        {children}
+      </DraftMessage>
     </>
   );
 }

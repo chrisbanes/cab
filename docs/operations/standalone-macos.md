@@ -24,7 +24,9 @@ directory. The defaults are:
 The label defaults to `local.ensemble.service` and the port to `8787`
 (`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
 `--label` and, at install only, `--port` override them; upgrade keeps the
-installed port. Pass the same directory and label options to `upgrade` and
+installed port. `--diagnostic-retention-days` and `--diagnostic-storage-mib`
+(install and upgrade) set the [diagnostic retention](#execution-diagnostic-retention)
+limits. Pass the same directory and label options to `upgrade` and
 `uninstall` as to `install`. The state and LaunchAgents directories must
 be real directories you own that no one else can write; the data, snapshot,
 install-record and log directories are created with mode `0700` and must stay
@@ -153,11 +155,13 @@ remove that plist and `STATE/launchd/<label>.json` and install again.
 Restart the installed job with `launchctl kickstart -k
 "gui/$(id -u)/local.ensemble.service"`; operator sessions reset and you log in
 again. If the Codex App Server process exits while the service runs, the
-operator workspace and `/runtime` page show "Codex runtime unavailable — restart
-the service". Queued requests stay queued with that reason and nothing new is
-admitted; turns already running are held for recovery. Nothing restarts the App
-Server automatically; the same `kickstart -k` recovers it, and startup
-reconciliation and the usual admission checks then apply.
+operator workspace and `/runtime` page show "Codex runtime unavailable — turn it
+off and on in Settings → Runtime, or restart the service". Queued requests stay
+queued with that reason and nothing new is admitted; turns already running are
+held for recovery. Nothing restarts the App Server automatically. Turning the
+runtime off and on in Settings → Runtime replaces it with a fresh one; if it
+stays unavailable, the same `kickstart -k` recovers it. Startup reconciliation
+and the usual admission checks then apply.
 
 The LaunchAgent in `~/Library/LaunchAgents` is meant to start the service when
 the user logs into the GUI session; the procedure does not claim unattended
@@ -229,15 +233,19 @@ from the Codex runtime after the next restart.
 
 Each project's GitHub source configuration chooses its own `gh:github.com` or
 `env:NAME` reference. Discovery configuration does not select a source credential
-or provide a fallback. Configure the source in project settings, preview its
+or provide a fallback. When guided setup detects a signed-in GitHub CLI account in
+the source's candidate environment, it shows the account and records
+`gh:github.com` for the new project's source; otherwise the source starts without a
+credential and the ready check says so. Change or Clear it in the project's GitHub
+source settings; a cleared source stays cleared. Configure the source in project settings, preview its
 current version to activate it, then refresh observations to import tasks.
 Preview activation and successful import are separate evidence.
 
-The offered GitHub CLI account uses the same candidate environment as an
-explicit gh source selection: `GH_TOKEN` takes precedence over `GITHUB_TOKEN`,
+The offered GitHub CLI account, in setup and source settings, uses the same
+candidate environment as an explicit gh source selection: `GH_TOKEN` takes precedence over `GITHUB_TOKEN`,
 then the stored login. An invalid overriding token does not fall back to the
-stored account. This status-only offer does not select credentials or activate a
-source, and does not run `gh auth token` for a null/env source. Status uses the
+stored account, so setup records no default. This status-only detection does not
+activate a source, and does not run `gh auth token` for a null/env source. Status uses the
 candidate environment credentials to identify the offered account. Current
 env-source usability remains independent of an unavailable candidate gh account.
 Configured unrelated credentials, their aliases and lifetime old-token aliases
@@ -339,14 +347,16 @@ and a fresh bound preparation.
 
 Claude profiles run the `claude` command (Claude Code) that resolves on the
 service's fixed `PATH`; Ensemble does not redistribute it. Install it so it
-resolves there (Homebrew puts it in `/opt/homebrew/bin`), then restart the service
-after installing or upgrading it: the runtime looks `claude` up once when it starts.
+resolves there (Homebrew puts it in `/opt/homebrew/bin`), then turn Claude off and
+on in Settings → Runtime (or restart the service) after installing or upgrading it:
+the runtime looks `claude` up when it starts.
 A `claude` that does not resolve on the `PATH` when the service starts leaves the
 Claude runtime not enabled for that run. Settings → Runtime shows it as Not enabled,
 with no alert, as if Claude were not configured, and Claude work waits visibly with
 the not-enabled reason; it never falls back to another runtime. Codex and the
-service are unaffected. After installing `claude`, restart the service to enable
-Claude. A `claude` that resolves but whose runtime fails shows as unavailable
+service are unaffected. The Claude switch can already be on: after installing
+`claude`, turn Claude off and on in Settings → Runtime (or restart the service) to
+start it. A `claude` that resolves but whose runtime fails shows as unavailable
 instead. Readiness shows the Claude executable as Not configured while Claude is
 unused, and as Fail with the fix once a token reference or an active Claude profile
 needs it.
@@ -398,8 +408,20 @@ untested; the bounded live journeys ran the service outside launchd.
 Execution diagnostics expire after `ENSEMBLE_DIAGNOSTIC_RETENTION_DAYS` days
 (1–365, default 30), checked hourly; past `ENSEMBLE_DIAGNOSTIC_STORAGE_MIB` (16–1048576,
 default 1024) the oldest items are evicted. An invalid value stops the service
-at startup. The rendered LaunchAgent sets neither variable, so a LaunchAgent
-service uses the defaults; changing them there needs a reviewed renderer change.
+at startup. The supported LaunchAgent route is
+`service install` or `service upgrade` with `--diagnostic-retention-days N|default`
+and `--diagnostic-storage-mib N|default`. A value is written into the
+LaunchAgent environment and recorded, so a later upgrade keeps it unless an
+option changes it; `default` removes the variable and the service default
+applies. An out-of-range value is refused before anything changes. To change a
+value on an installed service, run `service upgrade` with the installed release
+directory and the new option: it stops the job, takes a verified snapshot,
+re-renders the plist, restarts the job and checks readiness. A hand-edited
+plist is unsupported: upgrade refuses an activation that no longer matches its
+recorded hash. A release built before these options rejects an install record
+that holds them, so before moving to such a release run `service upgrade` with
+`default` for each value.
+
 The quota counts stored diagnostic payload text only, not the database, WAL or
 filesystem. Pruning deletes payload items only and keeps per-execution gap
 counts. There is no manual purge, and older snapshots keep any payloads they
@@ -546,7 +568,8 @@ its licence, `dist/src`, `dist/operator`, the production `node_modules`,
 `package.json`, `package-lock.json`, `LICENSE` and `manifest.json`. It needs `codex`
 on `PATH` like a checkout build. It does not include `claude`: a release without one
 on the service `PATH` shows Claude as Not enabled, and installing `claude` on that
-`PATH` enables it after a restart (see [Claude executable](#claude-executable)).
+`PATH` enables it once Claude is turned off and on in Settings → Runtime, or after a
+restart (see [Claude executable](#claude-executable)).
 Codex remains the default harness.
 
 `manifest.json` records the schema `ensemble.release/v1`, name, version, platform,
@@ -649,10 +672,29 @@ npm run operations -- render-launch-agent \
   /absolute/private/launch-agents/com.example.ensemble.plist
 ```
 
+To set the diagnostic retention limits, append the two optional flags after the
+plist path (1–365 days, 16–1048576 MiB); omitted, the service defaults apply.
+Malformed or out-of-range values print usage and exit 2:
+
+```sh
+npm run operations -- render-launch-agent \
+  com.example.ensemble \
+  /absolute/path/to/node \
+  /absolute/path/to/ensemble/dist/src/standalone/cli.js \
+  /absolute/private/ensemble-data \
+  /absolute/private/auth/operator-auth.json \
+  http://127.0.0.1:8787 8787 \
+  /absolute/private/logs/operator.stdout.log \
+  /absolute/private/logs/operator.stderr.log \
+  /absolute/private/launch-agents/com.example.ensemble.plist \
+  --diagnostic-retention-days 14 --diagnostic-storage-mib 512
+```
+
 The current renderer sets `RunAtLoad=true` and `KeepAlive=false`; launchctl,
 not automatic crash relaunch, owns restart. The plist contains the Node/CLI,
 operator command, data directory, port, separate auth-file path, canonical
-origin, fixed non-secret PATH, and private log paths. It contains no password
+origin, fixed non-secret PATH, the diagnostic retention variables when set,
+and private log paths. It contains no password
 or shell wrapper. Before bootstrap, inspect and lint the exact plist:
 
 ```sh

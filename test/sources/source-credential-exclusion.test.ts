@@ -1262,3 +1262,70 @@ test("candidate gh offers match selected identity across service/JSON/HTML with 
   assert.equal(providerReads, 0);
   assert.equal(f.service.githubSources().issue("I_1"), undefined);
 });
+
+test("a readiness rule naming a withheld value is unavailable, never none, and its text never leaves", async (t) => {
+  environment(t, {
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    FIXTURE_SX_LABEL: "label-secret-value",
+  });
+  const f = await fixture(t);
+  f.execute({
+    type: "github.configure",
+    projectId: f.projectId,
+    expectedVersion: 1,
+    credentialRef: "env:FIXTURE_SX_LABEL",
+    selections: [selection],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", name: "label-secret-value" }],
+    },
+    repositories: [],
+  });
+  f.execute({
+    type: "github.activate",
+    projectId: f.projectId,
+    expectedVersion: 2,
+    selectionId: "S-1",
+  });
+  const sources = f.service.githubSources();
+  sources.reconcileSelection(f.projectId, "S-1", {
+    complete: true,
+    issues: [
+      {
+        providerInstance: "github.com",
+        ...reference,
+        title: "Withheld",
+        body: "Scope",
+        state: "open",
+        labels: [],
+        projectFields: [],
+      },
+    ],
+    reason: null,
+  });
+  const taskId = String(sources.issue(reference.nodeId)?.taskId);
+  const observations = await f.api.readSourceObservations(),
+    project = observations.data.projects.find(
+      (p) => p.projectId === f.projectId,
+    );
+  assert.deepEqual(project?.readiness, { kind: "unavailable" });
+  assert.equal(project?.selections[0]?.counts?.matching, null);
+  assert.equal(project?.selections[0]?.counts?.open, 1);
+  const list = await f.api.readTaskListPage(),
+    task = await f.api.readTask(taskId);
+  const summary = list.data.tasks.find((s) => s.id === taskId);
+  for (const readiness of [
+    summary?.source?.readiness,
+    task.data.source?.readiness,
+  ])
+    assert.deepEqual(readiness, {
+      rule: { kind: "unavailable" },
+      outcome: "not-evaluated",
+      unmet: [],
+    });
+  assert.equal(
+    JSON.stringify([observations, list, task]).includes("label-secret-value"),
+    false,
+  );
+});

@@ -7,11 +7,13 @@ import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
+import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import {
   createCheckout,
   noPageOverflow,
   outcomeMessages,
   phone,
+  resolve,
   savedOutcome,
   startSettings,
   trail,
@@ -580,6 +582,68 @@ test("GitHub source repository and readiness errors focus the exact row without 
     .waitFor();
 });
 
+test("GitHub source shows no readiness rule, saves an added rule, removes it, and never clears an unavailable rule", async (t, journey) => {
+  const previous = process.env.FIXTURE_GITHUB;
+  process.env.FIXTURE_GITHUB = "offline-readiness-rule-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_GITHUB;
+    else process.env.FIXTURE_GITHUB = previous;
+  });
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const noRule = page.getByText("No readiness rule:", { exact: false });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await noRule.waitFor();
+  assert.equal(await page.getByLabel("Ready label").count(), 0);
+  await page.getByRole("button", { name: "Add readiness condition" }).click();
+  await page.getByLabel("Ready label").fill("ready-for-agent");
+  await save.click();
+  await savedOutcome(page);
+  assert.deepEqual(d.githubConfiguration(ids.relay).readiness, {
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready-for-agent" }],
+  });
+  await page.getByRole("button", { name: "Remove condition 1" }).click();
+  await noRule.waitFor();
+  const removal = page.getByText("Readiness: no readiness rule", {
+    exact: true,
+  });
+  await removal.waitFor();
+  await save.click();
+  await removal.waitFor({ state: "detached" });
+  assert.equal(d.githubConfiguration(ids.relay).readiness, null);
+  // A rule naming private text is withheld: shown as unknown, never as no rule.
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: d.githubConfiguration(ids.relay).version,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: [],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", name: "offline-readiness-rule-value" }],
+    },
+    repositories: [],
+  });
+  await page.reload();
+  await page
+    .getByText("Saved readiness is unavailable; add a condition to replace it.")
+    .waitFor();
+  assert.equal(await noRule.count(), 0);
+  assert.equal(await save.isDisabled(), true);
+  await page.getByRole("button", { name: "Add readiness condition" }).click();
+  await page.getByLabel("Ready label").fill("ready");
+  await page
+    .getByText("(replaces unavailable readiness)", { exact: false })
+    .waitFor();
+  assert.equal(await save.isDisabled(), false);
+});
+
 test("GitHub source conflict keeps rows and an unknown save is checked once", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
@@ -834,4 +898,86 @@ test("a repository link saved elsewhere under the same id needs an explicit choi
     await realpath(theirs),
   );
   assert.equal((await page.content()).includes("theirs-checkout"), false);
+});
+
+test("Sync and GitHub source show stored readiness counts and a zero-match warning that opens the Readiness panel", async (t, journey) => {
+  const previous = process.env.FIXTURE_GITHUB;
+  process.env.FIXTURE_GITHUB = "offline-readiness-source-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_GITHUB;
+    else process.env.FIXTURE_GITHUB = previous;
+  });
+  let complete = true;
+  const issue = (n: number) => ({
+    providerInstance: "github.com" as const,
+    nodeId: `I_${n}`,
+    repositoryId: "acme/atlas",
+    repositoryName: "acme/atlas",
+    number: n,
+    title: `Issue ${n}`,
+    body: "Scope",
+    state: "open" as const,
+    labels: [],
+    projectFields: [],
+  });
+  const reader: GitHubReaderFactory = () => ({
+    async readSelection() {
+      return complete
+        ? {
+            complete: true as const,
+            issues: [1, 2, 3].map(issue),
+            reason: null,
+          }
+        : { complete: false as const, issues: [], reason: "http-403" };
+    },
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "open" as const };
+    },
+  });
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+    undefined,
+    undefined,
+    { readerFactory: reader },
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    selectionId: "S-1",
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+  });
+  await f.service.refreshGitHub();
+  const counts = "3 observed · 3 open · 0 match label `ready`";
+  const warning =
+    "No open item matches the readiness rule (label `ready`); imported tasks stay Draft until one does.";
+  await page.goto(
+    web.origin + resolve("/app/projects/:atlas/settings?tab=sync", ids),
+  );
+  const row = page.locator("article.settings-row").filter({ hasText: counts });
+  await row.getByText(counts, { exact: true }).waitFor();
+  await row.getByText(warning, { exact: false }).waitFor();
+  await row.getByRole("link", { name: "Check readiness conditions" }).click();
+  await page.waitForURL(/tab=github#source-readiness$/);
+  await page.waitForFunction(
+    () => document.activeElement?.id === "source-readiness",
+  );
+  await page.getByText(`S-1: ${counts}`, { exact: true }).waitFor();
+  await page.getByText(warning, { exact: false }).waitFor();
+
+  complete = false;
+  await f.service.refreshGitHub();
+  await page.reload();
+  await page
+    .getByText(`S-1: ${counts} · partial read; counts may be incomplete`, {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await page.getByText(warning, { exact: false }).count(), 0);
 });

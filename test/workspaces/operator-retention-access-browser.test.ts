@@ -12,12 +12,17 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedRetainedReviewWindow } from "../fixtures/task-review.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 // Retained-history seeding shares the startup deadline with web/browser launch.
-// Allow seeding-heavy setup headroom on CI while retaining a finite ceiling.
+// These journeys assert no deadline of their own, so every budget is wide
+// headroom for a loaded runner: with 24 concurrent copies on 10 cores, setup
+// passed 40 s, the journey 60 s, one re-render of 272 records 30 s (about 1 s
+// unloaded) and browser.close 10 s.
 const retentionJourneyLimits = {
-  startupMs: 40000,
-  executionMs: 60000,
-  overallMs: 100000,
+  startupMs: 90000,
+  executionMs: 150000,
+  overallMs: 200000,
+  cleanupStepMs: 30000,
 };
+const retentionActionMs = 30000;
 const test = browserSuite(
   "operator-retention-access-browser",
   retentionJourneyLimits,
@@ -185,7 +190,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page.clock.install({ time: clockStart });
     await page.clock.pauseAt(new Date(clockStart.getTime() + 1000));
   } else await page.clock.install();
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(retentionActionMs);
   await page.goto(`${web.origin}/app/search`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -456,7 +461,11 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   await readingDiagnostic("header-attached");
   let snapshot = await waitReading("header-settled");
   if (!counterpart) {
-    // Drive the real production timer through its pending visibility boundary.
+    // Drive the real production timer: its poll keeps the validated history shown while it revalidates.
+    // The poll can request history before the task. When the task's one-time route then finishes
+    // last, Playwright sees no routes left and continues the held history request itself; this
+    // lowest-priority pass-through keeps the route list non-empty.
+    await page.route(`**/api/operator/**`, (route) => route.fallback());
     let releaseTask!: () => void;
     const heldTask = new Promise<void>((resolve) => {
       releaseTask = resolve;
@@ -493,11 +502,10 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     try {
       await page.clock.fastForward(15000);
       await taskEntered;
-      await singleItem.waitFor({ state: "detached" });
       assert.equal(
         await singleItem.count(),
-        0,
-        "pending refresh hides unvalidated history",
+        1,
+        "a pending timer poll keeps the validated history visible",
       );
       await readingDiagnostic("timer-pending");
     } finally {
@@ -505,6 +513,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     }
     try {
       await historyEntered;
+      assert.equal(await singleItem.count(), 1);
       await readingDiagnostic("overlap-history-pending");
       await page.clock.fastForward(15000);
     } finally {
@@ -719,7 +728,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   try {
     await page.clock.fastForward(15000);
     await intentionalEntered;
-    await singleItem.waitFor({ state: "detached" });
+    assert.equal(await singleItem.count(), 1);
     await page.getByLabel("Editable reply").focus();
     await readingDiagnostic("intentional-control-focus-pending");
     await page.clock.fastForward(15000);

@@ -1,8 +1,14 @@
+import {
+  selectionCountsText,
+  zeroMatchWarning,
+} from "../operator/readiness-text.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
 import { sourceCredentialReference } from "../core/credential-reference.js";
 import {
+  closedIssuesSchema,
+  type Readiness,
   readinessSchema,
   repositoryLinkSchema,
   selectionSchema,
@@ -53,8 +59,12 @@ const kindLabel = (kind: string) =>
       ? "GitHub Project"
       : "Search";
 const conditions = (n: number) => `${n} condition${n === 1 ? "" : "s"}`;
+const ruleSummary = (r: Readiness | null) =>
+  r ? `${r.mode} of ${conditions(r.conditions.length)}` : "No readiness rule";
 const readinessText = (r: Source["readiness"]) =>
-  r ? `${r.mode} of ${conditions(r.conditions.length)}` : "(unavailable)";
+  r.kind === "unavailable"
+    ? "(unavailable)"
+    : ruleSummary(r.kind === "rule" ? r : null);
 const sourceCredentialReasons: SourceCredentialReason[] = [
   "missing-credential",
   "invalid-credential-reference",
@@ -63,14 +73,12 @@ const sourceCredentialReasons: SourceCredentialReason[] = [
   "gh-unreadable",
 ];
 
-const readObservations = (client: ServiceClient, projectId: string) =>
+const readObservedProject = (client: ServiceClient, projectId: string) =>
   client
     .get(`${API}/source-observations`, sourceObservationSchema)
-    .then(
-      (r) =>
-        r.data.projects.find((p) => p.projectId === projectId)?.selections ??
-        [],
-    );
+    .then((r) => r.data.projects.find((p) => p.projectId === projectId));
+const readObservations = (client: ServiceClient, projectId: string) =>
+  readObservedProject(client, projectId).then((p) => p?.selections ?? []);
 
 const requireWriteScope = (session: Session) => {
   if (session.identity.credential.scope !== "read-write")
@@ -93,14 +101,16 @@ const sourcesCommand: BrowseCommand = {
     const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
     const client = await ctx.connect();
     const read = await readProject(client, id);
-    const observations = await readObservations(client, id);
+    const project = await readObservedProject(client, id);
+    const observations = project?.selections ?? [];
+    const rule = project?.readiness ?? { kind: "unavailable" as const };
     const { source, placements } = read.data;
     const observed = (selectionId: string | null) =>
       observations.find((o) => o.selectionId === selectionId);
     const gaps: CoverageGap[] = [];
     if (
       unnamed(source) ||
-      source.readiness === null ||
+      source.readiness.kind === "unavailable" ||
       source.selections.some((s) => s.kind !== "search" && !s.descriptor)
     )
       gaps.push("content-unavailable");
@@ -109,7 +119,13 @@ const sourcesCommand: BrowseCommand = {
     if (observations.some((o) => o.state === "unavailable"))
       gaps.push("redaction-unavailable");
     return browseOutput(ctx, {
-      data: { projectId: id, source, placements, observations },
+      data: {
+        projectId: id,
+        source,
+        placements,
+        observations,
+        readinessRule: rule,
+      },
       observedAt: read.observedAt,
       gaps,
       human: [
@@ -151,6 +167,7 @@ const sourcesCommand: BrowseCommand = {
               ]
             : []),
           ["Readiness", readinessText(source.readiness)],
+          ["Closed issues", closedIssueLabels[source.closedIssues]],
         ] as [string, string][]),
         "",
         source.selections.length
@@ -162,6 +179,7 @@ const sourcesCommand: BrowseCommand = {
                 "Active",
                 "Observed",
                 "Last success",
+                "Items",
               ],
               source.selections.map((s) => {
                 const o = observed(s.id);
@@ -176,10 +194,19 @@ const sourcesCommand: BrowseCommand = {
                     ? `${o.state}${o.lastAttemptAt ? ` ${o.lastAttemptAt}` : ""}`
                     : "-",
                   o?.lastSuccessfulAt ?? "-",
+                  o?.counts ? selectionCountsText(o.counts, rule) : "-",
                 ];
               }),
             )
           : "No selections.",
+        ...observations.flatMap((o) => {
+          const warning = zeroMatchWarning(o.counts, rule);
+          return warning
+            ? [
+                `${unavailable(o.selectionId)}: ${warning} Change readiness with 'ensemble project prepare-source'.`,
+              ]
+            : [];
+        }),
         "",
         source.repositories.length
           ? table(
@@ -210,6 +237,11 @@ const sourcesCommand: BrowseCommand = {
   },
 };
 
+const closedIssueLabels = {
+  skip: "Skip closed issues",
+  done: "Treat closure as Done",
+} as const;
+
 const editSchema = z
   .object({
     addSelections: z
@@ -217,7 +249,9 @@ const editSchema = z
       .max(30)
       .optional(),
     removeSelections: z.array(z.string().min(1).max(512)).max(30).optional(),
-    readiness: readinessSchema.optional(),
+    /** A rule replaces, `null` removes the rule, omitted keeps the saved one. */
+    readiness: readinessSchema.nullable().optional(),
+    closedIssues: closedIssuesSchema.optional(),
     linkRepositories: z.array(repositoryLinkSchema).max(20).optional(),
     unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
     setRefs: z.record(z.string(), z.string().trim().min(1).max(512)).optional(),
@@ -279,7 +313,8 @@ export function sourceEditCommand(
       "conflict",
       "A saved selection or repository link cannot be named in this read, so the CLI cannot keep it. Nothing was prepared.",
     );
-  if (source.readiness === null && !edit.readiness)
+  const unavailableRule = source.readiness.kind === "unavailable";
+  if (unavailableRule && edit.readiness === undefined)
     throw new CliError(
       "conflict",
       'The saved readiness cannot be read; replace it with "readiness" in the edit file. Nothing was prepared.',
@@ -352,7 +387,12 @@ export function sourceEditCommand(
     throw bad(
       'This edit removes every repository link, so no task can be checked out. Add "confirmUnlinkAll": true to confirm.',
     );
-  const readiness = edit.readiness ?? source.readiness;
+  // The saved rule as a command value: the view's `kind` key is not part of it.
+  const savedRule =
+    source.readiness.kind === "rule"
+      ? { mode: source.readiness.mode, conditions: source.readiness.conditions }
+      : null;
+  const readiness = edit.readiness !== undefined ? edit.readiness : savedRule;
   const command: Record<string, unknown> = {
     type: "github.configure",
     projectId,
@@ -364,6 +404,7 @@ export function sourceEditCommand(
       ...added,
     ],
     readiness,
+    closedIssues: edit.closedIssues ?? source.closedIssues,
     repositories,
     ...(edit.credentialRef === undefined
       ? {}
@@ -383,10 +424,18 @@ export function sourceEditCommand(
     );
   const readinessChanged =
     edit.readiness !== undefined &&
-    JSON.stringify(edit.readiness) !== JSON.stringify(source.readiness);
+    (unavailableRule ||
+      JSON.stringify(edit.readiness) !== JSON.stringify(savedRule));
   if (readinessChanged)
     diff.push(
-      `Readiness: ${edit.readiness?.mode} of ${conditions(edit.readiness?.conditions.length ?? 0)}${source.readiness ? "" : " (replaces unavailable readiness)"}`,
+      `Readiness: ${edit.readiness ? ruleSummary(edit.readiness) : "no readiness rule"}${unavailableRule ? " (replaces unavailable readiness)" : ""}`,
+    );
+  const closedIssuesChanged =
+    edit.closedIssues !== undefined &&
+    edit.closedIssues !== source.closedIssues;
+  if (closedIssuesChanged)
+    diff.push(
+      `Closed issues: ${closedIssueLabels[edit.closedIssues ?? "skip"]}`,
     );
   for (const id of unlink) diff.push(`− Repository access: ${id}`);
   for (const l of links)
@@ -416,8 +465,14 @@ export function sourceEditCommand(
   if (readinessChanged)
     changes.push({
       field: "readiness",
-      from: source.readiness ? readinessText(source.readiness) : null,
-      to: readinessText(readiness),
+      from: unavailableRule ? null : readinessText(source.readiness),
+      to: ruleSummary(readiness),
+    });
+  if (closedIssuesChanged)
+    changes.push({
+      field: "closedIssues",
+      from: source.closedIssues,
+      to: edit.closedIssues ?? source.closedIssues,
     });
   if (unlink.length || links.length)
     changes.push({

@@ -575,9 +575,10 @@ test("React shell announces an unavailable Codex runtime without a reload", asyn
   await page.getByLabel("Password", { exact: true }).fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
-  const banner = page
-    .getByRole("alert")
-    .filter({ hasText: "Codex runtime unavailable — restart the service" });
+  const banner = page.getByRole("alert").filter({
+    hasText:
+      "Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+  });
   await page.getByText("No projects yet.", { exact: true }).first().waitFor();
   assert.equal(await banner.count(), 0);
   f.runtime.crash();
@@ -617,9 +618,10 @@ test("React shell Inbox poll surfaces a runtime failure on its own", async (_t, 
   await page.goto(`${web.origin}/app/inbox`);
   await loaded;
   await page.getByRole("heading", { name: "Inbox", exact: true }).waitFor();
-  const banner = page
-    .getByRole("alert")
-    .filter({ hasText: "Codex runtime unavailable — restart the service" });
+  const banner = page.getByRole("alert").filter({
+    hasText:
+      "Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+  });
   assert.equal(await banner.count(), 0);
   f.runtime.crash();
   await page.clock.fastForward(16000);

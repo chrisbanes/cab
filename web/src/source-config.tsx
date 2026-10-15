@@ -1,8 +1,10 @@
+import { noRuleText } from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
   adoptSourceRows,
+  closedIssueLabels,
   duplicateSourceIds,
   kindLabel,
   nextSelectionId,
@@ -37,14 +39,24 @@ import {
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
+import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
+import type { ObservationResource } from "./sync-placement.js";
 
 const withKeys = (rows: object[]) =>
   JSON.stringify(rows.map((r) => ({ ...r, rowKey: key() })));
 
-export function SourceTab(p: TabProps) {
+export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   const { data, projectId } = p,
     draftKey = `github.configure:${projectId}`,
     d = useDraft(p.drafts, draftKey);
+  const observed = p.observations.state.data?.data.projects.find(
+    (r) => r.projectId === projectId,
+  );
+  // The panel renders after the configuration read, so the browser cannot scroll to it.
+  useEffect(() => {
+    if (location.hash === `#${readinessAnchor}`)
+      document.getElementById(readinessAnchor)?.focus();
+  }, []);
   const loaded = sourceRowsFrom(data.source);
   const initial: Values = {
     expectedVersion: String(data.source.version),
@@ -53,6 +65,7 @@ export function SourceTab(p: TabProps) {
     selections: withKeys(loaded.selections),
     conditions: withKeys(loaded.conditions),
     mode: loaded.mode,
+    closedIssues: loaded.closedIssues,
     repositories: withKeys(loaded.repositories),
     removeAll: false,
   };
@@ -72,13 +85,19 @@ export function SourceTab(p: TabProps) {
       stale.length > 0 ||
       duplicates.length > 0 ||
       lines.length === 0 ||
+      // An unknown saved rule is only replaced by a rule, never cleared to none.
+      (data.source.readiness.kind === "unavailable" &&
+        conditions.length === 0) ||
       (v.referenceMode === "gh" &&
         data.source.credential?.gh.state !== "signed-in") ||
       (removesAll && !v.removeAll);
   const adopt = () => {
     // An unsettled save keeps its own message; nothing is loaded or discarded then.
     if (locked(d)) return;
-    d.adoptLatest(data.source.version, initial, [["mode", "conditions"]]);
+    d.adoptLatest(data.source.version, initial, [
+      ["mode", "conditions"],
+      ["closedIssues"],
+    ]);
     const rows = adoptSourceRows(data.source, d.values);
     if (rows.dropped.length)
       d.notice = `Loaded the latest version. ${rows.dropped.join(", ")} ${rows.dropped.length === 1 ? "was" : "were"} removed elsewhere, so your edits to ${rows.dropped.length === 1 ? "it" : "them"} were discarded.`;
@@ -448,7 +467,18 @@ export function SourceTab(p: TabProps) {
             title="2 · Readiness matching"
             description="Readiness admits work; it never grants repository access."
           >
+            {observed?.selections.map((s, i) => (
+              <ObservationCounts
+                key={s.selectionId ?? i}
+                label={s.selectionId ?? "Selection unavailable"}
+                projectId={projectId}
+                rule={observed.readiness}
+                counts={s.counts}
+                sameTab
+              />
+            ))}
             <fieldset
+              id={readinessAnchor}
               disabled={isLocked}
               className="settings-rows"
               tabIndex={-1}
@@ -465,11 +495,16 @@ export function SourceTab(p: TabProps) {
                 "source-conditions-error",
                 "Check readiness mode and complete conditions.",
               )}
-              {!data.source.readiness && (
+              {data.source.readiness.kind === "unavailable" ? (
                 <p className="metadata muted">
-                  Saved readiness is unavailable; saving replaces it with these
-                  conditions.
+                  Saved readiness is unavailable; add a condition to replace it.
                 </p>
+              ) : (
+                conditions.length === 0 && (
+                  <p className="metadata muted">
+                    {noRuleText} Matching applies once a condition is added.
+                  </p>
+                )
               )}
               <DraftField
                 draft={d}
@@ -568,6 +603,21 @@ export function SourceTab(p: TabProps) {
                 </Button>
               </div>
             </fieldset>
+            <DraftField
+              draft={d}
+              field="closedIssues"
+              label="Closed GitHub issues"
+            >
+              {Object.entries(closedIssueLabels).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </DraftField>
+            <p className="metadata muted">
+              Treat closure as Done marks the task closed on GitHub, not
+              delivered by Ensemble, once its work has stopped.
+            </p>
           </Panel>
           <ChangeList
             lines={
@@ -636,7 +686,7 @@ function SourceCredential({
   return (
     <Panel
       title="GitHub source credential"
-      description="Choose explicitly for this project. Discovery credentials are configured separately."
+      description="A project created in guided setup starts with the GitHub CLI login setup detected, when it was usable; otherwise choose one here. Discovery credentials are configured separately."
     >
       <div className="settings-discovery-line">
         <p className="metadata">

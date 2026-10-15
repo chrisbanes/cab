@@ -117,7 +117,10 @@ export class ConfigurationDraft {
   private afterCommit: (() => void)[] = [];
   constructor(
     private render: () => void = () => {},
-    private onSaved: (receipt: CommandReceipt) => void = () => {},
+    private onSaved: (
+      receipt: CommandReceipt,
+      activeSelectionIds: string[],
+    ) => void = () => {},
   ) {}
   bind(render: () => void) {
     this.render = render;
@@ -348,7 +351,16 @@ export class ConfigurationDraft {
     };
     if (disposition === "recorded") {
       this.phase = "recorded";
-      if (this.receipt) this.onSaved(this.receipt);
+      if (this.receipt) {
+        // Only a source preview keeps anything of the form, and only non-private ids.
+        const active = this.values.activeSelectionIds;
+        this.onSaved(
+          this.receipt,
+          c.type === "github.preview" && Array.isArray(active)
+            ? [...active]
+            : [],
+        );
+      }
       this.savedAt = Date.now();
       this.notice = outcomeCopy.saved;
     } else if (disposition === "unknown") {
@@ -381,6 +393,8 @@ export class ConfigurationDraft {
 export interface SavedRecord {
   at: number;
   receipt: CommandReceipt;
+  /** For a source preview: the selections the page showed active when it was submitted. */
+  activeSelectionIds: string[];
 }
 export class ConfigurationDrafts {
   private drafts = new Map<string, ConfigurationDraft>();
@@ -416,8 +430,12 @@ export class ConfigurationDrafts {
   get(key: string, render: () => void) {
     let draft = this.drafts.get(key);
     if (!draft) {
-      draft = new ConfigurationDraft(render, (receipt) =>
-        this.savedRecords.set(key, { at: Date.now(), receipt }),
+      draft = new ConfigurationDraft(render, (receipt, activeSelectionIds) =>
+        this.savedRecords.set(key, {
+          at: Date.now(),
+          receipt,
+          activeSelectionIds,
+        }),
       );
       this.drafts.set(key, draft);
     }

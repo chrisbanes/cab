@@ -767,6 +767,25 @@ test("source replacement verifies repositories without diagnostic echo and obser
     f.service.domain().githubConfiguration(ids.projectId).version,
     4,
   );
+  await page
+    .getByLabel("Closed GitHub issues", { exact: true })
+    .selectOption("done");
+  await page
+    .getByText("Closed issues: Treat closure as Done", { exact: true })
+    .waitFor();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(
+    [
+      f.service.domain().githubConfiguration(ids.projectId).version,
+      f.service.domain().githubConfiguration(ids.projectId).closedIssues,
+    ],
+    [5, "done"],
+  );
+  assert.equal(
+    await page.getByLabel("Closed GitHub issues", { exact: true }).inputValue(),
+    "done",
+  );
 });
 for (const layout of [
   { name: "1366", width: 1366, height: 820, scale: 1 },
@@ -1375,7 +1394,11 @@ test("readiness validation focuses the exact invalid row with a real description
   page.setDefaultTimeout(5000);
   await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=github`);
   const labels = page.getByLabel("Ready label", { exact: true });
-  await labels.nth(0).fill("");
+  // A new project has no readiness rule; an added condition starts empty.
+  await page
+    .getByRole("button", { name: "Add readiness condition", exact: true })
+    .click();
+  assert.equal(await labels.nth(0).inputValue(), "");
   let posts = 0;
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) posts++;

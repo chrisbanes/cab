@@ -11,6 +11,8 @@ import {
   workspaceComparisonReadSchema,
   workspaceSchema,
   taskSchema,
+  readinessRuleViewSchema,
+  selectionCountsSchema,
 } from "../../src/operator/contracts.js";
 const key = "00000000-0000-4000-8000-000000000001";
 const create = {
@@ -729,6 +731,37 @@ test("runtime enablement receipts and commands name a known harness", () => {
   );
   assert.equal(
     operationScopeSchema.safeParse("system:runtime:pi").success,
+    false,
+  );
+});
+
+test("readiness rule views and selection counts are strict", () => {
+  for (const view of [
+    { kind: "none" },
+    { kind: "unavailable" },
+    { kind: "rule", mode: "any", conditions: [{ kind: "label", name: "a" }] },
+  ])
+    assert.equal(readinessRuleViewSchema.safeParse(view).success, true);
+  for (const view of [
+    { kind: "none", conditions: [] },
+    { kind: "unavailable", mode: "all" },
+    { kind: "rule", mode: "all", conditions: [] },
+  ])
+    assert.equal(readinessRuleViewSchema.safeParse(view).success, false);
+  const counts = {
+    observed: 2,
+    open: 1,
+    closedSkipped: 1,
+    matching: null,
+    complete: true,
+  };
+  assert.equal(selectionCountsSchema.safeParse(counts).success, true);
+  assert.equal(
+    selectionCountsSchema.safeParse({ ...counts, open: -1 }).success,
+    false,
+  );
+  assert.equal(
+    selectionCountsSchema.safeParse({ ...counts, total: 2 }).success,
     false,
   );
 });

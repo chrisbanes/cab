@@ -205,6 +205,7 @@ import {
 } from "./workspace-inspection.js";
 import {
   SqliteWorkspaceBindingStore,
+  type TaskWorkspaceBinding,
   type TaskWorkspaceRepositoryInput,
   type WorkspaceCleanupEvidence,
   WorkspaceManager,
@@ -469,6 +470,7 @@ function gitHubCredentialExclusions(domain: DomainStore) {
         (project) =>
           domain.githubConfiguration(String(project.id)).credentialRef,
       ),
+    ...domain.pendingCredentialReferences(),
   ];
   const excluded = references.map((ref) => credentialReferenceExclusions(ref));
   return {
@@ -1077,6 +1079,7 @@ export class StandaloneService {
         deliveryCoordinator,
       });
       await githubSynchronizer.refresh();
+      this.completeSettledProviderClosures({ githubSources, state });
       this.emitSourceHoldNotices({ githubSources, domain, coordination });
       // Nothing is published until provider reconciliation and queued-inbox
       // supersession finish; domain notifications cannot admit work.
@@ -1664,7 +1667,7 @@ export class StandaloneService {
     if (!this.harnessEnabled(harness))
       return `${executionHarnessLabels[harness]} runtime is not configured`;
     if (this.runtimeUnavailableSince.has(harness))
-      return `${executionHarnessLabels[harness]} runtime unavailable; restart the service`;
+      return `${executionHarnessLabels[harness]} runtime unavailable; turn it off and on in Settings → Runtime, or restart the service`;
     return undefined;
   }
 
@@ -2675,6 +2678,7 @@ export class StandaloneService {
     await started.deliveryCoordinator.refresh();
     await this.reconcileOwnDeliveryClosures(started);
     await started.githubSynchronizer.refresh();
+    this.completeSettledProviderClosures(started);
     this.emitSourceHoldNotices(started);
     await this.wakeScheduler();
   }
@@ -2725,6 +2729,18 @@ export class StandaloneService {
           );
         }
       }
+  }
+
+  /** Done-mode sources complete closure-held tasks once their execution has settled. */
+  private completeSettledProviderClosures({
+    githubSources,
+    state,
+  }: Pick<Started, "githubSources" | "state">): void {
+    for (const hold of githubSources.activeHolds())
+      if (hold.reason === "closed")
+        githubSources.completeFromProviderClosure(hold.taskId, () =>
+          state.taskExecutionSettled(hold.taskId),
+        );
   }
 
   private emitSourceHoldNotices({
@@ -4521,6 +4537,54 @@ export class StandaloneService {
     ];
   }
 
+  /**
+   * Whether an older held turn of this assignment was reconciled by the operator without a
+   * recorded continuation. Admission and the task read share this check.
+   */
+  recoveryContinuationUnresolved(
+    assignmentId: string,
+    excludeWorkId: string,
+  ): boolean {
+    return (
+      this.current?.coordination.hasUnresolvedRecoveryContinuation(
+        assignmentId,
+        excludeWorkId,
+      ) ?? false
+    );
+  }
+
+  /**
+   * Whether an imported task's workspace uses a repository the project no longer links
+   * exactly. Admission and the task read share this check; it defaults to the stored binding
+   * once that is ready, as admission only checks a ready workspace.
+   */
+  repositoryAccessRevoked(
+    taskId: string,
+    repositories?: TaskWorkspaceBinding["repositories"],
+  ): boolean {
+    const domain = this.domain();
+    if (!domain.importedTask(taskId)) return false;
+    if (!repositories) {
+      // As admission sees it: only a ready workspace, whose repositories are all bound.
+      // A workspace still provisioning, or whose provisioning failed, has no identity yet.
+      const binding = this.current?.workspaceBindings.get(taskId);
+      repositories = binding?.state === "ready" ? binding.repositories : [];
+    }
+    const linked = domain.githubConfiguration(
+      String(domain.task(taskId).projectId),
+    ).repositories;
+    return repositories.some(
+      (repository) =>
+        !linked.some(
+          (link) =>
+            link.repositoryId === repository.repositoryId &&
+            link.path === repository.sourcePath &&
+            link.ref === repository.ref &&
+            link.gitCommonDirectory === repository.gitCommonDir,
+        ),
+    );
+  }
+
   private async attemptRequest(
     request: TurnRequest,
     generation = this.generation,
@@ -4584,39 +4648,12 @@ export class StandaloneService {
             instructionsRevision,
             profileRevision,
           }).reasons;
-          if (
-            this.started()
-              .schedulerStore.heldWorkIds(assignmentId, request.workId)
-              .some(
-                (olderWorkId) =>
-                  this.current?.coordination.recoveryDispositionForWork(
-                    olderWorkId,
-                  ) === "operator-reconciled" &&
-                  !this.current.coordination.hasRecoveryContinuation(
-                    olderWorkId,
-                  ),
-              )
-          )
+          if (this.recoveryContinuationUnresolved(assignmentId, request.workId))
             reasons.push("recovery-continuation-unresolved");
-          if (domain.importedTask(binding.taskId)) {
-            const task = domain.task(binding.taskId);
-            const linked = domain.githubConfiguration(
-              String(task.projectId),
-            ).repositories;
-            if (
-              binding.repositories.some(
-                (repository) =>
-                  !linked.some(
-                    (link) =>
-                      link.repositoryId === repository.repositoryId &&
-                      link.path === repository.sourcePath &&
-                      link.ref === repository.ref &&
-                      link.gitCommonDirectory === repository.gitCommonDir,
-                  ),
-              )
-            )
-              reasons.push("repository-access-revoked");
-          }
+          if (
+            this.repositoryAccessRevoked(binding.taskId, binding.repositories)
+          )
+            reasons.push("repository-access-revoked");
           return reasons;
         };
       } else if (request.workspace) {

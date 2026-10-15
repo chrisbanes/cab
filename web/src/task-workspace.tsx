@@ -38,7 +38,7 @@ import {
 import { failureCause } from "./outcome-copy.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
-import { TaskFiles } from "./task-files.js";
+import { MarkdownPreview, TaskFiles } from "./task-files.js";
 import { TaskWorkspaceChanges } from "./inspection-changes.js";
 import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
@@ -234,6 +234,8 @@ export function TaskWorkspace({
   const auxInFlight = useRef<OperatorCommand | null>(null);
 
   const focusUnconfirmed = useRef(false);
+  // The control whose replayed check just settled, focused once the commit enables it.
+  const focusReplay = useRef<string | null>(null);
   // The message that follows a reply replaces the control the operator used, so it takes
   // focus: an unknown outcome, whose Send button gives way to the check, and the answer to
   // that check. Results and Changes actions never take it.
@@ -250,14 +252,15 @@ export function TaskWorkspace({
     [pending, setPending] = useState(false),
     [updates, setUpdates] = useState(false);
   const historyRequests = useRef(new Map<string, number>());
-  const invalidateHistory = () => {
+  const invalidateHistory = (clear = true) => {
     for (const [id, revision] of historyRequests.current)
       historyRequests.current.set(id, revision + 1);
-    setHistory({});
+    if (clear) setHistory({});
   };
   const replyInFlight = useRef<string | null>(null);
   const scope = useRef(true),
     anchor = useRef<{ id: string; y: number } | null>(null),
+    anchorElement = useRef<HTMLElement | null>(null),
     bottom = useRef(false),
     first = useRef(true),
     restoreReadingFocus = useRef(true),
@@ -349,6 +352,19 @@ export function TaskWorkspace({
       focusUnconfirmed.current = false;
     }
   });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new task never inherits the last one's focus request.
+  useEffect(() => {
+    focusReplay.current = null;
+  }, [taskId]);
+  useEffect(() => {
+    if (pending || !focusReplay.current) return;
+    document
+      .querySelector<HTMLElement>(
+        `[data-unconfirmed-control="${focusReplay.current}"]`,
+      )
+      ?.focus();
+    focusReplay.current = null;
+  });
   const completeSourceObservation =
     !data?.source ||
     (data.source.memberships.length > 0 &&
@@ -409,6 +425,7 @@ export function TaskWorkspace({
     const el = visible.find(
       (e) => !visible.some((child) => child !== e && e.contains(child)),
     );
+    anchorElement.current = el ?? null;
     anchor.current = el
       ? { id: el.dataset.recordId ?? "", y: el.getBoundingClientRect().top }
       : null;
@@ -446,13 +463,18 @@ export function TaskWorkspace({
     invalidateHistory();
     resource.refresh();
   };
+  // The timer read: nothing blanks or announces progress unless it fails.
+  const poll = () => {
+    capture();
+    resource.poll();
+  };
   // Manual re-reads also refresh the shell's workspace and Inbox count; the poll below does not.
   const refreshAll = () => {
     refresh();
     onRefresh?.();
   };
-  const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
+  const pollRef = useRef(poll);
+  pollRef.current = poll;
   const captureRef = useRef(capture);
   captureRef.current = capture;
   useEffect(() => {
@@ -474,7 +496,7 @@ export function TaskWorkspace({
     };
     document.addEventListener("click", leave, true);
     document.addEventListener("focusin", intentionalFocus);
-    const timer = setInterval(() => refreshRef.current(), 15000);
+    const timer = setInterval(() => pollRef.current(), 15000);
     return () => {
       scope.current = false;
       if (
@@ -593,17 +615,26 @@ export function TaskWorkspace({
     if (bottom.current) scrollTo(0, document.documentElement.scrollHeight);
     else {
       const a = anchor.current ?? state.historyAnchor,
-        el = a
-          ? [
-              ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
-            ].find((el) => el.dataset.recordId === a.id)
-          : null;
+        captured = anchorElement.current,
+        // Review contexts nest a second element with the same record id, so the first match can be the wrong one.
+        el = !a
+          ? null
+          : captured?.isConnected && captured.dataset.recordId === a.id
+            ? captured
+            : [
+                ...document.querySelectorAll<HTMLElement>("[data-record-id]"),
+              ].find((el) => el.dataset.recordId === a.id);
       if (a && el) scrollBy(0, el.getBoundingClientRect().top - a.y);
       if (newMaterial) setUpdates(true);
     }
   }, [data, histories, state, path]);
   const loadHistory = useCallback(
-    async (id: string, before?: number, beforeOmission?: number) => {
+    async (
+      id: string,
+      before?: number,
+      beforeOmission?: number,
+      keepShown = false,
+    ) => {
       const current = client.captureAuthenticationScope();
       const revision = (historyRequests.current.get(id) ?? 0) + 1;
       historyRequests.current.set(id, revision);
@@ -611,11 +642,12 @@ export function TaskWorkspace({
         scope.current &&
         current() &&
         historyRequests.current.get(id) === revision;
-      setHistory((old) => {
-        const next = { ...old };
-        delete next[id];
-        return next;
-      });
+      if (!keepShown)
+        setHistory((old) => {
+          const next = { ...old };
+          delete next[id];
+          return next;
+        });
       try {
         const itemDepth =
           (state.historyPages[id]?.length ?? 0) + (before ? 1 : 0);
@@ -757,11 +789,13 @@ export function TaskWorkspace({
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: pending/error invalidates the current history ownership before any late batch can publish.
   useEffect(() => {
+    // A timer poll never publishes pending, so only an explicit read clears what is shown.
     if (resource.state.pending || resource.state.error) {
-      invalidateHistory();
+      invalidateHistory(resource.state.pending);
       return;
     }
-    for (const a of data?.assignments ?? []) void loadHistory(a.assignmentId);
+    for (const a of data?.assignments ?? [])
+      void loadHistory(a.assignmentId, undefined, undefined, true);
   }, [data, loadHistory, resource.state.pending, resource.state.error]);
   async function command(input: OperatorCommand) {
     if (pending) return;
@@ -835,14 +869,7 @@ export function TaskWorkspace({
         state.unconfirmed = unconfirmedOf(taskId, input, outcome.code);
       } else {
         state.unconfirmed = null;
-        if (replayed)
-          requestAnimationFrame(() =>
-            document
-              .querySelector<HTMLElement>(
-                `[data-unconfirmed-control="${input.type}"]`,
-              )
-              ?.focus(),
-          );
+        if (replayed) focusReplay.current = input.type;
         if (outcome.state === "recorded") {
           if (outcome.receipt.kind === "comment-review")
             state.commentReview = outcome.receipt;
@@ -1353,7 +1380,9 @@ export function TaskWorkspace({
                 return (
                   <>
                     {brief.prose && (
-                      <p className="brief-prose">{brief.prose}</p>
+                      <div className="brief-prose">
+                        <MarkdownPreview text={brief.prose} />
+                      </div>
                     )}
                     <h4 className="small-heading">
                       Supplied acceptance criteria

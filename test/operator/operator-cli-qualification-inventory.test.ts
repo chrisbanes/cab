@@ -160,7 +160,7 @@ test("operations without a command are explicit", () => {
     "the project diagnosticCapture prepare operation is listed",
   );
   assert.equal(capture.area, "project");
-  assert.equal(capture.state, "unproved");
+  assert.equal(capture.state, "bounded");
 });
 
 test("every row names scenarios, area, existing evidence, a closed state and its gap", () => {

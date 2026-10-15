@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   executionHarnessLabels,
   runtimeSettingsSchema,
@@ -55,6 +55,8 @@ type Outcome = {
   details: ReturnType<typeof detailRows>;
   /** Resend the exact original command. */
   retry?: () => void;
+  /** The switch is off while the check is pending, so the check takes the focus. */
+  focus?: boolean;
 };
 
 /**
@@ -71,7 +73,15 @@ function RuntimeToggle(
     [outcome, setOutcome] = useState<Outcome | null>(null),
     [confirm, setConfirm] = useState<number | null>(null),
     control = useRef<HTMLInputElement>(null),
+    // The switch regains focus once the commit that re-enables it; a frame callback can run first.
+    restore = useRef(false),
     id = useId();
+  useEffect(() => {
+    if (!restore.current || pending || confirm !== null || outcome?.retry)
+      return;
+    restore.current = false;
+    control.current?.focus();
+  });
   const boundTasks = async () =>
     (
       await p.client
@@ -84,6 +94,7 @@ function RuntimeToggle(
     setPending(true);
     setConfirm(null);
     setOutcome(null);
+    restore.current = false;
     const result = await p.client.command(command, p.session.csrfToken);
     const details = (code?: string) =>
       detailRows({
@@ -106,6 +117,7 @@ function RuntimeToggle(
         message: "We couldn't confirm the change.",
         details: details(result.code),
         retry: () => void send(command),
+        focus: true,
       });
     else if (result.code === "runtime-confirmation-required") {
       const tasks = await boundTasks();
@@ -126,7 +138,7 @@ function RuntimeToggle(
         details: details(result.code),
       });
     setPending(false);
-    requestAnimationFrame(() => control.current?.focus());
+    restore.current = true;
   };
   const command = (enabled: boolean, confirmedBoundTasks?: number) =>
     ({
@@ -173,6 +185,7 @@ function RuntimeToggle(
               onClick: outcome.retry,
             }
           }
+          focus={outcome.focus}
         />
       )}
       <Dialog

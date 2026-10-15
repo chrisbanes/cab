@@ -39,6 +39,8 @@ import {
   executionHarnessLabels,
   executionIntentStateSchema,
 } from "../core/execution-runtime.js";
+import type { Readiness } from "../core/github-source-contracts.js";
+import type { TaskReadiness } from "../core/github-source.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
@@ -124,7 +126,6 @@ import {
 } from "./execution-diagnostics.js";
 import {
   credentialReferenceExclusions,
-  detectGh,
   GhLoginScope,
   type GhOptions,
   ghEnvironment,
@@ -180,6 +181,7 @@ import {
   workspaceInspectionPathsExcluded,
 } from "./workspace-inspection.js";
 
+type ReadinessByTask = ReadonlyMap<string, TaskReadiness>;
 type Row =
   ReturnType<StandaloneService["domain"]> extends { task(id: string): infer R }
     ? R
@@ -2148,9 +2150,10 @@ export class OperatorApi {
   }
   /**
    * The assignments waiting to run: each whose current turn request is queued, each pending
-   * assignment not yet requested, and each `refused` for stale captured revisions, which
-   * holds it until it is re-bound. Each assignment's current request only, so the read
-   * stays bounded by assignments.
+   * assignment not yet requested, each `refused` for stale captured revisions, which holds
+   * it until it is re-bound, and each held assignment whatever its last request. Only the
+   * queued or unrequested (`runtime`) run next on their profile's runtime. Each
+   * assignment's current request only, so the read stays bounded by assignments.
    */
   private nextAssignments(taskId: string) {
     return this.domain()
@@ -2160,13 +2163,14 @@ export class OperatorApi {
           String(assignment.id),
           Number(assignment.version),
         );
+        const runtime =
+          request?.state === "queued" ||
+          (assignment.state === "pending" && !request);
         const refused =
           request?.state === "held" &&
           !!request.reason?.startsWith(refusedRevisionPrefix);
-        return request?.state === "queued" ||
-          (assignment.state === "pending" && !request) ||
-          refused
-          ? [{ assignment, request, refused }]
+        return runtime || refused || assignment.state === "held"
+          ? [{ assignment, request, runtime }]
           : [];
       });
   }
@@ -2181,7 +2185,7 @@ export class OperatorApi {
     next: ReturnType<OperatorApi["nextAssignments"]>,
   ) {
     const candidates = next
-      .filter((w) => !w.refused)
+      .filter((w) => w.runtime)
       .map(({ assignment, request }) =>
         this.profileWaitFacts(
           String(assignment.profileId),
@@ -2214,13 +2218,24 @@ export class OperatorApi {
     if (!next.length) return [];
     const d = this.domain(),
       task = new Set(d.admission(taskId).reasons);
-    return next.flatMap(({ assignment }) => {
-      const reasons = d
-        .assignmentAdmission(String(assignment.id))
-        .reasons.filter((r) => !task.has(r));
+    return next.flatMap(({ assignment, request }) => {
+      const assignmentId = String(assignment.id);
+      const reasons = [
+        ...d
+          .assignmentAdmission(assignmentId)
+          .reasons.filter((r) => !task.has(r)),
+        // Scheduler-only: the same check admission runs for the queued request.
+        ...(this.service.recoveryContinuationUnresolved(
+          assignmentId,
+          request?.workId ?? "",
+        )
+          ? ["recovery-continuation-unresolved"]
+          : []),
+      ];
       return reasons.length
         ? [
             {
+              assignmentId,
               profileId: String(assignment.profileId),
               profileName: this.exact(
                 d.profile(String(assignment.profileId)).name,
@@ -2328,6 +2343,7 @@ export class OperatorApi {
       capacity:
         admission.eligible && waiting ? this.capacityWait(projectId) : null,
       powerHold: this.powerHold(),
+      repositoryAccessRevoked: this.service.repositoryAccessRevoked(taskId),
     });
   }
   private admission(taskId: string) {
@@ -2370,9 +2386,11 @@ export class OperatorApi {
     } catch {}
     return { profileId: String(project.leadProfileId), name };
   }
+  /** Collection reads pass `readiness` preloaded for all their tasks. */
   private sourceSummary(
     taskId: string,
     excluded: readonly string[] | undefined,
+    readiness?: ReadinessByTask,
   ) {
     const identity = this.identity(taskId);
     if (!identity) return null;
@@ -2396,13 +2414,56 @@ export class OperatorApi {
       number,
       url: githubIssueUrl(repositoryName, number),
       state: issue?.observedState ?? null,
+      closure: this.domain().providerClosure(taskId),
+      readiness: this.taskReadiness(
+        () => String(this.domain().task(taskId).projectId),
+        taskId,
+        excluded,
+        readiness,
+      ),
     };
   }
-  private async taskSummary(taskId: string, base?: ExclusionBase) {
-    return (await this.taskSummaryRead(taskId, base)).summary;
+  /** A stored null rule is `none`; a rule the exclusions withhold is `unavailable`. */
+  private readinessRuleView(
+    rule: Readiness | null,
+    excluded: readonly string[] | undefined,
+  ) {
+    if (rule === null) return { kind: "none" as const };
+    if (this.exact(JSON.stringify(rule), excluded) === null)
+      return { kind: "unavailable" as const };
+    return { kind: "rule" as const, ...rule };
+  }
+  private taskReadiness(
+    projectId: () => string,
+    taskId: string | undefined,
+    excluded: readonly string[] | undefined,
+    preloaded?: ReadinessByTask,
+  ) {
+    const store = this.service.githubSources(),
+      result = taskId
+        ? (preloaded ?? store.readinessByTask([taskId])).get(taskId)
+        : undefined,
+      rule = this.readinessRuleView(
+        result ? result.rule : store.readinessRule(projectId()),
+        excluded,
+      );
+    return rule.kind === "unavailable" || !result
+      ? { rule, outcome: "not-evaluated" as const, unmet: [] }
+      : { rule, outcome: result.outcome, unmet: result.unmet };
+  }
+  private async taskSummary(
+    taskId: string,
+    base?: ExclusionBase,
+    readiness?: ReadinessByTask,
+  ) {
+    return (await this.taskSummaryRead(taskId, base, readiness)).summary;
   }
   /** The summary plus the coordination view and exclusions it was derived from. */
-  private async taskSummaryRead(taskId: string, base?: ExclusionBase) {
+  private async taskSummaryRead(
+    taskId: string,
+    base?: ExclusionBase,
+    readiness?: ReadinessByTask,
+  ) {
     const d = this.domain(),
       task = d.task(taskId),
       projectId = String(task.projectId),
@@ -2479,7 +2540,7 @@ export class OperatorApi {
       execution,
       admission: this.admission(taskId),
       capacity: this.capacity(projectId),
-      source: this.sourceSummary(taskId, excluded),
+      source: this.sourceSummary(taskId, excluded, readiness),
       attention: { codes, count },
     };
     return { summary, view, excluded };
@@ -2511,7 +2572,12 @@ export class OperatorApi {
     const page = catalog.slice(index + 1, index + 1 + query.limit),
       snapshot = this.workspaceSnapshot(page.map((t) => t.id)),
       base = this.exclusionBase(),
-      tasks = await Promise.all(page.map((t) => this.taskSummary(t.id, base)));
+      readiness = this.service
+        .githubSources()
+        .readinessByTask(page.map((t) => t.id)),
+      tasks = await Promise.all(
+        page.map((t) => this.taskSummary(t.id, base, readiness)),
+      );
     this.requireWorkspaceSnapshot(snapshot);
     return taskListPageSchema.parse({
       data: {
@@ -2552,20 +2618,22 @@ export class OperatorApi {
           name: this.safe(d.profile(String(p.leadProfileId)).name, excluded),
         }
       : null;
+    const own = catalog.filter((t) => t.projectId === projectId),
+      readiness = this.service
+        .githubSources()
+        .readinessByTask(own.map((t) => t.id));
     const dependencies = await Promise.all(
-      catalog
-        .filter((t) => t.projectId === projectId)
-        .map(async (t) => {
-          const row = d.task(t.id),
-            safe = await this.exclusions(projectId, t.id, [], [], base);
-          return {
-            id: t.id,
-            title: this.safe(row.title, safe),
-            state: row.state,
-            source: this.sourceSummary(t.id, safe),
-            blocking: d.blocksDependents(t.id),
-          };
-        }),
+      own.map(async (t) => {
+        const row = d.task(t.id),
+          safe = await this.exclusions(projectId, t.id, [], [], base);
+        return {
+          id: t.id,
+          title: this.safe(row.title, safe),
+          state: row.state,
+          source: this.sourceSummary(t.id, safe, readiness),
+          blocking: d.blocksDependents(t.id),
+        };
+      }),
     );
     this.requireWorkspaceSnapshot(snapshot);
     return composerOptionsSchema.parse({
@@ -2736,7 +2804,10 @@ export class OperatorApi {
     const catalog = this.catalog();
     const tasks = catalog.map((t) => this.requireTask(t.id)),
       snapshot = this.workspaceSnapshot(catalog.map((t) => t.id)),
-      exclusionBase = this.exclusionBase();
+      exclusionBase = this.exclusionBase(),
+      readiness = this.service
+        .githubSources()
+        .readinessByTask(catalog.map((t) => t.id));
     let unavailable = false;
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]!;
@@ -2745,6 +2816,7 @@ export class OperatorApi {
         const { summary, view, excluded } = await this.taskSummaryRead(
           taskId,
           exclusionBase,
+          readiness,
         );
         if (!excluded) unavailable = true;
         const base = {
@@ -3970,6 +4042,14 @@ export class OperatorApi {
       title: this.safe(issue?.observedTitle, excluded),
       body: this.safe(issue?.observedBody, excluded),
       state: issue?.observedState ?? null,
+      closure: issue
+        ? this.domain().providerClosure(String(issue.taskId))
+        : null,
+      readiness: this.taskReadiness(
+        () => projectId,
+        issue ? String(issue.taskId) : undefined,
+        excluded,
+      ),
       memberships: store
         .memberships(identity.nodeId)
         .filter((m) => m.projectId === projectId)
@@ -4802,10 +4882,8 @@ export class OperatorApi {
             ),
             active: active.includes(s.id),
           })),
-          readiness:
-            this.exact(JSON.stringify(g.readiness), excluded) === null
-              ? null
-              : g.readiness,
+          readiness: this.readinessRuleView(g.readiness, excluded),
+          closedIssues: g.closedIssues,
           repositories: g.repositories.map((r) => ({
             repositoryId: this.safe(r.repositoryId, excluded),
             ref: this.safe(r.ref, excluded),
@@ -5068,31 +5146,52 @@ export class OperatorApi {
     const excluded = await this.exclusions();
     return sourceObservationSchema.parse({
       data: {
-        projects: projects.map(({ projectId, credential }) => ({
-          projectId,
-          credential,
-          selections: d.githubConfiguration(projectId).selections.map((s) => {
-            const sync = this.service
-              .githubSources()
-              .syncState(projectId, s.id);
-            const at =
-              sync?.refreshedAt === undefined ? null : String(sync.refreshedAt);
-            return {
-              selectionId: this.safe(s.id, excluded),
-              state:
+        projects: projects.map(({ projectId, credential }) => {
+          const readiness = this.readinessRuleView(
+              this.service.githubSources().readinessRule(projectId),
+              excluded,
+            ),
+            counted = this.service.githubSources().selectionCounts(projectId);
+          return {
+            projectId,
+            credential,
+            readiness,
+            selections: d.githubConfiguration(projectId).selections.map((s) => {
+              const store = this.service.githubSources(),
+                sync = store.syncState(projectId, s.id);
+              const at =
+                sync?.refreshedAt === undefined
+                  ? null
+                  : String(sync.refreshedAt);
+              const state =
                 excluded === undefined || !credential.usable
                   ? "unavailable"
                   : sync
                     ? sync.complete
                       ? "complete"
                       : "partial"
-                    : "never",
-              credentialReason: credential.reason,
-              lastAttemptAt: at,
-              lastSuccessfulAt: sync?.complete && credential.usable ? at : null,
-            };
-          }),
-        })),
+                    : "never";
+              // Counts only for stored reads; never and unavailable claim nothing.
+              const counts =
+                state === "complete" || state === "partial"
+                  ? (counted.get(s.id) ?? null)
+                  : null;
+              return {
+                selectionId: this.safe(s.id, excluded),
+                state,
+                credentialReason: credential.reason,
+                lastAttemptAt: at,
+                lastSuccessfulAt:
+                  sync?.complete && credential.usable ? at : null,
+                counts: counts && {
+                  ...counts,
+                  matching:
+                    readiness.kind === "unavailable" ? null : counts.matching,
+                },
+              };
+            }),
+          };
+        }),
       },
       observedAt: Date.now(),
     });
@@ -5191,10 +5290,23 @@ export class OperatorApi {
       environment: ghEnvironment(this.domain()),
     };
   }
-  /** Detects the `gh` login on every read, so the choice is offered even when unconfigured. */
+  /**
+   * Detects the `gh` login on every read, so the choice is offered even when unconfigured.
+   * `sourceGh` is the login a new project's `gh:github.com` source would use, detected in
+   * that source environment (`GH_TOKEN`/`GITHUB_TOKEN` overrides included); status only.
+   */
   async readDiscoveryStatus() {
     const ref = this.domain().discoveryCredentialReference();
-    const gh = await detectGh(this.gh());
+    const scope = new GhLoginScope();
+    const [gh, sourceGh] = await Promise.all([
+      scope.detect(this.gh()),
+      scope.detect({
+        executable: this.setup.ghExecutable,
+        environment: ghEnvironment(this.domain(), {
+          reference: "gh:github.com",
+        }),
+      }),
+    ]);
     const source = ref === null ? null : ref.startsWith("gh:") ? "gh" : "env";
     return discoveryStatusSchema.parse({
       data: {
@@ -5205,6 +5317,7 @@ export class OperatorApi {
             : ref !== null && Boolean(process.env[ref.slice(4)]),
         source,
         gh,
+        sourceGh,
       },
       observedAt: Date.now(),
     });

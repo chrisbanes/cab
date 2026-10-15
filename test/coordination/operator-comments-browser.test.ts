@@ -842,6 +842,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
             state: "partial",
             lastAttemptAt: null,
             lastSuccessfulAt: null,
+            counts: null,
           });
         await route.fulfill({ response, json: observation });
         mark(

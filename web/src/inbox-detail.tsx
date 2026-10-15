@@ -37,8 +37,8 @@ function useInboxTask(
   useEffect(() => {
     if (seen.current === observedAt) return;
     seen.current = observedAt;
-    // A slow hold read settles before the next poll replaces it.
-    if (!current.current.state.pending) void current.current.refresh();
+    // A slow hold read settles before the next poll replaces it; poll skips while one is in flight.
+    void current.current.poll();
   }, [observedAt]);
   return resource;
 }

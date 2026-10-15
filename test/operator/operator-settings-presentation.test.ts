@@ -25,7 +25,9 @@ import {
 import {
   holdPills,
   projectStateSummary,
+  readinessNextStep,
   joinNames,
+  activationLine,
   savedLine,
   settingsHeader,
 } from "../../web/src/settings-view.js";
@@ -81,9 +83,11 @@ const config = (): ProjectConfigurationData =>
         { id: "S-3", kind: "project", descriptor: "PVT_x", active: false },
       ],
       readiness: {
+        kind: "rule",
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
+      closedIssues: "skip",
       repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
     },
   }) as ProjectConfigurationData;
@@ -277,6 +281,21 @@ test("source rows, change lines and command use keep markers and never paths", (
     [{ repositoryId: "acme/atlas", ref: "main" }],
   );
   assert.equal(removesAllAccess(c.source, { repositories: "[]" }), true);
+  assert.equal(rows.closedIssues, "skip");
+  assert.equal(command.closedIssues, undefined);
+  assert.deepEqual(
+    sourceChanges(c.source, { ...values, closedIssues: "skip" }),
+    lines,
+  );
+  assert.ok(
+    sourceChanges(c.source, { ...values, closedIssues: "done" }).includes(
+      "Closed issues: Treat closure as Done",
+    ),
+  );
+  assert.equal(
+    sourceCommand(projectId, { ...values, closedIssues: "done" }).closedIssues,
+    "done",
+  );
   assert.equal(
     removesAllAccess(c.source, {
       repositories: JSON.stringify([
@@ -305,6 +324,55 @@ test("source rows, change lines and command use keep markers and never paths", (
       ],
     }).incomplete,
     true,
+  );
+});
+
+test("no readiness rule loads no condition, saves null and never clears an unavailable rule silently", () => {
+  const c = config();
+  const none = { ...c.source, readiness: { kind: "none" as const } };
+  const unavailable = {
+    ...c.source,
+    readiness: { kind: "unavailable" as const },
+  };
+  const label = JSON.stringify([
+    { kind: "label", name: "ready-for-agent", rowKey: "r" },
+  ]);
+  for (const source of [none, unavailable]) {
+    assert.deepEqual(sourceRowsFrom(source).conditions, []);
+    assert.equal(sourceRowsFrom(source).mode, "all");
+  }
+  const base = {
+    key: "k",
+    expectedVersion: "4",
+    mode: "all",
+    conditions: "[]",
+    selections: JSON.stringify(sourceRowsFrom(c.source).selections),
+    repositories: JSON.stringify(sourceRowsFrom(c.source).repositories),
+    referenceMode: "preserve",
+  };
+  const readinessLines = (source: typeof c.source, v: typeof base) =>
+    sourceChanges(source, v).filter((l) => l.startsWith("Readiness"));
+  // An unedited no-rule source has nothing to save; the mode alone is no rule.
+  assert.deepEqual(readinessLines(none, base), []);
+  assert.deepEqual(readinessLines(none, { ...base, mode: "any" }), []);
+  assert.equal(sourceCommand(projectId, base).readiness, null);
+  assert.deepEqual(readinessLines(none, { ...base, conditions: label }), [
+    "Readiness: all of 1 condition",
+  ]);
+  assert.deepEqual(
+    sourceCommand(projectId, { ...base, conditions: label }).readiness,
+    {
+      mode: "all",
+      conditions: [{ kind: "label", name: "ready-for-agent" }],
+    },
+  );
+  // Removing the last condition of a saved rule removes the rule.
+  assert.deepEqual(readinessLines(c.source, base), [
+    "Readiness: no readiness rule",
+  ]);
+  assert.deepEqual(
+    readinessLines(unavailable, { ...base, conditions: label }),
+    ["Readiness: all of 1 condition (replaces unavailable readiness)"],
   );
 });
 
@@ -401,11 +469,14 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   } as never;
   assert.equal(savedLine(3, undefined), null);
   assert.match(
-    savedLine(3, { at: Date.now(), receipt }) ?? "",
+    savedLine(3, { at: Date.now(), receipt, activeSelectionIds: [] }) ?? "",
     /^Saved \d\d:\d\d$/,
   );
   // A save at another version never reads as the current one, and no version is shown.
-  assert.equal(savedLine(4, { at: Date.now(), receipt }), null);
+  assert.equal(
+    savedLine(4, { at: Date.now(), receipt, activeSelectionIds: [] }),
+    null,
+  );
   assert.equal(joinNames(["Ada"]), "Ada");
   assert.equal(joinNames(["Ada", "Eli"]), "Ada and Eli");
   assert.equal(joinNames(["Ada", "Eli", "Bo"]), "Ada, Eli and Bo");
@@ -627,4 +698,134 @@ test("the warning colours stay legible on the page and on a warning alert", () =
   );
   assert.ok(contrast(rgb(fg[1]), rgb(page[1])) >= 4.5, "text on the page");
   assert.ok(contrast(rgb(fg[1]), surface) >= 4.5, "text on a warning alert");
+});
+
+test("the activation line claims only a confirmed preview at the loaded source version", () => {
+  const preview = (commandType = "github.preview") =>
+    ({
+      kind: "configuration",
+      key: randomUUID(),
+      recorded: true,
+      result: {
+        commandType,
+        resourceId: randomUUID(),
+        selectionId: "S-1",
+        configVersion: 3,
+        active: true,
+      },
+    }) as never;
+  const activation = (
+    wasActive: boolean,
+    over: Partial<Parameters<typeof activationLine>[0]> = {},
+  ) =>
+    activationLine({
+      saved: {
+        at: Date.now(),
+        receipt: preview(),
+        activeSelectionIds: wasActive ? ["S-1"] : [],
+      },
+      sourceVersion: 3,
+      selections: [],
+      recorded: true,
+      ...over,
+    });
+  const line = (...args: Parameters<typeof activation>) =>
+    activation(...args)?.line ?? null;
+  const next = "Tasks aren't imported until you refresh source observations.";
+  assert.equal(line(false), `Activated S-1. ${next}`);
+  assert.equal(line(true), `S-1 was already active. ${next}`);
+  // A receipt for another source version never reads as current activation.
+  assert.equal(line(false, { sourceVersion: 4 }), null);
+  assert.equal(line(false, { saved: undefined }), null);
+  assert.equal(
+    line(false, {
+      saved: {
+        at: Date.now(),
+        receipt: preview("project.configure"),
+        activeSelectionIds: [],
+      },
+    }),
+    null,
+  );
+  // After a re-read the read itself must show the selection active.
+  assert.equal(
+    line(false, {
+      recorded: false,
+      selections: [{ id: "S-1", active: false }],
+    }),
+    "Couldn't confirm that S-1 is active. Preview it again.",
+  );
+  assert.equal(
+    activation(false, {
+      recorded: false,
+      selections: [{ id: "S-1", active: false }],
+    })?.refresh,
+    false,
+  );
+  assert.equal(
+    line(false, { recorded: false, selections: [{ id: "S-1", active: true }] }),
+    `Activated S-1. ${next}`,
+  );
+  assert.equal(activation(false)?.refresh, true);
+});
+
+test("the phone summary appends stored counts and points to readiness when nothing matches", () => {
+  const c = config();
+  const observations = (
+    counts: {
+      observed: number;
+      open: number;
+      closedSkipped: number;
+      matching: number | null;
+      complete: boolean;
+    } | null,
+  ) => ({
+    projects: [
+      {
+        projectId,
+        readiness: {
+          kind: "rule" as const,
+          mode: "all" as const,
+          conditions: [{ kind: "label" as const, name: "ready" }],
+        },
+        selections: [
+          {
+            selectionId: "S-1",
+            state:
+              counts?.complete === false
+                ? ("partial" as const)
+                : ("complete" as const),
+            lastAttemptAt: null,
+            lastSuccessfulAt: null,
+            counts,
+          },
+        ],
+      },
+    ],
+  });
+  const zero = {
+    observed: 3,
+    open: 3,
+    closedSkipped: 0,
+    matching: 0,
+    complete: true,
+  };
+  const warned = projectStateSummary(c, observations(zero), []);
+  assert.equal(
+    warned.state[1],
+    "GitHub S-1 active · synced · 3 observed · 3 open · 0 match label `ready`",
+  );
+  assert.equal(warned.next, readinessNextStep);
+  const partial = projectStateSummary(
+    c,
+    observations({ ...zero, complete: false }),
+    [],
+  );
+  assert.match(
+    partial.state[1] ?? "",
+    /partial read; counts may be incomplete$/,
+  );
+  assert.equal(partial.next, "Nothing needs attention here.");
+  const none = projectStateSummary(c, observations(null), []);
+  assert.equal(none.state[1], "GitHub S-1 active · synced");
 });

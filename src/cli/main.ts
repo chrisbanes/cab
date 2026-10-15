@@ -29,7 +29,8 @@ import {
 } from "./service.js";
 import { jsonLine, terminalSafe } from "./render.js";
 import { RequestJournal } from "./request-journal.js";
-import { waitLines } from "./task-write.js";
+import { closureSuffix, waitLines } from "./task-write.js";
+import { unmetReason } from "../operator/readiness-text.js";
 import { connectionOrigin, ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 import { rejectUnusedFlags } from "./write.js";
@@ -179,6 +180,7 @@ export async function main(
         revoked: { type: "string" },
         paused: { type: "string" },
         "lead-profile": { type: "string" },
+        "diagnostic-capture": { type: "string" },
         id: { type: "string" },
         enabled: { type: "string" },
         "guidance-file": { type: "string" },
@@ -431,6 +433,7 @@ async function run(
       taskSchema,
     );
     const { task } = read.data;
+    const readiness = unmetReason(read.data.source?.readiness);
     return {
       ...session.result,
       data: read.data,
@@ -442,8 +445,9 @@ async function run(
         `${task.title ?? "(untitled)"}`,
         `Task:    ${task.id}`,
         `Project: ${task.projectId}`,
-        `State:   ${task.state}${task.ready ? " (ready)" : ""}`,
+        `State:   ${task.state}${closureSuffix(read.data.source?.closure)}${task.ready ? " (ready)" : ""}`,
         `Version: ${task.version}`,
+        ...(readiness ? [`Readiness: ${readiness}`] : []),
         ...waitLines(read.data.waits, task.id),
         ...(task.outcome ? ["", task.outcome] : []),
       ].join("\n"),

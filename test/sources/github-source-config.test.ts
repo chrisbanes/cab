@@ -314,12 +314,46 @@ test("operator pages distinguish GitHub sync, provenance and source holds while 
     assert.match(task, /&lt;script&gt;alert\(2\)&lt;\/script&gt;/);
     assert.doesNotMatch(project + task, /<script>|<img src=x/);
     assert.doesNotMatch(project + task, /ENSEMBLE_TEST_GITHUB|fixture-token/);
+    assert.match(project, /1 observed · 1 open · 1 match any of label `ready`/);
+    assert.doesNotMatch(project, /No open item matches/);
+    // The label is removed on GitHub: nothing matches and the task names why.
+    sources.reconcileSelection(projectId, "repo", {
+      complete: true,
+      issues: [
+        {
+          providerInstance: "github.com",
+          nodeId: "I_1",
+          repositoryId: "R_1",
+          repositoryName: "org/repo",
+          number: 1,
+          title: "<img src=x onerror=alert(1)>",
+          body: "<script>alert(2)</script>",
+          state: "open",
+          labels: [],
+          projectFields: [],
+        },
+      ],
+      reason: null,
+    });
+    const unmatched = ui.project(projectId);
+    assert.match(
+      unmatched,
+      /1 observed · 1 open · 0 match any of label `ready`\. No open item matches the readiness rule \(any of label `ready`\); imported tasks stay Draft until one does\. <a href="#github-readiness">Check readiness conditions<\/a>/,
+    );
+    assert.match(unmatched, /<div id="github-readiness">/);
+    assert.match(ui.task(taskId), /Not ready \(needs any of label `ready`\)/);
+    assert.doesNotMatch(ui.task(localId), /needs any of/);
     sources.reconcileSelection(projectId, "repo", {
       complete: false,
       issues: [],
       reason: "http-403",
     });
     assert.match(ui.project(projectId), /repo.*partial: http-403/i);
+    assert.match(
+      ui.project(projectId),
+      /partial read; counts may be incomplete/,
+    );
+    assert.doesNotMatch(ui.project(projectId), /No open item matches/);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
@@ -964,6 +998,7 @@ test("verified GitHub command duplicates share correlation and replay without re
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
+      closedIssues: "skip",
       repositories: [
         {
           repositoryId: "R_1",
@@ -1004,12 +1039,312 @@ test("existing standalone projects acquire inactive source configuration on migr
       name: "Existing",
       leadProfileId: null,
     });
+    const rawReadiness = (id: string) =>
+      String(
+        (
+          db
+            .prepare(
+              "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+            )
+            .get(id) as { readiness: string }
+        ).readiness,
+      );
+    // A new project stores no readiness rule, not a hardcoded label.
+    assert.equal(rawReadiness(projectId), "null");
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
     db.prepare("DELETE FROM project_github_sources WHERE projectId = ?").run(
       projectId,
     );
     domain.migrate();
     assert.equal(domain.githubConfiguration(projectId).version, 1);
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    assert.equal(rawReadiness(projectId), "null");
     assert.deepEqual(domain.githubActiveSelectionIds(projectId), []);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("saved readiness rules, including label ready, are untouched by migration and restart", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-saved-rules-"));
+  const file = join(root, "db.sqlite");
+  let db = new DatabaseSync(file);
+  const rules = {
+    [randomUUID()]:
+      '{"mode":"all","conditions":[{"kind":"label","name":"ready"}]}',
+    [randomUUID()]:
+      '{"mode":"any","conditions":[{"kind":"label","name":"ready-for-agent"}]}',
+  };
+  const raw = () =>
+    Object.keys(rules).map((id) =>
+      String(
+        (
+          db
+            .prepare(
+              "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+            )
+            .get(id) as { readiness: string }
+        ).readiness,
+      ),
+    );
+  try {
+    new Store(db).ensureHost("test");
+    let domain = new DomainStore(db);
+    domain.migrate();
+    for (const [projectId, rule] of Object.entries(rules)) {
+      domain.execute({
+        type: "project.create",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        name: projectId,
+        leadProfileId: null,
+      });
+      // Rows written before no-rule defaults, stored exactly as they were.
+      db.prepare(
+        "UPDATE project_github_sources SET readiness = ? WHERE projectId = ?",
+      ).run(rule, projectId);
+    }
+    domain.migrate();
+    assert.deepEqual(raw(), Object.values(rules));
+    db.close();
+    db = new DatabaseSync(file);
+    domain = new DomainStore(db);
+    new Store(db).ensureHost("test");
+    domain.migrate();
+    assert.deepEqual(raw(), Object.values(rules));
+    assert.deepEqual(
+      Object.keys(rules).map((id) => domain.githubConfiguration(id).readiness),
+      Object.values(rules).map((rule) => JSON.parse(rule) as unknown),
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readiness rule is added, removed and re-added through keyed, versioned configuration", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-readiness-cycle-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Cycle",
+      leadProfileId: null,
+    });
+    const rule = {
+      mode: "all" as const,
+      conditions: [{ kind: "label" as const, name: "ready" }],
+    };
+    const configure = (
+      expectedVersion: number,
+      readiness: typeof rule | null,
+      key: string = randomUUID(),
+    ) =>
+      domain.execute({
+        type: "github.configure",
+        actor: "operator",
+        key,
+        projectId,
+        expectedVersion,
+        credentialRef: null,
+        selections: [],
+        readiness,
+        repositories: [],
+      });
+    configure(1, rule);
+    assert.deepEqual(domain.githubConfiguration(projectId).readiness, rule);
+    const key = randomUUID();
+    const removed = configure(2, null, key);
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    assert.equal(domain.githubConfiguration(projectId).version, 3);
+    // An exact keyed replay of the removal returns its receipt without another bump.
+    assert.deepEqual(configure(2, null, key), removed);
+    assert.equal(domain.githubConfiguration(projectId).version, 3);
+    assert.throws(() => configure(2, rule), /Version conflict/);
+    configure(3, rule);
+    assert.deepEqual(domain.githubConfiguration(projectId).readiness, rule);
+    assert.equal(domain.githubConfiguration(projectId).version, 4);
+    // No-rule is only ever null, never an empty condition list.
+    assert.throws(() => configure(4, { mode: "all", conditions: [] as never }));
+    assert.equal(domain.githubConfiguration(projectId).version, 4);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the HTML project page names the readiness state and its form removes or sets a rule", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-readiness-html-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Html",
+      leadProfileId: null,
+    });
+    const ui = new LocalOperatorUi(domain);
+    const noRule =
+      /No readiness rule: open issues in active selections are not filtered/;
+    assert.match(ui.project(projectId), noRule);
+    assert.match(
+      ui.project(projectId),
+      /<textarea name="readiness">null<\/textarea>/,
+    );
+    const submit = (readiness: string) =>
+      ui.submit({
+        type: "github.configure",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: String(domain.githubConfiguration(projectId).version),
+        selections: "[]",
+        readiness,
+        repositories: "[]",
+      });
+    await submit(
+      JSON.stringify({
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready-for-agent" }],
+      }),
+    );
+    assert.match(
+      ui.project(projectId),
+      /Readiness rule: label `ready-for-agent`\./,
+    );
+    await submit("null");
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    assert.equal(domain.githubConfiguration(projectId).version, 3);
+    assert.match(ui.project(projectId), noRule);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("closed-issue mode defaults to skip and changes only through keyed, versioned configuration", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-mode-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Modes",
+      leadProfileId: null,
+    });
+    assert.equal(domain.githubConfiguration(projectId).closedIssues, "skip");
+    // A source saved before the mode existed reads as skip without a rewrite.
+    db.exec("ALTER TABLE project_github_sources DROP COLUMN closedIssues");
+    domain.migrate();
+    const legacy = domain.githubConfiguration(projectId);
+    assert.equal(legacy.closedIssues, "skip");
+    assert.equal(legacy.version, 1);
+
+    const configure = (
+      key: string,
+      expectedVersion: number,
+      closedIssues?: "skip" | "done",
+    ) =>
+      domain.execute({
+        type: "github.configure",
+        actor: "operator",
+        key,
+        projectId,
+        expectedVersion,
+        credentialRef: null,
+        selections: [],
+        readiness: {
+          mode: "all",
+          conditions: [{ kind: "label", name: "ready" }],
+        },
+        ...(closedIssues ? { closedIssues } : {}),
+        repositories: [],
+      });
+    const key = randomUUID();
+    configure(key, 1, "done");
+    assert.deepEqual(
+      [
+        domain.githubConfiguration(projectId).version,
+        domain.githubConfiguration(projectId).closedIssues,
+      ],
+      [2, "done"],
+    );
+    configure(key, 1, "done");
+    assert.equal(domain.githubConfiguration(projectId).version, 2);
+    assert.throws(() => configure(randomUUID(), 1, "skip"));
+    configure(randomUUID(), 2);
+    assert.deepEqual(
+      [
+        domain.githubConfiguration(projectId).version,
+        domain.githubConfiguration(projectId).closedIssues,
+      ],
+      [3, "done"],
+    );
+    assert.throws(() =>
+      db
+        .prepare(
+          "UPDATE project_github_sources SET closedIssues = 'closed' WHERE projectId = ?",
+        )
+        .run(projectId),
+    );
+    // The HTML fallback shows and saves the mode through the same command.
+    const ui = new LocalOperatorUi(domain);
+    assert.match(
+      ui.project(projectId),
+      /<select name="closedIssues">.*<option value="done" selected>Treat closure as Done<\/option>/,
+    );
+    const form = {
+      type: "github.configure",
+      projectId,
+      sourceCredentialMode: "keep",
+      selections: "[]",
+      readiness: JSON.stringify({
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      }),
+      repositories: "[]",
+    };
+    await assert.rejects(
+      ui.submit({
+        ...form,
+        key: randomUUID(),
+        expectedVersion: "3",
+        closedIssues: "closed",
+      }),
+    );
+    await ui.submit({
+      ...form,
+      key: randomUUID(),
+      expectedVersion: "3",
+      closedIssues: "skip",
+    });
+    assert.deepEqual(
+      [
+        domain.githubConfiguration(projectId).version,
+        domain.githubConfiguration(projectId).closedIssues,
+      ],
+      [4, "skip"],
+    );
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });
