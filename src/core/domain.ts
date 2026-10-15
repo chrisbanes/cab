@@ -416,6 +416,23 @@ export class DomainStore {
     private readonly verifyRepository: RepositoryVerifier = unconfiguredVerifier,
   ) {}
 
+  /** Credential references a command selected but has not recorded yet; see select. */
+  private readonly selecting: string[] = [];
+
+  /** Helpers exclude these as if recorded: verification Git runs before the command commits. */
+  pendingCredentialReferences(): readonly string[] {
+    return [...this.selecting];
+  }
+
+  /** Marks `credentialRef` selected until `release()`; spans verification through commit. */
+  private select(credentialRef: string | null | undefined) {
+    if (!credentialRef) return () => {};
+    this.selecting.push(credentialRef);
+    return () => {
+      this.selecting.splice(this.selecting.indexOf(credentialRef), 1);
+    };
+  }
+
   migrate(): void {
     new TaskReviewStore(this.db).migrate();
     new DeliveryStore(this.db).migrate();
@@ -714,41 +731,47 @@ export class DomainStore {
       return prior.result;
     }
     this.operator(command);
-    this.version(
-      { version: this.githubConfiguration(command.projectId).version },
-      command.expectedVersion,
-    );
-    const saved = this.githubConfiguration(command.projectId).repositories;
-    let verified: LinkedRepository[];
+    const release = this.select(command.credentialRef);
     try {
-      verified = await Promise.all(
-        // Async, so a missing saved path rejects like a failed verification instead of
-        // throwing past `Promise.all` and leaving earlier verifications unhandled.
-        command.repositories.map(async (link) => {
-          // A link without `path` keeps the saved path for that repository.
-          const path =
-            link.path ??
-            saved.find((item) => item.repositoryId === link.repositoryId)?.path;
-          if (path === undefined) throw new Error("No saved repository path");
-          return parseLinkedRepositoryResult(
-            await this.verifyRepository({ ...link, path }),
-          );
-        }),
+      this.version(
+        { version: this.githubConfiguration(command.projectId).version },
+        command.expectedVersion,
       );
-    } catch (error) {
-      if (error instanceof CommandResultValidationError) throw error;
-      throw new DomainPolicyError(
-        "invalid-input",
-        "Repository verification failed",
-        ["repositories"],
-      );
+      const saved = this.githubConfiguration(command.projectId).repositories;
+      let verified: LinkedRepository[];
+      try {
+        verified = await Promise.all(
+          // Async, so a missing saved path rejects like a failed verification instead of
+          // throwing past `Promise.all` and leaving earlier verifications unhandled.
+          command.repositories.map(async (link) => {
+            // A link without `path` keeps the saved path for that repository.
+            const path =
+              link.path ??
+              saved.find((item) => item.repositoryId === link.repositoryId)
+                ?.path;
+            if (path === undefined) throw new Error("No saved repository path");
+            return parseLinkedRepositoryResult(
+              await this.verifyRepository({ ...link, path }),
+            );
+          }),
+        );
+      } catch (error) {
+        if (error instanceof CommandResultValidationError) throw error;
+        throw new DomainPolicyError(
+          "invalid-input",
+          "Repository verification failed",
+          ["repositories"],
+        );
+      }
+      const outcome = this.executeParsed(command, verified);
+      if (outcome.type !== "github.configure")
+        throw new CommandResultValidationError(
+          "GitHub configuration result has the wrong command type",
+        );
+      return outcome.result;
+    } finally {
+      release();
     }
-    const outcome = this.executeParsed(command, verified);
-    if (outcome.type !== "github.configure")
-      throw new CommandResultValidationError(
-        "GitHub configuration result has the wrong command type",
-      );
-    return outcome.result;
   }
 
   /** Guided setup: verify every repository, then record the whole project in one transaction. */
@@ -772,42 +795,51 @@ export class DomainStore {
       return prior.result;
     }
     this.operator(command);
-    const verified: LinkedRepository[] = [];
-    // In order, so the first failing row is the one reported; nothing is recorded on failure.
-    for (const [index, link] of (command.repositories ?? []).entries()) {
-      try {
-        const repository = parseLinkedRepositoryResult(
-          await this.verifyRepository(
-            { repositoryId: link.repositoryId, path: link.path, ref: link.ref },
-            { owner: link.owner, name: link.name },
-          ),
-        );
-        verified.push({
-          repositoryId: repository.repositoryId,
-          path: repository.path,
-          ref: repository.ref,
-          gitCommonDirectory: repository.gitCommonDirectory,
-        });
-      } catch (error) {
-        if (error instanceof CommandResultValidationError) throw error;
-        const field =
-          error instanceof RepositoryVerificationError &&
-          error.reason === "ref-unavailable"
-            ? "ref"
-            : "path";
-        throw new DomainPolicyError(
-          "invalid-input",
-          "Repository verification failed",
-          [`repositories.${index}.${field}`],
-        );
+    const release = this.select(command.sourceCredentialRef);
+    try {
+      const verified: LinkedRepository[] = [];
+      // In order, so the first failing row is the one reported; nothing is recorded on failure.
+      for (const [index, link] of (command.repositories ?? []).entries()) {
+        try {
+          const repository = parseLinkedRepositoryResult(
+            await this.verifyRepository(
+              {
+                repositoryId: link.repositoryId,
+                path: link.path,
+                ref: link.ref,
+              },
+              { owner: link.owner, name: link.name },
+            ),
+          );
+          verified.push({
+            repositoryId: repository.repositoryId,
+            path: repository.path,
+            ref: repository.ref,
+            gitCommonDirectory: repository.gitCommonDirectory,
+          });
+        } catch (error) {
+          if (error instanceof CommandResultValidationError) throw error;
+          const field =
+            error instanceof RepositoryVerificationError &&
+            error.reason === "ref-unavailable"
+              ? "ref"
+              : "path";
+          throw new DomainPolicyError(
+            "invalid-input",
+            "Repository verification failed",
+            [`repositories.${index}.${field}`],
+          );
+        }
       }
+      const outcome = this.executeParsed(command, verified);
+      if (outcome.type !== "project.create")
+        throw new CommandResultValidationError(
+          "Project creation result has the wrong command type",
+        );
+      return outcome.result;
+    } finally {
+      release();
     }
-    const outcome = this.executeParsed(command, verified);
-    if (outcome.type !== "project.create")
-      throw new CommandResultValidationError(
-        "Project creation result has the wrong command type",
-      );
-    return outcome.result;
   }
 
   discoveryCredentialReference(): string | null {

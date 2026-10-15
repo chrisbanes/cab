@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
@@ -431,4 +440,76 @@ test("post-commit notification failure of a guided create stays unknown and repl
       .filter((p) => p.name === "Atlas").length,
     1,
   );
+});
+
+test("verification Git never inherits a credential the command selects before it is recorded", async (t) => {
+  const { f, api } = await setupWorld(t);
+  const shim = await mkdtemp(join(tmpdir(), "ensemble-git-credential-"));
+  t.after(() => rm(shim, { recursive: true, force: true }));
+  const log = join(shim, "seen");
+  const real = execFileSync("/usr/bin/which", ["git"], {
+    encoding: "utf8",
+  }).trim();
+  // Records only which names are present, never a value.
+  await writeFile(
+    join(shim, "git"),
+    `#!/bin/sh\nfor n in GH_TOKEN GITHUB_TOKEN FIXTURE_PENDING_SOURCE; do eval "v=\\\${$n+x}"; [ -n "$v" ] && echo "$n" >> '${log}'; done; echo run >> '${log}'\nexec '${real}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  const saved = Object.fromEntries(
+    ["PATH", "GH_TOKEN", "GITHUB_TOKEN", "FIXTURE_PENDING_SOURCE"].map((k) => [
+      k,
+      process.env[k],
+    ]),
+  );
+  t.after(() => {
+    for (const [k, v] of Object.entries(saved))
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+  });
+  process.env.PATH = `${shim}:${process.env.PATH ?? ""}`;
+  process.env.GH_TOKEN = "fixture-pending-gh";
+  process.env.GITHUB_TOKEN = "fixture-pending-github";
+  process.env.FIXTURE_PENDING_SOURCE = "fixture-pending-env";
+  const created = create({
+    repositories: [atlas("~/src/atlas")],
+    sourceCredentialRef: "gh:github.com",
+  });
+  await api.execute(created);
+  const id = String(created.projectId);
+  // Unrelated until selected below, so only the configure phase is checked for it.
+  const seenBy = async () => {
+    const lines = (await readFile(log, "utf8")).trim().split("\n");
+    await rm(log);
+    return lines;
+  };
+  const creating = await seenBy();
+  assert.ok(creating.filter((line) => line === "run").length >= 2);
+  assert.deepEqual(
+    creating.filter(
+      (line) => line !== "run" && line !== "FIXTURE_PENDING_SOURCE",
+    ),
+    [],
+  );
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: id,
+    expectedVersion: 1,
+    credentialRef: "env:FIXTURE_PENDING_SOURCE",
+    selections: [],
+    readiness: f.service.domain().githubConfiguration(id).readiness,
+    repositories: [{ repositoryId: "R_atlas", ref: "main" }],
+  });
+  const configuring = await seenBy();
+  assert.ok(configuring.includes("run"));
+  assert.deepEqual(
+    configuring.filter((line) => line !== "run"),
+    [],
+  );
+  assert.equal(
+    f.service.domain().githubConfiguration(id).credentialRef,
+    "env:FIXTURE_PENDING_SOURCE",
+  );
+  assert.deepEqual(f.service.domain().pendingCredentialReferences(), []);
 });

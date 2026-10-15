@@ -54,6 +54,9 @@ delivery credentials and the Claude token are:
   reused for reads or persisted. Each resolved token is bounded to 512 bytes;
   distinct rotations grow this exclusion-only memory until service restart.
 
+A source reference that a create or source save selects is excluded the same way
+while that command verifies its repositories, before it is recorded.
+
 A Codex runtime keeps the environment it was spawned with, so a reference set
 while it runs is excluded from it after the next service restart.
 
