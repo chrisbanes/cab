@@ -596,59 +596,184 @@
   --state-border: var(--ok-border);
 }
 
-/* Board: collapsed 150px empty columns, 360px minimum for the rest, 12px gaps, radius 14. */
+/* Board (04-tasks-board): equal columns with a 140px floor, so seven fit one 1366 screen;
+   anything wider scrolls inside .board-columns only. */
 .column-navigation {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-8);
+  gap: var(--space-4);
+  width: fit-content;
+  max-width: 100%;
+  padding: var(--space-4);
   margin-bottom: var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
 }
 
 .column-tab {
   min-width: 0;
-  color: var(--muted-foreground);
+  color: var(--fg-2);
 }
 
 .column-tab[aria-pressed="true"] {
+  background: var(--overlay);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--foreground);
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
+}
+
+.column-tab[data-attention="true"] {
+  color: var(--risk);
 }
 
 .board-columns {
+  --board-column-min: 140px;
   display: flex;
-  gap: var(--space-12);
+  align-items: stretch;
+  gap: 10px;
   overflow-x: auto;
   max-width: 100%;
-  padding-bottom: var(--space-12);
+  padding-bottom: var(--space-8);
 }
 
 .board-column {
-  flex: 1 0 360px;
-  min-width: 0;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: var(--board-column-min);
   padding: var(--space-8);
+  border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background: var(--card);
+  background: var(--surface);
 }
 
-.board-column[data-empty="true"] {
-  flex: 0 0 150px;
+#column-Uncertain:not([data-empty]) {
+  border-color: var(--risk-border);
 }
 
-.board-column h2 {
-  margin: var(--space-4) var(--space-4) var(--space-12);
+.board-column-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 2px 4px 4px;
+  font-size: var(--type-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.board-column-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.board-column-name svg {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  color: var(--idle);
+}
+
+.board-column:not([data-empty]) .board-column-name[data-column="Running"],
+.board-column:not([data-empty]) .board-column-name[data-column="Running"] svg {
+  color: var(--accent-text);
+}
+
+.board-column:not([data-empty]) .board-column-name[data-column="Uncertain"],
+.board-column:not([data-empty])
+  .board-column-name[data-column="Uncertain"]
+  svg {
+  color: var(--risk);
+}
+
+.board-column-count {
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-regular);
 }
 
 .board-column > p {
   margin: 0 var(--space-4);
 }
 
+/* An empty column is a 44px labelled rail: count, then name and sentence read vertically. */
+@media (min-width: 760px) {
+  .board-column[data-empty="true"] {
+    flex: 0 0 44px;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 10px 0;
+  }
+
+  .board-column[data-empty="true"] .board-column-heading {
+    flex-direction: column-reverse;
+    gap: 10px;
+    padding: 0;
+  }
+
+  .board-column[data-empty="true"] .board-column-name,
+  .board-column[data-empty="true"] > p {
+    writing-mode: vertical-rl;
+  }
+
+  /* The bounded block length wraps a long sentence onto a second vertical line. */
+  .board-column[data-empty="true"] > p {
+    max-height: 10rem;
+    margin: 0;
+  }
+}
+
 .task-card {
   position: relative;
-  gap: var(--space-8);
-  padding: var(--space-12);
-  margin-bottom: var(--space-12);
-  background: var(--background);
+  gap: 6px;
+  padding: 10px;
+  border-color: var(--line-strong);
+  background: var(--raised);
+  font-size: var(--type-xs);
   overflow-wrap: anywhere;
+}
+
+.task-card[data-tone="attention"] {
+  border-color: var(--attn-border);
+}
+
+.task-card[data-tone="risk"] {
+  border-color: var(--risk-border);
+}
+
+.task-card .body {
+  font-size: var(--type-xs);
+}
+
+/* A narrow card wraps the chip below the title rather than squeezing the title. */
+.task-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.task-card .task-title {
+  flex: 1 1 8rem;
+  min-width: 0;
+  font-size: var(--type-sm);
+  font-weight: var(--weight-medium);
+}
+
+.task-card .task-state {
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+}
+
+.task-card .task-state.phone-only {
+  display: none;
 }
 
 .task-card .task-title::after {
@@ -666,6 +791,10 @@
   z-index: 1;
 }
 
+.task-identity {
+  font-family: var(--font-mono);
+}
+
 .task-card .task-project-metadata a {
   display: inline-flex;
   align-items: center;
@@ -677,32 +806,16 @@
   height: 12px;
 }
 
+.task-card-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 6px;
+  color: var(--fg-3);
+}
+
 .task-request {
   font-weight: var(--weight-medium);
-}
-
-.task-card-lead {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  margin-top: var(--space-4);
-  padding-top: var(--space-12);
-  border-top: 1px solid var(--border);
-}
-
-.task-avatar {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--secondary);
-}
-
-.task-card-mark {
-  width: 14px;
-  height: 14px;
-  margin-left: auto;
 }
 
 .phone-column-controls {
@@ -711,10 +824,6 @@
 
 .board-footer {
   margin: var(--space-4) 0 0;
-}
-
-.board-footer-narrow {
-  display: none;
 }
 
 /* Between the phone and the sidebar layouts the title keeps at least 200px. */
@@ -825,15 +934,26 @@
   .column-navigation {
     display: grid;
     grid-template-columns: repeat(3, minmax(44px, 1fr));
+    gap: 6px;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: none;
   }
 
   .column-tab {
     padding-inline: var(--space-4);
+    border: 1px solid var(--border);
     font-size: var(--type-xs);
   }
 
   .column-tab[aria-pressed="true"] {
-    border-color: var(--foreground);
+    border-color: var(--accent-border);
+    box-shadow: none;
+  }
+
+  .task-card .task-state.phone-only {
+    display: inline-flex;
   }
 
   .board-columns {
@@ -846,11 +966,7 @@
   }
 
   .board-column.selected-column {
-    display: block;
-  }
-
-  .board-column[data-empty="true"] {
-    flex: none;
+    display: flex;
   }
 
   .phone-column-controls {
@@ -862,13 +978,5 @@
 
   .phone-column-controls [data-slot="button"] {
     flex: 0 1 auto;
-  }
-
-  .board-footer-wide {
-    display: none;
-  }
-
-  .board-footer-narrow {
-    display: inline;
   }
 }

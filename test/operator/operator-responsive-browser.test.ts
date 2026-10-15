@@ -90,6 +90,7 @@ async function runResponsiveBrowserJourney(
   const routes = {
     overview: "/app",
     tasks: "/app/tasks",
+    board: "/app/tasks?view=board",
     project: `/app/projects/${question.projectId}`,
     inbox: "/app/inbox",
     question: `/app/tasks/${question.taskId}?request=${question.interactionId}`,
@@ -151,6 +152,12 @@ async function runResponsiveBrowserJourney(
       await page.locator("main h1").first().waitFor();
       if (route === "tasks" || route === "project" || route === "overview")
         await page.locator(".task-title").first().waitFor();
+      // A phone Board shows one column, which may hold no task.
+      if (route === "board")
+        await page
+          .locator(".board-columns [data-task-id]")
+          .first()
+          .waitFor({ state: "attached" });
       if (route === "overview")
         await page
           .locator(".overview-card input[type=radio]")

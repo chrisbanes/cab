@@ -350,6 +350,10 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   await signIn(page, web.origin, web.password, "/app/tasks?view=board");
   const card = page.locator(`[data-task-id="${a.taskId}"] .task-title`);
   await card.waitFor();
+  // Columns and rails now fit one 1366 screen; widen them so the board still scrolls.
+  await page.addStyleTag({
+    content: ".board-columns .board-column{min-width:600px !important}",
+  });
   const board = page.locator(".board-columns");
   await board.evaluate((e) => {
     e.scrollLeft = e.scrollWidth;

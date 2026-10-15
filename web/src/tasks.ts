@@ -226,6 +226,12 @@ export function taskNext(task: TaskListSummary) {
   if (column === "Cancelled") return "Next: none · history retained";
   return "No operator decision";
 }
+/** One rule for "Next: you": the row and card text and the card's attention tone. */
+export const operatorNext = (task: TaskListSummary) =>
+  taskNext(task).startsWith("Next: you");
+/** Ready work that admission holds (dependency, blocker, lead), shown in Waiting with its Ready label. */
+export const readyButBlocked = (task: TaskListSummary) =>
+  taskColumn(task) === "Waiting" && task.ready && !task.admission.eligible;
 const plural = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 export function taskRouteSubtitle(
   kind: "overview" | "tasks" | "project",
