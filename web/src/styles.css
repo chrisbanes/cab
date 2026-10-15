@@ -277,14 +277,21 @@ p {
   flex: 1;
 }
 
+/* One bounded line: long names truncate so status and New task stay in the bar. */
 .top-bar-trail ol {
   display: flex;
-  flex-wrap: wrap;
   gap: var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
   color: var(--fg-3);
+}
+
+.top-bar-trail li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .top-bar-trail li + li::before {

@@ -122,6 +122,29 @@ test("production shell keeps direct task links usable and the navigation drawer 
   }
   await captureBrowserEvidence(page, "1121-shell-sidebar-threshold");
 
+  // An unbroken 512-character name stays on one line inside the 48px top bar.
+  const topBar = await page.evaluate(() => {
+    const current = document.querySelector<HTMLElement>(
+      '.top-bar-trail [aria-current="page"]',
+    );
+    if (current) current.textContent = "x".repeat(512);
+    const bar = document.querySelector<HTMLElement>(".top-bar");
+    const action = bar?.querySelector<HTMLElement>(":scope > a");
+    return {
+      height: bar?.getBoundingClientRect().height,
+      overflowX: (bar?.scrollWidth ?? 0) - (bar?.clientWidth ?? 0),
+      overflowY: (bar?.scrollHeight ?? 0) - (bar?.clientHeight ?? 0),
+      actionRight: action?.getBoundingClientRect().right ?? Infinity,
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  });
+  assert.equal(topBar.height, 48);
+  assert.ok(
+    topBar.overflowX <= 0 && topBar.overflowY <= 0,
+    JSON.stringify(topBar),
+  );
+  assert.ok(topBar.actionRight <= topBar.viewportWidth, JSON.stringify(topBar));
+
   // A directly loaded task's Back returns to its project; the header has no menu.
   await page.setViewportSize({ width: 390, height: 844 });
   const back = page.getByRole("link", {

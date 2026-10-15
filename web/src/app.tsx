@@ -283,6 +283,7 @@ function SearchWorkField({ navigate }: { navigate: (path: string) => void }) {
           aria-label="Search work"
           aria-keyshortcuts="Meta+K Control+K"
           placeholder="Search work"
+          maxLength={256}
           className="body"
         />
         <span className="kbd identifier" aria-hidden="true">
