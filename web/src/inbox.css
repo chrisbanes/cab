@@ -327,6 +327,10 @@
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
 }
+.inbox-detail .inbox-approval-facts dd {
+  font-size: 13px;
+  line-height: 18px;
+}
 .inbox-detail .inbox-approval-facts dt {
   font-family: inherit;
   font-size: 11px;
