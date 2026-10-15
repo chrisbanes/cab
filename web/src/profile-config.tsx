@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { CircleCheck } from "lucide-react";
 import { profileConfigurationSchema } from "../../src/operator/contracts.js";
 import {
   ActionLink,
@@ -347,7 +348,10 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
       {data && (
         <>
           <p className="settings-status body muted">
-            <StatusBadge tone={data.profile.revoked ? "warning" : "neutral"}>
+            <StatusBadge
+              tone={data.profile.revoked ? "warning" : "idle"}
+              icon={data.profile.revoked ? undefined : CircleCheck}
+            >
               {data.profile.revoked ? "Revoked" : "Available"}
             </StatusBadge>{" "}
             Current revision {data.profile.version}.{" "}

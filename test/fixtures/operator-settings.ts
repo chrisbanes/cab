@@ -287,16 +287,14 @@ export const unpairedBadges = (
   scope: Page | Locator,
   allowed = /^(Matches |New repository link$|\d+ unresolved$)/,
 ) =>
-  scope
-    .locator('[data-slot="badge"]')
-    .evaluateAll(
-      (es, source) =>
-        es
-          .filter((e) => !e.querySelector('svg[aria-hidden="true"]'))
-          .map((e) => e.textContent ?? "")
-          .filter((t) => !new RegExp(source).test(t)),
-      allowed.source,
-    );
+  scope.locator('[data-slot="badge"]').evaluateAll(
+    (es, source) =>
+      es
+        .filter((e) => !e.querySelector('svg[aria-hidden="true"]'))
+        .map((e) => e.textContent ?? "")
+        .filter((t) => !new RegExp(source).test(t)),
+    allowed.source,
+  );
 /** The breadcrumb as read aloud: its items joined by the drawn separator. */
 export const trail = (page: Page) =>
   page

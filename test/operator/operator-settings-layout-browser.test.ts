@@ -87,6 +87,13 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
   const text = await page.locator("body").innerText();
   for (const secret of ["PRIVATE", "FIXTURE_GITHUB", "atlas-checkout"])
     assert.equal(text.includes(secret), false, secret);
+  // Every state badge on the index pairs a symbol with its word; counts and labels do not.
+  assert.deepEqual(await unpairedBadges(main), []);
+  await assertPausedBadgeIdle(projects);
+  const revoked = profiles.getByText("Revoked", { exact: true });
+  assert.ok(
+    ((await revoked.getAttribute("class")) ?? "").includes("text-(--attn)"),
+  );
   await assertPausedBadgeIdle(
     page.getByRole("navigation", { name: "Operator navigation" }),
   );
@@ -132,6 +139,7 @@ test("Settings index is one column with 44px targets on a phone", async (_t, jou
   await page.getByRole("heading", { level: 1, name: "Settings" }).waitFor();
   await page.getByText("7 profiles · 1 revoked").waitFor();
   await page.getByText("Lead: Mira").waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await noPageOverflow(page);
   const columns = await page
     .locator(".settings-index")

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { Circle, CirclePause, CircleSlash } from "lucide-react";
 import {
   executionHarnessLabels,
   runtimeSettingsSchema,
@@ -364,7 +365,10 @@ export function RuntimeSettings(p: SettingsProps) {
                             ? "error"
                             : h.state === "available"
                               ? "success"
-                              : "neutral"
+                              : "idle"
+                        }
+                        icon={
+                          h.state === "not-configured" ? CircleSlash : undefined
                         }
                       >
                         {harnessStateLabel[h.state]}
@@ -401,7 +405,16 @@ export function RuntimeSettings(p: SettingsProps) {
                         {r.project.name ?? "Project"} ·{" "}
                         {task.title ?? "Task title unavailable"}
                       </h3>
-                      <StatusBadge tone={task.held ? "warning" : "neutral"}>
+                      <StatusBadge
+                        tone={task.held ? "warning" : "idle"}
+                        icon={
+                          task.held
+                            ? undefined
+                            : task.paused
+                              ? CirclePause
+                              : Circle
+                        }
+                      >
                         {task.held
                           ? "Execution hold recorded"
                           : task.paused
@@ -480,7 +493,7 @@ export function AssignmentRecovery(
       {data && (
         <>
           <p className="settings-status body muted">
-            <StatusBadge tone={data.held ? "warning" : "neutral"}>
+            <StatusBadge tone={data.held ? "warning" : "idle"}>
               {data.held ? "Execution held" : "No unresolved hold reported"}
             </StatusBadge>{" "}
             {data.assignment.name ?? "Profile name unavailable"} in{" "}

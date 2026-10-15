@@ -8,6 +8,7 @@ import {
 const test = browserSuite("operator-account-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { unpairedBadges } from "../fixtures/operator-settings.js";
 
 const viewports = [
   { name: "desktop", width: 1366, height: 900 },
@@ -614,6 +615,8 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   await page
     .getByRole("heading", { name: "Getting started", exact: true })
     .waitFor();
+  // Next is the one checklist state without a symbol: it is the call to act, not a state.
+  assert.deepEqual(await unpairedBadges(checklist, /^Next$/), []);
   // A lost reply is an unknown outcome; Check whether it saved resends it exactly.
   await page.route("**/api/operator/commands", (route) => route.abort());
   await checklist.getByRole("button", { name: "Dismiss", exact: true }).click();

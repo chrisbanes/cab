@@ -2,6 +2,7 @@ import type { OperatorCommand } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import type { sourceObservationSchema } from "../../src/operator/contracts.js";
 import { useEffect, useState } from "react";
+import { CircleCheck } from "lucide-react";
 import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import { ObservationCounts } from "./observation-counts.js";
 import type { ResourceState } from "./resource.js";
@@ -11,6 +12,7 @@ import type { ConfigurationDraft } from "./settings-state.js";
 import {
   activationLine,
   observationLabel,
+  observationSymbol,
   sourceCredentialCopy,
 } from "./settings-view.js";
 import {
@@ -246,9 +248,16 @@ function SourceObservations(
                 {s.lastSuccessfulAt ?? "unavailable"}.
               </p>
             </div>
-            <StatusBadge>{observationLabel(s)}</StatusBadge>
+            <StatusBadge tone="idle" icon={observationSymbol(s)}>
+              {observationLabel(s)}
+            </StatusBadge>
             {selection(s.selectionId) && (
-              <StatusBadge>
+              <StatusBadge
+                tone="idle"
+                icon={
+                  selection(s.selectionId)?.active ? CircleCheck : undefined
+                }
+              >
                 {selection(s.selectionId)?.active ? "Active" : "Inactive"}
               </StatusBadge>
             )}

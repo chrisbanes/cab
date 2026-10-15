@@ -1,4 +1,11 @@
-import { CircleAlert, CircleCheck } from "lucide-react";
+import {
+  Circle,
+  CircleAlert,
+  CircleCheck,
+  CircleQuestionMark,
+  Clock,
+  type LucideIcon,
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   discoveryStatusSchema,
@@ -30,15 +37,24 @@ const badges: Record<
   {
     label: string;
     variant: "default" | "success" | "attention" | "outline";
+    icon: LucideIcon | null;
   }
 > = {
-  done: { label: "Done", variant: "success" },
-  next: { label: "Next", variant: "default" },
-  attention: { label: "Needs attention", variant: "attention" },
-  "not-started": { label: "Not started", variant: "outline" },
-  optional: { label: "Optional", variant: "outline" },
-  checking: { label: "Checking", variant: "outline" },
-  unknown: { label: "Couldn't check", variant: "outline" },
+  done: { label: "Done", variant: "success", icon: CircleCheck },
+  next: { label: "Next", variant: "default", icon: null },
+  attention: {
+    label: "Needs attention",
+    variant: "attention",
+    icon: CircleAlert,
+  },
+  "not-started": { label: "Not started", variant: "outline", icon: Circle },
+  optional: { label: "Optional", variant: "outline", icon: Circle },
+  checking: { label: "Checking", variant: "outline", icon: Clock },
+  unknown: {
+    label: "Couldn't check",
+    variant: "outline",
+    icon: CircleQuestionMark,
+  },
 };
 
 /** The draft both the page and the account menu use, so either shows the other's outcome. */
@@ -142,31 +158,33 @@ export function GettingStarted({
         </p>
       </div>
       <ol className="getting-started-rows">
-        {rows.map((row) => (
-          <li
-            key={row.id}
-            className="getting-started-row"
-            aria-label={row.title}
-          >
-            <div className="getting-started-text">
-              <h3 className="small-heading">{row.title}</h3>
-              <p className="metadata muted">{row.detail}</p>
-            </div>
-            <Badge variant={badges[row.status].variant}>
-              {row.status === "done" && <CircleCheck aria-hidden="true" />}
-              {row.status === "attention" && <CircleAlert aria-hidden="true" />}
-              {badges[row.status].label}
-            </Badge>
-            <div className="getting-started-action">
-              <RowAction
-                row={row}
-                p={{ ...p, onChanged: changed }}
-                ghDraft={ghDraft}
-                resume={resume}
-              />
-            </div>
-          </li>
-        ))}
+        {rows.map((row) => {
+          const { variant, label, icon: Icon } = badges[row.status];
+          return (
+            <li
+              key={row.id}
+              className="getting-started-row"
+              aria-label={row.title}
+            >
+              <div className="getting-started-text">
+                <h3 className="small-heading">{row.title}</h3>
+                <p className="metadata muted">{row.detail}</p>
+              </div>
+              <Badge variant={variant}>
+                {Icon && <Icon aria-hidden="true" />}
+                {label}
+              </Badge>
+              <div className="getting-started-action">
+                <RowAction
+                  row={row}
+                  p={{ ...p, onChanged: changed }}
+                  ghDraft={ghDraft}
+                  resume={resume}
+                />
+              </div>
+            </li>
+          );
+        })}
       </ol>
       <DraftMessage
         draft={ghDraft}

@@ -5,6 +5,13 @@ import {
 } from "../../src/operator/readiness-text.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { z } from "zod";
+import {
+  Circle,
+  CircleCheck,
+  CircleDashed,
+  CircleQuestionMark,
+  type LucideIcon,
+} from "lucide-react";
 import type {
   CommandReceipt,
   OperatorCommand,
@@ -191,6 +198,14 @@ export function observationLabel(o: Observation | undefined) {
   return "Unavailable";
 }
 
+/** Badge symbol for `observationLabel`: it pairs with the word, never replaces it. */
+export function observationSymbol(o: Observation | undefined): LucideIcon {
+  if (o?.state === "complete") return CircleCheck;
+  if (o?.state === "partial") return CircleDashed;
+  if (o && o.state !== "never") return CircleQuestionMark;
+  return Circle;
+}
+
 export function routingLine(r: ProjectConfigurationData["routing"]) {
   const n = r.candidateProfileIds.length;
   return r.enabled
@@ -267,7 +282,7 @@ export function projectStateSummary(
   return { state, next };
 }
 
-export type HoldTone = "warning" | "neutral";
+export type HoldTone = "warning" | "idle";
 /** The five independent holds; absence is never described as a release. */
 export function holdPills(h: {
   stop: boolean;
@@ -279,7 +294,7 @@ export function holdPills(h: {
   const pill = (label: string, on: boolean, yes: string, no: string) => ({
     label,
     value: on ? yes : no,
-    tone: (on ? "warning" : "neutral") as HoldTone,
+    tone: (on ? "warning" : "idle") as HoldTone,
   });
   return [
     pill("Operator Stop", h.stop, "Active", "Not active"),

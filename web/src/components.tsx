@@ -118,7 +118,7 @@ export function StatusBadge({
   children: ReactNode;
   tone?: keyof typeof badgeTones;
   /** Replaces the tone's default symbol. */
-  icon?: LucideIcon;
+  icon?: LucideIcon | undefined;
   className?: string;
 }) {
   const { variant, Icon: toneIcon } = badgeTones[tone];

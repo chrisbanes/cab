@@ -11,6 +11,7 @@ import {
   savedOutcome,
   startSettings,
   trail,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-runtime-recovery-browser");
@@ -33,6 +34,7 @@ test("Runtime saves a lowered capacity from a change list and lists recovery des
   await page
     .getByText("Usage 1 / effective limit 2 · Project paused", { exact: false })
     .waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await page
     .getByText(
       "may belong to a held execution; pausing or saving capacity does not release it",
@@ -145,6 +147,7 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   );
   assert.equal(read.data.omittedCount, 0);
   await page.getByText("Execution may still be active.").waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   const pills = await page
     .locator(".settings-pill")
     .evaluateAll((es) => es.map((e) => e.textContent));

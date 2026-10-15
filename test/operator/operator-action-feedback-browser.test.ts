@@ -17,6 +17,7 @@ import {
   seedImportedConflict,
   startSettings,
   resolve,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
 
@@ -583,6 +584,7 @@ test("Sync & placement marks active selections and drops the marker when the sou
   await observationRow(page, "S-1")
     .getByText("Active", { exact: true })
     .waitFor();
+  assert.deepEqual(await unpairedBadges(observationRow(page, "S-1")), []);
   assert.match((await optionText(page, "S-2")) ?? "", /· inactive$/);
   await saveSourceElsewhere(fixture);
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
