@@ -238,6 +238,7 @@ test("preview-source activates after a complete read and reports the live state"
     selectionId: "S-1",
     configVersion: version,
     active: true,
+    alreadyActive: false,
   });
   assert.equal(first.data.current.active, true);
   assert.equal(first.data.current.observation.state, "never");

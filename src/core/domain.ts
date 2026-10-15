@@ -2247,6 +2247,15 @@ export class DomainStore {
           )
         )
           throw new DomainConflictError("Unknown GitHub selection");
+        // Same transaction as the upsert, so concurrent activations see one first.
+        const alreadyActive = Boolean(
+          this.one(
+            "SELECT 1 AS present FROM project_github_active WHERE projectId = ? AND selectionId = ? AND configVersion = ?",
+            command.projectId,
+            command.selectionId,
+            config.version,
+          ),
+        );
         this.db
           .prepare(
             "INSERT INTO project_github_active (projectId, selectionId, configVersion) VALUES (?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET configVersion = excluded.configVersion",
@@ -2257,6 +2266,7 @@ export class DomainStore {
           selectionId: command.selectionId,
           configVersion: config.version,
           active: true,
+          alreadyActive,
         };
       }
       case "github.place": {

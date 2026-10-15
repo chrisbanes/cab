@@ -100,6 +100,7 @@ const cases = {
     selectionId: "selection",
     configVersion: 1,
     active: true,
+    alreadyActive: false,
   },
   "github.place": task,
   "source.review": task,
@@ -180,6 +181,7 @@ test("rejects schemas that normalize result identities", () => {
     selectionId: " selector ",
     configVersion: 1,
     active: true,
+    alreadyActive: false,
   };
   assert.throws(
     () => parseDomainCommandOutcome("github.activate", untrustedActivation),
@@ -461,6 +463,34 @@ test("legacy receipt validation preserves only the known migrated omissions", ()
       closedIssues: "closed",
     }),
   );
+
+  const activation = {
+    projectId,
+    selectionId: "selection",
+    configVersion: 1,
+    active: true as const,
+  };
+  assert.deepEqual(
+    parseDomainCommandOutcome("github.activate", activation).result,
+    activation,
+  );
+  assert.throws(() =>
+    parseFreshDomainCommandOutcome("github.activate", activation),
+  );
+  assert.equal(
+    parseFreshDomainCommandOutcome("github.activate", {
+      ...activation,
+      alreadyActive: true,
+    }).result.alreadyActive,
+    true,
+  );
+  for (const parse of [
+    parseDomainCommandOutcome,
+    parseFreshDomainCommandOutcome,
+  ])
+    assert.throws(() =>
+      parse("github.activate", { ...activation, alreadyActive: "yes" }),
+    );
 });
 
 test("keeps result variants correlated with their command key", () => {
