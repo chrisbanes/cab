@@ -1571,8 +1571,7 @@ The web app is the ground truth for these items.
   navigation beside the field. The capacity meter reads global turn usage from the
   task list, so it is absent while there are no tasks. Not found shows no
   breadcrumb or New task.
-- **Not yet adopted:** per-surface layouts — the three-pane Inbox, the task detail header, tabs and inspector, the
-  all-columns Board.
+- **Not yet adopted:** per-surface layouts — the three-pane Inbox, the task detail header, tabs and inspector.
 
 ### Question actions, composer and test matrix
 
@@ -1684,14 +1683,41 @@ Production Overview, List and Board
   where the project is already the route.
 - Active tasks is the default State, so Done and Cancelled are reached through
   "All tasks", a column name or the Completed work link.
-- Board: only the selected column tab is emphasised (the frames embolden the
-  columns in view); the footer reads "Scroll horizontally or choose a column
-  above. Empty columns are collapsed." rather than "Columns 1–3 of 6"; "task 1 of
-  3", "N more waiting tasks" and the per-card phone readiness note are not built;
-  the phone attention summary reflows the desktop bar instead of the shorter
-  two-line variant; relative age ("1h 46m ago") is omitted. Items "Check failed",
-  "repair assignment A-108" and "Repair owner unknown" need assignment and check
-  records the list summary lacks.
+- Board (`04-tasks-board`, `23-atlas-project-board`, `800f-tablet-all-projects-board`,
+  `25-phone-board-waiting`, `25b-phone-board-uncertain`): columns are equal width
+  with a 140px floor, so the seven Active columns share one screen at 1366; a
+  narrower viewport, the Overview work panel or State "All tasks" scrolls inside
+  the board only, never the page. Every empty column is a 44px rail (count, then
+  the name and its empty sentence read vertically). The column heading is the
+  state symbol and word with a mono count (Running indigo and Uncertain rose while
+  populated; a populated Uncertain column has a rose border). Cards show the title,
+  project and identity (`repository#number` in mono linking to GitHub, else "Local
+  task"), recorded reasons, the next actor, then the lead and the request response.
+  The card border is rose for uncertain ownership, amber when the next actor is
+  you, otherwise the control hairline. The column names the state, so cards carry
+  no state badge, except a "Ready" chip on Ready work that admission holds in
+  Waiting and an "Uncertain" chip on a phone, where one column shows. The segmented
+  link bar stays at every width as the reach path and keyboard route to a column;
+  Uncertain reads rose with its symbol while it has tasks. The phone keeps the
+  three-column tab grid (selected tab on the overlay with an indigo border) and
+  in-flow Previous/Next under the column. The footer reads "Columns describe
+  Ensemble work, not GitHub issue state. Cards open the task; nothing here changes
+  state, and there is no drag and drop."
+- Board differences from the frames: a Draft column follows Uncertain (not drawn);
+  the column floor is 140px rather than 176px so seven populated columns fit; cards
+  keep the Card primitive's 8px radius; the lead reads "<name> · accountable lead"
+  rather than "Lead · <name>", with no "No decision"/"No request" footer text; only
+  the selected tab is emphasised; the grouping sentence is in the footer rather than
+  the page header; Previous/Next are not a sticky bottom bar. Not built, because no
+  read carries them: "task 1 of 3", "N more waiting tasks", the per-card phone
+  readiness note, relative age ("1h 46m ago"), times, short identifiers, "Check
+  failed", "repair assigned" or "Repair owner unknown". The phone attention summary
+  reflows the desktop bar instead of the shorter two-line variant.
+- One Board serves `/app/tasks`, project routes and Overview (`?view=board`, in the
+  work panel). List/Board is a reversible presentation switch: no status mutation
+  and no drag and drop. Search results, task Back and Inbox "Open task" return to it
+  with filters, column and scroll restored. It has no notification, deep-link or
+  context-menu surface.
 - "Refresh tasks" and "More filters" (Search, Source, Readiness) are existing
   capabilities the frames do not draw.
 - There is no phone Overview or phone List frame; both phone layouts are
