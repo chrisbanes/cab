@@ -690,7 +690,7 @@ nav {
   accent-color: var(--foreground);
 }
 
-/* Bleeds to the page edges (.page padding) so the bar spans the content area. */
+/* Bleeds into the .page padding on both sides. */
 .composer-actions {
   position: sticky;
   bottom: 0;

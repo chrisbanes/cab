@@ -15,8 +15,8 @@ with project, title and outcome; one Optional settings panel (context, reference
 links, assignee and dependencies) shows a chip per supplied value or the error
 count when collapsed. Beside the fields, "If you create it now" says Starts now
 or Will wait with numbered reasons, above an "Inherited from <project>" panel,
-and a sticky bar separates on-device input from Save draft and Create and start. The board mapping and
-command/admission contracts are unchanged by them.
+and a sticky bar separates on-device input from Save draft and Create and start.
+The board mapping and command/admission contracts are unchanged by the composer.
 
 ## Creation and admission
 

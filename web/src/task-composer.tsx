@@ -515,7 +515,12 @@ export function TaskComposer({
                       key={chip.field}
                       data-invalid={chip.invalid ? "true" : undefined}
                     >
-                      {chip.invalid && <span aria-hidden="true">!</span>}
+                      {chip.invalid && (
+                        <>
+                          <span aria-hidden="true">!</span>
+                          <span className="sr-only">Error: </span>
+                        </>
+                      )}
                       {chip.text}
                     </li>
                   ))}
@@ -656,7 +661,7 @@ export function TaskComposer({
           !locked && (
             <div className="composer-actions">
               {state.savedOnDevice && (
-                <p className="metadata muted composer-saved">
+                <p className="metadata muted">
                   Unfinished input saved on this device · not yet an Ensemble
                   draft
                 </p>

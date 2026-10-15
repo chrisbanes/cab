@@ -1750,8 +1750,8 @@ as follows:
 
 Entry points: Overview, List, Board, Inbox "Open task", Search results and the
 composer receipt open the same `/app/tasks/:id` with this header and Back; the
-composer is reached from Overview, List, a project's New task, setup's ready check
-and Getting started, all opening the same `/app/tasks/new` (`?project=` is the
+composer is reached from the top bar's New task on every route, Overview, List, a
+project's New task, setup's ready check and Getting started, all opening the same `/app/tasks/new` (`?project=` is the
 only deep link). The retained
 `/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
 and linked (Advanced task controls, Execution, Requests and coordination). No

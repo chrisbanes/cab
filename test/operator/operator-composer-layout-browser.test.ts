@@ -4,7 +4,6 @@ import {
   chromium,
   webkit,
   type Browser,
-  type BrowserType,
   type Locator,
   type Page,
 } from "playwright";
@@ -582,10 +581,10 @@ test("Composer, post-create line and task detail show a power-supervision hold",
 for (const [engineName, engine] of [
   ["chromium", chromium],
   ["webkit", webkit],
-] as [string, BrowserType][])
+] as const)
   test(
     `Composer leads with Project and Title and stacks the panels on a ${engineName} phone`,
-    { browserEngine: engineName as "chromium" | "webkit" },
+    { browserEngine: engineName },
     async (_t, j) => {
       const f = await j.start("fixture.create", () =>
         createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
