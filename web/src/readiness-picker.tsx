@@ -189,7 +189,7 @@ export function ProjectFieldPicker(p: {
         "projectNodeId",
         "Readiness Project",
         "Choose a Project",
-        projects.map((x) => ({ id: x.projectNodeId, name: x.title })),
+        projects.map((x) => ({ id: x.projectNodeId, name: x.label })),
         (v) => p.onChange(selectProject(v)),
         loading && !state.projects,
       )}

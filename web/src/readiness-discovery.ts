@@ -17,7 +17,8 @@ type ReadyFields = Extract<FieldsRead, { state: "ready" }>["fields"];
 
 export interface ProjectChoice {
   projectNodeId: string;
-  title: string;
+  /** The title, with owner and number added when another listed Project shares it. */
+  label: string;
 }
 export type ConditionIds = {
   projectNodeId: string;
@@ -81,7 +82,10 @@ export function projectChoices(
   if (repositories.state === "unavailable")
     return { state: "typed", note: unavailableNote(repositories) };
   if (repositories.truncated) return { state: "typed", note: truncatedNote };
-  const projects = new Map<string, ProjectChoice>();
+  const found = new Map<
+    string,
+    { title: string; owner: string; number: number }
+  >();
   const names = linkedRepositoryNames(saved, repositories.repositories);
   for (const name of names) {
     const read = projectReads[name];
@@ -90,14 +94,25 @@ export function projectChoices(
       return { state: "typed", note: unavailableNote(read) };
     if (read.truncated) return { state: "typed", note: truncatedNote };
     for (const p of read.linked)
-      projects.set(p.projectNodeId, {
-        projectNodeId: p.projectNodeId,
-        title: p.title,
+      found.set(p.projectNodeId, {
+        title: p.title || "Untitled Project",
+        owner: read.ownerLogin,
+        number: p.number,
       });
   }
-  return projects.size
-    ? { state: "ready", projects: [...projects.values()] }
-    : { state: "typed", note: noProjectNote };
+  if (!found.size) return { state: "typed", note: noProjectNote };
+  const titles = [...found.values()].map((p) => p.title);
+  return {
+    state: "ready",
+    // An owner and number identify a Project, so they tell apart Projects that share a title.
+    projects: [...found].map(([projectNodeId, p]) => ({
+      projectNodeId,
+      label:
+        titles.filter((t) => t === p.title).length > 1
+          ? `${p.title} (${p.owner} #${p.number})`
+          : p.title,
+    })),
+  };
 }
 
 /** Whether a condition row shows name selects, waits, or keeps typed node IDs. */

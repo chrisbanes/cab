@@ -29,17 +29,18 @@ const repositories: RepositoriesRead = {
     },
   ],
 };
-const project = (id: string, title: string) => ({
+const project = (id: string, title: string, number = 1) => ({
   projectNodeId: id,
   title,
-  number: 1,
+  number,
 });
 const projects = (
   linked: ReturnType<typeof project>[],
   truncated = false,
+  ownerLogin = "acme",
 ): ProjectsRead => ({
   state: "ready",
-  ownerLogin: "acme",
+  ownerLogin,
   linked,
   owned: [project("PVT_owned", "Owned")],
   truncated,
@@ -83,7 +84,7 @@ test("saved links resolve by node ID, typed id or owner/name and unresolved link
 test("the Project list is the linked Projects only, deduplicated across repositories", () => {
   assert.deepEqual(ready, {
     state: "ready",
-    projects: [{ projectNodeId: "PVT_atlas", title: "Atlas roadmap" }],
+    projects: [{ projectNodeId: "PVT_atlas", label: "Atlas roadmap" }],
   });
   const both = projectChoices(
     repositories,
@@ -96,6 +97,49 @@ test("the Project list is the linked Projects only, deduplicated across reposito
   assert.deepEqual(
     both.state === "ready" && both.projects.map((p) => p.projectNodeId),
     ["PVT_a", "PVT_b"],
+  );
+});
+
+test("Projects that share a title are told apart by owner and number", () => {
+  const labels = (c: ReturnType<typeof projectChoices>) =>
+    c.state === "ready" ? c.projects.map((p) => p.label) : c.state;
+  const both = [{ repositoryId: "R_atlas" }, { repositoryId: "R_relay" }];
+  // Same owner: the Project number differs. Other titles stay plain.
+  assert.deepEqual(
+    labels(
+      projectChoices(repositories, saved, {
+        "Acme/Atlas": projects([
+          project("PVT_a", "Roadmap", 1),
+          project("PVT_b", "Roadmap", 2),
+          project("PVT_c", "Web", 3),
+        ]),
+      }),
+    ),
+    ["Roadmap (acme #1)", "Roadmap (acme #2)", "Web"],
+  );
+  // Across linked repositories with different owners.
+  assert.deepEqual(
+    labels(
+      projectChoices(repositories, both, {
+        "Acme/Atlas": projects([project("PVT_a", "Roadmap", 1)]),
+        "acme/relay": projects(
+          [project("PVT_x", "Roadmap", 1)],
+          false,
+          "other",
+        ),
+      }),
+    ),
+    ["Roadmap (acme #1)", "Roadmap (other #1)"],
+  );
+  // A Project linked from two repositories is listed once, without a suffix.
+  assert.deepEqual(
+    labels(
+      projectChoices(repositories, both, {
+        "Acme/Atlas": projects([project("PVT_a", "Roadmap")]),
+        "acme/relay": projects([project("PVT_a", "Roadmap")]),
+      }),
+    ),
+    ["Roadmap"],
   );
 });
 
@@ -159,7 +203,7 @@ test("a row shows selects for empty or fully listed IDs and keeps typed IDs othe
   // The Project list stays selectable while its fields load.
   assert.deepEqual(rowState(ids("PVT_atlas"), ready, {}), {
     state: "loading",
-    projects: [{ projectNodeId: "PVT_atlas", title: "Atlas roadmap" }],
+    projects: [{ projectNodeId: "PVT_atlas", label: "Atlas roadmap" }],
   });
   assert.equal(rowState(ids(), { state: "loading" }, {}).state, "loading");
   for (const unlisted of [
