@@ -221,6 +221,81 @@ test("a version-matched successful source preview activates only that selection"
   }
 });
 
+test("github.activate reports whether the selection was already active at the source version", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-activation-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    const configure = (expectedVersion: number) =>
+      domain.execute({
+        type: "github.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId,
+        expectedVersion,
+        credentialRef: "env:ENSEMBLE_TEST_GITHUB",
+        selections: ["repo", "other"].map((name) => ({
+          id: name,
+          kind: "repository" as const,
+          repositoryId: `R_${name}`,
+          owner: "org",
+          name,
+        })),
+        readiness: {
+          mode: "any",
+          conditions: [{ kind: "label", name: "ready" }],
+        },
+        repositories: [],
+      });
+    const activate = (
+      selectionId: string,
+      expectedVersion: number,
+      key = randomUUID(),
+    ) =>
+      (
+        domain.execute({
+          type: "github.activate",
+          actor: "operator",
+          key,
+          projectId,
+          selectionId,
+          expectedVersion,
+        }) as { alreadyActive?: boolean }
+      ).alreadyActive;
+    configure(1);
+    const keyA = randomUUID();
+    assert.equal(activate("repo", 2, keyA), false);
+    assert.equal(activate("repo", 2), true);
+    assert.equal(
+      activate("repo", 2, keyA),
+      false,
+      "a replay keeps the recorded value",
+    );
+    assert.equal(activate("other", 2), false, "prior state is per selection");
+    configure(2);
+    assert.equal(
+      activate("repo", 3),
+      false,
+      "a row at an older version is not active",
+    );
+    assert.equal(activate("repo", 3), true);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("operator pages distinguish GitHub sync, provenance and source holds while escaping provider text", () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-github-ui-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));

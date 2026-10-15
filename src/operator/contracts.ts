@@ -2132,6 +2132,7 @@ export const configurationReceiptSchema = z
           selectionId: z.string().min(1).max(512),
           configVersion: revision,
           active: z.literal(true),
+          alreadyActive: z.boolean().optional(),
         })
         .strict(),
       z

@@ -167,11 +167,15 @@ export function activationLine({
       line: `Couldn't confirm that ${id} is active. Preview it again.`,
       refresh: false,
     };
-  const wasActive = saved?.activeSelectionIds.includes(id);
-  return {
-    line: `${wasActive ? `${id} was already active.` : `Activated ${id}.`} ${tasksNotImported}`,
-    refresh: true,
-  };
+  // The receipt records the prior state; one from before it was recorded says nothing.
+  const { alreadyActive } = r.result;
+  const state =
+    alreadyActive === undefined
+      ? `${id} is active.`
+      : alreadyActive
+        ? `${id} was already active.`
+        : `Activated ${id}.`;
+  return { line: `${state} ${tasksNotImported}`, refresh: true };
 }
 
 /** "Ada", "Ada and Eli", "Ada, Eli and Bo". */

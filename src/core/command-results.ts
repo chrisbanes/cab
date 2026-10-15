@@ -149,8 +149,14 @@ export const githubActivationCommandResultSchema = z
     selectionId: z.string().trim().min(1).max(512),
     configVersion: positiveInteger,
     active: z.literal(true),
+    alreadyActive: z.boolean(),
   })
   .strict();
+// Receipts recorded before the prior state was reported omit it.
+const legacyGithubActivationCommandResultSchema =
+  githubActivationCommandResultSchema
+    .extend({ alreadyActive: z.boolean().optional() })
+    .strict();
 
 const numericRecord = z.record(id, positiveInteger);
 const usageRecord = z.record(id, nonnegativeInteger);
@@ -190,7 +196,7 @@ export interface DomainCommandResultMap {
   "github.configure": z.output<
     typeof legacyGithubConfigurationCommandResultSchema
   >;
-  "github.activate": z.output<typeof githubActivationCommandResultSchema>;
+  "github.activate": z.output<typeof legacyGithubActivationCommandResultSchema>;
   "github.place": z.output<typeof taskCommandResultSchema>;
   "source.review": z.output<typeof taskCommandResultSchema>;
   "assignment.create": z.output<typeof legacyAssignmentCommandResultSchema>;
@@ -329,7 +335,12 @@ function parseCommandOutcome(
     case "github.activate":
       return {
         type,
-        result: parseUnchanged(githubActivationCommandResultSchema, value),
+        result: parseUnchanged(
+          fresh
+            ? githubActivationCommandResultSchema
+            : legacyGithubActivationCommandResultSchema,
+          value,
+        ),
       };
     case "assignment.create":
     case "assignment.apply":

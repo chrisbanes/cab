@@ -103,6 +103,9 @@ export function commandReceipt(
             selectionId: outcome.result.selectionId,
             configVersion: outcome.result.configVersion,
             active: outcome.result.active,
+            ...(outcome.result.alreadyActive === undefined
+              ? {}
+              : { alreadyActive: outcome.result.alreadyActive }),
           },
         };
       case "capacity.configure":

@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
+import { type TestContext, test } from "node:test";
 import { promisify } from "node:util";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { githubConfigurationCommandSchema } from "../../src/core/github-source-contracts.js";
@@ -291,6 +291,157 @@ test("preview original activation receipt replays without provider access after 
     status: 409,
   });
   assert.equal(reads, 1);
+});
+
+async function previewFixture(
+  t: TestContext,
+  readSelection: () => Promise<{
+    complete: true;
+    issues: never[];
+    reason: null;
+  }>,
+) {
+  const reader = {
+    readSelection,
+    async readBlockers() {
+      return { complete: true, blockers: [], reason: null };
+    },
+    async readIssueStatus() {
+      return { status: "unknown" as const };
+    },
+  };
+  const f = await createOperatorFixture(null, () => reader);
+  t.after(() => f.close());
+  const build = () =>
+    new OperatorApi(f.service, [f.directory], undefined, () => reader);
+  const api = build();
+  const projectId = randomUUID();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Preview",
+    leadProfileId: null,
+  });
+  await api.execute({
+    type: "github.configure",
+    projectId,
+    selections: [
+      { id: "search", kind: "search", query: "repo:example/private" },
+    ],
+    repositories: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    credentialRef: "env:FIXTURE_PREVIEW",
+    key: randomUUID(),
+    expectedVersion: 1,
+  });
+  const preview = () => ({
+    type: "github.preview" as const,
+    key: randomUUID(),
+    projectId,
+    selectionId: "search",
+    expectedVersion: 2,
+  });
+  const read = (api: OperatorApi, key: string) =>
+    api.readOperation(
+      new URLSearchParams({
+        scope: `project:${projectId}`,
+        type: "github.preview",
+        key,
+      }),
+    );
+  return { f, api, build, projectId, preview, read };
+}
+
+test("concurrent source previews report exactly one first activation", async (t) => {
+  let reads = 0;
+  let release!: () => void;
+  const bothRead = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { f, api, projectId, preview, read } = await previewFixture(
+    t,
+    async () => {
+      if (++reads === 2) release();
+      await bothRead;
+      return { complete: true as const, issues: [], reason: null };
+    },
+  );
+  const [a, b] = [preview(), preview()];
+  const receipts = await Promise.all([api.execute(a), api.execute(b)]);
+  const flags = receipts.map((r) => {
+    assert.equal(r.kind, "configuration");
+    assert.equal(r.result.commandType, "github.preview");
+    return r.result.alreadyActive;
+  });
+  assert.deepEqual([...flags].sort(), [false, true]);
+  assert.deepEqual(f.service.domain().githubActiveSelectionIds(projectId), [
+    "search",
+  ]);
+  for (const [i, command] of [a, b].entries())
+    assert.deepEqual((await read(api, command.key)).data, {
+      state: "recorded",
+      receipt: receipts[i],
+    });
+  const third = await api.execute(preview());
+  assert.equal(
+    third.kind === "configuration" &&
+      third.result.commandType === "github.preview" &&
+      third.result.alreadyActive,
+    true,
+  );
+});
+
+test("preview lookup replays an unchanged receipt recorded before alreadyActive existed", async (t) => {
+  let reads = 0;
+  const { f, build, projectId, preview, read } = await previewFixture(
+    t,
+    async () => {
+      reads++;
+      return { complete: true as const, issues: [], reason: null };
+    },
+  );
+  const command = preview();
+  const receipt = await build().execute(command);
+  assert.equal(
+    receipt.kind === "configuration" &&
+      receipt.result.commandType === "github.preview" &&
+      receipt.result.alreadyActive,
+    false,
+  );
+  f.seedPersistedState((db) => {
+    const row = db
+      .prepare(
+        "SELECT result FROM command_receipts WHERE scope = ? AND key = ?",
+      )
+      .get(projectId, command.key) as { result: string };
+    const legacy = JSON.parse(row.result) as Record<string, unknown>;
+    delete legacy.alreadyActive;
+    db.prepare(
+      "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+    ).run(JSON.stringify(legacy), projectId, command.key);
+  });
+  await f.reopen();
+  const reopened = build();
+  const readsBefore = reads; // service start may read the active selection itself
+  const replayed = await reopened.execute(command);
+  assert.equal(reads, readsBefore);
+  assert.equal(
+    "alreadyActive" in (replayed as { result: object }).result,
+    false,
+  );
+  assert.deepEqual(
+    replayed,
+    JSON.parse(
+      JSON.stringify(receipt, (k, v) =>
+        k === "alreadyActive" ? undefined : v,
+      ),
+    ),
+  );
+  assert.deepEqual((await read(reopened, command.key)).data, {
+    state: "recorded",
+    receipt: replayed,
+  });
 });
 
 test("capacity receipts replay original limits and recovery exposes bounded independent evidence", async (t) => {

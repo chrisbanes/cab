@@ -238,6 +238,7 @@ test("preview-source activates after a complete read and reports the live state"
     selectionId: "S-1",
     configVersion: version,
     active: true,
+    alreadyActive: false,
   });
   assert.equal(first.data.current.active, true);
   assert.equal(first.data.current.observation.state, "never");
@@ -393,6 +394,69 @@ test("preview-source activates after a complete read and reports the live state"
     "github.preview",
   ]);
   assert.deepEqual(read.data.receipt, settled.data.receipt);
+});
+
+test("preview-source reports whether the selection was already active", async (t) => {
+  const w = await world(t);
+  const atlas = w.ids.atlas;
+  const version = (await w.config()).source.version as number;
+  const preview = (selection: string, ...extra: string[]) => [
+    "project",
+    "preview-source",
+    atlas,
+    "--selection",
+    selection,
+    "--expected-version",
+    String(version),
+    ...extra,
+  ];
+  const flag = (r: Json) => r.data.receipt.result.alreadyActive;
+  const human = (args: string[]) => w.h.run([...args, "--connection", "rw"]);
+
+  assert.equal(flag(await w.ok("rw", preview("S-1"))), false);
+  const replay = await human(preview("S-1"));
+  assert.match(replay.out, /Activated S-1 at source version/);
+  const repeat = await human(preview("S-1", "--request-id", randomUUID()));
+  assert.match(repeat.out, /S-1 was already active at source version/);
+
+  // Another client activated S-2 first.
+  const post = async (selectionId: string) => {
+    const r = await w.s.sessionPost("/api/operator/commands", {
+      type: "github.preview",
+      key: randomUUID(),
+      projectId: atlas,
+      selectionId,
+      expectedVersion: version,
+    });
+    assert.equal(r.status, 200);
+    return ((await r.json()) as Json).result.alreadyActive;
+  };
+  assert.equal(await post("S-2"), false);
+  assert.equal(flag(await w.ok("rw", preview("S-2"))), true);
+
+  // Concurrent activation of S-3: exactly one first.
+  const [cli, posted] = await Promise.all([
+    w.ok("rw", preview("S-3")),
+    post("S-3"),
+  ]);
+  assert.deepEqual([flag(cli), posted].sort(), [false, true]);
+
+  // A receipt recorded before the field existed makes no claim.
+  w.s.f.seedPersistedState((db) => {
+    for (const row of db
+      .prepare("SELECT key, result FROM command_receipts WHERE scope = ?")
+      .all(atlas) as { key: string; result: string }[]) {
+      const result = JSON.parse(row.result) as Json;
+      if (result.selectionId !== "S-1") continue;
+      delete result.alreadyActive;
+      db.prepare(
+        "UPDATE command_receipts SET result = ? WHERE scope = ? AND key = ?",
+      ).run(JSON.stringify(result), atlas, row.key);
+    }
+  });
+  const legacy = await human(preview("S-1"));
+  assert.equal(legacy.code, 0, legacy.out);
+  assert.doesNotMatch(legacy.out, /Activated S-1 at|already active at/);
 });
 
 test("place-task chooses a matching project once, with the domain's placement rules", async (t) => {
