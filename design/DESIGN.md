@@ -1558,9 +1558,11 @@ The web app is the ground truth for these items.
 - **Implemented:** the canvas tokens are defined in `web/src/tokens.css` and the
   shadcn names map onto them (surfaces, hairlines, indigo primary, focus, radii,
   13px controls and body). State badges use the soft fill, border and text of their
-  state colour; non-neutral badges add a symbol, and task state marks show their
-  icon and word in the state colour (Running indigo, Uncertain rose, Done emerald,
-  the rest slate). Buttons use the primary, secondary and destructive treatments.
+  state colour; every state badge pairs a symbol with its word (idle states use
+  `Circle`, `CirclePause`, `CircleCheck`, `CircleSlash`, `CircleDashed` or
+  `CircleQuestionMark`), while count and label badges carry none. Task state marks
+  show their icon and word in the state colour (Running indigo, Uncertain rose, Done
+  emerald, the rest slate). Buttons use the primary, secondary and destructive treatments.
 - **Implemented shell:** the 232px sidebar with the mark, installation name, Search
   work field (⌘K or Ctrl+K focuses it; submitting opens Search with the query),
   navigation, projects with their active-task count, a running-turns capacity meter
@@ -1852,6 +1854,11 @@ frames 114 and 118–128 as follows:
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
   execution policy" disclosure. The shell raises one alert per unavailable runtime.
+- Paused project badges are idle (slate) with a pause symbol in the sidebar, phone
+  drawer and Settings; Enabled, Available and Configured stay slate with a check,
+  and Revoked stays amber, rather than the canvas's emerald and rose. Project setup
+  has no state badge. "Next" in the getting-started checklist is the one call-to-act
+  badge without a symbol.
 
 ## Using this snapshot
 
