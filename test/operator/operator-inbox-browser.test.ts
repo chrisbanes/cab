@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { chromium, type Browser, type Page } from "playwright";
 import {
   browserSuite,
@@ -1274,4 +1275,48 @@ test("an intervention's inspector lists a pending approval on its task as a hold
   await aside
     .getByText("Execution held (approval needs a decision)", { exact: true })
     .waitFor();
+});
+
+test("an approval's inspector keeps another open approval on its task as a hold, but not the approval in view (1366)", async (_t, j) => {
+  const { page, more: approval } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnApproval(f),
+  );
+  const serveApprovals = (ids: string[]) =>
+    page.route(`**/api/operator/tasks/${approval.taskId}`, async (route) => {
+      const response = await route.fetch(),
+        body = (await response.json()) as TaskRead;
+      body.data.waits = [
+        {
+          code: "approval",
+          fix: null,
+          links: ids.map((id) => ({
+            kind: "request",
+            id,
+            label: "Review material & decide",
+          })),
+        },
+      ];
+      taskSchema.parse(body);
+      await route.fulfill({ response, json: body });
+    });
+  const aside = page.getByRole("complementary", { name: "Task context" }),
+    hold = aside.getByText("Execution held (approval needs a decision)", {
+      exact: true,
+    });
+  // The task also has another open approval: it still holds execution after this decision.
+  await serveApprovals([approval.interactionId, randomUUID()]);
+  await page.locator('.inbox-row[data-kind="approval"]').click();
+  await hold.waitFor();
+  // Only the approval in view: it is not a hold on itself.
+  await page.unrouteAll();
+  await serveApprovals([approval.interactionId]);
+  await page
+    .locator(".inbox-queue")
+    .getByRole("button", { name: "Refresh", exact: true })
+    .click();
+  await hold.waitFor({ state: "detached" });
 });

@@ -28,7 +28,7 @@ export function InboxContext({
       ? holdNotices(
           task,
           item.kind === "question" ? "answer" : "approve",
-          item.kind === "approval",
+          item.kind === "approval" ? (item.interactionId ?? item.id) : null,
         )
       : [];
   return (

@@ -84,8 +84,11 @@ const answerDetails: Record<string, string> = {
 export function holdNotices(
   task: TaskRead["data"],
   action: "approve" | "answer" = "approve",
-  /** False when the request in view is not an approval, so a pending approval is a hold too. */
-  decidingApproval = true,
+  /**
+   * The approval in view, which is not a hold on itself: its interaction id, or true for any
+   * approval. Null when the request in view is not an approval, so pending approvals hold too.
+   */
+  deciding: string | true | null = true,
 ): HoldNotice[] {
   const notices: HoldNotice[] = [],
     openBlockers = (task.source?.nativeBlockers ?? [])
@@ -148,8 +151,17 @@ export function holdNotices(
         detail: "Approving does not clear it.",
       });
     }
-    // The request being decided is not a hold on itself.
-    else if (code !== "approval" || !decidingApproval) {
+    // The request being decided is not a hold on itself; other open approvals still are.
+    else if (
+      code !== "approval" ||
+      deciding === null ||
+      (deciding !== true &&
+        task.waits
+          .find((wait) => wait.code === code)
+          ?.links.some(
+            (link) => link.kind !== "request" || link.id !== deciding,
+          ))
+    ) {
       // A wait's detail, such as an assignment's profile, says what the hold is about.
       const about = task.waits.find((wait) => wait.code === code)?.detail;
       notices.push({

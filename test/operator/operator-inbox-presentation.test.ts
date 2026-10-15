@@ -284,16 +284,38 @@ test("revoked repository access and unresolved recovery are hold notices in the 
 });
 
 test("a pending approval is a hold unless it is the approval being decided", () => {
-  const held = task([], {
-    waits: [{ code: "approval", fix: null, links: [] }],
-  } as Partial<TaskRead["data"]>);
-  // The approval in view is not a hold on itself.
-  assert.deepEqual(holdNotices(held), []);
-  // Beside an intervention or question, the pending approval still holds execution.
+  const approvalWait = (...ids: string[]) =>
+    task([], {
+      waits: [
+        {
+          code: "approval",
+          fix: null,
+          links: ids.map((id) => ({
+            kind: "request" as const,
+            id,
+            label: "Review material & decide",
+          })),
+        },
+      ],
+    } as Partial<TaskRead["data"]>);
+  const titles = (notices: ReturnType<typeof holdNotices>) =>
+      notices.map((n) => n.title),
+    held = ["Execution held (approval needs a decision)"];
+  // Any approval in view (the approval pane and Overview card) is not a hold on itself.
+  assert.deepEqual(holdNotices(approvalWait("a1")), []);
+  // The selected approval alone is not a hold; another open approval still is.
+  assert.deepEqual(holdNotices(approvalWait("a1"), "approve", "a1"), []);
   assert.deepEqual(
-    holdNotices(held, "approve", false).map((n) => n.title),
-    ["Execution held (approval needs a decision)"],
+    titles(holdNotices(approvalWait("a1", "a2"), "approve", "a1")),
+    held,
   );
+  // Beside an intervention or question, every pending approval holds execution.
+  assert.deepEqual(
+    titles(holdNotices(approvalWait("a1"), "approve", null)),
+    held,
+  );
+  // Also when the wait names no request.
+  assert.deepEqual(titles(holdNotices(approvalWait(), "approve", null)), held);
 });
 
 test("answering a question words each hold notice for answers, with the same titles and items", () => {
