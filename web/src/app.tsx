@@ -248,15 +248,21 @@ function ProjectNavigation({
     </nav>
   );
 }
-/** Sidebar Search work field: opens the retained-record search; ⌘K / Ctrl+K focuses it. */
+/** Sidebar Search work field: opens the retained-record search; ⌘K / Ctrl+K focuses it (or Search's field). */
 function SearchWorkField({ navigate }: { navigate: (path: string) => void }) {
   const input = useRef<HTMLInputElement>(null);
+  const go = useRef(navigate);
+  go.current = navigate;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        input.current?.focus();
-      }
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "k") return;
+      e.preventDefault();
+      // The drawer layouts hide this field, so the shortcut opens the Search page's field instead.
+      if (input.current?.checkVisibility()) return input.current.focus();
+      if (location.pathname !== "/app/search") go.current("/app/search");
+      requestAnimationFrame(() =>
+        document.getElementById("retained-query")?.focus(),
+      );
     };
     addEventListener("keydown", onKey);
     return () => removeEventListener("keydown", onKey);

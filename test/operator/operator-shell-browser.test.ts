@@ -503,6 +503,23 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   );
   await page.goto(`${web.origin}/app`);
   await page.locator("main.page h1").waitFor();
+  // Ctrl+K focuses the sidebar field; in the drawer layout it opens Search's own field.
+  await page.keyboard.press("Control+k");
+  assert.equal(
+    await page.evaluate(() =>
+      document.activeElement?.getAttribute("aria-label"),
+    ),
+    "Search work",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Control+k");
+  await page.waitForURL(`${web.origin}/app/search`);
+  await page.waitForFunction(
+    () => document.activeElement?.id === "retained-query",
+  );
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.goto(`${web.origin}/app`);
+  await page.locator("main.page h1").waitFor();
 
   // A failed Inbox read shows no number rather than a stale or partial one.
   await page.route("**/api/operator/inbox*", (route) =>
