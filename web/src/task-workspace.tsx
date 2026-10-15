@@ -1563,6 +1563,14 @@ export function TaskWorkspace({
                     states={questionStates}
                     onRecorded={refreshAll}
                     requesterName={requesterOf(params.get("request"))}
+                    // The card lists these once when another request is open too.
+                    holds={
+                      openRequests.some(
+                        (q) => q.interactionId !== params.get("request"),
+                      )
+                        ? []
+                        : holdNotices(data, "answer")
+                    }
                   />
                 )}
                 {openRequests
@@ -1627,6 +1635,14 @@ export function TaskWorkspace({
                     href={`/coordination/task/${taskId}`}
                   >
                     Review rejected completion
+                  </ActionLink>
+                )}
+                {nextActor.kind === "lead-review" && (
+                  <ActionLink
+                    variant="secondary"
+                    href={`/coordination/task/${taskId}`}
+                  >
+                    Review task: routing fell back to the lead
                   </ActionLink>
                 )}
                 {nextActor.kind === "uncertain" &&

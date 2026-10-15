@@ -1808,3 +1808,96 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   assert.equal(await page.locator(".inspector-divider").count(), 0);
   assert.deepEqual(commands, []);
 });
+
+test("A routing fallback to the lead names the operator in the strip and the decision card", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const d = fixture.f.service.domain(),
+    projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Fallback",
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "Unrouted task",
+    outcome: "Route this work.",
+    ready: true,
+  });
+  const { web, page, commands } = await fixture.launch();
+  // The read as the service reports a routing fallback with nothing assigned.
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.attention.routingFallbacks = [
+        {
+          eventId: randomUUID(),
+          operationId: randomUUID(),
+          reasonCode: "routing-fallback",
+          createdAt: 1,
+        },
+      ];
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${taskId}?section=history`,
+  );
+  await page
+    .locator("[data-task-strip]")
+    .getByRole("button", { name: "Next: you · review task" })
+    .click();
+  assert.equal(await selectedTab(page), "Overview");
+  const card = page.locator("section#decisions");
+  assert.equal(
+    await card
+      .getByRole("link", { name: "Review task: routing fell back to the lead" })
+      .getAttribute("href"),
+    `/coordination/task/${taskId}`,
+  );
+  assert.equal(await card.getByText("No operator decision needed.").count(), 0);
+  assert.deepEqual(commands, []);
+});
+
+test("A question opened on the task page keeps the holds an answer does not clear", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const q = await seedOwnQuestion(fixture.f, guideForm);
+  const { web, page } = await fixture.launch();
+  // An independent hold beside the only open request.
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${q.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.admission.reasons.push("task-unready");
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${q.taskId}?request=${q.interactionId}`,
+  );
+  const form = page.getByRole("region", { name: "Exact question response" });
+  await form.getByText("Recommended by Task lead", { exact: true }).waitFor();
+  const holds = page.locator("section#decisions .question-holds");
+  await holds.first().waitFor();
+  // Once, inside the selected question, in the answer's wording.
+  assert.equal(await holds.count(), 1);
+  assert.equal(await form.locator(".question-holds").count(), 1);
+  assert.match(await holds.innerText(), /Answering does not clear it\./);
+});

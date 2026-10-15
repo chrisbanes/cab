@@ -29,6 +29,8 @@ const data = (patch: Record<string, unknown> = {}) =>
     approvals: [],
     unresolvedResults: [],
     completionRequests: [],
+    assignments: [],
+    attention: { routingFallbacks: [] },
     ...patch,
   }) as unknown as Data;
 
@@ -110,6 +112,21 @@ test("taskNextActor names only recorded operator decisions", () => {
   assert.deepEqual(
     taskNextActor(data({ approvals: [{ status: "approved" }] })),
     { kind: "none", text: "No operator decision", operator: false },
+  );
+  // A routing fallback to the lead with nothing assigned is the list's lead-review.
+  const fallback = { attention: { routingFallbacks: [{ eventId: "e" }] } };
+  assert.deepEqual(taskNextActor(data(fallback)), {
+    kind: "lead-review",
+    text: "Next: you · review task",
+    operator: true,
+  });
+  assert.equal(
+    taskNextActor(data({ ...fallback, assignments: [{}] })).kind,
+    "none",
+  );
+  assert.equal(
+    taskNextActor(data({ ...fallback, questions: [open] })).kind,
+    "question",
   );
   assert.equal(
     taskNextActor(data({ task: { state: "done", version: 3 } })).text,
