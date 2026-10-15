@@ -392,15 +392,14 @@ export class LocalOperatorUi {
       ? this.githubSources?.review(String(imported.nodeId))
       : undefined;
     const readiness = imported
-      ? this.githubSources?.taskReadiness(taskId)
+      ? this.githubSources?.readinessByTask([taskId]).get(taskId)
       : undefined;
     const unmet =
       readiness &&
       unmetText({
-        rule: ruleView(
-          this.githubSources?.readinessRule(String(task.projectId)) ?? null,
-        ),
-        ...readiness,
+        rule: ruleView(readiness.rule),
+        outcome: readiness.outcome,
+        unmet: readiness.unmet,
       });
     const hold = imported
       ? this.githubSources?.hold(String(imported.nodeId))

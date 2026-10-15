@@ -4,9 +4,11 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
 
+const parseRule = (json: unknown) =>
+  readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
+
 /** Why an imported task is or is not Draft, with its project's rule. */
 export interface TaskReadiness {
-  projectId: string;
   rule: Readiness | null;
   outcome: "matched" | "unmet" | "not-evaluated";
   unmet: ReadinessCondition[];
@@ -1070,11 +1072,7 @@ export class GitHubSourceStore {
         "SELECT readiness FROM project_github_sources WHERE projectId = ?",
       )
       .get(projectId) as Row | undefined;
-    return row
-      ? readinessSchema
-          .nullable()
-          .parse(JSON.parse(String(row.readiness)) as unknown)
-      : null;
+    return row ? parseRule(row.readiness) : null;
   }
 
   /** One issue's labels and the Project fields of its memberships in its task's project. */
@@ -1207,23 +1205,21 @@ export class GitHubSourceStore {
           WHERE projectId IN (SELECT DISTINCT t.projectId FROM domain_tasks t
             WHERE t.id IN (SELECT value FROM json_each(?)))`)
           .all(ids) as Row[]
-      ).map((row) => [
-        String(row.projectId),
-        readinessSchema
-          .nullable()
-          .parse(JSON.parse(String(row.readiness)) as unknown),
-      ]),
+      ).map((row) => [String(row.projectId), parseRule(row.readiness)]),
     );
+    // The facts `readinessFacts` reads: memberships in the task's project.
+    const byIssue = new Map<string, Row[]>();
+    for (const m of memberships) {
+      const key = `${String(m.projectId)}\0${String(m.nodeId)}`;
+      byIssue.set(key, [...(byIssue.get(key) ?? []), m]);
+    }
     return new Map(
       externals.map((external): [string, TaskReadiness] => {
         const projectId = String(external.projectId),
           rule = rules.get(projectId) ?? null;
-        // The facts `readinessFacts` reads: memberships in the task's project.
-        const own = memberships.filter(
-          (m) => m.nodeId === external.nodeId && m.projectId === projectId,
-        );
+        const own =
+          byIssue.get(`${projectId}\0${String(external.nodeId)}`) ?? [];
         const notEvaluated: TaskReadiness = {
-          projectId,
           rule,
           outcome: "not-evaluated",
           unmet: [],
@@ -1244,9 +1240,8 @@ export class GitHubSourceStore {
         return [
           String(external.taskId),
           result.satisfied
-            ? { projectId, rule, outcome: "matched" as const, unmet: [] }
+            ? { rule, outcome: "matched" as const, unmet: [] }
             : {
-                projectId,
                 rule,
                 outcome: "unmet" as const,
                 unmet: result.unmet,

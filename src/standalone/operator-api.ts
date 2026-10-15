@@ -2800,7 +2800,10 @@ export class OperatorApi {
     const catalog = this.catalog();
     const tasks = catalog.map((t) => this.requireTask(t.id)),
       snapshot = this.workspaceSnapshot(catalog.map((t) => t.id)),
-      exclusionBase = this.exclusionBase();
+      exclusionBase = this.exclusionBase(),
+      readiness = this.service
+        .githubSources()
+        .readinessByTask(catalog.map((t) => t.id));
     let unavailable = false;
     for (let i = 0; i < tasks.length; i++) {
       const task = tasks[i]!;
@@ -2809,6 +2812,7 @@ export class OperatorApi {
         const { summary, view, excluded } = await this.taskSummaryRead(
           taskId,
           exclusionBase,
+          readiness,
         );
         if (!excluded) unavailable = true;
         const base = {

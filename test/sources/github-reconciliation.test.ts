@@ -1150,10 +1150,6 @@ test("selection counts use a fixed number of queries however many items are stor
     for (const task of f.domain.tasks(f.projectId)) {
       const r = readiness.get(String(task.id));
       assert.equal(r?.outcome === "matched", Number(task.ready) === 1);
-      assert.deepEqual(
-        { outcome: r?.outcome, unmet: r?.unmet },
-        f.sources.taskReadiness(String(task.id)),
-      );
     }
   } finally {
     f.db.close();

@@ -157,7 +157,8 @@ test("readiness counts and unmet reasons come from stored observations without p
     const batched = mock.method(service.githubSources(), "readinessByTask");
     await api.readTaskListPage();
     await api.readComposerOptions(projectId);
-    assert.equal(batched.mock.callCount(), 2);
+    await api.readInbox();
+    assert.equal(batched.mock.callCount(), 3);
     batched.mock.restore();
 
     failing = true;
