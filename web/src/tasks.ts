@@ -182,7 +182,8 @@ export function taskReasons(task: TaskListSummary) {
           : (reasonLabels[r] ?? "Waiting to start"),
       ),
   ];
-  if (task.source?.closure === "held") reasons.unshift("Held · closed on GitHub");
+  if (task.source?.closure === "held")
+    reasons.unshift("Held · closed on GitHub");
   if (task.source?.closure === "completed")
     reasons.unshift("Closed on GitHub, not delivered by Ensemble");
   if (task.execution.holds.stop)
