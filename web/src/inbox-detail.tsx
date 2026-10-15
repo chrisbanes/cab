@@ -7,7 +7,7 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button } from "./components.js";
-import { holdNotices } from "./inbox-presentation.js";
+import { holdNotices, requestActionLabel } from "./inbox-presentation.js";
 import { QuestionResponse } from "./question-response.js";
 import { useOperatorResource } from "./resource.js";
 import { Alert } from "./ui/alert.js";
@@ -161,15 +161,21 @@ export function ApprovalDetail({
   );
 }
 
-/** An intervention in the Inbox: the recorded reason and the way to inspect the execution. */
+/** An intervention in the Inbox: what it needs and the way to the task or its execution. */
 export function InterventionDetail({ item }: { item: InboxItem }) {
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
-        <p>Review the exact execution state before acting.</p>
+        <p>
+          {item.attentionCode === "lead-review"
+            ? "Ensemble assigns the project lead or retires the fallback on its next coordination pass; no operator decision is needed."
+            : "Review the exact execution state before acting."}
+        </p>
       </div>
       <div className="inbox-decision">
-        <ActionLink href={item.destination}>Inspect execution</ActionLink>
+        <ActionLink href={item.destination}>
+          {requestActionLabel(item)}
+        </ActionLink>
       </div>
     </div>
   );

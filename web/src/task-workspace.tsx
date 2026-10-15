@@ -1625,7 +1625,7 @@ export function TaskWorkspace({
                     Unresolved result delivery
                   </ActionLink>
                 )}
-                {nextActor.kind === "rejected-completion" && (
+                {nextActor.code === "completion-rejected" && (
                   <ActionLink
                     variant="secondary"
                     href={`/coordination/task/${taskId}`}
@@ -1633,7 +1633,7 @@ export function TaskWorkspace({
                     Review rejected completion
                   </ActionLink>
                 )}
-                {nextActor.kind === "uncertain" &&
+                {nextActor.code === "execution-uncertain" &&
                   !data.execution.holds.uncertainty && (
                     <ActionLink
                       variant="secondary"

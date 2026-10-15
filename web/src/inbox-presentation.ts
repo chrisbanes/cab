@@ -1,5 +1,6 @@
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
+import { attentionNext, nextAttention } from "../../src/operator/attention.js";
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
@@ -11,13 +12,15 @@ const kindLabels: Record<InboxItem["kind"], string> = {
 };
 export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 
-const actionLabels: Record<InboxItem["kind"], string> = {
-  question: "Answer question",
-  approval: "Review material & decide",
-  intervention: "Inspect execution",
-};
-export const requestActionLabel = (kind: InboxItem["kind"]) =>
-  actionLabels[kind];
+/** The request's action; an intervention's comes from its attention code. */
+export const requestActionLabel = (
+  item: Pick<InboxItem, "kind" | "attentionCode">,
+) =>
+  attentionNext[
+    item.kind === "intervention"
+      ? (item.attentionCode ?? "execution-uncertain")
+      : item.kind
+  ].inboxAction;
 
 /** Relative age such as "8m", "1h 46m" or "1d 1h"; a future time reads as just now. */
 export function ageLabel(createdAt: number | null, now: number) {
@@ -258,7 +261,7 @@ export function assignmentChain(
  */
 export const taskContext = (
   task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
-  item: Pick<InboxItem, "kind">,
+  item: Pick<InboxItem, "kind" | "attentionCode">,
   open: boolean,
 ) => ({
   source: !task
@@ -273,6 +276,8 @@ export const taskContext = (
       ? (task.lead.name ?? "Name unavailable")
       : "No lead configured",
   next: open
-    ? `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`
+    ? item.kind === "intervention" && item.attentionCode
+      ? (nextAttention([item.attentionCode])?.text ?? null)
+      : `Next: you · ${lowerFirst(requestActionLabel(item))}`
     : null,
 });

@@ -599,6 +599,8 @@ test("A rejected completion is a decision the strip and decision card both name"
           finalizedAt: null,
         },
       ];
+      json.data.attention.codes = ["completion-rejected"];
+      json.data.attention.count = 1;
       await route.fulfill({ response, json });
     },
   );
@@ -620,6 +622,50 @@ test("A rejected completion is a decision the strip and decision card both name"
     `/coordination/task/${a.taskId}`,
   );
   assert.equal(await card.getByText("No operator decision needed.").count(), 0);
+});
+
+test("The strip and decision card follow the server's attention codes, not a client derivation", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  let codes = ["execution-uncertain"];
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      // An uncertain execution only the server sees: idle, with no uncertainty hold.
+      json.data.execution.state = "idle";
+      json.data.execution.holds.uncertainty = false;
+      json.data.attention.codes = codes;
+      json.data.attention.count = codes.length;
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const strip = page.locator("[data-task-strip]");
+  await strip
+    .getByRole("button", { name: "Next: you · inspect execution" })
+    .click();
+  const card = page.locator("section#decisions");
+  assert.equal(
+    await card
+      .getByRole("link", { name: "Inspect uncertain execution" })
+      .getAttribute("href"),
+    `/runtime/task/${a.taskId}`,
+  );
+  // Ensemble records a routing fallback itself: plain text, never an operator button.
+  codes = ["lead-review"];
+  await page.reload();
+  await strip
+    .getByText("Next: Ensemble · recording routing fallback", { exact: true })
+    .waitFor();
+  assert.equal(
+    await strip
+      .getByRole("button", { name: /recording routing fallback/ })
+      .count(),
+    0,
+  );
 });
 
 for (const engine of [
@@ -1545,7 +1591,12 @@ test("An open approval leads Overview and stays reachable from every tab through
     async (route) => {
       const response = await route.fetch();
       const json = await response.json();
-      if (hide) json.data.approvals = [];
+      if (hide) {
+        json.data.approvals = [];
+        json.data.attention.codes = json.data.attention.codes.filter(
+          (code: string) => code !== "approval",
+        );
+      }
       // An independent hold the approval does not clear.
       else json.data.admission.reasons.push("task-unready");
       await route.fulfill({ response, json });

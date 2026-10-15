@@ -320,9 +320,7 @@ export function Inbox({
         <span className="inbox-row-reason">
           {item.reason ?? "Exact details unavailable"}
         </span>
-        <span className="inbox-row-action">
-          {requestActionLabel(item.kind)} →
-        </span>
+        <span className="inbox-row-action">{requestActionLabel(item)} →</span>
         <span className="inbox-row-meta">
           {item.requesterName ?? "Responsibility unknown"} ·{" "}
           {item.createdAt === null ? (

@@ -14,6 +14,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { CoordinationStore } from "../../src/core/coordination.js";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
+import { inboxReadSchema, taskSchema } from "../../src/operator/contracts.js";
 import { executionPolicy } from "../../src/standalone/codex.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 import { CoordinationView } from "../../src/standalone/coordination-view.js";
@@ -657,6 +658,16 @@ test("workspace reports the Codex runtime as unavailable after a runtime failure
     true,
   );
 });
+/** The task read carries exactly the List row's attention, from the same server function. */
+async function listedAttention(api: OperatorApi, taskId: string) {
+  const row = (await api.readTaskListPage()).data.tasks.find(
+    (t) => t.id === taskId,
+  );
+  assert.ok(row);
+  const { codes, count } = (await api.readTask(taskId)).data.attention;
+  assert.deepEqual({ codes, count }, row.attention);
+  return row.attention.codes;
+}
 async function seed(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
   active = false,
@@ -761,11 +772,10 @@ test("task summaries classify Stop and independent holds by type, not display re
 
   const taskSummary = async (taskId: string) => {
     const read = await api.readTask(taskId);
-    const listed = (await api.readTaskListPage()).data.tasks.find(
-      (task) => task.id === taskId,
-    );
-    assert.ok(listed);
-    return { execution: read.data.execution, codes: listed.attention.codes };
+    return {
+      execution: read.data.execution,
+      codes: await listedAttention(api, taskId),
+    };
   };
   const stop = await taskSummary(stopOnly.taskId);
   assert.equal(stop.execution.state, "stopping");
@@ -886,11 +896,10 @@ test("scoped interactions preserve exact material, revision conflicts, and origi
   const q = read.data.questions[0],
     a = read.data.approvals[0];
   assert.ok(q && a);
-  assert.deepEqual(
-    (await api.readTaskListPage()).data.tasks.find((t) => t.id === ids.taskId)
-      ?.attention.codes,
-    ["question", "approval"],
-  );
+  assert.deepEqual(await listedAttention(api, ids.taskId), [
+    "question",
+    "approval",
+  ]);
   assert.deepEqual(a.material, { version: "next" });
   assert.equal(a.approvable, true);
   const answer = {
@@ -1336,6 +1345,9 @@ test("retained ownership without a confirmed active intent and held request stay
       .run(request.workId),
   );
   let read = await api.readTask(ids.taskId);
+  assert.ok(
+    (await listedAttention(api, ids.taskId)).includes("execution-uncertain"),
+  );
   assert.equal(read.data.execution.state, "uncertain");
   assert.equal(read.data.execution.holds.writer, true);
   assert.equal(read.data.execution.holds.capacity, true);
@@ -1349,6 +1361,55 @@ test("retained ownership without a confirmed active intent and held request stay
   });
   read = await api.readTask(ids.taskId);
   assert.equal(read.data.execution.state, "uncertain");
+  assert.ok(
+    (await listedAttention(api, ids.taskId)).includes("execution-uncertain"),
+  );
+});
+test("a non-Stop task hold is execution-uncertain on the List, the task read and the Inbox", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const ids = await seed(f),
+    api = new OperatorApi(f.service, [f.directory]);
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, ?)",
+      )
+      .run(ids.taskId, "Writer ownership is unclear"),
+  );
+  const read = await api.readTask(ids.taskId);
+  assert.equal(read.data.execution.holds.uncertainty, false);
+  assert.deepEqual(await listedAttention(api, ids.taskId), [
+    "execution-uncertain",
+  ]);
+  const inbox = await api.readInbox(),
+    item = inbox.data.items.find((i) => i.taskId === ids.taskId);
+  assert.equal(item?.attentionCode, "execution-uncertain");
+  assert.equal(item?.reason, "Execution ownership is uncertain");
+  // The contract validates the new fields at runtime.
+  assert.equal(taskSchema.safeParse(read).success, true);
+  const attention = read.data.attention;
+  for (const invalid of [
+    { ...attention, codes: ["fictional"] },
+    { ...attention, codes: undefined },
+    { ...attention, count: undefined },
+  ])
+    assert.equal(
+      taskSchema.safeParse({
+        ...read,
+        data: { ...read.data, attention: invalid },
+      }).success,
+      false,
+    );
+  assert.equal(inboxReadSchema.safeParse(inbox).success, true);
+  for (const attentionCode of ["fictional", undefined])
+    assert.equal(
+      inboxReadSchema.safeParse({
+        ...inbox,
+        data: { ...inbox.data, items: [{ ...item, attentionCode }] },
+      }).success,
+      false,
+    );
 });
 test("imported projections validate provider fields and distinguish attempted sync from successful sync", async (t) => {
   const f = await createOperatorFixture();
@@ -2067,9 +2128,7 @@ test("catalog attention tracks current rejected completion and lead review, excl
       .readTask(ids.taskId)
       .completionRequests.some((c) => c.status === "rejected"),
   );
-  const codes = async (id: string) =>
-    (await api.readTaskListPage()).data.tasks.find((t) => t.id === id)
-      ?.attention.codes ?? [];
+  const codes = (id: string) => listedAttention(api, id);
   assert.ok((await codes(ids.taskId)).includes("completion-rejected"));
   f.service.domain().execute({
     type: "task.configure",
@@ -2104,6 +2163,12 @@ test("catalog attention tracks current rejected completion and lead review, excl
     });
   });
   assert.ok((await codes(other.taskId)).includes("lead-review"));
+  const intervention = (await api.readInbox()).data.items.find(
+    (i) => i.taskId === other.taskId,
+  );
+  assert.equal(intervention?.kind, "intervention");
+  assert.equal(intervention?.attentionCode, "lead-review");
+  assert.equal(intervention?.reason, "Routing fell back to the project lead");
   f.service.domain().execute({
     type: "task.configure",
     key: randomUUID(),
@@ -2118,6 +2183,149 @@ test("catalog attention tracks current rejected completion and lead review, excl
     f.service.coordinationView().readTask(other.taskId).routing.attempts.length,
     1,
   );
+});
+test("a routing fallback on a task with no project lead clears without operator action", async (t) => {
+  const f = await createOperatorFixture({
+      choose: () => Promise.reject(new Error("no candidates never asks")),
+    }),
+    d = f.service.domain(),
+    api = new OperatorApi(f.service, [f.directory]),
+    leadProfileId = randomUUID();
+  t.after(() => f.close());
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: leadProfileId,
+    name: "Lead",
+    instructions: "Coordinate",
+    capabilities: "coordination",
+  });
+  // A ready, provisioned task in an unpaused project with routing enabled and no lead.
+  const leadless = async () => {
+    const projectId = randomUUID(),
+      taskId = randomUUID();
+    d.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Leadless",
+      leadProfileId: null,
+    });
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      paused: false,
+    });
+    d.execute({
+      type: "routing.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(d.routing(projectId).version),
+      enabled: true,
+      guidance: "Route parser work.",
+      credentialRef: "env:TEST_TYPESAFE_KEY",
+      candidateProfileIds: [],
+    });
+    d.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      title: "Leadless task",
+      outcome: "Ship",
+      ready: false,
+    });
+    await f.service.provisionTask(taskId);
+    d.execute({
+      type: "task.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      taskId,
+      expectedVersion: 1,
+      ready: true,
+    });
+    return { projectId, taskId };
+  };
+  const seeded = await leadless(),
+    never = await leadless(),
+    version = Number(d.task(seeded.taskId).version),
+    attempts = (taskId: string) =>
+      f.service.coordinationView().readTask(taskId).routing.attempts;
+  assert.ok(
+    d.admission(seeded.taskId).reasons.includes("project-lead-unconfigured"),
+  );
+  // Routing recorded a fallback that Ensemble has not committed to a lead yet.
+  f.seedPersistedState((db) => {
+    const routing = new RoutingAttemptStore(db),
+      operation = routing.ensureOperation({
+        projectId: seeded.projectId,
+        taskId: seeded.taskId,
+        taskVersion: version,
+        guidanceRevision: Number(d.routing(seeded.projectId).version),
+        brief: "Ship",
+        findings: "",
+        guidance: "Route parser work.",
+        candidates: [],
+      });
+    routing.completeFallback(operation.operationId, {
+      kind: "lead-review",
+      reason: "no-candidates",
+      requestedModel: "jev-1.13.0",
+    });
+  });
+  assert.ok(
+    (await listedAttention(api, seeded.taskId)).includes("lead-review"),
+  );
+  assert.equal(
+    (await api.readInbox()).data.items.find((i) => i.taskId === seeded.taskId)
+      ?.attentionCode,
+    "lead-review",
+  );
+  // The next coordination pass, woken without a task edit, retires the fallback.
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: randomUUID(),
+    name: "Wake",
+    instructions: "Wake",
+    capabilities: "none",
+  });
+  await until(() => attempts(seeded.taskId)[0]?.status === "stale");
+  assert.equal(attempts(seeded.taskId)[0]?.staleReason, "admission-held");
+  assert.deepEqual(await listedAttention(api, seeded.taskId), []);
+  assert.equal(Number(d.task(seeded.taskId).version), version);
+  // That pass never routed a task whose project has no lead.
+  assert.deepEqual(attempts(never.taskId), []);
+  assert.deepEqual(d.routingOperations(never.taskId), []);
+  // Configuring a lead routes the never-routed task on its current version.
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: never.projectId,
+    expectedVersion: Number(d.project(never.projectId).version),
+    leadProfileId,
+  });
+  await until(() => d.assignments(never.taskId).length > 0);
+  assert.deepEqual(
+    d.routingOperations(never.taskId).map((o) => o.disposition),
+    ["lead-review:no-candidates"],
+  );
+  assert.deepEqual(
+    d.assignments(never.taskId).map((a) => String(a.profileId)),
+    [leadProfileId],
+  );
+  assert.equal(Number(d.task(never.taskId).version), version);
+  assert.deepEqual(await listedAttention(api, never.taskId), []);
 });
 test("a task read reports source review, hold and unknown source as source-held", async (t) => {
   const f = await createOperatorFixture();

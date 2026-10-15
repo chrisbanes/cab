@@ -226,7 +226,7 @@ function RequestCard({
       aria-describedby={headline}
       className="overview-respond"
     >
-      {requestActionLabel(item.kind)}
+      {requestActionLabel(item)}
     </ActionLink>
   );
   return (

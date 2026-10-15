@@ -269,6 +269,24 @@ test("headers carry the new subtitles, one New task action and the page-owned re
   await shot(page, "390-tasks-toolbar");
 });
 
+test("a routing fallback row names Ensemble as the next actor without the operator tone", async (_t, journey) => {
+  const { ids, page } = await start(journey, "/app/tasks?state=all");
+  await page.route("**/api/operator/task-list*", async (route) => {
+    const response = await route.fetch(),
+      json = await response.json();
+    for (const task of json.data.tasks)
+      if (task.id === ids.running.id)
+        task.attention = { codes: ["lead-review"], count: 1 };
+    await route.fulfill({ response, json });
+  });
+  await page.reload();
+  const next = page
+    .locator(`.task-list [data-task-id="${ids.running.id}"]`)
+    .getByText("Next: Ensemble · recording routing fallback", { exact: true });
+  await next.waitFor();
+  assert.equal(await next.getAttribute("data-operator"), null);
+});
+
 test("task rows show state, next actor and lead from recorded facts without raw identifiers", async (_t, journey) => {
   const { ids, web, page } = await start(journey, "/app/tasks?state=all");
   const row = (id: string) => page.locator(`.task-list [data-task-id="${id}"]`);

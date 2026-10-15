@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
+import { attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
   closedIssuesSchema,
@@ -62,6 +63,7 @@ const revision = z.number().int().positive().safe();
 const time = z.number().int().nonnegative().safe();
 const text = z.string().max(16000);
 const safeText = text.nullable();
+const attentionCodesSchema = z.array(attentionCodeSchema).max(6);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export type JsonValue =
   | null
@@ -878,18 +880,7 @@ export const taskListSummarySchema = z
     source: taskSourceSummarySchema,
     attention: z
       .object({
-        codes: z
-          .array(
-            z.enum([
-              "question",
-              "approval",
-              "unresolved-result",
-              "completion-rejected",
-              "execution-uncertain",
-              "lead-review",
-            ]),
-          )
-          .max(6),
+        codes: attentionCodesSchema,
         count: time,
       })
       .strict(),
@@ -1354,6 +1345,8 @@ export const taskSchema = envelope(
               })
               .strict(),
           ),
+          codes: attentionCodesSchema,
+          count: time,
         })
         .strict(),
       review: taskReviewReadSchema.optional(),
@@ -2551,6 +2544,7 @@ export const inboxItemSchema = z
     interactionId: uuid.nullable(),
     revision: revision.nullable(),
     reason: safeText,
+    attentionCode: attentionCodeSchema.nullable(),
     destination: z.string().max(512),
     evidence: z.string().max(512),
     conversation: z.string().max(512).nullable(),

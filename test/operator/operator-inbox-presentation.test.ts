@@ -44,8 +44,18 @@ test("kind and action labels cover every request kind", () => {
     ["intervention", "Intervention", "Inspect execution"],
   ] as const) {
     assert.equal(requestKindLabel(kind), label);
-    assert.equal(requestActionLabel(kind), action);
+    assert.equal(requestActionLabel({ kind, attentionCode: null }), action);
   }
+  for (const [code, action] of [
+    ["execution-uncertain", "Inspect execution"],
+    ["unresolved-result", "Inspect execution"],
+    ["completion-rejected", "Inspect execution"],
+    ["lead-review", "View task"],
+  ] as const)
+    assert.equal(
+      requestActionLabel({ kind: "intervention", attentionCode: code }),
+      action,
+    );
 });
 
 const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
@@ -63,6 +73,7 @@ const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
   revision: null,
   reason: "r",
   destination: "/",
+  attentionCode: null,
   evidence: "/",
   conversation: null,
 });
@@ -632,6 +643,19 @@ test("task context reads the source, lead and the operator's next action", () =>
     lead: "Unavailable",
     next: "Next: you · inspect execution",
   });
+  // An intervention's next actor is its attention code's, as on the List and task detail.
+  for (const [code, next] of [
+    ["execution-uncertain", "Next: you · inspect execution"],
+    ["lead-review", "Next: Ensemble · recording routing fallback"],
+  ] as const)
+    assert.equal(
+      taskContext(
+        imported,
+        { ...item("intervention", "p"), attentionCode: code },
+        true,
+      ).next,
+      next,
+    );
   // A recorded or resolved request is no longer the operator's next action.
   assert.equal(taskContext(imported, item("question", "p"), false).next, null);
 });

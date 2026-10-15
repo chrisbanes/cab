@@ -714,7 +714,7 @@ test("an approval shows its exact action, target and independent holds, and deci
   );
 });
 
-test("an intervention shows its recorded reason and links to the execution", async (_t, j) => {
+test("an intervention shows its attention code's reason and action", async (_t, j) => {
   const { page, more: held } = await openInbox(
     j,
     0,
@@ -725,11 +725,7 @@ test("an intervention shows its recorded reason and links to the execution", asy
   const detail = page.getByRole("region", { name: "Selected request" });
   await page.locator(".inbox-row").click();
   await detail.getByText("Intervention", { exact: true }).waitFor();
-  await detail
-    .getByText(
-      "Recorded intervention requires exact recovery or review; responsibility unknown",
-    )
-    .waitFor();
+  await detail.getByText("Execution ownership is uncertain").waitFor();
   assert.equal(
     await detail
       .getByRole("link", { name: "Inspect execution", exact: true })
@@ -739,6 +735,30 @@ test("an intervention shows its recorded reason and links to the execution", asy
   await captureBrowserEvidence(page, "1366-inbox-intervention", {
     fullPage: false,
   });
+  // A routing fallback is Ensemble's to record, so the Inbox only links to the task.
+  await page.route("**/api/operator/inbox*", async (route) => {
+    const response = await route.fetch(),
+      json = await response.json();
+    for (const item of json.data.items)
+      if (item.kind === "intervention")
+        Object.assign(item, {
+          attentionCode: "lead-review",
+          reason: "Routing fell back to the project lead",
+        });
+    await route.fulfill({ response, json });
+  });
+  await page.reload();
+  await page.locator(".inbox-row").click();
+  const row = page.locator(".inbox-row");
+  await row.getByText("Routing fell back to the project lead").waitFor();
+  await row.getByText("View task →").waitFor();
+  assert.equal(
+    await detail
+      .getByRole("link", { name: "View task", exact: true })
+      .getAttribute("href"),
+    `/app/tasks/${held.taskId}`,
+  );
+  assert.equal(await detail.getByText("Inspect execution").count(), 0);
 });
 
 test("returning to the Inbox restores the request the operator chose, not the one it opened by itself", async (_t, j) => {
