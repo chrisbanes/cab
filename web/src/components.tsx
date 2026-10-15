@@ -336,7 +336,7 @@ export function TopBar({
   connection: {
     tone: "success" | "warning" | "error";
     label: "Connected" | "Updates delayed" | "Disconnected";
-  };
+  } | null;
   action?: ReactNode;
 }) {
   return (
@@ -362,9 +362,11 @@ export function TopBar({
       ) : (
         <span className="top-bar-trail" />
       )}
-      <StatusBadge tone={connection.tone} className="top-bar-connection">
-        {connection.label}
-      </StatusBadge>
+      {connection && (
+        <StatusBadge tone={connection.tone} className="top-bar-connection">
+          {connection.label}
+        </StatusBadge>
+      )}
       {action}
     </header>
   );

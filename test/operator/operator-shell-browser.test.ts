@@ -462,6 +462,24 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     await page.getByRole("link", { name: "New task", exact: true }).count(),
     1,
   );
+  // Connected only after a completed workspace read; nothing while the first read is pending.
+  await page.locator(".top-bar-connection", { hasText: "Connected" }).waitFor();
+  await page.route("**/api/operator/workspace", () => {});
+  await page.reload();
+  await page.locator(".top-bar").waitFor();
+  assert.equal(await page.locator(".top-bar-connection").count(), 0);
+  await page.unroute("**/api/operator/workspace");
+  // The Settings index, whose own trail is empty, still names the current page.
+  await page.goto(`${web.origin}/app/settings`);
+  assert.equal(
+    await page
+      .getByRole("navigation", { name: "Breadcrumb" })
+      .locator('[aria-current="page"]')
+      .textContent(),
+    "Settings",
+  );
+  await page.goto(`${web.origin}/app`);
+  await page.locator("main.page h1").waitFor();
 
   // A failed Inbox read shows no number rather than a stale or partial one.
   await page.route("**/api/operator/inbox*", (route) =>

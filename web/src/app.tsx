@@ -324,7 +324,8 @@ function connectionOf(state: ResourceState<unknown>) {
     return { tone: "error", label: "Disconnected" } as const;
   if (state.status === "stale" && state.error)
     return { tone: "warning", label: "Updates delayed" } as const;
-  return { tone: "success", label: "Connected" } as const;
+  // Only a completed read claims a connection; before the first one, show nothing.
+  return state.data ? ({ tone: "success", label: "Connected" } as const) : null;
 }
 /** Phone drawer account group: always visible rows, since no popup is nested in the Sheet. */
 function AccountRows({
@@ -939,11 +940,13 @@ export function App() {
           trail={
             unknownRoute
               ? []
-              : (settingsPage?.trail ?? [
-                  // The page header's Back links the parent; the crumb only names it.
-                  ...(parent ? [{ label: parent.label }] : []),
-                  { label: taskReport?.title ?? title },
-                ])
+              : settingsPage?.trail.length
+                ? settingsPage.trail
+                : [
+                    // The page header's Back links the parent; the crumb only names it.
+                    ...(parent ? [{ label: parent.label }] : []),
+                    { label: taskReport?.title ?? title },
+                  ]
           }
           connection={connectionOf(workspace.state)}
           action={

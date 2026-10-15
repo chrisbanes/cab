@@ -1566,7 +1566,7 @@ The web app is the ground truth for these items.
   navigation, projects with their active-task count, a running-turns capacity meter
   and the account menu; and the 48px desktop top bar with the breadcrumb, connection
   status (Connected, Updates delayed or Disconnected from the shell's workspace
-  read) and New task. On desktop the top bar owns New task and the breadcrumb; the
+  read; nothing before the first read completes) and New task. On desktop the top bar owns New task and the breadcrumb; the
   drawer shell keeps New task in the page header. The Search link stays in the
   navigation beside the field. The capacity meter reads global turn usage from the
   task list, so it is absent while there are no tasks. Not found shows no
