@@ -39,6 +39,10 @@ import {
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
+import {
+  ProjectFieldPicker,
+  useReadinessDiscovery,
+} from "./readiness-picker.js";
 import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
 import type { ObservationResource } from "./sync-placement.js";
 
@@ -91,6 +95,19 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       (v.referenceMode === "gh" &&
         data.source.credential?.gh.state !== "signed-in") ||
       (removesAll && !v.removeAll);
+  const readinessDiscovery = useReadinessDiscovery({
+    client: p.client,
+    csrfToken: p.session.csrfToken,
+    enabled: conditions.some((r) => r.kind === "project-field"),
+    saved: data.source.repositories.map((r) => ({
+      repositoryId: r.repositoryId ?? "",
+    })),
+    projectIds: conditions.flatMap((r) =>
+      r.kind === "project-field" && r.projectNodeId
+        ? [String(r.projectNodeId)]
+        : [],
+    ),
+  });
   const adopt = () => {
     // An unsettled save keeps its own message; nothing is loaded or discarded then.
     if (locked(d)) return;
@@ -560,26 +577,37 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                     {r.kind === "label" ? (
                       input("conditions", i, "name", "Ready label")
                     ) : (
-                      <>
-                        {input(
-                          "conditions",
-                          i,
-                          "projectNodeId",
-                          "Readiness Project node ID",
-                        )}
-                        {input(
-                          "conditions",
-                          i,
-                          "fieldNodeId",
-                          "Readiness field node ID",
-                        )}
-                        {input(
-                          "conditions",
-                          i,
-                          "optionNodeId",
-                          "Readiness option node ID",
-                        )}
-                      </>
+                      <ProjectFieldPicker
+                        index={i}
+                        row={r}
+                        discovery={readinessDiscovery}
+                        invalid={(name) =>
+                          Boolean(rowError("conditions", i, name))
+                        }
+                        onChange={(patch) => update("conditions", i, patch)}
+                        typed={
+                          <>
+                            {input(
+                              "conditions",
+                              i,
+                              "projectNodeId",
+                              "Readiness Project node ID",
+                            )}
+                            {input(
+                              "conditions",
+                              i,
+                              "fieldNodeId",
+                              "Readiness field node ID",
+                            )}
+                            {input(
+                              "conditions",
+                              i,
+                              "optionNodeId",
+                              "Readiness option node ID",
+                            )}
+                          </>
+                        }
+                      />
                     )}
                   </div>
                   <div>

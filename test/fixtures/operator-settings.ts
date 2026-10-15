@@ -9,6 +9,7 @@ import { OperatorApi } from "../../src/standalone/operator-api.js";
 import type { BrowserJourney } from "./browser-diagnostics.js";
 import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
+import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
 import type {
   RuntimeSpawnContext,
   StandaloneServiceOptions,
@@ -213,6 +214,8 @@ export async function startSettings(
     serviceOptions?: StandaloneServiceOptions;
     /** Answers GitHub reads, so a source preview can succeed offline. */
     readerFactory?: GitHubReaderFactory;
+    /** Setup seams for the web listener, such as a fake discovery reader. */
+    setup?: OperatorSetupSeams;
   } = {},
 ) {
   const f = await journey.start("fixture.create", () =>
@@ -241,7 +244,9 @@ export async function startSettings(
     () => f.lifecycle.steps,
   );
   const ids = await seedSettingsWorld(f);
-  const web = await journey.start("fixture.web", () => f.startWeb());
+  const web = await journey.start("fixture.web", () =>
+    f.startWeb(undefined, options.setup),
+  );
   browser = await journey.start("browser.launch", launch);
   const page = await browser.newPage({ viewport });
   journey.observe(page);
