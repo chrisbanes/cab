@@ -1629,14 +1629,6 @@ export function TaskWorkspace({
                     Review rejected completion
                   </ActionLink>
                 )}
-                {nextActor.kind === "lead-review" && (
-                  <ActionLink
-                    variant="secondary"
-                    href={`/coordination/task/${taskId}`}
-                  >
-                    Review task: routing fell back to the lead
-                  </ActionLink>
-                )}
                 {nextActor.kind === "uncertain" &&
                   !data.execution.holds.uncertainty && (
                     <ActionLink

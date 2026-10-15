@@ -173,8 +173,6 @@ export function taskNextActor(
     | "approvals"
     | "unresolvedResults"
     | "completionRequests"
-    | "assignments"
-    | "attention"
   >,
 ) {
   const you = (
@@ -183,8 +181,7 @@ export function taskNextActor(
       | "approval"
       | "question"
       | "unresolved-result"
-      | "rejected-completion"
-      | "lead-review",
+      | "rejected-completion",
     action: string,
   ) => ({ kind, text: `Next: you · ${action}`, operator: true });
   const none = (text: string) => ({
@@ -207,10 +204,6 @@ export function taskNextActor(
     )
   )
     return you("rejected-completion", "review rejected completion");
-  // Routing fell back to the lead and nothing was assigned: the list's lead-review. The read
-  // carries the fallback events, not the routing attempt's task version.
-  if (!data.assignments.length && data.attention.routingFallbacks.length)
-    return you("lead-review", "review task");
   // The list's wording (`taskNext`).
   if (data.task.state === "done") return none("Next: none · no decision");
   if (data.task.state === "cancelled")
