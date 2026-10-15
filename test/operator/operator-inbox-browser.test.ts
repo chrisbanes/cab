@@ -826,6 +826,53 @@ test("an Inbox question in a paused project shows its hold in the footer, record
   }
 });
 
+test("an Inbox question beside an open approval lists the approval as a hold in the footer without gating the answer", async (_t, j) => {
+  const { page, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    seedHeldQuestions("Question beside approval"),
+  );
+  // The task also has an open approval, served as a contract-valid task read.
+  await page.route(
+    `**/api/operator/tasks/${more[0]!.taskId}`,
+    async (route) => {
+      const response = await route.fetch(),
+        body = (await response.json()) as TaskRead;
+      body.data.waits.push({
+        code: "approval",
+        fix: null,
+        links: [
+          {
+            kind: "request",
+            id: randomUUID(),
+            label: "Review material & decide",
+          },
+        ],
+      });
+      taskSchema.parse(body);
+      await route.fulfill({ response, json: body });
+    },
+  );
+  const form = page.getByRole("region", { name: "Exact question response" }),
+    footer = form.locator(".question-submit");
+  await page
+    .locator(".inbox-row", { hasText: "Question beside approval" })
+    .click();
+  const hold = footer.getByText("Execution held (approval needs a decision)", {
+    exact: true,
+  });
+  await hold.waitFor();
+  assert.equal(await hold.count(), 1);
+  assert.match(await footer.innerText(), /Answering does not clear it\./);
+  assert.equal(await footer.getByText(/Approving/).count(), 0);
+  await form.getByRole("radio", { name: /^Team owners/ }).check();
+  assert.ok(
+    await footer.getByRole("button", { name: "Submit answer" }).isEnabled(),
+  );
+});
+
 test("phone: the question hold sits in the sticky submit area without covering fields, and a loading task read does not block answering", async (_t, j) => {
   const { page, more } = await openInbox(
     j,
