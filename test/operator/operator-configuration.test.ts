@@ -8,6 +8,7 @@ import { test } from "node:test";
 import { promisify } from "node:util";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { githubConfigurationCommandSchema } from "../../src/core/github-source-contracts.js";
+import { readinessRuleViewSchema } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   createOperatorFixture,
@@ -75,6 +76,58 @@ test("configuration receipts preserve original creation after later configuratio
   const reopened = new OperatorApi(f.service, [f.directory]);
   assert.deepEqual(await reopened.execute(profile), receipt);
   assert.deepEqual(await reopened.execute(project), created);
+});
+
+test("the project read shows no readiness rule, a rule, and no rule again after removal and restart", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  let api = new OperatorApi(f.service, [f.directory]);
+  const projectId = randomUUID();
+  await api.execute({
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Readiness",
+    leadProfileId: null,
+  });
+  const read = async () =>
+    (await api.readProjectConfiguration(projectId)).data.source.readiness;
+  assert.deepEqual(await read(), { kind: "none" });
+  const rule = {
+    mode: "any" as const,
+    conditions: [{ kind: "label" as const, name: "ready-for-agent" }],
+  };
+  const configure = (
+    readiness: unknown,
+    expectedVersion = f.service.domain().githubConfiguration(projectId).version,
+  ) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId,
+      expectedVersion,
+      selections: [],
+      readiness,
+      repositories: [],
+    } as never);
+  await configure(rule);
+  assert.deepEqual(await read(), { kind: "rule", ...rule });
+  // No-rule is only `null`: an empty rule and the read shape are not commands.
+  for (const bad of [
+    { mode: "all", conditions: [] },
+    { kind: "rule", ...rule },
+  ])
+    await assert.rejects(configure(bad));
+  await configure(null);
+  assert.deepEqual(await read(), { kind: "none" });
+  await f.service.stop();
+  await f.service.start();
+  api = new OperatorApi(f.service, [f.directory]);
+  assert.deepEqual(await read(), { kind: "none" });
+  assert.equal(
+    readinessRuleViewSchema.safeParse({ kind: "none", mode: "all" }).success,
+    false,
+  );
 });
 
 test("profile operation lookup returns an unchanged legacy receipt after SQLite migration", async (t) => {
@@ -598,7 +651,10 @@ test("delivery and source credential reference, key and value are excluded from 
         "private delivery material excluded",
       );
     assert.equal(publicData.project.data.project.name, null);
-    assert.equal(publicData.project.data.source.readiness, null);
+    // A withheld rule is unknown, never shown as no rule.
+    assert.deepEqual(publicData.project.data.source.readiness, {
+      kind: "unavailable",
+    });
     assert.equal(publicData.profile.data.capabilities, "[redacted]");
     await assert.rejects(
       api.execute({

@@ -19,6 +19,10 @@ export const conditionText = (c: Condition) =>
     ? `label \`${c.name}\``
     : `Project field ${c.fieldNodeId} = ${c.optionNodeId}`;
 
+/** What a source without a readiness rule admits, in every surface's settings. */
+export const noRuleText =
+  "No readiness rule: open issues in active selections are not filtered by label or Project field.";
+
 export function ruleText(rule: RuleView) {
   if (rule.kind === "none") return "no readiness rule";
   if (rule.kind === "unavailable") return "rule unavailable";

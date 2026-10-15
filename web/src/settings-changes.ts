@@ -166,10 +166,12 @@ export function sourceRowsFrom(source: Source) {
       savedRef: r.ref ?? "",
       keep: true,
     })),
-    conditions: (
-      source.readiness?.conditions ?? [{ kind: "label", name: "ready" }]
-    ).map((c) => ({ ...c })),
-    mode: source.readiness?.mode ?? "all",
+    // No rule and an unavailable rule both load no condition; nothing is prefilled.
+    conditions:
+      source.readiness.kind === "rule"
+        ? source.readiness.conditions.map((c) => ({ ...c }))
+        : [],
+    mode: source.readiness.kind === "rule" ? source.readiness.mode : "all",
     closedIssues: source.closedIssues,
     incomplete:
       source.selections.some((s) => s.id === null) ||
@@ -211,11 +213,11 @@ function newSelectionLine(r: SourceRow) {
   return `+ ${r.id} · ${what} · added inactive`;
 }
 
-const conditionsOf = (v: Values) =>
-  JSON.stringify({
-    mode: v.mode,
-    conditions: parseRows(v.conditions).map(strip),
-  });
+/** The drafted rule; no condition rows is no readiness rule, sent as `null`. */
+const draftedRule = (v: Values) => {
+  const conditions = parseRows(v.conditions).map(strip);
+  return conditions.length ? { mode: v.mode, conditions } : null;
+};
 
 export function sourceChanges(source: Source, v: Values) {
   const lines: string[] = [];
@@ -234,14 +236,19 @@ export function sourceChanges(source: Source, v: Values) {
       lines.push(
         `− ${s.id} · ${kindLabel(s.kind)} (saved since this form loaded)`,
       );
-  const readiness = source.readiness;
+  const saved = source.readiness;
+  const unavailable = saved.kind === "unavailable";
   if (
-    !readiness ||
-    conditionsOf(v) !==
-      JSON.stringify({ mode: readiness.mode, conditions: readiness.conditions })
+    unavailable ||
+    JSON.stringify(draftedRule(v)) !==
+      JSON.stringify(
+        saved.kind === "rule"
+          ? { mode: saved.mode, conditions: saved.conditions }
+          : null,
+      )
   )
     lines.push(
-      `Readiness: ${v.mode === "any" ? "any" : "all"} of ${plural(conditions.length, "condition")}${readiness ? "" : " (replaces unavailable readiness)"}`,
+      `Readiness: ${conditions.length ? `${v.mode === "any" ? "any" : "all"} of ${plural(conditions.length, "condition")}` : "no readiness rule"}${unavailable ? " (replaces unavailable readiness)" : ""}`,
     );
   // A draft without the field keeps the saved mode.
   if (v.closedIssues !== undefined && v.closedIssues !== source.closedIssues)
@@ -405,10 +412,7 @@ export function sourceCommand(projectId: string, v: Values) {
       const { rowKey: _k, ...row } = r;
       return row;
     }),
-    readiness: {
-      mode: v.mode,
-      conditions: parseRows(v.conditions).map(strip),
-    },
+    readiness: draftedRule(v),
     closedIssues: v.closedIssues,
     repositories: live(parseRows(v.repositories)).map((r) =>
       r.keep

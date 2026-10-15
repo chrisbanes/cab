@@ -158,6 +158,88 @@ test("project sources reads selections, links and observations without private t
   assert.equal(existsSync(w.journal), false);
 });
 
+test("project sources and prepare-source show and round-trip no readiness rule, never inferring it from an unavailable rule", async (t) => {
+  const w = await world(t);
+  const prepare = async (projectId: string, edit: unknown) => {
+    const out = join(w.h.dir, `${randomUUID()}.json`);
+    const r = await w.cli("ro", [
+      "project",
+      "prepare-source",
+      projectId,
+      "--out",
+      out,
+      "--edit-file",
+      w.file(`${randomUUID()}.edit`, JSON.stringify(edit)),
+    ]);
+    return {
+      code: r.code,
+      out,
+      document: r.code === 0 ? JSON.parse(readFileSync(out, "utf8")) : null,
+    };
+  };
+  // A project never given a rule shows none and keeps none.
+  const relay = await w.ok("ro", ["project", "sources", w.ids.relay]);
+  assert.deepEqual(relay.data.source.readiness, { kind: "none" });
+  assert.ok(!relay.coverage.gaps.includes("content-unavailable"));
+  const relayHuman = await w.h.run([
+    "project",
+    "sources",
+    w.ids.relay,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(relayHuman.out, /No readiness rule/);
+  const kept = await prepare(w.ids.relay, { closedIssues: "done" });
+  assert.equal(kept.document.command.readiness, null);
+  // An omitted readiness keeps a saved rule as a command value, without the read's kind.
+  const keptRule = await prepare(w.ids.atlas, { closedIssues: "done" });
+  assert.deepEqual(keptRule.document.command.readiness, {
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  // `null` removes the rule, and applying it reads back as none.
+  const removed = await prepare(w.ids.atlas, { readiness: null });
+  assert.equal(removed.document.command.readiness, null);
+  assert.deepEqual(removed.document.preview.diff.lines, [
+    "Readiness: no readiness rule",
+  ]);
+  await w.ok("rw", ["project", "apply", "--file", removed.out]);
+  assert.deepEqual((await w.config()).source.readiness, { kind: "none" });
+  // A rule naming private text is withheld: unknown, and an edit must replace it.
+  const r = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: w.ids.relay,
+    expectedVersion: (await w.config(w.ids.relay)).source.version,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: [],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", name: "FIXTURE_GITHUB" }],
+    },
+    repositories: [],
+  });
+  assert.equal(r.status, 200);
+  const hidden = await w.ok("ro", ["project", "sources", w.ids.relay]);
+  assert.deepEqual(hidden.data.source.readiness, { kind: "unavailable" });
+  assert.ok(hidden.coverage.gaps.includes("content-unavailable"));
+  const hiddenHuman = await w.h.run([
+    "project",
+    "sources",
+    w.ids.relay,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(hiddenHuman.out, /\(unavailable\)/);
+  assert.doesNotMatch(hiddenHuman.out, /No readiness rule/);
+  assert.equal((await prepare(w.ids.relay, { closedIssues: "done" })).code, 4);
+  const replaced = await prepare(w.ids.relay, { readiness: null });
+  assert.equal(replaced.document.command.readiness, null);
+  assert.deepEqual(replaced.document.preview.diff.lines, [
+    "Readiness: no readiness rule (replaces unavailable readiness)",
+  ]);
+});
+
 test("prepare-source writes the exact UI command with redacted preview lines", async (t) => {
   const w = await world(t);
   const edit = {
@@ -461,7 +543,7 @@ test("project apply sends the prepared source change once, deactivating selectio
       { id: "S-1", keep: true },
       { id: "S-2", keep: true },
     ],
-    readiness: (await w.config()).source.readiness,
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(r.status, 200);

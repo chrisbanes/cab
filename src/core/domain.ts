@@ -680,12 +680,8 @@ export class DomainStore {
         .prepare(
           "INSERT OR IGNORE INTO project_github_sources (projectId, version, credentialRef, selections, readiness, repositories) SELECT id, 1, NULL, '[]', ?, '[]' FROM domain_projects",
         )
-        .run(
-          JSON.stringify({
-            mode: "all",
-            conditions: [{ kind: "label", name: "ready" }],
-          }),
-        );
+        // No readiness rule: a backfilled source filters nothing.
+        .run(JSON.stringify(null));
     });
   }
 
@@ -1031,7 +1027,7 @@ export class DomainStore {
     version: number;
     credentialRef: string | null;
     selections: z.output<typeof selectionSchema>[];
-    readiness: z.output<typeof readinessSchema>;
+    readiness: z.output<typeof readinessSchema> | null;
     closedIssues: z.output<typeof closedIssuesSchema>;
     repositories: LinkedRepository[];
   } {
@@ -1047,7 +1043,9 @@ export class DomainStore {
       selections: z
         .array(selectionSchema)
         .parse(JSON.parse(String(row.selections))),
-      readiness: readinessSchema.parse(JSON.parse(String(row.readiness))),
+      readiness: readinessSchema
+        .nullable()
+        .parse(JSON.parse(String(row.readiness))),
       closedIssues: closedIssuesSchema.parse(row.closedIssues),
       repositories: z
         .array(linkedRepositorySchema)
@@ -1930,10 +1928,8 @@ export class DomainStore {
                   ]
                 : [],
             ),
-            JSON.stringify({
-              mode: "all",
-              conditions: [{ kind: "label", name: "ready" }],
-            }),
+            // No readiness rule until the operator adds one.
+            JSON.stringify(null),
             JSON.stringify(repositories),
           );
         return this.project(command.projectId);

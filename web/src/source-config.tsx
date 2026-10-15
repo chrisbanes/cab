@@ -1,3 +1,4 @@
+import { noRuleText } from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
@@ -84,6 +85,9 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
       stale.length > 0 ||
       duplicates.length > 0 ||
       lines.length === 0 ||
+      // An unknown saved rule is only replaced by a rule, never cleared to none.
+      (data.source.readiness.kind === "unavailable" &&
+        conditions.length === 0) ||
       (v.referenceMode === "gh" &&
         data.source.credential?.gh.state !== "signed-in") ||
       (removesAll && !v.removeAll);
@@ -491,11 +495,16 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                 "source-conditions-error",
                 "Check readiness mode and complete conditions.",
               )}
-              {!data.source.readiness && (
+              {data.source.readiness.kind === "unavailable" ? (
                 <p className="metadata muted">
-                  Saved readiness is unavailable; saving replaces it with these
-                  conditions.
+                  Saved readiness is unavailable; add a condition to replace it.
                 </p>
+              ) : (
+                conditions.length === 0 && (
+                  <p className="metadata muted">
+                    {noRuleText} Matching applies once a condition is added.
+                  </p>
+                )
               )}
               <DraftField
                 draft={d}

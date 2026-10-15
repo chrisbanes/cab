@@ -200,3 +200,109 @@ test("immutable intents precede effects and reject denied, readiness, and change
     db.close();
   }
 });
+
+test("agents cannot change readiness labels or fields, and no readiness rule protects none", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    const projectId = randomUUID();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "A",
+      leadProfileId: null,
+    });
+    domain.execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      mode: "reviewable-pr",
+      credentialRef: null,
+      grants: [
+        { action: "issue.labels", repositoryId: "R1", mode: "allow" },
+        {
+          action: "project.field",
+          repositoryId: "R1",
+          mode: "allow",
+          projectNodeId: "P1",
+          fieldNodeId: "F1",
+          optionNodeIds: ["O1"],
+        },
+      ],
+      requiredChecks: [],
+    });
+    const delivery = new DeliveryStore(db);
+    delivery.migrate();
+    const binding = {
+      projectId,
+      taskId: randomUUID(),
+      taskVersion: 1,
+      assignmentId: randomUUID(),
+      assignmentVersion: 1,
+      workId: "work",
+      workRevision: 1,
+      conversationRevision: 1,
+    };
+    const target = { repositoryId: "R1", number: 1, nodeId: "I1" };
+    const labels = () =>
+      delivery.authorize(
+        {
+          operationId: randomUUID(),
+          action: { kind: "issue.labels", target, add: ["ready"], remove: [] },
+        },
+        binding,
+        false,
+      );
+    const field = () =>
+      delivery.authorize(
+        {
+          operationId: randomUUID(),
+          action: {
+            kind: "project.field",
+            target,
+            projectNodeId: "P1",
+            itemNodeId: "ITEM1",
+            fieldNodeId: "F1",
+            optionNodeId: "O1",
+          },
+        },
+        binding,
+        false,
+      );
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    labels();
+    field();
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: null,
+      selections: [],
+      readiness: {
+        mode: "any",
+        conditions: [
+          { kind: "label", name: "ready" },
+          {
+            kind: "project-field",
+            projectNodeId: "P1",
+            fieldNodeId: "F1",
+            optionNodeId: "O2",
+          },
+        ],
+      },
+      repositories: [],
+    });
+    assert.throws(labels, /readiness labels/);
+    assert.throws(field, /readiness fields/);
+  } finally {
+    db.close();
+  }
+});

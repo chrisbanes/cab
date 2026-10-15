@@ -37,8 +37,8 @@ and review. Agents use operator-defined profiles and may create assignments with
 BB's configured concurrency limits; they cannot create new profiles autonomously.
 
 Enabled projects select work automatically from an explicitly Ready queue,
-defined by explicit task readiness or the configured authoritative readiness rule. The operator admits tasks directly or through an explicitly configured source
-rule; the lead may triage and propose readiness but cannot admit arbitrary work.
+defined by explicit task readiness or the source's optional readiness rule. The operator admits tasks directly or through an explicitly configured source
+and its rule; the lead may triage and propose readiness but cannot admit arbitrary work.
 Each project chooses whether coding delivery ends at a reviewable PR or continues
 through merge. Both choices are supported in the first operational release;
 merging still requires the applicable permission and completion conditions.
@@ -79,8 +79,9 @@ and results and update configured labels or GitHub Project fields. Editing an
 external issue's title or description requires separate operator approval; source
 membership and workflow permissions do not grant that authority.
 
-Each Ensemble project defines one explicit readiness rule for GitHub tasks,
-using selected labels, a specified Project field, or an explicit combination.
+Each Ensemble project may define one readiness rule for GitHub tasks, using
+selected labels, a specified Project field, or an explicit combination. A project
+without a rule does not filter its selected open issues by readiness.
 Membership in another source cannot independently grant readiness. Agents cannot
 change admission inputs to admit work themselves; their workflow-write authority
 excludes granting readiness. Issue closure is a separate per-project permission:

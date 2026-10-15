@@ -4878,10 +4878,7 @@ export class OperatorApi {
             ),
             active: active.includes(s.id),
           })),
-          readiness:
-            this.exact(JSON.stringify(g.readiness), excluded) === null
-              ? null
-              : g.readiness,
+          readiness: this.readinessRuleView(g.readiness, excluded),
           closedIssues: g.closedIssues,
           repositories: g.repositories.map((r) => ({
             repositoryId: this.safe(r.repositoryId, excluded),

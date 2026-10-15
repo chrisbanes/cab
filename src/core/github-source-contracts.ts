@@ -145,7 +145,8 @@ export const githubConfigurationSchema = z
           new Set(values.map((value) => value.id)).size === values.length,
         "Selection IDs must be unique",
       ),
-    readiness: readinessSchema,
+    /** `null` is no readiness rule: open issues in active selections are not filtered. */
+    readiness: readinessSchema.nullable(),
     closedIssues: closedIssuesSchema,
     repositories: z
       .array(repositoryLinkSchema)

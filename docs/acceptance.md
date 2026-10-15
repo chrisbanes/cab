@@ -349,7 +349,12 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
 - **GitHub discovery** (A19–A23, A29 and the GitHub portion of A30) — **Bounded.**
   Discovery of selected repository issues, searches and Projects is read-only and
   grants no repository access. Complete and incomplete selection and native dependency
-  reads are retained separately, and incomplete reads hold new admission.
+  reads are retained separately, and incomplete reads hold new admission. A source
+  without a readiness rule makes its open selected issues Ready while every other
+  admission control still holds; adding or removing a rule, keeping saved rules
+  unchanged and showing a withheld rule as unavailable are covered by
+  `github-reconciliation`, `github-source-config`, `operator-configuration`,
+  `operator-cli-source` and the GitHub settings browser tests.
   Deterministic tests and a bounded live fixture pass. Evidence:
   [GitHub discovery](evidence/s06-github-discovery.md).
 - **GitHub delivery and release candidate** (A24, A26 and the A01–A30/R01–R10

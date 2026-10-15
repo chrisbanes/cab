@@ -83,6 +83,7 @@ const config = (): ProjectConfigurationData =>
         { id: "S-3", kind: "project", descriptor: "PVT_x", active: false },
       ],
       readiness: {
+        kind: "rule",
         mode: "all",
         conditions: [{ kind: "label", name: "ready" }],
       },
@@ -323,6 +324,55 @@ test("source rows, change lines and command use keep markers and never paths", (
       ],
     }).incomplete,
     true,
+  );
+});
+
+test("no readiness rule loads no condition, saves null and never clears an unavailable rule silently", () => {
+  const c = config();
+  const none = { ...c.source, readiness: { kind: "none" as const } };
+  const unavailable = {
+    ...c.source,
+    readiness: { kind: "unavailable" as const },
+  };
+  const label = JSON.stringify([
+    { kind: "label", name: "ready-for-agent", rowKey: "r" },
+  ]);
+  for (const source of [none, unavailable]) {
+    assert.deepEqual(sourceRowsFrom(source).conditions, []);
+    assert.equal(sourceRowsFrom(source).mode, "all");
+  }
+  const base = {
+    key: "k",
+    expectedVersion: "4",
+    mode: "all",
+    conditions: "[]",
+    selections: JSON.stringify(sourceRowsFrom(c.source).selections),
+    repositories: JSON.stringify(sourceRowsFrom(c.source).repositories),
+    referenceMode: "preserve",
+  };
+  const readinessLines = (source: typeof c.source, v: typeof base) =>
+    sourceChanges(source, v).filter((l) => l.startsWith("Readiness"));
+  // An unedited no-rule source has nothing to save; the mode alone is no rule.
+  assert.deepEqual(readinessLines(none, base), []);
+  assert.deepEqual(readinessLines(none, { ...base, mode: "any" }), []);
+  assert.equal(sourceCommand(projectId, base).readiness, null);
+  assert.deepEqual(readinessLines(none, { ...base, conditions: label }), [
+    "Readiness: all of 1 condition",
+  ]);
+  assert.deepEqual(
+    sourceCommand(projectId, { ...base, conditions: label }).readiness,
+    {
+      mode: "all",
+      conditions: [{ kind: "label", name: "ready-for-agent" }],
+    },
+  );
+  // Removing the last condition of a saved rule removes the rule.
+  assert.deepEqual(readinessLines(c.source, base), [
+    "Readiness: no readiness rule",
+  ]);
+  assert.deepEqual(
+    readinessLines(unavailable, { ...base, conditions: label }),
+    ["Readiness: all of 1 condition (replaces unavailable readiness)"],
   );
 });
 

@@ -29,6 +29,8 @@ import {
   type Readiness,
 } from "../core/github-source-contracts.js";
 import {
+  noRuleText,
+  ruleText,
   selectionCountsText,
   unmetText,
   zeroMatchWarning,
@@ -328,7 +330,7 @@ export class LocalOperatorUi {
         ),
       undefined,
       csrfToken,
-    )}<h2 id="github-source-credential">GitHub source</h2><p>Credential: ${credential?.source === "gh" ? "GitHub CLI" : credential?.source === "env" ? "environment variable" : github.credentialRef ? "configured" : "not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}.` : ""} Selections require preview before activation at the current source version.</p>${form(
+    )}<h2 id="github-source-credential">GitHub source</h2><p>Credential: ${credential?.source === "gh" ? "GitHub CLI" : credential?.source === "env" ? "environment variable" : github.credentialRef ? "configured" : "not configured"}. ${credential ? (credential.usable ? "Usable." : escapeHtml(sourceCredentialExplanation(credential.reason ?? "missing-credential"))) : ""} ${credential?.gh.state === "signed-in" ? `Detected GitHub CLI account @${escapeHtml(credential.gh.login)}.` : ""} Selections require preview before activation at the current source version.</p><p>${github.readiness ? `Readiness rule: ${escapeHtml(ruleText({ kind: "rule", ...github.readiness }))}. Set readiness to null to remove it.` : noRuleText}</p>${form(
       "github.configure",
       field("projectId", projectId, "hidden") +
         field("expectedVersion", String(github.version), "hidden") +
