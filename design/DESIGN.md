@@ -1410,8 +1410,9 @@ Presentation and interaction rules that the canvas does not show on its own.
     saved (View final activity).
   - Execution uncertain: the process may still be active, so check its state
     before attempting new work (Inspect execution).
-  - Paused: new turns are held, messages queue for the lead, and sending does not
-    resume the task.
+  - Project paused: the project holds new turns, messages queue for the lead, and
+    sending does not resume work. Resume project, in project configuration or the
+    wait's Fix, releases it.
 
 ### Approval review
 
