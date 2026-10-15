@@ -1150,3 +1150,60 @@ test("selection counts use a fixed number of queries however many items are stor
     f.db.close();
   }
 });
+
+test("after a rule change and before the next read, explanations never disagree with Ready", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    f.read("repo", [f.at("I_1"), f.at("I_2", { labels: ["next"] })]);
+    f.domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [{ id: "repo", keep: true }],
+      readiness: { mode: "all", conditions: [{ kind: "label", name: "next" }] },
+      repositories: [],
+    });
+    // Ready still reflects the old rule: I_1 Ready, I_2 Draft.
+    assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
+    for (const nodeId of ["I_1", "I_2"])
+      assert.deepEqual(f.sources.taskReadiness(f.task(nodeId)), {
+        outcome: "not-evaluated",
+        unmet: [],
+      });
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      null,
+    );
+    f.domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      selectionId: "repo",
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+    });
+    f.read("repo", [f.at("I_1"), f.at("I_2", { labels: ["next"] })]);
+    assert.equal(f.sources.taskReadiness(f.task("I_2"))?.outcome, "matched");
+    assert.deepEqual(f.sources.taskReadiness(f.task("I_1")), {
+      outcome: "unmet",
+      unmet: [{ kind: "label", name: "next" }],
+    });
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      1,
+    );
+    for (const task of f.domain.tasks(f.projectId))
+      assert.equal(
+        f.sources.taskReadiness(String(task.id))?.outcome === "matched",
+        Number(task.ready) === 1,
+      );
+  } finally {
+    f.db.close();
+  }
+});

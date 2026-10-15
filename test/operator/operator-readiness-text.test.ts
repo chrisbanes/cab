@@ -55,6 +55,17 @@ test("selection counts name observed, open and matching items for every rule kin
     }),
     "149 observed · 9 open · readiness match unknown (rule unavailable)",
   );
+  assert.equal(
+    selectionCountsText(
+      counts({ closedSkipped: 0, matching: null }),
+      rule("all", label("a")),
+    ),
+    "149 observed · 9 open · readiness match unknown until the next refresh",
+  );
+  assert.equal(
+    zeroMatchWarning(counts({ matching: null }), rule("all", label("a"))),
+    null,
+  );
   assert.match(
     selectionCountsText(counts({ complete: false }), rule("all", label("a"))),
     / · partial read; counts may be incomplete$/,

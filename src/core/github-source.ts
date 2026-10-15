@@ -1097,7 +1097,8 @@ export class GitHubSourceStore {
       observed: number;
       open: number;
       closedSkipped: number;
-      matching: number;
+      /** `null` while a member's stored Ready flag predates the current rule. */
+      matching: number | null;
       complete: boolean;
     }
   > {
@@ -1107,8 +1108,10 @@ export class GitHubSourceStore {
       )
       .all(projectId) as Row[];
     const rows = this.db
-      .prepare(`SELECT m.selectionId, m.nodeId, m.projectFields, e.observedState, e.labels
+      .prepare(`SELECT m.selectionId, m.nodeId, m.projectFields, e.observedState, e.labels,
+        t.ready, t.projectId AS taskProjectId
         FROM github_memberships m JOIN github_external_issues e ON e.nodeId = m.nodeId
+        JOIN domain_tasks t ON t.id = e.taskId
         WHERE m.projectId = ?`)
       .all(projectId) as Row[];
     const rule = this.readinessRule(projectId);
@@ -1144,13 +1147,19 @@ export class GitHubSourceStore {
           .parse(JSON.parse(String(sync.skippedClosedNodeIds)) as unknown)
           .filter((id) => !memberIds.has(id)).length;
         const open = members.filter((r) => r.observedState === "open");
+        // A rule change re-evaluates Ready only on the next read; claim no match until then.
+        const stale = open.some(
+          (r) =>
+            r.taskProjectId === projectId &&
+            matching(r) !== (Number(r.ready) === 1),
+        );
         return [
           String(sync.selectionId),
           {
             observed: members.length + closedSkipped,
             open: open.length,
             closedSkipped,
-            matching: open.filter(matching).length,
+            matching: stale ? null : open.filter(matching).length,
             complete: Number(sync.complete) === 1,
           },
         ];
@@ -1168,7 +1177,7 @@ export class GitHubSourceStore {
   } | null {
     const external = this.db
       .prepare(
-        "SELECT e.nodeId, e.labels, e.observedState, t.projectId FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
+        "SELECT e.nodeId, e.labels, e.observedState, t.projectId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
       )
       .get(taskId) as Row | undefined;
     if (!external) return null;
@@ -1179,6 +1188,9 @@ export class GitHubSourceStore {
       this.readinessRule(String(external.projectId)),
       facts,
     );
+    // Until the next read re-evaluates Ready under a changed rule, explain nothing.
+    if (result.satisfied !== (Number(external.ready) === 1))
+      return { outcome: "not-evaluated", unmet: [] };
     return result.satisfied
       ? { outcome: "matched", unmet: [] }
       : { outcome: "unmet", unmet: result.unmet };
