@@ -12,6 +12,14 @@ const harness = await import(
     resolve("test/operator/journey-qualification/runtime-contract.mjs"),
   ).href
 );
+// The harness reserves 2 s of every fixture total for cleanup.
+const harnessCleanupMs = 2000;
+// Behaviour cases stop at their asserted boundary, so the headroom only covers
+// slow runners.
+const behaviourTotalMs = 30_000;
+// Deadline cases end only at the total deadline, so setup must reach the
+// stalled step first; with 20 concurrent copies it took up to about 5 s.
+const deadlineTotalMs = 10_000;
 browserTest(
   "production browser creates task, persists native answer before reply, consumes exact map and inspects result without prompt override",
   async () => {
@@ -56,7 +64,13 @@ for (const mode of [
     `${mode} fails finitely, retains persisted fixture and hold, closes exact child and never dispatches on restart`,
     async () => {
       const r = await harness.runQualification({
-        fixture: { mode, totalMs: 6500 },
+        fixture: {
+          mode,
+          totalMs:
+            mode === "missing-report" || mode === "missing-reply"
+              ? deadlineTotalMs
+              : behaviourTotalMs,
+        },
       });
       assert.equal(r.status, "failed");
       const expected = {
@@ -114,7 +128,7 @@ browserTest(
       fixture: {
         delayBrowserCreation: true,
         lateCleanupFailure: true,
-        totalMs: 4500,
+        totalMs: deadlineTotalMs,
       },
     });
     assert.equal(r.status, "failed");
@@ -126,8 +140,17 @@ browserTest(
 );
 
 test("timed-out service startup keeps its late service-stop owner without racing runtime shutdown", async () => {
+  const totalMs = 4500;
+  const serviceStartDeadline = Date.now() + totalMs - harnessCleanupMs;
   const r = await harness.runQualification({
-    fixture: { delayRuntimeStart: 3000, totalMs: 4500 },
+    fixture: {
+      totalMs,
+      // Release runtime start just after its deadline, however long service
+      // setup took, so the late stop gets the whole cleanup window.
+      get delayRuntimeStart() {
+        return Math.max(1, serviceStartDeadline + 100 - Date.now());
+      },
+    },
   });
   assert.equal(r.status, "failed");
   assert.match(r.failure.reason, /service-start-deadline/);
@@ -166,7 +189,11 @@ browserTest(
   "delayed HTTP setup and shutdown failure retain incomplete cleanup evidence",
   async () => {
     const r = await harness.runQualification({
-      fixture: { delayHttp: true, shutdownFailure: true, totalMs: 4500 },
+      fixture: {
+        delayHttp: true,
+        shutdownFailure: true,
+        totalMs: deadlineTotalMs,
+      },
     });
     assert.equal(r.status, "failed");
     assert.match(r.failure.reason, /browser-create-task-deadline/);
