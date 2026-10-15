@@ -13,7 +13,7 @@ Each semicolon-separated control is individually retained at the listed destinat
 | /project/:id | project.configure | name; lead; instructions; pause | Settings | no |
 | /profile/:id | profile.configure | name; instructions; capabilities; revoke | Settings | no |
 | /project/:id | routing.configure | enable; guidance; candidates; set/clear credential reference | Settings | no |
-| /project/:id | github.configure | selections; optional readiness rule (`null` is no rule); closed-issue mode; repositories; set/clear credential reference | Settings | no |
+| /project/:id | github.configure | selections; readiness; closed-issue mode; repositories; set/clear credential reference | Settings | no |
 | /project/:id | github.preview | preview selections; activation via preview receipt | Settings | no |
 | /project/:id | github.refresh | refresh observation | Settings | no |
 | /project/:id | github.place | conflicting placement | Settings | no |
