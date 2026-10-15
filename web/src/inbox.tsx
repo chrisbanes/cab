@@ -1,6 +1,7 @@
 import { NativeSelect } from "./ui/native-select.js";
 import { Card } from "./ui/card.js";
 import {
+  Fragment,
   type ReactNode,
   useCallback,
   useEffect,
@@ -14,29 +15,31 @@ import {
   type Session,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ArrowUpRight } from "lucide-react";
-import {
-  ActionLink,
-  Button,
-  ResourceStatus,
-  StatusBadge,
-} from "./components.js";
+import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
+import { ActionLink, Button, ResourceStatus } from "./components.js";
+import { Badge } from "./ui/badge.js";
 import { useMediaQuery } from "./use-media-query.js";
 import {
   ageLabel,
   clockLabel,
   filterCounts,
+  queueGroups,
   requestActionLabel,
+  requestIdentity,
   requestKindLabel,
 } from "./inbox-presentation.js";
-import { inboxSummaryOf } from "./request-presentation.js";
+import { inboxSummaryOf, requestKindIcons } from "./request-presentation.js";
 import { useOperatorResource } from "./resource.js";
 import {
+  answerHolds,
   ApprovalDetail,
-  InboxQuestion,
   InterventionDetail,
+  useInboxTask,
 } from "./inbox-detail.js";
+import { InboxContext } from "./inbox-context.js";
+import { QuestionResponse } from "./question-response.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
+import "./inbox.css";
 export class InboxState {
   project = "";
   kind = "";
@@ -99,6 +102,7 @@ export function Inbox({
   observation,
   onSummary,
   onHeader,
+  chrome,
 }: {
   client: OperatorClient;
   session: Session;
@@ -111,6 +115,8 @@ export function Inbox({
   onSummary?: (summary: ReturnType<typeof inboxSummaryOf>) => void;
   /** Reports the header content for this view (null on unmount). */
   onHeader?: (header: InboxHeader | null) => void;
+  /** At the sidebar shell the queue header owns the page heading, summary and Refresh. */
+  chrome?: { onRefresh: () => void; refreshing: boolean } | undefined;
 }) {
   const loader = useCallback(
     (signal: AbortSignal) => loadInbox(client, signal),
@@ -145,7 +151,9 @@ export function Inbox({
   }, [observation]);
   const [, render] = useState(0),
     queue = useRef<HTMLDivElement>(null),
-    single = useMediaQuery("(max-width: 760px)");
+    single = useMediaQuery("(max-width: 760px)"),
+    // The task-context inspector has room from 1280px.
+    inspector = useMediaQuery("(min-width: 1280px)") && !single;
   const params = new URLSearchParams(path.split("?")[1] ?? ""),
     urlId = params.get("request"),
     urlTask = params.get("task"),
@@ -166,10 +174,24 @@ export function Inbox({
           : null
         : implicit))
     : null;
-  const rows = items.filter(
-    (item) =>
-      (!state.project || item.projectId === state.project) &&
-      (!state.kind || item.kind === state.kind),
+  // The queue's display order (grouped) is the one order for position, Previous/Next and focus.
+  const rows = queueGroups(
+    items.filter(
+      (item) =>
+        (!state.project || item.projectId === state.project) &&
+        (!state.kind || item.kind === state.kind),
+    ),
+  ).flatMap((group) => group.items);
+  // One read of the selected request's task serves its holds, approval facts and the inspector.
+  const task = useInboxTask(
+    client,
+    session,
+    // An intervention below the inspector width shows nothing from the task read.
+    selectedId && taskId && (inspector || selected?.kind !== "intervention")
+      ? taskId
+      : null,
+    resource.state.fetchedAt,
+    "request",
   );
   // Open the first request once per visit when the first fresh read arrives on a wide layout.
   const autoDone = useRef(false);
@@ -204,13 +226,14 @@ export function Inbox({
       : null,
     leftQueue = Boolean(
       selected && !current && resource.state.status === "fresh",
+    ),
+    recorded = Boolean(
+      selected && questions.recordedHere(selected.taskId, selected.id),
     );
   const subtitle =
     count === undefined || projectCount === undefined
       ? undefined
-      : leftQueue &&
-          selected &&
-          questions.recordedHere(selected.taskId, selected.id)
+      : leftQueue && recorded
         ? `${count} unresolved · confirmation retained`
         : count === 0
           ? "0 unresolved across your projects"
@@ -276,49 +299,103 @@ export function Inbox({
     state.kind = "";
     render((v) => v + 1);
   };
+  const row = (item: InboxItem) => {
+    const Icon = requestKindIcons[item.kind];
+    return (
+      <button
+        type="button"
+        className="inbox-row"
+        key={item.id}
+        data-record-id={item.id}
+        data-kind={item.kind}
+        aria-pressed={selectedId === item.id}
+        onClick={() => choose(item)}
+      >
+        <span className="inbox-row-label">
+          <Icon aria-hidden="true" />
+          {item.projectName ?? "Unavailable project"} /{" "}
+          {requestKindLabel(item.kind)}
+        </span>
+        <strong>{item.taskTitle ?? "Unavailable task"}</strong>
+        <span className="inbox-row-reason">
+          {item.reason ?? "Exact details unavailable"}
+        </span>
+        <span className="inbox-row-action">
+          {requestActionLabel(item.kind)} →
+        </span>
+        <span className="inbox-row-meta">
+          {item.requesterName ?? "Responsibility unknown"} ·{" "}
+          {item.createdAt === null ? (
+            <time>{ageLabel(null, now)}</time>
+          ) : (
+            <time dateTime={new Date(item.createdAt).toISOString()}>
+              {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, now)}
+            </time>
+          )}
+        </span>
+      </button>
+    );
+  };
+  const KindIcon = selected ? requestKindIcons[selected.kind] : null,
+    previous = position > 0 ? rows[position - 1] : undefined,
+    next = position >= 0 ? rows[position + 1] : undefined;
   return (
     <section
       className={`action-inbox ${selectedId ? "inbox-selected" : ""} ${empty && !selectedId ? "inbox-empty" : ""}`}
       aria-label="Action Inbox"
     >
-      <div className="inbox-filters">
-        <NativeSelect
-          aria-label="Project"
-          value={state.project}
-          onChange={(e) => {
-            state.project = e.target.value;
-            render((v) => v + 1);
-          }}
-        >
-          <option value="">All projects · {counts.total}</option>
-          {projects.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name ?? "Unavailable project"} · {counts.project[id] ?? 0}
-            </option>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          aria-label="Request kind"
-          value={state.kind}
-          onChange={(e) => {
-            state.kind = e.target.value;
-            render((v) => v + 1);
-          }}
-        >
-          <option value="">All request types · {counts.total}</option>
-          <option value="question">
-            Questions · {counts.kind.question ?? 0}
-          </option>
-          <option value="approval">
-            Approvals · {counts.kind.approval ?? 0}
-          </option>
-          <option value="intervention">
-            Interventions · {counts.kind.intervention ?? 0}
-          </option>
-        </NativeSelect>
-        <p className="metadata muted">Intervention first · then oldest</p>
-      </div>
       <div className="inbox-queue">
+        <div className="inbox-queue-head">
+          {chrome && (
+            <div className="inbox-title">
+              <h1 className="inbox-heading">Inbox</h1>
+              {subtitle && <p className="inbox-summary">{subtitle}</p>}
+              <Button
+                variant="secondary"
+                onClick={chrome.onRefresh}
+                disabled={chrome.refreshing}
+              >
+                Refresh
+              </Button>
+            </div>
+          )}
+          <div className="inbox-filters">
+            <NativeSelect
+              aria-label="Project"
+              value={state.project}
+              onChange={(e) => {
+                state.project = e.target.value;
+                render((v) => v + 1);
+              }}
+            >
+              <option value="">All projects · {counts.total}</option>
+              {projects.map(([id, name]) => (
+                <option key={id} value={id}>
+                  {name ?? "Unavailable project"} · {counts.project[id] ?? 0}
+                </option>
+              ))}
+            </NativeSelect>
+            <NativeSelect
+              aria-label="Request kind"
+              value={state.kind}
+              onChange={(e) => {
+                state.kind = e.target.value;
+                render((v) => v + 1);
+              }}
+            >
+              <option value="">All request types · {counts.total}</option>
+              <option value="question">
+                Questions · {counts.kind.question ?? 0}
+              </option>
+              <option value="approval">
+                Approvals · {counts.kind.approval ?? 0}
+              </option>
+              <option value="intervention">
+                Interventions · {counts.kind.intervention ?? 0}
+              </option>
+            </NativeSelect>
+          </div>
+        </div>
         <ResourceStatus state={resource.state} retry={resource.refresh} />
         {resource.state.data && !resource.state.data.complete && (
           <p role="alert">
@@ -332,36 +409,11 @@ export function Inbox({
             state.scrollTop = e.currentTarget.scrollTop;
           }}
         >
-          {rows.map((item) => (
-            <button
-              type="button"
-              className="inbox-row"
-              key={item.id}
-              data-record-id={item.id}
-              aria-pressed={selectedId === item.id}
-              onClick={() => choose(item)}
-            >
-              <span className="inbox-row-label">
-                {item.projectName ?? "Unavailable project"} /{" "}
-                {requestKindLabel(item.kind)}
-              </span>
-              <strong>{item.taskTitle ?? "Unavailable task"}</strong>
-              <span>{item.reason ?? "Exact details unavailable"}</span>
-              <span className="inbox-row-action">
-                {requestActionLabel(item.kind)} →
-              </span>
-              <span className="inbox-row-meta">
-                {item.requesterName ?? "Responsibility unknown"} ·{" "}
-                {item.createdAt === null ? (
-                  <time>{ageLabel(null, now)}</time>
-                ) : (
-                  <time dateTime={new Date(item.createdAt).toISOString()}>
-                    {clockLabel(item.createdAt)} ·{" "}
-                    {ageLabel(item.createdAt, now)}
-                  </time>
-                )}
-              </span>
-            </button>
+          {queueGroups(rows).map((group) => (
+            <Fragment key={group.id}>
+              <h2 className="inbox-group">{group.heading}</h2>
+              {group.items.map(row)}
+            </Fragment>
           ))}
           {!rows.length && resource.state.status === "fresh" && (
             <Card className="inbox-empty-card">
@@ -395,6 +447,10 @@ export function Inbox({
             </Card>
           )}
         </div>
+        <p className="inbox-caption">
+          Only items that need your decision or intervention. Routine progress
+          stays in task views.
+        </p>
         <ActionLink
           variant="secondary"
           className="inbox-advanced"
@@ -406,61 +462,96 @@ export function Inbox({
       <section className="inbox-detail" aria-label="Selected request">
         {selectedId && taskId ? (
           <>
-            {heading && selected && (
+            {heading && selected && KindIcon && (
               <header className="inbox-detail-header">
-                <StatusBadge>{requestKindLabel(selected.kind)}</StatusBadge>
+                <Badge
+                  className="inbox-kind"
+                  variant={
+                    selected.kind === "intervention"
+                      ? "destructive"
+                      : "attention"
+                  }
+                >
+                  <KindIcon aria-hidden="true" />
+                  {requestKindLabel(selected.kind)}
+                </Badge>
                 {position >= 0 && (
-                  <span className="metadata muted inbox-position">
+                  <span className="inbox-position">
                     {position + 1} of {rows.length}
                   </span>
                 )}
                 {!single && (
-                  <a
-                    className="inbox-open-task"
-                    href={`/app/tasks/${selected.taskId}`}
-                  >
-                    Open task
-                    <ArrowUpRight aria-hidden="true" />
-                  </a>
+                  <span className="inbox-detail-tools">
+                    <a
+                      className="inbox-open-task"
+                      href={`/app/tasks/${selected.taskId}`}
+                    >
+                      Open task
+                      <ArrowUpRight aria-hidden="true" />
+                    </a>
+                    {position >= 0 && (
+                      <>
+                        <Button
+                          variant="secondary"
+                          className="inbox-step"
+                          aria-label="Previous request"
+                          disabled={!previous}
+                          onClick={() => previous && choose(previous)}
+                        >
+                          <ChevronUp aria-hidden="true" />
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          className="inbox-step"
+                          aria-label="Next request"
+                          disabled={!next}
+                          onClick={() => next && choose(next)}
+                        >
+                          <ChevronDown aria-hidden="true" />
+                        </Button>
+                      </>
+                    )}
+                  </span>
                 )}
               </header>
             )}
             <div className="inbox-detail-body">
               {selected && (
                 <div className="inbox-detail-intro">
-                  <p className="metadata muted">
+                  <p className="inbox-detail-project">
                     {selected.projectName ?? "Unavailable project"}
                   </p>
                   <h2>{selected.taskTitle ?? "Selected request"}</h2>
-                  <p className="body muted">
-                    Requested by{" "}
-                    {selected.requesterName ?? "Responsibility unknown"}
+                  <p className="inbox-identity">{requestIdentity(selected)}</p>
+                  <p className="inbox-reason">
+                    {selected.reason ?? "Exact details unavailable"}
                   </p>
-                  <p>{selected.reason ?? "Exact details unavailable"}</p>
                   {leftQueue && (
                     <p role="status">
                       This request has left the current queue. Its exact detail
                       remains selected.
                     </p>
                   )}
-                  <div className="inbox-detail-links">
-                    <ActionLink variant="secondary" href={selected.evidence}>
-                      Task evidence
-                    </ActionLink>
-                    {selected.conversation && (
-                      <ActionLink
-                        variant="secondary"
-                        href={selected.conversation}
-                      >
-                        Requesting conversation
+                  {!inspector && (
+                    <div className="inbox-detail-links">
+                      <ActionLink variant="secondary" href={selected.evidence}>
+                        Task evidence
                       </ActionLink>
-                    )}
-                  </div>
+                      {selected.conversation && (
+                        <ActionLink
+                          variant="secondary"
+                          href={selected.conversation}
+                        >
+                          Requesting conversation
+                        </ActionLink>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {selected?.kind === "question" ||
               (!selected && !selectedId.startsWith("intervention:")) ? (
-                <InboxQuestion
+                <QuestionResponse
                   client={client}
                   session={session}
                   taskId={taskId}
@@ -470,15 +561,10 @@ export function Inbox({
                   requesterName={selected?.requesterName}
                   compactContext={Boolean(selected)}
                   onBack={back}
-                  observedAt={resource.state.fetchedAt}
+                  holds={answerHolds(task.state)}
                 />
               ) : selected?.kind === "approval" ? (
-                <ApprovalDetail
-                  client={client}
-                  session={session}
-                  item={selected}
-                  observedAt={resource.state.fetchedAt}
-                />
+                <ApprovalDetail item={selected} resource={task} />
               ) : selected ? (
                 <InterventionDetail item={selected} />
               ) : (
@@ -490,6 +576,13 @@ export function Inbox({
           <p>Select a request to review its complete form or exact material.</p>
         )}
       </section>
+      {inspector && selected && (
+        <InboxContext
+          item={selected}
+          task={task}
+          open={!leftQueue && !recorded}
+        />
+      )}
     </section>
   );
 }

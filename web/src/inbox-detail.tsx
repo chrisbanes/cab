@@ -19,9 +19,9 @@ import { Alert } from "./ui/alert.js";
 export function useInboxTask(
   client: OperatorClient,
   session: Session,
-  taskId: string,
+  taskId: string | null,
   observedAt: number | null,
-  scope: "approval" | "question",
+  scope: "approval" | "question" | "request",
 ) {
   const loader = useCallback(
       (signal: AbortSignal) =>
@@ -29,7 +29,7 @@ export function useInboxTask(
       [client, taskId],
     ),
     resource = useOperatorResource(
-      `${session.csrfToken}:inbox-${scope}:${taskId}`,
+      taskId ? `${session.csrfToken}:inbox-${scope}:${taskId}` : null,
       loader,
     ),
     current = useRef(resource),
@@ -38,11 +38,18 @@ export function useInboxTask(
   useEffect(() => {
     if (seen.current === observedAt) return;
     seen.current = observedAt;
+    if (!taskId) return;
     // A slow hold read settles before the next poll replaces it; poll skips while one is in flight.
     void current.current.poll();
-  }, [observedAt]);
+  }, [observedAt, taskId]);
   return resource;
 }
+
+type TaskResource = ReturnType<typeof useInboxTask>;
+
+/** The holds answering does not clear; a read still loading or failed shows none and never gates answering. */
+export const answerHolds = (state: TaskResource["state"]) =>
+  state.data && !state.error ? holdNotices(state.data.data, "answer") : [];
 
 /**
  * An Inbox question with the independent holds that answering does not clear. The read lives here,
@@ -62,14 +69,7 @@ export function InboxQuestion({
     observedAt,
     "question",
   );
-  return (
-    <QuestionResponse
-      {...props}
-      holds={
-        state.data && !state.error ? holdNotices(state.data.data, "answer") : []
-      }
-    />
-  );
+  return <QuestionResponse {...props} holds={answerHolds(state)} />;
 }
 
 /** The exact action, target, revision and requester of an approval, or that it is unavailable. */
@@ -104,32 +104,22 @@ export function ApprovalFacts({
  * approval does not clear. Deciding stays at the exact retained destination, where the control lives.
  */
 export function ApprovalDetail({
-  client,
-  session,
   item,
-  observedAt,
+  resource,
 }: {
-  client: OperatorClient;
-  session: Session;
   item: InboxItem;
-  /** The Inbox's last successful read; each poll or Refresh rereads the holds. */
-  observedAt: number | null;
+  /** The Inbox's one read of this task; each poll or Refresh rereads the holds. */
+  resource: TaskResource;
 }) {
-  const resource = useInboxTask(
-      client,
-      session,
-      item.taskId,
-      observedAt,
-      "approval",
-    ),
-    task = resource.state.data?.data,
-    holds = task ? holdNotices(task) : [];
+  const task = resource.state.data?.data,
+    // Only this approval is not a hold on itself; other open approvals on the task still are.
+    holds = task
+      ? holdNotices(task, "approve", item.interactionId ?? item.id)
+      : [];
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
         {task && <ApprovalFacts task={task} item={item} />}
-      </div>
-      <div className="inbox-decision">
         {resource.state.error && (
           <Alert variant="destructive" role="alert">
             <p className="body">
@@ -155,7 +145,9 @@ export function ApprovalDetail({
             <p className="body muted">{hold.detail}</p>
           </Alert>
         ))}
-        <p className="metadata muted">
+      </div>
+      <div className="inbox-decision">
+        <p>
           Your decision is bound to the action, target and version in the exact
           approval. Changed material requires a new review.
         </p>

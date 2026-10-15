@@ -1,11 +1,4 @@
-import {
-  ArrowRight,
-  CircleAlert,
-  CircleQuestionMark,
-  Diamond,
-  TriangleAlert,
-  type LucideIcon,
-} from "lucide-react";
+import { ArrowRight, CircleAlert } from "lucide-react";
 import { useCallback, useState, type ReactNode } from "react";
 import {
   questionReadSchema,
@@ -33,6 +26,7 @@ import {
   inboxSummaryOf,
   requestActionLabel,
   requestHref,
+  requestKindIcons,
 } from "./request-presentation.js";
 import { useOperatorResource } from "./resource.js";
 import type { Requests } from "./task-attention.js";
@@ -171,12 +165,6 @@ export function NeedsYou({
   );
 }
 
-const icons: Record<InboxItem["kind"], LucideIcon> = {
-  question: CircleQuestionMark,
-  approval: Diamond,
-  intervention: TriangleAlert,
-};
-
 function RequestCard({
   item,
   task,
@@ -193,7 +181,7 @@ function RequestCard({
   const evidence = task && interventionEvidence(task),
     uncertain =
       item.kind === "intervention" && Boolean(evidence?.ownershipHeld),
-    Icon = uncertain ? CircleAlert : icons[item.kind],
+    Icon = uncertain ? CircleAlert : requestKindIcons[item.kind],
     headline = `overview-${item.id}-headline`;
   const head = (title: string | null) => (
     <>
