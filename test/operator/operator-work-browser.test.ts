@@ -1040,7 +1040,12 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
       ),
     );
   for (const [empty, width] of widths)
-    assert.ok(empty ? width <= 160 : width >= 300, `${empty} ${width}`);
+    assert.ok(
+      empty ? width >= 40 && width <= 60 : width >= 140,
+      `${empty} ${width}`,
+    );
+  const populated = widths.filter(([empty]) => !empty).map(([, w]) => w);
+  assert.ok(Math.max(...populated) - Math.min(...populated) <= 1, "equal");
   await shot(page, "1366-board");
 
   await bar.getByRole("button", { name: /^Uncertain · 1$/ }).click();
@@ -1069,11 +1074,10 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
   const order = [
     "Question requiring action",
     "Service integration · Local task",
-    "Running",
     "Question needs an answer",
     "Next: you · answer question",
-    "Answer question →",
     "Accountable lead · accountable lead",
+    "Answer question →",
   ];
   let at = -1;
   for (const expected of order) {
@@ -1097,7 +1101,7 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
     await card
       .locator(".task-card")
       .evaluate((e) => getComputedStyle(e).padding),
-    "12px",
+    "10px",
   );
   assert.doesNotMatch(await mainText(page), uuidText);
 
@@ -1170,7 +1174,7 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
     if (id === "column-Done") assert.equal(empty, null);
     else {
       assert.equal(empty, "true", id);
-      assert.ok(width <= 160, `${id} collapses to ${width}px`);
+      assert.ok(width <= 60, `${id} collapses to ${width}px`);
     }
   assert.equal(
     await page.locator("#column-Ready p").innerText(),
@@ -1262,6 +1266,342 @@ test("board shows a link bar with every count, collapsed empty columns and drawn
     .selectOption(ids.projectId);
   await page.waitForURL((u) => u.searchParams.get("project") === ids.projectId);
   assert.deepEqual(await visible(), ["column-Draft"]);
+});
+
+/** What `property: value` computes to on a probe element, e.g. a token's colour. */
+const resolved = (page: Page, property: string, value: string) =>
+  page.evaluate(
+    ([property, value]) => {
+      const probe = document.createElement("span");
+      probe.style.setProperty(property, value);
+      probe.style.borderStyle = "solid";
+      document.body.append(probe);
+      const result = getComputedStyle(probe).getPropertyValue(property);
+      probe.remove();
+      return result;
+    },
+    [property, value] as const,
+  );
+const style = (page: Page, selector: string, property: string) =>
+  page
+    .locator(selector)
+    .first()
+    .evaluate(
+      (e, property) => getComputedStyle(e).getPropertyValue(property),
+      property,
+    );
+
+test("board cards follow the frame's anatomy", async (_t, journey) => {
+  const { ids, page, commands } = await start(journey, "/app/tasks?view=board");
+  const card = (id: string) => `[data-task-id="${id}"]`;
+  await page.locator(card(ids.question.id)).waitFor();
+  await page
+    .locator(card(ids.question.id))
+    .getByRole("link", { name: "Answer question" })
+    .waitFor();
+  const lines = (await page.locator(card(ids.question.id)).innerText())
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  assert.deepEqual(lines, [
+    "Question requiring action",
+    "Service integration · Local task",
+    "Question needs an answer",
+    "Capacity is full; it rechecks as turns finish",
+    "Next: you · answer question",
+    "Accountable lead · accountable lead",
+    "Answer question →",
+  ]);
+  const [lead, response] = await Promise.all(
+    [".task-card-footer .task-lead", ".task-card-footer .task-request"].map(
+      (s) => page.locator(`${card(ids.question.id)} ${s}`).boundingBox(),
+    ),
+  );
+  // The lead leads the footer; a narrow card wraps the response below it.
+  assert.ok(
+    lead &&
+      response &&
+      (lead.x + lead.width <= response.x || lead.y + lead.height <= response.y),
+  );
+  assert.match(
+    (await page
+      .locator(`${card(ids.question.id)} .task-request`)
+      .getAttribute("href")) ?? "",
+    /^\/app\/inbox\?task=/,
+  );
+  assert.equal(
+    await page.locator(`${card(ids.question.id)} .task-status`).count(),
+    0,
+  );
+  assert.equal(
+    await style(page, `${card(ids.question.id)} .task-next`, "color"),
+    await resolved(page, "color", "var(--attn)"),
+  );
+  const border = (id: string) =>
+    style(page, `${card(id)} .task-card`, "border-top-color");
+  assert.equal(
+    await border(ids.question.id),
+    await resolved(page, "border-top-color", "var(--attn-border)"),
+  );
+  assert.equal(
+    await border(ids.uncertainStop.id),
+    await resolved(page, "border-top-color", "var(--risk-border)"),
+  );
+  assert.equal(
+    await border(ids.running.id),
+    await resolved(page, "border-top-color", "var(--line-strong)"),
+  );
+
+  // Ready-but-blocked work keeps its Ready label in Waiting; nothing else repeats its column.
+  const chip = page.locator(
+    `#column-Waiting ${card(ids.waiting)} .task-state[data-column="Ready"]`,
+  );
+  assert.equal(await chip.innerText(), "Ready");
+  assert.equal(await chip.locator("svg").count(), 1);
+  for (const id of [ids.ready, ids.running.id])
+    assert.equal(await page.locator(`${card(id)} .task-state`).count(), 0);
+  const uncertainChip = page.locator(
+    `${card(ids.uncertain.id)} .task-state[data-column="Uncertain"]`,
+  );
+  assert.equal(await uncertainChip.isVisible(), false);
+
+  // Each heading: symbol, the column word and a mono count of its cards.
+  for (const section of await page
+    .locator('.board-column:not([data-empty="true"])')
+    .all()) {
+    const heading = section.locator(".board-column-heading");
+    const column = (await section.getAttribute("id"))!.slice("column-".length);
+    assert.equal(
+      await heading.locator(".board-column-name").innerText(),
+      column,
+    );
+    assert.equal(await heading.locator("svg").count(), 1, column);
+    assert.equal(
+      Number(await heading.locator(".board-column-count").innerText()),
+      await section.locator("[data-task-id]").count(),
+      column,
+    );
+    assert.match(
+      await style(page, `#column-${column} .board-column-count`, "font-family"),
+      /Geist Mono/,
+    );
+  }
+  assert.equal(
+    await style(page, "#column-Running .board-column-name", "color"),
+    await resolved(page, "color", "var(--accent-text)"),
+  );
+  assert.equal(
+    await style(page, "#column-Uncertain .board-column-name", "color"),
+    await resolved(page, "color", "var(--risk)"),
+  );
+  assert.equal(
+    await style(page, "#column-Uncertain", "border-top-color"),
+    await resolved(page, "border-top-color", "var(--risk-border)"),
+  );
+
+  // Imported identity in mono, opening GitHub in a new tab.
+  const source = page
+    .locator(card(ids.importedId))
+    .getByRole("link", { name: /fixture\/source#42/ });
+  assert.match(
+    await source.evaluate((e) => getComputedStyle(e).fontFamily),
+    /Geist Mono/,
+  );
+  assert.equal(await source.getAttribute("target"), "_blank");
+  assert.match((await source.getAttribute("rel")) ?? "", /noopener/);
+  assert.match(await source.innerText(), /opens GitHub/);
+  await shot(page, "1366-board-cards");
+
+  // One column at a time on a phone, so the Uncertain card names its state.
+  await page.setViewportSize(phone);
+  await page
+    .getByRole("toolbar", { name: "Board columns" })
+    .getByRole("button", { name: /^Uncertain · / })
+    .click();
+  assert.equal(await uncertainChip.isVisible(), true);
+  assert.equal(await uncertainChip.innerText(), "Uncertain");
+  assert.equal(commands(), 0);
+});
+
+test("board columns share one 1366 screen, collapse to rails and scroll only inside the board", async (_t, journey) => {
+  const { ids, web, page, commands } = await start(
+    journey,
+    "/app/tasks?view=board",
+  );
+  const bar = page.getByRole("toolbar", { name: "Board columns" });
+  await page.locator(`[data-task-id="${ids.question.id}"]`).waitFor();
+  const layout = () =>
+    page.evaluate(() => {
+      const board = document.querySelector<HTMLElement>(".board-columns")!,
+        b = board.getBoundingClientRect();
+      return {
+        scrollWidth: board.scrollWidth,
+        clientWidth: board.clientWidth,
+        columns: [...board.querySelectorAll<HTMLElement>(".board-column")].map(
+          (c) => {
+            const r = c.getBoundingClientRect();
+            return {
+              id: c.id,
+              empty: c.dataset.empty === "true",
+              width: r.width,
+              inside: r.left >= b.left - 1 && r.right <= b.right + 1,
+            };
+          },
+        ),
+      };
+    });
+
+  // (a) Seven populated Active columns, equal and all on one screen.
+  const one = await layout();
+  assert.equal(one.columns.length, 7);
+  assert.ok(one.columns.every((c) => !c.empty && c.inside && c.width >= 140));
+  const widths = one.columns.map((c) => c.width);
+  assert.ok(Math.max(...widths) - Math.min(...widths) <= 1, `${widths}`);
+  assert.ok(one.scrollWidth <= one.clientWidth, "board does not scroll");
+  assert.ok(await noPageOverflow(page));
+  assert.equal(await page.evaluate(() => scrollX), 0);
+  await shot(page, "1366-board-all-columns");
+
+  // (b) Nine columns overflow into the board, never the page; Back restores its scroll.
+  await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
+  await bar.waitFor();
+  const all = await layout();
+  assert.equal(all.columns.length, 9);
+  assert.ok(all.scrollWidth > all.clientWidth);
+  assert.ok(await noPageOverflow(page));
+  const scrolled = await page
+    .locator(".board-columns")
+    .evaluate(async (board) => {
+      board.scrollLeft = board.scrollWidth;
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+      return board.scrollLeft;
+    });
+  assert.ok(scrolled > 0);
+  await page.waitForFunction(
+    (left) => history.state?.board?.scrollLeft === left,
+    scrolled,
+  );
+  const title = page.getByRole("link", { name: "Cancelled work", exact: true });
+  await title.click();
+  await page.waitForURL((u) => u.pathname.startsWith("/app/tasks/"));
+  await page.goBack();
+  await bar.waitFor();
+  await page.waitForFunction(
+    (left) => document.querySelector(".board-columns")?.scrollLeft === left,
+    scrolled,
+  );
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === "Cancelled work",
+  );
+
+  // (c) Every empty column is a labelled vertical rail that does not clip its text.
+  await page.goto(`${web.origin}/app/tasks?view=board&state=Done`);
+  await bar.waitFor();
+  const rails = await page.locator(".board-column").evaluateAll((es) =>
+    es.map((e) => ({
+      id: e.id,
+      empty: e.getAttribute("data-empty") === "true",
+      width: e.getBoundingClientRect().width,
+      count: e.querySelector(".board-column-count")?.checkVisibility(),
+      vertical: getComputedStyle(e.querySelector(".board-column-name")!)
+        .writingMode,
+      clipped: e.scrollHeight > e.clientHeight + 1,
+    })),
+  );
+  assert.equal(rails.filter((r) => r.empty).length, 7);
+  for (const rail of rails)
+    if (rail.empty) {
+      assert.ok(rail.width >= 40 && rail.width <= 60, JSON.stringify(rail));
+      assert.equal(rail.vertical, "vertical-rl", rail.id);
+      assert.equal(rail.count, true, rail.id);
+      assert.equal(rail.clipped, false, rail.id);
+    } else assert.ok(rail.id === "column-Done" && rail.width > 500);
+  assert.equal(
+    await page.locator("#column-Ready p").innerText(),
+    "None ready. Held Ready work is in Waiting.",
+  );
+  assert.equal(await page.locator("#column-Paused p").innerText(), "No tasks");
+  await shot(page, "1366-board-rails");
+
+  // (d) Tablet: the board scrolls inside itself and the link bar reaches Uncertain.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto(`${web.origin}/app/tasks?view=board`);
+  await bar.waitFor();
+  const tablet = await layout();
+  assert.ok(tablet.scrollWidth > tablet.clientWidth);
+  assert.ok(await noPageOverflow(page));
+  await bar.getByRole("button", { name: /^Uncertain · 1$/ }).click();
+  await page.waitForFunction(() => {
+    const board = document
+        .querySelector(".board-columns")!
+        .getBoundingClientRect(),
+      column = document
+        .querySelector("#column-Uncertain")!
+        .getBoundingClientRect();
+    return column.left >= board.left - 1 && column.right <= board.right + 1;
+  });
+  // Tabs transition their colours; capture the settled selection.
+  const settled = () =>
+    page.waitForFunction(() => document.getAnimations().length === 0);
+  await settled();
+  await shot(page, "1024-board");
+
+  // (e) Phone: selected tab and Uncertain tones, 44px targets and the footer sentence.
+  await page.setViewportSize(phone);
+  await page.goto(`${web.origin}/app/tasks?view=board`);
+  await bar.waitFor();
+  await bar.getByRole("button", { name: /^Waiting · / }).click();
+  // Buttons transition their colours, so wait for the settled value.
+  const settles = async (property: string, token: string) => {
+    const want = await resolved(page, property, token);
+    await page.waitForFunction(
+      ([property, want]) =>
+        getComputedStyle(
+          document.querySelector('.column-tab[aria-pressed="true"]')!,
+        ).getPropertyValue(property) === want,
+      [property, want] as const,
+    );
+  };
+  await settles("background-color", "var(--overlay)");
+  await settles("border-top-color", "var(--accent-border)");
+  assert.equal(
+    await bar
+      .getByRole("button", { name: /^Uncertain · 1$/ })
+      .evaluate((e) => getComputedStyle(e).color),
+    await resolved(page, "color", "var(--risk)"),
+  );
+  const targets = await page
+    .locator(".column-tab, .phone-column-controls button")
+    .evaluateAll((es) => es.map((e) => e.getBoundingClientRect().height));
+  assert.ok(
+    targets.every((h) => h >= 44),
+    `${targets}`,
+  );
+  assert.equal(
+    squash(await page.locator(".board-footer").innerText()),
+    "Columns describe Ensemble work, not GitHub issue state. Cards open the task; nothing here changes state, and there is no drag and drop.",
+  );
+  assert.ok(await noPageOverflow(page));
+  await shot(page, "390-board-waiting-tabs");
+  await bar.getByRole("button", { name: /^Uncertain · 1$/ }).click();
+  await page
+    .locator(`[data-task-id="${ids.uncertain.id}"] .task-state`)
+    .getByText("Uncertain")
+    .waitFor();
+  await settled();
+  await shot(page, "390-board-uncertain-chip");
+
+  // (f) Overview's Board sits in its work panel and keeps the List's task IDs.
+  await page.setViewportSize(desktop);
+  await page.goto(`${web.origin}/app?view=board`);
+  await page.locator(".overview-panel .board-columns").waitFor();
+  await page.locator(".overview-panel .task-card").first().waitFor();
+  assert.ok(await noPageOverflow(page));
+  const board = await taskIds(page, ".overview-panel .board-columns");
+  await page.goto(`${web.origin}/app`);
+  await page.locator(".overview-panel .task-row").first().waitFor();
+  assert.deepEqual(await taskIds(page, ".overview-panel .task-list"), board);
+  assert.equal(commands(), 0);
 });
 
 test("attention summary names the uncertain or stopping task and links to the Inbox", async (_t, journey) => {
