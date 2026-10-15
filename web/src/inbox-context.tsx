@@ -61,7 +61,7 @@ export function InboxContext({
         <dt>Requester</dt>
         <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
         {/* An intervention has no requesting assignment, so no chain. */}
-        {(!task || chain.length > 0) && (
+        {item.requestingAssignmentId && (!task || chain.length > 0) && (
           <>
             <dt>Chain</dt>
             <dd className="inbox-context-chain">

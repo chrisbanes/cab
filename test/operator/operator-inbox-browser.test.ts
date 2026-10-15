@@ -1311,6 +1311,11 @@ test("an approval's inspector keeps another open approval on its task as a hold,
   await serveApprovals([approval.interactionId, randomUUID()]);
   await page.locator('.inbox-row[data-kind="approval"]').click();
   await hold.waitFor();
+  // The request pane lists the same hold, since it is not the approval in view.
+  await page
+    .getByRole("region", { name: "Selected request" })
+    .getByText("Execution held (approval needs a decision)", { exact: true })
+    .waitFor();
   // Only the approval in view: it is not a hold on itself.
   await page.unrouteAll();
   await serveApprovals([approval.interactionId]);
@@ -1360,4 +1365,32 @@ test("the inspector drops the next action once the answer is recorded, and alway
   // The retained confirmation is not the operator's next action any more.
   await aside.getByText(/^Next: you/).waitFor({ state: "detached" });
   assert.equal(await leadValue(), expectedLead);
+});
+
+test("without a task read the inspector says the source is unavailable, and an intervention has no chain (1366)", async (_t, j) => {
+  const { page, more: held } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnIntervention(f),
+  );
+  await page.route(`**/api/operator/tasks/${held.taskId}`, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  await page.locator('.inbox-row[data-kind="intervention"]').click();
+  const aside = page.getByRole("complementary", { name: "Task context" });
+  await aside.getByRole("button", { name: "Try again" }).waitFor();
+  await aside.getByText(/ · Source unavailable$/).waitFor();
+  assert.equal(
+    await aside
+      .locator("dt", { hasText: /^Lead$/ })
+      .evaluate((dt) => dt.nextElementSibling?.textContent),
+    "Unavailable",
+  );
+  assert.equal(await aside.locator("dt", { hasText: /^Chain$/ }).count(), 0);
 });
