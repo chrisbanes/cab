@@ -218,7 +218,8 @@ export class LocalOperatorUi {
     const activeGithub = new Set(
       this.store.githubActiveSelectionIds(projectId),
     );
-    const rule = ruleView(this.githubSources?.readinessRule(projectId) ?? null);
+    const rule = ruleView(this.githubSources?.readinessRule(projectId) ?? null),
+      counted = this.githubSources?.selectionCounts(projectId);
     const previewForms = github.selections
       .map((raw) => {
         const selection = selectionSchema.parse(raw);
@@ -227,8 +228,7 @@ export class LocalOperatorUi {
         const counts =
           credential?.usable === false
             ? null
-            : (this.githubSources?.selectionCounts(projectId, selection.id) ??
-              null);
+            : (counted?.get(selection.id) ?? null);
         const warning = zeroMatchWarning(counts, rule);
         const items = counts
           ? ` ${escapeHtml(selectionCountsText(counts, rule))}.${warning ? ` ${escapeHtml(warning)} <a href="#github-readiness">Check readiness conditions</a>` : ""}`

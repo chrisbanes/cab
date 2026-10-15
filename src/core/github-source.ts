@@ -200,7 +200,7 @@ export class GitHubSourceStore {
     CREATE TABLE IF NOT EXISTS github_sync_state (
       projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
       complete INTEGER NOT NULL CHECK(complete IN (0,1)), reason TEXT,
-      refreshedAt TEXT NOT NULL, skippedClosed INTEGER NOT NULL DEFAULT 0,
+      refreshedAt TEXT NOT NULL, skippedClosedNodeIds TEXT NOT NULL DEFAULT '[]',
       PRIMARY KEY(projectId, selectionId)
     );
     CREATE TABLE IF NOT EXISTS github_placement_decisions (
@@ -235,9 +235,9 @@ export class GitHubSourceStore {
     const syncColumns = this.db
       .prepare("PRAGMA table_info(github_sync_state)")
       .all() as Row[];
-    if (!syncColumns.some((c) => c.name === "skippedClosed"))
+    if (!syncColumns.some((c) => c.name === "skippedClosedNodeIds"))
       this.db.exec(
-        "ALTER TABLE github_sync_state ADD COLUMN skippedClosed INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE github_sync_state ADD COLUMN skippedClosedNodeIds TEXT NOT NULL DEFAULT '[]'",
       );
   }
 
@@ -835,8 +835,8 @@ export class GitHubSourceStore {
       }
       this.db
         .prepare(
-          // A partial read keeps the last complete read's skipped count, as it keeps memberships.
-          "INSERT INTO github_sync_state (projectId, selectionId, complete, reason, refreshedAt, skippedClosed) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET complete = excluded.complete, reason = excluded.reason, refreshedAt = excluded.refreshedAt, skippedClosed = CASE WHEN excluded.complete = 1 THEN excluded.skippedClosed ELSE skippedClosed END",
+          // A partial read keeps the last complete read's skipped issues, as it keeps memberships.
+          "INSERT INTO github_sync_state (projectId, selectionId, complete, reason, refreshedAt, skippedClosedNodeIds) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET complete = excluded.complete, reason = excluded.reason, refreshedAt = excluded.refreshedAt, skippedClosedNodeIds = CASE WHEN excluded.complete = 1 THEN excluded.skippedClosedNodeIds ELSE skippedClosedNodeIds END",
         )
         .run(
           projectId,
@@ -844,7 +844,7 @@ export class GitHubSourceStore {
           Number(snapshot.complete),
           snapshot.reason,
           new Date().toISOString(),
-          snapshot.complete ? skipped.size : 0,
+          JSON.stringify(snapshot.complete ? [...skipped] : []),
         );
       if (
         previousSync &&
@@ -1088,43 +1088,74 @@ export class GitHubSourceStore {
   }
 
   /**
-   * Read-only counts for one selection from stored observations; `null` before any
-   * read. Never a readiness grant: matching the rule is not Ready or admissible.
+   * Read-only counts per read selection of a project, from stored observations, in a
+   * fixed number of queries. Never a readiness grant: matching is not Ready or admissible.
    */
-  selectionCounts(
-    projectId: string,
-    selectionId: string,
-  ): {
-    observed: number;
-    open: number;
-    closedSkipped: number;
-    matching: number;
-    complete: boolean;
-  } | null {
-    const sync = this.db
+  selectionCounts(projectId: string): Map<
+    string,
+    {
+      observed: number;
+      open: number;
+      closedSkipped: number;
+      matching: number;
+      complete: boolean;
+    }
+  > {
+    const states = this.db
       .prepare(
-        "SELECT complete, skippedClosed FROM github_sync_state WHERE projectId = ? AND selectionId = ?",
+        "SELECT selectionId, complete, skippedClosedNodeIds FROM github_sync_state WHERE projectId = ?",
       )
-      .get(projectId, selectionId) as Row | undefined;
-    if (!sync) return null;
+      .all(projectId) as Row[];
     const rows = this.db
-      .prepare(`SELECT e.nodeId, e.observedState, e.labels, m.projectId FROM github_memberships m
-        JOIN github_external_issues e ON e.nodeId = m.nodeId
-        WHERE m.projectId = ? AND m.selectionId = ?`)
-      .all(projectId, selectionId) as Row[];
+      .prepare(`SELECT m.selectionId, m.nodeId, m.projectFields, e.observedState, e.labels
+        FROM github_memberships m JOIN github_external_issues e ON e.nodeId = m.nodeId
+        WHERE m.projectId = ?`)
+      .all(projectId) as Row[];
     const rule = this.readinessRule(projectId);
-    const open = rows.filter((r) => r.observedState === "open");
-    const closedSkipped = Number(sync.skippedClosed);
-    return {
-      observed: rows.length + closedSkipped,
-      open: open.length,
-      closedSkipped,
-      // The issue's fields from every membership in the project, as `updateReadiness` reads them.
-      matching: open.filter(
-        (r) => evaluateReadiness(rule, this.readinessFacts(r)).satisfied,
-      ).length,
-      complete: Number(sync.complete) === 1,
+    // Each issue's fields from every membership in the project, as `readinessFacts` reads them.
+    const fields = new Map<string, z.output<typeof projectFieldsSchema>>();
+    for (const r of rows)
+      fields.set(String(r.nodeId), [
+        ...(fields.get(String(r.nodeId)) ?? []),
+        ...projectFieldsSchema.parse(JSON.parse(String(r.projectFields))),
+      ]);
+    const matches = new Map<string, boolean>();
+    const matching = (r: Row) => {
+      const nodeId = String(r.nodeId);
+      if (!matches.has(nodeId))
+        matches.set(
+          nodeId,
+          evaluateReadiness(rule, {
+            labels: z
+              .array(z.string())
+              .parse(JSON.parse(String(r.labels)) as unknown),
+            fields: fields.get(nodeId) ?? [],
+          }).satisfied,
+        );
+      return matches.get(nodeId) === true;
     };
+    return new Map(
+      states.map((sync) => {
+        const members = rows.filter((r) => r.selectionId === sync.selectionId);
+        const memberIds = new Set(members.map((r) => String(r.nodeId)));
+        // An issue imported since it was skipped (reopened on a partial read) counts once.
+        const closedSkipped = z
+          .array(z.string())
+          .parse(JSON.parse(String(sync.skippedClosedNodeIds)) as unknown)
+          .filter((id) => !memberIds.has(id)).length;
+        const open = members.filter((r) => r.observedState === "open");
+        return [
+          String(sync.selectionId),
+          {
+            observed: members.length + closedSkipped,
+            open: open.length,
+            closedSkipped,
+            matching: open.filter(matching).length,
+            complete: Number(sync.complete) === 1,
+          },
+        ];
+      }),
+    );
   }
 
   /**

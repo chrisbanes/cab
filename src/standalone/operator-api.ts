@@ -5118,7 +5118,8 @@ export class OperatorApi {
     return sourceObservationSchema.parse({
       data: {
         projects: projects.map(({ projectId, credential }) => {
-          const readiness = this.readinessRuleView(projectId, excluded);
+          const readiness = this.readinessRuleView(projectId, excluded),
+            counted = this.service.githubSources().selectionCounts(projectId);
           return {
             projectId,
             credential,
@@ -5141,7 +5142,7 @@ export class OperatorApi {
               // Counts only for stored reads; never and unavailable claim nothing.
               const counts =
                 state === "complete" || state === "partial"
-                  ? store.selectionCounts(projectId, s.id)
+                  ? (counted.get(s.id) ?? null)
                   : null;
               return {
                 selectionId: this.safe(s.id, excluded),

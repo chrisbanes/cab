@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { evaluateReadiness } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
@@ -876,7 +876,7 @@ test("selection counts come from stored observations, with skipped closed issues
       f.at("I_2", { labels: [] }),
       f.at("I_3", { state: "closed" }),
     ]);
-    assert.deepEqual(f.sources.selectionCounts(f.projectId, "repo"), {
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
       observed: 3,
       open: 2,
       closedSkipped: 1,
@@ -886,7 +886,7 @@ test("selection counts come from stored observations, with skipped closed issues
     assert.equal(f.sources.issue("I_3"), undefined);
     // Reopened: imported on this read and recounted, never incremented.
     f.read("repo", [f.at("I_1"), f.at("I_2", { labels: [] }), f.at("I_3")]);
-    assert.deepEqual(f.sources.selectionCounts(f.projectId, "repo"), {
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
       observed: 3,
       open: 3,
       closedSkipped: 0,
@@ -899,7 +899,7 @@ test("selection counts come from stored observations, with skipped closed issues
       f.at("I_2", { labels: [] }),
       f.at("I_3"),
     ]);
-    assert.deepEqual(f.sources.selectionCounts(f.projectId, "repo"), {
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
       observed: 3,
       open: 2,
       closedSkipped: 0,
@@ -917,14 +917,14 @@ test("partial reads keep the skipped count and memberships; zero match and never
     ["repo", "other"],
   );
   try {
-    assert.equal(f.sources.selectionCounts(f.projectId, "repo"), null);
+    assert.equal(f.sources.selectionCounts(f.projectId).get("repo"), undefined);
     f.read("repo", [
       f.at("I_1"),
       f.at("I_2"),
       f.at("I_9", { state: "closed" }),
     ]);
     f.read("repo", [f.at("I_8", { state: "closed" })], false);
-    assert.deepEqual(f.sources.selectionCounts(f.projectId, "repo"), {
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
       observed: 3,
       open: 2,
       closedSkipped: 1,
@@ -933,7 +933,10 @@ test("partial reads keep the skipped count and memberships; zero match and never
     });
     // One issue in two selections counts once in each and is one task.
     f.read("other", [f.at("I_1")]);
-    assert.equal(f.sources.selectionCounts(f.projectId, "other")?.observed, 1);
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("other")?.observed,
+      1,
+    );
     assert.equal(f.domain.tasks(f.projectId).length, 2);
   } finally {
     f.db.close();
@@ -1039,7 +1042,7 @@ test("the readiness predicate filters nothing without a rule and follows all/any
   );
 });
 
-test("migration adds the skipped-closed count to existing sync state rows", () => {
+test("migration adds the skipped closed issues to existing sync state rows", () => {
   const db = new DatabaseSync(":memory:");
   try {
     new Store(db).ensureHost("test");
@@ -1058,7 +1061,7 @@ test("migration adds the skipped-closed count to existing sync state rows", () =
         complete: 1,
         reason: null,
         refreshedAt: "then",
-        skippedClosed: 0,
+        skippedClosedNodeIds: "[]",
       },
     );
   } finally {
@@ -1093,8 +1096,55 @@ test("matching counts a Project field from another selection's membership, as Re
     assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
     for (const selectionId of ["repo", "board"])
       assert.equal(
-        f.sources.selectionCounts(f.projectId, selectionId)?.matching,
+        f.sources.selectionCounts(f.projectId).get(selectionId)?.matching,
         1,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("an issue skipped closed and imported on a later partial read counts once", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    f.read("repo", [f.at("I_1"), f.at("I_2", { state: "closed" })]);
+    f.read("repo", [f.at("I_2")], false);
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
+      observed: 2,
+      open: 2,
+      closedSkipped: 0,
+      matching: 2,
+      complete: false,
+    });
+  } finally {
+    f.db.close();
+  }
+});
+
+test("selection counts use a fixed number of queries however many items are stored", () => {
+  const f = readinessFixture(
+    { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    ["repo", "other"],
+  );
+  try {
+    const issues = Array.from({ length: 40 }, (_, i) =>
+      f.at(`I_${i + 1}`, { labels: i % 2 ? [] : ["ready"] }),
+    );
+    f.read("repo", issues);
+    f.read("other", issues.slice(0, 20));
+    const prepare = mock.method(f.db, "prepare");
+    const counts = f.sources.selectionCounts(f.projectId);
+    assert.equal(prepare.mock.callCount(), 3);
+    prepare.mock.restore();
+    assert.equal(counts.get("repo")?.matching, 20);
+    assert.equal(counts.get("other")?.matching, 10);
+    for (const task of f.domain.tasks(f.projectId))
+      assert.equal(
+        f.sources.taskReadiness(String(task.id))?.outcome === "matched",
+        Number(task.ready) === 1,
       );
   } finally {
     f.db.close();
