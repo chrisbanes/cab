@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CirclePlay, Clock } from "lucide-react";
 import { flushSync } from "react-dom";
 import {
   composerOptionsSchema,
@@ -16,6 +17,7 @@ import {
 } from "./components.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import { Alert } from "./ui/alert.js";
+import { Badge } from "./ui/badge.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
@@ -24,6 +26,7 @@ import { useOperatorResource } from "./resource.js";
 import {
   orderWaits,
   runtimeWaitCodes,
+  waitLabels,
   type Wait,
 } from "../../src/operator/wait-reasons.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
@@ -287,18 +290,13 @@ export function TaskComposer({
             : []),
         ])
       : null;
-  // A refused or unconfirmed creation sits beside the action that made it.
+  // A refused or unconfirmed creation sits just above the bar that made it.
   const outcomeShown = state.failed || state.phase === "unknown";
   const optionalError = Object.keys(optionalFields).some(
     (f) => state.errors[f],
   );
   return (
     <section className="composer" aria-label="Task composer">
-      {state.savedOnDevice && state.phase === "editable" && (
-        <p className="metadata muted composer-saved">
-          Unfinished input saved on this device
-        </p>
-      )}
       {state.notice && !outcomeShown && (
         <Alert className="resource-status" role="status">
           {state.notice}
@@ -311,266 +309,258 @@ export function TaskComposer({
           void submit(true);
         }}
       >
-        <fieldset disabled={locked} className="composer-fields">
-          <label className="field body" htmlFor="composer-projectId">
-            Project
-            <NativeSelect
-              id="composer-projectId"
-              aria-label="Project"
-              value={input.projectId}
-              onChange={(e) => {
-                edit({
-                  projectId: e.target.value,
-                  profileId: "",
-                  blockerTaskIds: [],
-                });
-                state.notice =
-                  "Project changed. Assignee and dependency selections were cleared.";
-                setDependencyQuery("");
-              }}
-            >
-              <option value="">Choose a project</option>
-              {workspace?.data.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name ?? "Name unavailable"}
-                </option>
-              ))}
-            </NativeSelect>
-            {error("projectId")}
-          </label>
-          {input.projectId && (
-            <aside
-              className="composer-inherited"
-              aria-label={`Inherited from ${o?.project.name ?? "project"}`}
-            >
-              <p className="metadata muted composer-inherited-title">
-                Inherited from {o?.project.name ?? "project"}
-              </p>
-              <ResourceStatus
-                state={options.state}
-                retry={options.refresh}
-                label="Project options"
-              />
-              {o && (
-                <div className="composer-policy">
-                  <p className="metadata muted">Accountable lead</p>
-                  <p className="body">
-                    {o.lead?.name ??
-                      (o.lead ? "Name unavailable" : "Unconfigured")}
-                  </p>
-                  {lead?.summary && (
-                    <p className="body muted">{lead.summary}</p>
-                  )}
-                  <p className="body muted">
-                    {o.routingEnabled
-                      ? "Routing chooses an assignee unless you pick one."
-                      : "The project lead is assigned unless you pick one."}
-                  </p>
-                  <p className="body muted">
-                    Capacity: {o.capacity.projectUsage}/
-                    {o.capacity.projectLimit} project · {o.capacity.globalUsage}
-                    /{o.capacity.globalLimit} global. Dependencies, Stop and
-                    ownership are checked again when work starts.
-                  </p>
-                  <a
-                    className="body"
-                    href={`/app/projects/${encodeURIComponent(input.projectId)}/settings`}
-                  >
-                    View project instructions
-                  </a>
-                  <h3 className="small-heading">Created ≠ running</h3>
-                  <p className="body muted">
-                    Execution may wait for project state, dependencies, capacity
-                    or holds. You'll see the reason on the task.
-                  </p>
-                </div>
-              )}
-            </aside>
-          )}
-          <label className="field body" htmlFor="composer-title">
-            Task title
-            <Input
-              id="composer-title"
-              aria-label="Task title"
-              className="control"
-              value={input.title}
-              onChange={(e) => edit({ title: e.target.value })}
-              aria-invalid={Boolean(state.errors.title)}
-            />
-            {error("title")}
-          </label>
-          <label className="field body" htmlFor="composer-outcome">
-            Desired outcome
-            <Textarea
-              id="composer-outcome"
-              aria-label="Desired outcome"
-              className="control outcome-input"
-              rows={9}
-              autoGrow
-              maxAutoGrowHeight={480}
-              value={input.outcome}
-              onChange={(e) => edit({ outcome: e.target.value })}
-              aria-invalid={Boolean(state.errors.outcome)}
-            />
-            <span className="metadata muted">
-              Outcome, optional context and reference links share a
-              16,000-character brief limit.
-            </span>
-            {error("outcome")}
-          </label>
-          <details
-            className="composer-disclosure"
-            open={optionalOpen}
-            onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
-          >
-            <summary className="small-heading">{optional.summary}</summary>
-            <label className="field body" htmlFor="composer-context">
-              Optional context
-              <Textarea
-                id="composer-context"
-                aria-label="Optional context"
-                className="control"
-                rows={5}
-                autoGrow
-                value={input.context}
-                onChange={(e) => edit({ context: e.target.value })}
-              />
-              {error("context")}
-            </label>
-            <label className="field body" htmlFor="composer-links">
-              Reference links
-              <Textarea
-                id="composer-links"
-                aria-label="Reference links"
-                className="control"
-                rows={3}
-                value={linkText}
-                onChange={(e) => {
-                  setLinkText(e.target.value);
-                  edit({ links: e.target.value.split("\n").filter(Boolean) });
-                }}
-              />
-              <span className="metadata muted">
-                One HTTP or HTTPS link per line. References are passive context
-                and grant no repository access.
-              </span>
-              {error("links")}
-            </label>
-            <label className="field body" htmlFor="composer-profileId">
-              Assignee
-              <NativeSelect
-                id="composer-profileId"
-                aria-label="Assignee"
-                value={input.profileId}
-                onChange={(e) => edit({ profileId: e.target.value })}
-                disabled={!o || options.state.status !== "fresh"}
-              >
-                <option value="">
-                  {o?.routingEnabled
-                    ? "Automatic allocation via project routing"
-                    : "Default project lead allocation"}
-                </option>
-                {o?.profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name ?? "Name unavailable"}
-                  </option>
-                ))}
-              </NativeSelect>
-              <span className="metadata muted">
-                An explicit assignee skips routing, but every hold still
-                applies. The project lead remains accountable.
-              </span>
-              {error("profileId")}
-            </label>
-            <fieldset
-              className="dependency-options"
-              disabled={!o || options.state.status !== "fresh"}
-            >
-              <legend className="small-heading">Dependencies</legend>
-              <p className="body muted">
-                Choose existing tasks in this project. These must finish before
-                execution can begin.
-              </p>
-              <label className="field body" htmlFor="dependency-search">
-                Find dependencies
-                <Input
-                  id="dependency-search"
-                  className="control"
-                  value={dependencyQuery}
-                  onChange={(e) => setDependencyQuery(e.target.value)}
-                />
-              </label>
-              <div
-                id="composer-blockerTaskIds"
-                className="dependency-list"
-                tabIndex={-1}
-              >
-                {o?.dependencies
-                  .filter(
-                    (d) =>
-                      !dependencyQuery ||
-                      d.title
-                        ?.toLocaleLowerCase()
-                        .includes(dependencyQuery.toLocaleLowerCase()),
-                  )
-                  .map((d) => (
-                    <label className="dependency-choice body" key={d.id}>
-                      <input
-                        type="checkbox"
-                        aria-label={d.title ?? "Title unavailable"}
-                        checked={input.blockerTaskIds.includes(d.id)}
-                        onChange={(e) =>
-                          edit({
-                            blockerTaskIds: e.target.checked
-                              ? [...input.blockerTaskIds, d.id]
-                              : input.blockerTaskIds.filter(
-                                  (id) => id !== d.id,
-                                ),
-                          })
-                        }
-                      />
-                      <span>{d.title ?? "Title unavailable"}</span>
-                      <span className="metadata muted">
-                        {d.state}
-                        {d.source ? ` · GitHub #${d.source.number ?? "?"}` : ""}
-                      </span>
-                    </label>
+        <div className="composer-body">
+          <fieldset disabled={locked} className="composer-fields">
+            <div className="composer-lead-row">
+              <label className="field body" htmlFor="composer-projectId">
+                Project
+                <NativeSelect
+                  id="composer-projectId"
+                  aria-label="Project"
+                  value={input.projectId}
+                  onChange={(e) => {
+                    edit({
+                      projectId: e.target.value,
+                      profileId: "",
+                      blockerTaskIds: [],
+                    });
+                    state.notice =
+                      "Project changed. Assignee and dependency selections were cleared.";
+                    setDependencyQuery("");
+                  }}
+                >
+                  <option value="">Choose a project</option>
+                  {workspace?.data.projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name ?? "Name unavailable"}
+                    </option>
                   ))}
-              </div>
-              {o?.dependencies.length === 0 && (
-                <p className="body muted">No existing tasks in this project.</p>
-              )}
-              {error("blockerTaskIds")}
-            </fieldset>
-          </details>
-          {!optionalOpen && (
-            <div className="composer-optional-values metadata muted">
-              {optional.lines.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-              {optional.fix && <p>{optional.fix}</p>}
+                </NativeSelect>
+                {error("projectId")}
+              </label>
+              <label className="field body" htmlFor="composer-title">
+                Task title
+                <Input
+                  id="composer-title"
+                  aria-label="Task title"
+                  className="control"
+                  value={input.title}
+                  onChange={(e) => edit({ title: e.target.value })}
+                  aria-invalid={Boolean(state.errors.title)}
+                />
+                {error("title")}
+              </label>
             </div>
-          )}
-        </fieldset>
-        {state.phase === "pending" ? (
-          <div className="composer-actions">
-            <Button type="button" disabled>
-              {state.frozen?.ready ? "Creating…" : "Saving…"}
-            </Button>
-          </div>
-        ) : (
-          !locked && (
-            <div className="composer-actions">
-              {prediction && (
-                <div className="composer-prediction" aria-live="polite">
-                  {!prediction.length && (
-                    <p className="small-heading">Starts now.</p>
+            <label className="field body" htmlFor="composer-outcome">
+              Desired outcome
+              <Textarea
+                id="composer-outcome"
+                aria-label="Desired outcome"
+                className="control outcome-input"
+                rows={9}
+                autoGrow
+                maxAutoGrowHeight={480}
+                value={input.outcome}
+                onChange={(e) => edit({ outcome: e.target.value })}
+                aria-invalid={Boolean(state.errors.outcome)}
+              />
+              <span className="metadata muted">
+                Outcome, optional context and reference links share a
+                16,000-character brief limit.
+              </span>
+              {error("outcome")}
+            </label>
+            <div
+              className="composer-optional"
+              data-invalid={optional.fix ? "true" : undefined}
+            >
+              <details
+                className="composer-disclosure"
+                open={optionalOpen}
+                onToggle={(e) => setOptionalOpen(e.currentTarget.open)}
+              >
+                <summary className="small-heading">{optional.summary}</summary>
+                <label className="field body" htmlFor="composer-context">
+                  Optional context
+                  <Textarea
+                    id="composer-context"
+                    aria-label="Optional context"
+                    className="control"
+                    rows={5}
+                    autoGrow
+                    value={input.context}
+                    onChange={(e) => edit({ context: e.target.value })}
+                  />
+                  {error("context")}
+                </label>
+                <label className="field body" htmlFor="composer-links">
+                  Reference links
+                  <Textarea
+                    id="composer-links"
+                    aria-label="Reference links"
+                    className="control"
+                    rows={3}
+                    value={linkText}
+                    onChange={(e) => {
+                      setLinkText(e.target.value);
+                      edit({
+                        links: e.target.value.split("\n").filter(Boolean),
+                      });
+                    }}
+                  />
+                  <span className="metadata muted">
+                    One HTTP or HTTPS link per line. References are passive
+                    context and grant no repository access.
+                  </span>
+                  {error("links")}
+                </label>
+                <label className="field body" htmlFor="composer-profileId">
+                  Assignee
+                  <NativeSelect
+                    id="composer-profileId"
+                    aria-label="Assignee"
+                    value={input.profileId}
+                    onChange={(e) => edit({ profileId: e.target.value })}
+                    disabled={!o || options.state.status !== "fresh"}
+                  >
+                    <option value="">
+                      {o?.routingEnabled
+                        ? "Automatic allocation via project routing"
+                        : "Default project lead allocation"}
+                    </option>
+                    {o?.profiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name ?? "Name unavailable"}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                  <span className="metadata muted">
+                    An explicit assignee skips routing, but every hold still
+                    applies. The project lead remains accountable.
+                  </span>
+                  {error("profileId")}
+                </label>
+                <fieldset
+                  className="dependency-options"
+                  disabled={!o || options.state.status !== "fresh"}
+                >
+                  <legend className="small-heading">Dependencies</legend>
+                  <p className="body muted">
+                    Choose existing tasks in this project. These must finish
+                    before execution can begin.
+                  </p>
+                  <label className="field body" htmlFor="dependency-search">
+                    Find dependencies
+                    <Input
+                      id="dependency-search"
+                      className="control"
+                      value={dependencyQuery}
+                      onChange={(e) => setDependencyQuery(e.target.value)}
+                    />
+                  </label>
+                  <div
+                    id="composer-blockerTaskIds"
+                    className="dependency-list"
+                    tabIndex={-1}
+                  >
+                    {o?.dependencies
+                      .filter(
+                        (d) =>
+                          !dependencyQuery ||
+                          d.title
+                            ?.toLocaleLowerCase()
+                            .includes(dependencyQuery.toLocaleLowerCase()),
+                      )
+                      .map((d) => (
+                        <label className="dependency-choice body" key={d.id}>
+                          <input
+                            type="checkbox"
+                            aria-label={d.title ?? "Title unavailable"}
+                            checked={input.blockerTaskIds.includes(d.id)}
+                            onChange={(e) =>
+                              edit({
+                                blockerTaskIds: e.target.checked
+                                  ? [...input.blockerTaskIds, d.id]
+                                  : input.blockerTaskIds.filter(
+                                      (id) => id !== d.id,
+                                    ),
+                              })
+                            }
+                          />
+                          <span>{d.title ?? "Title unavailable"}</span>
+                          <span className="metadata muted">
+                            {d.state}
+                            {d.source
+                              ? ` · GitHub #${d.source.number ?? "?"}`
+                              : ""}
+                          </span>
+                        </label>
+                      ))}
+                  </div>
+                  {o?.dependencies.length === 0 && (
+                    <p className="body muted">
+                      No existing tasks in this project.
+                    </p>
                   )}
+                  {error("blockerTaskIds")}
+                </fieldset>
+              </details>
+              {!optionalOpen && optional.chips.length > 0 && (
+                <ul
+                  className="composer-optional-chips"
+                  aria-label="Supplied optional values"
+                >
+                  {optional.chips.map((chip) => (
+                    <li
+                      key={chip.field}
+                      data-invalid={chip.invalid ? "true" : undefined}
+                    >
+                      {chip.invalid && <span aria-hidden="true">!</span>}
+                      {chip.text}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!optionalOpen && optional.fix && (
+                <p className="metadata composer-optional-fix">{optional.fix}</p>
+              )}
+            </div>
+          </fieldset>
+          {input.projectId && (
+            <aside className="composer-aside" aria-label="Before you create">
+              {prediction && !locked && (
+                <section
+                  className="composer-prediction"
+                  aria-labelledby="composer-prediction-title"
+                  aria-live="polite"
+                >
+                  <div className="composer-prediction-head">
+                    <h2
+                      id="composer-prediction-title"
+                      className="small-heading"
+                    >
+                      If you create it now
+                    </h2>
+                    {prediction.length ? (
+                      <Badge variant="secondary" className="metadata">
+                        <Clock aria-hidden="true" />
+                        Will wait
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="metadata border-(--accent-edge) text-(--accent-text)"
+                      >
+                        <CirclePlay aria-hidden="true" />
+                        Starts now
+                      </Badge>
+                    )}
+                  </div>
                   {/* Kept when no wait remains, so a Resume outcome stays visible. */}
                   <WaitReasons
                     waits={prediction}
                     projectId={input.projectId}
-                    prefix="It will wait: "
+                    variant="numbered"
                     client={client}
                     session={session}
                     drafts={drafts}
@@ -580,26 +570,62 @@ export function TaskComposer({
                       refresh();
                     }}
                   />
-                </div>
+                  <p className="metadata muted">
+                    Created ≠ running. Execution may wait for project state,
+                    dependencies, capacity or holds. You'll see the reason on
+                    the task.
+                  </p>
+                </section>
               )}
-              <Button type="submit">Create and start</Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => void submit(false)}
+              <section
+                className="composer-inherited"
+                aria-labelledby="composer-inherited-title"
               >
-                Save draft
-              </Button>
-              <p className="metadata muted">
-                {optionalError
-                  ? "Check the optional settings to continue. Your input is still here."
-                  : prediction
-                    ? "Save draft keeps it without starting."
-                    : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
-              </p>
-            </div>
-          )
-        )}
+                <h2
+                  id="composer-inherited-title"
+                  className="metadata muted composer-inherited-title"
+                >
+                  Inherited from {o?.project.name ?? "project"}
+                </h2>
+                <ResourceStatus
+                  state={options.state}
+                  retry={options.refresh}
+                  label="Project options"
+                />
+                {o && (
+                  <div className="composer-policy">
+                    <p className="metadata muted">Accountable lead</p>
+                    <p className="body">
+                      {o.lead?.name ??
+                        (o.lead ? "Name unavailable" : "Unconfigured")}
+                    </p>
+                    {lead?.summary && (
+                      <p className="body muted">{lead.summary}</p>
+                    )}
+                    <p className="body muted">
+                      {o.routingEnabled
+                        ? "Routing chooses an assignee unless you pick one."
+                        : "The project lead is assigned unless you pick one."}
+                    </p>
+                    <p className="body muted">
+                      Capacity: {o.capacity.projectUsage}/
+                      {o.capacity.projectLimit} project ·{" "}
+                      {o.capacity.globalUsage}/{o.capacity.globalLimit} global.
+                      Dependencies, Stop and ownership are checked again when
+                      work starts.
+                    </p>
+                    <a
+                      className="body"
+                      href={`/app/projects/${encodeURIComponent(input.projectId)}/settings`}
+                    >
+                      View project instructions
+                    </a>
+                  </div>
+                )}
+              </section>
+            </aside>
+          )}
+        </div>
         {state.failed && (
           <ActionOutcome
             key={state.details.requestKey}
@@ -619,6 +645,41 @@ export function TaskComposer({
             focus={sent.current}
             details={detailRows(state.details)}
           />
+        )}
+        {state.phase === "pending" ? (
+          <div className="composer-actions">
+            <Button type="button" disabled>
+              {state.frozen?.ready ? "Creating…" : "Saving…"}
+            </Button>
+          </div>
+        ) : (
+          !locked && (
+            <div className="composer-actions">
+              {state.savedOnDevice && (
+                <p className="metadata muted composer-saved">
+                  Unfinished input saved on this device · not yet an Ensemble
+                  draft
+                </p>
+              )}
+              <div className="composer-actions-end">
+                <p className="metadata muted">
+                  {optionalError
+                    ? "Check the optional settings to continue. Your input is still here."
+                    : prediction
+                      ? `${prediction[0] ? `Will wait: ${waitLabels[prediction[0].code]}.` : "Starts now."} Save draft keeps it without starting.`
+                      : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
+                </p>
+                <Button type="submit">Create and start</Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void submit(false)}
+                >
+                  Save draft
+                </Button>
+              </div>
+            </div>
+          )
         )}
       </form>
     </section>
