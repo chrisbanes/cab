@@ -666,6 +666,13 @@ test("The strip and decision card follow the server's attention codes, not a cli
       .count(),
     0,
   );
+  // The decision card offers the operator nothing to do for it.
+  assert.equal(
+    await card
+      .getByRole("link", { name: "Inspect uncertain execution" })
+      .count(),
+    0,
+  );
 });
 
 for (const engine of [

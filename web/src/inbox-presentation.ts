@@ -1,6 +1,8 @@
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { attentionNext, nextAttention } from "../../src/operator/attention.js";
+import { taskColumnOf } from "./task-overview.js";
+import { nextActor } from "./tasks.js";
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
@@ -260,7 +262,12 @@ export function assignmentChain(
  * next action is the operator's only while the request is still open in the queue.
  */
 export const taskContext = (
-  task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
+  task:
+    | Pick<
+        TaskRead["data"],
+        "task" | "execution" | "admission" | "source" | "lead" | "attention"
+      >
+    | undefined,
   item: Pick<InboxItem, "kind" | "attentionCode">,
   open: boolean,
 ) => ({
@@ -275,9 +282,12 @@ export const taskContext = (
     : task.lead
       ? (task.lead.name ?? "Name unavailable")
       : "No lead configured",
-  next: open
-    ? item.kind === "intervention" && item.attentionCode
-      ? (nextAttention([item.attentionCode])?.text ?? null)
-      : `Next: you · ${lowerFirst(requestActionLabel(item))}`
-    : null,
+  // The task's next actor once its read lands, as on the List and the task page.
+  next: !open
+    ? null
+    : task
+      ? nextActor(task.attention.codes, taskColumnOf(task)).text
+      : item.kind === "intervention" && item.attentionCode
+        ? (nextAttention([item.attentionCode])?.text ?? null)
+        : `Next: you · ${lowerFirst(requestActionLabel(item))}`,
 });

@@ -1364,6 +1364,11 @@ test("retained ownership without a confirmed active intent and held request stay
   assert.ok(
     (await listedAttention(api, ids.taskId)).includes("execution-uncertain"),
   );
+  assert.equal(
+    (await api.readInbox()).data.items.find((i) => i.taskId === ids.taskId)
+      ?.attentionCode,
+    "execution-uncertain",
+  );
 });
 test("a non-Stop task hold is execution-uncertain on the List, the task read and the Inbox", async (t) => {
   const f = await createOperatorFixture();
