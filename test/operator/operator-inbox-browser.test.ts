@@ -1251,3 +1251,27 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
     1,
   );
 });
+
+test("an intervention's inspector lists a pending approval on its task as a hold (1366)", async (_t, j) => {
+  const { page, more: held } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnIntervention(f),
+  );
+  // The same task also has a pending approval, served as a contract-valid task read.
+  await page.route(`**/api/operator/tasks/${held.taskId}`, async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as TaskRead;
+    body.data.waits = [{ code: "approval", fix: null, links: [] }];
+    taskSchema.parse(body);
+    await route.fulfill({ response, json: body });
+  });
+  await page.locator('.inbox-row[data-kind="intervention"]').click();
+  const aside = page.getByRole("complementary", { name: "Task context" });
+  await aside.getByText("Holds · 1", { exact: true }).waitFor();
+  await aside
+    .getByText("Execution held (approval needs a decision)", { exact: true })
+    .waitFor();
+});

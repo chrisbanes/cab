@@ -25,7 +25,11 @@ export function InboxContext({
     context = taskContext(task, item),
     chain = task ? assignmentChain(task, item.requestingAssignmentId) : [],
     holds = task
-      ? holdNotices(task, item.kind === "question" ? "answer" : "approve")
+      ? holdNotices(
+          task,
+          item.kind === "question" ? "answer" : "approve",
+          item.kind === "approval",
+        )
       : [];
   return (
     <aside className="inbox-context" aria-label="Task context">

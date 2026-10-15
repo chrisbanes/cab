@@ -283,6 +283,19 @@ test("revoked repository access and unresolved recovery are hold notices in the 
   );
 });
 
+test("a pending approval is a hold unless it is the approval being decided", () => {
+  const held = task([], {
+    waits: [{ code: "approval", fix: null, links: [] }],
+  } as Partial<TaskRead["data"]>);
+  // The approval in view is not a hold on itself.
+  assert.deepEqual(holdNotices(held), []);
+  // Beside an intervention or question, the pending approval still holds execution.
+  assert.deepEqual(
+    holdNotices(held, "approve", false).map((n) => n.title),
+    ["Execution held (approval needs a decision)"],
+  );
+});
+
 test("answering a question words each hold notice for answers, with the same titles and items", () => {
   const source = {
     nativeBlockers: [
