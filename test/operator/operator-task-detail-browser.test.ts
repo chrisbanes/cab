@@ -1191,7 +1191,7 @@ test("Task detail explains a held assignment, revoked repository access and unre
   assert.deepEqual(commands, []);
 });
 
-test("An approval wait opens the approval review, not the question form", async (_t, j) => {
+test("An approval request opens the approval review, not the question form", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -1210,8 +1210,10 @@ test("An approval wait opens the approval review, not the question form", async 
   j.observe(page);
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-  const waits = page.locator(".wait-reasons");
-  const review = waits.getByRole("link", { name: "Review material & decide" });
+  // The card lists the approval as a request; the merged approval wait is not repeated.
+  const review = page
+    .locator("section#decisions .decision")
+    .getByRole("link", { name: "Review material & decide" });
   assert.equal(
     await review.getAttribute("href"),
     `/coordination/task/${a.taskId}#${a.interactionId}`,
