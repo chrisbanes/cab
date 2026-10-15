@@ -83,7 +83,7 @@ const answerDetails: Record<string, string> = {
  */
 export function holdNotices(
   task: TaskRead["data"],
-  action: "approve" | "answer" = "approve",
+  action: "approve" | "answer",
   /**
    * The approval in view, which is not a hold on itself: its interaction id. Null when no
    * approval is in view, so every pending approval holds.

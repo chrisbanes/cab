@@ -1871,7 +1871,10 @@ test("A question opened on the task page keeps the holds an answer does not clea
     .waitFor();
   assert.equal(await holds.count(), 1);
   assert.match(await holds.innerText(), /Answering does not clear it\./);
-  // The approval is a "Your decision" row already, so it is not also listed as a hold.
+  // The approval is a "Your decision" row and an inspector row already, so it is not also a hold.
+  const aside = page.getByRole("complementary", { name: "Task context" });
+  await aside.getByText("Approval pending").waitFor();
+  assert.equal(await aside.getByText(/approval needs a decision/).count(), 0);
   assert.doesNotMatch(
     await holds.innerText(),
     /Approving|approval needs a decision/,
