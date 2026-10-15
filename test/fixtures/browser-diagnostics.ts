@@ -269,7 +269,8 @@ export class BrowserJourney {
       return undefined;
     }
     try {
-      const image = await page.screenshot({ fullPage, timeout: 5000 });
+      // The page's action timeout bounds capture, so heavy pages can widen both together.
+      const image = await page.screenshot({ fullPage });
       if (!this.active) return undefined;
       if (
         image.length > browserEvidenceLimits.screenshotBytes ||
