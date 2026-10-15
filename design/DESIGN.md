@@ -1648,6 +1648,12 @@ frames 114 and 118–128 as follows:
   conditions" link, and the phone "Current state" card appends the counts. Task
   List and Board name an imported Draft task's unmet conditions instead of "Draft:
   not Ready".
+- No frame draws the GitHub source Readiness panel without a rule. Production
+  shows no condition row and the helper text "No readiness rule: open issues in
+  active selections are not filtered by label or Project field"; "Add readiness
+  condition" starts a rule and removing the last condition removes it. A withheld
+  rule reads "Saved readiness is unavailable; add a condition to replace it." and
+  Save stays disabled until a condition is added.
 - Removing every linked repository shows a warning and a required "Remove all
   repository access" checkbox inside "Changes to save" (no frame draws it).
 - Profile Revoke and Restore are one draft field saved by Save profile, so the

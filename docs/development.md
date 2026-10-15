@@ -349,7 +349,8 @@ or run `node dist/src/cli/main.js` directly.
      closed-issue mode, linked repositories and refs, and placement conflicts. A
      complete read with open items and none matching the readiness rule adds a
      warning line naming `project prepare-source`; JSON carries the counts and
-     `readinessRule`. `task get` adds a `Readiness:` line naming an imported Draft
+     `readinessRule`. A project without a rule shows readiness "No readiness
+     rule"; a withheld rule shows "(unavailable)". `task get` adds a `Readiness:` line naming an imported Draft
      task's unmet conditions. Queries, filters, paths and reference names are never shown. A
      partial observation is gap `evidence-gap`, an unavailable one
      `redaction-unavailable`, and an unreadable saved value `content-unavailable`.
@@ -359,7 +360,9 @@ or run `node dist/src/cli/main.js` directly.
      is strict JSON with any of `addSelections` (selection definitions without
      `id`: `{"kind":"repository","repositoryId","owner","name"}`,
      `{"kind":"search","query"}` or `{"kind":"project","projectNodeId","filter"}`),
-     `removeSelections` (ids), `readiness` (replaces), `closedIssues` (`"skip"`
+     `removeSelections` (ids), `readiness` (a rule replaces, `null` removes the
+     rule, omitted keeps it; a saved rule the read withholds must be given),
+     `closedIssues` (`"skip"`
      or `"done"`; omitted keeps the saved mode), `linkRepositories`
      (`{"repositoryId","path","ref"}`), `unlinkRepositories` (ids), `setRefs`
      (`{"REPOSITORY_ID":"REF"}`), `credentialRef` (`"env:NAME"` or `null`) and

@@ -191,10 +191,16 @@ boundaries. Typed judgments and confidence are not proof of correctness or autho
 
 ## Admission, project placement and task dependencies
 
-The operator admits local work or defines an authoritative source readiness rule.
+The operator admits local work or configures the source's optional readiness rule.
 The lead may inspect and triage unready tasks but cannot grant readiness. For
-GitHub, allow simple all/any label and Project-field conditions; nested expressions
-are deferred. Each GitHub source also has a closed-issue mode, changed only through
+GitHub, a rule uses simple all/any label and Project-field conditions; nested
+expressions are deferred. A new project's source has no rule, and the operator may
+add or remove one: with no rule, every open imported issue with current source
+membership satisfies readiness whatever its labels or Project fields. Absence of a
+rule is stored explicitly (`null`), never as an empty condition list, and a rule
+withheld from a read is shown as unavailable, never as no rule. Readiness alone is
+not admission: activation, complete source observations, placement, repository
+access, dependencies, approvals, holds, pauses and capacity still apply. Each GitHub source also has a closed-issue mode, changed only through
 its versioned configuration: **Skip closed issues** (the default) never imports an
 issue first observed closed, and **Treat closure as Done** imports one as Done from a
 complete read only. Membership in another source cannot grant admission. Each selection's
@@ -1395,8 +1401,9 @@ comment/review/check identities also wake it; unchanged polls are deduplicated.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;
-merge attribution requires the exact PR in GitHub's latest ClosedEvent. Current
-label readiness and repository-selection proof must still hold. Field/search cases
+merge attribution requires the exact PR in GitHub's latest ClosedEvent. When a
+readiness rule exists, current label readiness must still hold, and
+repository-selection proof must hold in every case. Field/search cases
 without that proof, independent holds and changed source text remain held. Explicit
 issue closure requires observed open before the effect; a concurrent independent
 closure between that read and write remains an attribution limit.
