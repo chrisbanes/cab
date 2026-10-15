@@ -6,6 +6,7 @@ import {
   captureBrowserEvidence,
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
+import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { openMoreFilters, seedCatalog } from "../fixtures/operator-work.js";
 import { choiceForm, guideForm } from "../fixtures/question-data.js";
@@ -645,6 +646,67 @@ test("cards put uncertain interventions first, then the oldest, with exact appro
   );
   assert.doesNotMatch(await mainText(page), uuidText);
   await shot(page, "1366-overview-card-kinds");
+});
+
+const approvalHold = "Execution held (approval needs a decision)";
+/** Serves the task read with an `approval` wait linking these requests, as the server merges open approvals. */
+const serveApprovalWait = (page: Page, taskId: string, ids: string[]) =>
+  page.route(`**/api/operator/tasks/${taskId}`, async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as TaskRead;
+    body.data.waits = [
+      ...body.data.waits.filter((wait) => wait.code !== "approval"),
+      {
+        code: "approval",
+        fix: null,
+        links: ids.map((id) => ({
+          kind: "request",
+          id,
+          label: "Review material & decide",
+        })),
+      },
+    ];
+    taskSchema.parse(body);
+    await route.fulfill({ response, json: body });
+  });
+
+test("an Overview approval card lists another open approval as a hold, but not its own", async (_t, journey) => {
+  const { f, page } = await startBare(journey, (f) => seedOwnApproval(f));
+  const approval = f.seeded;
+  const card = page.locator(".overview-card[data-kind='approval']");
+  // Two open approvals on the task, one in view: the other still holds execution.
+  await serveApprovalWait(page, approval.taskId, [
+    approval.interactionId,
+    randomUUID(),
+  ]);
+  await page.reload();
+  await card.getByText(approvalHold, { exact: true }).waitFor();
+  assert.equal(await card.getByText(approvalHold).count(), 1);
+  // Only the card's own approval: not a hold on itself, while the project hold still lists.
+  await page.unrouteAll();
+  await serveApprovalWait(page, approval.taskId, [approval.interactionId]);
+  await page.reload();
+  await card.getByText(/Approval does not resume work/).waitFor();
+  assert.equal(await card.getByText(approvalHold).count(), 0);
+  await card.getByRole("link", { name: "Review material & decide" }).waitFor();
+});
+
+test("an Overview question card lists an open approval beside it as a hold", async (_t, journey) => {
+  const { f, page } = await startBare(journey, (f) =>
+    seedOwnQuestion(f, choiceForm, "Overview choice", "Overview project"),
+  );
+  const question = f.seeded;
+  await serveApprovalWait(page, question.taskId, [randomUUID()]);
+  await page.reload();
+  const card = page.locator(
+    `.overview-card[data-request-id="${question.interactionId}"]`,
+  );
+  await card.getByText(approvalHold, { exact: true }).waitFor();
+  assert.match(await card.innerText(), /Answering does not clear it\./);
+  assert.doesNotMatch(await card.innerText(), /Approving/);
+  await card
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .waitFor();
 });
 
 test("a single-choice question is answered in its card with the Inbox's command and outcomes", async (_t, journey) => {

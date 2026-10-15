@@ -1191,7 +1191,7 @@ test("Task detail explains a held assignment, revoked repository access and unre
   assert.deepEqual(commands, []);
 });
 
-test("An approval wait opens the approval review, not the question form", async (_t, j) => {
+test("An approval request opens the approval review, not the question form", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -1210,8 +1210,10 @@ test("An approval wait opens the approval review, not the question form", async 
   j.observe(page);
   page.setDefaultTimeout(5000);
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
-  const waits = page.locator(".wait-reasons");
-  const review = waits.getByRole("link", { name: "Review material & decide" });
+  // The card lists the approval as a request; the merged approval wait is not repeated.
+  const review = page
+    .locator("section#decisions .decision")
+    .getByRole("link", { name: "Review material & decide" });
   assert.equal(
     await review.getAttribute("href"),
     `/coordination/task/${a.taskId}#${a.interactionId}`,
@@ -1603,6 +1605,8 @@ test("An open approval leads Overview and stays reachable from every tab through
   const holds = card.locator(".question-holds");
   assert.equal(await holds.count(), 1);
   assert.match(await holds.innerText(), /Approving does not clear it\./);
+  // The approval is already the card's own row, so its merged hold is not listed again.
+  assert.doesNotMatch(await holds.innerText(), /approval needs a decision/);
   assert.ok(
     await decision.evaluate(
       (d, h) =>
@@ -1821,13 +1825,20 @@ test("A question opened on the task page keeps the holds an answer does not clea
       const response = await route.fetch();
       const json = await response.json();
       json.data.admission.reasons.push("task-unready");
-      if (withApproval)
+      if (withApproval) {
+        const interactionId = randomUUID();
         json.data.approvals.push({
           ...json.data.questions[0],
-          interactionId: randomUUID(),
+          interactionId,
           kind: "approval",
           status: "open",
         });
+        json.data.waits.push({
+          code: "approval",
+          fix: null,
+          links: [{ kind: "request", id: interactionId, label: "Review" }],
+        });
+      }
       await route.fulfill({ response, json });
     },
   );
@@ -1862,5 +1873,87 @@ test("A question opened on the task page keeps the holds an answer does not clea
     .waitFor();
   assert.equal(await holds.count(), 1);
   assert.match(await holds.innerText(), /Answering does not clear it\./);
-  assert.doesNotMatch(await holds.innerText(), /Approv/);
+  // The approval is a "Your decision" row and an inspector row already, so it is not also a hold.
+  const aside = page.getByRole("complementary", { name: "Task context" });
+  await aside.getByText("Approval pending").waitFor();
+  assert.equal(await aside.getByText(/approval needs a decision/).count(), 0);
+  assert.doesNotMatch(
+    await holds.innerText(),
+    /Approving|approval needs a decision/,
+  );
+});
+
+/** Serves the task read with these open approvals, joined into the one `approval` wait as the server does. */
+async function serveApprovals(page: Page, taskId: string, ids: string[]) {
+  await page.unrouteAll();
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      const [first] = json.data.approvals;
+      json.data.approvals = ids.map((id) => ({
+        ...first,
+        interactionId: id,
+        status: "open",
+      }));
+      json.data.waits = [
+        ...json.data.waits.filter((w: Wait) => w.code !== "approval"),
+        {
+          code: "approval",
+          fix: null,
+          links: ids.map((id) => ({
+            kind: "request",
+            id,
+            label: "Review material & decide",
+          })),
+        },
+      ];
+      await route.fulfill({ response, json });
+    },
+  );
+}
+
+const approvalHold = "Execution held (approval needs a decision)";
+
+test("The decision card and inspector list only the other open approvals as holds", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedOwnApproval(fixture.f);
+  const { web, page } = await fixture.launch();
+  const other = randomUUID();
+  await serveApprovals(page, a.taskId, [a.interactionId, other]);
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${a.taskId}?request=${a.interactionId}`,
+  );
+  const holds = page.locator("section#decisions .question-holds"),
+    aside = page.getByRole("complementary", { name: "Task context" }),
+    card = page.locator("section#decisions"),
+    // The merged approval wait, which the card's rows and hold line already cover.
+    waitLabel = /Approval needs a decision/;
+  // Two open approvals, one in view: the other is the hold, once on each surface.
+  await holds.getByText(approvalHold, { exact: true }).waitFor();
+  assert.equal(await holds.getByText(approvalHold).count(), 1);
+  // Two request rows, the paused project and the other approval.
+  await aside.getByText("Holds · 4", { exact: true }).waitFor();
+  assert.equal(await aside.getByText(approvalHold).count(), 1);
+  assert.equal(await card.getByText(approvalHold).count(), 1);
+  assert.equal(await card.getByText(waitLabel).count(), 0);
+
+  // Only the approval in view: it is not a hold on itself.
+  await serveApprovals(page, a.taskId, [a.interactionId]);
+  await page.reload();
+  await aside.getByText("Holds · 2", { exact: true }).waitFor();
+  assert.equal(await page.getByText(approvalHold).count(), 0);
+  assert.equal(await card.getByText(waitLabel).count(), 0);
+
+  // Nothing selected: both approvals are rows already, so neither surface repeats them as a hold.
+  await serveApprovals(page, a.taskId, [a.interactionId, other]);
+  await page.goto(`${web.origin}/app/tasks/${a.taskId}`);
+  await aside.getByText("Holds · 3", { exact: true }).waitFor();
+  assert.equal(await aside.getByText("Approval pending").count(), 2);
+  assert.equal(await page.getByText(approvalHold).count(), 0);
+  assert.equal(await card.getByText(waitLabel).count(), 0);
 });
