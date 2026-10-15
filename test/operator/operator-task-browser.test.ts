@@ -1122,14 +1122,14 @@ for (const viewport of [
       .getByRole("link", { name: "Normal Stop observation", exact: true })
       .waitFor();
     const attention = page.getByRole("region", {
-        name: "Needs your attention",
+        name: "Needs you",
         exact: true,
       }),
       work = page.getByRole("region", {
         name: "Across your projects",
         exact: true,
       });
-    await attention.locator(".work-request").first().waitFor();
+    await attention.locator(".overview-card").first().waitFor();
     assert.equal(
       await attention
         .getByText("Normal Stop observation", { exact: true })
@@ -1174,7 +1174,7 @@ for (const viewport of [
       if (r.url().endsWith("/api/operator/commands") && r.method() === "POST")
         commandPosts++;
     });
-    await page.getByRole("link", { name: "View inbox", exact: true }).click();
+    await page.getByRole("link", { name: /^Open Inbox/ }).click();
     assert.equal(
       await page
         .getByRole("link", {

@@ -30,7 +30,7 @@ import {
   requestKindLabel,
 } from "./inbox-presentation.js";
 import { inboxSummaryOf } from "./request-presentation.js";
-import { useOperatorResource, type ResourceState } from "./resource.js";
+import { useOperatorResource } from "./resource.js";
 import {
   ApprovalDetail,
   InboxQuestion,
@@ -90,7 +90,6 @@ export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
   }
 }
 export { inboxSummaryOf };
-type InboxRead = Awaited<ReturnType<typeof loadInbox>>;
 export function Inbox({
   client,
   session,

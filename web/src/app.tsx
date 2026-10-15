@@ -1171,6 +1171,11 @@ export function App() {
                 navigate={navigate}
                 {...(projectId ? { projectId } : {})}
                 overview={pathname === "/app"}
+                operator={
+                  pathname === "/app"
+                    ? { client, session, questions: questionStates.current }
+                    : undefined
+                }
               />
             </>
           )}
