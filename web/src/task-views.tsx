@@ -40,6 +40,9 @@ import {
   taskColumn,
   taskDetailHref,
   taskFiltersUrl,
+  isUncertain,
+  operatorNext,
+  readyButBlocked,
   taskNext,
   taskReasons,
   visibleColumns,
@@ -60,16 +63,25 @@ const stateIcons: Record<TaskColumn, LucideIcon> = {
   Done: CircleCheck,
   Cancelled: CircleX,
 };
-function TaskStateMark({ task }: { task: TaskListSummary }) {
-  const column = taskColumn(task),
-    Icon = stateIcons[column];
+/** A state's symbol and word in its colour; colour never carries the state alone. */
+function ColumnMark({
+  column,
+  className = "task-state",
+}: {
+  column: TaskColumn;
+  className?: string;
+}) {
+  const Icon = stateIcons[column];
   return (
-    <span className="task-state" data-column={column}>
+    <span className={className} data-column={column}>
       <Icon aria-hidden="true" />
       {column}
     </span>
   );
 }
+const TaskStateMark = ({ task }: { task: TaskListSummary }) => (
+  <ColumnMark column={taskColumn(task)} />
+);
 const identity = (task: TaskListSummary) =>
   task.source
     ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
@@ -86,9 +98,7 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
       ))}
       <p
         className="body task-next"
-        data-operator={
-          taskNext(task).startsWith("Next: you") ? "true" : undefined
-        }
+        data-operator={operatorNext(task) ? "true" : undefined}
       >
         {taskNext(task)}
       </p>
@@ -130,27 +140,48 @@ export function TaskCard({
   request?: InboxItem | undefined;
 }) {
   const url = task.source?.url,
-    lead = leadName(task);
+    lead = leadName(task),
+    column = taskColumn(task);
   return (
     <article data-task-id={task.id}>
-      <Card className="task-card">
-        <a className="small-heading task-title" href={taskDetailHref(task)}>
-          {task.title ?? "Title unavailable"}
-        </a>
+      <Card
+        className="task-card"
+        data-tone={
+          isUncertain(task)
+            ? "risk"
+            : operatorNext(task)
+              ? "attention"
+              : undefined
+        }
+      >
+        <div className="task-card-head">
+          <a className="task-title" href={taskDetailHref(task)}>
+            {task.title ?? "Title unavailable"}
+          </a>
+          {/* The column names the state; a chip marks only what the column does not. */}
+          {readyButBlocked(task) && <ColumnMark column="Ready" />}
+          {column === "Uncertain" && (
+            <ColumnMark column="Uncertain" className="task-state phone-only" />
+          )}
+        </div>
         <p className="metadata muted task-project-metadata">
           {task.project.name ?? "Project name unavailable"} ·{" "}
           {url ? (
-            <a href={url} target="_blank" rel="noopener noreferrer">
+            <a
+              className="task-identity"
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {identity(task)}
               <ArrowUpRight aria-hidden="true" />
               <span className="sr-only"> (opens GitHub)</span>
             </a>
           ) : (
-            identity(task)
+            <span className={task.source ? "task-identity" : undefined}>
+              {identity(task)}
+            </span>
           )}
-        </p>
-        <p className="body task-status">
-          <TaskStateMark task={task} />
         </p>
         <TaskFacts task={task} />
         {task.source && task.source.state !== "open" && (
@@ -158,20 +189,16 @@ export function TaskCard({
             GitHub source: {task.source.state ?? "state unavailable"}
           </p>
         )}
-        {request && (
-          <a className="body task-request" href={requestHref(request)}>
-            {requestActionLabel(request.kind)} →
-          </a>
-        )}
-        <p className="metadata task-lead task-card-lead">
-          {lead && (
-            <span className="task-avatar" aria-hidden="true">
-              {lead.slice(0, 1)}
-            </span>
+        <div className="metadata task-card-footer">
+          <span className="task-lead">
+            {lead ? `${lead} · accountable lead` : "No lead configured"}
+          </span>
+          {request && (
+            <a className="task-request" href={requestHref(request)}>
+              {requestActionLabel(request.kind)} →
+            </a>
           )}
-          {lead ? `${lead} · accountable lead` : "No lead configured"}
-          <ArrowUpRight aria-hidden="true" className="task-card-mark" />
-        </p>
+        </div>
       </Card>
     </article>
   );
@@ -251,6 +278,9 @@ export function TaskBoard({
             variant="ghost"
             className="column-tab"
             aria-pressed={selected === index}
+            data-attention={
+              column === "Uncertain" && counts[column] ? "true" : undefined
+            }
             onClick={() => {
               setSelected(index);
               document
@@ -258,6 +288,9 @@ export function TaskBoard({
                 ?.scrollIntoView({ block: "nearest", inline: "start" });
             }}
           >
+            {column === "Uncertain" && counts[column] > 0 && (
+              <CircleQuestionMark aria-hidden="true" />
+            )}
             {column} · {counts[column]}
           </Button>
         ))}
@@ -283,8 +316,9 @@ export function TaskBoard({
             data-empty={counts[column] ? undefined : "true"}
             aria-label={`${column} tasks`}
           >
-            <h2 className="small-heading">
-              {column} · {counts[column]}
+            <h2 className="board-column-heading">
+              <ColumnMark column={column} className="board-column-name" />
+              <span className="board-column-count">{counts[column]}</span>
             </h2>
             {tasks
               .filter((t) => taskColumn(t) === column)
@@ -332,11 +366,8 @@ export function TaskBoard({
         </Button>
       </div>
       <p className="metadata muted board-footer">
-        <span className="board-footer-wide">
-          Scroll horizontally or choose a column above.{" "}
-        </span>
-        <span className="board-footer-narrow">Choose a column above. </span>
-        Empty columns are collapsed.
+        Columns describe Ensemble work, not GitHub issue state. Cards open the
+        task; nothing here changes state, and there is no drag and drop.
       </p>
     </div>
   );

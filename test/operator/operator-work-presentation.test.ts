@@ -12,7 +12,9 @@ import {
   columnCounts,
   columns,
   filterTasks,
+  operatorNext,
   parseTaskFilters,
+  readyButBlocked,
   taskColumn,
   taskNext,
   taskReasons,
@@ -163,6 +165,30 @@ test("the next actor is derived from recorded attention and state only", () => {
   const columnOnly = summary({ execution: "uncertain" });
   assert.equal(taskNext(columnOnly), "Next: you · inspect execution");
   assert.equal(attentionCandidate([summary(), columnOnly]), columnOnly);
+});
+
+test("only Ready work that admission holds keeps its Ready label in Waiting", () => {
+  const held = summary({ ready: true, reasons: ["local-dependency"] });
+  assert.equal(taskColumn(held), "Waiting");
+  assert.equal(readyButBlocked(held), true);
+  // Waiting on a decision with eligible admission is not the dependency-blocked card.
+  const deciding = summary({ ready: true, execution: "waiting" });
+  assert.equal(taskColumn(deciding), "Waiting");
+  assert.equal(readyButBlocked(deciding), false);
+  for (const other of [
+    summary({ ready: false }),
+    summary(),
+    summary({ execution: "running" }),
+    summary({ paused: true, reasons: ["project-paused"] }),
+  ])
+    assert.equal(readyButBlocked(other), false, taskColumn(other));
+});
+
+test("the operator is next only while an attention code names them", () => {
+  assert.equal(operatorNext(summary({ codes: ["question"] })), true);
+  assert.equal(operatorNext(summary({ codes: ["approval"] })), true);
+  assert.equal(operatorNext(summary()), false);
+  assert.equal(operatorNext(summary({ state: "done" })), false);
 });
 
 test("source summaries only accept https links", () => {
