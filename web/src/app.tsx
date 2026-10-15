@@ -1,10 +1,5 @@
-import {
-  Inbox,
-  InboxState,
-  inboxSummaryOf,
-  loadInbox,
-  type InboxHeader,
-} from "./inbox.js";
+import { Inbox, InboxState, loadInbox, type InboxHeader } from "./inbox.js";
+import { inboxSummaryOf } from "./request-presentation.js";
 import { QuestionResponseStates } from "./question-response-state.js";
 import {
   useCallback,

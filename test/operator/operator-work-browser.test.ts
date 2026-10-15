@@ -613,6 +613,25 @@ test("cards put uncertain interventions first, then the oldest, with exact appro
   // The paused approval project holds execution; the card says approval does not clear it.
   await approvalCard.getByText(/Approval does not resume work/).waitFor();
 
+  // A failed task read never reads as "no holds".
+  await page.route(`**/api/operator/tasks/${approval.taskId}`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+    }),
+  );
+  await page.reload();
+  await approvalCard
+    .getByText("Independent holds could not be read; they remain in effect.", {
+      exact: true,
+    })
+    .waitFor();
+  await approvalCard
+    .getByRole("link", { name: "Review material & decide" })
+    .waitFor();
+  await page.unroute(`**/api/operator/tasks/${approval.taskId}`);
+
   const intervention = page.locator(".overview-card[data-kind='intervention']");
   const evidence = await intervention.innerText();
   assert.match(evidence, /Execution uncertain/);

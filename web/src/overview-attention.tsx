@@ -381,19 +381,25 @@ function ApprovalCard({
   head,
   respond,
 }: CardParts) {
-  const task = useInboxTask(
+  const { state } = useInboxTask(
       client,
       session,
       item.taskId,
       observedAt,
       "approval",
-    ).state.data?.data,
+    ),
+    task = state.data?.data,
     approval = task?.approvals.find(
       (a) => a.interactionId === (item.interactionId ?? item.id),
     );
   return (
     <>
-      {head(approval?.action ?? null)}
+      {head(approval && !approval.materialUnavailable ? approval.action : null)}
+      {state.error && !task && (
+        <p role="alert" className="metadata">
+          Independent holds could not be read; they remain in effect.
+        </p>
+      )}
       {task && (
         <div className="overview-evidence">
           <ApprovalFacts task={task} item={item} />

@@ -464,14 +464,12 @@ export function TaskViews({
         <ResourceStatus state={state} retry={refresh} label="Tasks" />
       )}
       {overview ? (
-        <>
-          <NeedsYou
-            requests={requests}
-            retry={refresh}
-            tasks={state.data?.tasks}
-            operator={operator}
-          />
-        </>
+        <NeedsYou
+          requests={requests}
+          retry={refresh}
+          tasks={state.data?.tasks}
+          operator={operator}
+        />
       ) : (
         <AttentionBar
           tasks={all.filter((t) => !scope || t.projectId === scope)}

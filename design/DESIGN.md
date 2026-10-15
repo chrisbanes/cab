@@ -1664,6 +1664,8 @@ Production Overview, List and Board
   the card until Overview is left. Grouped, multiple-choice and free-text forms,
   and a failed question read, link to the Inbox. Overview has no notification,
   deep-link or context-menu entry for answering.
+- "Next: you" reads in the attention colour on every task row and card (Overview,
+  List and Board), as the token table assigns it.
 - The work table has no Updated column and the Projects panel no sync time: the
   task list carries no update time and no endpoint reports per-project sync. The
   Projects panel shows lead, active work by state (uncertain first), "Project

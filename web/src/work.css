@@ -261,7 +261,6 @@
 }
 
 /* The shared question response inside a card: the card already names the request. */
-.overview-card .question-response .question-hint,
 .overview-card .question-response legend {
   position: absolute;
   width: 1px;

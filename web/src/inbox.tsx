@@ -89,7 +89,6 @@ export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
     cursor = page.data.nextCursor;
   }
 }
-export { inboxSummaryOf };
 export function Inbox({
   client,
   session,
