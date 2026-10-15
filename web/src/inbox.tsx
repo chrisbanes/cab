@@ -226,13 +226,14 @@ export function Inbox({
       : null,
     leftQueue = Boolean(
       selected && !current && resource.state.status === "fresh",
+    ),
+    recorded = Boolean(
+      selected && questions.recordedHere(selected.taskId, selected.id),
     );
   const subtitle =
     count === undefined || projectCount === undefined
       ? undefined
-      : leftQueue &&
-          selected &&
-          questions.recordedHere(selected.taskId, selected.id)
+      : leftQueue && recorded
         ? `${count} unresolved · confirmation retained`
         : count === 0
           ? "0 unresolved across your projects"
@@ -579,13 +580,7 @@ export function Inbox({
         <InboxContext
           item={selected}
           task={task}
-          open={
-            Boolean(current) &&
-            !(
-              selected.kind === "question" &&
-              questions.recordedHere(selected.taskId, selected.id)
-            )
-          }
+          open={!leftQueue && !recorded}
         />
       )}
     </section>

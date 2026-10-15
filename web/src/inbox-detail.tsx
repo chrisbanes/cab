@@ -112,7 +112,10 @@ export function ApprovalDetail({
   resource: TaskResource;
 }) {
   const task = resource.state.data?.data,
-    holds = task ? holdNotices(task) : [];
+    // Only this approval is not a hold on itself; other open approvals on the task still are.
+    holds = task
+      ? holdNotices(task, "approve", item.interactionId ?? item.id)
+      : [];
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">

@@ -43,9 +43,8 @@ export function InboxContext({
           <ArrowUpRight aria-hidden="true" size={12} />
         </a>
         <p className="muted">
-          {[item.projectName ?? "Unavailable project", context.source]
-            .filter(Boolean)
-            .join(" · ")}
+          {item.projectName ?? "Unavailable project"} ·{" "}
+          {context.source ?? "Source unavailable"}
         </p>
         {context.next && <p className="inbox-context-next">{context.next}</p>}
       </section>
@@ -61,10 +60,13 @@ export function InboxContext({
         <dd>{context.lead}</dd>
         <dt>Requester</dt>
         <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
-        {chain.length > 0 && (
+        {/* An intervention has no requesting assignment, so no chain. */}
+        {(!task || chain.length > 0) && (
           <>
             <dt>Chain</dt>
-            <dd className="inbox-context-chain">{chain.join(" → ")}</dd>
+            <dd className="inbox-context-chain">
+              {task ? chain.join(" → ") : "Unavailable"}
+            </dd>
           </>
         )}
       </dl>

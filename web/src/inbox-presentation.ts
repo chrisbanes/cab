@@ -248,7 +248,7 @@ export function assignmentChain(
 export const taskContext = (
   task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
   item: Pick<InboxItem, "kind">,
-  open = true,
+  open: boolean,
 ) => ({
   source: !task
     ? null

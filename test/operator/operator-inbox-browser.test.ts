@@ -1322,7 +1322,7 @@ test("an approval's inspector keeps another open approval on its task as a hold,
 });
 
 test("the inspector drops the next action once the answer is recorded, and always shows the lead (1366)", async (_t, j) => {
-  const { page } = await openInbox(
+  const { page, web, more } = await openInbox(
     j,
     0,
     { width: 1366, height: 900 },
@@ -1335,7 +1335,22 @@ test("the inspector drops the next action once the answer is recorded, and alway
   await aside
     .getByText("Next: you · answer question", { exact: true })
     .waitFor();
-  assert.equal(await aside.getByText("Lead", { exact: true }).count(), 1);
+  // Lead accountability stays visible: the lead's name, or the task views' wording.
+  const lead = taskSchema.parse(
+      await (
+        await page.request.get(
+          `${web.origin}/api/operator/tasks/${more[0]!.taskId}`,
+        )
+      ).json(),
+    ).data.lead,
+    leadValue = () =>
+      aside
+        .locator("dt", { hasText: /^Lead$/ })
+        .evaluate((dt) => dt.nextElementSibling?.textContent),
+    expectedLead = lead
+      ? (lead.name ?? "Name unavailable")
+      : "No lead configured";
+  assert.equal(await leadValue(), expectedLead);
   await form.getByRole("radio", { name: /^Team owners/ }).check();
   await form
     .locator(".question-submit")
@@ -1344,5 +1359,5 @@ test("the inspector drops the next action once the answer is recorded, and alway
   await form.locator(".question-recorded").waitFor();
   // The retained confirmation is not the operator's next action any more.
   await aside.getByText(/^Next: you/).waitFor({ state: "detached" });
-  assert.equal(await aside.getByText("Lead", { exact: true }).count(), 1);
+  assert.equal(await leadValue(), expectedLead);
 });

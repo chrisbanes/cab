@@ -524,14 +524,18 @@ test("task context reads the source, lead and the operator's next action", () =>
       lead: null,
     } as unknown as TaskRead["data"];
   assert.deepEqual(
-    taskContext(local as unknown as TaskRead["data"], item("question", "p")),
+    taskContext(
+      local as unknown as TaskRead["data"],
+      item("question", "p"),
+      true,
+    ),
     {
       source: "Local task",
       lead: "Mira",
       next: "Next: you · answer question",
     },
   );
-  assert.deepEqual(taskContext(imported, item("approval", "p")), {
+  assert.deepEqual(taskContext(imported, item("approval", "p"), true), {
     source: "acme/atlas#142",
     // Lead accountability stays visible, in the task views' wording.
     lead: "No lead configured",
@@ -545,10 +549,11 @@ test("task context reads the source, lead and the operator's next action", () =>
         lead: null,
       } as unknown as TaskRead["data"],
       item("approval", "p"),
+      true,
     ).source,
     "repository unavailable#?",
   );
-  assert.deepEqual(taskContext(undefined, item("intervention", "p")), {
+  assert.deepEqual(taskContext(undefined, item("intervention", "p"), true), {
     source: null,
     lead: "Unavailable",
     next: "Next: you · inspect execution",

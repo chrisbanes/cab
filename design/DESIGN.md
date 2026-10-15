@@ -1583,7 +1583,10 @@ The web app is the ground truth for these items.
   badge, position, Open task and Previous/Next request, then the project, task
   title, the "requester · version N · HH:MM" line, the reason, the request's own
   material and a sticky response bar. The inspector lists the task with its source
-  and next action, Lead, Requester, the assignment Chain, Holds and Evidence. One
+  and, while the request is still open in the queue, the next action; Lead (or "No
+  lead configured"), Requester, the assignment Chain, Holds and Evidence. A field
+  the task read cannot supply reads unavailable. A deep link to a request that is
+  no longer in the queue shows no inspector. One
   task read per selection serves the holds, the approval facts and the inspector.
   The page itself never scrolls at 761px and wider.
 - **Not yet adopted:** per-surface layouts — the task detail header, tabs and inspector, the
