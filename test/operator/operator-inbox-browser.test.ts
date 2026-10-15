@@ -1189,7 +1189,7 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
     );
   assert.equal(facts.Requester, item.requesterName);
   if (task.lead) assert.equal(facts.Lead, task.lead.name ?? "Name unavailable");
-  else assert.equal(facts.Lead, undefined);
+  else assert.equal(facts.Lead, "No lead configured");
   // The chain ends at the requesting assignment and starts at its root.
   assert.match(
     facts.Chain ?? "",
@@ -1319,4 +1319,30 @@ test("an approval's inspector keeps another open approval on its task as a hold,
     .getByRole("button", { name: "Refresh", exact: true })
     .click();
   await hold.waitFor({ state: "detached" });
+});
+
+test("the inspector drops the next action once the answer is recorded, and always shows the lead (1366)", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    seedHeldQuestions("Recorded question"),
+  );
+  const aside = page.getByRole("complementary", { name: "Task context" }),
+    form = page.getByRole("region", { name: "Exact question response" });
+  await page.locator(".inbox-row", { hasText: "Recorded question" }).click();
+  await aside
+    .getByText("Next: you · answer question", { exact: true })
+    .waitFor();
+  assert.equal(await aside.getByText("Lead", { exact: true }).count(), 1);
+  await form.getByRole("radio", { name: /^Team owners/ }).check();
+  await form
+    .locator(".question-submit")
+    .getByRole("button", { name: "Submit answer" })
+    .click();
+  await form.locator(".question-recorded").waitFor();
+  // The retained confirmation is not the operator's next action any more.
+  await aside.getByText(/^Next: you/).waitFor({ state: "detached" });
+  assert.equal(await aside.getByText("Lead", { exact: true }).count(), 1);
 });

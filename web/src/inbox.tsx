@@ -575,7 +575,19 @@ export function Inbox({
           <p>Select a request to review its complete form or exact material.</p>
         )}
       </section>
-      {inspector && selected && <InboxContext item={selected} task={task} />}
+      {inspector && selected && (
+        <InboxContext
+          item={selected}
+          task={task}
+          open={
+            Boolean(current) &&
+            !(
+              selected.kind === "question" &&
+              questions.recordedHere(selected.taskId, selected.id)
+            )
+          }
+        />
+      )}
     </section>
   );
 }

@@ -533,7 +533,8 @@ test("task context reads the source, lead and the operator's next action", () =>
   );
   assert.deepEqual(taskContext(imported, item("approval", "p")), {
     source: "acme/atlas#142",
-    lead: null,
+    // Lead accountability stays visible, in the task views' wording.
+    lead: "No lead configured",
     next: "Next: you · review material & decide",
   });
   // An imported task with an unreadable identity is never called local.
@@ -549,7 +550,9 @@ test("task context reads the source, lead and the operator's next action", () =>
   );
   assert.deepEqual(taskContext(undefined, item("intervention", "p")), {
     source: null,
-    lead: null,
+    lead: "Unavailable",
     next: "Next: you · inspect execution",
   });
+  // A recorded or resolved request is no longer the operator's next action.
+  assert.equal(taskContext(imported, item("question", "p"), false).next, null);
 });

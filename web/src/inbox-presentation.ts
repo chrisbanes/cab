@@ -241,16 +241,27 @@ export function assignmentChain(
   return chain;
 }
 
-/** The inspector's task facts; before the task read lands only the item's facts are known. */
+/**
+ * The inspector's task facts; before the task read lands only the item's facts are known. The
+ * next action is the operator's only while the request is still open in the queue.
+ */
 export const taskContext = (
   task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
   item: Pick<InboxItem, "kind">,
+  open = true,
 ) => ({
   source: !task
     ? null
     : task.source
       ? `${task.source.repositoryName ?? "repository unavailable"}#${task.source.number ?? "?"}`
       : "Local task",
-  lead: task?.lead ? (task.lead.name ?? "Name unavailable") : null,
-  next: `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`,
+  // Lead accountability stays visible, in the task views' wording when there is none.
+  lead: !task
+    ? "Unavailable"
+    : task.lead
+      ? (task.lead.name ?? "Name unavailable")
+      : "No lead configured",
+  next: open
+    ? `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`
+    : null,
 });

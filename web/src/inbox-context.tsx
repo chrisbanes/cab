@@ -17,12 +17,15 @@ import { requestTime } from "./request-presentation.js";
 export function InboxContext({
   item,
   task: resource,
+  open,
 }: {
   item: InboxItem;
   task: ReturnType<typeof useInboxTask>;
+  /** Still unresolved in the current queue; a recorded or resolved request has no next action. */
+  open: boolean;
 }) {
   const task = resource.state.data?.data,
-    context = taskContext(task, item),
+    context = taskContext(task, item, open),
     chain = task ? assignmentChain(task, item.requestingAssignmentId) : [],
     holds = task
       ? holdNotices(
@@ -44,7 +47,7 @@ export function InboxContext({
             .filter(Boolean)
             .join(" · ")}
         </p>
-        <p className="inbox-context-next">{context.next}</p>
+        {context.next && <p className="inbox-context-next">{context.next}</p>}
       </section>
       {resource.state.error && (
         <ResourceStatus
@@ -54,12 +57,8 @@ export function InboxContext({
         />
       )}
       <dl>
-        {context.lead && (
-          <>
-            <dt>Lead</dt>
-            <dd>{context.lead}</dd>
-          </>
-        )}
+        <dt>Lead</dt>
+        <dd>{context.lead}</dd>
         <dt>Requester</dt>
         <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
         {chain.length > 0 && (
