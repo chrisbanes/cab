@@ -1,243 +1,215 @@
 # Ensemble UI design handoff
 
 This is a portable reference for planning and implementing the reviewed Ensemble
-web UI without opening Pen. The editable visual source is [design.pen](design.pen);
-this document is a handoff snapshot of it, not a native Pen Markdown export or
-evidence of implemented behaviour. Refresh it through Pen MCP when the design
-changes; never parse the `.pen` file directly.
+web UI without opening the design canvas. The editable visual source is the
+**Ensemble operator UI** Design canvas on claude.ai
+(<https://claude.ai/artifact/6JBCAUn25QRBPVnyJNCBxY>, private to the owner). This
+document is a handoff snapshot of it, not evidence of implemented behaviour.
+Refresh it when the canvas changes.
 
 [SPEC.md](../docs/SPEC.md#operator-interface-and-human-requests) owns product
 behaviour, [acceptance.md](../docs/acceptance.md#operator-ui-scenarios) owns required
 evidence, and [#736](https://github.com/chrisbanes/ensemble/issues/736) owns delivery
 scope and sequencing. Resolve conflicts in favour of those contracts. This file
-records presentation and design references. shadcn is the component foundation.
+records presentation, layout and per-screen presentation rules.
 
-All names, repositories, dates, counts, identifiers and captures in the frames are
+All names, repositories, dates, counts, identifiers and captures on the canvas are
 fictional fixtures that illustrate states; they are not observations of Ensemble's
 backend, proof of a passed check or production defaults.
+
+Screens are referenced by artboard name, which is the artboard's file stem on the
+canvas (for example `02-inbox-approval`). Artboard names keep the screen numbers
+that issues and evidence records cite (06, 133, 800B and so on).
 
 ## Contents
 
 - Foundations: visual direction, tokens, typography and shape, layout and
-  responsive composition
-- Shared components
-- Screens: operator refinement brief, interaction guidance, fixtures, task
-  overview, review interactions, assignment context and delivery, search,
-  workspace inspection and local review, Files and diff editor, tablet and
-  short-viewport refinements
-- Implemented differences from the frames
-- Using this snapshot, design limits, and proposed (not yet adopted) data support
+  responsive composition, shared components
+- Guidance: operator refinement brief, interaction guidance, fixtures and journeys,
+  canvas map
+- Screens: settings, credentials, onboarding and action feedback; task overview;
+  review interactions; assignment context, delivery and search; workspace
+  inspection and local review; Files and diff editor; tablet and short viewport
+- Interaction notes
+- Implementation status, using this snapshot, design limits and proposed data support
 
 ## Visual direction
 
-Use the installed shadcn Pen library (`X`) with Mode **Dark**, Base **Neutral**,
-and Accent **Default**. Screens reference the library components directly.
-Domain-specific request, task, evidence and history content occupies component
-slots. These compositions preserve Ensemble's spec-owned behaviour. All screen
-roots select Dark / Neutral / Default; a user-facing theme switch is not designed.
+A dense dark workbench for one trusted operator: obsidian surfaces separated by
+hairlines, tonal depth instead of shadows, one indigo accent, and compact rows with
+monospaced identifiers. Calm surfaces, clear decisions: the next decision and its
+evidence get the space; navigation metadata stays quiet.
 
-The canvas follows shadcn/ui's **Nova** style on the Base UI base (the `base-nova`
-preset: Nova / Lucide / Geist, neutral, default 10px radius). The Pen library
-cannot be edited, so Nova is applied as instance overrides on its components plus
-local tokens. Nova reference:
-[`style-nova.css`](https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/styles/style-nova.css)
-and the `base-nova` entry in
-[`registry/config.ts`](https://github.com/shadcn-ui/ui/blob/main/apps/v4/registry/config.ts).
-The web app's `web/src/tokens.css` and UI primitives use Geist, Geist Mono and the
-Nova radii and control heights.
+State colour supports meaning and never carries it alone. Every state badge pairs a
+symbol and a word with its colour. Colour never establishes repair ownership,
+delivery or operator attention on its own; running does not imply a repair owner,
+and provider closure is never shown as success.
 
-Keep the compact workspace: 224px desktop sidebar, 20px main content padding,
-12px workspace gaps, 18px screen titles and 14–16px section headings. Task and
-request titles are 14px medium. Supporting text remains 12–14px. Desktop buttons,
-inputs and selects use Nova's 32px height (36px large); phone actions keep 44px
-targets. The outcome editor is 260px high on the representative desktop and 180px
-on phone; the production textarea uses the growth cap described under
-[tablet and short-viewport refinements](#tablet-and-short-viewport-refinements).
-
-Domain meaning is carried by visible labels, symbols, explanations and available
-actions. Routine waiting, success and dependency states use neutral library
-treatments. Error text remains high-contrast foreground; error panels use
-destructive borders. Colour never establishes repair ownership, delivery or
-operator attention.
+The canvas is dark only; a user-facing theme switch is not designed.
 
 ## Tokens
 
-All colour references use installed library tokens directly. The installed Pen
-library exposes colour variables only; do not describe imported typography or
-spacing tokens. Apart from the Nova and the editor/diff tokens below, the variable
-registry contains only imported `X` colour tokens.
+Each artboard defines the tokens as CSS custom properties. The production web app
+maps them onto its own token layer.
 
-| Purpose | Installed token |
-| --- | --- |
-| Page and text | `X:--background`, `X:--foreground` |
-| Supporting text | `X:--muted-foreground` |
-| Cards and alerts | `X:--card`, `X:--card-foreground` |
-| Neutral state surfaces | `X:--muted`, `X:--secondary` |
-| Navigation | `X:--sidebar` and sidebar component tokens |
-| Borders and input outlines | `X:--border`, `X:--input` |
-| Primary actions | `X:--primary`, `X:--primary-foreground` |
-| Selection | `X:--accent`, `X:--accent-foreground` |
-| Focus | `X:--ring` |
-| Error panel borders | `X:--destructive` |
+| Token | Value | Purpose |
+| --- | --- | --- |
+| `--bg` | `#090A0F` | Page ground, inputs, segmented-control track |
+| `--surface` | `#0D0F17` | Sidebar, panels, lists, cards, sticky bars |
+| `--raised` | `#151824` | Row hover, secondary buttons, evidence and excerpt blocks |
+| `--overlay` | `#1E2235` | Selection, menus, dialogs, active tab |
+| `--line`, `--line-strong` | `#23283B`, `#2A3047` | Hairline separators; control and card borders |
+| `--fg`, `--fg-2`, `--fg-3` | `#F1F5F9`, `#A6B0C3`, `#8390A6` | Primary, secondary and muted text (muted is at least 5.4:1 on `--raised`) |
+| `--accent` | `#4F46E5` | Primary action fill, white text (6.3:1) |
+| `--accent-text` | `#A5B4FC` | Links, running state text, selection marks |
+| `--focus` | `#818CF8` | 2px focus outline with 2px offset |
+| `--attn`, `--attn-soft`, `--attn-border` | `#FBBF24`, amber 12%, amber 35% | Attention: questions, approvals, "Next: you" |
+| `--risk`, `--risk-soft`, `--risk-border` | `#FB7185`, rose 12%, rose 38% | Uncertain execution, interventions, confirmed failures, destructive actions, field errors |
+| `--ok`, `--ok-soft`, `--ok-border` | `#34D399`, emerald 12%, emerald 32% | Completed results, recorded answers, confirmed saves |
+| `--idle`, `--idle-soft`, `--idle-border` | `#A6B0C3`, slate 14%, slate 35% | Waiting, paused, queued, capacity, ready, stopping, stopped, cancelled, provider closed, unknown |
 
-Code, diff and evidence views use themed local tokens with Light and Dark values:
-`editor-bg`, `editor-panel`, `editor-line-highlight`, `editor-selection`,
-`editor-selection-border`, `editor-hunk-bg`, `editor-hunk-text`, `editor-text`,
-`diff-added-bg`, `diff-added-text`, `diff-removed-bg`, `diff-removed-text`,
-`diff-marker`, `evidence-accent`, `removed-surface` and `overlay-scrim`. Diff
-colour always pairs with `+`/`−` markers and Before/After labels. These semantic
-code colours are local to inspection content; the shared Dark / Neutral / Default
-UI tokens, sidebar and buttons are unchanged. Editor line numbers are `#A3A3A3`,
-about 5.0:1 against the selected-line fill at lowest.
+Project identity uses a small square dot per project (Atlas indigo, Relay teal,
+Fieldnotes violet); it is never a state colour.
+
+Code, diff and evidence views use local values: editor ground `#0B0D14`; hunk header
+indigo 10% with `#A5B4FC` text; added lines emerald 12% with `#6EE7B7`; removed lines
+rose 12% with `#FDA4AF` (20% when selected, with a 2px `--focus` inset edge); line
+numbers `#7C879B`. Diff colour always pairs with `+`/`−` markers and Before/After
+labels.
 
 ### Typography, spacing and shape
 
-Geist (`$font-sans`) supplies interface text; Geist Mono (`$font-mono`)
-identifies IDs and provenance. Use 12px metadata, 14px body/control text, 14px
-medium task/request titles, 14–16px medium section headings and 18px semibold
-screen titles (in the tablet and short-viewport frames, section headings are
-16/600). Badges use 12px medium. Larger type sizes are reserved for canvas
-documentation, not product screen headings. Code is 13px monospace with 12px line
-numbers; phone source and diff rows are 24px high with 12–13px monospace text.
+Geist supplies interface text; Geist Mono identifies IDs, hashes, times, paths,
+counts and code. Page titles are 18/600 and task titles 20/600; section headings
+15/600; task and request titles 14/500; body, rows and controls 13; request prose
+14; metadata and badges 12; section labels 11 uppercase with 0.04em tracking in
+`--fg-3`; code 12–13 Geist Mono with `white-space: pre` on each code line.
+Identifier-heavy provenance (R2 · A-105 · 8d31c4a) is 12px muted metadata below the
+plain-language state, never the headline.
 
-Nova shape and density, with number tokens `$radius-sm` 6, `$radius-md` 8,
-`$radius-lg` 10 and `$radius-xl` 14:
-
-| Element | Nova treatment |
+| Element | Treatment |
 | --- | --- |
-| Buttons, inputs, selects, textareas, alerts, tabs list, menus | `$radius-lg`; controls 32px high with 10px side padding |
-| Cards, dialogs and card-like panels | `$radius-xl`, 16px padding, no shadow, 1px border |
-| Tab triggers, sidebar items, menu items | `$radius-md` |
-| Badges | Pill, 20px high |
-| Outline button and field backgrounds (dark) | `$nova-outline-bg`, `$nova-input-bg` (white at 3%) |
-| Destructive button and badge | Tinted `$nova-destructive-bg` with `$nova-destructive-fg` text, not solid red |
-| Switch | 32 × 18 track, 14px thumb |
-| Table cells | 8px padding |
+| Badges | 20px high, 4px radius, soft fill + border + text in the state colour, symbol + word |
+| Buttons, inputs, selects | 30–32px desktop, 6px radius, 10–12px side padding; phone 44px |
+| Primary button | `--accent` fill, white text, 1px white 12% border; one per view |
+| Secondary button | `--raised` fill, `--line-strong` border |
+| Destructive button | rose-tinted fill and border with `--risk` text, never solid red |
+| Panels, cards, dialogs | 8px radius, 1px `--line` border, `--surface` fill; header row separated by a hairline |
+| Evidence blocks, chips | `--raised` fill, 6px radius |
+| Keyboard keys | 18px high, 4px radius, `--bg` fill, mono 11px |
+| Selection in lists | `--overlay` fill plus a 2px `#6366F1` left edge; tabs use a 2px underline |
+| Menus and dialogs | `--overlay` with one shadow, `0 8px 24px rgba(0,0,0,0.5)` |
 
-Local layout overrides apply only where content or the 44px phone targets require
-them. Composition uses the same 4px spacing rhythm as the installed controls.
-Custom semantic fields and prose are not forced into unnecessary cards. The design
-is not an untouched library demo: retained adaptations are compact task/request
-content, 18px screen headings, 14–16px sections, 44px phone controls, identifier
-monospace, and Ensemble content/layout in library slots.
+Spacing follows a 4px rhythm (4, 8, 12, 16, 20, 24, 32). Status icons supplement
+visible state words; treat them as decorative when adjacent text conveys the
+meaning.
 
 ## Layout and responsive composition
 
-The collapsed laptop composer uses 1366 × 820. Desktop screens use 1366 × 900;
-full-content references are 1366 wide with their natural height. Tablet frames are
-1024 × 768 (the compact Inbox is 800 × 768) and short phone frames are 390 × 480.
-Phone references use 390 × 844. These are review viewports, not fixed application
-dimensions. Main desktop content and board workspaces use 20px padding and 12px
-gaps; the Inbox retains 24px padding and 16px gaps. The imported desktop workspace
-uses 28px padding and 20px gaps.
+Desktop frames are 1366 wide at their content height (at least 768); full-content
+references are the same width at their natural height. Phone frames are 390 × 844
+(longer where a frame shows a scrolled page), tablet frames 1024 × 768 or 800 × 768,
+and short phone frames 390 × 480. These are review viewports, not fixed application
+dimensions.
 
-The shell uses the navigation drawer through 1120 CSS pixels. The 224px sidebar
-plus the 40px horizontal page padding leaves 857px of task content at 1121px; the
-production browser test checks 1119, 1120 and 1121px as well as 759, 760 and
-800px. This measured shell breakpoint does not qualify the task-row, Inbox or
-reading layouts by itself. The tablet frames use the existing drawer at 1024px and
-keep the Inbox queue and detail side by side at 800px. Phone controls must
-accommodate touch, keyboard and safe-area space without covering content.
-
-- **Overview:** attention preview above the work list or board, with a route to the
-  complete Inbox. Routine results are separate from requests requiring action.
-- **Inbox:** sidebar, heading and filters remain available. Queue and detail scroll
-  independently; request header and response/decision controls remain visible.
-  Phone uses queue → detail → queue navigation with restored selection and position.
-- **Composer:** project, title and desired outcome lead. Optional context,
-  references, permitted assignee and dependencies disclose below them; collapsed
-  summaries retain supplied values and visible error counts. Reserve space for
-  Create and start / Save draft. Unfinished on-device input is distinct from a
-  confirmed Ensemble draft or Ready task, and confirmed creation is distinct from
-  admission. There is no attachment hint.
-- **Task detail:** outcome, current situation and next actor, unresolved decisions,
-  then attributed evidence precede assignment history. Requests remain outside
-  disclosure; independent holds remain beside approvals. Preserve task → assignment
-  → conversation identities and accountable lead. Opening an assignment shows its
-  bounded recent preview and result; earlier content and omission notices remain
-  accessible. The illustrated three-message preview is not a fixed acceptance
-  requirement. History updates preserve position, disclosures and replies.
-- **Imported task:** source content and Ensemble execution are visually separate.
-  Desktop has source/execution panes; phone has GitHub source and Ensemble tabs,
-  each preserving its position. External state is never implied by local activity.
-- **Structured questions:** related questions form one submission. Desktop can use
-  the Inbox detail pane or an adjacent task pane; phone uses one scrolling form
-  with a persistent submit area. The two phone question frames are scroll positions
-  of the same request, not separate submissions.
-- **Board:** desktop exposes named column links and horizontally navigable columns;
-  columns scroll vertically. Phone shows one column with named tabs and previous/
-  next navigation. Stopping and Uncertain remain reachable with visible counts.
-  Ready-but-blocked retains its Ready label in the Waiting column: readiness is
-  distinct from work-state grouping. Cross-project and project counts, phone
-  selection and previous/next controls reflect this mapping. The cross-project
-  Waiting viewport shows two of its three tasks, with a labelled continuation.
-  SPEC.md requires grouping by Ensemble work state, separating readiness from
-  dependency holds and preserving the existing board mapping; see the
-  [UI03 mapping record](../docs/design/ui03-tasks.md#attention-and-board). Done,
-  Cancelled and provider-closed fixtures remain in All tasks and task views without
-  redefining the active-board mapping. List/Board is a presentation switch, not a
-  status mutation; no drag-and-drop is depicted.
+- **Shell:** a 232px sidebar (Ensemble mark, installation name, Search work field
+  with ⌘K, Overview, Inbox with an amber count, Tasks, the projects list with
+  activity meta, a capacity meter and the account menu), a 48px top bar
+  (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and
+  New task with its key), then the page. Settings, Runtime and Sign out live in the
+  account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
+  run panes edge to edge with hairline dividers.
+- **Breakpoints:** the production shell uses the navigation drawer through 1120 CSS
+  pixels; the browser test checks 1119, 1120 and 1121px as well as 759, 760 and
+  800px. Tablet frames show the drawer behind a 44px Open navigation button in the
+  top bar. This shell breakpoint does not qualify task-row, Inbox or reading
+  layouts by itself. Phone controls accommodate touch, keyboard and safe-area space
+  without covering content.
+- **Overview (`01-attention-overview`):** title and a stat strip (Needs you,
+  Uncertain, Active tasks, Running turns), then Needs you as cards — execution
+  uncertainty first, then questions and approvals oldest first — each with the
+  request, reason, inline evidence and its response. A single-choice question can be
+  answered in its card; an approval always opens exact material. A dashed row names
+  further requests and opens the Inbox. Below, the work table (List/Board switch,
+  filters; Task, State, Next, Lead, Updated) sits beside a Projects panel (lead,
+  activity, source sync) and Recent results, which stay separate from requests.
+- **Inbox (`02-inbox-approval`):** three panes. The queue is grouped (Intervention,
+  then Questions & approvals oldest first) under its filters. The request pane shows
+  kind, position, project/task, the request as a question, requester and identities,
+  exact material, version and hold notes, and a sticky response bar. Questions are
+  answered there; an approval ends with the statement of what a decision covers and
+  one Review material & decide link to the retained exact-material destination.
+  The Inbox never approves or denies. The task-context inspector lists the task, lead,
+  requester, assignment chain, holds and evidence. Queue and detail scroll
+  independently; phone uses queue → detail → queue with restored selection and
+  position.
+- **Composer (`05-composer`):** project, title and desired outcome lead. Optional
+  context, references, permitted assignee and dependencies disclose below them;
+  collapsed, they show chips of the supplied values and any error count. The right
+  column shows "If you create it now" (Starts now or Will wait, with numbered
+  reasons and their Fix or link) and the facts inherited from the project. A sticky
+  bar separates unfinished on-device input from a confirmed Ensemble draft and holds
+  Save draft and Create and start. Confirmed creation is distinct from admission.
+  There is no attachment hint.
+- **Task detail (`03-task-detail`):** a header with the task ID, a source chip for
+  imported tasks, title, desired outcome, actions (Execution, and Stop… while the
+  task is open; there is no task pause), a status strip (state badge, readiness and holds, next actor, lead,
+  updated) and tabs (Overview, Files, Changes, Review, History). Overview leads with
+  any decision card, then the shared brief (requirements with provenance, approach
+  and decisions, the supplied-criteria table with evidence outcomes), the latest
+  result, the assignments table and Message lead. The inspector holds source sync,
+  holds, dependencies, execution facts and results and artifacts; the hold that
+  blocks the current decision also appears as a line in the decision card. Requests remain
+  outside disclosure; independent holds stay beside approvals. History updates
+  preserve position, disclosures and replies.
+- **Imported task:** source content and Ensemble execution are visually separate:
+  GitHub requirements are read-only and attributed, and the inspector carries the
+  source state (issue state, last sync, View source, Refresh). Phone uses GitHub
+  source and Ensemble tabs, each preserving its position. External state is never
+  implied by local activity.
+- **Structured questions:** related questions form one submission with one Submit
+  answers action. Desktop answers in the Inbox request pane or the task's answering
+  panel; phone uses one scrolling form with a persistent submit area.
+- **Board (`04-tasks-board`):** columns by Ensemble work state, equal width, all on
+  one screen at 1366 (an empty Ready column collapses to a narrow labelled rail).
+  Cards show title, project and source identity, the reason, the next actor (amber
+  when it is you) and the lead. Phone shows one column with named tabs and
+  previous/next. Ready-but-blocked work keeps its Ready label in the Waiting column;
+  Stopping and Uncertain stay reachable with counts. A closure-held task reads
+  "Held · closed on GitHub" and groups in the Paused column. List/Board is a presentation
+  switch, not a status mutation; no drag-and-drop is depicted.
+- **Settings (`114-settings-index`):** in-page section navigation (Projects, Runtime
+  & recovery, Profiles, Routing, GitHub discovery, CLI credentials, Readiness)
+  beside bordered sections; project configuration adds General, Routing, GitHub
+  source and Sync & placement tabs.
 
 ## Shared components
 
-Local reusable specimens connect to the installed library. Screen instances
-reference imported components directly. Content, visibility, semantic colour and
-responsive size overrides are intentional; the library remains the shared
-primitive foundation.
-
-| Ensemble specimen | Local node | Installed component |
+| Component | Canvas artboard | Use |
 | --- | --- | --- |
-| Navigation / projects | `eifyp` | Sidebar `X:PV1ln`, Sidebar items |
-| Button / primary | `VWlEO` | Button/Default `X:VSnC2` |
-| Button / secondary | `K7cX7` | Button/Outline `X:C10zH` |
-| Inbox / request row | `V8fnr` | Card `X:pcGlv`, request content slot |
-| Source / GitHub issue identity | `vCXTp` | Badge/Outline `X:3IiAS` |
-| Task / board card | `cjNBk` | Card `X:pcGlv`, task content slot |
-| Request / recorded response | `w5VRs` | Alert/Default `X:QyzNg` |
-| Execution / unresolved GitHub blocker | `Ra7pQ` | Alert/Default `X:QyzNg` |
-| Question / choice with description | `NNq5u` | Card plus selected/unselected Radio |
-| Question / free-text answer | `qdM95` | Textarea Group/Filled `X:CrS3L` |
-| Status / badge | `j3TsL` | Badge/Secondary `X:WuUMk` |
-| Navigation / segmented item | `B8KRB` | Tab Item, active/inactive |
-| Input / text field | `tQvAL` | Input/Filled `X:AfQIN` |
-| Navigation / board column link | `Q5GVK` | Tab Item, active/inactive |
-| Navigation / mobile column tab | `kZTPH` | Tab Item with 44px height |
-| Navigation / phone header (top-level screens) | `KthOL` | Menu icon, title, Badge, Button/Outline |
-| Navigation / phone detail header | `p69Od` | Button/Ghost back, title and subtitle, one Button/Outline action |
-| Navigation / row (navigation, not actions) | `mZoXC` | Title, optional summary, chevron |
-
-Other reusable components:
-
-- Compact task progress: `cIimt`.
-- Criterion rows `GA7Ra` and local-feedback context `xljAv`; reusable criterion
-  and feedback context `njRTx`.
-- Workspace inspection component frame `i8oSV`, holding the observation strip
-  `l1wkQX` and the selectable code line `Idu62` (kept for focused specimens; it is
-  not a second product theme).
-- Editor row `rccke` in `KlKGO`: separate source, gutter and diff-marker columns;
-  it supports code, retained evidence and both diff sides.
+| Sidebar | `Sidebar` | Every desktop screen. Props: `active` (overview, inbox, tasks, search, none), `inbox`, `project`, `projects` (fixtures, none, fixture-app or a comma list), `capacity`, `fixtureMeta` |
+| Top bar | `TopBar` | Every desktop screen. Props: `crumbs` (slash-separated), `status` (connected, stale, disconnected) |
+| Foundations and controls | `Main` | Tokens, state colours, typography, buttons, fields, choice controls, switch, segmented control, feedback lines and alerts, evidence and diff specimens |
+| Domain components | `ds-domain-components` | Request row, board card, source identity chip, execution blocker, recorded response, structured answers, phone headers, navigation row, column tabs |
+| Action feedback | `ds-action-feedback` | Success line, Details toggle and panel, warning and destructive alerts |
+| Compact progress | `54-compact-progress-entry-points` | Task progress across Overview, List, Board and Inbox entry points |
+| Review components | `56-review-components` | Criterion rows and local-feedback context |
+| Inspection components | `77-workspace-inspection-specimen`, `107-editor-inspection-specimen` | Observation strip, selectable code line, editor row with separate gutter, marker and source |
 
 Rules:
 
-- Project and permitted-assignee fields use Select Group/Default `X:w5c1O`.
-  Task lists use Table/Row/Cell components; assignments use Accordion. Agent and
-  operator initials use Avatar/Text. Grouped multi-select questions use Checkbox,
-  while single-choice questions use Radio. Labels, descriptions, selected values,
-  validation messages and response controls remain explicit.
-- Phone screens use one of the two headers above; nested screens use the detail
-  header with the parent as the back label.
-- Use a navigation row for anything that only opens another view. Keep buttons
-  for actions, with one primary action per screen. Desktop buttons hug their label.
-- The sidebar lists Overview, Inbox, Tasks (List/Board) and Search, then projects.
-  Settings, Runtime and Sign out live in the footer account menu.
-- Stop uses Button/Destructive and confirms first; reversible states show their
-  counterpart (for example Restore profile).
-- Identifier-heavy provenance (R2 · A-105 · 8d31c4a) is 12px muted metadata
-  below the plain-language state, never the headline.
-- Status icons supplement visible state words. Running does not imply repair
-  ownership; provider closure does not imply delivery. In implementation, treat
-  these icons as decorative when adjacent text already conveys their meaning.
-  Task lead names and accountability remain visible alongside avatars.
+- Project and permitted-assignee fields are selects. Task lists are tables;
+  assignments are table rows that disclose their history. Grouped multi-select
+  questions use checkboxes, single-choice questions radios. Labels, descriptions,
+  selected values, validation messages and response controls remain explicit.
+- Phone screens use one of two headers: top-level (menu, title, count badge, one
+  icon or outline action) or detail (back with the parent label, centred title and
+  mono subtitle, at most one outline action).
+- Use a navigation row for anything that only opens another view. Keep buttons for
+  actions, with one primary action per view. Desktop buttons hug their label.
+- Stop uses the destructive treatment and confirms first; reversible states show
+  their counterpart (for example Restore profile).
+- Task lead names and accountability remain visible wherever a task appears.
 
 ## Operator refinement brief
 
@@ -259,10 +231,9 @@ Make the next decision obvious, and keep its evidence close:
   Preserve validation, drafts and truthful creation/admission feedback.
 - **Readability:** give task meaning and the immediate next step more space than
   repeated navigation metadata. Keep titles distinguishable and supporting text
-  readable. Retain semantic state meanings and readable typography; shadcn supplies
-  their visual foundation.
+  readable. Retain semantic state meanings and readable typography.
 
-Shared components and representative desktop/phone frames use fixtures for
+Shared components and representative desktop/phone artboards use fixtures for
 agent-owned check repair, an operator question, approval with an independent
 dependency hold, completion without a decision, uncertain execution and capacity
 waiting. They also show unknown responsibility and distinguish cancelled/undelivered
@@ -277,7 +248,7 @@ presentation brief, not a delivery plan.
 ## Interaction guidance
 
 Apply the exact state and permission rules from SPEC.md. These are presentation
-details that the reviewed frames illustrate:
+details that the canvas illustrates:
 
 - Retain filters, selected request, scroll anchor, expanded groups and unfinished
   input while updates arrive. Follow new messages only when already at the bottom;
@@ -288,6 +259,8 @@ details that the reviewed frames illustrate:
   recorded, failed, stale, cancelled, already answered, offline and unsupported
   interactions distinctly. Unsupported requests remain unresolved without a blind
   retry or conversion to ordinary chat.
+- Every question action reads Answer question, in Overview, Inbox, List/Board and
+  task detail; the question text carries the specifics.
 - Distinguish Message lead, response to a specific question, approval of an exact
   action and Post comment to GitHub. Show destinations and persistence outcomes.
 - Preserve source snapshots on failed refresh, showing last successful sync. A
@@ -301,7 +274,7 @@ details that the reviewed frames illustrate:
 
 - Overview, project/cross-project List and Board share the compact facts and task
   detail. Back restores filters, selection and position; Board also restores its
-  column. Updated shared progress `cIimt` and frame `L2aXf` cover these entry points.
+  column. Compact progress (`54-compact-progress-entry-points`) covers these entry points.
 - Inbox enters at the relevant request and returns to that queue item, keeping its
   request anchor, queue filters, selected item and position. Task → inspection does
   not answer the request.
@@ -325,16 +298,16 @@ No recommendation is inferred from running activity.
 
 | Fixture / journey | Desktop references | Phone references |
 | --- | --- | --- |
-| Failed check with recorded repair owner, no attention | Overview `N9G11A`; List `nD0nh`; cross-project/project boards `E7qC9`, `MUFPD`; task `oipj4` | `zs53F` |
-| Running with unknown repair responsibility | Overview `N9G11A`; List `nD0nh`; boards `E7qC9`, `MUFPD`; task `kiPK9` | `zs53F` |
-| Specific audience question, requester, reason and evidence | Inbox `cGjau`; Overview and paused task row/card | Queue `U3RAH`; request `pmu7r`; evidence `YjRad` |
-| Failed submission, stale read, confirmation and return | Lifecycle reference `jKzRk`, shared receipt `w5VRs`, interaction contract `BvX5O` | Failed `uJVe2`; stale `e1kkI`; sent `o6O3M`; anchored return `q2vYE` |
-| Exact approval and independent dependency hold | Review `DAeiN`; recorded approval `US7Kv`; imported task `biA7p` | Task `K045bl`; review `ZWQIU` |
-| Completed result and retained evidence, no decision | Task `Q24BPH`; outcomes `zeoGi`; Overview recent results | `Thy1i` |
-| Cancellation and provider closure without delivery | Outcomes `zeoGi` | Cancelled `rn49D`; provider-closed/Ensemble-paused `ALMfc` |
-| Uncertain execution and honest recovery | Overview/List; later board `x9cPnW`; outcomes `zeoGi` | `CTUzI` |
-| Confirmed creation waiting for capacity | Outcomes `zeoGi`; composer semantics `s34356` | Created `Z6U3T4` |
-| Optional values, collapsed error count and expanded invalid dependency | Composer `Z315o`; full-content `MhM7z` | Composer `i3glx`; collapsed error `JX4dm`; expanded error `wXiWx` |
+| Failed check with recorded repair owner, no attention | Overview `01-attention-overview`; List `24-all-projects-list`; cross-project/project boards `04-tasks-board`, `23-atlas-project-board`; task `36-task-known-repair` | `38-phone-repair-responsibility` |
+| Running with unknown repair responsibility | Overview `01-attention-overview`; List `24-all-projects-list`; boards `04-tasks-board`, `23-atlas-project-board`; task `45-task-repair-unknown` | `38-phone-repair-responsibility` |
+| Specific audience question, requester, reason and evidence | Inbox `06-inbox-question-audience`; Overview and paused task row/card | Queue `09-phone-inbox-queue`; request `10-phone-question`; evidence `27-phone-question-evidence` |
+| Failed submission, stale read, confirmation and return | Question states `22-question-states-specimen`; recorded response in `ds-domain-components` | Failed `28-phone-question-failed-answer`; stale `29-phone-question-stale-read`; sent `30-phone-question-answer-sent`; anchored return `31-phone-inbox-anchored-return` |
+| Exact approval and independent dependency hold | Review `02-inbox-approval`; recorded approval `32-inbox-approved-dependency-held`; imported task `12-imported-task-source-execution` | Task `15-phone-imported-task-ensemble`; review `33-phone-exact-approval-source-hold` |
+| Completed result and retained evidence, no decision | Task `37-task-completed-result`; outcomes `43-desktop-lifecycle-outcomes`; Overview recent results | `40-phone-completed-result` |
+| Cancellation and provider closure without delivery | Outcomes `43-desktop-lifecycle-outcomes` | Cancelled `41-phone-cancelled`; closure hold `42-phone-provider-closed` |
+| Uncertain execution and honest recovery | Overview/List; later board `04-tasks-board`; outcomes `43-desktop-lifecycle-outcomes` | `25b-phone-board-uncertain` |
+| Confirmed creation waiting for capacity | Outcomes `43-desktop-lifecycle-outcomes`; composer `161-composer-created-project-paused` | Created `39-phone-created-waiting-capacity` |
+| Optional values, collapsed error count and expanded invalid dependency | Composer `05-composer`; full-content `02-composer-optional-expanded` | Composer `34-phone-composer-collapsed`; collapsed error `35b-phone-collapsed-validation`; expanded error `35-phone-optional-settings-error` |
 
 The question journey is queue → request → recorded evidence → request with
 retained selection → submit → recorded confirmation → anchored queue. Failure
@@ -342,84 +315,48 @@ retains the choice; stale evidence retains the last read and requires checking t
 current request. Exact unknown command outcomes require reconciliation, not a
 blind retry. Confirmation does not automatically open another item.
 
-Approval shows one success line, "Approved. Waiting on the GitHub dependency.",
-with AP-17 v2 in Details. The source-owned GitHub dependency stays visible. It
+Approval happens on the retained exact-material page. Returning to the Inbox shows
+one success line, "Approved. Waiting on the GitHub dependency.", with AP-17 v2 in
+Details, and the request leaves the queue (`32-inbox-approved-dependency-held`). The source-owned GitHub dependency stays visible. It
 does not claim PR creation or successful delivery. Existing source refresh/comment outcome
 references remain in place; the design adds no remote-write capabilities.
 
 Overview orders execution uncertainty first, then the 09:14 question before the
-10:52 approval, matching Inbox. Task detail `RyH7J` and full-content reference
-`QGdAx` identify AT-142 as imported from `acme/atlas#142` and retain the open
+10:52 approval, matching Inbox. Task detail `03-task-detail` identifies AT-142 as imported from `acme/atlas#142` and retain the open
 `acme/design-system#87` dependency independently of AP-17 approval, consistent
-with the board, imported detail and approval screens. Composer `Z315o` uses 12px
-for the shared sidebar workspace label.
+with the board, imported detail and approval screens.
 
-Frame `BvX5O` annotates focus restoration, scrolling, keyboard operation,
-safe-area handling, persistence and command reconciliation, plus the review
-checklist. Existing expanded-history and grouped question references remain the
+[Interaction notes](#interaction-notes) cover focus restoration, scrolling,
+keyboard operation, safe-area handling, persistence and command reconciliation. Existing expanded-history and grouped question references remain the
 disclosure/state inventory; representative initial screens prioritise evidence
 above history.
 
-## Screen reference map
+## Canvas map
 
-Use the viewport frames for composition. Full-content frames show content inventory
-and disclosure detail; do not shrink their entire height into a laptop viewport.
+Each canvas page groups one area. Desktop artboards come first on a page, then
+phone and tablet. Notes and review checklists from earlier design rounds are
+carried into [Interaction notes](#interaction-notes), not drawn.
 
-| Surface | Frames and Pen nodes |
+| Page | Artboards |
 | --- | --- |
-| Foundations and control library | `DOuyS`, `eIXDM` |
-| Attention overview | 01 `N9G11A` |
-| Laptop composer and task detail | 02a `Z315o`, 03a `RyH7J` |
-| Composer/history interaction notes | `s34356`, `ILOxx` |
-| Inbox question, approval and empty | 06 `cGjau`, 07 `DAeiN`, 08 `VVYuZ` |
-| Phone Inbox and question | 09 `U3RAH`, 10 `pmu7r` |
-| Inbox filters and lifecycle | 11 `jKzRk` |
-| Imported desktop and expanded history | 12 `biA7p`, 13 `rEGDJ` |
-| Phone source and execution | 14 `C5mb7`, 15 `K045bl` |
-| GitHub outcomes and connected surfaces | 16 `jHghC`, 17 `xoFAQ` |
-| Grouped questions in Inbox and task | 19 `eowDX`, 20 `bOQnB` |
-| Phone grouped form, initial and scrolled | 21 `YzbOM`, 21b `m6ZUJR` |
-| Question lifecycle and interaction notes | 22 `evQB1`, 26 `e839O` |
-| Matching list and cross-project board | 24 `nD0nh`, 18 `E7qC9`, 18b `x9cPnW` |
-| Project board | 23 `MUFPD` |
-| Phone Waiting (Ready with a hold) and Uncertain columns | 25 `GWXOi`, 25b `CTUzI` |
-| Full-content composer and task detail | 02 `MhM7z`, 03 `QGdAx` |
-| Expanded captured history and state references | 05 `nfqO8`, 04 `wLhJT` |
-| Refinement section and evidence/response journey | Section `uhRIV`; 27 `YjRad`, 28 `uJVe2`, 29 `e1kkI`, 30 `o6O3M`, 31 `q2vYE` |
-| Approval confirmation and phone review | 32 `US7Kv`, 33 `ZWQIU` |
-| Phone composer and validation disclosure | 34 `i3glx`, 35 `wXiWx`, 35b `JX4dm` |
-| Repair, completed and unknown-responsibility task details | 36 `oipj4`, 37 `Q24BPH`, 45 `kiPK9` |
-| Phone repair, capacity, completion, cancellation and closure | 38 `zs53F`, 39 `Z6U3T4`, 40 `Thy1i`, 41 `rn49D`, 42 `ALMfc` |
-| Desktop lifecycle comparison and interaction checklist | 43 `zeoGi`, 44 `BvX5O` |
-| Canvas contents (every section and frame with node IDs) | `H7aUq1` |
-| Settings, sign-in & recovery section | Section `dwLnk`; review notes 130 `DuF5u` |
-| Sign-in desktop and phone | 108 `nQvin`, 109 `MxgGj`, 110 `Wut6u`, 111 `yr1m8`, 112 `W64weN` |
-| Account menu, settings index and discovery credential source | 113 `DhtZq`, 114 `vEr15`, 114b `FcO5o` |
-| Guided project setup, error, first run, discovery unavailable and folder picker | 115 `wk678`, 116 `q6ZqlW`, 117 `bkNmZ`, 117b `T6VX5`, 131 `M6N2BQ` |
-| Project configuration and phone state | 118 `gi83t`, 119 `w0ozf`, 119b `xCaEr`, 119c `PbDkZ`, 120 `SBB7W`, 120b `gjYWT`, 121 `Pwzju` |
-| Profiles and routing | 122 `F6d3SQ`, 123 `O96oS`, 124 `Z8uZnh`, 125 `c8af5` |
-| Runtime, assignment recovery and not found | 126 `AqYk0`, 127 `iEF1o`, 128 `ur1mr`, 129 `HCNJ2` |
-| Stop confirmation | 132 `uQrNE` |
-| CLI credentials, desktop and phone | 133 `rX5TO`, 134 `b6P8Z3`, 135 `vlG3U`, 136 `LJKCn`, 137 `JEKrc`, 138 `CcimU`, 139 `PnQRM`, 140 `XTiZ6`, 141 `B3XyJr`, 142 `MaR6q` |
-| First run & onboarding section | Section `B4S7E`; review notes 153 `uqAeR` |
-| Getting-started checklist, desktop and phone | 143 `AnubR`, 143b `Ttbda`, 144 `stx1O` |
-| Setup inline lead profile and ready check | 145 `HGgoK`, 145b `ju0c4`, 146 `UdnEc`, 146b `PFBIv`, 147 `akpq9` |
-| First task: start prediction, wait reasons and Fix | 148 `q9Ogr`, 149 `Ky9f4`, 149b `CLbNV`, 149c `itg8q`, 150 `A0xMwZ` |
-| Readiness panel and Add Claude | 151 `ahTxh`, 152 `CLLED`, 152b `vF8EX` |
-| Execution runtime switches, disable confirmation and no runtime enabled | 126b `bXZvb`, 126c `FQScX`, 151b `WM9Em` |
-| Action feedback section and components | Section `BnKzu`; components `SKF0h`; review notes 167 `nrZYd` |
-| Action feedback, project configuration | 154 `JGenC`, 154b `TZhQ0`, 156 `RsAq8`, 157 `sbOOH`, 158 `x4tTqV`, 159 `IS6X0` |
-| Action feedback, other surfaces | 155 `hRBAj`, 160 `HYN4M`, 161 `thtaf`, 162 `zxH2a`, 162b `Gi4zR`, 163 `o6kBCw`, 164 `h0FyJW`, 165 `TGj4A` |
-| Action feedback, phone | 166a `VWHi0`, 166b `pPAmx`, 166c `N7QIqz` |
-| Operator refinement (section 10, renamed 800A–800H) | `qIVmm`; `h23qD`, `FsTwL`, `dUUIS`, `Z8BqXF`, `LBzlj`, `nKHGv`, `Sejey`, `g5wmIu` |
+| 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
+| 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
+| 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
+| 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
+| 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
+| 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short` |
+| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
+| 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
+| 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
+| 00 Foundations & components | `Main`, `Sidebar`, `TopBar`, `ds-domain-components` |
 
-Workspace inspection frames 77–106 and the task-overview, review, assignment and
-search frames have their own node tables in the sections below.
+## Settings, credentials, onboarding and feedback
 
 ### GitHub discovery credential
 
 Frame 114's Projects panel carries the installation discovery credential row; 114b
-`FcO5o` draws it open, and 117b `T6VX5` draws the setup alert when discovery is
+`114b-settings-discovery-credential` draws it open, and `117b-first-setup-discovery-unavailable` draws the setup alert when discovery is
 unconfigured.
 
 - **Configured (114):** "GitHub discovery credential · GitHub CLI · @account ·
@@ -455,46 +392,44 @@ unconfigured.
 
 ### Project source credential
 
-Frame 119 `w0ozf` shows the configured GitHub CLI account with Change and Clear in
-`b331J`. Frame 119b `xCaEr` opens GitHub CLI and Environment variable choices;
+Frame `119-project-config-github-source` shows the configured GitHub CLI account with Change and Clear.
+Frame `119b-project-source-credential-change` opens GitHub CLI and Environment variable choices;
 the detected account is an offer, and selecting a source identity is explicit;
 the panel description says a guided-setup project starts with the GitHub CLI login
 setup detected, when it was usable. A cleared source stays cleared.
 Cancel abandons only the credential edit, keeping unrelated source draft changes.
-The environment field takes the full `env:NAME` reference; values stay private.
+The environment field takes the full `env:NAME` reference; reads show the reference
+kind and status, never the variable name or value.
 Discovery never supplies the source identity.
 
-Frame 119c `PbDkZ` draws an uncertain Clear save with the retained draft and
+Frame `119c-source-credential-clear-unknown` draws an uncertain Clear save with the retained draft and
 **Check whether it saved**. Confirmed Change or Clear preserves definitions and
 history, invalidates activation and requires preview at the new source version.
 Reconciliation uses the same request; no new save is issued while its outcome is
 unknown.
 
-Frame 120 `SBB7W` shows missing credentials in preview `x0geR` and observations
-`aL7YS`, with a route to GitHub source settings and no invented attempt or success
-timestamp. Frame 120b `gjYWT` shows a configured but unusable login: sign in on the
+Frame `120-project-config-sync-placement` shows missing credentials in its preview and observations panels, with a route to GitHub source settings and no invented attempt or success
+timestamp. Frame `120b-sync-credential-unusable` shows a configured but unusable login: sign in on the
 service host or change the source credential. Not installed and unreadable use the
 same blocked presentation with their own actionable reason. Stale success is not
-proof of current completeness; blocker status remains unknown. Frame 121 `Pwzju`
-shows the missing-source state in `UBzbi` and the credential-then-preview next step
-in `p1X7qH`, preserving independent placement holds and the phone's read-only design.
+proof of current completeness; blocker status remains unknown. Frame `121-phone-atlas-configuration`
+shows the missing-source state and the credential-then-preview next step, preserving independent placement holds and the phone's read-only design.
 
 ### CLI credentials
 
-Frames 133–142 draw the CLI credentials panel of the Settings index: the last panel
-in the right column, after Routing. On phone the two columns stack, and 140 shows
-the panel scrolled into view under the phone header; phone states without a frame
-use the desktop copy.
+Artboards 133–142 show Settings with CLI credentials selected in the section
+navigation. On phone, 140 shows the panel under the phone header; phone states
+without an artboard use the desktop copy.
 
 | State | Desktop | Phone |
 | --- | --- | --- |
-| Empty, with the create form | 133 `rX5TO` | — |
-| List: active read-only, active read-write never used with Replaces, revoked, expired | 134 `b6P8Z3` | 140 `XTiZ6` |
-| Name validation error | 135 `vlG3U` | — |
-| Unconfirmed create with Check the list; list unavailable with Retry | 136 `LJKCn` | — |
-| One-time token after create (copy failed) | 137 `JEKrc` | 141 `B3XyJr` (copied) |
-| Rotation: replacement token; the old credential is still Active | 138 `CcimU` | — |
-| Revoke confirmation with a failed or unknown request | 139 `PnQRM` | 142 `MaR6q` |
+| Empty, with the create form | `133-settings-cli-credentials-empty` | — |
+| List: active read-only, active read-write never used with Replaces, revoked, expired | `134-settings-cli-credentials-list` | `140-phone-cli-credentials` |
+| Name validation error | `135-settings-cli-credentials-name-error` | — |
+| Unconfirmed create with Check the list; list unavailable with Retry | `136-settings-cli-credentials-unconfirmed` | — |
+| One-time token after create (copy failed) | `137-settings-cli-credentials-token` | `141-phone-cli-credentials-token` (copied) |
+| Rotation: replacement token; the old credential is still Active | `138-settings-cli-credentials-rotation` | — |
+| Revoke confirmation with a failed or unknown request | `139-settings-cli-credentials-revoke-failed` | `142-phone-cli-credentials-revoke` |
 
 - The create form is always inline: Credential name, Scope (Read-only or
   Read-write, Read-only by default) and Lifetime (7, 30, 60 or 90 days, 90 by
@@ -503,8 +438,8 @@ use the desktop copy.
 - Each row shows the name, a badge, and ID (first 8 characters), Scope, Created,
   Expires and Last used ("never" until first use), plus Replaces on a rotation
   replacement and Revoked on a revoked credential. Names may repeat, so the short
-  ID tells credentials apart. Active uses the secondary badge; Expired and Revoked
-  use the outline badge and have no actions. Rows are listed by creation time,
+  ID tells credentials apart. Active uses the emerald ● badge, Revoked the rose ✕
+  badge and Expired the neutral ◼ badge; Expired and Revoked rows have no actions. Rows are listed by creation time,
   oldest first.
 - The token is shown once in "CLI token for <name>", with Copy and Done. Copy
   reports "Copied to the clipboard." or "Copy failed. Select the token and copy it
@@ -521,12 +456,12 @@ use the desktop copy.
   reloading ("Couldn't create the credential: you don't have permission. Your
   entries are still here; we're reloading the list below."), with the code in
   Details. An unconfirmed create or rotate is one warning, "We couldn't confirm the
-  credential was created.", with **Check the list** (136 `LJKCn`). Create and rotate
+  credential was created.", with **Check the list** (`136-settings-cli-credentials-unconfirmed`). Create and rotate
   have no request key, so that action only re-reads the credentials and never
   resubmits. Revoke is by id: a failed or unconfirmed revoke stays inside the
-  dialog as text without a button (139 `PnQRM`, 142 `MaR6q`).
+  dialog as text without a button (`139-settings-cli-credentials-revoke-failed`, `142-phone-cli-credentials-revoke`).
 - Rotate and Revoke each leave one success line: "Rotated <name>. The old
-  credential stays active until you revoke it." and "Revoked <name>." (165 `TGj4A`
+  credential stays active until you revoke it." and "Revoked <name>." (`165-cli-credential-revoked`
   draws it in the credential row; the build shows it above the list). Create's
   confirmation is the one-time token dialog.
 - Settings (account menu → `/app/settings`) is the only entry point, and the
@@ -541,16 +476,14 @@ use the desktop copy.
 
 Frames 143–152b draw the flows in [docs/user-flows](../docs/user-flows/); each flow
 document states what is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
-@fixture-user, lead Ada and task FA-1. Review notes 153 list each frame's flow and
-the open decisions.
+@fixture-user, lead Ada and task FA-1.
 
 - **Getting started (143, 143b, 144):** Home replaces the board of 18 with a
   "Get Ensemble running" card of six rows (Runtime, GitHub, Lead profile, Project,
   First task, Claude optional). Each row has a status icon, title, explanation,
-  badge (Done secondary, Next default, Needs attention destructive, Not started
-  outline, Optional muted outline) and one action. Only the first incomplete
-  required row has the primary button; Done and optional rows use Ghost, the rest
-  Outline. On phone the action moves below the explanation. The summary counts the
+  badge (✓ Done emerald, → Next amber, Needs attention rose, ○ Not started and
+  Optional neutral) and one action. Only the first incomplete required row has the
+  primary button; Done and optional rows use a ghost button, the rest secondary. On phone the action moves below the explanation. The summary counts the
   four required rows ("1 of 4 required steps done"); GitHub and Claude are optional.
   In 143b the paused fixture-app is not Done: the Project row reads Not started with
   Resume, which confirms as in 149b. After the first turn Home keeps only rows that
@@ -564,7 +497,7 @@ the open decisions.
   (Codex preselected) and a secondary Create profile; the page's Create paused
   project stays primary. In 145b the lead select is back beside Project name with the
   new profile chosen, and the success line "Profile created. Other setup values kept."
-  (component `ugjxZ`) sits below the row.
+  (the success line in `ds-action-feedback`) sits below the row.
 - **Ready check (146, 146b, 147):** replaces the "Recorded … as a paused project"
   alert. The frames show the region that appears below the locked setup form after
   Create.
@@ -621,53 +554,52 @@ the open decisions.
 
 ### Action feedback
 
-Section 12 (frames 154–166c, review notes 167) sets one message per action, sized
-to the outcome. Frames 1–153 were swept to the same rules; 167 lists each change.
+Artboards 154–166c set one message per action, sized to the outcome. Every other
+screen follows the same rules.
 
 - **In progress:** the button label only ("Saving…", "Sending…"). An action with no
-  button shows one status line instead ("Sending review to Mira…", 94 `OHIOZ`).
+  button shows one status line instead ("Sending review to Mira…", `94-phone-review-sending`).
 - **Success:** one quiet inline line beside the action: muted check, muted text,
-  no Alert (component `ugjxZ`).
-- **Rejected:** one destructive Alert naming the cause (`NaPr2`), plus any field
+  no Alert (the success line in `ds-action-feedback`).
+- **Rejected:** one destructive Alert naming the cause, plus any field
   error.
 - **Changed elsewhere or unknown outcome:** one warning Alert with a single button
-  (`TsFAB`). An unknown outcome locks the other fields. The button is **Check
+  An unknown outcome locks the other fields. The button is **Check
   whether it saved** and resends the exact original request; CLI credential create
   and rotate have no request key, so theirs is **Check the list**, a re-read (136).
   A replaced, withdrawn or already answered question is a changed-elsewhere
   warning, "This question was already answered, changed or withdrawn. Your answer
   is still here.", with **Review current request** (the Stale request card of 22
-  `evQB1`).
+  `22-question-states-specimen`).
 - **Copy:** at most two short sentences. Message text never uses recorded,
   receipt, observation, admission, reconcile, submission or revision, and never
   shows command names, IDs, versions, hashes or raw codes. Every failure says the
   input is safe ("Your changes are still here.").
-- **Details:** every outcome has a collapsed Details disclosure (`Q5Ff9`).
+- **Details:** every outcome has a collapsed Details disclosure.
   Expanded, it shows a Geist Mono key/value list (Command, Resource, Version,
-  Request key, Code, and Kind where a receipt carries one) with Copy (`kUOab`).
+  Request key, Code, and Kind where a receipt carries one) with Copy.
   Sign-out has no receipt and no Details.
 - **Consequences** go in the Changes to save list before Save (159), never in the
   success line.
 - **Task-side copy as built:** a created task reads "Task created." and a draft
   "Draft saved."; an answer "Answer sent. It reaches the requester on its next
-  turn." (162 `zxH2a`, 30 `o6O3M`) and, on failure, "Couldn't send the answer: the
+  turn." (`162-grouped-questions-answered`, `30-phone-question-answer-sent`) and, on failure, "Couldn't send the answer: the
   service is unavailable. Your answer is still here." with the code in Details (162b
-  `Gi4zR`, 28 `uJVe2`); a reply "Sent to Ada." (163 `o6kBCw`, 61 `AVuFr`); a review
-  "Review sent to Mira." (97 `CACzF`, 104 `u0YEF`), or "We couldn't confirm the
-  review reached Mira." with **Check whether it saved** (96 `X3wI8B`), or, when
+  `162b-grouped-questions-send-failed`, `28-phone-question-failed-answer`); a reply "Sent to Ada." (`163-task-reply-sent`, `61-phone-message-sent`); a review
+  "Review sent to Mira." (`97-phone-review-sent`, `104-review-sent-original-comments`), or "We couldn't confirm the
+  review reached Mira." with **Check whether it saved** (`96-phone-review-unknown-outcome`), or, when
   refused, one error Alert "The review wasn't sent: …" with **Return to draft** (95
-  `OBijt`). Stop confirmation is the affected-assignments sentence plus one
-  sentence on what Stop does, with Stop task and Keep running (132 `uQrNE`, 164
-  `h0FyJW`). An unconfirmed sign-out re-reads the session: signed out is success and
+  `95-phone-review-confirmed-failure`). Stop confirmation is the affected-assignments sentence plus one
+  sentence on what Stop does, with Stop task and Keep running (`132-task-stop-confirmation`, 164
+  `164-stop-confirmation`). An unconfirmed sign-out re-reads the session: signed out is success and
   shows nothing; a session that survived shows one warning, "We couldn't sign you
-  out. You're still signed in.", in the shell only (130 `DuF5u`).
-- **Created and waiting:** 161 `thtaf` and 166c `N7QIqz` draw "It will wait: …"
-  beside the Resume project Fix, and 39 `Z6U3T4` draws "It will wait for capacity."
+  out. You're still signed in.", in the shell only (see [Interaction notes](#interaction-notes)).
+- **Created and waiting:** `161-composer-created-project-paused` and `166c-phone-task-created-project-paused` draw "It will wait: …"
+  beside the Resume project Fix, and `39-phone-created-waiting-capacity` draws "It will wait for capacity."
   As built, "It will wait: <reason>" and its Fix sit below the "Task created." line,
   with any further reasons listed beneath.
 
-Warning colours are the local `nova-warning-fg` and `nova-warning-bg` tokens;
-shadcn has no warning variant.
+Warnings use the attention tokens (`--attn`, `--attn-soft`, `--attn-border`).
 
 ## Task overview
 
@@ -680,9 +612,9 @@ reviewed design, not an implemented UI.
 The task header establishes project, source, accountable lead and current wait.
 Actionable requests sit above disclosure. Desktop places the shared brief beside
 the latest result, its evidence and compact delegation rows; phone discloses the
-brief, result detail and assignment history from a single task summary. Existing
-shadcn controls, semantic colours, identifier roles and the reusable compact
-progress component `cIimt` remain the foundation.
+brief, result detail and assignment history from a single task summary. The shared
+controls, state colours, identifier roles and compact progress
+(`54-compact-progress-entry-points`) remain the foundation.
 
 Fixture: criterion labels C1/C2, validation V-22, revisions and results illustrate
 recorded relationships. AT-142 retains the existing AP-17 v2 exact-material
@@ -693,19 +625,19 @@ and A-106 has recorded a failed focus check before waiting on the dependency.
 FN-58's empty and expanded views are different moments in the same local-task
 journey.
 
-| Review surface | Pen node |
+| Review surface | Artboard |
 | --- | --- |
-| Desktop task, 1366 × 900 | `MRbe2` |
-| Full-content task inventory | `TG3LC` |
-| Phone task, 390 × 844 | `YFLwX` |
-| Phone evidence and earlier results | `XQI9S` |
-| Empty, dependency, refresh and uncertainty specimens | `oJHx1` |
-| Expanded local brief, question, history and retained draft | `vesIN` |
-| Phone long brief and retained draft | `LrM0E` |
-| Phone empty local task | `Crq7h` |
-| Phone failed refresh and uncertain execution | `F2OKCj` |
-| Shared compact progress and entry-point specimens | `L2aXf` |
-| Phone delegation and history access | `qCkVq` |
+| Desktop task, 1366 × 900 | `46a-task-overview-laptop` |
+| Full-content task inventory | `03-task-detail` |
+| Phone task, 390 × 844 | `47-phone-task-overview` |
+| Phone evidence and earlier results | `48-phone-evidence-earlier-results` |
+| Empty, dependency, refresh and uncertainty specimens | `49-state-comparisons` |
+| Expanded local brief, question, history and retained draft | `50-local-task-brief-history-expanded` |
+| Phone long brief and retained draft | `51-phone-expanded-brief-reply` |
+| Phone empty local task | `52-phone-empty-local-task` |
+| Phone failed refresh and uncertain execution | `53-phone-failed-refresh-uncertain` |
+| Shared compact progress and entry-point specimens | `54-compact-progress-entry-points` |
+| Phone delegation and history access | `55-phone-parallel-delegation` |
 
 - **Brief:** GitHub requirements remain read-only with links to the full source
   brief on GitHub. Local brief content expands in the task reading area. Local
@@ -724,8 +656,8 @@ journey.
   requester → result destination. Opening a row discloses its result and bounded
   history. Unknown observations remain unknown; conversation text does not
   establish execution state or repair ownership.
-- **Attention and controls:** AP-17 links to existing desktop `DAeiN` / phone
-  `ZWQIU` exact-material review, preserving action, target, patch and description
+- **Attention and controls:** AP-17 links to existing desktop `02-inbox-approval` / phone
+  `33-phone-exact-approval-source-hold` exact-material review, preserving action, target, patch and description
   revisions, Deny and Leave pending. Changed material needs renewed review.
   Approval leaves independent holds intact. Execution, Stop and recovery remain
   reachable through existing controls; existing Resume/reconciliation boundaries
@@ -750,24 +682,23 @@ Comparison and revision changes disclose from the result; they are not new
 dashboard panels. Shared brief, delegation, attention and execution/recovery
 access remain.
 
-| Review surface | Pen node |
+| Review surface | Artboard |
 | --- | --- |
-| Reusable criterion and feedback context | `njRTx` |
-| Revised result and criteria needing another look | `gAT6T` |
-| Labelled before/after comparison | `dKc4O` |
-| Inspect evidence and edit contextual feedback | `WEBvT` |
-| Confirmed send failure with editable draft | `uqbVh` |
-| Sent local message | `AVuFr` |
-| Phone before/after comparison | `mrRXI` |
-| Missing before and unavailable after material | `OisQm` |
-| Revision changes, no baseline and failed-source alternatives | `ge1Mm` |
-| Revised phone task summary | `IuukL` |
-| Phone changes disclosure | `cP92Q` |
+| Reusable criterion and feedback context | `56-review-components` |
+| Revised result and criteria needing another look | `57-task-revised-result` |
+| Labelled before/after comparison | `58-compare-evidence` |
+| Inspect evidence and edit contextual feedback | `59-inspect-criterion-feedback` |
+| Confirmed send failure with editable draft | `60-phone-feedback-failed` |
+| Sent local message | `61-phone-message-sent` |
+| Phone before/after comparison | `62-phone-before-after` |
+| Missing before and unavailable after material | `63-phone-comparison-unavailable` |
+| Revision changes, no baseline and failed-source alternatives | `64-changes-since-viewed` |
+| Revised phone task summary | `65-phone-revised-result` |
+| Phone changes disclosure | `66-phone-changes-since-viewed` |
 
-The comparison uses fictional UI captures created on the canvas. The two image
-assets are in `design/assets/` (including `command-menu-after.png`) and are
-referenced by five canvas image references; screen preview exports are omitted. The
-images illustrate evidence presentation; they are not screenshots of implemented
+The comparison uses fictional captures drawn as labelled mock UI
+(`fixture-before-r2`, `fixture-after-r3`); the images in `design/assets/` are
+browser-test fixtures for the same comparison. The captures illustrate evidence presentation; they are not screenshots of implemented
 behaviour or real validation. Earlier unavailable/unverified fixtures are
 alternative or earlier states, not simultaneous claims about the latest result.
 
@@ -828,7 +759,7 @@ not generated. Source requirements remain read-only with GitHub attribution.
   created merely because a result changed. Both preserve the independent
   `acme/design-system#87` hold and existing exact-material review, Deny and Leave
   pending flow. Execution and recovery remain available through task navigation.
-- **Entry points:** `cIimt` and `L2aXf` reach the same result/criteria view and
+- **Entry points:** compact progress (`54-compact-progress-entry-points`) reaches the same result/criteria view and
   restore the origin's filters, selected task, column and position on return.
   Inbox still opens the exact actionable request; Open task reaches review tools
   without converting new results into attention.
@@ -838,27 +769,27 @@ not generated. Source requirements remain read-only with GitHub attribution.
 These are fictional design fixtures, not provider observations. They reuse the
 sidebar, buttons, input, result criteria and feedback journeys.
 
-| Surface | Pen node |
+| Surface | Artboard |
 | --- | --- |
-| Desktop captured assignment and current requirements | `DBsYv` |
-| Phone captured assignment and references | `tK66S` |
-| Desktop recorded changes, evidence and delivery | `M41aTm` |
-| Phone changes and delivery | `eP5LX` |
-| Desktop PR, repair, head and delivery alternatives | `ExcLV` |
-| Phone delivery alternatives | `c3utBY` |
-| Desktop search with attributed excerpts | `WaBk5` |
-| Phone search and restored selected match | `JPf7F` |
-| Desktop search coverage, recovery and historical result | `qYS87` |
-| Phone search recovery and historical result | `IzE97` |
+| Desktop captured assignment and current requirements | `67-assignment-context` |
+| Phone captured assignment and references | `68-phone-assignment-context` |
+| Desktop recorded changes, evidence and delivery | `69-changes-delivery` |
+| Phone changes and delivery | `70-phone-changes-delivery` |
+| Desktop PR, repair, head and delivery alternatives | `71-delivery-alternatives` |
+| Phone delivery alternatives | `72-phone-delivery-alternatives` |
+| Desktop search with attributed excerpts | `73-search` |
+| Phone search and restored selected match | `74-phone-search` |
+| Desktop search coverage, recovery and historical result | `75-search-states` |
+| Phone search recovery and historical result | `76-phone-search-states` |
 
 ### Connected journey and hierarchy
 
-Desktop: `WaBk5` → matching result in `gAT6T` → assignment context `DBsYv`
-→ changes/delivery `M41aTm` → selected match in `WaBk5`.
-Phone: `JPf7F` → matching result in `IuukL` → context `tK66S`
-→ delivery `eP5LX` → selected match in `JPf7F`.
-The relevant canvas controls carry destination-node annotations. These are
-static design annotations, not working navigation or prescribed application routes.
+Desktop: `73-search` → matching result in `57-task-revised-result` → assignment context `67-assignment-context`
+→ changes/delivery `69-changes-delivery` → selected match in `73-search`.
+Phone: `74-phone-search` → matching result in `65-phone-revised-result` → context `68-phone-assignment-context`
+→ delivery `70-phone-changes-delivery` → selected match in `74-phone-search`.
+The canvas does not wire these as prototype links; the sequence is the contract,
+not a prescribed application route.
 
 The desktop result leads with “Focus correction reported; toolbar needs another
 look”. Work revision and evidence gaps remain immediately visible. Assignment,
@@ -866,12 +797,12 @@ result, instruction/profile, source-snapshot, commit and validation identities s
 beneath the outcome or in the context/provenance disclosure. The parallel-assignment
 rows remain in the document behind disclosure; the initial result view uses a
 compact summary. Attribution remains available without competing with the outcome.
-`IuukL` retains phone criterion summaries and links into assignment context and
+`65-phone-revised-result` retains phone criterion summaries and links into assignment context and
 delivery.
 
-The C1/C2 summary, comparison `dKc4O` / `mrRXI`, contextual feedback `WEBvT`,
-send-failure recovery `uqbVh`, confirmation `AVuFr`, and since-viewed `ge1Mm` /
-`cP92Q` remain. Contextual feedback keeps its exact result/material reference when
+The C1/C2 summary, comparison `58-compare-evidence` / `62-phone-before-after`, contextual feedback `59-inspect-criterion-feedback`,
+send-failure recovery `60-phone-feedback-failed`, confirmation `61-phone-message-sent`, and since-viewed `64-changes-since-viewed` /
+`66-phone-changes-since-viewed` remain. Contextual feedback keeps its exact result/material reference when
 newer work appears; it does not silently retarget.
 
 ### Assignment context and delivery
@@ -918,9 +849,9 @@ selected match and position.
   Search has the active desktop navigation treatment; Overview is inactive there.
   The phone search header identifies the current Search view and offers Workspace
   return. No keyboard shortcut is required to discover it.
-- **Connected journey:** desktop `N9G11A` → Search `WaBk5` → selected AT-142
-  result `gAT6T` → Back to `WaBk5`; phone `U3RAH` or `GWXOi` → `JPf7F` →
-  `IuukL` → Back to `JPf7F`. Opening selects the exact matching requirement,
+- **Connected journey:** desktop `01-attention-overview` → Search `73-search` → selected AT-142
+  result `57-task-revised-result` → Back to `73-search`; phone `09-phone-inbox-queue` or `25-phone-board-waiting` → `74-phone-search` →
+  `65-phone-revised-result` → Back to `74-phone-search`. Opening selects the exact matching requirement,
   decision or result section. Returning restores `focus`, All projects, All types,
   Any date, history included, match 2 of 4 and its reading position. Return to
   Workspace restores the originating queue/board selection, filters and position.
@@ -937,19 +868,19 @@ selected match and position.
   selected. Historical R2 in the state specimens has the same complete ownership.
 - **States belong to flows:** search filters edit the current query scope; Refresh
   provider status retries the read in the current delivery view. Existing checks,
-  findings, comparison and recovery controls remain. `qYS87`, `IzE97`, `ExcLV`
-  and `c3utBY` are canvas review specimens with no product navigation into them.
+  findings, comparison and recovery controls remain. `75-search-states`, `76-phone-search-states`, `71-delivery-alternatives`
+  and `72-phone-delivery-alternatives` are canvas review specimens with no product navigation into them.
   Their loading, no-match, failure with retained earlier matches, partial-coverage,
   historical-result, unavailable-destination and changed-head snapshots replace
   content within the owning flow. Retry retains previous observations with their
   age, selected material, drafts and all holds.
 
-| Updated entry reference | Pen node |
+| Updated entry reference | Artboard |
 | --- | --- |
-| Desktop shared navigation | `m0d2bc` |
-| Desktop Overview → Search | `N9G11A` |
-| Phone Inbox → Search | `U3RAH` |
-| Phone Board → Search | `GWXOi` |
+| Desktop shared navigation | `ds-domain-components` |
+| Desktop Overview → Search | `01-attention-overview` |
+| Phone Inbox → Search | `09-phone-inbox-queue` |
+| Phone Board → Search | `25-phone-board-waiting` |
 
 Older reference screens are historical examples; apply the shared navigation
 treatment during implementation.
@@ -967,58 +898,58 @@ application implementation, dispatch, acceptance result or cutover authority. It
 extends, rather than replaces, existing task, evidence, contextual feedback,
 execution, approval and recovery flows.
 
-### Visual source and node references
+### Visual source and artboards
 
-The frames are in [design.pen](design.pen), in the section starting at canvas
-position **2952, 27789**. Desktop frames are 1366 × 900; phone frames are 390 × 844.
-Read the desktop rows left to right, then the phone rows below. The state
-specimens are review aids, not destinations in the product.
+The artboards are on the canvas page **06 Workspace inspection**; screen 80 is the
+core Changes view `06-workspace-changes-review`. Desktop artboards are 1366 wide;
+phone artboards are 390 × 844. Read the desktop rows left to right, then the phone
+rows below. The state specimens are review aids, not destinations in the product.
 
-The shared shadcn library remains **Dark / Neutral / Default**. The work reuses the
-installed sidebar and buttons, phone header `KthOL`, local-feedback context `xljAv`,
-and the existing task/result compositions. Inspection editors use edge-to-edge
+The work reuses the shared sidebar, top bar and buttons, the phone detail header,
+the local-feedback context (`56-review-components`) and the existing task/result
+compositions. Inspection editors use edge-to-edge
 panes and compact toolbars; other desktop content retains 20px padding. Phone
 reading content uses 16–20px padding and phone action targets are at least
 44 × 44px.
 
-| Composition / render reference | Exact Pen node |
+| Composition / render reference | Artboard |
 | --- | --- |
-| 77 · Shared inspection components and section introduction | `i8oSV` |
-| 78 · Current Files, code preview and single-line selection | `unmyA` |
-| 79 · Repository-free generated Markdown output | `pUX8f` |
-| 80 · Branch diff, both sides and deleted-range comment composer | `V0DCi` |
-| 81 · Repository/base selection, comparison menu and Uncommitted | `rlw92` |
-| 82 · Original retained R3 file after workspace removal | `xD63J` |
-| 83 · Complete editable two-file review and summary | `bRkWF` |
-| 84 · Actual latest-turn identity and complete/partial/unavailable alternatives | `dHsfB` |
-| 85 · Raster and PDF output preview alternatives | `JCGmX` |
-| 86 · Inspection, capture, ignored-reveal and workspace states | `oA8pq` |
-| 87 · Current/outdated/unknown/unavailable anchors and Refresh | `SQRtH` |
-| 88 · Phone file list and current observation | `gQhwY` |
-| 89 · Phone Before-side deleted-line range selection | `TEkRK` |
-| 90 · Phone add/edit/remove anchored comment | `J2AwE` |
-| 91 · Phone complete review, first reading position | `aB35C` |
-| 92 · Same complete review, second comment and summary position | `EZasz` |
-| 93 · Phone repository-free Markdown output | `bz4VC` |
-| 94 · Phone sending / original payload locked | `OHIOZ` |
-| 95 · Phone confirmed failure / editable draft / retry | `OBijt` |
-| 96 · Phone unknown outcome / check whether it was sent | `X3wI8B` |
-| 97 · Phone sent and sent-review access | `CACzF` |
-| 98 · Phone retained result bytes after workspace removal | `KVIG2` |
-| 99 · Phone PDF page and zoom controls | `FCvHl` |
-| 100 · Phone raster fit/zoom/pan | `MKzws` |
-| 101 · Phone comparison/base selection and staged/unstaged filters | `lQbVM` |
-| 102 · Phone unsettled turn, deletion and read recovery | `rD02Q` |
-| 103 · Phone authentication expiry and private-state purge | `OwZka` |
-| 104 · Desktop sent review with original comments and summary | `u0YEF` |
-| 105 · Retained original R3 diff after later workspace changes | `Mn97J` |
-| 106 · Keyboard range selection, editing and focus return | `EKC1J` |
+| 77 · Shared inspection components and section introduction | `77-workspace-inspection-specimen` |
+| 78 · Current Files, code preview and single-line selection | `78-files-current-observation` |
+| 79 · Repository-free generated Markdown output | `79-files-generated-markdown` |
+| 80 · Branch diff, both sides and deleted-range comment composer | `06-workspace-changes-review` |
+| 81 · Repository/base selection, comparison menu and Uncommitted | `81-changes-comparison-alternatives` |
+| 82 · Original retained R3 file after workspace removal | `82-result-r3-retained-files` |
+| 83 · Complete editable two-file review and summary | `83-review-complete-draft` |
+| 84 · Actual latest-turn identity and complete/partial/unavailable alternatives | `84-last-turn-capture-states` |
+| 85 · Raster and PDF output preview alternatives | `85-generated-output-previews` |
+| 86 · Inspection, capture, ignored-reveal and workspace states | `86-inspection-capture-states` |
+| 87 · Current/outdated/unknown/unavailable anchors and Refresh | `87-review-anchor-states` |
+| 88 · Phone file list and current observation | `88-phone-task-files-list` |
+| 89 · Phone Before-side deleted-line range selection | `89-phone-deleted-side-range-selection` |
+| 90 · Phone add/edit/remove anchored comment | `90-phone-edit-anchored-draft-comment` |
+| 91 · Phone complete review, first reading position | `91-phone-complete-review-first-scroll` |
+| 92 · Same complete review, second comment and summary position | `92-phone-complete-review-summary-scroll` |
+| 93 · Phone repository-free Markdown output | `93-phone-generated-markdown-preview` |
+| 94 · Phone sending / original payload locked | `94-phone-review-sending` |
+| 95 · Phone confirmed failure / editable draft / retry | `95-phone-review-confirmed-failure` |
+| 96 · Phone unknown outcome / check whether it was sent | `96-phone-review-unknown-outcome` |
+| 97 · Phone sent and sent-review access | `97-phone-review-sent` |
+| 98 · Phone retained result bytes after workspace removal | `98-phone-retained-result-bytes` |
+| 99 · Phone PDF page and zoom controls | `99-phone-generated-pdf-preview` |
+| 100 · Phone raster fit/zoom/pan | `100-phone-generated-raster-preview` |
+| 101 · Phone comparison/base selection and staged/unstaged filters | `101-phone-local-base-selection` |
+| 102 · Phone unsettled turn, deletion and read recovery | `102-phone-unsettled-turn-missing-file` |
+| 103 · Phone authentication expiry and private-state purge | `103-phone-auth-expired-private-state-cleared` |
+| 104 · Desktop sent review with original comments and summary | `104-review-sent-original-comments` |
+| 105 · Retained original R3 diff after later workspace changes | `105-result-r3-retained-diff` |
+| 106 · Keyboard range selection, editing and focus return | `106-keyboard-review-journey` |
 
-Existing desktop task `gAT6T`, phone task `IuukL`, and result/delivery view
-`M41aTm` are extended in place; their contextual feedback, criteria, approval,
+Existing desktop task `57-task-revised-result`, phone task `65-phone-revised-result`, and result/delivery view
+`69-changes-delivery` are extended in place; their contextual feedback, criteria, approval,
 assignments, execution and source-owned dependency controls remain. Desktop task
-entry nodes: Files `Nid6O`, Changes `O0Eyx4`, Review `wSt5b`, retained R3
-`Y4ifBs`. Phone entry row: `pi945`. Result/delivery entry row: `R2IFU`.
+entry points are the Files, Changes and Review tabs and the retained R3 link; the
+phone task and the result/delivery view have matching entry rows.
 
 ### Fixture material
 
@@ -1050,37 +981,37 @@ file sizes/page counts illustrate metadata, not configured limits.
 
 ### Connected journey and entry/return map
 
-1. Task → Files opens `unmyA` / phone `gQhwY` at a current observation. Generated
-   output has the same prominence and controls as code. FN-58 opens `pUX8f` /
-   `bz4VC`; raster/PDF open `JCGmX`, `MKzws` or `FCvHl`.
+1. Task → Files opens `78-files-current-observation` / phone `88-phone-task-files-list` at a current observation. Generated
+   output has the same prominence and controls as code. FN-58 opens `79-files-generated-markdown` /
+   `93-phone-generated-markdown-preview`; raster/PDF open `85-generated-output-previews`, `100-phone-generated-raster-preview` or `99-phone-generated-pdf-preview`.
 2. Changes opens the same task's selected repository and comparison. Branch
-   uses `V0DCi`; dropdown/base states use `rlw92` / `lQbVM`; actual-turn views
-   use `dHsfB` / `rD02Q`. Selecting a repository restores its own comparison
+   uses `06-workspace-changes-review`; dropdown/base states use `81-changes-comparison-alternatives` / `101-phone-local-base-selection`; actual-turn views
+   use `84-last-turn-capture-states` / `102-phone-unsettled-turn-missing-file`. Selecting a repository restores its own comparison
    and baseline, not another repository's main branch.
 3. Select one text line or a range, including either diff side and deleted
-   lines. Add/Edit opens the anchored composer (`V0DCi` / `J2AwE`) using the
+   lines. Add/Edit opens the anchored composer (`06-workspace-changes-review` / `90-phone-edit-anchored-draft-comment`) using the
    originating selection, as specified under parameterised composer entry. Save
    adds to the task's local draft and returns to that selection. It does not send.
 4. Move to another file and add another comment. Review opens the **complete**
-   draft (`bRkWF`; phone `aB35C` → scroll → `EZasz`). Every comment, original
+   draft (`83-review-complete-draft`; phone `91-phone-complete-review-first-scroll` → scroll → `92-phone-complete-review-summary-scroll`). Every comment, original
    excerpt, comparison and status can be inspected. Edit/remove and optional
    summary stay here. The destination is visibly Mira before Send review.
-5. Send freezes that exact logical submission. `OHIOZ` → confirmed failure
-   `OBijt`, unknown `X3wI8B`, or confirmed `CACzF`. Inspect sent review opens
-   the read-only equivalent of `u0YEF`; original context remains accessible.
-6. From R3 evidence or result delivery, open `xD63J` / `KVIG2` (original file)
-   or `Mn97J` (original diff), retaining R3/A-105/b72e910. Opening current
+5. Send freezes that exact logical submission. `94-phone-review-sending` → confirmed failure
+   `95-phone-review-confirmed-failure`, unknown `96-phone-review-unknown-outcome`, or confirmed `97-phone-review-sent`. Inspect sent review opens
+   the read-only equivalent of `104-review-sent-original-comments`; original context remains accessible.
+6. From R3 evidence or result delivery, open `82-result-r3-retained-files` / `98-phone-retained-result-bytes` (original file)
+   or `105-result-r3-retained-diff` (original diff), retaining R3/A-105/b72e910. Opening current
    contents is a separate explicit navigation; a missing historical capture
    never redirects there. Returning restores the exact result/evidence anchor.
 
 | Origin | Inspection entry and return contract |
 | --- | --- |
-| Overview `N9G11A` | Open shared task `gAT6T`, then current Files/Changes; return to the same task row, filters and position. |
-| Project/cross-project List `nD0nh` and Board `E7qC9` / `MUFPD`; phone `GWXOi` | Same task entry; return restores project/task filters, selected task, view, board column and scroll. |
-| Inbox `cGjau` / phone `U3RAH` | Retain originating request AP-17, queue filters, selected item and position. Task → inspection does not answer the request. Back returns to that request, not a generic task list. |
+| Overview `01-attention-overview` | Open shared task `57-task-revised-result`, then current Files/Changes; return to the same task row, filters and position. |
+| Project/cross-project List `24-all-projects-list` and Board `04-tasks-board` / `23-atlas-project-board`; phone `25-phone-board-waiting` | Same task entry; return restores project/task filters, selected task, view, board column and scroll. |
+| Inbox `06-inbox-question-audience` / phone `09-phone-inbox-queue` | Retain originating request AP-17, queue filters, selected item and position. Task → inspection does not answer the request. Back returns to that request, not a generic task list. |
 | Result, criterion and evidence | Preserve selected result, assignment/work revision, criterion/source reference and evidence identity, including older results. Existing single-message Ask lead for changes remains distinct from batched review. |
-| Search `WaBk5` / `JPf7F` | Retain query, scope, filters, match and exact historical section through task → inspection → return. |
-| Assignment context `DBsYv` / `tK66S`, delivery `M41aTm` / `eP5LX` | Carry the selected assignment/result into retained evidence; return to the same expanded disclosure and reading position. Current inspection is explicitly labelled. |
+| Search `73-search` / `74-phone-search` | Retain query, scope, filters, match and exact historical section through task → inspection → return. |
+| Assignment context `67-assignment-context` / `68-phone-assignment-context`, delivery `69-changes-delivery` / `70-phone-changes-delivery` | Carry the selected assignment/result into retained evidence; return to the same expanded disclosure and reading position. Current inspection is explicitly labelled. |
 | Direct task/file/comparison/result/review links | Resolve authorised task and exact requested context. Direct historical links stay historical. If missing or forbidden, explain the unavailable destination; never substitute current bytes. Without an in-session origin, offer the task/project as fallback. Exact URL syntax is an implementation choice. |
 | Retained advanced execution, approval and recovery routes | Reachable through task controls / Holds on phone. Keep the original task/request/result return anchor. Inspection never resolves ownership or execution uncertainty. |
 | Context menus, extensions and notifications | No applicable entry points are established by the current design. Native Codex/ChatGPT work is outside this design. |
@@ -1091,15 +1022,15 @@ file sizes/page counts illustrate metadata, not configured limits.
 
 Composer references in canvas actions are layout templates, not navigation to
 the fixture's prefilled anchor. In particular, screen 78's Add comment reference
-to `J2AwE` must instantiate a **current-file** composer for the selected current
+to `90-phone-edit-anchored-draft-comment` must instantiate a **current-file** composer for the selected current
 line 42; it must not copy that specimen's Branch / Before / deleted lines 41–43.
 The same parameterised contract applies on desktop and phone, in code and
 Markdown Source, and when editing an existing draft comment.
 
 | Origin | Composer context that must remain unchanged |
 | --- | --- |
-| Files screen 78 (`unmyA`), current line 42 | AT-142 / `acme/atlas` / `src/components/CommandMenu.tsx`; Current workspace, observation 12:06, exact observed content identity and excerpt, line 42 only; no diff side or Branch comparison. |
-| Changes screen 80 (`V0DCi`) or phone 89 (`TEkRK`), deleted range | Same task/repository/path; Branch comparison and exact merge base; Before side, deleted lines 41–43, original compared content identity and excerpt. This is the fixture drawn in `J2AwE`. |
+| Files screen 78 (`78-files-current-observation`), current line 42 | AT-142 / `acme/atlas` / `src/components/CommandMenu.tsx`; Current workspace, observation 12:06, exact observed content identity and excerpt, line 42 only; no diff side or Branch comparison. |
+| Changes screen 80 (`06-workspace-changes-review`) or phone 89 (`89-phone-deleted-side-range-selection`), deleted range | Same task/repository/path; Branch comparison and exact merge base; Before side, deleted lines 41–43, original compared content identity and excerpt. This is the fixture drawn in `90-phone-edit-anchored-draft-comment`. |
 | Retained result/evidence or an existing draft | That retained result/capture or saved comment's original immutable context, including its comparison/side/range when applicable; never the current file or another fixture's values. |
 
 Add comment captures the origin's task, repository/root, full path, current/
@@ -1129,12 +1060,12 @@ monospace text; explorer rows, range controls and action buttons keep their 44px
 targets. Tap a gutter to select a line, or use the labelled 44px Start/End
 controls for precise selection and range adjustment. The selected side is
 explicit; switching sides starts a new selection, never transforms an existing
-anchor. `TEkRK` shows deleted Before lines 41–43 with visible focus/selection.
+anchor. `89-phone-deleted-side-range-selection` shows deleted Before lines 41–43 with visible focus/selection.
 Use the same selection controls in source text/Markdown. Rendered Markdown
 offers Source lines; images and PDFs keep ordinary exact-context feedback rather
 than inventing image coordinates or PDF text-line anchors.
 
-`aB35C` and `EZasz` are two scroll positions of **one complete-review page**, not
+`91-phone-complete-review-first-scroll` and `92-phone-complete-review-summary-scroll` are two scroll positions of **one complete-review page**, not
 a pagination gate or separate batches. Every comment is reachable before Send;
 no arbitrary checkbox or forced reading confirmation is introduced. Content and
 action areas scroll above keyboard/safe-area insets. A pinned action bar, if used,
@@ -1143,7 +1074,7 @@ show bounded excerpts and separate reading positions, not an unscrollable app.
 
 #### Keyboard
 
-Keyboard path (drawn in `EKC1J`): Tab into the named file tree, arrows move the
+Keyboard path (drawn in `106-keyboard-review-journey`): Tab into the named file tree, arrows move the
 active item and Enter opens it. Tab reaches the preview gutter; arrows move the
 line cursor, Space selects one line, Shift+Up/Down extends the range. Labelled
 side and Start/End controls provide an equivalent explicit path. Tab → Add
@@ -1240,7 +1171,7 @@ Authenticated navigation and inspection Refresh preserve draft text, anchors,
 selected file, comparison, disclosures, reading position and return context where
 valid. The application explicitly purges private task/reply/search/Inbox state on
 authentication expiry or session-identity change (`web/src/app.tsx`, `expired` /
-`acceptSession`, and `web/src/task-workspace-state.ts`, `purge`). `OwZka`
+`acceptSession`, and `web/src/task-workspace-state.ts`, `purge`). `103-phone-auth-expired-private-state-cleared`
 therefore promises neither unsent-draft restoration after expiry nor indefinite
 client storage. Sign out and access loss follow the same privacy boundary. After
 reauthentication, reload authorised context; recover pending/submitted operation
@@ -1288,16 +1219,16 @@ readable diff hunks and comments close to their source. Ensemble does not add
 their write, staging or commit actions. The root IDs, entry points and the
 #793 / WI01–WI13 contracts above are unchanged.
 
-| Composition | Root / key render references |
+| Composition | Artboards |
 | --- | --- |
-| Files: explorer, source and single-line selection | `unmyA`; explorer `dM3KL`; editor `w0EoyN`; selection `jNeDu` |
-| Generated Markdown with an output explorer and rendered/source modes | `pUX8f`; document `ZmnP5` |
-| Branch: changed-file rail, split diff and inline deleted-range draft | `V0DCi`; diff `pGGwv`; inline draft `k0qaG` |
-| Repository, comparison and local-base menus; Uncommitted alternatives | `rlw92`; menus `GUH1I`, `A9NYX`; filters `xxayQ` |
-| Original R3 file and diff in the same editor language | `xD63J` / `ChMwt`; `Mn97J` / `i0qqt` |
-| Phone explorer and unified deleted-range selection | `gQhwY` / `Kz0T5`; `TEkRK` / `TOMyK`, `t3rHJu` |
-| Phone generated Markdown and retained original source | `bz4VC` / `Jo87G`; `KVIG2` / `q02M0E` |
-| Shared editor row: number, marker and source | `KlKGO` / `rccke`; children `zUmct`, `kUOqQ`, `nxeiM` |
+| Files: explorer, source and single-line selection | `78-files-current-observation` |
+| Generated Markdown with an output explorer and rendered/source modes | `79-files-generated-markdown` |
+| Branch: changed-file rail, split diff and inline deleted-range draft | `06-workspace-changes-review` |
+| Repository, comparison and local-base menus; Uncommitted alternatives | `81-changes-comparison-alternatives` |
+| Original R3 file and diff in the same editor language | `82-result-r3-retained-files`, `105-result-r3-retained-diff` |
+| Phone explorer and unified deleted-range selection | `88-phone-task-files-list`, `89-phone-deleted-side-range-selection` |
+| Phone generated Markdown and retained original source | `93-phone-generated-markdown-preview`, `98-phone-retained-result-bytes` |
+| Shared editor row: number, marker and source | `107-editor-inspection-specimen` |
 
 Desktop uses a 238px file rail beside the 224px application sidebar. The top task
 controls, Files/Changes navigation and observation strip together occupy 132px.
@@ -1310,23 +1241,23 @@ as source files.
 A selected line has a blue selection fill; diff additions/deletions use restrained
 green/red fills plus explicit +/− markers and Before/After labels.
 
-`V0DCi` places the draft composer below the selected hunk, with its exact
+`06-workspace-changes-review` places the draft composer below the selected hunk, with its exact
 Before 41–43 deleted-range anchor visible. Save comment adds to the local draft;
-it does not send. Review opens the complete-review screen `bRkWF`. Cancel restores
+it does not send. Review opens the complete-review screen `83-review-complete-draft`. Cancel restores
 focus to the originating range without changing other comments. Split/Unified
 changes presentation only, and hunk arrows move within the same comparison.
 Baseline selection uses only local branches and retains the per-repository
-baseline. `rlw92` deliberately draws mutually exclusive menus and states together
+baseline. `81-changes-comparison-alternatives` deliberately draws mutually exclusive menus and states together
 as labelled specimens, not as one product screen state.
 
 On phone, the explorer is a full-width destination with 44px file rows. Opening a
-change leads to `TEkRK`'s unified diff, with distinct old/new gutter columns.
+change leads to `89-phone-deleted-side-range-selection`'s unified diff, with distinct old/new gutter columns.
 Deleted rows remain selectable. Start/End controls choose the range without
 requiring a precise drag; Clear removes only the selection. Add comment uses the
-`J2AwE` template with that origin's exact anchor, then the complete-review
-journey is `aB35C` → `EZasz`. Both phone range controls and comment actions are
+`90-phone-edit-anchored-draft-comment` template with that origin's exact anchor, then the complete-review
+journey is `91-phone-complete-review-first-scroll` → `92-phone-complete-review-summary-scroll`. Both phone range controls and comment actions are
 44px high. Files, Markdown and retained evidence use the same compact navigation,
-without squeezing a desktop rail onto the phone. `TEkRK` and `KVIG2` use compact
+without squeezing a desktop rail onto the phone. `89-phone-deleted-side-range-selection` and `98-phone-retained-result-bytes` use compact
 24px editor rows (13 mobile editor rows at 24px); the desktop row component and
 instances are unchanged.
 
@@ -1337,12 +1268,12 @@ preserves explorer focus context. Tab enters the line-selection surface. Up/Down
 moves a single-line anchor and Shift+Up/Down extends it on the selected diff
 side. Enter on Add comment focuses the composer. Tab reaches Cancel/Save;
 Escape cancels the composer and restores the original line/range. Saving returns
-focus to its comment marker. `EKC1J` continues to specify comment editing and
+focus to its comment marker. `106-keyboard-review-journey` continues to specify comment editing and
 return from the complete review.
 
 Long filenames elide in the narrow rail; hover/focus discloses the exact path,
 and the selected file's breadcrumb/provenance exposes it without ambiguity.
-Screen 78 (`unmyA`) is drawn with the explorer labels `CommandMenu.tsx` and
+Screen 78 (`78-files-current-observation`) is drawn with the explorer labels `CommandMenu.tsx` and
 `CommandMenu.test…` wrapped onto two lines; the implementation uses single-line
 elision with exact-path disclosure as specified here. Tabs open bounded read-only
 previews, not editable buffers. Closing a tab only closes its preview; it cannot
@@ -1363,30 +1294,30 @@ specimens apply as before.
 
 ## Tablet and short-viewport refinements
 
-Canvas section `qIVmm` (`#800 · Operator refinement review`) contains eight static
-compositions. They use the installed Dark / Neutral / Default shadcn library,
-Geist Mono where identifiers appear, and a 12px minimum supporting-text size. They
+The canvas page **07 Tasks, composer & tablet** holds eight static compositions
+(800A–800H). They use the shared design system, Geist Mono where identifiers
+appear, and a 12px minimum supporting-text size. They
 add no reusable components, theme, entry point or product behaviour. [#800](https://github.com/chrisbanes/ensemble/issues/800)
 owns this design; its
 [implementation plan](https://github.com/chrisbanes/ensemble/issues/800#issuecomment-6047644893)
 is the exact scope. Existing product contracts and #793 source, return and task
 anchors are unchanged.
 
-| Canvas composition | Node | Size | Review purpose |
+| Composition | Artboard | Size | Review purpose |
 | --- | --- | --- | --- |
-| Tablet Overview / List | `h23qD` | 1024 × 768 | Existing drawer, attention summary, compact task rows, and List/Board switch. |
-| Compact tablet Inbox / question | `FsTwL` | 800 × 768 | Fieldnotes Q-204/r2 is one three-question form with one disabled Submit answers action while Q2 exceeds its limit; the task remains Paused. |
-| Tablet task detail / evidence | `dUUIS` | 1024 × 768 | Task situation and next actor stay distinct from the evidence rail. |
-| Tablet Search / selected result | `Z8BqXF` | 1024 × 768 | Canonical Atlas AT-142 identity, source, next actor and return anchor; AT-155 is the separate running cold-start task and A-108 its recorded Eli repair assignment. |
-| Tablet composer / validation disclosure | `LBzlj` | 1024 × 768 | Optional summaries, expanded dependency error, focus treatment, and both actions. |
-| Tablet all-projects Board | `nKHGv` | 1024 × 768 | Ready 0, Running 2, Waiting 3 and Paused 1; Stopping and Uncertain remain reachable. Held Ready work remains Ready and is grouped in Waiting. |
-| Phone question / short viewport | `Sejey` | 390 × 480 | Q-204/r2 Q2–Q3 scroll position, retained Q1 selection, over-limit Q2 error, Q3 draft, and one disabled Submit answers action. |
-| Phone composer / short viewport | `g5wmIu` | 390 × 480 | Long fields and optional summaries; unavailable dependency shows its error before submit while Save draft and Create and start stay enabled. |
+| Tablet Overview / List | `800a-tablet-overview-list` | 1024 × 768 | Existing drawer, attention summary, compact task rows, and List/Board switch. |
+| Compact tablet Inbox / question | `800b-tablet-inbox-question` | 800 × 768 | Fieldnotes Q-204/r2 is one three-question form with one disabled Submit answers action while Q2 exceeds its limit; the task remains Paused. |
+| Tablet task detail / evidence | `800c-tablet-task-evidence` | 1024 × 768 | Task situation and next actor stay distinct from the evidence rail. |
+| Tablet Search / selected result | `800d-tablet-search-result` | 1024 × 768 | Canonical Atlas AT-142 identity, source, next actor and return anchor; AT-155 is the separate running cold-start task and A-108 its recorded Eli repair assignment. |
+| Tablet composer / validation disclosure | `800e-tablet-composer-validation` | 1024 × 768 | Optional summaries, expanded dependency error, focus treatment, and both actions. |
+| Tablet all-projects Board | `800f-tablet-all-projects-board` | 1024 × 768 | Ready 0, Running 2, Waiting 3 and Paused 1; Stopping and Uncertain remain reachable. Held Ready work remains Ready and is grouped in Waiting. |
+| Phone question / short viewport | `800g-phone-grouped-question-short` | 390 × 480 | Q-204/r2 Q2–Q3 scroll position, retained Q1 selection, over-limit Q2 error, Q3 draft, and one disabled Submit answers action. |
+| Phone composer / short viewport | `800h-phone-composer-short` | 390 × 480 | Long fields and optional summaries; unavailable dependency shows its error before submit while Save draft and Create and start stay enabled. |
 
-The desktop baseline is `N9G11A` (Overview), `nD0nh` (List), `E7qC9` / `MUFPD`
-(Board), `cGjau` (Inbox), `RyH7J` (task detail), `WaBk5` (Search), and `Z315o` /
-`MhM7z` (collapsed/full composer). Phone references are `pmu7r` / `YzbOM` /
-`m6ZUJR` (question), `i3glx` (composer), and `wXiWx` / `JX4dm` (expanded/collapsed
+The desktop baseline is `01-attention-overview` (Overview), `24-all-projects-list` (List), `04-tasks-board` / `23-atlas-project-board`
+(Board), `06-inbox-question-audience` (Inbox), `03-task-detail` (task detail), `73-search` (Search), and `05-composer` /
+`02-composer-optional-expanded` (collapsed/full composer). Phone references are `10-phone-question` / `21-phone-grouped-questions` /
+`21b-phone-grouped-questions-scrolled` (question), `34-phone-composer-collapsed` (composer), and `35-phone-optional-settings-error` / `35b-phone-collapsed-validation` (expanded/collapsed
 validation).
 
 Textarea growth is capped against content and scrolls inside each named viewport.
@@ -1402,7 +1333,7 @@ and state semantics:
   fixed choices selected and exceeds its 1–2 limit, and Q3 retains its supplied
   text. The single Submit answers action stays disabled until the answers are
   valid. Recording answers does not resume Fieldnotes F-203 or clear independent
-  holds. The Q2 limit error uses the destructive colour in `Sejey` and `FsTwL`.
+  holds. The Q2 limit error uses the destructive colour in `800g-phone-grouped-question-short` and `800b-tablet-inbox-question`.
 - Search keeps its query, filters, selected result and return origin; selected
   Atlas AT-142 retains `acme/atlas#142`, Mira, A-105 / Builder, source S2, W-18, R3
   `b72e910` at 11:40, and its next actor. The separate cold-start result is task
@@ -1419,8 +1350,8 @@ and state semantics:
 - Composer summaries show the supplied context, references, assignee and
   dependency; expanding the dependency reveals the validation error without
   discarding its value. Save draft and Create and start stay enabled; either one
-  focuses the error and sends no command. The phone composer `g5wmIu` shows the
-  same four Context / References / Assignee / Dependencies rows as `LBzlj` and the
+  focuses the error and sends no command. The phone composer `800h-phone-composer-short` shows the
+  same four Context / References / Assignee / Dependencies rows as `800e-tablet-composer-validation` and the
   production composer, scrolled to its end so the unavailable dependency and its
   error sit above the enabled actions. The supplied-values panel keeps its
   unfinished-input notice concise and omits creation-receipt/admission explanation
@@ -1432,34 +1363,202 @@ Implementation notes: measure navigation and textarea behaviour, verify scroll
 ownership and caret retention, and validate focus before submission.
 
 The entry and recovery inventory is limited to existing references: desktop
-sidebar `X:PV1ln`; phone header `KthOL`; authentication expiry and private-state
-purge `OwZka`; interrupted-read recovery `rD02Q`; retained original file
-`xD63J` / `KVIG2` and diff `Mn97J`; Markdown `pUX8f` / `bz4VC`; and raster/PDF
-specimens `JCGmX`, `MKzws` and `FCvHl`. The design has no dedicated
+`Sidebar`; phone headers (`ds-domain-components`); authentication expiry and private-state
+purge `103-phone-auth-expired-private-state-cleared`; interrupted-read recovery `102-phone-unsettled-turn-missing-file`; retained original file
+`82-result-r3-retained-files` / `98-phone-retained-result-bytes` and diff `105-result-r3-retained-diff`; Markdown `79-files-generated-markdown` / `93-phone-generated-markdown-preview`; and raster/PDF
+specimens `85-generated-output-previews`, `100-phone-generated-raster-preview` and `99-phone-generated-pdf-preview`. The design has no dedicated
 account-settings, guided-login, or retained-HTML viewer composition in this
 section. Their route and recovery obligations remain in the specification; this
 canvas does not show a browser renderer for retained HTML.
 
-The short phone question frame intentionally clips `wHhpl`, the long answer body
-inside the 390 × 480 scroll viewport (the other intended scroll region is `fTREM`);
-the Q2–Q3 view ends at the pinned action area. Three disabled `Card Actions` slots
-in reused option components are zero-sized and do not appear in the render. The
-scroll owner is the named body or queue region, not the page. Board columns may
+The short phone question frame intentionally clips the long answer body inside the
+390 × 480 scroll viewport; the Q2–Q3 view ends at the pinned action area.
+The scroll owner is the named body or queue region, not the page. Board columns may
 scroll horizontally. A client still needs to apply real bottom safe-area insets,
 and must preserve the selected answer, draft, text selection and caret while these
 regions scroll or resize.
 
-## Implemented differences from the frames
+## Interaction notes
 
-Where the production UI intentionally differs from the frames, the differences are
-below. The web app is the ground truth for these items.
+Presentation and interaction rules that the canvas does not show on its own.
+
+### Composer
+
+- Submitting with an error in a collapsed optional group opens that group and
+  focuses its first invalid control (`05-composer`, `35b-phone-collapsed-validation`).
+- While a save or create is pending, and after it fails, the entered input stays
+  in place. No success state appears before the service confirms it.
+
+### Task detail and updates
+
+- No raw output is needed to understand the task. Assignments and captured
+  conversations open through disclosure (`03-task-detail`).
+- The reading anchor is the top visible message and its pixel offset. Updates keep
+  that anchor, open groups, expanded message previews and the unfinished reply.
+- Auto-follow is on only while the reader is at the bottom. Scrolling away turns it
+  off, and Jump to latest turns it back on.
+- Requests and failures pinned above history each link to their assignment.
+- History controls (`05-task-history-grouped`): Show earlier reveals the rest of
+  that group's messages, and Expand all opens every group. The chronological view
+  keeps each message's assignment label.
+- Artifact links open a preview. Back restores the reading position.
+- Execution state lines say what is still possible and give one route to inspect
+  it:
+  - Stopping: running work may still finish or have side effects, and the line
+    says it is waiting for runner confirmation (View execution).
+  - Stopped: the runner confirmed nothing is active, and queued replies remain
+    saved (View final activity).
+  - Execution uncertain: the process may still be active, so check its state
+    before attempting new work (Inspect execution).
+  - Paused: new turns are held, messages queue for the lead, and sending does not
+    resume the task.
+
+### Approval review
+
+- The review panel (`02-inbox-approval`, `33-phone-exact-approval-source-hold`) has
+  labelled sections for Exact action, Target and Material to approve. Each material
+  item shows its version, and the panel offers Open full description and Inspect
+  patch. A line states that the decision applies only to these material versions,
+  and that a change cancels it and needs a new review.
+- Accepted states that the action is allowed but has not started yet.
+- Denied states that nothing was approved, and offers to add feedback for the
+  requester or close the review.
+- Stale names the version change, says the earlier acceptance no longer applies,
+  and asks the operator to inspect the new material before deciding.
+
+### Inbox and filters
+
+- The filters are Projects and Request type. Each has an All option, and every
+  option shows a count. Filters combine.
+- The sidebar Inbox count is always the total of unresolved items. The queue
+  heading shows the filtered count. Count changes never move the visible row.
+- Only the queue and the reading pane scroll. Native scrollbars appear only when
+  content overflows.
+- Open task carries a return-to-Inbox route. The route saves the project and type
+  filters, sort order, selected request, the top visible request with its pixel
+  offset, the detail pane's scroll offset and the draft. Back restores that exact
+  state, even after new requests have arrived.
+- After a confirmed reply or decision, the item leaves the queue and the
+  unresolved count drops. The nearest surviving visible row keeps its pixel
+  offset, and the queue does not jump to the top.
+- When new items arrive while the reader is away from the top, a "N new items"
+  control appears. Applying it restores priority order and keeps the selected
+  request and the unfinished reply.
+- A filtered empty queue reads "No matching requests". It shows each active filter
+  as a removable chip, gives the unresolved total across all projects, and offers
+  Clear filters. The unfiltered empty state reads "Nothing needs you."
+  (`08-inbox-empty`).
+- On phone, Back to Inbox restores the queue anchor, the filters and focus on the
+  selected row (`31-phone-inbox-anchored-return`). The body scrolls under the fixed
+  header.
+
+### Structured questions
+
+- Tab reaches each question in turn, then the submit control. Space selects a
+  checkbox as well as a radio option.
+- Focus and selection look different. Focus is a 2px primary outline, and
+  selection is a filled radio dot or a checked box. Each is visible without the
+  other.
+- A selection-limit error names the limit, for example "Select no more than 2
+  sections.", and sits beside its question.
+- Returning from evidence puts focus back on the control that opened it
+  (`27-phone-question-evidence`).
+
+### Board
+
+- Switching between List and Board keeps the selected task. Each view restores its
+  own scroll position.
+- Enter on a focused card opens the task detail. Returning restores the filters,
+  the column and the scroll position.
+- The Board keeps the attention summary and the Inbox link. Stopping and Uncertain
+  remain named column tabs with counts.
+- Empty columns collapse to a narrow strip. The column link bar keeps every column
+  and its count, including empty ones (`04-tasks-board`).
+
+### Settings and sign-in
+
+- Phone settings stay usable forms. Project settings lead with Current state and
+  Next step cards, and recovery with Current holds and Next step
+  (`121-phone-atlas-configuration`, `128-phone-assignment-recovery`).
+- Readiness Project-field conditions choose the GitHub Project, field and option by
+  name from discovery, falling back to typed node IDs when discovery is unavailable.
+- On settings pages no primary navigation item is selected. Project configuration
+  selects its own project in the sidebar.
+- The account menu links to Settings (`/app/settings`) and Runtime
+  (`/app/settings/runtime`).
+- In Settings → Projects (`114-settings-index`), each project shows its lead, state,
+  repository access and discovery sources. Access and sources are labelled
+  separately so that discovery never reads as access. Routing has its own
+  per-project summary.
+- Project configuration has General, Routing, GitHub source, and Sync & placement
+  tabs. Each section saves separately against its own version.
+- Settings edit values in place. Private values are replace-only.
+- After routing saves, the form reloads the saved version. Guidance returns to
+  replace-only, and Save stays disabled until something changes
+  (`125-routing-relay-saved`).
+- Sign-in has two bootstrap states: "Loading sign-in…" and "Sign-in service
+  unavailable." with Try again.
+- While a sign-in request is pending, the password field and the button stay
+  disabled (`111-phone-signin-pending`). A failure clears the password, returns
+  focus to the field and shows no account or lockout detail (`109-signin-failed`,
+  `112-phone-signin-failed`).
+- Sign out shows "Signing out…" while it is pending, then clears private local
+  state.
+
+### Recovery
+
+- Every Inspect execution or Recovery details control opens the same assignment
+  recovery destination (`127-assignment-recovery-relay`). These controls are in
+  `01-attention-overview`, `49-state-comparisons`,
+  `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain` and Runtime →
+  Task recovery destinations (`126-runtime-capacity-recovery`).
+
+### First run
+
+- Before any project exists, the getting-started First task row reads "Needs a
+  project first." Its Create task action opens the composer.
+- The header New task button stays next to the getting-started card.
+- Before a project is created, the sidebar Projects group shows only New project.
+- The Fix confirmation (`149b-task-fix-resume-confirm`) states that holds and
+  access are unchanged.
+
+### Action feedback
+
+- When saving changes, a changed-elsewhere warning keeps the edited values and
+  offers Review changes (`157-project-configuration-changed-elsewhere`).
+- When a form closes on save, its row shows an inline "Saved." that fades after a
+  few seconds (`160-discovery-credential-saved`).
+- After a saved outcome, the aside heading does not repeat the save time
+  (`155-routing-saved`).
+- After a failed answer, the submit button reads Retry answer, and no second
+  action appears (`162b-grouped-questions-send-failed`).
+- Unknown outcomes say "not confirmed" or "We couldn't confirm…". Unsettled
+  execution or delivery reads "until we know it ended" or "until we know it
+  posted", never "reconcile".
+- The ban on IDs applies only to action-outcome messages. Task, assignment and
+  check IDs in ordinary task content stay.
+
+### Accessibility and keyboard
+
+- Iconography uses muted 14–16px glyphs beside agent initials and names, and
+  12–14px status symbols beside visible state labels.
+- Running uses an activity symbol, never a success or repair symbol. Questions,
+  approvals, pause, waiting and completed results each have a distinct symbol.
+
+## Implementation status
+
+The production web UI implements the reviewed behaviour on its own shadcn-based
+foundation (`web/src/tokens.css` and `web/src/ui/`). It does not yet use the
+canvas's visual direction, tokens or layouts. Where the production UI
+intentionally differs from the canvas in behaviour, the differences are below.
+The web app is the ground truth for these items.
 
 ### Question actions, composer and test matrix
 
 - Question actions on the task page sit in flow directly below the bounded
   question body rather than sticking to the page; a page-sticky footer covered the
   last field after it scrolled into view. At 390 × 480 the actions are reached by
-  scrolling the task page. They are not always on screen as in `Sejey`.
+  scrolling the task page. They are not always on screen as in `800g-phone-grouped-question-short`.
 - Create and start is not disabled for an unavailable assignee or dependency.
   When fresh options show a stored selection is no longer permitted, the
   composer opens that section with its error before submit. Either action then
@@ -1477,7 +1576,7 @@ below. The web app is the ground truth for these items.
   session carries no operator name, and the frames' name is an example. The
   trigger's accessible name is "Operator account".
 - The expired-session entry is the sign-in screen with a status notice rather
-  than a separate screen. It keeps frame `OwZka`'s headline and "Private state
+  than a separate screen. It keeps frame `103-phone-auth-expired-private-state-cleared`'s headline and "Private state
   cleared" card but not its review-recovery paragraph (that belongs to the
   review flow). The card's detail adds one sentence: unfinished task input is
   offered for recovery on this device, because the composer keeps it in the
@@ -1498,7 +1597,7 @@ Production Inbox and shared question response
 06–11, 19, 21 and 27–33 as follows:
 
 - Phone Back is the page header's link ("Back to Inbox"), as frames 10, 21 and 27–30 draw it, not an in-body "Back to queue" button. After a recorded answer the confirmation card's button reads "Back to Inbox". A wide layout has no back control.
-- Approvals show the exact action, target, revision, requester, the independent holds (frames 07 and 33) and the bound-decision statement, with one "Review material & decide" link to the retained `/coordination/task/:id#<interaction>` destination. There is no Approve or Deny in the Inbox (frame 32 is not built); an in-app decision would be a new authority surface and a separate scope decision.
+- Approvals show the exact action, target, revision, requester, the independent holds (frames 07 and 33) and the bound-decision statement, with one "Review material & decide" link to the retained `/coordination/task/:id#<interaction>` destination. The Inbox never approves or denies; an in-app decision would be a new authority surface.
 - Evidence stays the existing "Question evidence" and "Task evidence" links; the read has no excerpt field, so frame 27's in-pane excerpt is not drawn. Returning from the task restores the selection, scroll position and the link's focus.
 - A single question's choice cards stay in the reading flow (frame 06 pins them); only the submit area is sticky, inside the one scroll owner `.inbox-detail`, so a pinned option list cannot trap scrolling or cover a field.
 - Queue rows use read-model facts only: "PROJECT / KIND", the task title, the reason, the action ("Answer question", "Review material & decide", "Inspect execution") and "Requester · HH:MM · age". There are no short identifiers (Q-204, A-201: U3 #837), no "Execution uncertain" versus "Intervention problems" subtype (one "Interventions" option), and no grouped-question title on a phone.
@@ -1556,11 +1655,13 @@ Production task detail, composer and Stop confirmation
 ([#839](https://github.com/chrisbanes/ensemble/issues/839)) differ from the frames
 as follows:
 
-- The 3 October task overview (46/46a `MRbe2`/`TG3LC`, 57 `gAT6T`, 47 `YFLwX`)
-  governs every task, local or imported, over the earlier 03a `RyH7J`, 12 `biA7p`
-  and 36/37/45 generation. There is no "Pause task" (no task-level pause command)
-  and no "Current holds" side panel; holds and admission reasons are lines in the
-  decision card. Imported tasks keep source/execution separation through the
+- The 3 October task overview (46/`46a-task-overview-laptop`/`03-task-detail`, `57-task-revised-result`, `47-phone-task-overview`)
+  governs every task, local or imported, over the earlier 03a `03-task-detail`, `12-imported-task-source-execution`
+  and 36/37/45 generation. The build has no holds side panel yet; holds and
+  admission reasons are lines in the decision card. It still offers Stop… on
+  finished tasks ([#1030](https://github.com/chrisbanes/ensemble/issues/1030)) and
+  labels a closure hold "Paused · closed on GitHub"
+  ([#1031](https://github.com/chrisbanes/ensemble/issues/1031)). Imported tasks keep source/execution separation through the
   "Requirements · GitHub" label, the source line ("Open GitHub to edit source",
   "Refresh source observation") and the hold lines, not separate panes or tabs.
 - The header shows Back, the title, a status line ("Ready · waiting on
@@ -1620,18 +1721,12 @@ frames 114 and 118–128 as follows:
 - No configuration timestamp is stored, so a section header shows its version
   ("General version 3") and, only after a save in this browser session, "General
   saved 10:52" from that save's receipt. A reload shows the version again.
-- Phone frames 121 and 128 draw read-only screens. The forms stay usable on a
-  phone; project settings lead with "Current state" and "Next step" cards built
-  from the configuration, source-observation and placement reads, and recovery
-  leads with "Current holds" and "Next step". Both keep the detail header (Back to
-  the static parent) rather than the drawn menu header. "Copy desktop link" is
-  not built.
 - Existing GitHub sources are shown read-only and can be removed; a changed
   definition is a removal plus a new source with a fresh `S-<n>` id, added
   inactive. Search queries and Project filters stay private: a row reads "Private
   query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
-  Readiness Project-field conditions keep node-ID inputs (a name picker needs a
-  discovery read). A GitHub source save deletes the stored activation of each
+  Readiness Project-field conditions keep node-ID inputs; the discovery-backed name
+  picker is [#1032](https://github.com/chrisbanes/ensemble/issues/1032). A GitHub source save deletes the stored activation of each
   removed selection and keeps the stored activation of each kept one. The save
   raises the source version, and activation counts only at the version it was
   previewed, so every kept selection reads "Inactive" and is not synced until it
@@ -1682,22 +1777,26 @@ frames 114 and 118–128 as follows:
 
 ## Using this snapshot
 
-Worktrees may edit `design.pen` through Pen MCP, or use this Markdown reference
-when Pen is unavailable. Review the design in Pen using the node references above.
-Screen preview exports are omitted; comparison image assets are in `design/assets/`
-for use by the canvas.
+Open the canvas to review or change the design. Each artboard is a self-contained
+`.dc.html` page on the canvas; Claude sessions with the Artifact tool can read and
+publish them, and the canvas editor edits them in place. Keep the shared
+`Sidebar` and `TopBar` components as the single source for the shell, and copy
+tokens from an existing artboard. After a design change, update this document in
+the same change.
+
+The canvas has no repository copy. Implementation work that cannot open the
+canvas uses this document and SPEC.md.
 
 This snapshot covers the screens listed above. It does not supply every
 configuration/recovery screen; remaining product obligations stay in the spec and
 issues. The design does not cover every fixture at every viewport and entry point;
-the matrices name the representative coverage and interaction annotations.
+the matrices name the representative coverage.
 
 ## Design limits
 
 Canvas review is bounded and static: it checks hierarchy, spacing, contrast,
 readable state labels and clipping on rendered frames, and is not an accessibility
-audit. Intended clipping regions are the scroll viewports named above (for
-example `wHhpl` and `fTREM`).
+audit. Intended clipping regions are the scroll viewports named above.
 
 Static design does not establish responsive implementation, font availability,
 real resizing/zoom, text scale, keyboard/focus restoration, screen-reader or
@@ -1706,9 +1805,8 @@ scrollbar ownership, textarea growth and caret retention, scroll/query/filter an
 draft persistence, live updates, provider reconciliation, runtime question
 support, message delivery, source comparison, permissions or command
 reconciliation. These need browser and physical-device evidence against the
-acceptance plan. The five comparison-image references still render placeholders in
-Pen MCP, so comparison-image loading is unverified. Static frames and destination
-annotations are not working navigation.
+acceptance plan. Comparison captures are drawn as labelled mock UI, so image
+loading is not exercised. Static artboards are not working navigation.
 
 ## Proposed (not yet adopted): data support to settle
 

@@ -4,8 +4,8 @@ status: accepted
 
 # Discover repositories and pick checkouts during project setup
 
-These decisions follow the settings and setup designs (`design/design.pen`, frames
-114–117 and 131) and amend the guided project setup in
+These decisions follow the settings and setup designs (Design canvas artboards
+114–117 and 131, described in [DESIGN.md](../../design/DESIGN.md)) and amend the guided project setup in
 [SPEC.md](../SPEC.md#task-creation-and-project-setup). The operator UI implements
 them at `/app/settings/projects/new` and in the Settings index.
 
