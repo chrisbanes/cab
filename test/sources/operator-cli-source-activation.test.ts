@@ -15,6 +15,9 @@ process.env.FIXTURE_GITHUB = "test-only-github-source-token";
 
 // biome-ignore lint/suspicious/noExplicitAny: parsed CLI envelopes are asserted structurally
 type Json = Record<string, any>;
+/** A read's readiness view as the `github.configure` value that keeps it. */
+const ruleOf = (r: Json) =>
+  r.kind === "rule" ? { mode: r.mode, conditions: r.conditions } : null;
 
 async function world(
   t: Parameters<typeof startCliOperator>[0],
@@ -108,7 +111,7 @@ test("service and advanced HTML source status use only the configured fake gh ex
         id: selection.id,
         keep: true,
       })),
-      readiness: source.readiness,
+      readiness: ruleOf(source.readiness),
       repositories: source.repositories,
     },
   );
@@ -148,7 +151,7 @@ test("preview reports each unusable GitHub CLI credential with actionable safe g
           id: selection.id,
           keep: true,
         })),
-        readiness: source.readiness,
+        readiness: ruleOf(source.readiness),
         repositories: source.repositories,
       });
       assert.equal(configured.status, 200);
@@ -290,7 +293,7 @@ test("preview-source activates after a complete read and reports the live state"
     expectedVersion: noCredentialSource.version,
     credentialRef: "gh:github.com",
     selections: [{ id: "S-1", keep: true }],
-    readiness: noCredentialSource.readiness,
+    readiness: ruleOf(noCredentialSource.readiness),
     repositories: [],
   });
   assert.equal(ghConfigured.status, 200);
@@ -335,7 +338,7 @@ test("preview-source activates after a complete read and reports the live state"
     projectId: atlas,
     expectedVersion: version,
     selections: ["S-1", "S-2", "S-3"].map((id) => ({ id, keep: true })),
-    readiness: (await w.config()).source.readiness,
+    readiness: ruleOf((await w.config()).source.readiness),
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(saved.status, 200);
@@ -366,7 +369,7 @@ test("preview-source activates after a complete read and reports the live state"
       id: s.id,
       keep: true,
     })),
-    readiness: current.source.readiness,
+    readiness: ruleOf(current.source.readiness),
     repositories: current.source.repositories,
   });
   assert.equal(clear.status, 200);
@@ -538,7 +541,7 @@ test("a setup-recorded GitHub CLI source credential reads back the same in JSON,
     expectedVersion: 1,
     credentialRef: null,
     selections: [],
-    readiness: defaulted.source.readiness,
+    readiness: ruleOf(defaulted.source.readiness),
     repositories: [],
   });
   assert.equal(cleared.status, 200);

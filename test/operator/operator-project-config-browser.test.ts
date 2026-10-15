@@ -582,6 +582,68 @@ test("GitHub source repository and readiness errors focus the exact row without 
     .waitFor();
 });
 
+test("GitHub source shows no readiness rule, saves an added rule, removes it, and never clears an unavailable rule", async (t, journey) => {
+  const previous = process.env.FIXTURE_GITHUB;
+  process.env.FIXTURE_GITHUB = "offline-readiness-rule-value";
+  t.after(() => {
+    if (previous === undefined) delete process.env.FIXTURE_GITHUB;
+    else process.env.FIXTURE_GITHUB = previous;
+  });
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const noRule = page.getByText("No readiness rule:", { exact: false });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await noRule.waitFor();
+  assert.equal(await page.getByLabel("Ready label").count(), 0);
+  await page.getByRole("button", { name: "Add readiness condition" }).click();
+  await page.getByLabel("Ready label").fill("ready-for-agent");
+  await save.click();
+  await savedOutcome(page);
+  assert.deepEqual(d.githubConfiguration(ids.relay).readiness, {
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready-for-agent" }],
+  });
+  await page.getByRole("button", { name: "Remove condition 1" }).click();
+  await noRule.waitFor();
+  const removal = page.getByText("Readiness: no readiness rule", {
+    exact: true,
+  });
+  await removal.waitFor();
+  await save.click();
+  await removal.waitFor({ state: "detached" });
+  assert.equal(d.githubConfiguration(ids.relay).readiness, null);
+  // A rule naming private text is withheld: shown as unknown, never as no rule.
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: d.githubConfiguration(ids.relay).version,
+    credentialRef: "env:FIXTURE_GITHUB",
+    selections: [],
+    readiness: {
+      mode: "all",
+      conditions: [{ kind: "label", name: "offline-readiness-rule-value" }],
+    },
+    repositories: [],
+  });
+  await page.reload();
+  await page
+    .getByText("Saved readiness is unavailable; add a condition to replace it.")
+    .waitFor();
+  assert.equal(await noRule.count(), 0);
+  assert.equal(await save.isDisabled(), true);
+  await page.getByRole("button", { name: "Add readiness condition" }).click();
+  await page.getByLabel("Ready label").fill("ready");
+  await page
+    .getByText("(replaces unavailable readiness)", { exact: false })
+    .waitFor();
+  assert.equal(await save.isDisabled(), false);
+});
+
 test("GitHub source conflict keeps rows and an unknown save is checked once", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

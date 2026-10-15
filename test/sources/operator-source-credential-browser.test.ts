@@ -115,7 +115,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
       .count(),
     0,
   );
-  assert.equal(d.githubConfiguration(projectId).readiness, null);
+  assert.equal(d.githubConfiguration(projectId).readiness?.mode, "all");
   await page.getByRole("button", { name: "Set source credential" }).click();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page

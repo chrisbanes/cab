@@ -8,6 +8,7 @@ import { z } from "zod";
 import { sourceCredentialReference } from "../core/credential-reference.js";
 import {
   closedIssuesSchema,
+  type Readiness,
   readinessSchema,
   repositoryLinkSchema,
   selectionSchema,
@@ -58,8 +59,12 @@ const kindLabel = (kind: string) =>
       ? "GitHub Project"
       : "Search";
 const conditions = (n: number) => `${n} condition${n === 1 ? "" : "s"}`;
+const ruleSummary = (r: Readiness | null) =>
+  r ? `${r.mode} of ${conditions(r.conditions.length)}` : "No readiness rule";
 const readinessText = (r: Source["readiness"]) =>
-  r ? `${r.mode} of ${conditions(r.conditions.length)}` : "(unavailable)";
+  r.kind === "unavailable"
+    ? "(unavailable)"
+    : ruleSummary(r.kind === "rule" ? r : null);
 const sourceCredentialReasons: SourceCredentialReason[] = [
   "missing-credential",
   "invalid-credential-reference",
@@ -105,7 +110,7 @@ const sourcesCommand: BrowseCommand = {
     const gaps: CoverageGap[] = [];
     if (
       unnamed(source) ||
-      source.readiness === null ||
+      source.readiness.kind === "unavailable" ||
       source.selections.some((s) => s.kind !== "search" && !s.descriptor)
     )
       gaps.push("content-unavailable");
@@ -244,7 +249,8 @@ const editSchema = z
       .max(30)
       .optional(),
     removeSelections: z.array(z.string().min(1).max(512)).max(30).optional(),
-    readiness: readinessSchema.optional(),
+    /** A rule replaces, `null` removes the rule, omitted keeps the saved one. */
+    readiness: readinessSchema.nullable().optional(),
     closedIssues: closedIssuesSchema.optional(),
     linkRepositories: z.array(repositoryLinkSchema).max(20).optional(),
     unlinkRepositories: z.array(z.string().min(1).max(512)).max(20).optional(),
@@ -307,7 +313,8 @@ export function sourceEditCommand(
       "conflict",
       "A saved selection or repository link cannot be named in this read, so the CLI cannot keep it. Nothing was prepared.",
     );
-  if (source.readiness === null && !edit.readiness)
+  const unavailableRule = source.readiness.kind === "unavailable";
+  if (unavailableRule && edit.readiness === undefined)
     throw new CliError(
       "conflict",
       'The saved readiness cannot be read; replace it with "readiness" in the edit file. Nothing was prepared.',
@@ -380,7 +387,12 @@ export function sourceEditCommand(
     throw bad(
       'This edit removes every repository link, so no task can be checked out. Add "confirmUnlinkAll": true to confirm.',
     );
-  const readiness = edit.readiness ?? source.readiness;
+  // The saved rule as a command value: the view's `kind` key is not part of it.
+  const savedRule =
+    source.readiness.kind === "rule"
+      ? { mode: source.readiness.mode, conditions: source.readiness.conditions }
+      : null;
+  const readiness = edit.readiness !== undefined ? edit.readiness : savedRule;
   const command: Record<string, unknown> = {
     type: "github.configure",
     projectId,
@@ -412,10 +424,11 @@ export function sourceEditCommand(
     );
   const readinessChanged =
     edit.readiness !== undefined &&
-    JSON.stringify(edit.readiness) !== JSON.stringify(source.readiness);
+    (unavailableRule ||
+      JSON.stringify(edit.readiness) !== JSON.stringify(savedRule));
   if (readinessChanged)
     diff.push(
-      `Readiness: ${edit.readiness?.mode} of ${conditions(edit.readiness?.conditions.length ?? 0)}${source.readiness ? "" : " (replaces unavailable readiness)"}`,
+      `Readiness: ${edit.readiness ? ruleSummary(edit.readiness) : "no readiness rule"}${unavailableRule ? " (replaces unavailable readiness)" : ""}`,
     );
   const closedIssuesChanged =
     edit.closedIssues !== undefined &&
@@ -452,8 +465,8 @@ export function sourceEditCommand(
   if (readinessChanged)
     changes.push({
       field: "readiness",
-      from: source.readiness ? readinessText(source.readiness) : null,
-      to: readinessText(readiness),
+      from: unavailableRule ? null : readinessText(source.readiness),
+      to: ruleSummary(readiness),
     });
   if (closedIssuesChanged)
     changes.push({

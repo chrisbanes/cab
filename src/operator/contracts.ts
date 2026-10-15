@@ -2496,7 +2496,7 @@ export const projectConfigurationSchema = envelope(
               })
               .strict(),
           ),
-          readiness: readinessSchema.nullable(),
+          readiness: readinessRuleViewSchema,
           closedIssues: closedIssuesSchema,
           repositories: z.array(
             z.object({ repositoryId: safeText, ref: safeText }).strict(),

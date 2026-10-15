@@ -1182,6 +1182,60 @@ test("readiness rule is added, removed and re-added through keyed, versioned con
   }
 });
 
+test("the HTML project page names the readiness state and its form removes or sets a rule", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-readiness-html-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    const domain = new DomainStore(db);
+    domain.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Html",
+      leadProfileId: null,
+    });
+    const ui = new LocalOperatorUi(domain);
+    const noRule =
+      /No readiness rule: open issues in active selections are not filtered/;
+    assert.match(ui.project(projectId), noRule);
+    assert.match(
+      ui.project(projectId),
+      /<textarea name="readiness">null<\/textarea>/,
+    );
+    const submit = (readiness: string) =>
+      ui.submit({
+        type: "github.configure",
+        key: randomUUID(),
+        projectId,
+        expectedVersion: String(domain.githubConfiguration(projectId).version),
+        selections: "[]",
+        readiness,
+        repositories: "[]",
+      });
+    await submit(
+      JSON.stringify({
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready-for-agent" }],
+      }),
+    );
+    assert.match(
+      ui.project(projectId),
+      /Readiness rule: label `ready-for-agent`\./,
+    );
+    await submit("null");
+    assert.equal(domain.githubConfiguration(projectId).readiness, null);
+    assert.equal(domain.githubConfiguration(projectId).version, 3);
+    assert.match(ui.project(projectId), noRule);
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("closed-issue mode defaults to skip and changes only through keyed, versioned configuration", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-github-closed-mode-"));
   const db = new DatabaseSync(join(root, "db.sqlite"));

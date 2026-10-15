@@ -1394,7 +1394,11 @@ test("readiness validation focuses the exact invalid row with a real description
   page.setDefaultTimeout(5000);
   await signIn(page, web, `/app/projects/${ids.projectId}/settings?tab=github`);
   const labels = page.getByLabel("Ready label", { exact: true });
-  await labels.nth(0).fill("");
+  // A new project has no readiness rule; an added condition starts empty.
+  await page
+    .getByRole("button", { name: "Add readiness condition", exact: true })
+    .click();
+  assert.equal(await labels.nth(0).inputValue(), "");
   let posts = 0;
   page.on("request", (r) => {
     if (r.url().endsWith("/api/operator/commands")) posts++;
