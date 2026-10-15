@@ -1141,11 +1141,20 @@ test("selection counts use a fixed number of queries however many items are stor
     prepare.mock.restore();
     assert.equal(counts.get("repo")?.matching, 20);
     assert.equal(counts.get("other")?.matching, 10);
-    for (const task of f.domain.tasks(f.projectId))
-      assert.equal(
-        f.sources.taskReadiness(String(task.id))?.outcome === "matched",
-        Number(task.ready) === 1,
+    const tasks = f.domain.tasks(f.projectId).map((t) => String(t.id));
+    const batch = mock.method(f.db, "prepare");
+    const readiness = f.sources.readinessByTask(tasks);
+    assert.equal(batch.mock.callCount(), 3);
+    batch.mock.restore();
+    assert.equal(readiness.size, 40);
+    for (const task of f.domain.tasks(f.projectId)) {
+      const r = readiness.get(String(task.id));
+      assert.equal(r?.outcome === "matched", Number(task.ready) === 1);
+      assert.deepEqual(
+        { outcome: r?.outcome, unmet: r?.unmet },
+        f.sources.taskReadiness(String(task.id)),
       );
+    }
   } finally {
     f.db.close();
   }

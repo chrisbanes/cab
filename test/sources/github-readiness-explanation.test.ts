@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import type { Runtime } from "../../src/standalone/codex.js";
 import type {
   GitHubSourceReader,
@@ -153,6 +153,12 @@ test("readiness counts and unmet reasons come from stored observations without p
     }
     await selection();
     assert.deepEqual(reads, snapshot, "reads never call the provider");
+    // Collection reads load readiness once for all their tasks.
+    const batched = mock.method(service.githubSources(), "readinessByTask");
+    await api.readTaskListPage();
+    await api.readComposerOptions(projectId);
+    assert.equal(batched.mock.callCount(), 2);
+    batched.mock.restore();
 
     failing = true;
     await service.refreshGitHub();

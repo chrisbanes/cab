@@ -38,6 +38,8 @@ import {
   executionHarnessLabels,
   executionIntentStateSchema,
 } from "../core/execution-runtime.js";
+import type { Readiness } from "../core/github-source-contracts.js";
+import type { TaskReadiness } from "../core/github-source.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
 import {
   admissionSchema,
@@ -178,6 +180,7 @@ import {
   workspaceInspectionPathsExcluded,
 } from "./workspace-inspection.js";
 
+type ReadinessByTask = ReadonlyMap<string, TaskReadiness>;
 type Row =
   ReturnType<StandaloneService["domain"]> extends { task(id: string): infer R }
     ? R
@@ -2379,9 +2382,11 @@ export class OperatorApi {
     } catch {}
     return { profileId: String(project.leadProfileId), name };
   }
+  /** Collection reads pass `readiness` preloaded for all their tasks. */
   private sourceSummary(
     taskId: string,
     excluded: readonly string[] | undefined,
+    readiness?: ReadinessByTask,
   ) {
     const identity = this.identity(taskId);
     if (!identity) return null;
@@ -2407,41 +2412,54 @@ export class OperatorApi {
       state: issue?.observedState ?? null,
       closure: this.domain().providerClosure(taskId),
       readiness: this.taskReadiness(
-        String(this.domain().task(taskId).projectId),
+        () => String(this.domain().task(taskId).projectId),
         taskId,
         excluded,
+        readiness,
       ),
     };
   }
   /** A stored null rule is `none`; a rule the exclusions withhold is `unavailable`. */
   private readinessRuleView(
-    projectId: string,
+    rule: Readiness | null,
     excluded: readonly string[] | undefined,
   ) {
-    const rule = this.service.githubSources().readinessRule(projectId);
     if (rule === null) return { kind: "none" as const };
     if (this.exact(JSON.stringify(rule), excluded) === null)
       return { kind: "unavailable" as const };
     return { kind: "rule" as const, ...rule };
   }
   private taskReadiness(
-    projectId: string,
+    projectId: () => string,
     taskId: string | undefined,
     excluded: readonly string[] | undefined,
+    preloaded?: ReadinessByTask,
   ) {
-    const rule = this.readinessRuleView(projectId, excluded),
+    const store = this.service.githubSources(),
       result = taskId
-        ? this.service.githubSources().taskReadiness(taskId)
-        : null;
+        ? (preloaded ?? store.readinessByTask([taskId])).get(taskId)
+        : undefined,
+      rule = this.readinessRuleView(
+        result ? result.rule : store.readinessRule(projectId()),
+        excluded,
+      );
     return rule.kind === "unavailable" || !result
       ? { rule, outcome: "not-evaluated" as const, unmet: [] }
-      : { rule, ...result };
+      : { rule, outcome: result.outcome, unmet: result.unmet };
   }
-  private async taskSummary(taskId: string, base?: ExclusionBase) {
-    return (await this.taskSummaryRead(taskId, base)).summary;
+  private async taskSummary(
+    taskId: string,
+    base?: ExclusionBase,
+    readiness?: ReadinessByTask,
+  ) {
+    return (await this.taskSummaryRead(taskId, base, readiness)).summary;
   }
   /** The summary plus the coordination view and exclusions it was derived from. */
-  private async taskSummaryRead(taskId: string, base?: ExclusionBase) {
+  private async taskSummaryRead(
+    taskId: string,
+    base?: ExclusionBase,
+    readiness?: ReadinessByTask,
+  ) {
     const d = this.domain(),
       task = d.task(taskId),
       projectId = String(task.projectId),
@@ -2518,7 +2536,7 @@ export class OperatorApi {
       execution,
       admission: this.admission(taskId),
       capacity: this.capacity(projectId),
-      source: this.sourceSummary(taskId, excluded),
+      source: this.sourceSummary(taskId, excluded, readiness),
       attention: { codes, count },
     };
     return { summary, view, excluded };
@@ -2550,7 +2568,12 @@ export class OperatorApi {
     const page = catalog.slice(index + 1, index + 1 + query.limit),
       snapshot = this.workspaceSnapshot(page.map((t) => t.id)),
       base = this.exclusionBase(),
-      tasks = await Promise.all(page.map((t) => this.taskSummary(t.id, base)));
+      readiness = this.service
+        .githubSources()
+        .readinessByTask(page.map((t) => t.id)),
+      tasks = await Promise.all(
+        page.map((t) => this.taskSummary(t.id, base, readiness)),
+      );
     this.requireWorkspaceSnapshot(snapshot);
     return taskListPageSchema.parse({
       data: {
@@ -2591,20 +2614,22 @@ export class OperatorApi {
           name: this.safe(d.profile(String(p.leadProfileId)).name, excluded),
         }
       : null;
+    const own = catalog.filter((t) => t.projectId === projectId),
+      readiness = this.service
+        .githubSources()
+        .readinessByTask(own.map((t) => t.id));
     const dependencies = await Promise.all(
-      catalog
-        .filter((t) => t.projectId === projectId)
-        .map(async (t) => {
-          const row = d.task(t.id),
-            safe = await this.exclusions(projectId, t.id, [], [], base);
-          return {
-            id: t.id,
-            title: this.safe(row.title, safe),
-            state: row.state,
-            source: this.sourceSummary(t.id, safe),
-            blocking: d.blocksDependents(t.id),
-          };
-        }),
+      own.map(async (t) => {
+        const row = d.task(t.id),
+          safe = await this.exclusions(projectId, t.id, [], [], base);
+        return {
+          id: t.id,
+          title: this.safe(row.title, safe),
+          state: row.state,
+          source: this.sourceSummary(t.id, safe, readiness),
+          blocking: d.blocksDependents(t.id),
+        };
+      }),
     );
     this.requireWorkspaceSnapshot(snapshot);
     return composerOptionsSchema.parse({
@@ -4013,7 +4038,7 @@ export class OperatorApi {
         ? this.domain().providerClosure(String(issue.taskId))
         : null,
       readiness: this.taskReadiness(
-        projectId,
+        () => projectId,
         issue ? String(issue.taskId) : undefined,
         excluded,
       ),
@@ -5117,7 +5142,10 @@ export class OperatorApi {
     return sourceObservationSchema.parse({
       data: {
         projects: projects.map(({ projectId, credential }) => {
-          const readiness = this.readinessRuleView(projectId, excluded),
+          const readiness = this.readinessRuleView(
+              this.service.githubSources().readinessRule(projectId),
+              excluded,
+            ),
             counted = this.service.githubSources().selectionCounts(projectId);
           return {
             projectId,

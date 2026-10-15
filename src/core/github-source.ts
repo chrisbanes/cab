@@ -4,6 +4,14 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
 
+/** Why an imported task is or is not Draft, with its project's rule. */
+export interface TaskReadiness {
+  projectId: string;
+  rule: Readiness | null;
+  outcome: "matched" | "unmet" | "not-evaluated";
+  unmet: ReadinessCondition[];
+}
+
 export interface IssueSnapshot {
   providerInstance: "github.com";
   nodeId: string;
@@ -1171,29 +1179,81 @@ export class GitHubSourceStore {
    * Why an imported task is or is not Draft under the rule; `null` for a local task.
    * `not-evaluated` covers closed and withdrawn issues.
    */
-  taskReadiness(taskId: string): {
-    outcome: "matched" | "unmet" | "not-evaluated";
-    unmet: ReadinessCondition[];
-  } | null {
-    const external = this.db
-      .prepare(
-        "SELECT e.nodeId, e.labels, e.observedState, t.projectId, t.ready FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId WHERE e.taskId = ?",
-      )
-      .get(taskId) as Row | undefined;
-    if (!external) return null;
-    const facts = this.readinessFacts(external);
-    if (external.observedState !== "open" || facts.memberships === 0)
-      return { outcome: "not-evaluated", unmet: [] };
-    const result = evaluateReadiness(
-      this.readinessRule(String(external.projectId)),
-      facts,
+  taskReadiness(taskId: string) {
+    const r = this.readinessByTask([taskId]).get(taskId);
+    return r ? { outcome: r.outcome, unmet: r.unmet } : null;
+  }
+
+  /**
+   * `taskReadiness` for many imported tasks in a fixed number of queries, with each
+   * task's project rule. Local tasks are absent.
+   */
+  readinessByTask(taskIds: readonly string[]): Map<string, TaskReadiness> {
+    const ids = JSON.stringify(taskIds);
+    const externals = this.db
+      .prepare(`SELECT e.taskId, e.nodeId, e.labels, e.observedState, t.projectId, t.ready
+        FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId
+        WHERE e.taskId IN (SELECT value FROM json_each(?))`)
+      .all(ids) as Row[];
+    const memberships = this.db
+      .prepare(`SELECT m.nodeId, m.projectId, m.projectFields FROM github_memberships m
+        JOIN github_external_issues e ON e.nodeId = m.nodeId
+        WHERE e.taskId IN (SELECT value FROM json_each(?))`)
+      .all(ids) as Row[];
+    const rules = new Map(
+      (
+        this.db
+          .prepare(`SELECT projectId, readiness FROM project_github_sources
+          WHERE projectId IN (SELECT DISTINCT t.projectId FROM domain_tasks t
+            WHERE t.id IN (SELECT value FROM json_each(?)))`)
+          .all(ids) as Row[]
+      ).map((row) => [
+        String(row.projectId),
+        readinessSchema
+          .nullable()
+          .parse(JSON.parse(String(row.readiness)) as unknown),
+      ]),
     );
-    // Until the next read re-evaluates Ready under a changed rule, explain nothing.
-    if (result.satisfied !== (Number(external.ready) === 1))
-      return { outcome: "not-evaluated", unmet: [] };
-    return result.satisfied
-      ? { outcome: "matched", unmet: [] }
-      : { outcome: "unmet", unmet: result.unmet };
+    return new Map(
+      externals.map((external): [string, TaskReadiness] => {
+        const projectId = String(external.projectId),
+          rule = rules.get(projectId) ?? null;
+        // The facts `readinessFacts` reads: memberships in the task's project.
+        const own = memberships.filter(
+          (m) => m.nodeId === external.nodeId && m.projectId === projectId,
+        );
+        const notEvaluated: TaskReadiness = {
+          projectId,
+          rule,
+          outcome: "not-evaluated",
+          unmet: [],
+        };
+        if (external.observedState !== "open" || own.length === 0)
+          return [String(external.taskId), notEvaluated];
+        const result = evaluateReadiness(rule, {
+          labels: z
+            .array(z.string())
+            .parse(JSON.parse(String(external.labels)) as unknown),
+          fields: own.flatMap((m) =>
+            projectFieldsSchema.parse(JSON.parse(String(m.projectFields))),
+          ),
+        });
+        // Until the next read re-evaluates Ready under a changed rule, explain nothing.
+        if (result.satisfied !== (Number(external.ready) === 1))
+          return [String(external.taskId), notEvaluated];
+        return [
+          String(external.taskId),
+          result.satisfied
+            ? { projectId, rule, outcome: "matched" as const, unmet: [] }
+            : {
+                projectId,
+                rule,
+                outcome: "unmet" as const,
+                unmet: result.unmet,
+              },
+        ];
+      }),
+    );
   }
 
   private setSourceHold(nodeId: string, reason: string): void {
