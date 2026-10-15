@@ -271,29 +271,28 @@ export function TaskBoard({
         role="toolbar"
         aria-label="Board columns"
       >
-        {columns.map((column, index) => (
-          <Button
-            key={column}
-            type="button"
-            variant="ghost"
-            className="column-tab"
-            aria-pressed={selected === index}
-            data-attention={
-              column === "Uncertain" && counts[column] ? "true" : undefined
-            }
-            onClick={() => {
-              setSelected(index);
-              document
-                .getElementById(`column-${column}`)
-                ?.scrollIntoView({ block: "nearest", inline: "start" });
-            }}
-          >
-            {column === "Uncertain" && counts[column] > 0 && (
-              <CircleQuestionMark aria-hidden="true" />
-            )}
-            {column} · {counts[column]}
-          </Button>
-        ))}
+        {columns.map((column, index) => {
+          const risky = column === "Uncertain" && counts[column] > 0;
+          return (
+            <Button
+              key={column}
+              type="button"
+              variant="ghost"
+              className="column-tab"
+              aria-pressed={selected === index}
+              data-attention={risky ? "true" : undefined}
+              onClick={() => {
+                setSelected(index);
+                document
+                  .getElementById(`column-${column}`)
+                  ?.scrollIntoView({ block: "nearest", inline: "start" });
+              }}
+            >
+              {risky && <CircleQuestionMark aria-hidden="true" />}
+              {column} · {counts[column]}
+            </Button>
+          );
+        })}
       </div>
       <div
         className="board-columns"

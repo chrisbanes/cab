@@ -1394,6 +1394,10 @@ test("board cards follow the frame's anatomy", async (_t, journey) => {
     await style(page, "#column-Uncertain .board-column-name", "color"),
     await resolved(page, "color", "var(--risk)"),
   );
+  assert.equal(
+    await style(page, "#column-Uncertain", "border-top-color"),
+    await resolved(page, "border-top-color", "var(--risk-border)"),
+  );
 
   // Imported identity in mono, opening GitHub in a new tab.
   const source = page
@@ -1536,6 +1540,10 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
         .getBoundingClientRect();
     return column.left >= board.left - 1 && column.right <= board.right + 1;
   });
+  // Tabs transition their colours; capture the settled selection.
+  const settled = () =>
+    page.waitForFunction(() => document.getAnimations().length === 0);
+  await settled();
   await shot(page, "1024-board");
 
   // (e) Phone: selected tab and Uncertain tones, 44px targets and the footer sentence.
@@ -1580,6 +1588,7 @@ test("board columns share one 1366 screen, collapse to rails and scroll only ins
     .locator(`[data-task-id="${ids.uncertain.id}"] .task-state`)
     .getByText("Uncertain")
     .waitFor();
+  await settled();
   await shot(page, "390-board-uncertain-chip");
 
   // (f) Overview's Board sits in its work panel and keeps the List's task IDs.

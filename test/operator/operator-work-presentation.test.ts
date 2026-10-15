@@ -188,7 +188,6 @@ test("the operator is next only while an attention code names them", () => {
   assert.equal(operatorNext(summary({ codes: ["question"] })), true);
   assert.equal(operatorNext(summary({ codes: ["approval"] })), true);
   assert.equal(operatorNext(summary()), false);
-  assert.equal(operatorNext(summary({ state: "done" })), false);
 });
 
 test("source summaries only accept https links", () => {

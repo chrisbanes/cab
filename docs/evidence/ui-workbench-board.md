@@ -31,10 +31,6 @@ not content.
 | [390-board-waiting.png](ui-workbench/390-board-waiting.png) | `25-phone-board-waiting` | One column, the three-column 44px tab grid with Uncertain in rose, Ready chips on held Ready work, in-flow Previous/Next |
 | [390-board-uncertain.png](ui-workbench/390-board-uncertain.png) | `25b-phone-board-uncertain` | The Uncertain column with its rose border, the card's phone-only "Uncertain" chip and "Next: you · inspect execution" |
 
-The 1024 and 390 captures are taken just after a tab click, so the previously
-selected tab can still show its fading fill; the tests assert the settled
-`aria-pressed` state and colours.
-
 ## Deliberate differences from the frames
 
 - A Draft column follows Uncertain; the frames do not draw it.
