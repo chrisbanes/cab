@@ -2903,6 +2903,28 @@ export const discoveryProjectsSchema = discoveryRead({
   linked: z.array(discoveredProjectSchema).max(100),
   owned: z.array(discoveredProjectSchema).max(100),
 });
+export const discoveryProjectFieldsSchema = discoveryRead({
+  fields: z
+    .array(
+      z
+        .object({
+          fieldNodeId: z.string().min(1).max(512),
+          name: z.string().max(512),
+          options: z
+            .array(
+              z
+                .object({
+                  optionNodeId: z.string().min(1).max(512),
+                  name: z.string().max(512),
+                })
+                .strict(),
+            )
+            .max(500),
+        })
+        .strict(),
+    )
+    .max(100),
+});
 export const folderListRequestSchema = z
   .object({ path: z.string().min(1).max(4096) })
   .strict();

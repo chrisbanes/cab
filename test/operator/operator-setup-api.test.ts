@@ -211,6 +211,94 @@ test("discovery reads list through the injected reader, fail closed and store no
     assert.throws(() => api.readDiscoveryProjects(bad), { status: 400 });
 });
 
+test("project field reads use only the discovery credential, fail closed and store nothing", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const saved = {
+    FIXTURE_DISCOVERY: process.env.FIXTURE_DISCOVERY,
+    FIXTURE_GITHUB: process.env.FIXTURE_GITHUB,
+  };
+  process.env.FIXTURE_DISCOVERY = "DISCOVERYONLYTOKEN";
+  process.env.FIXTURE_GITHUB = "SOURCEONLYTOKEN";
+  t.after(() => {
+    for (const [key, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  const state: { failure?: Error; truncated?: boolean } = {};
+  const seen: { ref: string; token: string | undefined }[] = [];
+  let constructed = 0;
+  const factory = fakeDiscovery(state);
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    discovery: (ref, token) => {
+      constructed++;
+      seen.push({ ref, token });
+      return factory(ref);
+    },
+  });
+  const db = new DatabaseSync(join(f.directory, "data", "standalone.sqlite"));
+  t.after(() => db.close());
+  const counts = () =>
+    ["command_receipts", "project_github_sources", "domain_projects"].map(
+      (table) =>
+        Number(
+          (
+            db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
+              n: number;
+            }
+          ).n,
+        ),
+    );
+  const query = new URLSearchParams({ project: "PVT_atlas" });
+  assert.deepEqual((await api.readDiscoveryProjectFields(query)).data, {
+    state: "unavailable",
+    reason: "unconfigured",
+  });
+  assert.equal(constructed, 0);
+  await api.execute(configure("env:FIXTURE_DISCOVERY"));
+  const before = counts();
+  const ready = (await api.readDiscoveryProjectFields(query)).data;
+  assert.equal(ready.state, "ready");
+  assert.deepEqual(
+    ready.state === "ready" &&
+      ready.fields.map((field) => [
+        field.fieldNodeId,
+        field.name,
+        field.options.map((o) => o.name),
+      ]),
+    [
+      ["PVTSSF_status", "Status", ["Todo", "Ready"]],
+      ["PVTSSF_priority", "Priority", ["High", "Low"]],
+    ],
+  );
+  // Credential used: only the discovery token reaches the reader.
+  assert.deepEqual(seen, [
+    { ref: "env:FIXTURE_DISCOVERY", token: "DISCOVERYONLYTOKEN" },
+  ]);
+  state.truncated = true;
+  const truncated = (await api.readDiscoveryProjectFields(query)).data;
+  assert.equal(truncated.state === "ready" && truncated.truncated, true);
+  state.truncated = false;
+  state.failure = new DiscoveryFailure("unauthorized");
+  assert.deepEqual((await api.readDiscoveryProjectFields(query)).data, {
+    state: "unavailable",
+    reason: "unauthorized",
+  });
+  state.failure = new Error("PRIVATE FAILURE DETAIL");
+  const failed = await api.readDiscoveryProjectFields(query);
+  assert.deepEqual(failed.data, { state: "unavailable", reason: "unreadable" });
+  assert.equal(JSON.stringify(failed).includes("PRIVATE"), false);
+  assert.deepEqual(counts(), before);
+  for (const bad of [
+    new URLSearchParams(),
+    new URLSearchParams("project="),
+    new URLSearchParams("project=PVT_a&project=PVT_b"),
+    new URLSearchParams("project=PVT_a&x=1"),
+    new URLSearchParams("project=a/b"),
+  ])
+    assert.throws(() => api.readDiscoveryProjectFields(bad), { status: 400 });
+});
+
 async function snapshot(root: string): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string) => {
@@ -489,6 +577,7 @@ test("setup routes require an operator session, CSRF and same origin and are not
     "/api/operator/discovery/repositories",
     "/api/operator/discovery/branches?repository=acme/atlas",
     "/api/operator/discovery/projects?repository=acme/atlas",
+    "/api/operator/discovery/project-fields?project=PVT_atlas",
   ]) {
     assert.equal((await fetch(`${web.origin}${path}`)).status, 401, path);
     assert.equal(
@@ -502,6 +591,9 @@ test("setup routes require an operator session, CSRF and same origin and are not
     "/api/operator/discovery/branches",
     "/api/operator/discovery/branches?repository=acme/atlas&repository=acme/relay",
     "/api/operator/discovery/projects?repository=../x",
+    "/api/operator/discovery/project-fields",
+    "/api/operator/discovery/project-fields?project=",
+    "/api/operator/discovery/project-fields?project=PVT_a&project=PVT_b",
     "/api/operator/discovery?x=1",
   ])
     assert.equal(
@@ -711,6 +803,7 @@ test("a discovery result read with a credential that changed meanwhile is read a
         owned: [],
         truncated: false,
       }),
+      projectFields: async () => ({ fields: [], truncated: false }),
     }),
   });
   await api.execute(configure("env:FIRST_DISCOVERY"));

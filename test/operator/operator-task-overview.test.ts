@@ -367,10 +367,9 @@ test("optionalSummary counts supplied values and lets errors win", () => {
     profiles: [{ id: profile, name: "Eli" }],
     dependencies: deps.map((id, i) => ({ id, title: `Task ${i}` })),
   } as never;
-  assert.equal(
-    optionalSummary(emptyInput(), options, {}, {}).summary,
-    "Optional settings · none supplied",
-  );
+  const empty = optionalSummary(emptyInput(), options, {}, {});
+  assert.equal(empty.summary, "Optional settings · none supplied");
+  assert.deepEqual(empty.chips, []);
   const input = {
     ...emptyInput(),
     context: "final key bindings",
@@ -378,20 +377,43 @@ test("optionalSummary counts supplied values and lets errors win", () => {
     profileId: profile,
     blockerTaskIds: deps,
   };
+  const chip = (s: ReturnType<typeof optionalSummary>) =>
+    s.chips.map((c) => [c.text, c.invalid]);
   const full = optionalSummary(input, options, {}, {});
   assert.equal(full.summary, "Optional settings · 4 supplied");
-  assert.deepEqual(full.lines, [
-    "Context: final key bindings · Reference: https://example.com/notes",
-    "Assignee: Eli (permitted) · Depends on: Task 0, Task 1",
+  assert.deepEqual(chip(full), [
+    ["Context · final key bindings", false],
+    ["Reference · https://example.com/notes", false],
+    ["Assignee · Eli (permitted)", false],
+    ["Depends on · Task 0, Task 1", false],
   ]);
   assert.equal(full.fix, null);
   const one = optionalSummary(input, options, {}, { links: "bad" });
   assert.equal(one.summary, "Optional settings · 1 error");
   assert.equal(one.fix, "Open settings to fix the link.");
+  assert.deepEqual(
+    one.chips.filter((c) => c.invalid).map((c) => c.field),
+    ["links"],
+  );
+  const two = optionalSummary(
+    input,
+    options,
+    { profileId: "gone" },
+    { links: "bad" },
+  );
+  assert.equal(two.summary, "Optional settings · 2 errors");
+  assert.deepEqual(
+    two.chips.filter((c) => c.invalid).map((c) => c.field),
+    ["links", "profileId"],
+  );
   assert.equal(
-    optionalSummary(input, options, { profileId: "gone" }, { links: "bad" })
-      .summary,
-    "Optional settings · 2 errors",
+    optionalSummary(
+      { ...emptyInput(), profileId: randomUUID() },
+      options,
+      {},
+      {},
+    ).chips[0]?.text,
+    "Assignee · unavailable",
   );
 });
 

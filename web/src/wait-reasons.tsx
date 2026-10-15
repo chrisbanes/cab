@@ -120,6 +120,7 @@ export function WaitReasons({
   taskId = null,
   projectId,
   prefix = "Waiting · ",
+  variant = "list",
   ...p
 }: WaitProps & {
   waits: readonly Wait[];
@@ -127,10 +128,40 @@ export function WaitReasons({
   projectId: string;
   /** What precedes the first reason, such as "It will wait: ". */
   prefix?: string;
+  /** `numbered` (the composer panel, 149c): every reason numbered, each Fix secondary. */
+  variant?: "list" | "numbered";
 }) {
   const [first, ...rest] = waits;
   // One owner for the draft: its store notifies a single listener.
   const resume = useResumeDraft(p, projectId);
+  if (variant === "numbered")
+    return (
+      <div className="wait-reasons">
+        {first && (
+          <ol className="wait-numbered">
+            {waits.map((wait, i) => (
+              <li key={wait.code} data-primary={i === 0 ? "true" : undefined}>
+                <span className="wait-index" aria-hidden="true">
+                  {i + 1}
+                </span>
+                <span className="wait-label">{waitLabels[wait.code]}</span>
+                <span className="wait-actions">
+                  <WaitAction
+                    wait={wait}
+                    taskId={taskId}
+                    primary={false}
+                    p={p}
+                    resume={resume}
+                  />
+                </span>
+                <WaitDetail wait={wait} />
+              </li>
+            ))}
+          </ol>
+        )}
+        <ResumeOutcome p={p} draft={resume} projectId={projectId} />
+      </div>
+    );
   return (
     <div className="wait-reasons">
       {first && (

@@ -1587,7 +1587,7 @@ The web app is the ground truth for these items.
   task read per selection serves the holds, the approval facts and the inspector.
   The page itself never scrolls at 761px and wider.
 - **Not yet adopted:** per-surface layouts — the task detail header, tabs and inspector, the
-  all-columns Board and the composer prediction panel.
+  all-columns Board.
 
 ### Question actions, composer and test matrix
 
@@ -1758,22 +1758,52 @@ as follows:
 - The phone keeps one reading column with the same in-place sections; the drill-in
   screens of frames 47, 48, 51 and 55 are not built, so reading position,
   expansions and unsent replies are not split across history entries.
-- The composer's h1 is "Create a task" with the drawn subtitle; the phone header
-  of frame 34 ("New task" plus an in-body "Create a task") is not duplicated. The
-  "Inherited from" panel shows the lead, the lead profile's public summary,
-  routing, pause, capacity and a "View project instructions" link. Instruction
-  text and repository access are not shown: no read exposes them. On a phone the
-  panel sits under Project.
+- The composer's h1 is "Create a task" with the drawn subtitle and the field
+  label stays "Task title"; the phone header of frame 34 ("New task" plus an
+  in-body "Create a task") is not duplicated. Project (200px) and Task title share
+  a row from 760px; Desired outcome follows, then Optional settings as one panel
+  that, collapsed, shows a chip per supplied value (an invalid one marked "!" with
+  a rose border) and "Open settings to fix …". Its count reads "N supplied" at
+  every width, not "N values retained". Inside, it keeps the supported controls
+  (one link per line, the searchable dependency checklist), not the drawn
+  add/remove link rows and dependency chips.
+- The right column (from 1121px) holds "If you create it now" and "Inherited from
+  <project>". The prediction badge is "Starts now" (indigo, play symbol) or "Will
+  wait" (slate, clock); the reasons are numbered in the flow's order, each with
+  its Fix or link, and every Fix there is a secondary button, so Create and start
+  is the one primary in view. There is no "Project X is enabled · lead is
+  available" line: the read carries blockers, not satisfied conditions. The
+  inherited panel shows the lead, the lead profile's public summary, routing,
+  capacity and a "View project instructions" link; instruction text and
+  repository access are not shown, as no read exposes them. At 1120px and below
+  both panels follow the fields and precede the bar; the phone frames draw only a
+  status line, but production keeps the full prediction there.
+- The sticky bar reads "Unfinished input saved on this device · not yet an
+  Ensemble draft" only after a successful on-device write, then the verdict hint
+  ("Starts now." or "Will wait: <first reason>.", then "Save draft keeps it
+  without starting."), Create and start and Save draft. Create and start comes
+  before Save draft in DOM and visual order at every width, so focus order equals
+  visual order (the desktop artboard right-aligns Save draft, then Create and
+  start).
+  There is no ⌘↵ shortcut and no "Markdown supported" note; the 16,000-character
+  brief note stays. Refused and unconfirmed outcomes sit directly above the bar.
+  After creation the receipt view (Task created or Draft saved, Open task, the
+  execution state and "It will wait: …") replaces the form, rather than frames
+  161/166c's locked form with an outcome line in the bar.
 
 Entry points: Overview, List, Board, Inbox "Open task", Search results and the
 composer receipt open the same `/app/tasks/:id` with this header and Back; the
-composer is reached from Overview, List and a project's New task. The retained
+composer is reached from the top bar's New task on every route, Overview, List, a
+project's New task, setup's ready check and Getting started, all opening the same `/app/tasks/new` (`?project=` is the
+only deep link). The retained
 `/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
 and linked (Advanced task controls, Execution, Requests and coordination). No
 context menu, extension or notification surface applies. Counterparts: Stop →
 Execution → Resume (retained); Keep running and Escape send nothing; Optional
 settings collapse ↔ expand keeps values; a failed create keeps values and the
-existing receipt reconciliation.
+existing receipt reconciliation; Resume project in the prediction panel confirms
+first and Pause project in project configuration reverses it; a saved draft is
+not Ready.
 
 ### Settings, profiles, routing, runtime and recovery
 
@@ -1788,8 +1818,9 @@ frames 114 and 118–128 as follows:
   definition is a removal plus a new source with a fresh `S-<n>` id, added
   inactive. Search queries and Project filters stay private: a row reads "Private
   query kept" or "<node id> · Filter kept · private" instead of the drawn filter.
-  Readiness Project-field conditions keep node-ID inputs; the discovery-backed name
-  picker is [#1032](https://github.com/chrisbanes/ensemble/issues/1032). A GitHub source save deletes the stored activation of each
+  Readiness Project-field conditions pick the Project, field and option by name from
+  discovery and fall back to typed node IDs when discovery is unavailable or truncated.
+  A GitHub source save deletes the stored activation of each
   removed selection and keeps the stored activation of each kept one. The save
   raises the source version, and activation counts only at the version it was
   previewed, so every kept selection reads "Inactive" and is not synced until it

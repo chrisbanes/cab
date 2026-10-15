@@ -170,6 +170,108 @@ test("projects send one read-only query and list linked then the owner's open ot
   assert.deepEqual(body.variables, { owner: "acme", name: "atlas" });
 });
 
+test("project fields send one read-only query and list only single-select fields", async () => {
+  const response = (node: unknown) => json({ data: { node } });
+  const field = (id: string, name: string, options: string[]) => ({
+    __typename: "ProjectV2SingleSelectField",
+    id,
+    name,
+    options: options.map((o) => ({ id: `${id}_${o}`, name: o })),
+  });
+  const node = (nodes: unknown[], hasNextPage = false) => ({
+    id: "PVT_atlas",
+    fields: { nodes, pageInfo: { hasNextPage } },
+  });
+  const f = fake(() =>
+    response(
+      node([
+        field("F_status", "Status", ["Todo", "Ready"]),
+        { __typename: "ProjectV2Field", id: "F_text", name: "Notes" },
+        field("F_priority", "Priority", ["High"]),
+      ]),
+    ),
+  );
+  assert.deepEqual(
+    await new GitHubDiscoveryReader(token, f.fetcher).projectFields(
+      "PVT_atlas",
+    ),
+    {
+      fields: [
+        {
+          fieldNodeId: "F_status",
+          name: "Status",
+          options: [
+            { optionNodeId: "F_status_Todo", name: "Todo" },
+            { optionNodeId: "F_status_Ready", name: "Ready" },
+          ],
+        },
+        {
+          fieldNodeId: "F_priority",
+          name: "Priority",
+          options: [{ optionNodeId: "F_priority_High", name: "High" }],
+        },
+      ],
+      truncated: false,
+    },
+  );
+  assert.equal(f.calls.length, 1);
+  const call = f.calls[0];
+  assert.equal(call?.method, "POST");
+  assert.equal(call?.url, "https://api.github.com/graphql");
+  assert.equal(call?.auth, `Bearer ${token}`);
+  const body = JSON.parse(call?.body ?? "{}") as {
+    query: string;
+    variables: unknown;
+  };
+  assert.match(body.query, /^query /);
+  assert.equal(/mutation/i.test(body.query), false);
+  assert.deepEqual(body.variables, { project: "PVT_atlas" });
+  const read = (respond: () => Response) =>
+    reason(
+      new GitHubDiscoveryReader(token, fake(respond).fetcher).projectFields(
+        "PVT_atlas",
+      ),
+    );
+  const truncated = fake(() => response(node([], true)));
+  assert.equal(
+    (
+      await new GitHubDiscoveryReader(token, truncated.fetcher).projectFields(
+        "PVT_atlas",
+      )
+    ).truncated,
+    true,
+  );
+  const none = fake(() => response(node([])));
+  assert.equal(
+    await reason(
+      new GitHubDiscoveryReader(undefined, none.fetcher).projectFields("P"),
+    ),
+    "missing-credential",
+  );
+  assert.equal(none.calls.length, 0);
+  assert.equal(await read(() => json({}, { status: 401 })), "unauthorized");
+  assert.equal(
+    await read(() => json({ errors: [{ message: token }], data: null })),
+    "forbidden",
+  );
+  assert.equal(
+    await read(() =>
+      json({ errors: [{ type: "RATE_LIMITED", message: "x" }], data: null }),
+    ),
+    "rate-limited",
+  );
+  assert.equal(await read(() => response(null)), "forbidden");
+  assert.equal(await read(() => response({})), "forbidden");
+  assert.equal(
+    await read(() =>
+      response(
+        node([{ __typename: "ProjectV2SingleSelectField", id: "F", name: 1 }]),
+      ),
+    ),
+    "unreadable",
+  );
+});
+
 test("failures are reason codes without the token", async () => {
   const none = fake(() => json([]));
   assert.equal(

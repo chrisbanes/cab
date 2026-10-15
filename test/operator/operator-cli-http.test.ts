@@ -410,6 +410,7 @@ test("every known API route has an explicit authority", () => {
     "/api/operator/discovery/repositories",
     "/api/operator/discovery/branches",
     "/api/operator/discovery/projects",
+    "/api/operator/discovery/project-fields",
     "/api/operator/setup/folders",
     "/api/operator/setup/verify-checkout",
     "/api/operator/cli",
@@ -465,8 +466,13 @@ test("every known API route has an explicit authority", () => {
     `/api/operator/executions/assignment:${id}:initial/inputs`,
     `/api/operator/executions/assignment:${id}:initial/events`,
     `/api/operator/assignments/${id}/recovery-options`,
+    "/api/operator/discovery/project-fields",
   ])
     assert.equal(operatorRouteAuthority("GET", path), "read", path);
+  assert.equal(
+    operatorRouteAuthority("POST", "/api/operator/discovery/project-fields"),
+    undefined,
+  );
   assert.equal(
     operatorRouteAuthority(
       "POST",

@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { Page } from "playwright";
+import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   browserSuite,
   captureBrowserEvidence,
 } from "../fixtures/browser-diagnostics.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
+import { fakeDiscovery } from "../fixtures/setup-home.js";
 import {
   createCheckout,
   noPageOverflow,
@@ -642,6 +644,187 @@ test("GitHub source shows no readiness rule, saves an added rule, removes it, an
     .getByText("(replaces unavailable readiness)", { exact: false })
     .waitFor();
   assert.equal(await save.isDisabled(), false);
+});
+
+/** Settings on Atlas's GitHub tab with fake GitHub discovery configured. */
+async function startDiscovery(
+  journey: Parameters<typeof startSettings>[0],
+  state: { failure?: Error; calls?: string[]; truncated?: boolean },
+) {
+  const started = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+    undefined,
+    undefined,
+    { setup: { discovery: fakeDiscovery(state) } },
+  );
+  await new OperatorApi(started.f.service, [started.f.directory]).execute({
+    type: "discovery.configure",
+    key: randomUUID(),
+    credentialRef: "env:FIXTURE_DISCOVERY",
+  });
+  await started.page.reload();
+  return started;
+}
+const addProjectFieldCondition = async (page: Page) => {
+  await page.getByRole("button", { name: "Add readiness condition" }).click();
+  await page
+    .getByLabel("Condition kind")
+    .last()
+    .selectOption({ label: "Project field" });
+};
+const optionNames = (page: Page, label: string) =>
+  page
+    .getByLabel(label, { exact: true })
+    .locator("option")
+    .evaluateAll((o) => o.map((x) => x.textContent));
+
+test("a readiness Project-field condition is picked by name and saves the same node IDs", async (_t, journey) => {
+  const state: { calls: string[] } = { calls: [] };
+  const { f, ids, page } = await startDiscovery(journey, state);
+  const d = f.service.domain();
+  const version = d.githubConfiguration(ids.atlas).version;
+  await addProjectFieldCondition(page);
+  await page.getByLabel("Readiness Project", { exact: true }).waitFor();
+  assert.equal(await page.getByLabel("Readiness Project node ID").count(), 0);
+  // Only the Projects linked to the source's repository are listed, not the owner's others.
+  await page
+    .getByLabel("Readiness Project", { exact: true })
+    .selectOption({ label: "Atlas roadmap" });
+  assert.deepEqual(await optionNames(page, "Readiness Project"), [
+    "Choose a Project",
+    "Atlas roadmap",
+  ]);
+  await page
+    .getByLabel("Readiness field", { exact: true })
+    .selectOption({ label: "Status" });
+  assert.deepEqual(await optionNames(page, "Readiness field"), [
+    "Choose a field",
+    "Status",
+    "Priority",
+  ]);
+  assert.deepEqual(await optionNames(page, "Readiness option"), [
+    "Choose an option",
+    "Todo",
+    "Ready",
+  ]);
+  await page
+    .getByLabel("Readiness option", { exact: true })
+    .selectOption({ label: "Ready" });
+  await captureBrowserEvidence(page, "readiness-picker");
+  const body = commandBody(page);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  const command = (await body) as { readiness: { conditions: unknown[] } };
+  await savedOutcome(page);
+  const picked = {
+    kind: "project-field",
+    projectNodeId: "PVT_atlas",
+    fieldNodeId: "PVTSSF_status",
+    optionNodeId: "PVTSSO_ready",
+  };
+  assert.deepEqual(command.readiness.conditions.at(-1), picked);
+  assert.deepEqual(
+    d.githubConfiguration(ids.atlas).readiness?.conditions.at(-1),
+    picked,
+  );
+  assert.equal(d.githubConfiguration(ids.atlas).version, version + 1);
+  assert.deepEqual(
+    d.githubConfiguration(ids.atlas).selections.map((s) => s.id),
+    ["S-1", "S-2", "S-3"],
+  );
+  assert.deepEqual(
+    ["repositories", "projects", "projectFields"].filter(
+      (call) => !state.calls.includes(call),
+    ),
+    [],
+  );
+});
+
+test("a readiness Project-field condition keeps typed node IDs when discovery fails or is truncated", async (_t, journey) => {
+  for (const state of [
+    { truncated: true },
+    { failure: new DiscoveryFailure("unauthorized") },
+  ]) {
+    const { f, ids, page } = await startDiscovery(journey, state);
+    await addProjectFieldCondition(page);
+    await page
+      .getByText("GitHub discovery is unavailable", { exact: false })
+      .waitFor();
+    assert.equal(
+      await page.getByLabel("Readiness Project", { exact: true }).count(),
+      0,
+    );
+    await page.getByLabel("Readiness Project node ID").fill("PVT_typed");
+    await page.getByLabel("Readiness field node ID").fill("PVTSSF_typed");
+    await page.getByLabel("Readiness option node ID").fill("PVTSSO_typed");
+    await captureBrowserEvidence(page, "readiness-picker-typed");
+    await page
+      .getByRole("button", { name: "Save changes", exact: true })
+      .click();
+    await savedOutcome(page);
+    assert.deepEqual(
+      f.service
+        .domain()
+        .githubConfiguration(ids.atlas)
+        .readiness?.conditions.at(-1),
+      {
+        kind: "project-field",
+        projectNodeId: "PVT_typed",
+        fieldNodeId: "PVTSSF_typed",
+        optionNodeId: "PVTSSO_typed",
+      },
+    );
+  }
+});
+
+test("a saved readiness condition that discovery does not list stays typed, editable and savable", async (_t, journey) => {
+  const { f, ids, page } = await startDiscovery(journey, { calls: [] });
+  const d = f.service.domain();
+  await new OperatorApi(f.service, [f.directory]).execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "PVT_gone",
+          fieldNodeId: "PVTSSF_gone",
+          optionNodeId: "PVTSSO_gone",
+        },
+      ],
+    },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  });
+  await page.reload();
+  const project = page.getByLabel("Readiness Project node ID");
+  await project.waitFor();
+  await page
+    .getByText("not in the discovered lists", { exact: false })
+    .waitFor();
+  assert.equal(await project.inputValue(), "PVT_gone");
+  assert.equal(
+    await page.getByLabel("Readiness option node ID").inputValue(),
+    "PVTSSO_gone",
+  );
+  await page.getByLabel("Readiness option node ID").fill("PVTSSO_other");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await savedOutcome(page);
+  assert.deepEqual(d.githubConfiguration(ids.atlas).readiness?.conditions, [
+    {
+      kind: "project-field",
+      projectNodeId: "PVT_gone",
+      fieldNodeId: "PVTSSF_gone",
+      optionNodeId: "PVTSSO_other",
+    },
+  ]);
 });
 
 test("GitHub source conflict keeps rows and an unknown save is checked once", async (_t, journey) => {

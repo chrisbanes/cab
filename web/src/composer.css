@@ -1,12 +1,9 @@
-/* Composer (frames 02a, 34, 35, 35b): inherited project panel beside the fields. */
-.composer-saved {
-  margin: 0 0 var(--space-12);
-}
-
-.composer-fields {
+/* Composer (05-composer, 34, 35, 35b): fields left, the prediction and inherited
+   facts right, and a sticky bar. One column, aside after the fields, at ≤1120px. */
+.composer-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  column-gap: var(--space-32);
+  gap: var(--space-24);
   align-items: start;
 }
 
@@ -15,20 +12,62 @@
     max-width: none;
   }
 
-  .composer-fields {
-    grid-template-columns: minmax(0, 1fr) 280px;
+  .composer-body {
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    gap: var(--space-32);
   }
+}
 
-  .composer-fields > * {
-    grid-column: 1;
-  }
+.composer-lead-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  column-gap: var(--space-16);
+  align-items: start;
+}
 
-  .composer-fields > .composer-inherited {
-    grid-column: 2;
-    grid-row: 1 / span 6;
-    padding-left: var(--space-16);
-    border-left: 1px solid var(--border);
+@media (min-width: 760px) {
+  .composer-lead-row {
+    grid-template-columns: 200px minmax(0, 1fr);
   }
+}
+
+.composer-aside {
+  display: grid;
+  gap: var(--space-16);
+}
+
+.composer-prediction,
+.composer-inherited,
+.composer-optional {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+}
+
+.composer-prediction,
+.composer-inherited {
+  display: grid;
+  gap: var(--space-12);
+  padding: var(--space-16);
+}
+
+.composer-aside p,
+.composer-aside h2 {
+  margin: 0;
+}
+
+.composer-prediction-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.composer-inherited-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .composer-inherited .composer-policy {
@@ -39,42 +78,74 @@
   gap: var(--space-8);
 }
 
-.composer-inherited p,
-.composer-inherited h3 {
+.composer-optional {
+  padding: 0 var(--space-16);
+}
+
+.composer-optional .composer-disclosure:not([open]) {
+  padding-bottom: 0;
+}
+
+.composer-optional[data-invalid="true"] {
+  border-color: var(--risk-border);
+}
+
+.composer-optional-chips {
+  list-style: none;
   margin: 0;
+  padding: 0 0 var(--space-12);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
 }
 
-.composer-inherited-title {
-  text-transform: uppercase;
-  margin-bottom: var(--space-8);
+.composer-optional-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: 22px;
+  max-width: 100%;
+  padding: 0 var(--space-8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--raised);
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
-.composer-inherited h3 {
-  padding-top: var(--space-12);
-  border-top: 1px solid var(--border);
+.composer-optional-chips li[data-invalid="true"] {
+  border-color: var(--risk-border);
+  color: var(--risk);
 }
 
-@media (max-width: 1120px) {
-  .composer-inherited {
-    margin-bottom: var(--space-16);
-  }
+.composer-optional-fix {
+  margin: 0;
+  padding-bottom: var(--space-12);
+  color: var(--risk);
 }
 
-.composer-optional-values p {
-  margin: 0 0 var(--space-4);
+.composer-actions-end {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-12);
+  margin-left: auto;
 }
 
 @media (max-width: 759px) {
-  .composer-actions {
+  .composer-actions,
+  .composer-actions-end {
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  .composer-actions-end {
+    margin-left: 0;
   }
 
   .composer-actions [data-slot="button"] {
     width: 100%;
     min-height: 44px;
   }
-}
-
-.composer-prediction {
-  flex-basis: 100%;
 }
