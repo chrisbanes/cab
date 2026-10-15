@@ -28,15 +28,19 @@ export function ruleText(rule: RuleView) {
     : `any of ${parts.join(", ")}`;
 }
 
+/** Ready follows a changed rule only once the selection is previewed and read again. */
+const staleMatch =
+  "readiness match unknown until the selection is previewed and read again";
+
 /** "149 observed (141 closed, not imported) · 9 open · 0 match label `ready`". */
 export function selectionCountsText(counts: Counts, rule: RuleView) {
   const match =
-    rule.kind === "none"
-      ? `all ${counts.open} open match (no readiness rule)`
-      : rule.kind === "unavailable"
-        ? "readiness match unknown (rule unavailable)"
-        : counts.matching === null
-          ? "readiness match unknown until the next refresh"
+    rule.kind === "unavailable"
+      ? "readiness match unknown (rule unavailable)"
+      : counts.matching === null
+        ? staleMatch
+        : rule.kind === "none"
+          ? `all ${counts.open} open match (no readiness rule)`
           : `${counts.matching} match ${ruleText(rule)}`;
   return [
     `${counts.observed} observed${counts.closedSkipped ? ` (${counts.closedSkipped} closed, not imported)` : ""}`,

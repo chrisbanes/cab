@@ -60,7 +60,11 @@ test("selection counts name observed, open and matching items for every rule kin
       counts({ closedSkipped: 0, matching: null }),
       rule("all", label("a")),
     ),
-    "149 observed · 9 open · readiness match unknown until the next refresh",
+    "149 observed · 9 open · readiness match unknown until the selection is previewed and read again",
+  );
+  assert.match(
+    selectionCountsText(counts({ matching: null }), { kind: "none" }),
+    /readiness match unknown until the selection is previewed and read again/,
   );
   assert.equal(
     zeroMatchWarning(counts({ matching: null }), rule("all", label("a"))),
