@@ -332,10 +332,7 @@ const seedStop = (f: Fixture, taskId: string) =>
 test("Stop applies only to an open task", async (t) => {
   const f = await fixture(t);
   const open = await seedReviewTask(f, "Open project", "Open task");
-  assert.equal(
-    (await control(f, "task.stop", open.taskId)).kind,
-    "task-stop",
-  );
+  assert.equal((await control(f, "task.stop", open.taskId)).kind, "task-stop");
   for (const state of ["done", "cancelled"] as const) {
     const a = await seedReviewTask(f, `${state} project`, `${state} task`);
     finish(f, a.taskId, state);
@@ -373,10 +370,7 @@ test("Resume clears an existing Stop on a finished task", async (t) => {
     seedStop(f, a.taskId);
     assert.equal(f.service.isTaskStopped(a.taskId), true);
     const resume = await control(f, "task.resume", a.taskId);
-    assert.equal(
-      resume.kind === "task-resume" && resume.stopCleared,
-      true,
-    );
+    assert.equal(resume.kind === "task-resume" && resume.stopCleared, true);
     assert.equal(f.service.isTaskStopped(a.taskId), false);
   }
 });
