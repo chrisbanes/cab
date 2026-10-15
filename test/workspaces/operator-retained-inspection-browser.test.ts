@@ -16,6 +16,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-retained-inspection-browser");
 const digest = (bytes: Uint8Array | string) =>
@@ -190,6 +191,7 @@ test("production retained result evidence keeps original bytes and opens current
     1,
   );
 
+  await openTaskTab(page, "Overview");
   await retained
     .getByRole("button", { name: /^file · retained-proof\.png/ })
     .click();

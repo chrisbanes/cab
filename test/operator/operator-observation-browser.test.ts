@@ -6,6 +6,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedDeliveryCoverage } from "../fixtures/delivery-coverage.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-observation-browser");
 test("bounded retained provider lists disclose partial coverage on desktop and phone without inferring complete success", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -28,6 +29,8 @@ test("bounded retained provider lists disclose partial coverage on desktop and p
   await page.goto(`${web.origin}/app/tasks/${task.taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  // Delivery observation is on the Changes tab.
+  await openTaskTab(page, "Changes");
   const check = page.getByText(
     "Provider check coverage is partial; 1 additional retained check is omitted. Omitted checks may be pending or failed.",
     { exact: true },

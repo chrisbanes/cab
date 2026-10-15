@@ -2,6 +2,7 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
 import { waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
+import type { TaskColumn } from "./tasks.js";
 
 type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
@@ -76,17 +77,17 @@ export function criterionRows(
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
+type StatusData = Pick<
+  Data,
+  "task" | "execution" | "admission" | "waits" | "source" | "lead"
+>;
+
 /**
- * The header's second line: recorded state and wait, then the accountable lead.
- * Execution facts take the service's precedence (Stop, uncertain, active) over the
- * task's terminal state, as the Board columns do.
+ * The recorded state and wait, as the strip's readiness text. Execution facts take the
+ * service's precedence (Stop, uncertain, active) over the task's terminal state, as the
+ * Board columns do.
  */
-export function taskStatusLine(
-  data: Pick<
-    Data,
-    "task" | "execution" | "admission" | "waits" | "source" | "lead"
-  >,
-) {
+export function taskReadiness(data: Omit<StatusData, "lead">) {
   const { task, execution } = data;
   // The first wait in the flow's order is the one the header names.
   const reason = data.waits[0]?.code;
@@ -107,33 +108,163 @@ export function taskStatusLine(
   const paused =
     execution.state === "paused" ||
     data.admission.reasons.includes("project-paused");
-  const state =
-    execution.holds.stop || execution.state === "stopping"
-      ? "Stopping; effects may continue"
-      : execution.holds.uncertainty || execution.state === "uncertain"
-        ? "Execution uncertain"
-        : terminal
-          ? active
-            ? `${terminal} · ${execution.state}`
-            : data.source?.closure === "completed"
-              ? `${terminal} · closed on GitHub`
-              : terminal
-          : data.source?.closure === "held"
-            ? `Held · closed on GitHub${active ? ` · ${execution.state}` : ""}`
-            : paused
-              ? `${task.ready ? "Ready" : "Draft"} · project paused`
-              : !task.ready
-                ? unmet
-                  ? `Draft · ${unmet}`
-                  : "Draft"
-                : blocker
-                  ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
-                  : reason
-                    ? `Ready · ${lowerFirst(waitLabels[reason])}`
-                    : execution.state === "idle"
-                      ? "Ready"
-                      : `Ready · ${execution.state}`;
-  return `${state} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
+  return execution.holds.stop || execution.state === "stopping"
+    ? "Stopping; effects may continue"
+    : execution.holds.uncertainty || execution.state === "uncertain"
+      ? "Execution uncertain"
+      : terminal
+        ? active
+          ? `${terminal} · ${execution.state}`
+          : data.source?.closure === "completed"
+            ? `${terminal} · closed on GitHub`
+            : terminal
+        : data.source?.closure === "held"
+          ? `Held · closed on GitHub${active ? ` · ${execution.state}` : ""}`
+          : paused
+            ? `${task.ready ? "Ready" : "Draft"} · project paused`
+            : !task.ready
+              ? unmet
+                ? `Draft · ${unmet}`
+                : "Draft"
+              : blocker
+                ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
+                : reason
+                  ? `Ready · ${lowerFirst(waitLabels[reason])}`
+                  : execution.state === "idle"
+                    ? "Ready"
+                    : `Ready · ${execution.state}`;
+}
+
+/** The readiness text, then the accountable lead. */
+export function taskStatusLine(data: StatusData) {
+  return `${taskReadiness(data)} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
+}
+
+/** The task's Board column from its own read, in `taskColumn`'s precedence. */
+export function taskColumnOf(
+  data: Pick<Data, "task" | "execution" | "admission" | "source">,
+): TaskColumn {
+  const { task, execution } = data,
+    s = execution.state;
+  if (execution.holds.stop || s === "stopping") return "Stopping";
+  if (execution.holds.uncertainty || s === "uncertain") return "Uncertain";
+  if (s === "running" || s === "starting") return "Running";
+  if (task.state === "done") return "Done";
+  if (task.state === "cancelled") return "Cancelled";
+  if (
+    s === "paused" ||
+    data.source?.closure === "held" ||
+    data.admission.reasons.includes("project-paused")
+  )
+    return "Paused";
+  if (!task.ready) return "Draft";
+  if (!data.admission.eligible || s === "waiting" || execution.holds.task)
+    return "Waiting";
+  return "Ready";
+}
+
+/** Who acts next. Only decisions the task read records name the operator. */
+export function taskNextActor(
+  data: Pick<
+    Data,
+    | "task"
+    | "execution"
+    | "questions"
+    | "approvals"
+    | "unresolvedResults"
+    | "completionRequests"
+  >,
+) {
+  const you = (kind: string, action: string) => ({
+    kind,
+    text: `Next: you · ${action}`,
+    operator: true,
+  });
+  const none = (text: string) => ({ kind: "none", text, operator: false });
+  const { execution } = data,
+    open = (q: { status: string }) => q.status === "open";
+  if (execution.holds.uncertainty || execution.state === "uncertain")
+    return you("uncertain", "inspect execution");
+  if (data.approvals.some(open))
+    return you("approval", "review material & decide");
+  if (data.questions.some(open)) return you("question", "answer question");
+  if (data.unresolvedResults.length)
+    return you("unresolved-result", "resolve result destination");
+  if (
+    data.completionRequests.some(
+      (r) => r.status === "rejected" && r.taskVersion === data.task.version,
+    )
+  )
+    return you("rejected-completion", "review rejected completion");
+  // The list's wording (`taskNext`).
+  if (data.task.state === "done") return none("Next: none · no decision");
+  if (data.task.state === "cancelled")
+    return none("Next: none · history retained");
+  return none("No operator decision");
+}
+
+/** The ID slot: `repository#number` for an imported task, otherwise "Local task". */
+export function taskIdentity(data: Pick<Data, "source">) {
+  const s = data.source;
+  return s
+    ? {
+        label: `${s.repositoryName ?? "repository unavailable"}#${s.number ?? "?"}`,
+        url: s.url,
+      }
+    : { label: "Local task", url: null };
+}
+
+const syncProblems = {
+  "sync-unavailable": "sync unavailable",
+  "partial-sync": "partial sync",
+} as const;
+
+/**
+ * The source's issue state, latest successful sync across every selection and any sync
+ * failure or incomplete observation (the worst across selections), or null when complete.
+ */
+export function sourceFacts(source: NonNullable<Data["source"]>) {
+  const synced =
+    source.memberships
+      .map((m) => m.sync.lastSuccessfulAt)
+      .filter((t): t is string => t !== null)
+      .sort((a, b) => Date.parse(a) - Date.parse(b))
+      .at(-1) ?? null;
+  const codes = source.memberships.map((m) => m.sync.reasonCode);
+  const problem = codes.includes("sync-unavailable")
+    ? syncProblems["sync-unavailable"]
+    : codes.includes("partial-sync")
+      ? syncProblems["partial-sync"]
+      : !source.memberships.length ||
+          source.memberships.some((m) => m.sync.complete !== true)
+        ? "sync incomplete"
+        : null;
+  return { state: source.state, synced, problem };
+}
+
+const deliveryModes = {
+  "reviewable-pr": "Reviewable PR",
+  "through-merge": "Through merge",
+} as const;
+
+/** The inspector's execution facts: running assignments, lead runtime and delivery. */
+export function executionFacts(
+  data: Pick<Data, "assignments" | "leadAssignmentId" | "delivery">,
+) {
+  const lead = data.assignments.find(
+      (a) => a.assignmentId === data.leadAssignmentId,
+    ),
+    delivery = data.delivery,
+    binding = delivery?.binding;
+  return {
+    running: data.assignments.filter((a) => a.state === "running").length,
+    lead: lead ? executionSummary(lead).line : null,
+    delivery: !delivery
+      ? "Delivery not recorded"
+      : binding
+        ? `${deliveryModes[delivery.mode]} · ${binding.repositoryName}#${binding.number} · ${binding.state.toLowerCase()}`
+        : `${deliveryModes[delivery.mode]} · no PR yet`,
+  };
 }
 
 /** Who a Stop affects, for the confirmation's first line. */
@@ -180,12 +311,8 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
 /** The task's source identity and its latest successful sync across every selection. */
 export function sourceLine(source: Data["source"]) {
   if (!source) return "Local task";
-  const synced = source.memberships
-    .map((m) => m.sync.lastSuccessfulAt)
-    .filter((t): t is string => t !== null)
-    .sort((a, b) => Date.parse(a) - Date.parse(b))
-    .at(-1);
-  return `GitHub · ${source.repositoryName ?? "repository unavailable"}#${source.number ?? "?"} · ${source.state ?? "state unknown"} · ${synced ? `last successful sync ${synced}` : "no successful sync"} · read-only requirements`;
+  const { state, synced } = sourceFacts(source);
+  return `GitHub · ${source.repositoryName ?? "repository unavailable"}#${source.number ?? "?"} · ${state ?? "state unknown"} · ${synced ? `last successful sync ${synced}` : "no successful sync"} · read-only requirements`;
 }
 
 /** The view a task was opened from, for the header Back label. */

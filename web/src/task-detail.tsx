@@ -15,8 +15,11 @@ export function showSection(target: HTMLElement) {
   }
 }
 
-/** Keep this history entry, and so its origin, instead of pushing a hash entry. */
-function inPage(id: string, before?: () => void) {
+/**
+ * Keep this history entry, and so its origin, instead of pushing a hash entry. `reveal`
+ * selects the section's tab, then moves to it.
+ */
+function inPage(id: string, reveal: (id: string) => void, before?: () => void) {
   return (event: MouseEvent<HTMLElement>) => {
     // Links keep modified clicks (new tab or window); the assignment buttons always act.
     if (
@@ -25,18 +28,14 @@ function inPage(id: string, before?: () => void) {
     )
       return;
     event.preventDefault();
-    const show = () => {
-      const target = document.getElementById(id);
-      if (target) showSection(target);
-    };
-    if (!before) return show();
+    if (!before) return reveal(id);
     before();
-    requestAnimationFrame(show);
+    requestAnimationFrame(() => reveal(id));
   };
 }
 
 /** Frame 57's contextual entries; they replace the old section-button row. */
-export function EntryLinks() {
+export function EntryLinks({ reveal }: { reveal: (id: string) => void }) {
   const entries = [
     ["files", "Files"],
     ["changes", "Changes"],
@@ -52,7 +51,7 @@ export function EntryLinks() {
           key={id}
           variant="secondary"
           href={`#${id}`}
-          onClick={inPage(id)}
+          onClick={inPage(id, reveal)}
         >
           {label}
         </ActionLink>
@@ -61,37 +60,52 @@ export function EntryLinks() {
   );
 }
 
-/** Compact delegation rows; opening one expands that assignment's history. */
+/** The assignments table; opening one expands that assignment's history. */
 export function AssignmentRows({
   assignments,
   open,
+  reveal,
 }: {
   assignments: TaskRead["data"]["assignments"];
   open: (assignmentId: string) => void;
+  reveal: (id: string) => void;
 }) {
+  if (assignments.length === 0)
+    return <p className="muted">No assignments yet.</p>;
   return (
-    <div className="assignment-rows">
-      <h4 className="small-heading">
-        Assignments · requester → result destination
-      </h4>
-      {assignments.length === 0 && <p className="muted">No assignments yet.</p>}
-      {assignments.map((a) => {
-        const row = assignmentRow(a, assignments);
-        return (
-          <div className="assignment-row" key={a.assignmentId}>
-            <button
-              type="button"
-              onClick={inPage("history", () => open(a.assignmentId))}
-            >
-              {row.title}
-            </button>
-            <p className="metadata muted">
-              {row.id} · {row.flow} · {a.state} · {row.runtime} · {row.wait}
-            </p>
-            <ExecutionNotices assignment={a} />
-          </div>
-        );
-      })}
-    </div>
+    <table className="assignment-table">
+      <thead>
+        <tr>
+          <th scope="col">Assignment</th>
+          <th scope="col">Requested by → result to</th>
+          <th scope="col">Known state</th>
+        </tr>
+      </thead>
+      <tbody>
+        {assignments.map((a) => {
+          const row = assignmentRow(a, assignments);
+          return (
+            <tr className="assignment-row" key={a.assignmentId}>
+              <td>
+                <span className="assignment-id">{row.id}</span>
+                <button
+                  type="button"
+                  onClick={inPage("history", reveal, () =>
+                    open(a.assignmentId),
+                  )}
+                >
+                  {row.title}
+                </button>
+              </td>
+              <td>{row.flow}</td>
+              <td>
+                {a.state} · {row.runtime} · {row.wait}
+                <ExecutionNotices assignment={a} />
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }

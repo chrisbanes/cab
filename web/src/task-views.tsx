@@ -52,7 +52,7 @@ import {
 } from "./tasks.js";
 import "./work.css";
 
-const stateIcons: Record<TaskColumn, LucideIcon> = {
+export const stateIcons: Record<TaskColumn, LucideIcon> = {
   Ready: CircleDot,
   Running: LoaderCircle,
   Waiting: Clock,

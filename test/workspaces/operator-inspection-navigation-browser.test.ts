@@ -10,6 +10,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-inspection-navigation-browser");
 
@@ -158,7 +159,8 @@ test("overview, project list and inbox origins return correctly from Files", asy
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const files = page.locator("#files");
   const inspectAndReturn = async () => {
-    await page.getByRole("link", { name: "Files", exact: true }).click();
+    // Task evidence opens on History, so Files is reached through its tab.
+    await openTaskTab(page, "Files");
     await files.getByRole("button", { name: /notes\.md/ }).click();
     await files.getByText("origin notes", { exact: true }).waitFor();
     await page

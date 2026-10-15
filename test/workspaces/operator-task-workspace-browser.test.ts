@@ -15,6 +15,7 @@ import {
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-task-workspace-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
 const serviceWords =
@@ -132,6 +133,7 @@ test("production workspace retains literal history, pending request, focused rep
     await page.getByText("Which focus target?", { exact: true }).count(),
     1,
   );
+  await openTaskTab(page, "History");
   await page
     .getByRole("button", { name: "Expand all history", exact: true })
     .click();
@@ -279,6 +281,8 @@ test("production workspace retains literal history, pending request, focused rep
   await explicitRefresh.evaluate((el) => (el as HTMLElement).click());
   await focusEntry;
   await reading.waitFor({ state: "detached" });
+  // The operator moves to the reply on Overview while the history read is held.
+  await openTaskTab(page, "Overview");
   await page.getByLabel("Editable reply").focus();
   releaseFocus();
   await reading.waitFor({ state: "attached" });
@@ -289,6 +293,7 @@ test("production workspace retains literal history, pending request, focused rep
     true,
   );
   await page.unroute(focusRoute);
+  await openTaskTab(page, "History");
   await reading.scrollIntoViewIfNeeded();
   await reading.locator("summary").focus();
   const navigationReadingY = await reading.evaluate(
@@ -320,9 +325,11 @@ test("production workspace retains literal history, pending request, focused rep
       .evaluate((el) => el === document.activeElement),
     true,
   );
+  await openTaskTab(page, "Overview");
   await page
     .getByLabel("Editable reply")
     .fill("Navigation draft remains exact");
+  await openTaskTab(page, "History");
   const exactLink = page.getByRole("link", {
     name: `Open exact assignment result ${responsibilityResult.resultId}`,
     exact: true,
@@ -394,6 +401,11 @@ test("production workspace retains literal history, pending request, focused rep
   await page
     .getByRole("button", { name: "Collapse all history", exact: true })
     .click();
+  // History hides Overview's request; the strip names it, and its button opens it.
+  await page
+    .locator("[data-task-strip]")
+    .getByRole("button", { name: "Next: you · answer question" })
+    .click();
   assert.ok(
     await page.getByText("Which focus target?", { exact: true }).isVisible(),
   );
@@ -436,7 +448,12 @@ test("production workspace retains literal history, pending request, focused rep
     }),
   );
   await page.getByRole("button", { name: "Refresh task", exact: true }).click();
-  await page.getByText("unavailable", { exact: false }).first().waitFor();
+  await page
+    .getByText("Refresh failed. Showing the last fetched data.", {
+      exact: true,
+    })
+    .first()
+    .waitFor();
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),
     "Unfinished contextual reply",
@@ -538,19 +555,23 @@ test("production workspace retains literal history, pending request, focused rep
         r.url().includes("/api/operator/commands") &&
         (r.request().postData() ?? "").includes("delivery.refresh"),
     ),
-    page
-      .getByRole("button", {
-        name: "Refresh delivery observation",
-        exact: true,
-      })
-      .click(),
+    (async () => {
+      await openTaskTab(page, "Changes");
+      await page
+        .getByRole("button", {
+          name: "Refresh delivery observation",
+          exact: true,
+        })
+        .click();
+    })(),
   ]);
-  await outcome.waitFor();
+  await outcome.waitFor({ state: "attached" });
   assert.equal(await outcome.count(), 1);
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
     "Refresh delivery observation",
   );
+  await openTaskTab(page, "Overview");
   assert.ok(
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -591,6 +612,8 @@ test("production workspace retains literal history, pending request, focused rep
   ] as const) {
     const bodies: string[] = [];
     let lost = true;
+    // Viewing is set on Overview; delivery is observed on Changes.
+    await openTaskTab(page, type === "review.view" ? "Overview" : "Changes");
     await page.route("**/api/operator/commands", async (route) => {
       const body = route.request().postDataJSON() as { type?: string };
       if (body.type !== type) return route.fallback();
@@ -658,6 +681,7 @@ test("production workspace retains literal history, pending request, focused rep
     );
     await page.unroute("**/api/operator/commands");
   }
+  await openTaskTab(page, "Overview");
   // A running lead receives feedback on its next eligible turn (frame 03a).
   assert.equal(
     await page
@@ -829,6 +853,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
     ] as const) {
       const bodies: string[] = [];
       let lost = true;
+      await openTaskTab(page, type === "review.view" ? "Overview" : "Changes");
       await page.route("**/api/operator/commands", async (route) => {
         const body = route.request().postDataJSON() as { type?: string };
         if (body.type !== type) return route.fallback();
@@ -888,6 +913,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
       await gate;
       await route.fulfill({ response });
     });
+    await openTaskTab(page, "Overview");
     await click("Set viewing reference");
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })

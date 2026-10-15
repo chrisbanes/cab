@@ -15,6 +15,7 @@ import {
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-local-review-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
@@ -204,6 +205,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   );
 
   // Changes: Before deleted lines from an exact Uncommitted comparison.
+  await openTaskTab(page, "Changes");
   const changes = page.locator("#changes");
   await changes.getByLabel("Comparison target").selectOption("uncommitted");
   await changes.getByRole("button", { name: /modified diff\.txt/ }).click();
@@ -231,6 +233,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   await changesComposer.waitFor({ state: "detached" });
 
   // The complete draft shows both comments with original context.
+  await openTaskTab(page, "Review");
   const review = page.locator("#local-review");
   const comments = review.getByRole("list", { name: "Review comments" });
   await comments.locator(":scope > li").nth(1).waitFor();
@@ -261,6 +264,8 @@ test("production local review composes exact multi-origin anchors and sends one 
     state: "detached",
   });
   await page.reload();
+  // The link opens Files again; the draft is on the Review tab.
+  await openTaskTab(page, "Review");
   await review.getByText("Edited file comment").waitFor();
   assert.equal(
     await review.getByLabel("Summary (optional)").inputValue(),
@@ -320,6 +325,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   await review.getByText("No review comments yet.").waitFor();
 
   // An unsent draft does not cross sign-out.
+  await openTaskTab(page, "Files");
   await files
     .getByRole("button", { name: /repo-alpha, repository, full path/ })
     .click();
@@ -332,6 +338,7 @@ test("production local review composes exact multi-origin anchors and sends one 
   await files
     .getByRole("button", { name: "Save comment", exact: true })
     .click();
+  await openTaskTab(page, "Review");
   await review.getByText("Unsent private note").waitFor();
   // Desktop sign-out is in the sidebar account menu.
   await page
@@ -375,6 +382,7 @@ test("production local review composes exact multi-origin anchors and sends one 
 
 /** Selects one current-file line of review.txt, opening the file first when it is not open. */
 async function selectLine(page: Page, line: string) {
+  await openTaskTab(page, "Files");
   const files = page.locator("#files");
   const repository = files.getByRole("button", {
     name: /repo-alpha, repository, full path/,
@@ -400,7 +408,11 @@ async function commentOnLine(page: Page, line: string, text: string) {
   await files
     .getByRole("button", { name: "Save comment", exact: true })
     .click();
-  await page.locator("#local-review").getByText(text).waitFor();
+  // The draft lists it on the Review tab; Files stays open where the comment began.
+  await page
+    .locator("#local-review")
+    .getByText(text)
+    .waitFor({ state: "attached" });
 }
 
 const activeAttribute = (page: Page, name: string) =>
@@ -583,10 +595,9 @@ test("a comment save whose response is lost stays one exact request until it is 
       "We couldn't confirm the comment was saved. Your comment is kept.",
       { exact: true },
     )
-    .waitFor();
+    .waitFor({ state: "attached" });
   assert.equal(await warning.count(), 1);
   assert.equal(await warning.getAttribute("data-tone"), "warning");
-  assert.equal(await warning.getByRole("button").count(), 1);
   assert.equal(
     await files.getByLabel("Comment", { exact: true }).inputValue(),
     "Lost response comment",
@@ -604,7 +615,8 @@ test("a comment save whose response is lost stays one exact request until it is 
   assert.equal(await pointer.getAttribute("href"), "#local-review");
   // The warning appeared without taking the focus: the pointer is the route to it.
   assert.equal(await page.evaluate(checkFocused, warningSelector), false);
-  // Following it focuses the check in the same task as the click, and adds no history entry.
+  // Following it opens the Review tab and focuses the check in the same task as the click,
+  // and adds no history entry.
   assert.equal(
     await pointer.evaluate((link, selector) => {
       (link as HTMLElement).click();
@@ -618,6 +630,8 @@ test("a comment save whose response is lost stays one exact request until it is 
     true,
   );
   assert.equal(new URL(page.url()).hash, "");
+  // One action, now that the Review tab shows it.
+  assert.equal(await warning.getByRole("button").count(), 1);
   await warning.getByText("Details", { exact: true }).click();
   assert.match(
     await warning.locator("dl").innerText(),
@@ -660,6 +674,7 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
       await route.abort("connectionreset");
     } else await route.continue();
   });
+  await openTaskTab(page, "Review");
   await review.getByRole("button", { name: "Edit" }).click();
   await review.getByLabel("Edit comment").fill("Edited note");
   await review.getByRole("button", { name: "Save edit" }).click();
@@ -674,6 +689,7 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
   await page.waitForFunction(checkFocused, warningSelector);
   // Other edits stay blocked: the textarea is off and no new comment can start.
   assert.equal(await review.getByLabel("Edit comment").isDisabled(), true);
+  await openTaskTab(page, "Files");
   await files.getByRole("button", { name: "Line 2: second" }).click();
   assert.equal(
     await files
@@ -681,6 +697,7 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
       .isDisabled(),
     true,
   );
+  await openTaskTab(page, "Review");
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
@@ -692,6 +709,7 @@ test("an unconfirmed edit keeps its request and blocks new comments and edits un
   assert.equal(await warning.count(), 1);
   assert.equal(await warning.getAttribute("data-tone"), "success");
   assert.equal(await warning.getByRole("button").count(), 0);
+  await openTaskTab(page, "Files");
   await files
     .locator("button:not([disabled])", { hasText: "Add review comment" })
     .waitFor();
@@ -708,13 +726,16 @@ test("a draft write still waiting when its page goes away is kept as one exact c
   await commentOnLine(page, "Line 1: first", "First note");
   const files = page.locator("#files");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   const held = await holdSaves(page);
   try {
     await review.getByRole("button", { name: "Edit" }).click();
     await review.getByLabel("Edit comment").fill("Edited note");
     await review.getByRole("button", { name: "Save edit" }).click();
     await held.entered(0);
+    // A new entry opens on Overview; the check waits on the Review tab.
     await reopenTask(page);
+    await openTaskTab(page, "Review");
     const outcome = review.locator("[data-slot=action-outcome]");
     await outcome
       .getByText(
@@ -750,6 +771,7 @@ test("a draft write still waiting when its page goes away is kept as one exact c
     assert.equal(held.saves.length, 1);
     // The server already committed the held save: the check replays it and changes nothing.
     const version = await draftVersion(page, task.taskId);
+    await openTaskTab(page, "Review");
     await outcome
       .getByRole("button", { name: "Check whether it saved", exact: true })
       .click();
@@ -761,6 +783,7 @@ test("a draft write still waiting when its page goes away is kept as one exact c
       .getByRole("button", { name: "Edit", exact: true })
       .and(page.locator(":enabled"))
       .waitFor();
+    await openTaskTab(page, "Files");
     await files
       .locator("button:not([disabled])", { hasText: "Add review comment" })
       .waitFor();
@@ -794,6 +817,7 @@ test("a draft write answered after its page went away keeps its check and replay
   await commentOnLine(page, "Line 1: first", "First note");
   const files = page.locator("#files");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   const held = await holdSaves(page);
   try {
     await review.getByRole("button", { name: "Edit" }).click();
@@ -801,6 +825,7 @@ test("a draft write answered after its page went away keeps its check and replay
     await review.getByRole("button", { name: "Save edit" }).click();
     await held.entered(0);
     await reopenTask(page);
+    await openTaskTab(page, "Review");
     await held.release(0);
     await page.waitForTimeout(250);
     // The late answer is not a second result: the check, its key and the held controls stay.
@@ -865,6 +890,7 @@ test("every draft write reports one plain success line with its receipt, cleared
     assert.match(fields, /Kind\s+local-review-draft/);
   };
   await commentOnLine(page, "Line 1: first", "First note");
+  await openTaskTab(page, "Review");
   await expectSuccess("Comment added.");
   await review.getByRole("button", { name: "Edit" }).click();
   await review.getByLabel("Edit comment").fill("Edited note");
@@ -888,6 +914,7 @@ test("the review controls stay off until the refresh after a draft write has fin
   );
   await commentOnLine(page, "Line 1: first", "First note");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   await review.getByRole("button", { name: "Edit" }).click();
   await review.getByLabel("Edit comment").fill("Edited note");
   let entered!: () => void;
@@ -969,18 +996,23 @@ test("the review controls are off from the first request of a new comment until 
   await stageEntered;
   // The first request is in flight and nothing has been re-read yet: no other write may start.
   await page.waitForTimeout(200);
+  // The draft is on the Review tab, which Files hides.
   assert.equal(
-    await review.getByRole("button", { name: "Edit" }).first().isDisabled(),
+    await review
+      .getByRole("button", { name: "Edit", includeHidden: true })
+      .first()
+      .isDisabled(),
     true,
   );
   assert.equal(
     await review
-      .getByRole("button", { name: "Remove", exact: true })
+      .getByRole("button", { name: "Remove", exact: true, includeHidden: true })
       .first()
       .isDisabled(),
     true,
   );
   release();
+  await openTaskTab(page, "Review");
   await review.getByText("Second note").waitFor();
   await page.unroute("**/api/operator/commands");
 });
@@ -1041,7 +1073,14 @@ async function loseStageAnswer(
       "We couldn't confirm the exact lines were captured. Your comment is kept.",
       { exact: true },
     )
-    .waitFor();
+    .waitFor({ state: "attached" });
+  // The composer stays open in Files, so the warning waits on the marked Review tab.
+  assert.equal(
+    await page
+      .getByRole("tab", { name: "Review", exact: true })
+      .getAttribute("aria-description"),
+    "A review write needs a check",
+  );
   return { stages, saves, review };
 }
 
@@ -1050,6 +1089,7 @@ test("an unconfirmed anchor stays checkable from a new navigation entry and fini
   const { stages, saves, review } = await loseStageAnswer(page, task, web);
   // Leave and reopen the task through a new entry: no composer is on screen any more.
   await reopenTask(page);
+  await openTaskTab(page, "Review");
   const warning = review.locator("[data-slot=action-outcome]");
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -1085,6 +1125,7 @@ test("a stage replay stays held while no draft is loaded, then finishes the comm
     );
   try {
     await reopenTask(page);
+    await openTaskTab(page, "Review");
     const outcome = review.locator("[data-slot=action-outcome]");
     const check = outcome.getByRole("button", {
       name: "Check whether it saved",
@@ -1146,6 +1187,7 @@ test("a late answer to a save chained after a stage does not unlock the controls
     // The stage is recorded; the save chained after it is the write that is waiting.
     await held.entered(0);
     await reopenTask(page);
+    await openTaskTab(page, "Review");
     const outcome = review.locator("[data-slot=action-outcome]");
     await outcome
       .getByText(
@@ -1180,6 +1222,7 @@ test("a refused replay on a new entry is reported in the panel and does not bloc
   const { web, task, page } = await startReview(j);
   const { review } = await loseStageAnswer(page, task, web, "refuse");
   await reopenTask(page);
+  await openTaskTab(page, "Review");
   const panel = review.locator("[data-slot=action-outcome]");
   await panel
     .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -1193,6 +1236,7 @@ test("a refused replay on a new entry is reported in the panel and does not bloc
     .waitFor();
   assert.equal(await panel.count(), 1);
   // The leftover composer does not hold the Add button: a new comment can start here.
+  await openTaskTab(page, "Files");
   const files = page.locator("#files");
   await files
     .getByRole("button", { name: /repo-alpha, repository, full path/ })
@@ -1213,6 +1257,7 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
     "Couldn't capture the exact lines: you don't have permission. Your comment is kept.";
   const panel = review.locator("[data-slot=action-outcome]");
   await reopenTask(page);
+  await openTaskTab(page, "Review");
   await panel
     .getByRole("button", { name: "Check whether it saved", exact: true })
     .click();
@@ -1237,6 +1282,7 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
       characterData: true,
     });
   }, refusal);
+  await openTaskTab(page, "Files");
   await files
     .getByRole("button", { name: /repo-alpha, repository, full path/ })
     .click();
@@ -1261,10 +1307,12 @@ test("a refusal shown in the panel moves into the composer when it is reopened a
   );
   // When the form leaves, the panel says it again, once.
   await reopenTask(page);
+  await openTaskTab(page, "Review");
   await panel.getByText(refusal, { exact: true }).waitFor();
   assert.equal(await panel.count(), 1);
   assert.equal(await page.getByText(refusal, { exact: true }).count(), 1);
   // A comment started elsewhere replaces that composer, and its refusal goes with it.
+  await openTaskTab(page, "Files");
   await files
     .getByRole("button", { name: /repo-alpha, repository, full path/ })
     .click();
@@ -1288,6 +1336,7 @@ test("a review send in flight when its page goes away is left for the next page 
   );
   await commentOnLine(page, "Line 1: first", "First note");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   let entered!: () => void;
   let release!: () => void;
   const sendEntered = new Promise<void>((resolve) => {
@@ -1318,6 +1367,7 @@ test("a review send in flight when its page goes away is left for the next page 
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
+  await openTaskTab(page, "Review");
   release();
   await sendAnswered;
   // The old page's answer is not applied to a page that is gone; the new page checks it.
@@ -1337,6 +1387,7 @@ test("an unconfirmed anchor is settled by the page that checks it after a remoun
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
+  await openTaskTab(page, "Review");
   const warning = review.locator("[data-slot=action-outcome]");
   await warning
     .getByRole("button", { name: "Check whether it saved", exact: true })
@@ -1385,6 +1436,7 @@ test("local review keeps focus on the selection, the next comment and the headin
   const items = review
     .getByRole("list", { name: "Review comments" })
     .locator(":scope > li");
+  await openTaskTab(page, "Review");
   await items.nth(2).waitFor();
 
   // Escape cancels an edit, keeps the saved text and returns to its Edit button.
@@ -1447,10 +1499,11 @@ test("local review focus survives frame callbacks that run before the page commi
   await commentOnLine(page, "Line 3: third", "Third note");
   const files = page.locator("#files");
   const review = page.locator("#local-review");
+  // The list is on the Review tab, hidden while Files is open.
   const items = review
-    .getByRole("list", { name: "Review comments" })
+    .getByRole("list", { name: "Review comments", includeHidden: true })
     .locator(":scope > li");
-  await items.nth(2).waitFor();
+  await items.nth(2).waitFor({ state: "attached" });
   const frames = await page.evaluateHandle(() => window.requestAnimationFrame);
   try {
     await framesBeforeCommit(page);
@@ -1474,8 +1527,9 @@ test("local review focus survives frame callbacks that run before the page commi
     await domClick(
       files.getByRole("button", { name: "Save comment", exact: true }),
     );
-    await review.getByText("Fourth note").waitFor();
+    await review.getByText("Fourth note").waitFor({ state: "attached" });
     await returned.waitFor();
+    await domClick(page.getByRole("tab", { name: "Review", exact: true }));
 
     // Cancelling an edit returns to its Edit button; saving one to a re-enabled Edit.
     const edit = (index: number) =>
@@ -1527,6 +1581,7 @@ test("a write answered after local review is left queues no focus", async (_t, j
   await commentOnLine(page, "Line 1: first", "First note");
   await commentOnLine(page, "Line 2: second", "Second note");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   const held = await holdSaves(page);
   try {
     await review
@@ -1586,13 +1641,10 @@ test("phone local review comments and sends to a receipt using the keyboard", as
       document.activeElement !== document.body,
   );
 
-  // Move to the complete review with the section navigation, then send.
-  const nav = page.getByRole("navigation", { name: "Task material" });
-  await nav.getByRole("link", { name: "Review", exact: true }).focus();
+  // Move to the complete review with the tab list, then send.
+  await page.getByRole("tab", { name: "Review", exact: true }).focus();
   await page.keyboard.press("Enter");
-  await page.waitForFunction(
-    () => document.activeElement?.id === "local-review-heading",
-  );
+  await page.locator("#task-panel-review").waitFor();
   const review = page.locator("#local-review");
   await review.getByText("Phone keyboard comment").waitFor();
   assert.ok(
@@ -1655,6 +1707,7 @@ test("a completed lead is resumed by a review, with the status line before sendi
   // A terminal result completes the accountable lead's assignment.
   task.result("Terminal lead result");
   await page.reload();
+  await openTaskTab(page, "Review");
   await review.getByText("Comment for a finished lead").waitFor();
   await notice.waitFor();
   assert.equal(await send.isEnabled(), true);
@@ -1689,6 +1742,7 @@ test("a lead that completes after the page loaded is resumed; a held lead is a d
   );
   await commentOnLine(page, "Line 2: second", "Comment for a stale lead");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   task.result("Terminal lead result");
   await review
     .getByRole("button", { name: /^Send review \(1 comment\)/ })
@@ -1701,6 +1755,7 @@ test("a lead that completes after the page loaded is resumed; a held lead is a d
   // The resumed lead completes again and is then held: the next review is refused.
   await review.getByRole("button", { name: "Start a new review" }).click();
   await commentOnLine(page, "Line 3: third", "Comment for a held lead");
+  await openTaskTab(page, "Review");
   task.result("Second terminal lead result");
   fixture.seedPersistedState((db) =>
     db
@@ -1745,12 +1800,9 @@ test("phone keyboard review to a completed lead shows the status line and resume
     web.password,
   );
   await commentOnLine(page, "Line 2: second", "Phone follow-up comment");
-  const nav = page.getByRole("navigation", { name: "Task material" });
-  await nav.getByRole("link", { name: "Review", exact: true }).focus();
+  await page.getByRole("tab", { name: "Review", exact: true }).focus();
   await page.keyboard.press("Enter");
-  await page.waitForFunction(
-    () => document.activeElement?.id === "local-review-heading",
-  );
+  await page.locator("#task-panel-review").waitFor();
   const review = page.locator("#local-review");
   await review
     .getByText(leadResumeNotice("Task lead"), { exact: true })
@@ -1794,6 +1846,7 @@ test("the recovery-continuation copy appears only while the lead awaits an opera
   );
   await commentOnLine(page, "Line 2: second", "Recovery comment");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   const copy = review.getByText(leadAwaitingRecoveryNotice("Task lead"), {
     exact: true,
   });
@@ -1806,6 +1859,7 @@ test("the recovery-continuation copy appears only while the lead awaits an opera
   );
   awaiting = false;
   await page.reload();
+  await openTaskTab(page, "Review");
   await review.getByText("Recovery comment").waitFor();
   assert.equal(await copy.count(), 0);
   assert.deepEqual(pageErrors, []);
@@ -1822,6 +1876,7 @@ test("sent reviews stay inspectable after reload and Start a new review", async 
   );
   await commentOnLine(page, "Line 2: second", "Durable sent comment");
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   await review
     .getByRole("button", { name: /^Send review \(1 comment\)/ })
     .click();
@@ -1829,6 +1884,7 @@ test("sent reviews stay inspectable after reload and Start a new review", async 
   assert.equal(events(), 1);
 
   await page.reload();
+  await openTaskTab(page, "Review");
   await review.getByRole("button", { name: "Start a new review" }).click();
   await review.getByText("No review comments yet.").waitFor();
   const list = review.getByRole("region", {
@@ -1876,6 +1932,7 @@ test("a stored comment without line context can be removed so the review can be 
   });
   await page.reload();
   const review = page.locator("#local-review");
+  await openTaskTab(page, "Review");
   await review.getByText("Legacy two").waitFor();
   const send = review.getByRole("button", { name: /^Send review/ });
   assert.equal(await send.isDisabled(), true);

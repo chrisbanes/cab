@@ -1571,7 +1571,7 @@ The web app is the ground truth for these items.
   navigation beside the field. The capacity meter reads global turn usage from the
   task list, so it is absent while there are no tasks. Not found shows no
   breadcrumb or New task.
-- **Not yet adopted:** per-surface layouts — the three-pane Inbox, the task detail header, tabs and inspector.
+- **Not yet adopted:** per-surface layouts — the three-pane Inbox.
 
 ### Question actions, composer and test matrix
 
@@ -1730,20 +1730,82 @@ Production task detail, composer and Stop confirmation
 ([#839](https://github.com/chrisbanes/ensemble/issues/839)) differ from the frames
 as follows:
 
-- The 3 October task overview (46/`46a-task-overview-laptop`/`03-task-detail`, `57-task-revised-result`, `47-phone-task-overview`)
-  governs every task, local or imported, over the earlier 03a `03-task-detail`, `12-imported-task-source-execution`
-  and 36/37/45 generation. The build has no holds side panel yet; holds and
-  admission reasons are lines in the decision card.
-  Imported tasks keep source/execution separation through the "Requirements · GitHub" label, the source line ("Open GitHub to edit source",
-  "Refresh source observation") and the hold lines, not separate panes or tabs.
-- The header shows Back, the title, a status line ("Ready · waiting on
-  acme/design-system#87 / Accountable project lead: Mira") and Execution plus,
-  while the task is open, Stop…, at every width. A finished task offers no Stop…;
-  an existing Stop stays as a disabled "Stop requested". Back is the only back control: with an
-  in-session origin it reads the origin view ("Board", "Overview", "Inbox",
-  "Search", "Tasks"; named "Back to originating view") and returns to that entry;
-  otherwise it is "Back to <project>". The breadcrumb ("Atlas / List · Waiting ·
-  AT-142") is not built.
+- `03-task-detail` governs every task, local or imported, with
+  `12-imported-task-source-execution` for the imported inspector and
+  `47-phone-task-overview`, `53-phone-failed-refresh-uncertain` and
+  `55-phone-parallel-delegation` for the phone composition. The shell page header
+  keeps Back, the title, the recorded desired outcome as its subtitle (plain text,
+  clamped to three lines; the brief keeps the full text) and Execution plus, while
+  the task is open, Stop…, at every width. A finished task offers no Stop…; an
+  existing Stop stays as a disabled "Stop requested". Back is the only back
+  control: with an in-session origin it reads the origin view ("Board",
+  "Overview", "Inbox", "Search", "Tasks"; named "Back to originating view") and
+  returns to that entry; otherwise it is "Back to <project>". The breadcrumb
+  ("Atlas / List · Waiting · AT-142") is not built.
+- The status strip under the header carries the ID slot, the source chip, the
+  state badge (the Board's column for this task, symbol and word), readiness (the
+  recorded state and first wait, "Ready · waiting on acme/design-system#87"), the
+  next actor and "Accountable lead · Mira". Because the shell header is shared,
+  the ID slot and chip sit in this row under the title rather than above it. The
+  ID slot reads `repository#number` for an imported task, whose chip repeats it as
+  "Imported · repository#N ↗" linking the source, and "Local task" otherwise.
+  The next actor names the operator only for a decision the task read records:
+  "Next: you · inspect execution" (uncertain), "review material & decide",
+  "answer question", "resolve result destination" or "review rejected
+  completion"; otherwise "No operator decision", and a finished task reads
+  "Next: none". The list's lead-review state is not in the task read and is not
+  shown. There is no "Updated" time. The persistent tools row follows ("Open
+  GitHub to edit source" and "Refresh source observation" for an imported task,
+  "Advanced task controls", "Requests and coordination", "Refresh task").
+- Tabs: Overview, Files, Changes, Review and History, with no counts (History is
+  read per assignment; Review's count lives in the local draft). Every panel stays
+  mounted and only the selected one shows, so drafts, expansions, selections and
+  unconfirmed checks survive a switch; each tab keeps its own scroll. A switch
+  sends nothing and adds no history entry; Back and Forward restore the tab with
+  the reading position. Links choose the first tab: `?section=` (brief, review,
+  reply → Overview; files; changes; local-review → Review; context, history →
+  History), then the fragment, then `path` (Files), `target`/`base` (Changes),
+  `review` (Review), `result`/`source` (Overview) and `assignment` (History); a
+  `record` or `request` target opens the tab that holds it unless the link names a
+  section or fragment (`?request=…#history` opens History). A link followed in
+  place maps the same way. The full header shows
+  on every tab, not `06-workspace-changes-review`'s compact header. The tabs scroll
+  with the page.
+- A request is never hidden by a tab: the strip's "Next: you · …" is a button that
+  opens Overview at the decision card, and a request that arrives while another
+  tab is open updates the strip without moving the tab or the focus. A Local
+  review check that takes the focus opens the Review tab, which carries an amber
+  mark while a review write waits for its check; a delivery refresh's outcome
+  shows on Changes beside its control. "New updates — jump to latest" opens
+  History at its end.
+- Overview is one column of cards beside the inspector (280–320px, from 1024px;
+  below the reply on narrower screens): the decision card, the shared brief, the
+  latest result, the assignments table and the reply. The decision card leads
+  with any request ("Your decision · approval pending", exact action, target,
+  revision and material hash, and "Review material & decide" to the coordination
+  view; the page never approves), then pending completion and unresolved result
+  links, a "Review rejected completion" link for a completion rejected at the
+  current task version and "Inspect uncertain execution" for an uncertain execution
+  without its hold line, then, once and only while a request is open, the holds it does not clear
+  in the Inbox's wording, then the waits and execution hold lines. Its amber edge
+  shows only while a request is open. The assignments table has Assignment (short
+  id and the history button), Requested by → result to and Known state columns,
+  and reflows to stacked rows on a phone.
+- The inspector shows, for an imported task, a "GitHub source · read-only" group
+  (identity link, issue state, latest successful sync and any sync failure or
+  incomplete observation — "sync unavailable", "partial sync" or "sync
+  incomplete" — "GitHub owns the issue.
+  Ensemble coordinates the work.", the native blockers as "Dependencies · managed
+  in GitHub" and whether GitHub commenting is permitted), then "Ensemble
+  execution"; then for every task Holds (each open request and each hold title,
+  counted), Dependencies (local dependencies as links, or "None"), Execution
+  (state, running assignments, the lead's runtime, delivery mode and bound pull
+  request) and Results & artifacts (each recorded result, newest first, opening
+  it in the latest-result card, and the bound pull request). The per-selection
+  sync lines and dependency blocks have left the brief. There is no GitHub
+  Project status (memberships carry node ids only), "Unblocks" list, "Last turn"
+  time, workspace path or per-task artifact list; artifacts stay in the latest
+  result's evidence. The inspector is Overview's alone.
 - Stop task submits the retained `/runtime/control/stop` form and lands on the
   Execution page, where the Stop observation and Resume live. Unsent reply text on
   the task page is not carried across that navigation; Keep running, Escape and
@@ -1755,19 +1817,22 @@ as follows:
   characters of the assignment id; results keep their recorded ids. There is no
   "Approach" block (no recorded approach field), no "Compare screenshots" control
   (recorded pairs render under the latest result), no clock times, and no
-  "Earlier results (2)" button (the Result revision select keeps earlier results).
-- The section-button row is gone. Frame 57's entries under the latest result link
-  in place to Files, Changes, Review, "Assignment context & identifiers",
-  "Assignment history" and "Message lead". "Review" has no count.
+  "Earlier results (2)" button (the Result revision select and the inspector keep
+  earlier results).
+- Frame 57's entries under the latest result stay: Files, Changes, Review,
+  "Assignment context & identifiers", "Assignment history" and "Message lead"
+  open their tab in place and move to the section, without a history entry.
 - Criteria read C1, C2… in the brief and in the result's rows with the recorded
   outcome ("Supported by recorded evidence", "Failed recorded check",
   "Unverified"); no overall pass is derived. The literal brief, checklist syntax
   included, stays in the "read supplied text" disclosure. "Ask lead about
   criterion" keeps its exact-reference draft, which names the criterion by its
   line in the brief ("criterion 3 in source revision 1"), not by its C label.
-- The phone keeps one reading column with the same in-place sections; the drill-in
-  screens of frames 47, 48, 51 and 55 are not built, so reading position,
-  expansions and unsent replies are not split across history entries.
+- The phone keeps one reading column with the same tabs; the drill-in screens of
+  frames 47, 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
+  tab pair of phone frames 14 and 15 are not built, so reading position,
+  expansions and unsent replies are not split across history entries. The tab
+  list fits at 390px and scrolls inside itself only when narrower.
 - The composer's h1 is "Create a task" with the drawn subtitle and the field
   label stays "Task title"; the phone header of frame 34 ("New task" plus an
   in-body "Create a task") is not duplicated. Project (200px) and Task title share
@@ -1801,15 +1866,18 @@ as follows:
   execution state and "It will wait: …") replaces the form, rather than frames
   161/166c's locked form with an outcome line in the bar.
 
-Entry points: Overview, List, Board, Inbox "Open task", Search results and the
-composer receipt open the same `/app/tasks/:id` with this header and Back; the
+Entry points: Overview, List, Board, Inbox "Open task" and "Task evidence", Search
+results, recovery and assignment links, `?request=` and `?section=` deep links and
+the composer receipt open the same `/app/tasks/:id` with this header, strip and
+Back; the
 composer is reached from the top bar's New task on every route, Overview, List, a
 project's New task, setup's ready check and Getting started, all opening the same `/app/tasks/new` (`?project=` is the
 only deep link). The retained
 `/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
 and linked (Advanced task controls, Execution, Requests and coordination). No
 context menu, extension or notification surface applies. Counterparts: Stop →
-Execution → Resume (retained); Keep running and Escape send nothing; Optional
+Execution → Resume (retained); Keep running and Escape send nothing; a tab switch
+sends nothing and keeps drafts, and Refresh task only re-reads; Optional
 settings collapse ↔ expand keeps values; a failed create keeps values and the
 existing receipt reconciliation; Resume project in the prediction panel confirms
 first and Pause project in project configuration reverses it; a saved draft is

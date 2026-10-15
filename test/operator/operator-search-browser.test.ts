@@ -7,6 +7,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-search-browser");
 test("shared Search preserves exact historical target, dates, selected focus and both navigation origins across Back/Forward, failures and phone entry", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -416,7 +417,9 @@ test("same-task historical Search entries preserve manual origin selections and 
     ),
     true,
   );
+  await openTaskTab(page, "History");
   await assignmentDisclosure.locator(":scope > summary").click();
+  await openTaskTab(page, "Overview");
 
   const brief = page.locator(`#brief [data-record-id="${source.sourceId}"]`);
   await brief.locator("summary").click();

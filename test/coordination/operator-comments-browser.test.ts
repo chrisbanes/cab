@@ -7,6 +7,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-comments-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
@@ -493,10 +494,13 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       .isEnabled(),
   );
   settled = true;
+  // Delivery is observed on Changes; the reply and its check stay on Overview.
+  await openTaskTab(page, "Changes");
   await page
     .getByRole("button", { name: "Refresh delivery observation", exact: true })
     .click();
   await page.getByText(/issue.comment: confirmed-success/).waitFor();
+  await openTaskTab(page, "Overview");
   assert.equal(effects, 1);
   assert.equal(
     await page.getByLabel("Editable reply").inputValue(),

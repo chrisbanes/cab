@@ -636,6 +636,8 @@ export async function runQualification(options = {}) {
         .getByText("UI04 synthetic callback recorded", { exact: true })
         .waitFor();
       await page.getByText(/Synthetic callback transport only/).waitFor();
+      // Captured context is on the History tab.
+      await page.getByRole("tab", { name: "History", exact: true }).click();
       await page
         .getByRole("heading", { name: "Captured context", exact: true })
         .waitFor();

@@ -22,8 +22,23 @@
   grid-area: title;
 }
 
+/* The recorded desired outcome, clamped to three lines; the brief keeps the full text. */
 .page-header[data-desktop-back] .page-header-title p {
-  display: block;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  color: var(--fg-2);
+}
+
+/* The strip and tabs continue the header: the hairline sits under the tabs instead. */
+@media (min-width: 1121px) {
+  .page-header[data-desktop-back] {
+    padding-bottom: 0;
+    margin-bottom: var(--space-12);
+    border-bottom: 0;
+  }
 }
 
 .task-header-actions {
@@ -71,26 +86,120 @@
   }
 }
 
-/* Body: source line, decision card, then two columns from the shell breakpoint. */
-.task-source-line {
+/* Strip: ID, source chip, state, readiness, next actor and lead; then the tools row. */
+.task-strip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.task-strip-facts {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-8) var(--space-12);
+  gap: var(--space-8) var(--space-16);
+  font-size: var(--type-xs);
+  color: var(--fg-2);
 }
 
-.task-source-line p {
+.task-id {
+  font-family: var(--font-mono);
+  color: var(--fg-3);
+}
+
+.task-source-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg-2);
+  text-decoration: none;
+}
+
+a.task-source-chip:hover {
+  color: var(--fg);
+}
+
+.task-strip .task-next {
+  font: inherit;
+  color: var(--fg-2);
+}
+
+.task-strip button.task-next {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--attn);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.task-strip .task-tools {
   margin: 0;
 }
 
-.task-source-line .task-actions {
-  margin: 0;
+/* Tabs: 13px labels, a 2px indigo underline on the selected tab, the hairline under the row. */
+.task-tabs {
+  display: flex;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.task-tabs [role="tab"] {
+  flex: none;
+  padding: var(--space-8) 10px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: var(--type-sm);
+  cursor: pointer;
+}
+
+.task-tabs [role="tab"][aria-selected="true"] {
+  border-bottom-color: var(--accent-edge);
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+
+/* A tab holding a check to run: an amber mark beside its label. */
+.task-tabs [role="tab"][data-note]::after {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--attn);
+  vertical-align: middle;
+}
+
+.task-tabs [role="tab"]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* Only the open panel takes a layout; `hidden` keeps the others out (the browser default). */
+.task-panel:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
 }
 
 .task-workspace section.decision-card {
-  border-top: 1px solid var(--color-border);
   padding: var(--space-12) var(--space-16);
+}
+
+/* An open operator request gives the card its attention edge; otherwise it is neutral. */
+.task-workspace section.decision-card[data-attention] {
+  border-color: var(--attn-border);
 }
 
 .decision-card .decision + .decision {
@@ -98,23 +207,191 @@
   padding-top: var(--space-12);
 }
 
-.task-columns {
+/* Overview: one main column of cards beside the inspector from 1024px; stacked below. */
+.task-overview {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--space-20);
+  gap: var(--space-16);
+  align-items: start;
 }
 
-@media (min-width: 1121px) {
-  .task-columns {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
-    align-items: start;
+@media (min-width: 1024px) {
+  .task-overview {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   }
 }
 
-.task-columns > section {
+.task-columns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
   min-width: 0;
-  border-top: 0;
-  padding-top: 0;
+}
+
+.task-workspace .task-columns > section {
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.task-columns > section > .section-heading:first-child {
+  margin-top: 0;
+}
+
+/* Assignments: a table on wide screens, stacked rows on a phone. */
+.assignment-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.assignment-table th {
+  padding: var(--space-8);
+  color: var(--fg-3);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.assignment-table td {
+  padding: var(--space-8);
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.assignment-table td:first-child {
+  min-width: 0;
+}
+
+.assignment-id {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  color: var(--fg-3);
+}
+
+@media (max-width: 759px) {
+  .assignment-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .assignment-table tr,
+  .assignment-table td {
+    display: block;
+  }
+
+  .assignment-table td {
+    border-top: 0;
+    padding-block: var(--space-4);
+  }
+
+  .assignment-table tr {
+    border-top: 1px solid var(--line);
+    padding-block: var(--space-8);
+  }
+}
+
+/* Inspector: grouped facts with uppercase labels, Overview only. */
+.task-inspector {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: var(--type-xs);
+}
+
+.inspector-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-12) 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.inspector-group:last-child {
+  border-bottom: 0;
+}
+
+.task-workspace .inspector-group p {
+  margin: 0;
+}
+
+.inspector-label,
+.inspector-divider {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.task-workspace p.inspector-divider {
+  margin: 0;
+  padding: var(--space-8) 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--raised);
+}
+
+.inspector-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inspector-rows li {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-8);
+  overflow-wrap: anywhere;
+}
+
+.inspector-rows li > * {
+  min-width: 0;
+}
+
+.inspector-rows svg {
+  flex: none;
+  margin-top: 3px;
+  width: 12px;
+  height: 12px;
+  color: var(--idle);
+}
+
+.inspector-rows svg[data-tone="attn"] {
+  color: var(--attn);
+}
+
+.inspector-rows svg[data-tone="ok"] {
+  color: var(--ok);
+}
+
+.inspector-facts {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: var(--space-8);
+  margin: 0;
+}
+
+.inspector-facts dt {
+  color: var(--fg-3);
+}
+
+.inspector-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .task-provenance {
@@ -151,14 +428,12 @@
   font-weight: var(--weight-medium);
 }
 
-.criterion-row,
-.assignment-row {
+.criterion-row {
   border-bottom: 1px solid var(--color-border);
   padding-block: var(--space-8);
 }
 
-.task-workspace .criterion-row p,
-.task-workspace .assignment-row p {
+.task-workspace .criterion-row p {
   margin: var(--space-4) 0;
 }
 
@@ -169,11 +444,12 @@
   margin-block: var(--space-12);
 }
 
-.assignment-rows {
-  margin-block: var(--space-12);
-}
-
 .assignment-row button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
   font-weight: var(--weight-medium);
   overflow-wrap: anywhere;
   text-align: left;
@@ -183,21 +459,24 @@
 
 @media (max-width: 1120px) {
   .entry-links [data-slot="button"],
-  .task-source-line [data-slot="button"],
+  .task-strip [data-slot="button"],
+  .task-strip button.task-next,
+  .task-strip a.task-source-chip,
+  .task-inspector a,
+  .task-tabs [role="tab"],
   .decision-card [data-slot="button"],
   .assignment-row button {
     min-height: 44px;
   }
 
-  .assignment-row button {
+  .assignment-row button,
+  .task-strip a.task-source-chip,
+  .task-inspector a {
     display: inline-flex;
     align-items: center;
   }
 }
 
 .task-workspace section.reply-card {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
   padding: var(--space-16);
-  background: var(--color-card);
 }

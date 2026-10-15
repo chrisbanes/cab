@@ -10,6 +10,7 @@ import {
 } from "../fixtures/background-refresh.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("task-background-refresh-browser");
 
 test("a task workspace timer poll keeps history, position and status quiet; explicit Refresh still shows progress", async (_t, j) => {
@@ -54,6 +55,8 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
   const marker = (n: number | string) =>
     history.getByText(`Retained marker ${n}`, { exact: true });
   await marker(2).first().waitFor({ state: "attached" });
+  // The polls below run while History is the open tab.
+  await openTaskTab(page, "History");
   await page
     .getByRole("button", { name: "Expand all history", exact: true })
     .click();
@@ -139,9 +142,14 @@ test("a task workspace timer poll keeps history, position and status quiet; expl
     .getByText("Refreshing. Showing the last fetched data.", { exact: true })
     .first()
     .waitFor();
+  // The result stays mounted on Overview, behind the History tab.
   assert.equal(
     await page
-      .getByRole("heading", { name: "Latest result", exact: true })
+      .getByRole("heading", {
+        name: "Latest result",
+        exact: true,
+        includeHidden: true,
+      })
       .count(),
     1,
   );
