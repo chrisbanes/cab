@@ -626,7 +626,7 @@ test("the store remembers a recorded save until purge, and never an unknown outc
   unknown.startOperation({ name: "y" });
   assert.equal(unknown.phase, "unknown");
 });
-test("a saved record keeps the active selections of a source preview and no other form value", async () => {
+test("a saved record keeps the receipt of a source preview and no private form value", async () => {
   const projectId = randomUUID();
   const client = new OperatorClient(async (_url, init) => {
     const c = JSON.parse(String(init?.body));
@@ -642,6 +642,7 @@ test("a saved record keeps the active selections of a source preview and no othe
               selectionId: c.selectionId,
               configVersion: c.expectedVersion,
               active: true,
+              alreadyActive: false,
             }
           : {
               commandType: "profile.configure",
@@ -665,14 +666,17 @@ test("a saved record keeps the active selections of a source preview and no othe
     },
     "csrf",
   );
-  assert.deepEqual(drafts.saved("github.preview:a")?.activeSelectionIds, [
-    "S-1",
-  ]);
+  const recorded = drafts.saved("github.preview:a");
+  assert.equal(
+    recorded?.receipt.kind === "configuration" &&
+      recorded.receipt.result.commandType === "github.preview" &&
+      recorded.receipt.result.alreadyActive,
+    false,
+  );
+  assert.doesNotMatch(JSON.stringify(recorded), /activeSelectionIds/);
   // The record outlives the draft starting over.
   preview.startOperation({ activeSelectionIds: [] });
-  assert.deepEqual(drafts.saved("github.preview:a")?.activeSelectionIds, [
-    "S-1",
-  ]);
+  assert.equal(drafts.saved("github.preview:a"), recorded);
   // A private field of any other save is never retained in the record.
   const profile = drafts.get("profile.configure:p", () => {});
   profile.initialize({
@@ -692,7 +696,6 @@ test("a saved record keeps the active selections of a source preview and no othe
   );
   assert.equal(profile.phase, "recorded");
   const record = drafts.saved("profile.configure:p");
-  assert.deepEqual(record?.activeSelectionIds, []);
   assert.doesNotMatch(JSON.stringify(record), /PRIVATE/);
 });
 test("adopting a newer revision keeps edited fields and takes the latest for untouched ones", () => {

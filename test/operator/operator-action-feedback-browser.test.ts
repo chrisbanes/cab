@@ -651,6 +651,33 @@ test("repeat activation says it was already active without claiming a refresh", 
   await observationRow(page, "S-1").getByText("Not synced").waitFor();
 });
 
+test("activation by another client after the page loaded reads as already active", async (_t, journey) => {
+  const fixture = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=sync",
+    desktop,
+    undefined,
+    { readerFactory: reader },
+  );
+  const { page } = fixture;
+  await formReady(page);
+  const domain = fixture.f.service.domain();
+  domain.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: fixture.ids.atlas,
+    selectionId: "S-1",
+    expectedVersion: domain.githubConfiguration(fixture.ids.atlas).version,
+  });
+  await previewButton(page).click();
+  await savedOutcome(page, repeatActivation);
+  assert.equal(
+    await message(page),
+    "S-1 was already active. Tasks aren't imported until you refresh source observations.",
+  );
+});
+
 test("activation made before a source change does not read as current", async (_t, journey) => {
   const fixture = await startSettings(
     journey,

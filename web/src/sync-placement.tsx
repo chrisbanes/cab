@@ -44,8 +44,8 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
     {
       expectedVersion: String(data.source.version),
       selectionId: data.source.selections.find((s) => s.id !== null)?.id ?? "",
-      // The receipt can't say whether a selection was already active, so the save keeps
-      // what the page showed when it was submitted.
+      // Part of the signature that re-initialises the form once a preview is recorded and
+      // the next read shows the new active set.
       activeSelectionIds: data.source.selections.flatMap((s) =>
         s.active && s.id !== null ? [s.id] : [],
       ),

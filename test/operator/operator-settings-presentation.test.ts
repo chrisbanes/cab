@@ -469,14 +469,11 @@ test("settings headers, saved lines, state cards and hold pills", () => {
   } as never;
   assert.equal(savedLine(3, undefined), null);
   assert.match(
-    savedLine(3, { at: Date.now(), receipt, activeSelectionIds: [] }) ?? "",
+    savedLine(3, { at: Date.now(), receipt }) ?? "",
     /^Saved \d\d:\d\d$/,
   );
   // A save at another version never reads as the current one, and no version is shown.
-  assert.equal(
-    savedLine(4, { at: Date.now(), receipt, activeSelectionIds: [] }),
-    null,
-  );
+  assert.equal(savedLine(4, { at: Date.now(), receipt }), null);
   assert.equal(joinNames(["Ada"]), "Ada");
   assert.equal(joinNames(["Ada", "Eli"]), "Ada and Eli");
   assert.equal(joinNames(["Ada", "Eli", "Bo"]), "Ada, Eli and Bo");
@@ -706,7 +703,7 @@ test("the warning colours stay legible on the page and on a warning alert", () =
 });
 
 test("the activation line claims only a confirmed preview at the loaded source version", () => {
-  const preview = (commandType = "github.preview") =>
+  const preview = (commandType = "github.preview", alreadyActive?: boolean) =>
     ({
       kind: "configuration",
       key: randomUUID(),
@@ -717,17 +714,17 @@ test("the activation line claims only a confirmed preview at the loaded source v
         selectionId: "S-1",
         configVersion: 3,
         active: true,
+        ...(alreadyActive === undefined ? {} : { alreadyActive }),
       },
     }) as never;
   const activation = (
-    wasActive: boolean,
+    wasActive: boolean | undefined,
     over: Partial<Parameters<typeof activationLine>[0]> = {},
   ) =>
     activationLine({
       saved: {
         at: Date.now(),
-        receipt: preview(),
-        activeSelectionIds: wasActive ? ["S-1"] : [],
+        receipt: preview("github.preview", wasActive),
       },
       sourceVersion: 3,
       selections: [],
@@ -739,6 +736,13 @@ test("the activation line claims only a confirmed preview at the loaded source v
   const next = "Tasks aren't imported until you refresh source observations.";
   assert.equal(line(false), `Activated S-1. ${next}`);
   assert.equal(line(true), `S-1 was already active. ${next}`);
+  // A receipt recorded before the prior state existed claims neither.
+  assert.equal(line(undefined), `S-1 is active. ${next}`);
+  // The page's own snapshot no longer matters: the receipt says it was already active.
+  assert.equal(
+    line(true, { recorded: true, selections: [{ id: "S-1", active: false }] }),
+    `S-1 was already active. ${next}`,
+  );
   // A receipt for another source version never reads as current activation.
   assert.equal(line(false, { sourceVersion: 4 }), null);
   assert.equal(line(false, { saved: undefined }), null);
@@ -747,7 +751,6 @@ test("the activation line claims only a confirmed preview at the loaded source v
       saved: {
         at: Date.now(),
         receipt: preview("project.configure"),
-        activeSelectionIds: [],
       },
     }),
     null,
