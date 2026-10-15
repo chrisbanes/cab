@@ -16,6 +16,7 @@ import {
   plural,
   projectStateSummary,
   projectTab,
+  readinessNextStep,
   projectTabs,
   savedLine,
   type ProjectTab,
@@ -35,6 +36,7 @@ import {
   type SettingsProps,
 } from "./settings.js";
 import { SourceTab } from "./source-config.js";
+import { readinessAnchor } from "./observation-counts.js";
 import { SyncTab } from "./sync-placement.js";
 
 export interface TabProps extends SettingsProps {
@@ -136,6 +138,7 @@ export function ProjectConfiguration(
               data={data}
               loadedAt={resource.state.fetchedAt}
               refreshConfiguration={refreshConfiguration}
+              observations={observations}
             />
           ) : tab === "sync" ? (
             <SyncTab
@@ -220,6 +223,13 @@ function ProjectStateCards({
         {next.includes("credential") && (
           <a href={`/app/projects/${projectId}/settings?tab=github`}>
             Set or change source credential
+          </a>
+        )}
+        {next === readinessNextStep && (
+          <a
+            href={`/app/projects/${projectId}/settings?tab=github#${readinessAnchor}`}
+          >
+            Check readiness conditions
           </a>
         )}
       </section>

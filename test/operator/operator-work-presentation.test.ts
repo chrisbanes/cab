@@ -39,6 +39,7 @@ type Overrides = {
   paused?: boolean;
   closure?: "held" | "completed" | null;
   reasons?: string[];
+  readiness?: object | undefined;
 };
 function summary(o: Overrides = {}): TaskListSummary {
   const projectId = o.projectId ?? randomUUID();
@@ -87,12 +88,62 @@ function summary(o: Overrides = {}): TaskListSummary {
             repositoryName: "acme/atlas",
             number: 1,
             url: "https://github.com/acme/atlas/issues/1",
-            state: "closed",
+            state: o.readiness ? "open" : "closed",
             closure: o.closure,
+            readiness: o.readiness ?? {
+              rule: { kind: "none" },
+              outcome: "not-evaluated",
+              unmet: [],
+            },
           },
     attention: { codes: o.codes ?? [], count: o.codes?.length ?? 0 },
   });
 }
+
+test("an imported Draft task names its unmet readiness conditions; other tasks keep the generic reason", () => {
+  const label = (name: string) => ({ kind: "label", name });
+  const field = {
+    kind: "project-field",
+    projectNodeId: "P_1",
+    fieldNodeId: "F_1",
+    optionNodeId: "O_1",
+  };
+  const draft = (readiness?: object, closure: "held" | null = null) =>
+    summary({ ready: false, closure, reasons: ["task-unready"], readiness });
+  const unmet = (mode: string, conditions: object[], missing: object[]) =>
+    taskReasons(
+      draft({
+        rule: { kind: "rule", mode, conditions },
+        outcome: "unmet",
+        unmet: missing,
+      }),
+    );
+  assert.deepEqual(unmet("all", [label("ready")], [label("ready")]), [
+    "Not Ready: missing label `ready`",
+  ]);
+  assert.deepEqual(unmet("all", [label("a"), field], [label("a"), field]), [
+    "Not Ready: missing label `a`, Project field F_1 = O_1",
+  ]);
+  assert.deepEqual(
+    unmet("any", [label("a"), label("b")], [label("a"), label("b")]),
+    ["Not Ready: needs any of label `a`, label `b`"],
+  );
+  const rule = { kind: "rule", mode: "all", conditions: [label("a")] };
+  for (const task of [
+    draft({ rule, outcome: "matched", unmet: [] }),
+    draft({ rule, outcome: "not-evaluated", unmet: [] }),
+    summary({ ready: false, reasons: ["task-unready"] }),
+  ]) {
+    assert.deepEqual(taskReasons(task), ["Draft: not Ready"]);
+    assert.equal(taskColumn(task), "Draft");
+  }
+  const held = draft({ rule, outcome: "not-evaluated", unmet: [] }, "held");
+  assert.deepEqual(taskReasons(held), ["Closed on GitHub"]);
+  assert.equal(
+    taskColumn(draft({ rule, outcome: "unmet", unmet: [label("a")] })),
+    "Draft",
+  );
+});
 
 test("closure provenance places held tasks in Paused and names provider completion", () => {
   for (const ready of [true, false]) {
@@ -194,6 +245,11 @@ test("source summaries only accept https links", () => {
       url,
       state: "open",
       closure: null,
+      readiness: {
+        rule: { kind: "none" },
+        outcome: "not-evaluated",
+        unmet: [],
+      },
     }).success;
   assert.equal(source("https://github.com/a/b/issues/1"), true);
   assert.equal(source(null), true);

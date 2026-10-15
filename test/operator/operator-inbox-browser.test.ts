@@ -578,6 +578,11 @@ test("an approval shows its exact action, target and independent holds, and deci
       body: "",
       state: "open",
       closure: null,
+      readiness: {
+        rule: { kind: "none" },
+        outcome: "not-evaluated",
+        unmet: [],
+      },
       memberships: [],
       nativeBlockers: [
         {

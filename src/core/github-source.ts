@@ -4,6 +4,16 @@ import { isAbsolute } from "node:path";
 import { z } from "zod";
 import { transaction, type Database } from "./store.js";
 
+const parseRule = (json: unknown) =>
+  readinessSchema.nullable().parse(JSON.parse(String(json)) as unknown);
+
+/** Why an imported task is or is not Draft, with its project's rule. */
+export interface TaskReadiness {
+  rule: Readiness | null;
+  outcome: "matched" | "unmet" | "not-evaluated";
+  unmet: ReadinessCondition[];
+}
+
 export interface IssueSnapshot {
   providerInstance: "github.com";
   nodeId: string;
@@ -59,6 +69,9 @@ import {
   repositoryLinkSchema,
   readinessSchema,
   selectionSchema,
+  evaluateReadiness,
+  type Readiness,
+  type ReadinessCondition,
 } from "./github-source-contracts.js";
 export {
   repositoryLinkSchema,
@@ -197,7 +210,8 @@ export class GitHubSourceStore {
     CREATE TABLE IF NOT EXISTS github_sync_state (
       projectId TEXT NOT NULL REFERENCES domain_projects(id), selectionId TEXT NOT NULL,
       complete INTEGER NOT NULL CHECK(complete IN (0,1)), reason TEXT,
-      refreshedAt TEXT NOT NULL, PRIMARY KEY(projectId, selectionId)
+      refreshedAt TEXT NOT NULL, skippedClosedNodeIds TEXT NOT NULL DEFAULT '[]',
+      PRIMARY KEY(projectId, selectionId)
     );
     CREATE TABLE IF NOT EXISTS github_placement_decisions (
       nodeId TEXT PRIMARY KEY REFERENCES github_external_issues(nodeId),
@@ -228,6 +242,13 @@ export class GitHubSourceStore {
       taskId TEXT PRIMARY KEY REFERENCES domain_tasks(id),
       nodeId TEXT NOT NULL, completedAt TEXT NOT NULL
     );`);
+    const syncColumns = this.db
+      .prepare("PRAGMA table_info(github_sync_state)")
+      .all() as Row[];
+    if (!syncColumns.some((c) => c.name === "skippedClosedNodeIds"))
+      this.db.exec(
+        "ALTER TABLE github_sync_state ADD COLUMN skippedClosedNodeIds TEXT NOT NULL DEFAULT '[]'",
+      );
   }
 
   issue(nodeId: string): Row | undefined {
@@ -655,6 +676,8 @@ export class GitHubSourceStore {
         throw new Error("Unknown GitHub selection");
       const previousSync = this.syncState(projectId, selectionId);
       const seen = new Set<string>();
+      // Closed issues this read left unimported; counted as observed without a task.
+      const skipped = new Set<string>();
       const sourceCaptures: {
         taskId: string;
         kind: "github";
@@ -671,7 +694,10 @@ export class GitHubSourceStore {
           // A closed issue is imported, as Done, only by a Done-mode source on a complete read.
           const importClosed =
             config.closedIssues === "done" && snapshot.complete;
-          if (issue.state === "closed" && !importClosed) continue;
+          if (issue.state === "closed" && !importClosed) {
+            skipped.add(issue.nodeId);
+            continue;
+          }
           taskId = randomUUID();
           this.db
             .prepare(
@@ -817,9 +843,24 @@ export class GitHubSourceStore {
             .run(String(issue.taskId));
         }
       }
+      // A complete read replaces the skipped issues; a partial read adds to them, as it
+      // adds memberships without pruning.
+      if (!snapshot.complete) {
+        const stored = this.db
+          .prepare(
+            "SELECT skippedClosedNodeIds FROM github_sync_state WHERE projectId = ? AND selectionId = ?",
+          )
+          .get(projectId, selectionId) as Row | undefined;
+        const prior = z
+          .array(z.string())
+          .parse(
+            JSON.parse(String(stored?.skippedClosedNodeIds ?? "[]")) as unknown,
+          );
+        for (const id of prior) skipped.add(id);
+      }
       this.db
         .prepare(
-          "INSERT INTO github_sync_state (projectId, selectionId, complete, reason, refreshedAt) VALUES (?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET complete = excluded.complete, reason = excluded.reason, refreshedAt = excluded.refreshedAt",
+          "INSERT INTO github_sync_state (projectId, selectionId, complete, reason, refreshedAt, skippedClosedNodeIds) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(projectId, selectionId) DO UPDATE SET complete = excluded.complete, reason = excluded.reason, refreshedAt = excluded.refreshedAt, skippedClosedNodeIds = excluded.skippedClosedNodeIds",
         )
         .run(
           projectId,
@@ -827,6 +868,7 @@ export class GitHubSourceStore {
           Number(snapshot.complete),
           snapshot.reason,
           new Date().toISOString(),
+          JSON.stringify([...skipped]),
         );
       if (
         previousSync &&
@@ -968,7 +1010,7 @@ export class GitHubSourceStore {
       .get(taskId) as Row;
     const config = this.db
       .prepare(
-        "SELECT readiness, closedIssues FROM project_github_sources WHERE projectId = ?",
+        "SELECT closedIssues FROM project_github_sources WHERE projectId = ?",
       )
       .get(String(external.projectId)) as Row;
     const nodeId = String(external.nodeId);
@@ -987,36 +1029,13 @@ export class GitHubSourceStore {
         )
         .run(taskId);
     }
-    const rule = readinessSchema.parse(
-      JSON.parse(String(config.readiness)) as unknown,
-    );
-    const memberships = this.db
-      .prepare(
-        "SELECT projectFields FROM github_memberships WHERE nodeId = ? AND projectId = ?",
-      )
-      .all(String(external.nodeId), String(external.projectId)) as Row[];
-    const fields = memberships.flatMap((row) =>
-      projectFieldsSchema.parse(JSON.parse(String(row.projectFields))),
-    );
-    const labels = z
-      .array(z.string())
-      .parse(JSON.parse(String(external.labels)) as unknown);
-    const satisfied = rule.conditions.map((condition) =>
-      condition.kind === "label"
-        ? labels.includes(condition.name)
-        : fields.some(
-            (field) =>
-              field.projectNodeId === condition.projectNodeId &&
-              field.fieldNodeId === condition.fieldNodeId &&
-              field.optionNodeId === condition.optionNodeId,
-          ),
-    );
+    const facts = this.readinessFacts(external);
+    const memberships = facts.memberships;
     const ready =
-      memberships.length > 0 &&
+      memberships > 0 &&
       external.observedState === "open" &&
-      (rule.mode === "all"
-        ? satisfied.every(Boolean)
-        : satisfied.some(Boolean));
+      evaluateReadiness(this.readinessRule(String(external.projectId)), facts)
+        .satisfied;
     const row = this.db
       .prepare("SELECT ready, state FROM domain_tasks WHERE id = ?")
       .get(taskId) as Row;
@@ -1048,7 +1067,7 @@ export class GitHubSourceStore {
         String(external.nodeId),
         external.observedState === "closed"
           ? "closed"
-          : memberships.length === 0
+          : memberships === 0
             ? "withdrawn"
             : "readiness-lost",
       );
@@ -1058,6 +1077,192 @@ export class GitHubSourceStore {
           "UPDATE domain_tasks SET ready = ?, version = version + 1 WHERE id = ?",
         )
         .run(Number(ready), taskId);
+  }
+
+  /** The stored readiness rule; `null` filters nothing. */
+  readinessRule(projectId: string): Readiness | null {
+    const row = this.db
+      .prepare(
+        "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+      )
+      .get(projectId) as Row | undefined;
+    return row ? parseRule(row.readiness) : null;
+  }
+
+  /** One issue's labels and the Project fields of its memberships in its task's project. */
+  private readinessFacts(external: Row) {
+    const rows = this.db
+      .prepare(
+        "SELECT projectFields FROM github_memberships WHERE nodeId = ? AND projectId = ?",
+      )
+      .all(String(external.nodeId), String(external.projectId)) as Row[];
+    return {
+      memberships: rows.length,
+      labels: z
+        .array(z.string())
+        .parse(JSON.parse(String(external.labels)) as unknown),
+      fields: rows.flatMap((row) =>
+        projectFieldsSchema.parse(JSON.parse(String(row.projectFields))),
+      ),
+    };
+  }
+
+  /**
+   * Read-only counts per read selection of a project, from stored observations, in a
+   * fixed number of queries. Never a readiness grant: matching is not Ready or admissible.
+   */
+  selectionCounts(projectId: string): Map<
+    string,
+    {
+      observed: number;
+      open: number;
+      closedSkipped: number;
+      /** `null` while a member's stored Ready flag predates the current rule. */
+      matching: number | null;
+      complete: boolean;
+    }
+  > {
+    const states = this.db
+      .prepare(
+        "SELECT selectionId, complete, skippedClosedNodeIds FROM github_sync_state WHERE projectId = ?",
+      )
+      .all(projectId) as Row[];
+    const rows = this.db
+      .prepare(`SELECT m.selectionId, m.nodeId, m.projectFields, e.observedState, e.labels,
+        t.ready, t.projectId AS taskProjectId
+        FROM github_memberships m JOIN github_external_issues e ON e.nodeId = m.nodeId
+        JOIN domain_tasks t ON t.id = e.taskId
+        WHERE m.projectId = ?`)
+      .all(projectId) as Row[];
+    const rule = this.readinessRule(projectId);
+    // Each issue's fields from every membership in the project, as `readinessFacts` reads them.
+    const fields = new Map<string, z.output<typeof projectFieldsSchema>>();
+    for (const r of rows)
+      fields.set(String(r.nodeId), [
+        ...(fields.get(String(r.nodeId)) ?? []),
+        ...projectFieldsSchema.parse(JSON.parse(String(r.projectFields))),
+      ]);
+    const matches = new Map<string, boolean>();
+    const matching = (r: Row) => {
+      const nodeId = String(r.nodeId);
+      if (!matches.has(nodeId))
+        matches.set(
+          nodeId,
+          evaluateReadiness(rule, {
+            labels: z
+              .array(z.string())
+              .parse(JSON.parse(String(r.labels)) as unknown),
+            fields: fields.get(nodeId) ?? [],
+          }).satisfied,
+        );
+      return matches.get(nodeId) === true;
+    };
+    return new Map(
+      states.map((sync) => {
+        const members = rows.filter((r) => r.selectionId === sync.selectionId);
+        const memberIds = new Set(members.map((r) => String(r.nodeId)));
+        // An issue imported since it was skipped (reopened on a partial read) counts once.
+        const closedSkipped = z
+          .array(z.string())
+          .parse(JSON.parse(String(sync.skippedClosedNodeIds)) as unknown)
+          .filter((id) => !memberIds.has(id)).length;
+        const open = members.filter((r) => r.observedState === "open");
+        // A rule change re-evaluates Ready only on the next read; claim no match until then.
+        const stale = open.some(
+          (r) =>
+            r.taskProjectId === projectId &&
+            matching(r) !== (Number(r.ready) === 1),
+        );
+        return [
+          String(sync.selectionId),
+          {
+            observed: members.length + closedSkipped,
+            open: open.length,
+            closedSkipped,
+            matching: stale ? null : open.filter(matching).length,
+            complete: Number(sync.complete) === 1,
+          },
+        ];
+      }),
+    );
+  }
+
+  /**
+   * Why an imported task is or is not Draft under the rule; `null` for a local task.
+   * `not-evaluated` covers closed and withdrawn issues.
+   */
+  taskReadiness(taskId: string) {
+    const r = this.readinessByTask([taskId]).get(taskId);
+    return r ? { outcome: r.outcome, unmet: r.unmet } : null;
+  }
+
+  /**
+   * `taskReadiness` for many imported tasks in a fixed number of queries, with each
+   * task's project rule. Local tasks are absent.
+   */
+  readinessByTask(taskIds: readonly string[]): Map<string, TaskReadiness> {
+    const ids = JSON.stringify(taskIds);
+    const externals = this.db
+      .prepare(`SELECT e.taskId, e.nodeId, e.labels, e.observedState, t.projectId, t.ready
+        FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId
+        WHERE e.taskId IN (SELECT value FROM json_each(?))`)
+      .all(ids) as Row[];
+    const memberships = this.db
+      .prepare(`SELECT m.nodeId, m.projectId, m.projectFields FROM github_memberships m
+        JOIN github_external_issues e ON e.nodeId = m.nodeId
+        WHERE e.taskId IN (SELECT value FROM json_each(?))`)
+      .all(ids) as Row[];
+    const rules = new Map(
+      (
+        this.db
+          .prepare(`SELECT projectId, readiness FROM project_github_sources
+          WHERE projectId IN (SELECT DISTINCT t.projectId FROM domain_tasks t
+            WHERE t.id IN (SELECT value FROM json_each(?)))`)
+          .all(ids) as Row[]
+      ).map((row) => [String(row.projectId), parseRule(row.readiness)]),
+    );
+    // The facts `readinessFacts` reads: memberships in the task's project.
+    const byIssue = new Map<string, Row[]>();
+    for (const m of memberships) {
+      const key = `${String(m.projectId)}\0${String(m.nodeId)}`;
+      byIssue.set(key, [...(byIssue.get(key) ?? []), m]);
+    }
+    return new Map(
+      externals.map((external): [string, TaskReadiness] => {
+        const projectId = String(external.projectId),
+          rule = rules.get(projectId) ?? null;
+        const own =
+          byIssue.get(`${projectId}\0${String(external.nodeId)}`) ?? [];
+        const notEvaluated: TaskReadiness = {
+          rule,
+          outcome: "not-evaluated",
+          unmet: [],
+        };
+        if (external.observedState !== "open" || own.length === 0)
+          return [String(external.taskId), notEvaluated];
+        const result = evaluateReadiness(rule, {
+          labels: z
+            .array(z.string())
+            .parse(JSON.parse(String(external.labels)) as unknown),
+          fields: own.flatMap((m) =>
+            projectFieldsSchema.parse(JSON.parse(String(m.projectFields))),
+          ),
+        });
+        // Until the next read re-evaluates Ready under a changed rule, explain nothing.
+        if (result.satisfied !== (Number(external.ready) === 1))
+          return [String(external.taskId), notEvaluated];
+        return [
+          String(external.taskId),
+          result.satisfied
+            ? { rule, outcome: "matched" as const, unmet: [] }
+            : {
+                rule,
+                outcome: "unmet" as const,
+                unmet: result.unmet,
+              },
+        ];
+      }),
+    );
   }
 
   private setSourceHold(nodeId: string, reason: string): void {

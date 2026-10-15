@@ -177,6 +177,33 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     line({ task: { state: "open", ready: false } }),
     "Draft / Accountable project lead: Mira",
   );
+  const rule = {
+    kind: "rule",
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  };
+  assert.equal(
+    line({
+      task: { state: "open", ready: false },
+      source: {
+        closure: null,
+        readiness: {
+          rule,
+          outcome: "unmet",
+          unmet: [{ kind: "label", name: "ready" }],
+        },
+      },
+    }),
+    "Draft · missing label `ready` / Accountable project lead: Mira",
+  );
+  for (const outcome of ["matched", "not-evaluated"])
+    assert.equal(
+      line({
+        task: { state: "open", ready: false },
+        source: { closure: null, readiness: { rule, outcome, unmet: [] } },
+      }),
+      "Draft / Accountable project lead: Mira",
+    );
   assert.equal(
     line({
       admission: { reasons: ["imported-blockers-blocked"] },

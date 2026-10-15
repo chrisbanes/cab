@@ -1,3 +1,4 @@
+import { unmetReason } from "../../src/operator/readiness-text.js";
 import {
   taskListPageSchema,
   uuid,
@@ -175,7 +176,11 @@ export function taskReasons(task: TaskListSummary) {
     ...(terminal ? [] : task.admission.reasons)
       // A closure-held task is Paused, never Draft.
       .filter((r) => !(r === "task-unready" && task.source?.closure === "held"))
-      .map((r) => reasonLabels[r] ?? "Waiting to start"),
+      .map((r) =>
+        r === "task-unready"
+          ? (unmetReason(task.source?.readiness) ?? reasonLabels[r])
+          : (reasonLabels[r] ?? "Waiting to start"),
+      ),
   ];
   if (task.source?.closure === "held") reasons.unshift("Closed on GitHub");
   if (task.source?.closure === "completed")

@@ -1,3 +1,7 @@
+import {
+  selectionCountsText,
+  zeroMatchWarning,
+} from "../operator/readiness-text.js";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
@@ -64,14 +68,12 @@ const sourceCredentialReasons: SourceCredentialReason[] = [
   "gh-unreadable",
 ];
 
-const readObservations = (client: ServiceClient, projectId: string) =>
+const readObservedProject = (client: ServiceClient, projectId: string) =>
   client
     .get(`${API}/source-observations`, sourceObservationSchema)
-    .then(
-      (r) =>
-        r.data.projects.find((p) => p.projectId === projectId)?.selections ??
-        [],
-    );
+    .then((r) => r.data.projects.find((p) => p.projectId === projectId));
+const readObservations = (client: ServiceClient, projectId: string) =>
+  readObservedProject(client, projectId).then((p) => p?.selections ?? []);
 
 const requireWriteScope = (session: Session) => {
   if (session.identity.credential.scope !== "read-write")
@@ -94,7 +96,9 @@ const sourcesCommand: BrowseCommand = {
     const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
     const client = await ctx.connect();
     const read = await readProject(client, id);
-    const observations = await readObservations(client, id);
+    const project = await readObservedProject(client, id);
+    const observations = project?.selections ?? [];
+    const rule = project?.readiness ?? { kind: "unavailable" as const };
     const { source, placements } = read.data;
     const observed = (selectionId: string | null) =>
       observations.find((o) => o.selectionId === selectionId);
@@ -110,7 +114,13 @@ const sourcesCommand: BrowseCommand = {
     if (observations.some((o) => o.state === "unavailable"))
       gaps.push("redaction-unavailable");
     return browseOutput(ctx, {
-      data: { projectId: id, source, placements, observations },
+      data: {
+        projectId: id,
+        source,
+        placements,
+        observations,
+        readinessRule: rule,
+      },
       observedAt: read.observedAt,
       gaps,
       human: [
@@ -164,6 +174,7 @@ const sourcesCommand: BrowseCommand = {
                 "Active",
                 "Observed",
                 "Last success",
+                "Items",
               ],
               source.selections.map((s) => {
                 const o = observed(s.id);
@@ -178,10 +189,19 @@ const sourcesCommand: BrowseCommand = {
                     ? `${o.state}${o.lastAttemptAt ? ` ${o.lastAttemptAt}` : ""}`
                     : "-",
                   o?.lastSuccessfulAt ?? "-",
+                  o?.counts ? selectionCountsText(o.counts, rule) : "-",
                 ];
               }),
             )
           : "No selections.",
+        ...observations.flatMap((o) => {
+          const warning = zeroMatchWarning(o.counts, rule);
+          return warning
+            ? [
+                `${unavailable(o.selectionId)}: ${warning} Change readiness with 'ensemble project prepare-source'.`,
+              ]
+            : [];
+        }),
         "",
         source.repositories.length
           ? table(

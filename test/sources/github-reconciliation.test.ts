@@ -4,8 +4,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
+import { evaluateReadiness } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
@@ -784,5 +785,466 @@ test("manual state changes never carry a provider-completion record", () => {
     assert.equal(w.completion(taskId), false);
   } finally {
     w.close();
+  }
+});
+
+function readinessFixture(
+  readiness: {
+    mode: "all" | "any";
+    conditions: (
+      | { kind: "label"; name: string }
+      | {
+          kind: "project-field";
+          projectNodeId: string;
+          fieldNodeId: string;
+          optionNodeId: string;
+        }
+    )[];
+  },
+  selectionIds = ["repo"],
+) {
+  const db = new DatabaseSync(":memory:");
+  new Store(db).ensureHost("test");
+  const domain = new DomainStore(db);
+  domain.migrate();
+  const sources = new GitHubSourceStore(db);
+  sources.migrate();
+  const projectId = randomUUID();
+  domain.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Alpha",
+    leadProfileId: null,
+  });
+  domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "env:TEST_GITHUB",
+    selections: selectionIds.map((id) => ({
+      id,
+      kind: "search" as const,
+      query: `repo:org/${id}`,
+    })),
+    readiness,
+    repositories: [],
+  });
+  for (const selectionId of selectionIds)
+    domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId,
+      expectedVersion: 2,
+    });
+  const at = (nodeId: string, patch: Partial<IssueSnapshot> = {}) => ({
+    ...issue,
+    nodeId,
+    number: Number(nodeId.replace(/\D/g, "")) || 1,
+    projectFields: [],
+    ...patch,
+  });
+  const read = (
+    selectionId: string,
+    issues: IssueSnapshot[],
+    complete = true,
+  ) =>
+    sources.reconcileSelection(
+      projectId,
+      selectionId,
+      complete
+        ? { complete: true, issues, reason: null }
+        : { complete: false, issues, reason: "rate-limited" },
+    );
+  const task = (nodeId: string) => String(sources.issue(nodeId)?.taskId);
+  return { db, domain, sources, projectId, at, read, task };
+}
+
+test("selection counts come from stored observations, with skipped closed issues observed but not imported", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    f.read("repo", [
+      f.at("I_1"),
+      f.at("I_2", { labels: [] }),
+      f.at("I_3", { state: "closed" }),
+    ]);
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
+      observed: 3,
+      open: 2,
+      closedSkipped: 1,
+      matching: 1,
+      complete: true,
+    });
+    assert.equal(f.sources.issue("I_3"), undefined);
+    // Reopened: imported on this read and recounted, never incremented.
+    f.read("repo", [f.at("I_1"), f.at("I_2", { labels: [] }), f.at("I_3")]);
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
+      observed: 3,
+      open: 3,
+      closedSkipped: 0,
+      matching: 2,
+      complete: true,
+    });
+    // Closed after import: the membership stays observed.
+    f.read("repo", [
+      f.at("I_1", { state: "closed" }),
+      f.at("I_2", { labels: [] }),
+      f.at("I_3"),
+    ]);
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
+      observed: 3,
+      open: 2,
+      closedSkipped: 0,
+      matching: 1,
+      complete: true,
+    });
+  } finally {
+    f.db.close();
+  }
+});
+
+test("partial reads keep memberships and skipped issues; zero match and never-read selections", () => {
+  const f = readinessFixture(
+    { mode: "all", conditions: [{ kind: "label", name: "nope" }] },
+    ["repo", "other"],
+  );
+  try {
+    assert.equal(f.sources.selectionCounts(f.projectId).get("repo"), undefined);
+    f.read("repo", [
+      f.at("I_1"),
+      f.at("I_2"),
+      f.at("I_9", { state: "closed" }),
+    ]);
+    f.read("repo", [f.at("I_8", { state: "closed" })], false);
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
+      observed: 4,
+      open: 2,
+      closedSkipped: 2,
+      matching: 0,
+      complete: false,
+    });
+    // One issue in two selections counts once in each and is one task.
+    f.read("other", [f.at("I_1")]);
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("other")?.observed,
+      1,
+    );
+    assert.equal(f.domain.tasks(f.projectId).length, 2);
+  } finally {
+    f.db.close();
+  }
+});
+
+test("task readiness names unmet conditions and agrees with the stored Ready flag", () => {
+  const field = {
+    kind: "project-field" as const,
+    projectNodeId: "P_1",
+    fieldNodeId: "F_1",
+    optionNodeId: "O_1",
+  };
+  const all = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "a" }, field],
+  });
+  const any = readinessFixture({
+    mode: "any",
+    conditions: [{ kind: "label", name: "a" }, field],
+  });
+  try {
+    const fields = [
+      { projectNodeId: "P_1", fieldNodeId: "F_1", optionNodeId: "O_1" },
+    ];
+    all.read("repo", [
+      all.at("I_1", { labels: [], projectFields: fields }),
+      all.at("I_2", { labels: ["a"], projectFields: fields }),
+      all.at("I_3", { labels: ["a"] }),
+      all.at("I_4", { labels: [] }),
+    ]);
+    assert.deepEqual(all.sources.taskReadiness(all.task("I_1")), {
+      outcome: "unmet",
+      unmet: [{ kind: "label", name: "a" }],
+    });
+    assert.deepEqual(all.sources.taskReadiness(all.task("I_2")), {
+      outcome: "matched",
+      unmet: [],
+    });
+    // Closed, then withdrawn (pruned by a complete read): not evaluated.
+    all.read("repo", [
+      all.at("I_1", { labels: [], projectFields: fields }),
+      all.at("I_2", { labels: ["a"], projectFields: fields }),
+      all.at("I_3", { labels: ["a"], state: "closed" }),
+    ]);
+    for (const nodeId of ["I_3", "I_4"])
+      assert.deepEqual(all.sources.taskReadiness(all.task(nodeId)), {
+        outcome: "not-evaluated",
+        unmet: [],
+      });
+    any.read("repo", [
+      any.at("I_1", { labels: [] }),
+      any.at("I_2", { labels: [], projectFields: fields }),
+    ]);
+    assert.deepEqual(any.sources.taskReadiness(any.task("I_1")), {
+      outcome: "unmet",
+      unmet: [{ kind: "label", name: "a" }, field],
+    });
+    assert.equal(
+      any.sources.taskReadiness(any.task("I_2"))?.outcome,
+      "matched",
+    );
+    for (const f of [all, any])
+      for (const task of f.domain.tasks(f.projectId))
+        assert.equal(
+          f.sources.taskReadiness(String(task.id))?.outcome === "matched",
+          Number(task.ready) === 1,
+        );
+    assert.equal(all.sources.taskReadiness(randomUUID()), null);
+  } finally {
+    all.db.close();
+    any.db.close();
+  }
+});
+
+test("the readiness predicate filters nothing without a rule and follows all/any modes", () => {
+  const label = (name: string) => ({ kind: "label" as const, name });
+  const facts = { labels: ["a"], fields: [] };
+  assert.deepEqual(evaluateReadiness(null, facts), {
+    satisfied: true,
+    unmet: [],
+  });
+  assert.deepEqual(
+    evaluateReadiness(
+      { mode: "all", conditions: [label("a"), label("b")] },
+      facts,
+    ),
+    { satisfied: false, unmet: [label("b")] },
+  );
+  assert.equal(
+    evaluateReadiness(
+      { mode: "any", conditions: [label("a"), label("b")] },
+      facts,
+    ).satisfied,
+    true,
+  );
+  assert.deepEqual(
+    evaluateReadiness(
+      { mode: "any", conditions: [label("b"), label("c")] },
+      facts,
+    ),
+    { satisfied: false, unmet: [label("b"), label("c")] },
+  );
+});
+
+test("migration adds the skipped closed issues to existing sync state rows", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    new Store(db).ensureHost("test");
+    new DomainStore(db).migrate();
+    db.exec(`CREATE TABLE github_sync_state (
+      projectId TEXT NOT NULL, selectionId TEXT NOT NULL,
+      complete INTEGER NOT NULL, reason TEXT, refreshedAt TEXT NOT NULL,
+      PRIMARY KEY(projectId, selectionId));
+      INSERT INTO github_sync_state VALUES ('p', 's', 1, NULL, 'then');`);
+    new GitHubSourceStore(db).migrate();
+    assert.deepEqual(
+      { ...db.prepare("SELECT * FROM github_sync_state").get() },
+      {
+        projectId: "p",
+        selectionId: "s",
+        complete: 1,
+        reason: null,
+        refreshedAt: "then",
+        skippedClosedNodeIds: "[]",
+      },
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("matching counts a Project field from another selection's membership, as Ready does", () => {
+  const f = readinessFixture(
+    {
+      mode: "all",
+      conditions: [
+        {
+          kind: "project-field",
+          projectNodeId: "P_1",
+          fieldNodeId: "F_1",
+          optionNodeId: "O_1",
+        },
+      ],
+    },
+    ["repo", "board"],
+  );
+  try {
+    f.read("repo", [f.at("I_1")]);
+    f.read("board", [
+      f.at("I_1", {
+        projectFields: [
+          { projectNodeId: "P_1", fieldNodeId: "F_1", optionNodeId: "O_1" },
+        ],
+      }),
+    ]);
+    assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
+    for (const selectionId of ["repo", "board"])
+      assert.equal(
+        f.sources.selectionCounts(f.projectId).get(selectionId)?.matching,
+        1,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("an issue skipped closed and imported on a later partial read counts once", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    f.read("repo", [f.at("I_1"), f.at("I_2", { state: "closed" })]);
+    f.read("repo", [f.at("I_2")], false);
+    assert.deepEqual(f.sources.selectionCounts(f.projectId).get("repo"), {
+      observed: 2,
+      open: 2,
+      closedSkipped: 0,
+      matching: 2,
+      complete: false,
+    });
+  } finally {
+    f.db.close();
+  }
+});
+
+test("selection counts use a fixed number of queries however many items are stored", () => {
+  const f = readinessFixture(
+    { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    ["repo", "other"],
+  );
+  try {
+    const issues = Array.from({ length: 40 }, (_, i) =>
+      f.at(`I_${i + 1}`, { labels: i % 2 ? [] : ["ready"] }),
+    );
+    f.read("repo", issues);
+    f.read("other", issues.slice(0, 20));
+    const prepare = mock.method(f.db, "prepare");
+    const counts = f.sources.selectionCounts(f.projectId);
+    assert.equal(prepare.mock.callCount(), 3);
+    prepare.mock.restore();
+    assert.equal(counts.get("repo")?.matching, 20);
+    assert.equal(counts.get("other")?.matching, 10);
+    const tasks = f.domain.tasks(f.projectId).map((t) => String(t.id));
+    const batch = mock.method(f.db, "prepare");
+    const readiness = f.sources.readinessByTask(tasks);
+    assert.equal(batch.mock.callCount(), 3);
+    batch.mock.restore();
+    assert.equal(readiness.size, 40);
+    for (const task of f.domain.tasks(f.projectId)) {
+      const r = readiness.get(String(task.id));
+      assert.equal(r?.outcome === "matched", Number(task.ready) === 1);
+    }
+  } finally {
+    f.db.close();
+  }
+});
+
+test("after a rule change and before the next read, explanations never disagree with Ready", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    f.read("repo", [f.at("I_1"), f.at("I_2", { labels: ["next"] })]);
+    f.domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [{ id: "repo", keep: true }],
+      readiness: { mode: "all", conditions: [{ kind: "label", name: "next" }] },
+      repositories: [],
+    });
+    // Ready still reflects the old rule: I_1 Ready, I_2 Draft.
+    assert.equal(Number(f.domain.task(f.task("I_1")).ready), 1);
+    for (const nodeId of ["I_1", "I_2"])
+      assert.deepEqual(f.sources.taskReadiness(f.task(nodeId)), {
+        outcome: "not-evaluated",
+        unmet: [],
+      });
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      null,
+    );
+    f.domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      selectionId: "repo",
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+    });
+    f.read("repo", [f.at("I_1"), f.at("I_2", { labels: ["next"] })]);
+    assert.equal(f.sources.taskReadiness(f.task("I_2"))?.outcome, "matched");
+    assert.deepEqual(f.sources.taskReadiness(f.task("I_1")), {
+      outcome: "unmet",
+      unmet: [{ kind: "label", name: "next" }],
+    });
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      1,
+    );
+    for (const task of f.domain.tasks(f.projectId))
+      assert.equal(
+        f.sources.taskReadiness(String(task.id))?.outcome === "matched",
+        Number(task.ready) === 1,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("a partial read adds the closed issues it skips; a complete read replaces them", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    const counts = () => f.sources.selectionCounts(f.projectId).get("repo");
+    f.read("repo", [f.at("I_1", { state: "closed" })], false);
+    assert.equal(counts()?.observed, 1);
+    assert.equal(counts()?.closedSkipped, 1);
+    // I_1 reopens on this partial read: imported, and counted once.
+    f.read(
+      "repo",
+      [f.at("I_1"), f.at("I_2"), f.at("I_3", { state: "closed" })],
+      false,
+    );
+    assert.deepEqual(counts(), {
+      observed: 3,
+      open: 2,
+      closedSkipped: 1,
+      matching: 2,
+      complete: false,
+    });
+    f.read("repo", [f.at("I_2"), f.at("I_4", { state: "closed" })]);
+    assert.deepEqual(counts(), {
+      observed: 2,
+      open: 1,
+      closedSkipped: 1,
+      matching: 1,
+      complete: true,
+    });
+  } finally {
+    f.db.close();
   }
 });

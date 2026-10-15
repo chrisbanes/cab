@@ -25,6 +25,7 @@ import {
 import {
   holdPills,
   projectStateSummary,
+  readinessNextStep,
   joinNames,
   activationLine,
   savedLine,
@@ -716,4 +717,65 @@ test("the activation line claims only a confirmed preview at the loaded source v
     `Activated S-1. ${next}`,
   );
   assert.equal(activation(false)?.refresh, true);
+});
+
+test("the phone summary appends stored counts and points to readiness when nothing matches", () => {
+  const c = config();
+  const observations = (
+    counts: {
+      observed: number;
+      open: number;
+      closedSkipped: number;
+      matching: number | null;
+      complete: boolean;
+    } | null,
+  ) => ({
+    projects: [
+      {
+        projectId,
+        readiness: {
+          kind: "rule" as const,
+          mode: "all" as const,
+          conditions: [{ kind: "label" as const, name: "ready" }],
+        },
+        selections: [
+          {
+            selectionId: "S-1",
+            state:
+              counts?.complete === false
+                ? ("partial" as const)
+                : ("complete" as const),
+            lastAttemptAt: null,
+            lastSuccessfulAt: null,
+            counts,
+          },
+        ],
+      },
+    ],
+  });
+  const zero = {
+    observed: 3,
+    open: 3,
+    closedSkipped: 0,
+    matching: 0,
+    complete: true,
+  };
+  const warned = projectStateSummary(c, observations(zero), []);
+  assert.equal(
+    warned.state[1],
+    "GitHub S-1 active · synced · 3 observed · 3 open · 0 match label `ready`",
+  );
+  assert.equal(warned.next, readinessNextStep);
+  const partial = projectStateSummary(
+    c,
+    observations({ ...zero, complete: false }),
+    [],
+  );
+  assert.match(
+    partial.state[1] ?? "",
+    /partial read; counts may be incomplete$/,
+  );
+  assert.equal(partial.next, "Nothing needs attention here.");
+  const none = projectStateSummary(c, observations(null), []);
+  assert.equal(none.state[1], "GitHub S-1 active · synced");
 });

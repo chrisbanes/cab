@@ -639,7 +639,9 @@ export function App() {
     (p) => p.id === projectId,
   );
   const unknownRoute = !knownRoute(pathname);
-  const query = path.includes("?") ? path.slice(path.indexOf("?")) : "";
+  // A fragment (#source-readiness) is not part of the query.
+  const search = path.split("#")[0] ?? "",
+    query = search.includes("?") ? search.slice(search.indexOf("?")) : "";
   const settingsPage = unknownRoute
     ? null
     : settingsHeader(pathname, query, workspace.state.data);

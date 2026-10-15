@@ -34,7 +34,7 @@ export const selectionSchema = z.discriminatedUnion("kind", [
     .strict(),
 ]);
 
-const conditionSchema = z.discriminatedUnion("kind", [
+export const readinessConditionSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("label"), name: nonempty }).strict(),
   z
     .object({
@@ -49,9 +49,39 @@ const conditionSchema = z.discriminatedUnion("kind", [
 export const readinessSchema = z
   .object({
     mode: z.enum(["all", "any"]),
-    conditions: z.array(conditionSchema).min(1).max(20),
+    conditions: z.array(readinessConditionSchema).min(1).max(20),
   })
   .strict();
+export type Readiness = z.output<typeof readinessSchema>;
+export type ReadinessCondition = z.output<typeof readinessConditionSchema>;
+type ProjectField = z.output<typeof projectFieldsSchema>[number];
+
+/**
+ * The readiness predicate over one issue's labels and Project fields. A `null` rule
+ * filters nothing. `unmet` lists the unsatisfied conditions (all) or, when none is
+ * satisfied, every condition (any).
+ */
+export function evaluateReadiness(
+  rule: Readiness | null,
+  facts: { labels: readonly string[]; fields: readonly ProjectField[] },
+): { satisfied: boolean; unmet: ReadinessCondition[] } {
+  if (!rule) return { satisfied: true, unmet: [] };
+  const unmet = rule.conditions.filter((c) =>
+    c.kind === "label"
+      ? !facts.labels.includes(c.name)
+      : !facts.fields.some(
+          (f) =>
+            f.projectNodeId === c.projectNodeId &&
+            f.fieldNodeId === c.fieldNodeId &&
+            f.optionNodeId === c.optionNodeId,
+        ),
+  );
+  const satisfied =
+    rule.mode === "all"
+      ? unmet.length === 0
+      : unmet.length < rule.conditions.length;
+  return { satisfied, unmet: satisfied ? [] : unmet };
+}
 
 /** How a GitHub source treats issues closed on GitHub. */
 export const closedIssuesSchema = z.enum(["skip", "done"]);

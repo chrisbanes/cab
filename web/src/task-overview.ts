@@ -1,4 +1,5 @@
 import type { TaskRead } from "../../src/operator/contracts.js";
+import { unmetText } from "../../src/operator/readiness-text.js";
 import { waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 
@@ -101,6 +102,7 @@ export function taskStatusLine(
         : null;
   const active =
     execution.state === "running" || execution.state === "starting";
+  const unmet = unmetText(data.source?.readiness);
   // The Board puts a paused project's tasks under Paused before Draft or Ready.
   const paused =
     execution.state === "paused" ||
@@ -121,7 +123,9 @@ export function taskStatusLine(
             : paused
               ? `${task.ready ? "Ready" : "Draft"} · project paused`
               : !task.ready
-                ? "Draft"
+                ? unmet
+                  ? `Draft · ${unmet}`
+                  : "Draft"
                 : blocker
                   ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
                   : reason
