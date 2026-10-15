@@ -15,9 +15,11 @@ waits, led by the reason to clear first and a link that fixes it.
 
 ## Steps
 
-1. Composer opens with the project selected. Before submission it states "Starts
-   now." or "It will wait: <reason>", using the same reasons and order as step 3
-   for the project, the chosen dependencies and the explicit assignee's runtime.
+1. Composer opens with the project selected. Before submission its "If you create
+   it now" panel says "Starts now" or "Will wait" with numbered reasons, using the
+   same reasons and order as step 3 for the project, the chosen dependencies and
+   the explicit assignee's runtime; the sticky bar repeats the verdict beside
+   **Create and start** and **Save draft**.
 2. **Create and start** shows "Task created." with **Open task**, the execution state
    and the same wait reasons, the first with its Fix.
 3. Task detail shows the current state. A waiting task shows its reasons in the
