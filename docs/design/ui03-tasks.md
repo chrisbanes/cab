@@ -10,11 +10,13 @@ their retained destinations.
 The [operator interface requirements](../SPEC.md#operator-interface-and-human-requests)
 call for evidence-backed next actors, separate attention and work state, and
 progressive composer disclosure; the [design handoff](../../design/DESIGN.md)
-records the static design and the implemented differences. The composer shows
-one Optional settings disclosure (context, reference links, assignee and
-dependencies) whose collapsed summary lists supplied values or the error count,
-beside an "Inherited from <project>" panel. The board mapping and
-command/admission contracts are unchanged by them.
+records the static design and the implemented differences. The composer leads
+with project, title and outcome; one Optional settings panel (context, reference
+links, assignee and dependencies) shows a chip per supplied value or the error
+count when collapsed. Beside the fields, "If you create it now" says Starts now
+or Will wait with numbered reasons, above an "Inherited from <project>" panel,
+and a sticky bar separates on-device input from Save draft and Create and start.
+The board mapping and command/admission contracts are unchanged by the composer.
 
 ## Creation and admission
 

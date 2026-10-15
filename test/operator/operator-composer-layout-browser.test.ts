@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chromium, type Browser, type Page } from "playwright";
+import {
+  chromium,
+  webkit,
+  type Browser,
+  type Locator,
+  type Page,
+} from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -66,7 +72,13 @@ async function open(
 const noHorizontalScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
-test("Composer shows the inherited panel, one Optional settings row and fixed actions", async (_t, j) => {
+const savedOnDevice =
+  "Unfinished input saved on this device · not yet an Ensemble draft";
+
+const box = async (page: Page, label: string) =>
+  (await page.getByLabel(label, { exact: true }).boundingBox())!;
+
+test("Composer shows the inherited panel, one Optional settings panel and the sticky bar", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -80,7 +92,7 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
-    viewport: { width: 1366, height: 820 },
+    viewport: { width: 1366, height: 900 },
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
@@ -93,8 +105,9 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
       commands++;
   });
   await open(page, web.origin, web.password, projectId);
+  assert.equal(await page.getByText(/Unfinished input saved/).count(), 0);
 
-  // (a) Heading, subtitle and the inherited panel to the right; no private instructions.
+  // (a) Heading, subtitle and the panels to the right; no private instructions.
   assert.equal(
     await page.locator("main.page h1").textContent(),
     "Create a task",
@@ -104,21 +117,31 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
       "Describe the result you want. The project lead stays accountable.",
     )
     .waitFor();
-  const panel = page.getByRole("complementary", {
-    name: "Inherited from Atlas",
-  });
+  const aside = page.getByRole("complementary", { name: "Before you create" });
+  const panel = aside.getByRole("region", { name: "Inherited from Atlas" });
   await panel.getByText("Mira", { exact: true }).waitFor();
   await panel.getByText(/^Capacity: \d+\/\d+ project/).waitFor();
-  await panel.getByText("Created ≠ running").waitFor();
+  await aside
+    .getByRole("region", { name: "If you create it now" })
+    .getByText(/^Created ≠ running\./)
+    .waitFor();
   assert.equal(
     await panel
       .getByRole("link", { name: "View project instructions" })
       .getAttribute("href"),
     `/app/projects/${projectId}/settings`,
   );
-  const panelBox = (await panel.boundingBox())!,
-    titleBox = (await page.getByLabel("Task title").boundingBox())!;
-  assert.ok(panelBox.x >= titleBox.x + titleBox.width, "panel is to the right");
+  const asideBox = (await aside.boundingBox())!,
+    outcomeBox = await box(page, "Desired outcome");
+  assert.ok(
+    asideBox.x >= outcomeBox.x + outcomeBox.width,
+    "panels are to the right",
+  );
+  assert.equal(
+    (await page.locator("body").innerText()).match(/attach/i),
+    null,
+    "no attachment hint",
+  );
   assert.ok(
     !(await page.locator("body").innerText()).includes(
       "PRIVATE COMPOSER INSTRUCTIONS",
@@ -148,11 +171,23 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
   await summary.focus();
   await page.keyboard.press("Space");
   await page.getByText("Optional settings · 4 supplied").waitFor();
-  await page
-    .getByText("Assignee: Mira (permitted) · Depends on: Command menu task")
-    .waitFor();
-  await page.getByText(/^Unfinished input saved on this device$/).waitFor();
+  const chips = page.locator("ul.composer-optional-chips li");
+  await chips.first().waitFor();
+  assert.deepEqual(await chips.allInnerTexts(), [
+    "Context · final key bindings",
+    "Reference · https://example.com/notes",
+    "Assignee · Mira (permitted)",
+    "Depends on · Command menu task",
+  ]);
+  assert.equal(await summary.textContent(), "Optional settings · 4 supplied");
+  const actions = page.locator(".composer-actions");
+  await actions.getByText(savedOnDevice, { exact: true }).waitFor();
+  assert.deepEqual(await actions.getByRole("button").allInnerTexts(), [
+    "Create and start",
+    "Save draft",
+  ]);
   await summary.click();
+  await chips.first().waitFor({ state: "detached" }); // no chips while open
   assert.equal(
     await page.getByLabel("Optional context").inputValue(),
     "final key bindings",
@@ -172,23 +207,31 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
   );
   assert.equal(await summary.textContent(), "Optional settings · 1 error");
   assert.equal(commands, 0);
+  await summary.click();
+  await chips.first().waitFor();
+  assert.deepEqual(
+    await chips.evaluateAll((li) =>
+      li.map((e) => e.getAttribute("data-invalid")),
+    ),
+    [null, "true", null, null],
+  );
+  await summary.click();
   await page.getByLabel("Reference links").fill("https://example.com/notes");
   await summary.click();
   await page.getByText("Optional settings · 4 supplied").waitFor();
 
   // (d) A long outcome keeps the actions in view, without covering the last field.
   await page.getByLabel("Desired outcome").fill("Long outcome. ".repeat(640));
-  const actions = page.locator(".composer-actions");
   for (const y of [0, 1e6]) {
     await page.evaluate((y) => scrollTo(0, y), y);
     for (const name of ["Create and start", "Save draft"]) {
       const b = (await page
         .getByRole("button", { name, exact: true })
         .boundingBox())!;
-      assert.ok(b.y >= 0 && b.y + b.height <= 820, `${name} at ${y}`);
+      assert.ok(b.y >= 0 && b.y + b.height <= 900, `${name} at ${y}`);
     }
   }
-  const last = (await page.locator(".composer-optional-values").boundingBox())!,
+  const last = (await page.locator(".composer-optional").boundingBox())!,
     bar = (await actions.boundingBox())!;
   assert.ok(last.y + last.height <= bar.y, "actions do not cover the summary");
   await page.getByLabel("Desired outcome").fill("Publish the guide.");
@@ -204,11 +247,21 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
       .boundingBox())!;
     assert.ok(b.height >= 44 && b.width >= 390 - 40 - 1, `${name} ${b.width}`);
   }
-  assert.ok(
-    await actions.evaluate((e) =>
-      getComputedStyle(e).paddingBottom.includes("px"),
-    ),
+  assert.deepEqual(
+    await actions.evaluate((e) => [
+      getComputedStyle(e).position,
+      getComputedStyle(e).paddingBottom.endsWith("px"),
+    ]),
+    ["sticky", true],
   );
+  const [first] = await page
+    .locator(".composer-prediction .wait-label")
+    .allTextContents();
+  // Status, then the hint, then the stacked buttons.
+  assert.deepEqual((await actions.innerText()).split(/\n+/).slice(0, 2), [
+    savedOnDevice,
+    `${first ? `Will wait: ${first}.` : "Starts now."} Save draft keeps it without starting.`,
+  ]);
   await captureBrowserEvidence(page, "composer-phone-34");
   await summary.click();
   await page.getByLabel("Reference links").fill("not a link");
@@ -221,6 +274,11 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
   );
   await summary.click();
   await page.getByText("Open settings to fix the link.").waitFor();
+  assert.equal(
+    await chips.nth(1).getAttribute("data-invalid"),
+    "true",
+    "the Reference chip is marked",
+  );
   await page
     .getByText(
       "Check the optional settings to continue. Your input is still here.",
@@ -240,10 +298,7 @@ test("Composer shows the inherited panel, one Optional settings row and fixed ac
     .getByRole("button", { name: "Discard unfinished input", exact: true })
     .click();
   await page.locator("main.page h1").waitFor();
-  assert.equal(
-    await page.getByText("Unfinished input saved on this device").count(),
-    0,
-  );
+  assert.equal(await page.getByText(/Unfinished input saved/).count(), 0);
 });
 
 test("Composer never claims on-device saving when storage fails", async (_t, j) => {
@@ -341,46 +396,67 @@ test("Composer predicts start or wait before submission from the same waits", as
   });
   await open(page, web.origin, web.password, projectId);
   const prediction = page.locator(".composer-prediction");
-  await prediction.getByText("Starts now.", { exact: true }).waitFor();
+  const verdict = (text: string) =>
+    prediction.getByText(text, { exact: true }).waitFor();
+  const reasons = prediction.locator("ol.wait-numbered > li");
+  const labels = () => reasons.locator(".wait-label").allTextContents();
+  await verdict("Starts now");
 
   // A not-done dependency makes it wait; removing it restores the start.
   await page.getByText(/^Optional settings/).click();
   await page.getByLabel("Command menu task").check();
-  await prediction
-    .getByText("It will wait: Blocked by a task dependency", { exact: true })
+  await verdict("Will wait");
+  assert.deepEqual(await labels(), ["Blocked by a task dependency"]);
+  await reasons
+    .first()
+    .getByRole("link", { name: "Command menu task" })
     .waitFor();
-  await prediction.getByRole("link", { name: "Command menu task" }).waitFor();
   await page.getByLabel("Command menu task").uncheck();
-  await prediction.getByText("Starts now.", { exact: true }).waitFor();
+  await verdict("Starts now");
 
   // An explicit assignee runs the turn, so its runtime waits replace the lead's.
   await page.getByLabel("Assignee").selectOption(claude);
-  await prediction
-    .getByText("It will wait: Claude token unavailable", { exact: true })
-    .waitFor();
+  await verdict("Will wait");
+  assert.equal((await labels())[0], "Claude token unavailable");
   await page.getByLabel("Assignee").selectOption("");
-  await prediction.getByText("Starts now.", { exact: true }).waitFor();
+  await verdict("Starts now");
 
-  // A paused project leads with its Fix; the dependency is listed beneath it.
+  // A paused project leads with its Fix; the dependency is numbered after it.
   configure(true);
   await page.reload();
   // The selections kept in this tab come back first.
   await page
     .getByRole("button", { name: "Resume unfinished input", exact: true })
     .click();
-  await prediction
-    .getByText("It will wait: Project paused", { exact: true })
-    .waitFor();
-  await prediction
-    .getByRole("button", { name: "Fix: Resume project" })
-    .waitFor();
+  await verdict("Will wait");
   await page.getByText(/^Optional settings/).click();
   await page.getByLabel("Command menu task").check();
-  assert.deepEqual(
-    await prediction
-      .locator(".wait-list li > span:first-child")
-      .allInnerTexts(),
-    ["Blocked by a task dependency"],
+  await reasons.nth(1).waitFor();
+  assert.deepEqual(await reasons.locator(".wait-index").allTextContents(), [
+    "1",
+    "2",
+  ]);
+  assert.deepEqual(await labels(), [
+    "Project paused",
+    "Blocked by a task dependency",
+  ]);
+  assert.equal(await reasons.first().getAttribute("data-primary"), "true");
+  const fix = reasons
+    .first()
+    .getByRole("button", { name: "Fix: Resume project" });
+  await reasons
+    .nth(1)
+    .getByRole("link", { name: "Command menu task" })
+    .waitFor();
+  // The bar's Create and start is the one primary action in view.
+  const background = (l: Locator) =>
+    l.evaluate((e) => getComputedStyle(e).backgroundColor);
+  const create = page.getByRole("button", { name: "Create and start" });
+  assert.equal(await background(create), "rgb(79, 70, 229)");
+  assert.notEqual(
+    await background(fix),
+    "rgb(79, 70, 229)",
+    "Fix is secondary",
   );
   assert.equal(commands, 0);
   // Save draft is unchanged by the prediction.
@@ -453,18 +529,20 @@ test("Composer, post-create line and task detail show a power-supervision hold",
 
   // The healthy project does not start now: the hold and its reason, with no Fix.
   const prediction = page.locator(".composer-prediction");
-  await prediction
-    .getByText("It will wait: Held by power supervision", { exact: true })
-    .waitFor();
-  await prediction.getByText(reason, { exact: true }).waitFor();
-  assert.equal(await prediction.getByText("Starts now.").count(), 0);
+  const held = async () => {
+    await prediction.getByText("Will wait", { exact: true }).waitFor();
+    assert.deepEqual(
+      await prediction.locator(".wait-label").allTextContents(),
+      ["Held by power supervision"],
+    );
+    await prediction.getByText(reason, { exact: true }).waitFor();
+    assert.equal(await prediction.getByText("Starts now").count(), 0);
+  };
+  await held();
   assert.equal(await prediction.getByText(/^Fix:/).count(), 0);
   await page.getByText(/^Optional settings/).click();
   await page.getByLabel("Assignee").selectOption(worker);
-  await prediction
-    .getByText("It will wait: Held by power supervision", { exact: true })
-    .waitFor();
-  assert.equal(await prediction.getByText("Starts now.").count(), 0);
+  await held();
   await page.getByLabel("Assignee").selectOption("");
 
   // The post-create line shows the same hold.
@@ -495,7 +573,194 @@ test("Composer, post-create line and task detail show a power-supervision hold",
   await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
   await page
     .locator(".composer-prediction")
-    .getByText("Starts now.", { exact: true })
+    .getByText("Starts now", { exact: true })
     .waitFor();
   assert.equal(await page.getByText(reason).count(), 0);
+});
+
+for (const [engineName, engine] of [
+  ["chromium", chromium],
+  ["webkit", webkit],
+] as const)
+  test(
+    `Composer leads with Project and Title and stacks the panels on a ${engineName} phone`,
+    { browserEngine: engineName },
+    async (_t, j) => {
+      const f = await j.start("fixture.create", () =>
+        createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+      );
+      let browser: Browser | undefined;
+      j.cleanup(
+        (primary) => f.close(browser, primary),
+        "fixture.close",
+        () => f.lifecycle.steps,
+      );
+      const { projectId } = seed(f);
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start("browser.launch", () => engine.launch());
+      const page = await browser.newPage({
+        viewport: { width: 1366, height: 900 },
+      });
+      j.observe(page);
+      page.setDefaultTimeout(5000);
+      await open(page, web.origin, web.password, projectId);
+      const prediction = page.getByRole("region", {
+        name: "If you create it now",
+      });
+      await prediction.waitFor();
+
+      // Desktop: Project beside Title, and the panels level with that row.
+      let project = await box(page, "Project"),
+        title = await box(page, "Task title");
+      assert.ok(title.x >= project.x + project.width, "title beside project");
+      assert.ok(Math.abs(title.y - project.y) <= 4, "one row");
+      const panel = (await prediction.boundingBox())!;
+      assert.ok(panel.x >= title.x + title.width, "panel to the right");
+      assert.ok(panel.y <= project.y, "panel top level with the row");
+
+      // The disclosure still toggles by keyboard.
+      const details = page.locator("details.composer-disclosure");
+      await details.locator("summary").focus();
+      await page.keyboard.press("Enter");
+      await page.waitForFunction(
+        () => document.querySelector("details")?.open === true,
+      );
+      await page.keyboard.press("Space");
+      await page.waitForFunction(
+        () => document.querySelector("details")?.open === false,
+      );
+
+      // Phone: stacked fields, then the panels after Optional settings.
+      await page.setViewportSize({ width: 390, height: 844 });
+      project = await box(page, "Project");
+      title = await box(page, "Task title");
+      assert.ok(title.y >= project.y + project.height, "title below project");
+      await prediction.scrollIntoViewIfNeeded();
+      const stacked = (await prediction.boundingBox())!;
+      assert.ok(stacked.y >= 0 && stacked.y < 844, "reachable by scrolling");
+      assert.ok(
+        await prediction.evaluate(
+          (e) =>
+            e.getBoundingClientRect().top >=
+            document
+              .querySelector(".composer-optional")!
+              .getBoundingClientRect().bottom,
+        ),
+        "panels follow Optional settings",
+      );
+      assert.ok(
+        stacked.x >= 0 && stacked.x + stacked.width <= 390,
+        "not clipped",
+      );
+      assert.ok(await noHorizontalScroll(page));
+    },
+  );
+
+test("Composer bar keeps drafts, refused creation and admission distinct", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId } = seed(f);
+  const d = f.service.domain();
+  if (!d.project(projectId).paused)
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: Number(d.project(projectId).version),
+      paused: true,
+    });
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const sent: { type: string; ready?: boolean }[] = [];
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      new URL(r.url()).pathname === "/api/operator/commands"
+    )
+      sent.push(r.postDataJSON());
+  });
+  await open(page, web.origin, web.password, projectId);
+  const fill = async (title: string) => {
+    await page.getByLabel("Task title").fill(title);
+    await page.getByLabel("Desired outcome").fill("Probe");
+  };
+  const button = (name: string) =>
+    page.getByRole("button", { name, exact: true });
+  await fill("Refused");
+  await page
+    .locator(".composer-actions")
+    .getByText(
+      "Will wait: Project paused. Save draft keeps it without starting.",
+    )
+    .waitFor();
+
+  // A refused create keeps the input and both actions, above the bar.
+  await page.route("**/api/operator/commands", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "invalid-input", message: "Safe failure" },
+      }),
+    }),
+  );
+  await button("Create and start").click();
+  const refused = page.getByText(/^Couldn't create the task/);
+  await refused.waitFor();
+  await page.unroute("**/api/operator/commands");
+  assert.equal(await page.getByLabel("Task title").inputValue(), "Refused");
+  assert.ok(await button("Create and start").isEnabled());
+  assert.ok(await button("Save draft").isEnabled());
+  assert.ok(
+    await refused.evaluate(
+      (e) =>
+        (e.compareDocumentPosition(
+          document.querySelector(".composer-actions")!,
+        ) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+        0,
+    ),
+    "the outcome sits above the bar",
+  );
+
+  // Save draft sends a draft; Create and start sends ready work.
+  await button("Save draft").click();
+  await page.getByText("Draft saved.", { exact: true }).waitFor();
+  await page.goto(`${web.origin}/app/tasks/new?project=${projectId}`);
+  await fill("Created");
+  await button("Create and start").click();
+  const created = page.getByText("Task created.", { exact: true });
+  await created.waitFor();
+  const waiting = page
+    .locator(".wait-reasons")
+    .getByText("It will wait: Project paused", { exact: true });
+  await waiting.waitFor();
+  assert.ok(
+    !(await created.evaluate(
+      (e, w) => e.contains(w),
+      await waiting.elementHandle(),
+    )),
+    "creation and admission are separate lines",
+  );
+  assert.deepEqual(
+    sent.map((c) => [c.type, c.ready]),
+    [
+      ["task.create", true],
+      ["task.create", false],
+      ["task.create", true],
+    ],
+  );
 });

@@ -642,7 +642,6 @@ nav {
 }
 
 .composer-disclosure {
-  border-top: 1px solid var(--border);
   padding: var(--space-12) 0;
 }
 
@@ -691,21 +690,23 @@ nav {
   accent-color: var(--foreground);
 }
 
+/* Bleeds into the .page padding on both sides. */
 .composer-actions {
   position: sticky;
   bottom: 0;
-  background: var(--background);
+  z-index: 1;
+  background: var(--surface);
   border-top: 1px solid var(--border);
   display: flex;
+  align-items: center;
   gap: var(--space-12);
   flex-wrap: wrap;
-  padding: var(--space-16) 0
+  padding: var(--space-16) var(--space-20)
     calc(var(--space-16) + var(--operator-safe-area-inset-bottom));
-  margin-top: var(--space-24);
+  margin: var(--space-24) calc(-1 * var(--space-20)) 0;
 }
 
 .composer-actions p {
-  flex-basis: 100%;
   margin: 0;
 }
 
