@@ -56,6 +56,7 @@ import {
   configurationImpactSchema,
   deliveryReadSchema,
   discoveryBranchesSchema,
+  discoveryProjectFieldsSchema,
   discoveryProjectsSchema,
   discoveryRepositoriesSchema,
   discoveryStatusSchema,
@@ -5414,6 +5415,18 @@ export class OperatorApi {
     const [owner, name] = this.discoveryRepository(query);
     return this.discoveryRead(discoveryProjectsSchema, (r) =>
       r.projects(owner, name),
+    );
+  }
+  readDiscoveryProjectFields(query: URLSearchParams) {
+    const project = query.get("project") ?? "";
+    if (
+      [...query.keys()].some((k) => k !== "project") ||
+      query.getAll("project").length !== 1 ||
+      !/^[A-Za-z0-9_=-]{1,512}$/.test(project)
+    )
+      throw new OperatorApiError(400, "invalid-input");
+    return this.discoveryRead(discoveryProjectFieldsSchema, (r) =>
+      r.projectFields(project),
     );
   }
   /** Folder names and Git status under the operator's home folder (authenticated POST only). */

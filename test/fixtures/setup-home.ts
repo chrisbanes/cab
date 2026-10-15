@@ -95,6 +95,31 @@ export function fakeDiscovery(
         truncated: Boolean(state.truncated),
       };
     },
+    async projectFields(project) {
+      fail("projectFields");
+      const option = (name: string, id: string) => ({
+        optionNodeId: `PVTSSO_${id}`,
+        name,
+      });
+      return {
+        fields:
+          project === "PVT_atlas"
+            ? [
+                {
+                  fieldNodeId: "PVTSSF_status",
+                  name: "Status",
+                  options: [option("Todo", "todo"), option("Ready", "ready")],
+                },
+                {
+                  fieldNodeId: "PVTSSF_priority",
+                  name: "Priority",
+                  options: [option("High", "high"), option("Low", "low")],
+                },
+              ]
+            : [],
+        truncated: Boolean(state.truncated),
+      };
+    },
     async projects(_owner, name) {
       fail("projects");
       return {
