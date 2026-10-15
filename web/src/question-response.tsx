@@ -508,7 +508,7 @@ export function QuestionResponse({
 }
 
 /** Compact hold lines; the phone's sticky submit area has no room for alert cards. */
-function QuestionHolds({ holds }: { holds: readonly HoldNotice[] }) {
+export function QuestionHolds({ holds }: { holds: readonly HoldNotice[] }) {
   if (!holds.length) return null;
   return (
     <div className="question-holds">

@@ -8,6 +8,7 @@ import {
 const test = browserSuite("operator-responsive-browser");
 import { chromium, webkit, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 
 const longTitle =
@@ -71,6 +72,8 @@ async function runResponsiveBrowserJourney(
     () => f.lifecycle.steps,
   );
   const question = await seedOwnQuestion(f, undefined, longTitle);
+  // A single-choice question is answered in its Overview card.
+  await seedOwnQuestion(f, choiceForm, "Overview choice", "Overview project");
   const d = f.service.domain();
   for (let index = 0; index < 4; index++)
     d.execute({
@@ -108,10 +111,12 @@ async function runResponsiveBrowserJourney(
     [683, 450, ["tasks", "question", "composer"]],
   ];
   const evidence = new Set([
+    "390x844:overview",
     "390x844:tasks",
     "390x480:question",
     "800x768:inbox",
     "1024x768:composer",
+    "1366x900:overview",
     "1366x900:project",
   ]);
   browser = await journey.start(`browser.launch.${engineName}`, () =>
@@ -146,6 +151,11 @@ async function runResponsiveBrowserJourney(
       await page.locator("main h1").first().waitFor();
       if (route === "tasks" || route === "project" || route === "overview")
         await page.locator(".task-title").first().waitFor();
+      if (route === "overview")
+        await page
+          .locator(".overview-card input[type=radio]")
+          .first()
+          .waitFor();
       if (route === "inbox") await page.locator(".inbox-row").first().waitFor();
       if (route === "question")
         await page

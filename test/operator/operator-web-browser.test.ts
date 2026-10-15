@@ -270,7 +270,8 @@ for (const viewport of [
       await page.keyboard.press("Escape");
     } else {
       await screenshot(page, `${viewport.width}-populated`);
-      await page.getByRole("link", { name }).click();
+      // The Overview Projects panel links the same project; open it from the sidebar.
+      await page.locator(".sidebar").getByRole("link", { name }).click();
     }
     await page.getByRole("heading", { name, exact: true }).waitFor();
     assert.equal(

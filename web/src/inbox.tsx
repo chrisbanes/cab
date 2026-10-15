@@ -29,7 +29,8 @@ import {
   requestActionLabel,
   requestKindLabel,
 } from "./inbox-presentation.js";
-import { useOperatorResource, type ResourceState } from "./resource.js";
+import { inboxSummaryOf } from "./request-presentation.js";
+import { useOperatorResource } from "./resource.js";
 import {
   ApprovalDetail,
   InboxQuestion,
@@ -88,16 +89,6 @@ export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
     cursor = page.data.nextCursor;
   }
 }
-/** A count is a total only when the whole Inbox was read and the last read succeeded. */
-export function inboxSummaryOf(state: ResourceState<InboxRead>) {
-  return state.data?.complete && !state.data.unavailable && !state.error
-    ? {
-        count: state.data.items.length,
-        projects: new Set(state.data.items.map((item) => item.projectId)).size,
-      }
-    : null;
-}
-type InboxRead = Awaited<ReturnType<typeof loadInbox>>;
 export function Inbox({
   client,
   session,

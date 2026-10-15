@@ -104,99 +104,309 @@
   height: 14px;
 }
 
-/* Overview attention: 83px row pitch, 34px tile (radius 10), action right-aligned. */
-.work-attention {
-  margin-bottom: var(--space-32);
+/* Overview (01-attention-overview): stat strip, Needs you cards, work panel and side panels. */
+.overview-stats {
+  display: flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 var(--space-20) auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+  overflow: hidden;
 }
 
-.work-section-head {
+.overview-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-8) 14px;
+  border-right: 1px solid var(--border);
+}
+
+.overview-stats > div:last-child {
+  border-right: 0;
+}
+
+.overview-stats dt {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+
+.overview-stats dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.overview-stats [data-tone="attn"] dd {
+  color: var(--attn);
+}
+
+.overview-stats [data-tone="risk"] dd {
+  color: var(--risk);
+}
+
+.overview-needs {
+  margin-bottom: var(--space-24);
+}
+
+.overview-needs-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-12);
+  gap: var(--space-8) var(--space-12);
   padding-bottom: var(--space-12);
 }
 
-.work-section-head h2 {
-  margin: 0 auto 0 0;
+.overview-needs-head h2,
+.overview-needs-head p {
+  margin: 0;
 }
 
-.work-requests {
+.overview-needs-head .work-link {
+  margin-left: auto;
+}
+
+.overview-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-12);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.work-request {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr) auto auto;
-  grid-template-areas: "tile text meta action";
-  align-items: center;
-  gap: var(--space-16);
-  padding: var(--space-20) 0;
-  border-top: 1px solid var(--border);
-}
-
-.work-request > * {
+.overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
   min-width: 0;
-  margin: 0;
-}
-
-.work-request-text {
-  grid-area: text;
-}
-
-.work-request-text p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.work-request-text p + p {
-  margin-top: var(--space-4);
-}
-
-.work-request-meta {
-  grid-area: meta;
-  align-self: start;
-  white-space: nowrap;
-}
-
-.work-request > a {
-  grid-area: action;
-}
-
-.work-tile {
-  grid-area: tile;
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
+  padding: 14px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--card);
+  overflow-wrap: anywhere;
 }
 
-.work-tile svg {
-  width: 16px;
-  height: 16px;
+.overview-card[data-tone="risk"] {
+  border-color: var(--risk-border);
 }
 
-.work-request[data-kind="intervention"] .work-tile {
-  border-color: var(--destructive);
-}
-
-.work-completed {
-  display: grid;
-  grid-template-columns: 8rem minmax(0, 1fr) auto;
-  align-items: center;
-  gap: var(--space-16);
-  margin-top: var(--space-24);
-  padding-top: var(--space-16);
-  border-top: 1px solid var(--border);
-}
-
-.work-completed > * {
+.overview-card p,
+.overview-card h3 {
   margin: 0;
+}
+
+.overview-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.overview-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--attn-border);
+  border-radius: var(--radius-sm);
+  background: var(--attn-soft);
+  color: var(--attn);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+
+.overview-badge[data-tone="risk"] {
+  border-color: var(--risk-border);
+  background: var(--risk-soft);
+  color: var(--risk);
+}
+
+.overview-badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.overview-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: var(--space-8) 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--raised);
+}
+
+.overview-evidence dl {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: var(--space-4) var(--space-8);
+  margin: 0;
+  font-size: var(--type-xs);
+}
+
+.overview-evidence dd {
+  margin: 0;
+}
+
+.overview-respond {
+  margin-top: auto;
+  align-self: flex-start;
+}
+
+/* The shared question response inside a card: the card already names the request. */
+.overview-card .question-response legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.overview-overflow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-12);
+  padding: var(--space-12) 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-lg);
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.overview-overflow:hover {
+  color: var(--foreground);
+}
+
+.overview-overflow svg {
+  width: 14px;
+  height: 14px;
+}
+
+.overview-work {
+  display: grid;
+  gap: var(--space-16);
+}
+
+.overview-panel {
+  min-width: 0;
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.overview-columns {
+  display: none;
+}
+
+.overview-side {
+  display: grid;
+  gap: var(--space-16);
+  align-content: start;
+}
+
+.overview-side-panel {
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.overview-side-panel > * {
+  margin: 0;
+}
+
+.overview-side-panel > * + * {
+  margin-top: var(--space-8);
+}
+
+.overview-projects,
+.overview-completed {
+  padding: 0;
+  list-style: none;
+}
+
+.overview-project {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  column-gap: var(--space-8);
+  padding: var(--space-8) 0;
+  border-top: 1px solid var(--border);
+  color: inherit;
+  text-decoration: none;
+}
+
+.overview-projects li:first-child .overview-project {
+  border-top: 0;
+}
+
+.overview-project > span:not(.overview-dot) {
+  grid-column: 2;
+}
+
+.overview-project:hover .overview-project-name {
+  text-decoration: underline;
+}
+
+.overview-dot {
+  grid-row: 1;
+  align-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--accent-text);
+}
+
+.overview-dot[data-slot="1"] {
+  background: var(--fg-2);
+}
+
+.overview-dot[data-slot="2"] {
+  background: var(--fg-3);
+}
+
+.overview-completed li + li {
+  margin-top: var(--space-4);
+}
+
+.task-next[data-operator="true"] {
+  color: var(--attn);
+}
+
+@media (min-width: 1121px) {
+  .overview-columns {
+    display: grid;
+    grid-template-columns: 14rem 7rem minmax(0, 1fr) 9.5rem 16px;
+    column-gap: var(--space-16);
+    padding: var(--space-8) var(--space-4);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .overview-columns span:nth-child(4) {
+    text-align: right;
+  }
+}
+
+/* The side column sits beside the work panel once both fit. */
+@media (min-width: 1280px) {
+  .overview-work {
+    grid-template-columns: minmax(0, 1fr) 17rem;
+    align-items: start;
+  }
+}
+
+@media (min-width: 760px) and (max-width: 1120px) {
+  .overview-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* Persistent attention summary above List and Board. */
@@ -554,28 +764,38 @@
     order: 4;
   }
 
-  .work-request {
-    grid-template-columns: 34px minmax(0, 1fr);
-    grid-template-areas:
-      "tile meta"
-      "text text"
-      "action action";
-    gap: var(--space-12);
-    padding: var(--space-16) 0;
+  .overview-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: auto;
+    margin-left: 0;
   }
 
-  .work-request > a {
-    justify-content: center;
+  .overview-stats > div:nth-child(2n) {
+    border-right: 0;
   }
 
-  .work-request-meta {
-    align-self: center;
-    white-space: normal;
+  .overview-stats > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--border);
   }
 
-  .work-completed {
+  .overview-cards {
     grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-8);
+  }
+
+  .overview-respond,
+  .overview-card .question-actions [data-slot="button"] {
+    align-self: stretch;
+    justify-content: center;
+    min-height: 44px;
+  }
+
+  .overview-overflow {
+    min-height: 44px;
+  }
+
+  .overview-panel {
+    padding: var(--space-12);
   }
 
   .task-row,
