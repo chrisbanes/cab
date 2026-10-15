@@ -1681,10 +1681,8 @@ as follows:
   governs every task, local or imported, over the earlier 03a `03-task-detail`, `12-imported-task-source-execution`
   and 36/37/45 generation. The build has no holds side panel yet; holds and
   admission reasons are lines in the decision card. It still offers Stop… on
-  finished tasks ([#1030](https://github.com/chrisbanes/ensemble/issues/1030)) and
-  labels a closure hold "Paused · closed on GitHub"
-  ([#1031](https://github.com/chrisbanes/ensemble/issues/1031)). Imported tasks keep source/execution separation through the
-  "Requirements · GitHub" label, the source line ("Open GitHub to edit source",
+  finished tasks ([#1030](https://github.com/chrisbanes/ensemble/issues/1030)).
+  Imported tasks keep source/execution separation through the "Requirements · GitHub" label, the source line ("Open GitHub to edit source",
   "Refresh source observation") and the hold lines, not separate panes or tabs.
 - The header shows Back, the title, a status line ("Ready · waiting on
   acme/design-system#87 / Accountable project lead: Mira") and two actions,

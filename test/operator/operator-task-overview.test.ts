@@ -152,7 +152,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       task: { state: "open", ready: false },
       source: { closure: "held" },
     }),
-    "Paused · closed on GitHub / Accountable project lead: Mira",
+    "Held · closed on GitHub / Accountable project lead: Mira",
   );
   assert.equal(
     line({
@@ -160,7 +160,7 @@ test("taskStatusLine states recorded state, wait and lead", () => {
       source: { closure: "held" },
       execution: { state: "running", holds },
     }),
-    "Paused · closed on GitHub · running / Accountable project lead: Mira",
+    "Held · closed on GitHub · running / Accountable project lead: Mira",
   );
   assert.equal(
     line({
