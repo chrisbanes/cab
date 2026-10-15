@@ -1644,7 +1644,13 @@ export function TaskWorkspace({
                   <QuestionHolds
                     holds={holdNotices(
                       data,
-                      openRequests.some((q) => q.kind === "approval")
+                      // The selected request's action names the wording; otherwise any approval.
+                      (openRequests.find(
+                        (q) => q.interactionId === params.get("request"),
+                      )?.kind ??
+                        (openRequests.some((q) => q.kind === "approval")
+                          ? "approval"
+                          : "question")) === "approval"
                         ? "approve"
                         : "answer",
                     )}

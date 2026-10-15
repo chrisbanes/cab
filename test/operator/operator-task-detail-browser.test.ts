@@ -1813,13 +1813,21 @@ test("A question opened on the task page keeps the holds an answer does not clea
   const fixture = await openFixture(j);
   const q = await seedOwnQuestion(fixture.f, guideForm);
   const { web, page } = await fixture.launch();
-  // An independent hold beside the only open request.
+  // An independent hold beside the open question; later also an open approval.
+  let withApproval = false;
   await page.route(
     (url) => url.pathname === `/api/operator/tasks/${q.taskId}`,
     async (route) => {
       const response = await route.fetch();
       const json = await response.json();
       json.data.admission.reasons.push("task-unready");
+      if (withApproval)
+        json.data.approvals.push({
+          ...json.data.questions[0],
+          interactionId: randomUUID(),
+          kind: "approval",
+          status: "open",
+        });
       await route.fulfill({ response, json });
     },
   );
@@ -1845,4 +1853,14 @@ test("A question opened on the task page keeps the holds an answer does not clea
     ),
   );
   assert.match(await holds.innerText(), /Answering does not clear it\./);
+  // An approval open beside the selected question keeps the question's wording.
+  withApproval = true;
+  await page.reload();
+  await page
+    .locator("section#decisions .decision")
+    .getByText("Your decision · approval pending")
+    .waitFor();
+  assert.equal(await holds.count(), 1);
+  assert.match(await holds.innerText(), /Answering does not clear it\./);
+  assert.doesNotMatch(await holds.innerText(), /Approv/);
 });
