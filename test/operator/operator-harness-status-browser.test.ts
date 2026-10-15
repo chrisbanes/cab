@@ -9,6 +9,7 @@ import {
   noPageOverflow,
   phone,
   startSettings,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { randomUUID } from "node:crypto";
 import { webkit, type Browser, type Page } from "playwright";
@@ -229,6 +230,7 @@ for (const [name, viewport] of [
     assert.equal(await page.getByRole("alertdialog").count(), 0);
     await row.getByText("Not enabled", { exact: true }).waitFor();
     await row.getByText("Disabled in Settings", { exact: true }).waitFor();
+    assert.deepEqual(await unpairedBadges(runtimesPanel(page)), []);
     assert.equal(await control.isChecked(), false);
     assert.equal(f.service.domain().runtimeEnabled("claude"), false);
     // A disabled runtime is not an unavailable one: no shell alert, no restart advice.

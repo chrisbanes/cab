@@ -12,6 +12,7 @@ import {
   noPageOverflow,
   phone,
   startSettings,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import {
   ClaudeShapedFixtureRuntime,
@@ -111,6 +112,7 @@ for (const [name, viewport] of [
       .getByRole("article", { name: "GitHub discovery" })
       .getByText("Not configured", { exact: true })
       .waitFor();
+    assert.deepEqual(await unpairedBadges(panel), []);
 
     const text = await page.locator("body").innerText();
     for (const secret of [CANARY, tokenPath, root, f.directory])

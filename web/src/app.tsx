@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  CirclePause,
   Folder,
   Gauge,
   InboxIcon,
@@ -219,7 +220,9 @@ function ProjectNavigation({
           p.name ?? "Name unavailable",
           {
             trailing: p.paused ? (
-              <StatusBadge tone="warning">Paused</StatusBadge>
+              <StatusBadge tone="idle" icon={CirclePause}>
+                Paused
+              </StatusBadge>
             ) : tasks ? (
               <span className="nav-count metadata">
                 {

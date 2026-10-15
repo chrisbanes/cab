@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CircleCheck,
+  CirclePause,
+  CircleQuestionMark,
+  CircleSlash,
+} from "lucide-react";
+import {
   projectConfigurationSchema,
   runtimeSettingsSchema,
   sourceObservationSchema,
@@ -18,6 +24,7 @@ import type { ProjectConfigurationData } from "./settings-changes.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 import {
   observationLabel,
+  observationSymbol,
   plural,
   repositoryLines,
   routingLine,
@@ -161,7 +168,10 @@ export function SettingsWorkspace(p: SettingsProps) {
                         Lead: {lead ?? "Unconfigured"}
                       </span>
                     )}
-                    <StatusBadge tone={r.paused ? "warning" : "neutral"}>
+                    <StatusBadge
+                      tone="idle"
+                      icon={r.paused ? CirclePause : CircleCheck}
+                    >
                       {r.paused ? "Paused" : "Enabled"}
                     </StatusBadge>
                     <ActionLink
@@ -196,22 +206,30 @@ export function SettingsWorkspace(p: SettingsProps) {
                             "No GitHub source"
                           ) : (
                             <ul>
-                              {c.source.selections.map((s, i) => (
-                                <li key={s.id ?? i}>
-                                  <span>{selectionLine(s)}</span>
-                                  <StatusBadge>
-                                    {observations.state.data
-                                      ? observationLabel(
-                                          observed
-                                            ?.find((o) => o.projectId === r.id)
-                                            ?.selections.find(
-                                              (o) => o.selectionId === s.id,
-                                            ),
-                                        )
-                                      : "Unavailable"}
-                                  </StatusBadge>
-                                </li>
-                              ))}
+                              {c.source.selections.map((s, i) => {
+                                const o = observed
+                                  ?.find((o) => o.projectId === r.id)
+                                  ?.selections.find(
+                                    (o) => o.selectionId === s.id,
+                                  );
+                                return (
+                                  <li key={s.id ?? i}>
+                                    <span>{selectionLine(s)}</span>
+                                    <StatusBadge
+                                      tone="idle"
+                                      icon={
+                                        observations.state.data
+                                          ? observationSymbol(o)
+                                          : CircleQuestionMark
+                                      }
+                                    >
+                                      {observations.state.data
+                                        ? observationLabel(o)
+                                        : "Unavailable"}
+                                    </StatusBadge>
+                                  </li>
+                                );
+                              })}
                             </ul>
                           )}
                         </dd>
@@ -277,7 +295,10 @@ export function SettingsWorkspace(p: SettingsProps) {
                         Runtime: {runtimeSummary(r.runtime)}
                       </p>
                     </div>
-                    <StatusBadge>
+                    <StatusBadge
+                      tone={r.revoked ? "warning" : "idle"}
+                      icon={r.revoked ? undefined : CircleCheck}
+                    >
                       {r.revoked ? "Revoked" : "Available"}
                     </StatusBadge>
                     <ActionLink
@@ -315,7 +336,10 @@ export function SettingsWorkspace(p: SettingsProps) {
                       )}
                     </div>
                     {c && (
-                      <StatusBadge>
+                      <StatusBadge
+                        tone="idle"
+                        icon={c.routing.enabled ? CircleCheck : CircleSlash}
+                      >
                         {c.routing.enabled ? "Enabled" : "Disabled"}
                       </StatusBadge>
                     )}

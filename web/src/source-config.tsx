@@ -1,5 +1,6 @@
 import { noRuleText } from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
+import { CircleCheck } from "lucide-react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
 import {
@@ -236,7 +237,10 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                               : String(r.descriptor)}
                         </p>
                       </div>
-                      <StatusBadge tone={r.removed ? "warning" : "neutral"}>
+                      <StatusBadge
+                        tone={r.removed ? "warning" : "idle"}
+                        icon={r.active && !r.removed ? CircleCheck : undefined}
+                      >
                         {r.removed
                           ? "Will be removed"
                           : r.active
@@ -258,7 +262,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
                   <div className="settings-row" key={String(r.rowKey)}>
                     <div className="settings-row-heading">
                       <h3 className="small-heading">{String(r.id)}</h3>
-                      <StatusBadge>New · inactive</StatusBadge>
+                      <StatusBadge tone="idle">New · inactive</StatusBadge>
                       <Button
                         type="button"
                         variant="secondary"

@@ -1,4 +1,5 @@
 import { sourceCredentialSummary } from "./settings-view.js";
+import { Circle, CircleCheck, CirclePause } from "lucide-react";
 import { useCallback } from "react";
 import {
   projectConfigurationSchema,
@@ -97,7 +98,10 @@ export function ProjectConfiguration(
       {data && (
         <>
           <p className="settings-status body muted">
-            <StatusBadge tone={data.project.paused ? "warning" : "neutral"}>
+            <StatusBadge
+              tone="idle"
+              icon={data.project.paused ? CirclePause : CircleCheck}
+            >
               {data.project.paused ? "Paused" : "Enabled"}
             </StatusBadge>{" "}
             {statusLine(tab, data, p, unsettled.length)}
@@ -373,7 +377,7 @@ function CredentialReferences({
   const row = (
     title: string,
     detail: string,
-    badge: string | null,
+    configured: boolean | null,
     href: string,
     action: string,
   ) => (
@@ -383,7 +387,11 @@ function CredentialReferences({
           <h3 className="small-heading">{title}</h3>
           <p className="metadata muted">{detail}</p>
         </div>
-        {badge && <StatusBadge>{badge}</StatusBadge>}
+        {configured !== null && (
+          <StatusBadge tone="idle" icon={configured ? CircleCheck : Circle}>
+            {configured ? "Configured" : "Unconfigured"}
+          </StatusBadge>
+        )}
         <ActionLink variant="secondary" href={href}>
           {action}
         </ActionLink>
@@ -402,14 +410,14 @@ function CredentialReferences({
         routing
           ? "Reference configured"
           : "Reference unconfigured · routing is unavailable until one is set",
-        routing ? "Configured" : "Unconfigured",
+        routing,
         `${page}?tab=routing`,
         "Change in Routing",
       )}
       {row(
         "GitHub source",
         sourceCredentialSummary(data.source),
-        source ? "Configured" : "Unconfigured",
+        source,
         `${page}?tab=github`,
         "Change in GitHub source",
       )}
