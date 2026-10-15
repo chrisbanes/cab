@@ -19,6 +19,7 @@ import {
   savedOutcome,
   startSettings,
   trail,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-project-config-browser");
@@ -110,6 +111,7 @@ test("General tab edits in place with a change list, saved line and tabs that ke
       .getAttribute("href"),
     `/app/projects/${ids.atlas}`,
   );
+  assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await captureBrowserEvidence(page, "1366-project-general");
   await page.getByLabel("Project name", { exact: true }).fill("Atlas II");
   await changes(page).getByText("Project name: Atlas → Atlas II").waitFor();
@@ -181,6 +183,7 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
   assert.equal(await name.inputValue(), "Atlas typed");
   // The conflict re-reads on its own; no manual Refresh is needed before Review.
   await page.locator(".settings-status").getByText("Paused").waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator(".settings-status")), []);
   await outcomeMessages(page)
     .getByRole("button", { name: "Review changes" })
     .click();
@@ -426,6 +429,7 @@ test("GitHub source keeps saved rows private and sends keep markers for in-place
   await page.getByText("Private query kept").waitFor();
   await page.getByText("PVT_atlas · Filter kept · private").waitFor();
   await page.getByText("Local path: Kept · private").waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   const html = await page.content();
   for (const secret of ["PRIVATE", "atlas-checkout", "FIXTURE_GITHUB"])
     assert.equal(html.includes(secret), false, secret);
@@ -1028,6 +1032,7 @@ test("Sync & placement shows preview, observations and the placement status line
       name: "Request installation-wide source observations",
     })
     .waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator("main")), []);
   await captureBrowserEvidence(page, "1366-sync");
 });
 

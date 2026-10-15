@@ -17,6 +17,7 @@ import {
   noPageOverflow,
   phone,
   startSettings,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -102,6 +103,7 @@ test("Add Claude copies the runbook commands and checks a saved file: reference 
     1,
   );
   await readable.getByText("Not configured", { exact: true }).waitFor();
+  assert.deepEqual(await unpairedBadges(readable), []);
 
   // Copy puts exactly the runbook text on the clipboard and shows one outcome.
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {

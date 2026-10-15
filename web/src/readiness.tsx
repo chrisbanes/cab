@@ -7,7 +7,7 @@ import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 const status = {
   pass: { label: "Pass", tone: "success" },
   fail: { label: "Fail", tone: "error" },
-  "not-configured": { label: "Not configured", tone: "neutral" },
+  "not-configured": { label: "Not configured", tone: "idle" },
 } as const;
 
 /** What the running service can and cannot use; Run again is the only action. */

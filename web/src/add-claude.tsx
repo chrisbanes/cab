@@ -26,7 +26,7 @@ const claudeTokenWrite = [
 const status = {
   pass: { label: "Pass", tone: "success" },
   fail: { label: "Fail", tone: "error" },
-  "not-configured": { label: "Not configured", tone: "neutral" },
+  "not-configured": { label: "Not configured", tone: "idle" },
 } as const;
 
 const DRAFT = "claude-token.configure";

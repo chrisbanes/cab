@@ -12,6 +12,7 @@ import {
   savedOutcome,
   startSettings,
   trail,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 import { commandRequest } from "../fixtures/setup-browser.js";
 import {
@@ -69,6 +70,7 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
     })
     .waitFor();
   await page.locator(".settings-status").getByText("Revoked").waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator(".settings-status")), []);
   assert.equal(
     await page.getByLabel("Summary", { exact: true }).inputValue(),
     "Review",
@@ -104,6 +106,7 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
   await captureBrowserEvidence(page, "1366-profile-revoked");
   await save.click();
   await page.locator(".settings-status").getByText("Available").waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator(".settings-status")), []);
   assert.equal(d.profile(reviewer).revoked, 0);
   assert.equal(
     d.profile(reviewer).capabilities,

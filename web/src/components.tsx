@@ -12,10 +12,12 @@ import * as Dialog from "@radix-ui/react-dialog";
 import {
   ChevronLeft,
   ChevronRight,
+  Circle,
   CircleAlert,
   CircleCheck,
   CircleX,
   Menu,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "./lib/utils.js";
 import { Alert, AlertDescription } from "./ui/alert.js";
@@ -96,9 +98,13 @@ export const TextField = forwardRef<
   );
 });
 
-/** Colour never carries state alone: non-neutral tones add a symbol beside the word. */
+/**
+ * Colour never carries state alone: every state tone adds a symbol beside the
+ * word. `neutral` is for counts and labels that are not states.
+ */
 const badgeTones = {
   neutral: { variant: "secondary", Icon: null },
+  idle: { variant: "secondary", Icon: Circle },
   warning: { variant: "attention", Icon: CircleAlert },
   error: { variant: "destructive", Icon: CircleX },
   success: { variant: "success", Icon: CircleCheck },
@@ -106,13 +112,17 @@ const badgeTones = {
 export function StatusBadge({
   children,
   tone = "neutral",
+  icon,
   className,
 }: {
   children: ReactNode;
-  tone?: "neutral" | "warning" | "error" | "success";
+  tone?: keyof typeof badgeTones;
+  /** Replaces the tone's default symbol. */
+  icon?: LucideIcon | undefined;
   className?: string;
 }) {
-  const { variant, Icon } = badgeTones[tone];
+  const { variant, Icon: toneIcon } = badgeTones[tone];
+  const Icon = icon ?? toneIcon;
   return (
     <Badge variant={variant} className={cn("metadata", className)}>
       {Icon && <Icon aria-hidden="true" />}
