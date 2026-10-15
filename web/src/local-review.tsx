@@ -797,9 +797,12 @@ export const useLocalReview = () => useContext(LocalReviewContext);
 
 export function LocalReviewProvider({
   children,
+  reveal,
   ...props
 }: Parameters<typeof useLocalReviewController>[0] & {
   children: React.ReactNode;
+  /** Opens the page's Local review panel, so the check it holds can take focus. */
+  reveal?: () => void;
 }) {
   const controller = useLocalReviewController(props);
   // Every notify re-renders this provider; tell the gate which change that commit shows.
@@ -809,6 +812,10 @@ export function LocalReviewProvider({
     <LocalReviewContext.Provider
       value={{
         ...controller,
+        showWarning() {
+          reveal?.();
+          controller.showWarning();
+        },
         state: props.state,
         changed: props.changed,
         client: props.client,
@@ -1183,6 +1190,12 @@ export function LocalReviewPanel() {
   const review = useLocalReview();
   const draft = review?.draft;
   const state = review?.state;
+  // A warning that takes the focus opens this panel's tab first: the write may have begun
+  // in Files or Changes, and a hidden control cannot take focus.
+  useLayoutEffect(() => {
+    if (review?.focusWarning.current && review.state.unconfirmed)
+      review.showWarning();
+  });
   // A warning that appeared has had its turn at the focus.
   useEffect(() => {
     if (review) review.focusWarning.current = false;

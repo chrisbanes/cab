@@ -11,7 +11,9 @@ import { orderWaits, type Wait } from "../../src/operator/wait-reasons.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
+import { seedCatalog } from "../fixtures/operator-work.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("ui-task-detail");
 const testForEngine = (
@@ -87,6 +89,28 @@ async function signIn(
 const noHorizontalScroll = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
 
+const taskTab = (page: Page, name: string) =>
+  page
+    .getByRole("tablist", { name: "Task sections" })
+    .getByRole("tab", { name, exact: true });
+const selectedTab = (page: Page) =>
+  page
+    .locator('[role="tablist"] [aria-selected="true"]')
+    .evaluate((e) => e.textContent);
+const visiblePanels = (page: Page) =>
+  page
+    .locator('.task-workspace [role="tabpanel"]')
+    .evaluateAll((panels) =>
+      panels.filter((p) => !(p as HTMLElement).hidden).map((p) => p.id),
+    );
+const settle = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+
 test("Task detail shows the designed header, two columns and C1/C2 criteria", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -111,9 +135,19 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
     .waitFor();
   const header = page.locator(".page-header");
+  // The subtitle is the recorded desired outcome; the strip carries state and the lead.
   assert.match(
     (await header.locator(".page-header-title p").textContent()) ?? "",
-    /Accountable project lead: Task lead$/,
+    /^## Context/,
+  );
+  const strip = page.locator("[data-task-strip]");
+  assert.match(
+    (await strip.textContent()) ?? "",
+    /Accountable lead · Task lead/,
+  );
+  assert.ok(
+    ((await strip.locator("[data-task-readiness]").textContent()) ?? "")
+      .length > 0,
   );
   // Exactly two header actions, and the direct-load Back names the project.
   assert.deepEqual(
@@ -138,10 +172,18 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
       .count(),
     0,
   );
-  assert.equal(
-    await page.locator('nav[aria-label="Task sections"]').count(),
-    0,
-  );
+  // Five tabs without counts; Overview is selected.
+  const tabs = page
+    .getByRole("tablist", { name: "Task sections" })
+    .getByRole("tab");
+  assert.deepEqual(await tabs.allTextContents(), [
+    "Overview",
+    "Files",
+    "Changes",
+    "Review",
+    "History",
+  ]);
+  assert.equal(await tabs.first().getAttribute("aria-selected"), "true");
   // Stop… uses the tinted destructive button.
   const tint = await header
     .getByRole("button", { name: "Stop…" })
@@ -153,7 +195,8 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   assert.ok(alpha > 0 && alpha < 1, `Stop background ${tint.bg}`);
   assert.notEqual(tint.bg, tint.fg);
 
-  // Decision card above two side-by-side columns; the document is the only scroller.
+  // Decision card, brief and result stacked in one main column beside the inspector; the
+  // document is the only scroller.
   await page
     .getByRole("heading", { name: "Latest result", exact: true })
     .waitFor();
@@ -165,11 +208,11 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   const card = await box('section[aria-label="Pending requests and holds"]'),
     brief = await box("section#brief"),
     review = await box("section#review");
-  assert.ok(
-    card.y + card.height <= brief.y && card.y + card.height <= review.y,
-  );
-  assert.ok(brief.x + brief.width <= review.x, "brief is left of the result");
-  assert.ok(Math.abs(brief.y - review.y) <= 24);
+  assert.ok(card.y + card.height <= brief.y);
+  assert.ok(brief.y + brief.height <= review.y, "the result follows the brief");
+  const inspector = await box('aside[aria-label="Task context"]');
+  assert.ok(brief.x + brief.width <= inspector.x, "inspector is beside");
+  assert.ok(inspector.width <= 320);
   assert.ok(
     await page
       .getByRole("heading", { name: "Shared brief", exact: true })
@@ -244,10 +287,17 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     ["Changes", "changes"],
     ["Review", "local-review"],
   ] as const) {
+    await openTaskTab(page, "Overview");
     await page.getByRole("link", { name, exact: true }).click();
     await page.waitForFunction(
       (id) => document.activeElement?.closest("section")?.id === id,
       id,
+    );
+    assert.equal(
+      await page
+        .getByRole("tab", { name, exact: true })
+        .getAttribute("aria-selected"),
+      "true",
     );
   }
   assert.equal(await page.evaluate(() => history.length), before);
@@ -258,6 +308,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     4,
     "lead and three delegated assignments",
   );
+  await openTaskTab(page, "Overview");
   await page.evaluate(() => scrollTo(0, 0));
   await captureBrowserEvidence(page, "task-detail-desktop", {
     fullPage: false,
@@ -270,6 +321,7 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     .click();
   const expanded = page.locator("#history details[open]").first();
   await expanded.waitFor();
+  await openTaskTab(page, "Overview");
   await page.getByLabel("Editable reply").fill("Unsent reply");
   // Read the anchor with the result in view; the grid must not disturb restoration.
   const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
@@ -459,15 +511,22 @@ test("An empty local task says so honestly", async (_t, j) => {
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
-  await review.getByText("No assignments yet.", { exact: true }).waitFor();
+  await page
+    .locator("#assignments")
+    .getByText("No assignments yet.", { exact: true })
+    .waitFor();
   await page
     .locator("#brief")
     .getByText("None supplied", { exact: true })
     .waitFor();
   assert.match(
-    (await page.locator(".page-header-title p").textContent()) ?? "",
-    /Accountable project lead: Unconfigured$/,
+    (await page.locator("[data-task-strip]").textContent()) ?? "",
+    /Accountable lead · Unconfigured/,
   );
+  await page
+    .locator('aside[aria-label="Task context"]')
+    .getByText("No results yet.", { exact: true })
+    .waitFor();
   assert.ok(await noHorizontalScroll(page));
   await captureBrowserEvidence(page, "task-detail-empty-phone", {
     fullPage: false,
@@ -502,6 +561,65 @@ test("A question opened on the task page names its requester", async (_t, j) => 
     .getByRole("region", { name: "Exact question response" })
     .getByText("Recommended by Task lead", { exact: true })
     .waitFor();
+  assert.equal(await selectedTab(page), "Overview");
+  // Its evidence link opens History in place, as a fresh load of that link would.
+  await page
+    .getByRole("link", { name: "Question evidence", exact: true })
+    .click();
+  await page.waitForFunction(() =>
+    document
+      .querySelector('[role="tablist"] [aria-selected="true"]')
+      ?.textContent?.includes("History"),
+  );
+  assert.deepEqual(await visiblePanels(page), ["task-panel-history"]);
+});
+
+test("A rejected completion is a decision the strip and decision card both name", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.completionRequests = [
+        {
+          requestId: randomUUID(),
+          taskId: a.taskId,
+          leadAssignmentId: a.assignmentId,
+          leadWorkId: "work",
+          leadWorkRevision: 1,
+          taskVersion: json.data.task.version,
+          reviewedResultIds: [],
+          status: "rejected",
+          rejectionReasons: ["completion-rejected"],
+          revision: 1,
+          createdAt: 1,
+          finalizedAt: null,
+        },
+      ];
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${a.taskId}?section=files`,
+  );
+  const next = page
+    .locator("[data-task-strip]")
+    .getByRole("button", { name: "Next: you · review rejected completion" });
+  await next.click();
+  const card = page.locator("section#decisions");
+  assert.equal(
+    await card
+      .getByRole("link", { name: "Review rejected completion" })
+      .getAttribute("href"),
+    `/coordination/task/${a.taskId}`,
+  );
+  assert.equal(await card.getByText("No operator decision needed.").count(), 0);
 });
 
 for (const engine of [
@@ -631,7 +749,7 @@ for (const engine of [
           .isVisible(),
       );
       assert.match(
-        (await page.locator(".page-header-title p").textContent()) ?? "",
+        (await page.locator("[data-task-readiness]").textContent()) ?? "",
         /^Stopping; effects may continue/,
       );
     },
@@ -1106,4 +1224,643 @@ test("An approval wait opens the approval review, not the question form", async 
   await page
     .getByRole("button", { name: "Approve this exact material" })
     .waitFor();
+});
+
+/** A signed-in page on a fresh fixture, with every command POST recorded. */
+async function openFixture(
+  j: BrowserJourney,
+  engine: "chromium" | "webkit" = "chromium",
+) {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  return {
+    f,
+    async launch(viewport = { width: 1366, height: 900 }) {
+      const web = await j.start("fixture.web", () => f.startWeb());
+      browser = await j.start(`browser.launch.${engine}`, () =>
+        (engine === "webkit" ? webkit : chromium).launch(),
+      );
+      const page = await browser.newPage({ viewport });
+      j.observe(page);
+      page.setDefaultTimeout(5000);
+      const commands: unknown[] = [];
+      page.on("request", (request) => {
+        if (
+          request.method() === "POST" &&
+          request.url().endsWith("/api/operator/commands")
+        )
+          commands.push(request.postDataJSON());
+      });
+      return { web, page, commands };
+    },
+  };
+}
+
+for (const engine of ["chromium", "webkit"] as const)
+  testForEngine(
+    `Task tabs follow the tab pattern, show one panel and send nothing (${engine})`,
+    engine,
+    async (_t, j) => {
+      const fixture = await openFixture(j, engine);
+      const a = await seed(fixture.f);
+      const { web, page, commands } = await fixture.launch();
+      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      const tabs = page
+        .getByRole("tablist", { name: "Task sections" })
+        .getByRole("tab");
+      await tabs.first().waitFor();
+      const before = await page.evaluate(() => history.length);
+      // Every tab controls an existing panel, and only the selected one shows.
+      for (const id of await tabs.evaluateAll((els) =>
+        els.map((e) => e.getAttribute("aria-controls")),
+      ))
+        assert.equal(await page.locator(`#${id}[role="tabpanel"]`).count(), 1);
+      assert.deepEqual(await visiblePanels(page), ["task-panel-overview"]);
+      await taskTab(page, "Overview").focus();
+      for (const [key, name] of [
+        ["ArrowRight", "Files"],
+        ["ArrowRight", "Changes"],
+        ["ArrowLeft", "Files"],
+        ["End", "History"],
+        ["ArrowRight", "Overview"],
+        ["ArrowLeft", "History"],
+        ["Home", "Overview"],
+      ] as const) {
+        await page.keyboard.press(key);
+        assert.equal(await selectedTab(page), name, key);
+        assert.equal(
+          await page.evaluate(() => document.activeElement?.textContent),
+          name,
+        );
+        // Roving focus: only the selected tab is in the tab order.
+        assert.deepEqual(
+          await tabs.evaluateAll(
+            (els) =>
+              els.filter((e) => e.getAttribute("tabindex") === "0").length,
+          ),
+          1,
+        );
+        assert.equal((await visiblePanels(page)).length, 1);
+        assert.deepEqual(await visiblePanels(page), [
+          `task-panel-${name.toLowerCase()}`,
+        ]);
+      }
+      // Switching tabs reads nothing new into history and sends no command.
+      assert.equal(await page.evaluate(() => history.length), before);
+      assert.deepEqual(commands, []);
+      // A local task shows "Local task" and no source chip; no raw UUID is shown.
+      const strip = page.locator("[data-task-strip]");
+      assert.equal(await strip.locator(".task-id").innerText(), "Local task");
+      assert.equal(await strip.locator(".task-source-chip").count(), 0);
+      assert.doesNotMatch(
+        await strip.innerText(),
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
+      );
+    },
+  );
+
+test("Task deep links open their tab on the first paint", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  // The tab selected when the tab list first reaches the page, before any paint.
+  await page.addInitScript(() => {
+    const w = window as unknown as { firstTab?: string | null };
+    new MutationObserver((_m, observer) => {
+      const tab = document.querySelector(
+        '[role="tablist"] [aria-selected="true"]',
+      );
+      if (!tab) return;
+      w.firstTab = tab.textContent;
+      observer.disconnect();
+    }).observe(document, { childList: true, subtree: true });
+  });
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await taskTab(page, "Overview").waitFor();
+  const read = await page.evaluate(
+    (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
+    a.taskId,
+  );
+  const message = read.data.messages[0]?.eventId as string | undefined;
+  const cases: [string, string][] = [
+    ["?section=files", "Files"],
+    ["?section=local-review", "Review"],
+    [`?assignment=${a.assignmentId}#history`, "History"],
+    ["?path=notes.md", "Files"],
+    ["?target=branch", "Changes"],
+    [`?result=${a.result.resultId}`, "Overview"],
+    ["#changes", "Changes"],
+  ];
+  if (message) cases.push([`?record=${message}`, "History"]);
+  for (const [query, name] of cases) {
+    await page.goto(`${web.origin}/app/tasks/${a.taskId}${query}`);
+    await page
+      .getByRole("heading", {
+        name: "Ship an accessible command menu",
+        level: 1,
+      })
+      .waitFor();
+    await settle(page);
+    assert.equal(await selectedTab(page), name, query);
+    assert.equal(
+      await page.evaluate(
+        () => (window as unknown as { firstTab?: string }).firstTab,
+      ),
+      name,
+      `${query} first paint`,
+    );
+  }
+  assert.ok(message, "the seeded task records a message to link to");
+  // An expanded assignment link shows that assignment's history.
+  await page.goto(
+    `${web.origin}/app/tasks/${a.taskId}?assignment=${a.assignmentId}#history`,
+  );
+  await page.locator("#history details[open]").first().waitFor();
+});
+
+test("Tab switches, Refresh task and polls keep the reply, expansions and each tab's reading position", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page, commands } = await fixture.launch({
+    width: 1366,
+    height: 700,
+  });
+  await page.clock.install();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page
+    .getByRole("heading", { name: "Latest result", exact: true })
+    .waitFor();
+  // Persistent tools stay on every tab; the inspector is Overview's alone.
+  for (const name of ["Overview", "Files", "Changes", "Review", "History"]) {
+    await openTaskTab(page, name as "Overview");
+    for (const tool of ["Advanced task controls", "Requests and coordination"])
+      assert.ok(
+        await page.getByRole("link", { name: tool, exact: true }).isVisible(),
+      );
+    assert.ok(
+      await page
+        .getByRole("button", { name: "Refresh task", exact: true })
+        .isVisible(),
+    );
+    assert.equal(
+      await page.locator('aside[aria-label="Task context"]').isVisible(),
+      name === "Overview",
+    );
+  }
+  await openTaskTab(page, "Overview");
+  // An expanded assignment, an unsent reply and a reading anchor on Overview.
+  await page
+    .getByRole("button", { name: /^Task lead · Produce the scoped/ })
+    .first()
+    .click();
+  await page.locator("#history details[open]").first().waitFor();
+  assert.equal(await selectedTab(page), "History");
+  await openTaskTab(page, "Overview");
+  await page.getByLabel("Editable reply").fill("Unsent reply");
+  const anchor = page.locator(`[data-record-id="${a.result.resultId}"]`);
+  await anchor.evaluate((e) => e.scrollIntoView());
+  await page.evaluate(() => scrollBy(0, -40));
+  const top = () => anchor.evaluate((e) => e.getBoundingClientRect().top);
+  const anchorTop = await top();
+  // Switch in place: a Playwright click would first scroll the tab list into view.
+  const switchTo = (name: string) => taskTab(page, name).dispatchEvent("click");
+  const kept = async (label: string) => {
+    await switchTo("Overview");
+    await settle(page);
+    const after = await top();
+    assert.ok(
+      Math.abs(after - anchorTop) <= 1,
+      `${label}: ${anchorTop} -> ${after}`,
+    );
+    assert.equal(
+      await page.getByLabel("Editable reply").inputValue(),
+      "Unsent reply",
+    );
+    assert.equal(await page.locator("#history details[open]").count(), 1);
+  };
+  await switchTo("Files");
+  await kept("tab switch");
+  await switchTo("Files");
+  const reread = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
+  );
+  await page
+    .getByRole("button", { name: "Refresh task", exact: true })
+    .dispatchEvent("click");
+  await reread;
+  await settle(page);
+  await kept("Refresh task on Files");
+
+  // Each tab keeps its own scroll.
+  await switchTo("History");
+  await page.evaluate(() => scrollTo(0, document.documentElement.scrollHeight));
+  const historyY = await page.evaluate(() => scrollY);
+  assert.ok(historyY > 0, "History scrolls");
+  await switchTo("Overview");
+  const overviewY = await page.evaluate(() => scrollY);
+  assert.notEqual(overviewY, historyY);
+  await switchTo("History");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - historyY) <= 1);
+  await switchTo("Overview");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - overviewY) <= 1);
+
+  // A timer poll while History is open keeps its position and expansion.
+  await switchTo("History");
+  const polled = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
+  );
+  await page.clock.runFor(15000);
+  await polled;
+  await settle(page);
+  assert.equal(await selectedTab(page), "History");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - historyY) <= 1);
+  assert.equal(await page.locator("#history details[open]").count(), 1);
+  await captureBrowserEvidence(page, "1366-task-detail-history", {
+    fullPage: false,
+  });
+
+  // Leaving for another view and coming Back restores the tab and its scroll.
+  await page
+    .getByRole("link", { name: "Overview", exact: true })
+    .first()
+    .click();
+  await page.getByRole("heading", { name: "Overview", level: 1 }).waitFor();
+  await page.goBack();
+  await page.locator("#history details[open]").first().waitFor();
+  await settle(page);
+  assert.equal(await selectedTab(page), "History");
+  assert.ok(Math.abs((await page.evaluate(() => scrollY)) - historyY) <= 1);
+  await openTaskTab(page, "Overview");
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Unsent reply",
+  );
+
+  // The inspector's results open in place: the earlier result fills the result card.
+  const results = await page.evaluate(
+    (id) =>
+      fetch(`/api/operator/tasks/${id}`)
+        .then((r) => r.json())
+        .then((r) =>
+          r.data.results.map((x: { resultId: string }) => x.resultId),
+        ),
+    a.taskId,
+  );
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  const links = inspector.getByRole("link", { name: /^Result \d/ });
+  assert.deepEqual(
+    (await links.allTextContents()).map((t) => t.split(" · ")[0]),
+    ["Result 2", "Result 1"],
+  );
+  const before = await page.evaluate(() => history.length);
+  await links.last().click();
+  await page.waitForFunction(
+    () => document.activeElement?.closest("section")?.id === "review",
+  );
+  assert.equal(
+    await page.locator("#retained-result-revision").inputValue(),
+    results[0],
+  );
+  assert.equal(await page.evaluate(() => history.length), before);
+  assert.deepEqual(commands, []);
+});
+
+test("An open approval leads Overview and stays reachable from every tab through the strip", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedOwnApproval(fixture.f);
+  const { web, page, commands } = await fixture.launch();
+  // The approval is hidden from the first reads, so it can arrive while Files is open.
+  let hide = true;
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      if (hide) json.data.approvals = [];
+      // An independent hold the approval does not clear.
+      else json.data.admission.reasons.push("task-unready");
+      await route.fulfill({ response, json });
+    },
+  );
+  await page.clock.install();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const strip = page.locator("[data-task-strip]");
+  await strip.getByText("No operator decision", { exact: true }).waitFor();
+  await openTaskTab(page, "Files");
+  const files = taskTab(page, "Files");
+  await files.focus();
+  hide = false;
+  const polled = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
+  );
+  await page.clock.runFor(15000);
+  await polled;
+  const next = strip.getByRole("button", {
+    name: "Next: you · review material & decide",
+  });
+  await next.waitFor();
+  assert.equal(await next.getAttribute("data-operator"), "true");
+  // The arriving request moves neither the tab nor the focus.
+  assert.equal(await selectedTab(page), "Files");
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Files",
+  );
+  // The strip's button opens Overview at the decision card.
+  await next.click();
+  await page.waitForFunction(
+    () => document.activeElement?.closest("#decisions") !== null,
+  );
+  assert.equal(await selectedTab(page), "Overview");
+
+  // The decision card leads with the approval and decides nothing itself.
+  const card = page.locator("section#decisions");
+  assert.equal(await card.getAttribute("data-attention"), "true");
+  const decision = card.locator(".decision").first();
+  assert.match(await decision.innerText(), /^Your decision · approval pending/);
+  const text = await decision.innerText();
+  for (const fact of [a.request.action, a.request.target, "revision"])
+    assert.ok(text.includes(fact), `${fact} in ${text}`);
+  assert.match(text, /Exact reviewed material: /);
+  assert.equal(
+    await decision
+      .getByRole("link", { name: "Review material & decide" })
+      .getAttribute("href"),
+    `/coordination/task/${a.taskId}#${a.interactionId}`,
+  );
+  assert.equal(
+    await card.getByRole("button", { name: /Approve|Deny/ }).count(),
+    0,
+  );
+  // The hold the approval does not clear follows it once, inside the card.
+  const holds = card.locator(".question-holds");
+  assert.equal(await holds.count(), 1);
+  assert.match(await holds.innerText(), /Approving does not clear it\./);
+  assert.ok(
+    await decision.evaluate(
+      (d, h) =>
+        Boolean(
+          h && d.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      await holds.elementHandle(),
+    ),
+  );
+  // The state mark is a symbol and a word in the state's colour.
+  const mark = strip.locator(".task-state");
+  assert.ok(await mark.locator("svg").isVisible());
+  assert.equal(await mark.innerText(), await mark.getAttribute("data-column"));
+
+  // Overview stacks the cards in one column beside the inspector.
+  const box = async (selector: string) => {
+    const b = await page.locator(selector).boundingBox();
+    assert.ok(b, selector);
+    return b;
+  };
+  const order = [
+    "section#decisions",
+    "section#brief",
+    "section#review",
+    "section#assignments",
+    "section#reply",
+  ];
+  const boxes = await Promise.all(order.map(box));
+  for (let i = 1; i < boxes.length; i++)
+    assert.ok(
+      boxes[i - 1]!.y + boxes[i - 1]!.height <= boxes[i]!.y,
+      String(order[i]),
+    );
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  const aside = await box('aside[aria-label="Task context"]');
+  assert.ok(boxes[0]!.x + boxes[0]!.width <= aside.x);
+  assert.ok(aside.width <= 320);
+  assert.ok(await noHorizontalScroll(page));
+  // Holds lists the pending approval; nothing the read lacks is invented.
+  await inspector.getByText(/^Approval pending/).waitFor();
+  assert.match(await inspector.innerText(), /Approval pending · Next: you/);
+  const inspected = await inspector.innerText();
+  for (const absent of [/Updated/, /Unblocks/, /Last turn/, /Workspace/])
+    assert.doesNotMatch(inspected, absent);
+  assert.match((await inspector.textContent()) ?? "", /Results & artifacts/);
+
+  // The assignments table keeps a row per assignment and opens its history.
+  const table = page.locator("section#assignments table");
+  assert.deepEqual(await table.locator("th[scope=col]").allTextContents(), [
+    "Assignment",
+    "Requested by → result to",
+    "Known state",
+  ]);
+  assert.equal(
+    await table.locator(".assignment-row").count(),
+    await page.evaluate(
+      (id) =>
+        fetch(`/api/operator/tasks/${id}`)
+          .then((r) => r.json())
+          .then((r) => r.data.assignments.length as number),
+      a.taskId,
+    ),
+  );
+  await page.evaluate(() => scrollTo(0, 0));
+  await captureBrowserEvidence(page, "1366-task-detail", { fullPage: false });
+
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const tablet = await box('aside[aria-label="Task context"]'),
+    tabletMain = await box(".task-columns");
+  assert.ok(tabletMain.x + tabletMain.width <= tablet.x, "beside at 1024");
+
+  // Phone: one column, the inspector after the reply, 44px assignment buttons.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => scrollTo(0, 0));
+  const phoneReply = await box("section#reply"),
+    phoneAside = await box('aside[aria-label="Task context"]'),
+    phoneCard = await box("section#decisions"),
+    phoneBrief = await box("section#brief");
+  assert.ok(phoneCard.y + phoneCard.height <= phoneBrief.y);
+  assert.ok(phoneReply.y + phoneReply.height <= phoneAside.y);
+  for (const b of await table
+    .locator(".assignment-row button")
+    .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height)))
+    assert.ok(b >= 44, `assignment button ${b}`);
+  assert.ok(await noHorizontalScroll(page));
+  assert.ok(
+    await page
+      .getByRole("tablist", { name: "Task sections" })
+      .evaluate((e) => e.scrollWidth <= e.clientWidth + 1),
+    "the tab list fits at 390",
+  );
+  await captureBrowserEvidence(page, "390-task-detail", { fullPage: false });
+  assert.deepEqual(commands, []);
+});
+
+test("An imported task separates read-only GitHub source from Ensemble execution", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const ids = await seedCatalog(fixture.f);
+  fixture.f.service.githubSources().reconcileBlockers("I-UI03", {
+    complete: true,
+    blockers: [
+      {
+        providerInstance: "github.com",
+        nodeId: "B-UI03",
+        repositoryId: "R-OUT",
+        repositoryName: "outside/repo",
+        number: 7,
+        title: "Outside blocker",
+        body: "",
+        state: "open",
+        labels: [],
+        projectFields: [],
+      },
+    ],
+    reason: null,
+  });
+  const { web, page, commands } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${ids.importedId}`);
+  const strip = page.locator("[data-task-strip]");
+  await strip.locator(".task-source-chip").waitFor();
+  const read = await page.evaluate(
+    (id) => fetch(`/api/operator/tasks/${id}`).then((r) => r.json()),
+    ids.importedId,
+  );
+  assert.equal(
+    await strip.locator(".task-id").innerText(),
+    "fixture/source#42",
+  );
+  const chip = strip.locator(".task-source-chip");
+  assert.equal(await chip.innerText(), "Imported · fixture/source#42 ↗");
+  assert.equal(await chip.getAttribute("href"), read.data.source.url);
+  assert.doesNotMatch(
+    await strip.innerText(),
+    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
+  );
+  assert.match(
+    await page.locator("#brief .task-provenance").innerText(),
+    /Requirements · GitHub/i,
+  );
+
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  const github = inspector.locator(".inspector-group").first();
+  assert.equal(
+    await github.locator(".inspector-label").first().textContent(),
+    "GitHub source · read-only",
+  );
+  const source = (await github.textContent()) ?? "";
+  assert.match(source, /fixture\/source#42/);
+  assert.match(source, /Issue open · (synced \S+|no successful sync)/);
+  assert.match(
+    source,
+    /GitHub owns the issue\. Ensemble coordinates the work\./,
+  );
+  assert.match(source, /Dependencies · managed in GitHub/);
+  assert.match(source, /outside\/repo#7\s*Open blocker/);
+  assert.match(source, /GitHub commenting (permitted|unavailable)/);
+  // Nothing in the GitHub group can write.
+  assert.equal(
+    await github.locator("button, form, input, textarea").count(),
+    0,
+  );
+  assert.equal(
+    await inspector.locator(".inspector-divider").textContent(),
+    "Ensemble execution",
+  );
+  assert.match(
+    await strip.locator("[data-task-readiness]").innerText(),
+    /waiting on outside\/repo#7/,
+  );
+  await captureBrowserEvidence(page, "1366-task-detail-imported", {
+    fullPage: false,
+  });
+  // A partial sync is named beside the last successful one.
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${ids.importedId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      for (const m of json.data.source.memberships)
+        m.sync = { ...m.sync, complete: false, reasonCode: "partial-sync" };
+      await route.fulfill({ response, json });
+    },
+  );
+  await page.reload();
+  await github.getByText(/· partial sync$/).waitFor();
+  await page.unrouteAll({ behavior: "wait" });
+  await page.reload();
+  await github.getByText(/^Issue open/).waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => scrollTo(0, 0));
+  assert.ok(await noHorizontalScroll(page));
+  await captureBrowserEvidence(page, "390-task-detail-imported", {
+    fullPage: false,
+  });
+
+  // A local task shows neither the GitHub group nor its note.
+  await page.goto(`${web.origin}/app/tasks/${ids.ready}`);
+  await page.locator('aside[aria-label="Task context"]').waitFor();
+  assert.equal(
+    await page.getByText("GitHub owns the issue.", { exact: false }).count(),
+    0,
+  );
+  assert.equal(await page.locator(".inspector-divider").count(), 0);
+  assert.deepEqual(commands, []);
+});
+
+test("A question opened on the task page keeps the holds an answer does not clear", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const q = await seedOwnQuestion(fixture.f, guideForm);
+  const { web, page } = await fixture.launch();
+  // An independent hold beside the open question; later also an open approval.
+  let withApproval = false;
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${q.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.admission.reasons.push("task-unready");
+      if (withApproval)
+        json.data.approvals.push({
+          ...json.data.questions[0],
+          interactionId: randomUUID(),
+          kind: "approval",
+          status: "open",
+        });
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(
+    page,
+    web.origin,
+    web.password,
+    `/app/tasks/${q.taskId}?request=${q.interactionId}`,
+  );
+  const form = page.getByRole("region", { name: "Exact question response" });
+  await form.getByText("Recommended by Task lead", { exact: true }).waitFor();
+  const holds = page.locator("section#decisions .question-holds");
+  await holds.first().waitFor();
+  // Once, in the decision card after the selected question, in the answer's wording.
+  assert.equal(await holds.count(), 1);
+  assert.ok(
+    await form.evaluate(
+      (f, h) =>
+        Boolean(
+          h && f.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      await holds.elementHandle(),
+    ),
+  );
+  assert.match(await holds.innerText(), /Answering does not clear it\./);
+  // An approval open beside the selected question keeps the question's wording.
+  withApproval = true;
+  await page.reload();
+  await page
+    .locator("section#decisions .decision")
+    .getByText("Your decision · approval pending")
+    .waitFor();
+  assert.equal(await holds.count(), 1);
+  assert.match(await holds.innerText(), /Answering does not clear it\./);
+  assert.doesNotMatch(await holds.innerText(), /Approv/);
 });

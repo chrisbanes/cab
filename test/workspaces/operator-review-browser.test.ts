@@ -12,6 +12,7 @@ import { TaskReviewStore } from "../../src/core/task-review.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { leadResumeNotice } from "../../web/src/lead-feedback.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-review-browser");
 test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, comparison identities and local artifact feedback on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -663,7 +664,7 @@ for (const [limitCase, sourceBody] of [
     );
     assert.equal(
       await page
-        .locator(".task-source-line")
+        .locator("[data-task-strip]")
         .getByRole("link", { name: "Open GitHub to edit source", exact: true })
         .count(),
       1,
@@ -974,6 +975,8 @@ test("every lead composer shows the same resume line for a completed lead and ke
     "Please review evidence artifact Lead screenshot.",
   );
   assert.ok(followUp?.reference?.artifactId);
+  // The message is listed in History.
+  await openTaskTab(page, "History");
   await page
     .getByText(/assignment-follow-up · requested by operator ·/)
     .first()

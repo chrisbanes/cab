@@ -4,6 +4,7 @@ import type {
 } from "../../src/operator/contracts.js";
 import type { z } from "zod";
 import { CommitGate } from "./commit-gate.js";
+import type { TaskTab } from "./task-tabs.js";
 import type { OutcomeField, OutcomeTone } from "./action-feedback.js";
 import type { feedbackReferenceSchema } from "../../src/core/task-review-contracts.js";
 import type {
@@ -355,6 +356,9 @@ export class TaskWorkspaceState {
     this.reply.uncertain = value;
   }
   scrollY = 0;
+  /** The open tab and each tab's own scroll offset, kept while the task is open. */
+  tab: TaskTab = "overview";
+  tabScroll: Partial<Record<TaskTab, number>> = {};
   historyPages: Record<string, number[]> = {};
   omissionHistoryPages: Record<string, number[]> = {};
   focusRecord: string | null = null;

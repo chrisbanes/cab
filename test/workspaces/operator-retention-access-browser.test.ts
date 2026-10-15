@@ -10,6 +10,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedRetainedReviewWindow } from "../fixtures/task-review.js";
+import { openTaskTab } from "../fixtures/task-tabs.js";
 import { ConversationHistoryStore } from "../../src/standalone/conversation-history.js";
 // Retained-history seeding shares the startup deadline with web/browser launch.
 // These journeys assert no deadline of their own, so every budget is wide
@@ -225,9 +226,12 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       .count(),
     0,
   );
+  // The recorded change reference is listed on Changes.
+  await openTaskTab(page, "Changes");
   await page
     .getByText("No available recorded change reference.", { exact: true })
     .waitFor();
+  await openTaskTab(page, "Overview");
   assert.equal(
     (
       await page.request.get(
@@ -274,6 +278,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     });
   }
   await page.getByLabel("Editable reply").fill("Retained exact old draft");
+  await openTaskTab(page, "History");
   await page
     .getByRole("button", { name: "Expand all history", exact: true })
     .click();
@@ -532,6 +537,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   }
   assert.ok(snapshot);
   stage("validation-label-begin");
+  await openTaskTab(page, "Overview");
   await page
     .getByText(
       `Stale validation; checked head ${headA}, current bound head ${headB}`,
@@ -557,6 +563,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
   });
   stage("validation-capture-complete");
   stage("history-expand-begin");
+  await openTaskTab(page, "History");
   await page
     .getByRole("button", { name: "Expand all history", exact: true })
     .click();
@@ -621,12 +628,13 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
       .getByRole("button", { name: "Refresh task", exact: true })
       .evaluate((el) => (el as HTMLButtonElement).click());
     await headHistoryArrival;
+    // The result is on Overview, behind the open History tab.
     await page
       .locator("#review")
       .getByText(
         /Historical check:.*Head comparison unknown; current bound head unavailable/,
       )
-      .waitFor();
+      .waitFor({ state: "attached" });
     const gap = await page.evaluate(
       ({ itemId }) => ({
         items: document.querySelectorAll(`[data-record-id="${itemId}"]`).length,
@@ -729,6 +737,7 @@ async function retainedJourney(j: BrowserJourney, counterpart: boolean) {
     await page.clock.fastForward(15000);
     await intentionalEntered;
     assert.equal(await singleItem.count(), 1);
+    await openTaskTab(page, "Overview");
     await page.getByLabel("Editable reply").focus();
     await readingDiagnostic("intentional-control-focus-pending");
     await page.clock.fastForward(15000);

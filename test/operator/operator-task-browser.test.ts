@@ -254,20 +254,22 @@ test("a closure-held task reads Held and a project-paused task reads Paused, sid
       .count(),
     1,
   );
-  // The status line renders once the task read loads, so wait for it by text.
+  // The strip's readiness renders once the task read loads, so wait for it by text.
   const statusLine = async (taskId: string, text: RegExp) => {
     await page.goto(`${web.origin}/app/tasks/${taskId}`);
-    const line = page.getByText(text);
+    const line = page
+      .locator("[data-task-strip] [data-task-readiness]")
+      .filter({ hasText: text });
     await line.waitFor();
     return line.innerText();
   };
-  assert.match(
-    await statusLine(held.taskId, /^Held · closed on GitHub \/ /),
-    /^Held · closed on GitHub \/ Accountable project lead/,
+  assert.equal(
+    await statusLine(held.taskId, /^Held · closed on GitHub/),
+    "Held · closed on GitHub",
   );
-  assert.match(
-    await statusLine(paused.taskId, /^Draft · project paused \/ /),
-    /^Draft · project paused \/ Accountable project lead/,
+  assert.equal(
+    await statusLine(paused.taskId, /^Draft · project paused/),
+    "Draft · project paused",
   );
   assert.equal(await page.getByText("closed on GitHub").count(), 0);
 });

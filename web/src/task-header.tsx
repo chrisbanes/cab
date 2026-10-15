@@ -1,11 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { ActionLink, Button } from "./components.js";
 import {
   originLabel,
   stopConsequences,
-  taskStatusLine,
+  taskColumnOf,
+  taskIdentity,
+  taskNextActor,
+  taskReadiness,
 } from "./task-overview.js";
+import { type TaskTab, taskTabs } from "./task-tabs.js";
+import { stateIcons } from "./task-views.js";
 import {
   Dialog,
   DialogClose,
@@ -19,7 +30,7 @@ import {
 export interface TaskHeaderReport {
   taskId: string;
   title: string;
-  subtitle: string;
+  subtitle?: string | undefined;
   back: { href: string; label: string; ariaLabel: string; history: boolean };
   stop: { affected: string; held: boolean; open: boolean };
 }
@@ -35,7 +46,8 @@ export function taskHeaderReport(
   return {
     taskId: data.task.id,
     title,
-    subtitle: taskStatusLine(data),
+    // The recorded desired outcome; the strip carries state and readiness.
+    subtitle: data.task.outcome || undefined,
     back: origin
       ? {
           href: origin,
@@ -135,6 +147,123 @@ export function TaskHeaderActions({
           </DialogContent>
         </Dialog>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * The identity and status strip under the shell header: ID and source chip, state,
+ * readiness, who acts next and the lead, then the page's persistent tools.
+ */
+export function TaskStrip({
+  data,
+  onNext,
+  children,
+}: {
+  data: TaskRead["data"];
+  /** Shows the open request: selects Overview and focuses the decision card. */
+  onNext: () => void;
+  children: ReactNode;
+}) {
+  const identity = taskIdentity(data),
+    column = taskColumnOf(data),
+    Icon = stateIcons[column],
+    next = taskNextActor(data);
+  return (
+    <div className="task-strip" data-task-strip>
+      <div className="task-strip-facts">
+        <span className="task-id">{identity.label}</span>
+        {data.source &&
+          (identity.url ? (
+            <a className="task-source-chip" href={identity.url}>
+              Imported · {identity.label} ↗
+            </a>
+          ) : (
+            <span className="task-source-chip">
+              Imported · {identity.label}
+            </span>
+          ))}
+        <span className="task-state" data-column={column}>
+          <Icon aria-hidden="true" />
+          {column}
+        </span>
+        <span data-task-readiness>{taskReadiness(data)}</span>
+        {next.operator ? (
+          <button
+            type="button"
+            className="task-next"
+            data-operator="true"
+            onClick={onNext}
+          >
+            {next.text}
+          </button>
+        ) : (
+          <span className="task-next">{next.text}</span>
+        )}
+        <span>Accountable lead · {data.lead?.name ?? "Unconfigured"}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+/** The WAI-ARIA tab list; switching sends nothing and adds no history entry. */
+export function TaskTabs({
+  tab,
+  select,
+  notes = {},
+}: {
+  tab: TaskTab;
+  select: (tab: TaskTab) => void;
+  /** What waits on a tab the operator is not looking at, such as a check to run. */
+  notes?: Partial<Record<TaskTab, string>>;
+}) {
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    const index = taskTabs.findIndex(([id]) => id === tab),
+      last = taskTabs.length - 1;
+    const next =
+      event.key === "ArrowRight"
+        ? index === last
+          ? 0
+          : index + 1
+        : event.key === "ArrowLeft"
+          ? index === 0
+            ? last
+            : index - 1
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? last
+              : null;
+    if (next === null) return;
+    event.preventDefault();
+    const id = taskTabs[next]![0];
+    select(id);
+    document.getElementById(`task-tab-${id}`)?.focus();
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label="Task sections"
+      className="task-tabs"
+      onKeyDown={move}
+    >
+      {taskTabs.map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          id={`task-tab-${id}`}
+          aria-selected={id === tab}
+          aria-controls={`task-panel-${id}`}
+          tabIndex={id === tab ? 0 : -1}
+          aria-description={notes[id]}
+          data-note={notes[id] ? true : undefined}
+          onClick={() => select(id)}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
