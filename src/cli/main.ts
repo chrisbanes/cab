@@ -98,7 +98,8 @@ Options:
 
 Task operations: task create, task message, task follow-up, question answer and
 approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
-best-effort cancellation; Resume clears only the operator Stop),
+best-effort cancellation of an open task; Resume clears only the operator
+Stop),
 add-dependency/remove-dependency and task configure --ready true/false.
 
 Runtimes: runtime enable and runtime disable are a reverse pair. Disabling never

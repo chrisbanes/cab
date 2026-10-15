@@ -1,6 +1,6 @@
 import { TaskReviewStore } from "../core/task-review.js";
 import { canonicalMaterial, materialDigest } from "../core/delivery.js";
-import { DomainConflictError } from "../core/domain.js";
+import { DomainConflictError, TaskNotOpenError } from "../core/domain.js";
 import { executionIntentStateSchema } from "../core/execution-runtime.js";
 import type { CommandReceipt } from "../operator/contracts.js";
 import {
@@ -888,6 +888,10 @@ export class ExecutionState {
 
   /** Must run inside a transaction. */
   private holdTask(id: string): { active: number } {
+    const task = this.db
+      .prepare("SELECT state FROM domain_tasks WHERE id = ?")
+      .get(id) as { state: string } | undefined;
+    if (task && task.state !== "open") throw new TaskNotOpenError(task.state);
     this.db
       .prepare(
         "INSERT OR IGNORE INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",

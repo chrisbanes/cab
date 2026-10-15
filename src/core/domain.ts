@@ -48,6 +48,7 @@ export {
   DomainOperationError,
   DomainPolicyError,
   DomainStaleDispositionError,
+  TaskNotOpenError,
 } from "./domain-errors.js";
 
 const id = z.string().uuid();

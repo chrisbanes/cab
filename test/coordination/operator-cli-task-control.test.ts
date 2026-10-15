@@ -48,6 +48,37 @@ test("task stop requests best-effort cancellation without a pre-read", async (t)
   assert.equal(stopped(o, o.s.taskId), true);
 });
 
+test("task stop refuses a Done task, and task resume still clears its Stop", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s } = o;
+  s.f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_tasks SET state = 'done' WHERE id = ?").run(
+      s.taskId,
+    );
+  });
+  const digest = databaseDigest(s.f);
+  let r = await cli("rw", ["task", "stop", s.taskId]);
+  assert.equal(r.code, 4, r.out);
+  assert.match(
+    r.err + r.out,
+    /Only an open task can be stopped\. This task is Done\./,
+  );
+  assert.equal(databaseDigest(s.f), digest);
+  assert.equal(stopped(o, s.taskId), false);
+
+  s.f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
+    ).run(s.taskId);
+  });
+  r = await cli("rw", ["task", "get", s.taskId]);
+  assert.equal(r.json().data.execution.holds.stop, true);
+  r = await cli("rw", ["task", "resume", s.taskId]);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.json().data.receipt.stopCleared, true);
+  assert.equal(stopped(o, s.taskId), false);
+});
+
 test("task resume clears only the operator Stop and reports what remains", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s, d } = o;

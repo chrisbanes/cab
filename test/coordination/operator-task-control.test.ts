@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
-import { DomainConflictError } from "../../src/core/domain.js";
+import {
+  DomainConflictError,
+  TaskNotOpenError,
+} from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
 import {
   commandReceiptSchema,
@@ -16,6 +19,7 @@ import {
 } from "../../src/standalone/operator-api.js";
 import { ExecutionState } from "../../src/standalone/state.js";
 import { SchedulerStore } from "../../src/standalone/scheduler.js";
+import { databaseDigest } from "../fixtures/database-digest.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { startOwnWork } from "../fixtures/questions.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
@@ -310,6 +314,65 @@ test("keyless and receipted Stop and Resume share one hold", async (t) => {
   assert.equal(f.service.isTaskStopped(a.taskId), true);
   await f.service.resumeTask(a.taskId);
   assert.equal(f.service.isTaskStopped(a.taskId), false);
+});
+
+const finish = (f: Fixture, taskId: string, state: "done" | "cancelled") =>
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "UPDATE domain_tasks SET state = ?, version = version + 1 WHERE id = ?",
+    ).run(state, taskId);
+  });
+const seedStop = (f: Fixture, taskId: string) =>
+  f.seedPersistedState((db) => {
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
+    ).run(taskId);
+  });
+
+test("Stop applies only to an open task", async (t) => {
+  const f = await fixture(t);
+  const open = await seedReviewTask(f, "Open project", "Open task");
+  assert.equal((await control(f, "task.stop", open.taskId)).kind, "task-stop");
+  for (const state of ["done", "cancelled"] as const) {
+    const a = await seedReviewTask(f, `${state} project`, `${state} task`);
+    finish(f, a.taskId, state);
+    const before = databaseDigest(f);
+    for (const stop of [
+      () => control(f, "task.stop", a.taskId),
+      async () => f.service.stopTask(a.taskId),
+    ])
+      await assert.rejects(
+        stop(),
+        (error) =>
+          error instanceof TaskNotOpenError &&
+          error instanceof DomainConflictError &&
+          error.taskState === state,
+      );
+    assert.equal(databaseDigest(f), before);
+    assert.equal(f.service.isTaskStopped(a.taskId), false);
+  }
+});
+
+test("a stored Stop receipt replays after the task finishes", async (t) => {
+  const f = await fixture(t);
+  const a = await seedReviewTask(f);
+  const key = randomUUID();
+  const first = await control(f, "task.stop", a.taskId, key);
+  finish(f, a.taskId, "done");
+  assert.deepEqual(await control(f, "task.stop", a.taskId, key), first);
+});
+
+test("Resume clears an existing Stop on a finished task", async (t) => {
+  const f = await fixture(t);
+  for (const state of ["done", "cancelled"] as const) {
+    const a = await seedReviewTask(f, `${state} project`, `${state} task`);
+    finish(f, a.taskId, state);
+    seedStop(f, a.taskId);
+    assert.equal(f.service.isTaskStopped(a.taskId), true);
+    const resume = await control(f, "task.resume", a.taskId);
+    assert.equal(resume.kind === "task-resume" && resume.stopCleared, true);
+    assert.equal(f.service.isTaskStopped(a.taskId), false);
+  }
 });
 
 test("operator Stop coexists with an independent writer hold across restart and Resume", async (t) => {
