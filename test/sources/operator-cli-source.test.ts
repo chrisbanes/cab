@@ -543,7 +543,7 @@ test("project apply sends the prepared source change once, deactivating selectio
       { id: "S-1", keep: true },
       { id: "S-2", keep: true },
     ],
-    readiness: null,
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
     repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
   });
   assert.equal(r.status, 200);

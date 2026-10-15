@@ -1,3 +1,4 @@
+import { noRuleText } from "../../src/operator/readiness-text.js";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button, StatusBadge } from "./components.js";
 import type { TabProps } from "./project-config.js";
@@ -501,9 +502,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
               ) : (
                 conditions.length === 0 && (
                   <p className="metadata muted">
-                    No readiness rule: open issues in active selections are not
-                    filtered by label or Project field. Matching applies once a
-                    condition is added.
+                    {noRuleText} Matching applies once a condition is added.
                   </p>
                 )
               )}
