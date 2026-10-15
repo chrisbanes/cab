@@ -288,30 +288,7 @@
   transform: translateX(16px);
 }
 
-/* Breadcrumb and the phone title, shared by the page header. */
-.page-header-trail {
-  flex-direction: row;
-}
-
-.page-header-trail ol {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-4);
-  margin: 0 0 var(--space-12);
-  padding: 0;
-  list-style: none;
-  color: var(--muted-foreground);
-}
-
-.page-header-trail li + li::before {
-  content: "/";
-  margin-right: var(--space-4);
-}
-
-.page-header-trail a {
-  color: inherit;
-}
-
+/* The phone title, shared by the page header. */
 .page-title-short {
   display: none;
 }
@@ -377,12 +354,6 @@
 
 .settings-token {
   overflow-wrap: anywhere;
-}
-
-@media (max-width: 1120px) {
-  .page-header-trail {
-    display: none;
-  }
 }
 
 @media (max-width: 759px) {

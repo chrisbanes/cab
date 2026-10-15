@@ -30,10 +30,11 @@ import {
 import {
   workspaceSchema,
   type Session,
+  type TaskListSummary,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import { ClientError, OperatorClient } from "./api.js";
-import { useOperatorResource } from "./resource.js";
+import { useOperatorResource, type ResourceState } from "./resource.js";
 import {
   ActionLink,
   Button,
@@ -42,10 +43,16 @@ import {
   MobileNavigation,
   NavigationRow,
   PageHeader,
+  TopBar,
 } from "./components.js";
 import { ActionOutcome } from "./action-feedback.js";
 import { Alert } from "./ui/alert.js";
-import { loadTaskList, taskRouteSubtitle } from "./tasks.js";
+import {
+  isActiveColumn,
+  loadTaskList,
+  taskColumn,
+  taskRouteSubtitle,
+} from "./tasks.js";
 import { TaskComposer } from "./task-composer.js";
 import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
 import { unavailableAlert } from "./execution-runtime.js";
@@ -129,12 +136,14 @@ function ProjectNavigation({
   path,
   navigate,
   inboxCount,
+  tasks,
   row,
 }: {
   workspace: Workspace | null;
   path: string;
   navigate: (path: string) => void;
   inboxCount: number | null;
+  tasks: TaskListSummary[] | undefined;
   row: boolean;
 }) {
   const countId = useId();
@@ -216,6 +225,16 @@ function ProjectNavigation({
           {
             trailing: p.paused ? (
               <StatusBadge tone="warning">Paused</StatusBadge>
+            ) : tasks ? (
+              <span className="nav-count metadata">
+                {
+                  tasks.filter(
+                    (t) =>
+                      t.project.id === p.id && isActiveColumn(taskColumn(t)),
+                  ).length
+                }{" "}
+                active
+              </span>
             ) : undefined,
           },
         ),
@@ -228,6 +247,84 @@ function ProjectNavigation({
       )}
     </nav>
   );
+}
+/** Sidebar Search work field: opens the retained-record search; ⌘K / Ctrl+K focuses it. */
+function SearchWorkField({ navigate }: { navigate: (path: string) => void }) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        input.current?.focus();
+      }
+    };
+    addEventListener("keydown", onKey);
+    return () => removeEventListener("keydown", onKey);
+  }, []);
+  return (
+    <search>
+      <form
+        className="search-work"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const query = input.current?.value.trim();
+          navigate(
+            query
+              ? `/app/search?query=${encodeURIComponent(query)}`
+              : "/app/search",
+          );
+        }}
+      >
+        <SearchIcon {...navIcon} />
+        <input
+          ref={input}
+          type="search"
+          name="query"
+          aria-label="Search work"
+          aria-keyshortcuts="Meta+K Control+K"
+          placeholder="Search work"
+          className="body"
+        />
+        <span className="kbd identifier" aria-hidden="true">
+          ⌘K
+        </span>
+      </form>
+    </search>
+  );
+}
+/**
+ * Sidebar capacity meter. shortcut: reads global turn usage from the task list (every summary
+ * carries the same global figures), so it is absent with no tasks; read the runtime capacity
+ * directly if the shell needs it on an empty installation.
+ */
+function CapacityMeter({ tasks }: { tasks: TaskListSummary[] | undefined }) {
+  const capacity = tasks?.[0]?.capacity;
+  if (!capacity) return null;
+  const { globalUsage: used, globalLimit: limit } = capacity;
+  return (
+    <div className="capacity-meter">
+      <p className="metadata">
+        <span className="muted">Running turns</span>{" "}
+        <span className="identifier">
+          {used}/{limit}
+        </span>
+      </p>
+      <meter
+        min={0}
+        max={Math.max(limit, 1)}
+        value={Math.min(used, limit)}
+        aria-label={`Running turns: ${used} of ${limit}`}
+      />
+    </div>
+  );
+}
+/** Connection status from the shell's workspace read: delayed keeps the last data, disconnected has none. */
+function connectionOf(state: ResourceState<unknown>) {
+  if (state.status === "error")
+    return { tone: "error", label: "Disconnected" } as const;
+  if (state.status === "stale" && state.error)
+    return { tone: "warning", label: "Updates delayed" } as const;
+  return { tone: "success", label: "Connected" } as const;
 }
 /** Phone drawer account group: always visible rows, since no popup is nested in the Sheet. */
 function AccountRows({
@@ -797,6 +894,7 @@ export function App() {
         path={path}
         navigate={navigate}
         inboxCount={inboxCount}
+        tasks={tasks.state.data?.tasks}
         row={row}
       />
       {row ? (
@@ -809,6 +907,7 @@ export function App() {
         />
       ) : (
         <div className="account-footer">
+          <CapacityMeter tasks={tasks.state.data?.tasks} />
           <AccountMenu
             key={navigationVersion}
             path={path}
@@ -825,23 +924,42 @@ export function App() {
     <div className="shell">
       <aside className="sidebar">
         <div className="workspace-header">
-          <p className="body">Ensemble</p>
-          <p className="metadata muted">Personal workspace</p>
+          <span className="workspace-mark" aria-hidden="true" />
+          <div>
+            <p className="body">Ensemble</p>
+            <p className="metadata muted">Personal workspace</p>
+          </div>
         </div>
+        <SearchWorkField navigate={navigate} />
         {navigation(false)}
       </aside>
       <div className="workspace">
+        <TopBar
+          // Not found marks no current page.
+          trail={
+            unknownRoute
+              ? []
+              : (settingsPage?.trail ?? [
+                  // The page header's Back links the parent; the crumb only names it.
+                  ...(parent ? [{ label: parent.label }] : []),
+                  { label: taskReport?.title ?? title },
+                ])
+          }
+          connection={connectionOf(workspace.state)}
+          action={
+            unknownRoute ? undefined : (
+              <ActionLink variant="primary" href={newTaskHref}>
+                New task
+              </ActionLink>
+            )
+          }
+        />
         <main className={onInboxRoute ? "page page-inbox" : "page"}>
           <PageHeader
             title={title}
             subtitle={headerSubtitle}
             plain={unknownRoute || Boolean(settingsPage)}
-            {...(settingsPage
-              ? {
-                  trail: settingsPage.trail,
-                  shortTitle: settingsPage.shortTitle,
-                }
-              : {})}
+            {...(settingsPage ? { shortTitle: settingsPage.shortTitle } : {})}
             badge={
               onInboxRoute && inboxCount !== null
                 ? `${inboxCount} unresolved`
@@ -858,7 +976,12 @@ export function App() {
                 })}
             action={
               taskRoute ? (
-                <ActionLink variant="primary" href={newTaskHref}>
+                // The top bar carries New task on desktop; this one serves the drawer shell.
+                <ActionLink
+                  variant="primary"
+                  href={newTaskHref}
+                  className="page-header-new-task"
+                >
                   New task
                 </ActionLink>
               ) : ownsRefresh ? undefined : (

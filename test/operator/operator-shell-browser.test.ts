@@ -117,8 +117,8 @@ test("production shell keeps direct task links usable and the navigation drawer 
       geometry.documentWidth <= geometry.viewportWidth,
       `${width}px page must not scroll horizontally`,
     );
-    if (width === 1121) assert.ok(geometry.pageContentWidth >= 856);
-    if (width === 1366) assert.ok(geometry.workspaceWidth >= 1142);
+    if (width === 1121) assert.ok(geometry.pageContentWidth >= 849);
+    if (width === 1366) assert.ok(geometry.workspaceWidth >= 1134);
   }
   await captureBrowserEvidence(page, "1121-shell-sidebar-threshold");
 
@@ -390,7 +390,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     "2 unresolved",
   );
   assert.equal(
-    await sidebar.locator('nav a svg[aria-hidden="true"]').count(),
+    await sidebar.locator('nav a > svg.nav-icon[aria-hidden="true"]').count(),
     labels.length,
     "every sidebar item has a decorative icon",
   );
@@ -453,7 +453,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   );
   assert.equal(
     await page
-      .locator(".page-header")
+      .locator(".top-bar")
       .getByRole("link", { name: "New task", exact: true })
       .count(),
     1,

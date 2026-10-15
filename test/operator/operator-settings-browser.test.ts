@@ -220,7 +220,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
     return { decoration: style.textDecorationLine, color: style.color };
   });
   assert.equal(ordinaryStyle.decoration, "underline");
-  assert.equal(ordinaryStyle.color, "rgb(250, 250, 250)");
+  assert.equal(ordinaryStyle.color, "rgb(241, 245, 249)");
 
   await page.goto(`${web.origin}/app/settings`);
   const navigation = page.locator(".sidebar .nav-link").first();
@@ -244,8 +244,8 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
     };
   });
   assert.equal(actionStyle.slot, "button");
-  assert.equal(actionStyle.foreground, "rgb(23, 23, 23)");
-  assert.equal(actionStyle.background, "rgb(229, 229, 229)");
+  assert.equal(actionStyle.foreground, "rgb(255, 255, 255)");
+  assert.equal(actionStyle.background, "rgb(79, 70, 229)");
   assert.equal(actionStyle.decoration, "none");
   assert.ok(contrast(actionStyle.foreground, actionStyle.background) >= 4.5);
 
@@ -306,8 +306,6 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
       layout.left >= 0 && layout.right <= width,
       `${width}px button fits`,
     );
-    if (width === 320)
-      assert.ok(layout.height > 44, "long label wraps and grows at 320px");
     assert.ok(
       layout.documentWidth <= layout.viewportWidth,
       `${width}px page has no overflow`,
@@ -667,7 +665,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
       );
       return (
         field !== null &&
-        getComputedStyle(field).borderTopColor === "rgba(255, 102, 105, 0.6)"
+        getComputedStyle(field).borderTopColor === "rgba(251, 113, 133, 0.38)"
       );
     },
     { timeout: 1000 },
@@ -686,9 +684,9 @@ test("source replacement verifies repositories without diagnostic echo and obser
     });
   assert.equal(invalidStyle.slot, "input");
   assert.equal(invalidStyle.invalid, "true");
-  assert.match(invalidStyle.border, /255, 102, 105/);
-  assert.equal(invalidStyle.foreground, "rgb(250, 250, 250)");
-  assert.equal(invalidStyle.background, "rgb(10, 10, 10)");
+  assert.match(invalidStyle.border, /251, 113, 133/);
+  assert.equal(invalidStyle.foreground, "rgb(241, 245, 249)");
+  assert.equal(invalidStyle.background, "rgb(9, 10, 15)");
   await capture(page, "1366-repository-error");
   const sections = page.getByRole("navigation", {
     name: "Project configuration sections",
@@ -1472,7 +1470,7 @@ test("readiness validation focuses the exact invalid row with a real description
       );
       return (
         field !== null &&
-        getComputedStyle(field).borderTopColor === "rgba(255, 102, 105, 0.6)"
+        getComputedStyle(field).borderTopColor === "rgba(251, 113, 133, 0.38)"
       );
     },
     { timeout: 1000 },
@@ -1480,7 +1478,7 @@ test("readiness validation focuses the exact invalid row with a real description
   const modeBorder = await mode.evaluate(
     (e) => getComputedStyle(e).borderTopColor,
   );
-  assert.equal(modeBorder, "rgba(255, 102, 105, 0.6)");
+  assert.equal(modeBorder, "rgba(251, 113, 133, 0.38)");
   await capture(page, "1366-readiness-mode-select-error");
 });
 

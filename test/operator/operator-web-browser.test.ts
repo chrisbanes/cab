@@ -105,13 +105,13 @@ for (const viewport of [
           radius: s.borderRadius,
         };
       });
-    assert.equal(loginStyle.background, "rgb(229, 229, 229)");
-    assert.equal(loginStyle.foreground, "rgb(23, 23, 23)");
+    assert.equal(loginStyle.background, "rgb(79, 70, 229)");
+    assert.equal(loginStyle.foreground, "rgb(255, 255, 255)");
     assert.ok(contrast(loginStyle.foreground, loginStyle.background) >= 4.5);
     assert.match(loginStyle.family, /Geist/);
-    assert.equal(loginStyle.size, "14px");
+    assert.equal(loginStyle.size, "13px");
     assert.equal(loginStyle.height, viewport.width < 760 ? "44px" : "32px");
-    assert.equal(loginStyle.radius, "10px");
+    assert.equal(loginStyle.radius, "6px");
     await page.keyboard.press("Tab");
     assert.equal(
       await page
@@ -127,7 +127,7 @@ for (const viewport of [
         return { active: document.activeElement === el, ring: s.boxShadow };
       });
     assert.equal(focus.active, true);
-    assert.match(focus.ring, /115, 115, 115/);
+    assert.match(focus.ring, /129, 140, 248/);
     await page.keyboard.press("Shift+Tab");
     assert.equal(
       await page
@@ -157,8 +157,8 @@ for (const viewport of [
         const style = getComputedStyle(el);
         return { foreground: style.color, background: style.backgroundColor };
       });
-    assert.equal(primaryAction.foreground, "rgb(23, 23, 23)");
-    assert.equal(primaryAction.background, "rgb(229, 229, 229)");
+    assert.equal(primaryAction.foreground, "rgb(255, 255, 255)");
+    assert.equal(primaryAction.background, "rgb(79, 70, 229)");
     assert.ok(
       contrast(primaryAction.foreground, primaryAction.background) >= 4.5,
     );
@@ -338,13 +338,23 @@ for (const viewport of [
       });
     assert.ok(contrast(supporting.foreground, supporting.background) >= 4.5);
     assert.match(supporting.family, /Geist/);
-    assert.equal(supporting.size, "14px");
+    assert.equal(supporting.size, "13px");
     assert.equal(supporting.weight, "400");
     const badge = await page
       .locator('main [data-slot="badge"]')
       .evaluate((el) => {
         const s = getComputedStyle(el);
-        return { foreground: s.color, background: s.backgroundColor };
+        // Badges use a translucent soft fill, so contrast is measured over the page ground.
+        const [r = 0, g = 0, b = 0, alpha = 1] = (
+          s.backgroundColor.match(/[\d.]+/g) ?? []
+        ).map(Number);
+        const ground = (
+          getComputedStyle(document.body).backgroundColor.match(/[\d.]+/g) ?? []
+        ).map(Number);
+        const mix = [r, g, b].map(
+          (c, i) => alpha * c + (1 - alpha) * (ground[i] ?? 0),
+        );
+        return { foreground: s.color, background: `rgb(${mix.join(", ")})` };
       });
     assert.ok(contrast(badge.foreground, badge.background) >= 4.5);
     if (viewport.width === 683) await screenshot(page, "1366-zoom200");
