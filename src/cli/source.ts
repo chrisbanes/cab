@@ -647,7 +647,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         );
         const result = (
           receipt as Extract<CommandReceipt, { kind: "configuration" }>
-        ).result as { configVersion: number };
+        ).result as { configVersion: number; alreadyActive?: boolean };
         const active = selection?.active === true;
         return {
           request,
@@ -662,6 +662,14 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
           human: [
             `Recorded preview of ${selectionId} in project ${projectId} (request ${key}).`,
             keyValues(receiptLines(receipt)),
+            // An absent flag is a receipt recorded before the prior state was reported.
+            ...(result.alreadyActive === undefined
+              ? []
+              : [
+                  result.alreadyActive
+                    ? `${selectionId} was already active at source version ${result.configVersion}.`
+                    : `Activated ${selectionId} at source version ${result.configVersion}.`,
+                ]),
             `Now: source version ${live.source.version}; ${selectionId} is ${active ? "active" : "NOT active"}; observation ${observation?.state ?? "unavailable"}.`,
             ...(active
               ? []

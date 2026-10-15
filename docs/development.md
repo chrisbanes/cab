@@ -372,7 +372,9 @@ or run `node dist/src/cli/main.js` directly.
      discards its path. A saved value the read cannot name exits 4.
    - `project preview-source PROJECT_ID --selection ID --expected-version N`
      activates one selection after a complete provider read (an incomplete read
-     exits 4). It imports no tasks and proves no sync. There is no deactivate
+     exits 4). The receipt and output say whether the selection was already
+     active at the previewed version; a receipt recorded before that field existed
+     says neither. It imports no tasks and proves no sync. There is no deactivate
      command: saving any source change deactivates every selection. A rerun after a
      later save replays the original receipt and reports that the selection is not
      currently active.
