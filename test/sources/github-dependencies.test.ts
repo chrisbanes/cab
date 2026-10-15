@@ -8,7 +8,11 @@ import { test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
 import { Store } from "../../src/core/store.js";
-import type { IssueSnapshot } from "../../src/standalone/github-source.js";
+import type {
+  GitHubSourceReader,
+  IssueSnapshot,
+} from "../../src/standalone/github-source.js";
+import { GitHubSynchronizer } from "../../src/standalone/github-sync.js";
 
 const selected: IssueSnapshot = {
   providerInstance: "github.com",
@@ -369,6 +373,99 @@ test("initial and later incomplete native blocker reads hold imported admission"
     assert.ok(domain.admission(localId).reasons.includes("local-dependency"));
     sources.recordIssueStatus("I_1", { status: "unknown", reason: "http-403" });
     assert.ok(domain.admission(localId).reasons.includes("local-dependency"));
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("synchronization reads native blockers only for issues whose task admission needs them", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-github-dependencies-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  const domain = new DomainStore(db);
+  const sources = new GitHubSourceStore(db);
+  const projectId = randomUUID();
+  try {
+    new Store(db).ensureHost("test");
+    domain.migrate();
+    sources.migrate();
+    domain.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: "Alpha",
+      leadProfileId: null,
+    });
+    domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: 1,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [
+        {
+          id: "repo",
+          kind: "repository",
+          repositoryId: "R_1",
+          owner: "org",
+          name: "repo",
+        },
+      ],
+      readiness: {
+        mode: "any",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [],
+    });
+    domain.execute({
+      type: "github.activate",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      selectionId: "repo",
+      expectedVersion: 2,
+    });
+    const unready: IssueSnapshot = {
+      ...selected,
+      nodeId: "I_2",
+      number: 2,
+      labels: [],
+    };
+    let issues = [selected, unready];
+    const blockerReads: string[] = [];
+    const reader: GitHubSourceReader = {
+      async readSelection() {
+        return { complete: true, issues, reason: null };
+      },
+      async readBlockers(reference) {
+        blockerReads.push(reference.nodeId);
+        return { complete: true, blockers: [], reason: null };
+      },
+      async readIssueStatus() {
+        return { status: "open" };
+      },
+    };
+    const synchronizer = new GitHubSynchronizer(domain, sources, () => reader);
+    await synchronizer.refresh();
+    assert.deepEqual(blockerReads, ["I_1"]);
+    const readyTask = String(sources.issue("I_1")?.taskId);
+    const unreadyTask = String(sources.issue("I_2")?.taskId);
+    assert.equal(domain.task(readyTask).importedBlockers, "clear");
+    assert.equal(domain.task(unreadyTask).importedBlockers, "unknown");
+
+    // Losing readiness drops an earlier "clear" instead of keeping it unread.
+    issues = [{ ...selected, labels: [] }, unready];
+    blockerReads.length = 0;
+    await synchronizer.refresh();
+    assert.deepEqual(blockerReads, []);
+    assert.equal(domain.task(readyTask).importedBlockers, "unknown");
+
+    issues = [selected, { ...unready, labels: ["ready"] }];
+    await synchronizer.refresh();
+    assert.deepEqual(blockerReads.sort(), ["I_1", "I_2"]);
+    assert.equal(domain.task(unreadyTask).importedBlockers, "clear");
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });

@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   CommandResultValidationError,
   type DomainCommandResultMap,
+  LinkedRepositoryValidationError,
   parseDomainCommandOutcome,
 } from "../core/command-results.js";
 import type {
@@ -124,7 +125,7 @@ import {
   type ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
-  discoveryCredentialExclusions,
+  credentialReferenceExclusions,
   GhLoginScope,
   type GhOptions,
   ghEnvironment,
@@ -356,8 +357,11 @@ export class OperatorApiError extends Error {
 }
 
 function domainApiError(error: unknown): OperatorApiError | undefined {
-  if (error instanceof CommandResultValidationError)
+  if (error instanceof LinkedRepositoryValidationError)
     return new OperatorApiError(503, "unavailable");
+  // Any other result failed validation after its command ran, so its effect is unknown.
+  if (error instanceof CommandResultValidationError)
+    return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainOperationError)
     return new OperatorApiError(503, "command-outcome-unknown");
   if (error instanceof DomainConflictError)
@@ -483,7 +487,7 @@ export class OperatorApi {
       discovery
         ? [
             discovery,
-            digest(discoveryCredentialExclusions(discovery).values.join("\0")),
+            digest(credentialReferenceExclusions(discovery).values.join("\0")),
           ]
         : null,
       claude && claudeRead
@@ -5454,7 +5458,9 @@ export class OperatorApi {
   private requireReviewSession(
     context: OperatorReviewSessionContext | undefined,
   ): OperatorReviewSessionContext {
-    if (!context?.current()) throw new OperatorApiError(401, "unauthenticated");
+    // Bearer credentials carry no browser review session: that is a refusal, not a login failure.
+    if (!context) throw new OperatorApiError(403, "forbidden");
+    if (!context.current()) throw new OperatorApiError(401, "unauthenticated");
     if (context.ownerKey.length < 32 || context.ownerKey.length > 128)
       throw new OperatorApiError(403, "forbidden");
     return context;

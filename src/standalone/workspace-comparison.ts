@@ -310,7 +310,10 @@ function parseNulPaths(output: Buffer): string[] | undefined {
     return undefined;
   }
   const paths = decoded.split("\0");
-  return paths.every((path) => pathSegments(path) !== undefined)
+  // An untracked nested repository is listed as its directory with a trailing slash.
+  return paths.every(
+    (path) => pathSegments(path.replace(/\/$/, "")) !== undefined,
+  )
     ? paths
     : undefined;
 }
@@ -887,14 +890,32 @@ function entryForObservations(
 }
 
 function rawForUntracked(path: string): RawChange {
+  // A trailing slash marks a nested repository, which Git would add as a gitlink.
+  const nested = path.endsWith("/");
+  if (nested) path = path.slice(0, -1);
   return {
     oldMode: "000000",
-    newMode: "100644",
+    newMode: nested ? "160000" : "100644",
     oldObject: "0".repeat(40),
     newObject: "0".repeat(40),
     status: "A",
     oldPath: path,
     newPath: path,
+  };
+}
+
+/** A submodule commit pointer: its commit is not in this repository's objects. */
+function gitlinkObservation(objectId: string): ContentObservation {
+  return {
+    state: "unsupported",
+    content: {
+      ...(validObjectId.test(objectId) && !zeroObjectId.test(objectId)
+        ? { objectId }
+        : {}),
+      size: null,
+      lineCount: null,
+    },
+    reason: "unsupported-format",
   };
 }
 
@@ -1069,7 +1090,7 @@ export async function compareRepository(
 
   const refs = await run([
     "for-each-ref",
-    "--format=%(refname:short)",
+    "--format=%(refname:lstrip=2)",
     "refs/heads",
   ]);
   if (!refs) return result;
@@ -1308,6 +1329,7 @@ export async function compareRepository(
       result.reason = "git-failed";
       return undefined;
     }
+    if (mode === "160000") return gitlinkObservation(objectId);
     const cacheKey = `${objectId}\0${mode}\0${extname(path).toLowerCase()}`;
     const cached = objectCache.get(cacheKey);
     if (cached) return cached;
@@ -1474,6 +1496,9 @@ export async function compareRepository(
     if (change !== "deleted") {
       if (changeSet === "staged")
         right = await readObject(raw.newObject, afterPath, raw.newMode);
+      // A submodule's working tree is a directory, never previewed as a file.
+      else if (raw.newMode === "160000")
+        right = gitlinkObservation(raw.newObject);
       else right = await readWorking(afterPath);
     }
     if (isGap()) return result;

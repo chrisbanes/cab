@@ -484,10 +484,13 @@ function validBatch(
   return true;
 }
 
+const assertionRestartMinIntervalMs = 1000;
+
 /** Owns active-only sleep assertion and durable sleep/wake admission quarantine. */
 export class ExecutionPower {
   private readonly activeWork = new Set<string>();
   private assertionFailure: string | null = null;
+  private lastAssertionRestartAt = 0;
   private started = false;
   private polling: Promise<void> | undefined;
   // Wall clock: a monotonic clock may not advance while the Mac sleeps.
@@ -506,6 +509,18 @@ export class ExecutionPower {
         typeof reason === "string"
           ? reason.slice(0, 500)
           : "caffeinate process failed";
+      // The assertion otherwise only starts when work goes 0 to 1. start() is a no-op while a
+      // child exists, so this cannot double-spawn; the interval stops an immediate-failure loop.
+      const now = Date.now();
+      if (
+        this.activeWork.size === 0 ||
+        now - this.lastAssertionRestartAt < assertionRestartMinIntervalMs
+      )
+        return;
+      this.lastAssertionRestartAt = now;
+      this.assertion.start().catch(() => {
+        this.assertionFailure = "caffeinate process failed to restart";
+      });
     });
   }
 

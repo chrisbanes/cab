@@ -6,11 +6,7 @@ import {
   diagnosticStorageMib,
   isInBound,
 } from "../operator/diagnostic-retention.js";
-import {
-  type LaunchAgentConfiguration,
-  renderLaunchAgent,
-  writeLaunchAgent,
-} from "./launchd.js";
+import { type LaunchAgentConfiguration, writeLaunchAgent } from "./launchd.js";
 import {
   createSnapshot,
   restoreSnapshot,
@@ -133,10 +129,8 @@ async function operate(argv: string[], io: Io): Promise<number> {
       stderrPath: positionals[8] as string,
       ...diagnostic,
     };
+    // writeLaunchAgent validates by rendering before it creates the destination.
     const plistPath = positionals[9] as string;
-    // Validate before creating the destination. The rendered text is written
-    // with exclusive mode by the same renderer used by tests and the CLI.
-    renderLaunchAgent(configuration);
     writeLaunchAgent(configuration, plistPath);
     writeResult({
       ok: true,

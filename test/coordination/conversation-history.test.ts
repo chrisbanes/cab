@@ -1182,6 +1182,14 @@ test("exact values and credential patterns cannot hide each other", () => {
     ],
     ['password="P1 LEAK"', '"P1', "password=[redacted]"],
     ["token=abcLEAK", "token=abc", "[redacted]"],
+    [
+      "AWS_SECRET_ACCESS_KEY=wJalrLEAK",
+      "UNUSED",
+      "AWS_SECRET_ACCESS_KEY=[redacted]",
+    ],
+    ["DB_PASSWORD_PROD=hunter2", "UNUSED", "DB_PASSWORD_PROD=[redacted]"],
+    ["MY_SECRET=LEAK ok", "UNUSED", "MY_SECRET=[redacted] ok"],
+    ["token count: 5", "UNUSED", "token count: 5"],
   ] as const)
     assert.equal(sanitizeConversationText(text, [excluded]), expected, text);
 });

@@ -5,8 +5,9 @@ import {
   structuredAnswerDigest,
 } from "../core/structured-questions.js";
 import { createHash, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { delimiter, isAbsolute, join } from "node:path";
+import { createReadStream } from "node:fs";
+import { isAbsolute } from "node:path";
+import { resolveOnPath } from "./executable-path.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -437,6 +438,34 @@ export function parseFailureEvidence(
   if (!parsed.success) return undefined;
   const { retryAfterMs, ...evidence } = parsed.data;
   return retryAfterMs === undefined ? evidence : { ...evidence, retryAfterMs };
+}
+
+/** The failed-terminal evidence recorded by the safety port, or undefined when absent or conflicted. */
+export function terminalFailureEvidence(
+  safety: RuntimeSafetyPort,
+  threadId: string,
+  turnId: string,
+  generation: string | undefined,
+): FailureEvidence | undefined {
+  if (!threadId || !turnId || !generation) return undefined;
+  try {
+    const evidence = safety.terminal(threadId, turnId, generation);
+    if (
+      evidence?.firstStatus !== "failed" ||
+      evidence.conflicted ||
+      !evidence.workId ||
+      !evidence.failure
+    )
+      return undefined;
+    return parseFailureEvidence({
+      threadId,
+      turnId,
+      status: "failed",
+      ...evidence.failure,
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function makeFailureClassification(
@@ -877,28 +906,20 @@ export class CodexRuntime implements Runtime {
   }
   private async qualifyExecutable(
     environment: NodeJS.ProcessEnv,
+    executable: string,
   ): Promise<void> {
     this.nativeExecutable = undefined;
     try {
-      let executable = this.executable;
-      if (!isAbsolute(executable)) {
-        for (const directory of (environment.PATH ?? "").split(delimiter)) {
-          try {
-            await readFile(join(directory, executable));
-            executable = join(directory, executable);
-            break;
-          } catch {}
-        }
-      }
       const { stdout } = await promisify(execFile)(executable, ["--version"], {
         env: environment,
         timeout: 1000,
         killSignal: "SIGKILL",
         maxBuffer: 4096,
       });
-      const executableHash = createHash("sha256")
-        .update(await readFile(executable))
-        .digest("hex");
+      const hash = createHash("sha256");
+      for await (const chunk of createReadStream(executable))
+        hash.update(chunk);
+      const executableHash = hash.digest("hex");
       if (
         stdout.trim() === qualifiedCodexVersion &&
         executableHash ===
@@ -1545,10 +1566,15 @@ export class CodexRuntime implements Runtime {
   }
 
   async start(): Promise<void> {
+    const environment = this.options.spawnEnvironment?.() ?? process.env;
+    // One resolution feeds both qualification and spawn, so the hashed file is the one run.
+    const executable = isAbsolute(this.executable)
+      ? this.executable
+      : ((await resolveOnPath(this.executable, environment)) ??
+        this.executable);
     if (this.child) throw new Error("Runtime already started");
     this.failure = undefined;
     this.clearConversationCaptures();
-    const environment = this.options.spawnEnvironment?.() ?? process.env;
     this.nativeGeneration = randomUUID();
     this.nativeEndpoints.clear();
     this.nativeEndpointsByTurn.clear();
@@ -1558,7 +1584,7 @@ export class CodexRuntime implements Runtime {
     this.invalidNativeTurns.clear();
     this.nativeReadbacks.clear();
     const child = spawn(
-      this.executable,
+      executable,
       [
         "app-server",
         "-c",
@@ -1566,12 +1592,7 @@ export class CodexRuntime implements Runtime {
         "-c",
         "sandbox_mode=workspace-write",
       ],
-      {
-        stdio: "pipe",
-        ...(this.options.spawnEnvironment
-          ? { env: this.options.spawnEnvironment() }
-          : {}),
-      },
+      { stdio: "pipe", env: environment },
     );
     this.child = child;
     this.processIdentityValue = null;
@@ -1594,7 +1615,7 @@ export class CodexRuntime implements Runtime {
       this.failChild(child, new Error("Codex App Server stdout closed")),
     );
     try {
-      await this.qualifyExecutable(environment);
+      await this.qualifyExecutable(environment, executable);
       if (this.child !== child) throw new Error("Runtime stopped");
       this.processIdentityValue = await (
         this.options.captureProcessIdentity ?? captureProcessIdentity
@@ -1817,31 +1838,12 @@ export class CodexRuntime implements Runtime {
     threadId: string,
     turnId: string,
   ): FailureEvidence | undefined {
-    if (!threadId || !turnId) return undefined;
-    const generation = this.nativeGeneration;
-    if (!generation) return undefined;
-    try {
-      const evidence = this.options.safety.terminal(
-        threadId,
-        turnId,
-        generation,
-      );
-      if (
-        evidence?.firstStatus !== "failed" ||
-        evidence.conflicted ||
-        !evidence.workId ||
-        !evidence.failure
-      )
-        return undefined;
-      return parseFailureEvidence({
-        threadId,
-        turnId,
-        status: "failed",
-        ...evidence.failure,
-      });
-    } catch {
-      return undefined;
-    }
+    return terminalFailureEvidence(
+      this.options.safety,
+      threadId,
+      turnId,
+      this.nativeGeneration,
+    );
   }
 
   async waitForTurn(
@@ -1962,27 +1964,11 @@ export class CodexRuntime implements Runtime {
         this.receiveToolCall(child, message.id, message.params);
         return;
       }
-      let holdFailed = false;
-      try {
-        this.unexpected?.(unexpectedRequest(method, message.params));
-      } catch (error) {
-        holdFailed = true;
-        this.failChild(
-          child,
-          new Error(
-            `Could not persist unexpected request hold: ${String(error)}`,
-          ),
-        );
-      }
-      if (this.child === child)
-        void this.send(
-          `${JSON.stringify(deniedServerRequest(message.id, method))}\n`,
-        ).then(
-          () => {
-            if (holdFailed) child.kill("SIGTERM");
-          },
-          (error: Error) => this.failChild(child, error),
-        );
+      this.denyUnexpected(
+        child,
+        unexpectedRequest(method, message.params),
+        deniedServerRequest(message.id, method),
+      );
       return;
     }
     if (message.id !== undefined) {
@@ -2449,33 +2435,13 @@ export class CodexRuntime implements Runtime {
       : undefined;
     const registered = definitions?.some((tool) => tool.name === call?.tool);
     if (!call || !registered || !this.toolCall) {
-      let holdFailed = false;
-      try {
-        this.unexpected?.(unexpectedRequest("item/tool/call", params));
-      } catch (error) {
-        holdFailed = true;
-        this.failChild(
-          child,
-          new Error(
-            `Could not persist unexpected request hold: ${String(error)}`,
-          ),
-        );
-      }
-      if (this.child === child)
-        void this.send(
-          `${JSON.stringify({
-            id,
-            result: {
-              contentItems: [{ type: "inputText", text: "not authorized" }],
-              success: false,
-            },
-          })}\n`,
-        ).then(
-          () => {
-            if (holdFailed) child.kill("SIGTERM");
-          },
-          (error: Error) => this.failChild(child, error),
-        );
+      this.denyUnexpected(child, unexpectedRequest("item/tool/call", params), {
+        id,
+        result: {
+          contentItems: [{ type: "inputText", text: "not authorized" }],
+          success: false,
+        },
+      });
       return;
     }
     void this.dispatchToolCall(child, id, call);
@@ -2547,9 +2513,10 @@ export class CodexRuntime implements Runtime {
   private reportUnexpected(
     request: UnexpectedRequest,
     child = this.child,
-  ): void {
+  ): boolean {
     try {
       this.unexpected?.(request);
+      return false;
     } catch (error) {
       if (child)
         this.failChild(
@@ -2558,6 +2525,23 @@ export class CodexRuntime implements Runtime {
             `Could not persist unexpected request hold: ${String(error)}`,
           ),
         );
+      return true;
     }
+  }
+
+  /** Records the hold, then denies the request; a failed hold ends the child once the denial is written. */
+  private denyUnexpected(
+    child: ChildProcessWithoutNullStreams,
+    request: UnexpectedRequest,
+    denial: unknown,
+  ): void {
+    const holdFailed = this.reportUnexpected(request, child);
+    if (this.child === child)
+      void this.send(`${JSON.stringify(denial)}\n`).then(
+        () => {
+          if (holdFailed) child.kill("SIGTERM");
+        },
+        (error: Error) => this.failChild(child, error),
+      );
   }
 }

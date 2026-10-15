@@ -14,7 +14,13 @@ export type {
   BlockerSnapshot,
   IssueReference,
 } from "../core/github-source.js";
-import { githubApi as api, githubFetch, nextPageLink } from "./github-http.js";
+import {
+  githubApi as api,
+  githubFetch,
+  githubPages,
+  githubRateLimitResumeAt,
+  nextPageLink,
+} from "./github-http.js";
 
 const name = z.string().min(1);
 const issueSchema = z
@@ -154,33 +160,6 @@ class RateLimitedError extends Error {
   }
 }
 
-/** The epoch-ms time GitHub says to resume, when a 403/429 is a rate limit. */
-function rateLimitResumeAt(response: Response): number | undefined {
-  if (response.status !== 403 && response.status !== 429) return undefined;
-  const header = (name: string) => response.headers.get(name);
-  const retryAfter = header("retry-after");
-  // A 429 is always a rate limit; a 403 is one only when its headers say so.
-  if (
-    response.status === 403 &&
-    header("x-ratelimit-remaining") !== "0" &&
-    retryAfter === null
-  )
-    return undefined;
-  const now = Date.now();
-  // Only positive whole seconds are usable; empty, negative or past values fall back.
-  const seconds = (value: string | null) =>
-    value !== null && /^\d+$/.test(value.trim()) ? Number(value) : Number.NaN;
-  const times = [
-    seconds(header("x-ratelimit-reset")) * 1000,
-    now + seconds(retryAfter) * 1000,
-  ].filter((time) => Number.isFinite(time) && time > now);
-  // GitHub documents waiting at least one minute when no header gives a reset time.
-  // Headers are external input: cap at GitHub's one-hour primary window so they cannot pause discovery indefinitely.
-  return times.length
-    ? Math.min(Math.max(...times), now + 3_600_000)
-    : now + 60_000;
-}
-
 function safeReason(error: unknown): string {
   if (
     error instanceof Error &&
@@ -231,7 +210,7 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
       () => new Error("invalid-provider-origin"),
     );
     if (!response.ok) {
-      const resumeAt = rateLimitResumeAt(response);
+      const resumeAt = await githubRateLimitResumeAt(response);
       if (resumeAt !== undefined) throw new RateLimitedError(resumeAt);
       throw new Error(`http-${response.status}`);
     }
@@ -288,15 +267,15 @@ export class GitHubHttpSourceReader implements GitHubSourceReader {
     onPage?: (values: T[]) => void,
   ): Promise<T[]> {
     const result: T[] = [];
-    const seen = new Set<string>();
-    for (let page = 0; url; page++) {
-      if (page >= MAX_PAGES || seen.has(url)) throw new Error("page-limit");
-      seen.add(url);
-      const { response, value } = await this.request(url);
+    for await (const value of githubPages(
+      url,
+      (next) => this.request(next),
+      nextLink,
+      () => new Error("page-limit"),
+    )) {
       const values = z.array(schema).parse(value);
       result.push(...values);
       onPage?.(values);
-      url = nextLink(response) ?? "";
     }
     return result;
   }

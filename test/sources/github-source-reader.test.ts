@@ -470,6 +470,22 @@ test("a 403 without rate-limit headers stays an http failure", async () => {
   assert.equal(remaining.reason, "http-403");
 });
 
+test("a secondary-limit 403 without rate-limit headers is rate-limited", async () => {
+  const before = Date.now();
+  const result = await limitedReader(
+    () =>
+      new Response(
+        JSON.stringify({
+          message: "You have exceeded a secondary rate limit.",
+        }),
+        { status: 403, headers: { "x-ratelimit-remaining": "42" } },
+      ),
+  ).readSelection(repoSelection);
+  assert.equal(result.complete, false);
+  assert.equal(result.reason, "rate-limited");
+  assert.ok((result.resumeAt ?? 0) >= before + 60_000);
+});
+
 test("empty, negative or past rate-limit deadlines fall back to one minute", async () => {
   for (const headers of [
     { "retry-after": "" },

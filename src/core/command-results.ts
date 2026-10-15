@@ -239,8 +239,18 @@ function parseUnchanged<T>(schema: z.ZodType<T>, value: unknown): T {
   }
 }
 
+/** Repository verification output, checked before its command commits anything. */
+export class LinkedRepositoryValidationError extends CommandResultValidationError {}
+
 export function parseLinkedRepositoryResult(value: unknown) {
-  return parseUnchanged(linkedRepositorySchema, value);
+  try {
+    return parseUnchanged(linkedRepositorySchema, value);
+  } catch (error) {
+    throw new LinkedRepositoryValidationError(
+      "Repository verification failed runtime validation",
+      { cause: error },
+    );
+  }
 }
 
 /** Validate an untrusted apply, receipt, or provider result without changing its shape. */

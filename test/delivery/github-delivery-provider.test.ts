@@ -755,3 +755,105 @@ test("pagination follows only a same-origin next link", async () => {
   });
   assert.equal((await provider.inspectAction(record)).state, "uncertain");
 });
+
+const prRepository = (url: URL) =>
+  url.pathname === "/graphql"
+    ? Response.json({
+        data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+      })
+    : url.pathname === "/repos/org/repo"
+      ? Response.json({
+          node_id: "R1",
+          full_name: "org/repo",
+          allow_merge_commit: true,
+          allow_squash_merge: true,
+          allow_rebase_merge: false,
+        })
+      : null;
+
+test("pr.create readback queries only the exact head and base and tolerates a deleted fork's PR", async () => {
+  const record = commentRecord();
+  const head = "1".repeat(40);
+  record.request.action = {
+    kind: "pr.create",
+    target: {
+      repositoryId: "R1",
+      baseRef: "main",
+      headRef: "cb/x",
+      expectedHeadSha: head,
+    },
+    title: "PR",
+    body: "Body",
+    draft: true,
+  };
+  const marker = `<!-- ensemble-operation:${record.operationId} -->`;
+  const listings: URL[] = [];
+  const unmarked = new GitHubHttpDeliveryProvider(
+    "fixture-marker",
+    async (input) => {
+      const url = new URL(String(input));
+      const repository = prRepository(url);
+      if (repository) return repository;
+      if (url.pathname === "/user") return Response.json({ node_id: "U1" });
+      listings.push(url);
+      const repo = { node_id: "R1" };
+      return Response.json([
+        // A PR from a deleted fork: GitHub reports head.repo as null.
+        { node_id: "P0", number: 1, body: null, head: { repo: null } },
+        {
+          node_id: "P9",
+          number: 9,
+          title: "PR",
+          body: `Body\n\n${marker}`,
+          draft: true,
+          user: { node_id: "U1" },
+          head: { sha: head, ref: "cb/x", repo },
+          base: { ref: "main", repo },
+        },
+      ]);
+    },
+  );
+  const observation = await unmarked.inspectAction(record);
+  assert.equal(observation.state, "confirmed-success");
+  assert.deepEqual(observation.receipt, {
+    nodeId: "P9",
+    number: 9,
+    headSha: head,
+  });
+  assert.equal(listings.length, 1);
+  assert.equal(listings[0]?.pathname, "/repos/org/repo/pulls");
+  assert.equal(listings[0]?.searchParams.get("head"), "org:cb/x");
+  assert.equal(listings[0]?.searchParams.get("base"), "main");
+  assert.equal(listings[0]?.searchParams.get("state"), "all");
+});
+
+test("a rate-limited write is a retryable confirmed failure that names when to resume", async () => {
+  for (const limited of [
+    () =>
+      new Response("slow down", {
+        status: 429,
+        headers: { "retry-after": "30" },
+      }),
+    () =>
+      new Response("You have exceeded a secondary rate limit", {
+        status: 403,
+      }),
+  ]) {
+    const before = Date.now();
+    const observation = await new GitHubHttpDeliveryProvider(
+      "fixture-marker",
+      async (input) => prRepository(new URL(String(input))) ?? limited(),
+    ).performAction(commentRecord());
+    assert.equal(observation.state, "confirmed-failure");
+    assert.equal(observation.retryable, true);
+    assert.ok((observation.resumeAt ?? 0) >= before + 30_000);
+  }
+  const denied = await new GitHubHttpDeliveryProvider(
+    "fixture-marker",
+    async (input) =>
+      prRepository(new URL(String(input))) ??
+      new Response("denied", { status: 403 }),
+  ).performAction(commentRecord());
+  assert.equal(denied.state, "confirmed-failure");
+  assert.equal(denied.retryable, undefined);
+});

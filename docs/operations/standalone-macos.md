@@ -91,7 +91,9 @@ Before it changes anything, upgrade reads the install record, checks the target
 release as install does, checks that the running job is the one the record
 describes, and loads the connection's token (`--connection`,
 `ENSEMBLE_CONNECTION` or the default connection), which must be for the
-installed origin. It then runs these stages:
+installed origin. It also makes one readiness read with that token while the old
+job still runs, and refuses if the read fails (an expired or revoked token, or one
+without `diagnostics.read`). It then runs these stages:
 
 1. `stop`: boots out the job and confirms that its process exited, within 30
    seconds.

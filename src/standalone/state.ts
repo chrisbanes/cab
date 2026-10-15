@@ -679,6 +679,9 @@ export class ExecutionState {
     this.migratePreTurnReceipts();
     this.migrateStopInterruptState();
     this.migrateTaskStopHoldKind();
+    // Earlier builds kept Stop targets after a receipt reconciled their work.
+    this.db.exec(`DELETE FROM execution_stop_targets
+      WHERE workId IN (SELECT workId FROM execution_intents WHERE state = 'reconciled')`);
     // Workspace recovery runs before this state is opened. Keep the archival
     // hold only when bounded Git work recorded unresolved filesystem effects.
     const workspaceColumns = this.db
@@ -4110,6 +4113,11 @@ export class ExecutionState {
         throw new RecoveryRejectedError(
           "Recovery generation changed during receipt validation",
         );
+      // The verified receipt independently resolves a stopped generation; its
+      // target must not gate or answer later Stops of the task.
+      this.db
+        .prepare("DELETE FROM execution_stop_targets WHERE workId = ?")
+        .run(value.workId);
       this.db
         .prepare(`INSERT INTO execution_recovery_receipts
         (id, workId, workRevision, requestSequence, threadId, turnId, processId,
@@ -4704,18 +4712,21 @@ export class ExecutionState {
     );
   }
 
-  hold(id: string, reason: string): void {
-    this.db
+  /** Returns false when the intent was already settled and stays unheld. */
+  hold(id: string, reason: string): boolean {
+    const held = this.db
       .prepare(
-        "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ? AND state NOT IN ('completed','reconciled','resolved-failed')",
+        "UPDATE execution_intents SET state = 'held', reason = ? WHERE id = ? AND state NOT IN ('completed','reconciled','resolved-failed') RETURNING workId",
       )
-      .run(reason, id);
-    if (this.hasTurnRequests)
+      .get(reason, id) as { workId: string } | undefined;
+    // A settled intent keeps its request settled so later inbox delivery is not blocked.
+    if (held && this.hasTurnRequests)
       this.db
         .prepare(
-          "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = (SELECT workId FROM execution_intents WHERE id = ?)",
+          "UPDATE turn_requests SET state = 'held', reason = ? WHERE workId = ?",
         )
-        .run(reason, id);
+        .run(reason, held.workId);
+    return held !== undefined;
   }
 
   wait(id: string, reason: string): void {

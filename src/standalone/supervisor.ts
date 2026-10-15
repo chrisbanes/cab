@@ -358,19 +358,18 @@ export class ExecutionSupervisor {
     taskId: string,
     signal: AbortSignal,
   ): Promise<void> {
-    if (
+    const settled = () =>
       this.state
         .stopTargets(taskId)
-        .some((target) => target.terminalState !== "unknown")
-    )
-      return;
+        .every((target) => target.terminalState !== "unknown");
+    if (settled()) return;
     await new Promise<void>((resolve) => {
       const cleanup = () => {
         this.events.off("terminal", terminal);
         signal.removeEventListener("abort", abort);
       };
       const terminal = (observedTaskId: string) => {
-        if (observedTaskId === taskId) {
+        if (observedTaskId === taskId && settled()) {
           cleanup();
           resolve();
         }

@@ -48,3 +48,57 @@ export function nextPageLink(
   if (!match?.[1]) throw malformed();
   return new URL(match[1], githubApi).href;
 }
+
+/**
+ * Pages a GitHub REST listing from `first`, yielding each page's decoded body.
+ * At most 100 pages are read and a repeated URL is refused, both as `exceeded`.
+ */
+export async function* githubPages(
+  first: string,
+  request: (url: string) => Promise<{ response: Response; value: unknown }>,
+  next: (response: Response) => string | null,
+  exceeded: () => Error,
+): AsyncGenerator<unknown> {
+  const seen = new Set<string>();
+  let url: string | null = first;
+  for (let page = 0; url; page++) {
+    if (page >= 100 || seen.has(url)) throw exceeded();
+    seen.add(url);
+    const { response, value } = await request(url);
+    yield value;
+    url = next(response);
+  }
+}
+
+/**
+ * The epoch-ms time GitHub says to resume when a failed response is a primary or
+ * secondary rate limit, else undefined. Reads (and so consumes) a 403 body.
+ */
+export async function githubRateLimitResumeAt(
+  response: Response,
+): Promise<number | undefined> {
+  if (response.status !== 403 && response.status !== 429) return undefined;
+  const header = (name: string) => response.headers.get(name);
+  const retryAfter = header("retry-after");
+  // A 429 is always a rate limit; a 403 is one only when its headers or body say so.
+  if (
+    response.status === 403 &&
+    header("x-ratelimit-remaining") !== "0" &&
+    retryAfter === null &&
+    !/rate limit/i.test(await response.text().catch(() => ""))
+  )
+    return undefined;
+  const now = Date.now();
+  // Only positive whole seconds are usable; empty, negative or past values fall back.
+  const seconds = (value: string | null) =>
+    value !== null && /^\d+$/.test(value.trim()) ? Number(value) : Number.NaN;
+  const times = [
+    seconds(header("x-ratelimit-reset")) * 1000,
+    now + seconds(retryAfter) * 1000,
+  ].filter((time) => Number.isFinite(time) && time > now);
+  // GitHub documents waiting at least one minute when no header gives a reset time.
+  // Headers are external input: cap at GitHub's one-hour primary window so they cannot pause work indefinitely.
+  return times.length
+    ? Math.min(Math.max(...times), now + 3_600_000)
+    : now + 60_000;
+}

@@ -1404,17 +1404,6 @@ export class LocalOperatorHttp {
             );
             return;
           }
-          const extension = this.routes.match("GET", url.pathname);
-          if (extension) {
-            const result = await extension.handler({
-              params: extension.params,
-              fields: cleanQuery(url.searchParams),
-              csrfToken: authorized.csrfToken,
-              webEnabled: Boolean(this.web),
-            });
-            this.writeRouteResult(response, result, authorized);
-            return;
-          }
           writeHtml(response, 404, "<main><h1>Not found</h1></main>");
           return;
         }
@@ -1452,8 +1441,7 @@ export class LocalOperatorHttp {
             ? firstSegment
             : undefined;
         const extension =
-          (slot && this.routes.matchSlot(slot, "POST", url.pathname)) ||
-          this.routes.match("POST", url.pathname);
+          slot && this.routes.matchSlot(slot, "POST", url.pathname);
         if (!extension) {
           writeHtml(response, 404, "<main><h1>Not found</h1></main>");
           return;

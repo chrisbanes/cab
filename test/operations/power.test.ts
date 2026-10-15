@@ -335,6 +335,8 @@ test("assertion child failure is visible without releasing execution state", asy
     await waitUntil(() => power.status().assertionFailure !== null);
     assert.match(power.status().assertionFailure ?? "", /caffeinate.*exited/i);
     assert.equal(hasWriterOrCapacity(db, active.workId), true);
+    // Work is still active, so the assertion is restarted with a fresh child.
+    await waitUntil(() => children.length === 2);
   } finally {
     await power.stop();
     db.close();

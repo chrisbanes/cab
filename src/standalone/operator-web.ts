@@ -6,6 +6,7 @@ import {
   type OperatorApi,
   type OperatorReviewSessionContext,
 } from "./operator-api.js";
+import { operatorRouteAuthority } from "./operator-credentials.js";
 import type { Readiness } from "./readiness.js";
 import type { WorkspaceInspectionRequest } from "./workspace-inspection.js";
 import { workspaceComparisonReadRequestSchema } from "../operator/contracts.js";
@@ -436,62 +437,8 @@ export class OperatorWebBoundary {
   }
   knownApi(path: string) {
     return (
-      [
-        "/api/operator/session",
-        "/api/operator/runtime",
-        "/api/operator/login",
-        "/api/operator/logout",
-        "/api/operator/workspace",
-        "/api/operator/task-list",
-        "/api/operator/inbox",
-        "/api/operator/search",
-        "/api/operator/commands",
-        "/api/operator/source-refresh",
-        "/api/operator/source-observations",
-        "/api/operator/discovery",
-        "/api/operator/claude-token",
-        "/api/operator/readiness",
-        "/api/operator/readiness/claude-token",
-        "/api/operator/discovery/repositories",
-        "/api/operator/discovery/branches",
-        "/api/operator/discovery/projects",
-        "/api/operator/setup/folders",
-        "/api/operator/setup/verify-checkout",
-        "/api/operator/cli",
-        "/api/operator/credentials",
-        "/api/operator/operations",
-        "/api/operator/executions",
-      ].includes(path) ||
-      /^\/api\/operator\/executions\/[^/]+(?:\/(?:inputs|events))?$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
-      /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/configuration$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/(?:projects|tasks)\/[^/]+$/.test(path) ||
-      /^\/api\/operator\/tasks\/[^/]+\/(?:review|artifacts\/[^/]+)$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/tasks\/[^/]+\/(?:files|preview|results|messages)$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/tasks\/[^/]+\/results\/[^/]+\/evidence(?:\/[^/]+)?$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/tasks\/[^/]+\/review-anchors\/[^/]+$/.test(path) ||
-      /^\/api\/operator\/tasks\/[^/]+\/(?:review-draft|local-reviews(?:\/[^/]+)?)$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/tasks\/[^/]+\/comparisons$/.test(path) ||
-      /^\/api\/operator\/tasks\/[^/]+\/questions\/[^/]+$/.test(path) ||
-      /^\/api\/operator\/projects\/[^/]+\/composer-options$/.test(path) ||
-      /^\/api\/operator\/assignments\/[^/]+(?:\/(?:history|recovery|recovery-options|instructions))?$/.test(
-        path,
-      ) ||
-      /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/(?:instructions|impact)$/.test(
-        path,
-      )
+      operatorRouteAuthority("GET", path) !== undefined ||
+      operatorRouteAuthority("POST", path) !== undefined
     );
   }
 }

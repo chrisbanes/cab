@@ -428,7 +428,7 @@ function coordinatorFixture() {
     },
   };
 }
-test("positively confirmed transient failures retry only twice including persisted prior attempts", async () => {
+test("positively confirmed transient failures retry only twice, one attempt per reconcile, including persisted prior attempts", async () => {
   const f = coordinatorFixture();
   let effects = 0;
   const request = f.request(),
@@ -471,6 +471,9 @@ test("positively confirmed transient failures retry only twice including persist
     f.reopen();
     coordinator = new DeliveryCoordinator(f.store(), options);
     await coordinator.reconcile();
+    assert.equal(effects, 1);
+    assert.equal(f.store().action(request.operationId).attempts, 2);
+    await coordinator.reconcile();
     assert.equal(effects, 2);
     assert.equal(f.store().action(request.operationId).attempts, 3);
     await coordinator.stop();
@@ -484,6 +487,55 @@ test("positively confirmed transient failures retry only twice including persist
     );
   } finally {
     await coordinator?.stop();
+    f.close();
+  }
+});
+test("a rate-limited failure is not retried before its resume time and is retried after it", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 1_000_000 });
+  const f = coordinatorFixture();
+  let effects = 0;
+  const request = f.request(),
+    caller = f.caller(0);
+  const provider: GitHubDeliveryProvider = {
+    async preflight() {
+      return {};
+    },
+    async performAction() {
+      effects++;
+      return {
+        state: "confirmed-failure",
+        reason: "provider-http-429",
+        receipt: null,
+        retryable: true,
+        resumeAt: Date.now() + 60_000,
+      };
+    },
+    async inspectAction() {
+      throw new Error("unused");
+    },
+    async inspectPr() {
+      throw new Error("unused");
+    },
+  };
+  const coordinator = new DeliveryCoordinator(f.store(), {
+    providerFactory: () => provider,
+    authorize: () => {},
+    approved: () => false,
+  });
+  try {
+    await coordinator.submit(request, caller);
+    assert.equal(effects, 1);
+    await coordinator.reconcile();
+    assert.equal(effects, 1);
+    t.mock.timers.tick(59_000);
+    await coordinator.reconcile();
+    assert.equal(effects, 1);
+    t.mock.timers.tick(1_000);
+    await coordinator.reconcile();
+    assert.equal(effects, 2);
+    assert.equal(f.store().action(request.operationId).attempts, 2);
+  } finally {
+    await coordinator.stop();
     f.close();
   }
 });

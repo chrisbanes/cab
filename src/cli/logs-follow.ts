@@ -19,7 +19,7 @@ import {
   workIdArg,
 } from "./browse-execution.js";
 import { CliError } from "./connections.js";
-import { isoTime, oneLine, table } from "./render.js";
+import { isoTime, jsonLine, oneLine, table, terminalSafe } from "./render.js";
 
 const KINDS = ["input", "setting", "runtime", "tool", "service"] as const;
 const SEVERITIES = ["info", "warn", "error"] as const;
@@ -175,9 +175,11 @@ export const logsCommand: BrowseCommand = {
     }
 
     // Streaming: one page buffered per poll; each poll re-authenticates.
-    const out = (line: string) => ctx.deps.stdout.write(`${line}\n`);
+    const write = (line: string) => ctx.deps.stdout.write(`${line}\n`);
+    // Item names and payloads are model-controlled: neither mode may drive the terminal.
+    const out = (line: string) => write(terminalSafe(line));
     const emit = (type: string, body: Record<string, unknown>) =>
-      out(JSON.stringify({ schema: SCHEMA, type, ...body }));
+      write(jsonLine({ schema: SCHEMA, type, ...body }));
     const sleep = ctx.deps.sleep ?? defaultSleep;
     const signal = ctx.deps.signal;
     const deadline = ctx.deps.now() + maxDuration * 1000;
