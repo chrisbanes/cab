@@ -186,7 +186,7 @@ export function holdNotices(
 
 /**
  * `holdNotices` for surfaces that list every open approval as its own row: the merged approval
- * hold is dropped unless an approval is in view, so no approval is listed twice.
+ * hold is dropped unless an approval is in view; then only the other open approvals remain.
  */
 export function holdNoticesBesideRequests(
   task: TaskRead["data"],
