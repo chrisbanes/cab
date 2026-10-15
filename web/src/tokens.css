@@ -56,6 +56,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
+  /* Body and controls are 13px, so primitives using text-sm follow --type-sm. */
+  --text-sm: 13px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 6px;
