@@ -76,7 +76,7 @@ jobs:
       - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
       - run: node --version && npm --version
       - run: npm ci
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ensemble-build
           path: dist
@@ -128,7 +128,7 @@ jobs:
       - run: npm install --global "$(node -p 'require("./package.json").packageManager')"
       - run: node --version && npm --version
       - run: npm ci
-      - uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v8
         with:
           name: ensemble-build
           path: dist
