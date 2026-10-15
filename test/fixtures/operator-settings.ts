@@ -279,6 +279,24 @@ export const noPageOverflow = (page: Page) =>
       document.documentElement.scrollWidth <=
       document.documentElement.clientWidth,
   );
+/**
+ * Text of every badge within `scope` that shows a word without a symbol. Count and label
+ * badges are not states, so they are allowed to stay symbol-less.
+ */
+export const unpairedBadges = (
+  scope: Page | Locator,
+  allowed = /^(Matches |New repository link$|\d+ unresolved$)/,
+) =>
+  scope
+    .locator('[data-slot="badge"]')
+    .evaluateAll(
+      (es, source) =>
+        es
+          .filter((e) => !e.querySelector('svg[aria-hidden="true"]'))
+          .map((e) => e.textContent ?? "")
+          .filter((t) => !new RegExp(source).test(t)),
+      allowed.source,
+    );
 /** The breadcrumb as read aloud: its items joined by the drawn separator. */
 export const trail = (page: Page) =>
   page

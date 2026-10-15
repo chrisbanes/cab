@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { webkit } from "playwright";
+import { webkit, type Locator } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -8,9 +8,19 @@ import {
   noPageOverflow,
   phone,
   startSettings,
+  unpairedBadges,
 } from "../fixtures/operator-settings.js";
 
 const test = browserSuite("operator-settings-layout-browser");
+
+/** A paused project is idle, not attention: one symbol beside the word. */
+async function assertPausedBadgeIdle(scope: Locator) {
+  const paused = scope.getByText("Paused", { exact: true });
+  assert.equal(await paused.locator('svg[aria-hidden="true"]').count(), 1);
+  const classes = (await paused.getAttribute("class")) ?? "";
+  assert.ok(classes.includes("text-(--idle)"), classes);
+  assert.ok(!classes.includes("text-(--attn)"), classes);
+}
 
 test("Settings index lists projects, profiles, routing and runtime from their own reads", async (_t, journey) => {
   const { ids, page } = await startSettings(journey, "/app/settings");
@@ -77,6 +87,11 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
   const text = await page.locator("body").innerText();
   for (const secret of ["PRIVATE", "FIXTURE_GITHUB", "atlas-checkout"])
     assert.equal(text.includes(secret), false, secret);
+  await assertPausedBadgeIdle(
+    page.getByRole("navigation", { name: "Operator navigation" }),
+  );
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "1366-sidebar-paused-project");
   await captureBrowserEvidence(page, "1366-settings");
   const refresh = page.getByRole("button", { name: "Refresh", exact: true });
   assert.equal(await refresh.count(), 1);
@@ -131,6 +146,13 @@ test("Settings index is one column with 44px targets on a phone", async (_t, jou
     );
   assert.deepEqual(short, []);
   await captureBrowserEvidence(page, "390-settings");
+  await page
+    .getByRole("button", { name: "Projects and navigation", exact: true })
+    .click();
+  const drawer = page.getByRole("dialog", { name: "Projects and navigation" });
+  await assertPausedBadgeIdle(drawer);
+  await noPageOverflow(page);
+  await captureBrowserEvidence(page, "390-drawer-paused-project");
 });
 
 test(
