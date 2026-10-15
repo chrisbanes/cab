@@ -452,7 +452,8 @@ export class DomainStore {
           id TEXT PRIMARY KEY REFERENCES tasks(id), projectId TEXT NOT NULL REFERENCES domain_projects(id),
           version INTEGER NOT NULL, outcome TEXT NOT NULL, ready INTEGER NOT NULL CHECK(ready IN (0,1)),
           state TEXT NOT NULL CHECK(state IN ('open','done','cancelled')),
-          importedBlockers TEXT NOT NULL CHECK(importedBlockers IN ('clear','blocked','unknown'))
+          importedBlockers TEXT NOT NULL CHECK(importedBlockers IN ('clear','blocked','unknown')),
+          readinessRule TEXT
         );
         CREATE TABLE IF NOT EXISTS profiles (
           id TEXT PRIMARY KEY, version INTEGER NOT NULL, name TEXT NOT NULL,
@@ -683,6 +684,19 @@ export class DomainStore {
         )
         // No readiness rule: a backfilled source filters nothing.
         .run(JSON.stringify(null));
+      // Existing Ready flags are taken as evaluated under their project's current rule;
+      // `ready` and `version` stay untouched.
+      if (
+        !(
+          this.db.prepare("PRAGMA table_info(domain_tasks)").all() as Row[]
+        ).some((column) => column.name === "readinessRule")
+      ) {
+        this.db.exec("ALTER TABLE domain_tasks ADD COLUMN readinessRule TEXT");
+        this.db.exec(`UPDATE domain_tasks
+          SET readinessRule = (SELECT c.readiness FROM project_github_sources c
+            WHERE c.projectId = domain_tasks.projectId)
+          WHERE id IN (SELECT taskId FROM github_imported_tasks)`);
+      }
     });
   }
 

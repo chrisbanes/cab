@@ -1012,7 +1012,7 @@ export class GitHubSourceStore {
       .get(taskId) as Row;
     const config = this.db
       .prepare(
-        "SELECT closedIssues FROM project_github_sources WHERE projectId = ?",
+        "SELECT closedIssues, readiness FROM project_github_sources WHERE projectId = ?",
       )
       .get(String(external.projectId)) as Row;
     const nodeId = String(external.nodeId);
@@ -1036,10 +1036,11 @@ export class GitHubSourceStore {
     const ready =
       memberships > 0 &&
       external.observedState === "open" &&
-      evaluateReadiness(this.readinessRule(String(external.projectId)), facts)
-        .satisfied;
+      evaluateReadiness(parseRule(config.readiness), facts).satisfied;
     const row = this.db
-      .prepare("SELECT ready, state FROM domain_tasks WHERE id = ?")
+      .prepare(
+        "SELECT ready, state, readinessRule FROM domain_tasks WHERE id = ?",
+      )
       .get(taskId) as Row;
     const hold = this.hold(nodeId);
     if (
@@ -1076,19 +1077,30 @@ export class GitHubSourceStore {
     if (Number(row.ready) !== Number(ready))
       this.db
         .prepare(
-          "UPDATE domain_tasks SET ready = ?, version = version + 1 WHERE id = ?",
+          "UPDATE domain_tasks SET ready = ?, readinessRule = ?, version = version + 1 WHERE id = ?",
         )
-        .run(Number(ready), taskId);
+        .run(Number(ready), String(config.readiness), taskId);
+    // Stamp only: approval bindings compare the task version, which Ready alone moves.
+    else if (row.readinessRule !== config.readiness)
+      this.db
+        .prepare("UPDATE domain_tasks SET readinessRule = ? WHERE id = ?")
+        .run(String(config.readiness), taskId);
   }
 
   /** The stored readiness rule; `null` filters nothing. */
   readinessRule(projectId: string): Readiness | null {
+    const text = this.readinessRuleText(projectId);
+    return text === undefined ? null : parseRule(text);
+  }
+
+  /** The stored rule JSON, the identity a task's Ready flag is stamped with. */
+  private readinessRuleText(projectId: string): string | undefined {
     const row = this.db
       .prepare(
         "SELECT readiness FROM project_github_sources WHERE projectId = ?",
       )
       .get(projectId) as Row | undefined;
-    return row ? parseRule(row.readiness) : null;
+    return row ? String(row.readiness) : undefined;
   }
 
   /** One issue's labels and the Project fields of its memberships in its task's project. */
@@ -1131,12 +1143,13 @@ export class GitHubSourceStore {
       .all(projectId) as Row[];
     const rows = this.db
       .prepare(`SELECT m.selectionId, m.nodeId, m.projectFields, e.observedState, e.labels,
-        t.ready, t.projectId AS taskProjectId
+        t.ready, t.readinessRule, t.projectId AS taskProjectId
         FROM github_memberships m JOIN github_external_issues e ON e.nodeId = m.nodeId
         JOIN domain_tasks t ON t.id = e.taskId
         WHERE m.projectId = ?`)
       .all(projectId) as Row[];
-    const rule = this.readinessRule(projectId);
+    const ruleText = this.readinessRuleText(projectId);
+    const rule = ruleText === undefined ? null : parseRule(ruleText);
     // Each issue's fields from every membership in the project, as `readinessFacts` reads them.
     const fields = new Map<string, z.output<typeof projectFieldsSchema>>();
     for (const r of rows)
@@ -1173,7 +1186,8 @@ export class GitHubSourceStore {
         const stale = open.some(
           (r) =>
             r.taskProjectId === projectId &&
-            matching(r) !== (Number(r.ready) === 1),
+            (r.readinessRule !== ruleText ||
+              matching(r) !== (Number(r.ready) === 1)),
         );
         return [
           String(sync.selectionId),
@@ -1205,7 +1219,8 @@ export class GitHubSourceStore {
   readinessByTask(taskIds: readonly string[]): Map<string, TaskReadiness> {
     const ids = JSON.stringify(taskIds);
     const externals = this.db
-      .prepare(`SELECT e.taskId, e.nodeId, e.labels, e.observedState, t.projectId, t.ready
+      .prepare(`SELECT e.taskId, e.nodeId, e.labels, e.observedState, t.projectId, t.ready,
+        t.readinessRule
         FROM github_external_issues e JOIN domain_tasks t ON t.id = e.taskId
         WHERE e.taskId IN (SELECT value FROM json_each(?))`)
       .all(ids) as Row[];
@@ -1221,7 +1236,7 @@ export class GitHubSourceStore {
           WHERE projectId IN (SELECT DISTINCT t.projectId FROM domain_tasks t
             WHERE t.id IN (SELECT value FROM json_each(?)))`)
           .all(ids) as Row[]
-      ).map((row) => [String(row.projectId), parseRule(row.readiness)]),
+      ).map((row) => [String(row.projectId), String(row.readiness)]),
     );
     // The facts `readinessFacts` reads: memberships in the task's project.
     const byIssue = new Map<string, Row[]>();
@@ -1232,7 +1247,8 @@ export class GitHubSourceStore {
     return new Map(
       externals.map((external): [string, TaskReadiness] => {
         const projectId = String(external.projectId),
-          rule = rules.get(projectId) ?? null;
+          ruleText = rules.get(projectId),
+          rule = ruleText === undefined ? null : parseRule(ruleText);
         const own =
           byIssue.get(`${projectId}\0${String(external.nodeId)}`) ?? [];
         const notEvaluated: TaskReadiness = {
@@ -1240,7 +1256,12 @@ export class GitHubSourceStore {
           outcome: "not-evaluated",
           unmet: [],
         };
-        if (external.observedState !== "open" || own.length === 0)
+        // A stamp other than the current rule (or none) fails closed: Ready predates the rule.
+        if (
+          external.observedState !== "open" ||
+          own.length === 0 ||
+          external.readinessRule !== ruleText
+        )
           return [String(external.taskId), notEvaluated];
         const result = evaluateReadiness(rule, {
           labels: z

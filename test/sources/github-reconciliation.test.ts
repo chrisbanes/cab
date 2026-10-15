@@ -1320,6 +1320,143 @@ test("after a rule change and before the next read, explanations never disagree 
   }
 });
 
+test("a same-result rule change reports not-evaluated until the next read", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    const issues = () => [
+      f.at("I_1", { labels: [] }),
+      f.at("I_2", { labels: ["ready", "approved"] }),
+    ];
+    f.read("repo", issues());
+    f.domain.execute({
+      type: "github.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      expectedVersion: f.domain.githubConfiguration(f.projectId).version,
+      credentialRef: "env:TEST_GITHUB",
+      selections: [{ id: "repo", keep: true }],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "approved" }],
+      },
+      repositories: [],
+    });
+    // Both tasks keep their Ready flag and would keep it on re-evaluation.
+    assert.equal(Number(f.domain.task(f.task("I_1")).ready), 0);
+    assert.equal(Number(f.domain.task(f.task("I_2")).ready), 1);
+    for (const nodeId of ["I_1", "I_2"])
+      assert.deepEqual(f.sources.taskReadiness(f.task(nodeId)), {
+        outcome: "not-evaluated",
+        unmet: [],
+      });
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      null,
+    );
+    // Restamping alone is not a task change, so approval bindings stay valid.
+    const versions = ["I_1", "I_2"].map((nodeId) =>
+      Number(f.domain.task(f.task(nodeId)).version),
+    );
+    for (const nodeId of ["I_1", "I_2"])
+      f.sources.updateReadiness(f.task(nodeId));
+    assert.deepEqual(
+      ["I_1", "I_2"].map((nodeId) =>
+        Number(f.domain.task(f.task(nodeId)).version),
+      ),
+      versions,
+    );
+    assert.deepEqual(f.sources.taskReadiness(f.task("I_1")), {
+      outcome: "unmet",
+      unmet: [{ kind: "label", name: "approved" }],
+    });
+    assert.equal(f.sources.taskReadiness(f.task("I_2"))?.outcome, "matched");
+    assert.equal(
+      f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+      1,
+    );
+    for (const task of f.domain.tasks(f.projectId))
+      assert.equal(
+        f.sources.taskReadiness(String(task.id))?.outcome === "matched",
+        Number(task.ready) === 1,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
+test("upgrading initialises each imported task's readiness rule identity without changing Ready", () => {
+  const f = readinessFixture({
+    mode: "all",
+    conditions: [{ kind: "label", name: "ready" }],
+  });
+  try {
+    f.read("repo", [
+      f.at("I_1", { labels: ["ready"] }),
+      f.at("I_2", { labels: [] }),
+    ]);
+    const localId = randomUUID();
+    f.domain.execute({
+      type: "task.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: f.projectId,
+      taskId: localId,
+      title: "Local",
+      outcome: "Keep local",
+      ready: true,
+    });
+    const snapshot = () => ({
+      tasks: ["I_1", "I_2"].map((nodeId) => {
+        const t = f.domain.task(f.task(nodeId));
+        return {
+          ready: Number(t.ready),
+          version: Number(t.version),
+          readiness: f.sources.taskReadiness(f.task(nodeId)),
+        };
+      }),
+      matching: f.sources.selectionCounts(f.projectId).get("repo")?.matching,
+    });
+    const before = snapshot();
+    assert.equal(before.matching, 1);
+    f.db.exec("ALTER TABLE domain_tasks DROP COLUMN readinessRule");
+    for (let run = 0; run < 2; run++) {
+      f.domain.migrate();
+      assert.deepEqual(snapshot(), before);
+      const rule = f.db
+        .prepare(
+          "SELECT readiness FROM project_github_sources WHERE projectId = ?",
+        )
+        .get(f.projectId)?.readiness;
+      for (const nodeId of ["I_1", "I_2"])
+        assert.equal(
+          f.db
+            .prepare("SELECT readinessRule FROM domain_tasks WHERE id = ?")
+            .get(f.task(nodeId))?.readinessRule,
+          rule,
+        );
+      assert.equal(
+        f.db
+          .prepare("SELECT readinessRule FROM domain_tasks WHERE id = ?")
+          .get(localId)?.readinessRule,
+        null,
+      );
+    }
+    for (const task of f.domain
+      .tasks(f.projectId)
+      .filter((t) => t.id !== localId))
+      assert.equal(
+        f.sources.taskReadiness(String(task.id))?.outcome === "matched",
+        Number(task.ready) === 1,
+      );
+  } finally {
+    f.db.close();
+  }
+});
+
 test("a partial read adds the closed issues it skips; a complete read replaces them", () => {
   const f = readinessFixture({
     mode: "all",
