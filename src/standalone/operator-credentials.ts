@@ -241,6 +241,7 @@ export function operatorRouteAuthority(
       "/api/operator/discovery/repositories",
       "/api/operator/discovery/branches",
       "/api/operator/discovery/projects",
+      "/api/operator/discovery/project-fields",
       "/api/operator/operations",
       "/api/operator/executions",
     ].includes(path) ||

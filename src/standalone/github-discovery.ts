@@ -27,6 +27,11 @@ export interface DiscoveredProject {
   title: string;
   number: number;
 }
+export interface DiscoveredProjectField {
+  fieldNodeId: string;
+  name: string;
+  options: { optionNodeId: string; name: string }[];
+}
 /** Read-only GitHub lists for project setup. Nothing it returns is stored. */
 export interface DiscoveryReader {
   repositories(): Promise<{
@@ -49,6 +54,10 @@ export interface DiscoveryReader {
     ownerLogin: string;
     linked: DiscoveredProject[];
     owned: DiscoveredProject[];
+    truncated: boolean;
+  }>;
+  projectFields(project: string): Promise<{
+    fields: DiscoveredProjectField[];
     truncated: boolean;
   }>;
 }
@@ -96,6 +105,43 @@ const projectsQuery = `query ($owner: String!, $name: String!) {
     login
     ... on ProjectV2Owner {
       projectsV2(first: 100) { nodes { id title number closed } pageInfo { hasNextPage } }
+    }
+  }
+}`;
+
+const singleSelectField = z.object({
+  id: z.string().min(1).max(512),
+  name: z.string().max(512),
+  options: z.array(
+    z.object({ id: z.string().min(1).max(512), name: z.string().max(512) }),
+  ),
+});
+const projectFieldsResponse = z.object({
+  data: z.object({
+    node: z
+      .object({
+        id: z.string().min(1).max(512).optional(),
+        fields: z
+          .object({
+            nodes: z.array(
+              z.object({ __typename: z.string() }).passthrough().nullable(),
+            ),
+            pageInfo: z.object({ hasNextPage: z.boolean() }),
+          })
+          .optional(),
+      })
+      .nullable(),
+  }),
+});
+// One fixed read-only query; `project` travels only as a variable.
+const projectFieldsQuery = `query ($project: ID!) {
+  node(id: $project) {
+    ... on ProjectV2 {
+      id
+      fields(first: 100) {
+        nodes { __typename ... on ProjectV2SingleSelectField { id name options { id name } } }
+        pageInfo { hasNextPage }
+      }
     }
   }
 }`;
@@ -197,10 +243,11 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
     return { branches: items.map((b) => b.name), truncated };
   }
 
-  async projects(owner: string, name: string) {
+  /** POST one fixed GraphQL query; GitHub reports errors and limits as HTTP 200. */
+  private async graphql(query: string, variables: object): Promise<unknown> {
     const response = await this.request(`${githubApi}/graphql`, {
-      query: projectsQuery,
-      variables: { owner, name },
+      query,
+      variables,
     });
     const raw = await this.json(
       response,
@@ -222,6 +269,11 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
       // A token without Projects access answers with GraphQL errors: degrade only this read.
       throw new DiscoveryFailure("forbidden");
     }
+    return raw;
+  }
+
+  async projects(owner: string, name: string) {
+    const raw = await this.graphql(projectsQuery, { owner, name });
     const parsed = projectsResponse.safeParse(raw);
     if (!parsed.success) throw new DiscoveryFailure("unreadable");
     const { repository, repositoryOwner } = parsed.data.data;
@@ -245,5 +297,30 @@ export class GitHubDiscoveryReader implements DiscoveryReader {
         repository.projectsV2.pageInfo.hasNextPage ||
         Boolean(repositoryOwner.projectsV2?.pageInfo.hasNextPage),
     };
+  }
+
+  async projectFields(project: string) {
+    const parsed = projectFieldsResponse.safeParse(
+      await this.graphql(projectFieldsQuery, { project }),
+    );
+    if (!parsed.success) throw new DiscoveryFailure("unreadable");
+    // A null node, or one that is not a ProjectV2, is not readable with this token.
+    const { node } = parsed.data.data;
+    if (!node?.id || !node.fields) throw new DiscoveryFailure("forbidden");
+    const fields: DiscoveredProjectField[] = [];
+    for (const n of node.fields.nodes) {
+      if (n?.__typename !== "ProjectV2SingleSelectField") continue;
+      const field = singleSelectField.safeParse(n);
+      if (!field.success) throw new DiscoveryFailure("unreadable");
+      fields.push({
+        fieldNodeId: field.data.id,
+        name: field.data.name,
+        options: field.data.options.map((o) => ({
+          optionNodeId: o.id,
+          name: o.name,
+        })),
+      });
+    }
+    return { fields, truncated: node.fields.pageInfo.hasNextPage };
   }
 }

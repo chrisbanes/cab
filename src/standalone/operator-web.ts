@@ -229,6 +229,8 @@ export class OperatorWebBoundary {
       return this.api.readDiscoveryBranches(query);
     if (path === "/api/operator/discovery/projects")
       return this.api.readDiscoveryProjects(query);
+    if (path === "/api/operator/discovery/project-fields")
+      return this.api.readDiscoveryProjectFields(query);
     const reviewDraft = path.match(
       /^\/api\/operator\/tasks\/([^/]+)\/review-draft$/,
     );
