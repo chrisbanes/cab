@@ -122,7 +122,6 @@ import {
   type ExecutionDiagnosticsStore,
 } from "./execution-diagnostics.js";
 import {
-  detectGh,
   discoveryCredentialExclusions,
   GhLoginScope,
   type GhOptions,
@@ -5258,10 +5257,23 @@ export class OperatorApi {
       environment: ghEnvironment(this.domain()),
     };
   }
-  /** Detects the `gh` login on every read, so the choice is offered even when unconfigured. */
+  /**
+   * Detects the `gh` login on every read, so the choice is offered even when unconfigured.
+   * `sourceGh` is the login a new project's `gh:github.com` source would use, detected in
+   * that source environment (`GH_TOKEN`/`GITHUB_TOKEN` overrides included); status only.
+   */
   async readDiscoveryStatus() {
     const ref = this.domain().discoveryCredentialReference();
-    const gh = await detectGh(this.gh());
+    const scope = new GhLoginScope();
+    const [gh, sourceGh] = await Promise.all([
+      scope.detect(this.gh()),
+      scope.detect({
+        executable: this.setup.ghExecutable,
+        environment: ghEnvironment(this.domain(), {
+          reference: "gh:github.com",
+        }),
+      }),
+    ]);
     const source = ref === null ? null : ref.startsWith("gh:") ? "gh" : "env";
     return discoveryStatusSchema.parse({
       data: {
@@ -5272,6 +5284,7 @@ export class OperatorApi {
             : ref !== null && Boolean(process.env[ref.slice(4)]),
         source,
         gh,
+        sourceGh,
       },
       observedAt: Date.now(),
     });

@@ -109327,12 +109327,25 @@
                         },
                         {
                           "type": "text",
+                          "id": "Nm4zz",
+                          "name": "Source credential",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· GitHub source credential: GitHub CLI · @chrisbanes. Change or clear it later in the project's GitHub source settings.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
                           "id": "T5P4tO",
                           "name": "· Routing, GitHub discovery, credential references and capac",
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "· Routing, GitHub discovery, credential references and capacity overrides are configured after creation.",
+                          "content": "· Routing, GitHub discovery, other credential references and capacity overrides are configured after creation.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,
@@ -111285,12 +111298,25 @@
                         },
                         {
                           "type": "text",
+                          "id": "KD6F3",
+                          "name": "Source credential",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "· GitHub source credential: none. No usable GitHub CLI login was detected, so the source starts without a credential and won't sync until one is set in its GitHub source settings.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        },
+                        {
+                          "type": "text",
                           "id": "J8NCo",
                           "name": "· Routing, GitHub discovery, credential references and capac",
                           "fill": "$X:--foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "· Routing, GitHub discovery, credential references and capacity overrides are configured after creation.",
+                          "content": "· Routing, GitHub discovery, other credential references and capacity overrides are configured after creation.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,
@@ -114142,7 +114168,7 @@
                           "fill": "$X:--muted-foreground",
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
-                          "content": "Choose GitHub CLI or a service environment variable. Saving a change or Clear requires preview at the new source version.",
+                          "content": "A project created in guided setup starts with the GitHub CLI login setup detected, when it was usable; otherwise choose one here. Saving a change or Clear requires preview at the new source version.",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 12,
@@ -166912,6 +166938,46 @@
                       ]
                     },
                     {
+                      "type": "frame",
+                      "id": "PYy7f",
+                      "name": "Saved · GitHub source credential",
+                      "width": "fill_container",
+                      "stroke": "$X:--border",
+                      "strokeWidth": {
+                        "top": 1
+                      },
+                      "gap": 10,
+                      "padding": [
+                        10,
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "QEVA6",
+                          "name": "Text",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "LSnme",
+                              "name": "Item",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "GitHub source credential: GitHub CLI · @fixture-user",
+                              "lineHeight": 1.45,
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "id": "qIpRp",
                       "type": "ref",
                       "ref": "Q5Ff9",
@@ -167519,6 +167585,56 @@
                       ]
                     },
                     {
+                      "type": "frame",
+                      "id": "FT63r",
+                      "name": "Saved · GitHub source credential",
+                      "width": "fill_container",
+                      "stroke": "$X:--border",
+                      "strokeWidth": {
+                        "top": 1
+                      },
+                      "gap": 10,
+                      "padding": [
+                        10,
+                        0
+                      ],
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "RNcqq",
+                          "name": "Text",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 2,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "LP4A2",
+                              "name": "Item",
+                              "fill": "$X:--foreground",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "GitHub source credential: not set. The source won't sync until one is set.",
+                              "lineHeight": 1.45,
+                              "fontFamily": "$font-sans",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            },
+                            {
+                              "type": "text",
+                              "id": "vIFL0",
+                              "name": "Settings link",
+                              "fill": "$X:--foreground",
+                              "content": "GitHub source settings ↗",
+                              "fontFamily": "$font-sans",
+                              "fontSize": 13,
+                              "fontWeight": "500"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
                       "id": "UnXKN",
                       "type": "ref",
                       "ref": "Q5Ff9",
@@ -167977,6 +168093,46 @@
                           "textGrowth": "fixed-width",
                           "width": "fill_container",
                           "content": "Repository access: fixture-org/fixture-app (main), checked on this Mac.",
+                          "lineHeight": 1.45,
+                          "fontFamily": "$font-sans",
+                          "fontSize": 14,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vE3K0",
+                  "name": "Saved · GitHub source credential",
+                  "width": "fill_container",
+                  "stroke": "$X:--border",
+                  "strokeWidth": {
+                    "top": 1
+                  },
+                  "gap": 10,
+                  "padding": [
+                    10,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "oUZ2m",
+                      "name": "Text",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 2,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "WEXfV",
+                          "name": "Item",
+                          "fill": "$X:--foreground",
+                          "textGrowth": "fixed-width",
+                          "width": "fill_container",
+                          "content": "GitHub source credential: GitHub CLI · @fixture-user",
                           "lineHeight": 1.45,
                           "fontFamily": "$font-sans",
                           "fontSize": 14,

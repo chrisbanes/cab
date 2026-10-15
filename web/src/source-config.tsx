@@ -677,7 +677,7 @@ function SourceCredential({
   return (
     <Panel
       title="GitHub source credential"
-      description="Choose explicitly for this project. Discovery credentials are configured separately."
+      description="A project created in guided setup starts with the GitHub CLI login setup detected, when it was usable; otherwise choose one here. Discovery credentials are configured separately."
     >
       <div className="settings-discovery-line">
         <p className="metadata">

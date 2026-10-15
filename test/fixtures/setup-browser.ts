@@ -28,6 +28,8 @@ export async function setupJourney(
 ) {
   const home = await createSetupHome();
   journey.cleanup(() => home.close(), "setup-home.close");
+  // The service resolves source credentials with the same gh the setup reads use.
+  const gh = options.ghExecutable ? { ghExecutable: options.ghExecutable } : {};
   const f = await journey.start("fixture.create", () =>
     options.claude
       ? createOperatorFixture(
@@ -39,13 +41,15 @@ export async function setupJourney(
             harness === "claude"
               ? new ClaudeShapedFixtureRuntime()
               : new OperatorFixtureRuntime(),
-          { runtimeHarnesses: ["codex", "claude"] },
+          { runtimeHarnesses: ["codex", "claude"], ...gh },
         )
       : createOperatorFixture(
           null,
           undefined,
           undefined,
           journey.fixtureOptions,
+          undefined,
+          gh,
         ),
   );
   let browser: Browser | undefined;
@@ -93,7 +97,7 @@ export async function setupJourney(
     f.startWeb([f.directory], {
       home: home.home,
       discovery: fakeDiscovery(discoveryState),
-      ...(options.ghExecutable ? { ghExecutable: options.ghExecutable } : {}),
+      ...gh,
     }),
   );
   browser = await journey.start("browser.launch", () =>

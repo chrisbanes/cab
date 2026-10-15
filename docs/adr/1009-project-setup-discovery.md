@@ -34,11 +34,14 @@ The discovery status read reports:
 
 - whether a reference is configured and usable, and its kind;
 - the GitHub CLI detection state (`gh auth status --json`): signed in with the
-  account login, not installed, not signed in, or unreadable from the service.
+  account login, not installed, not signed in, or unreadable from the service;
+- the same detection in the candidate environment of a `gh:github.com` project
+  source, where `GH_TOKEN` and then `GITHUB_TOKEN` override the stored login.
 
-It never reports the reference name or token. Detection only offers the login.
-Ensemble reads with it only after the operator chooses it in Settings or the setup
-alert, and never falls back to it implicitly.
+It never reports the reference name or token, and runs no `gh auth token`. For
+discovery, detection only offers the login: Ensemble reads with it only after the
+operator chooses it in Settings or the setup alert, and never falls back to it
+implicitly.
 
 Discovery and project source credentials are removed, by name and value, from the Codex runtime
 spawn environment, from each Claude turn and from helper child processes, as
@@ -50,6 +53,9 @@ delivery credentials and the Claude token are:
   exclusion and redaction, including after Clear and token rotation. They are never
   reused for reads or persisted. Each resolved token is bounded to 512 bytes;
   distinct rotations grow this exclusion-only memory until service restart.
+
+A source reference that a create or source save selects is excluded the same way
+while that command verifies its repositories, before it is recorded.
 
 A Codex runtime keeps the environment it was spawned with, so a reference set
 while it runs is excluded from it after the next service restart.
@@ -91,8 +97,19 @@ every other value.
 Linking a discovered GitHub Project adds an inactive discovery source. Preview,
 readiness and activation stay in project configuration, unchanged.
 
+Guided setup states the source credential before Create. When the candidate source
+detection is signed in, setup shows the account and `project.create` records
+`gh:github.com` as the new project's source credential at source version 1; the
+explicit field keeps keyed replays deterministic. Otherwise setup says no source
+credential will be set, records none, and the ready check shows that the source
+cannot sync until one is set. The ready check reports the recorded credential and
+its usability without blocking Resume. Nothing resolves a missing source credential
+at read, sync, restart or migration: an existing, environment-selected or cleared
+source is never re-defaulted. The HTML fallback and CLI creates show no account
+and record no default.
+
 Source settings offer GitHub CLI with the detected account or a service environment
-variable. Detection alone chooses nothing. Configured settings offer Change and
+variable. Configured settings offer Change and
 Clear; Cancel restores only the credential edit, preserving other source drafts.
 Missing or unusable credentials show the same actionable reason in source settings,
 Sync & placement and preview: configure a source credential, install gh, sign in on

@@ -18,6 +18,7 @@ import {
   commandRequest,
   setupJourney,
 } from "../fixtures/setup-browser.js";
+import { createFakeGh } from "../fixtures/fake-gh.js";
 import { git } from "../fixtures/setup-home.js";
 import {
   outcomeMessages,
@@ -44,7 +45,7 @@ test("Setup creates a paused project from discovered repositories and Projects",
       .getByRole("region", { name: "What creation does" })
       .locator("li")
       .count(),
-    5,
+    6,
   );
   await page
     .getByText(
@@ -1061,7 +1062,8 @@ test("Setup lets the operator check again after fixing a failed item", async (_t
   const check = ready.getByRole("button", { name: "Check again", exact: true });
   await check.click();
   await ready.getByText("codex-login fix").waitFor({ state: "detached" });
-  await check.waitFor({ state: "detached" });
+  // Check again stays for the unset source credential, which never blocks Resume.
+  assert.equal(await check.count(), 1);
   await resume.click();
   await composer();
   assert.equal(f.service.domain().project(projectId).paused, 0);
@@ -1504,5 +1506,85 @@ test("Setup does not unlock Resume on a workspace that was not re-read after the
   await page.unroute("**/api/operator/workspace");
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
+  assert.equal(await resume.isEnabled(), true);
+});
+
+test("Setup records the signed-in GitHub CLI login as the source credential and shows it", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    ghExecutable: gh.executable,
+  });
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  await page
+    .getByText(/^GitHub source credential: GitHub CLI · @octo\. /)
+    .waitFor();
+  const { ready, projectId, resume } = await createProject(page, sent);
+  assert.equal(
+    sent.find((c) => c.type === "project.create")?.sourceCredentialRef,
+    "gh:github.com",
+  );
+  await ready
+    .getByText("GitHub source credential: GitHub CLI · @octo", { exact: true })
+    .waitFor();
+  const source = f.service.domain().githubConfiguration(projectId);
+  assert.equal(source.credentialRef, "gh:github.com");
+  assert.equal(source.version, 1);
+  await resume.waitFor();
+  assert.equal(await resume.isEnabled(), true);
+});
+
+test("Setup records no source credential without a signed-in GitHub CLI login", async (_t, journey) => {
+  const gh = createFakeGh("not-signed-in");
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    ghExecutable: gh.executable,
+  });
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  await page.getByText(/^GitHub source credential: none\. /).waitFor();
+  const { ready, projectId, resume } = await createProject(page, sent);
+  const create = sent.find((c) => c.type === "project.create");
+  assert.equal(create && "sourceCredentialRef" in create, false);
+  const line = ready.getByText(
+    "GitHub source credential: not set. The source won't sync until one is set.",
+  );
+  await line.waitFor();
+  assert.equal(
+    await ready
+      .getByRole("link", { name: "GitHub source settings" })
+      .getAttribute("href"),
+    `/app/projects/${projectId}/settings?tab=github`,
+  );
+  assert.equal(
+    f.service.domain().githubConfiguration(projectId).credentialRef,
+    null,
+  );
+  await resume.waitFor();
+  assert.equal(await resume.isEnabled(), true);
+  // Fixed in another tab: Check again re-reads the credential, as it does readiness.
+  gh.set("signed-in");
+  const d = f.service.domain();
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: "gh:github.com",
+    selections: [],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  });
+  await ready.getByRole("button", { name: "Check again" }).click();
+  await ready
+    .getByText("GitHub source credential: GitHub CLI · @octo", { exact: true })
+    .waitFor();
+  await line.waitFor({ state: "detached" });
+  assert.equal(
+    await ready.getByRole("button", { name: "Check again" }).count(),
+    0,
+  );
   assert.equal(await resume.isEnabled(), true);
 });
