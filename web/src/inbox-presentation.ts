@@ -172,3 +172,71 @@ export function holdNotices(
       }))
     : notices;
 }
+
+/** The queue's two groups in server order: interventions, then questions and approvals oldest first. */
+export function queueGroups<T extends Pick<InboxItem, "kind">>(
+  rows: readonly T[],
+) {
+  const interventions = rows.filter((row) => row.kind === "intervention"),
+    requests = rows.filter((row) => row.kind !== "intervention");
+  return [
+    {
+      id: "intervention",
+      heading: `Intervention · ${interventions.length}`,
+      items: interventions,
+    },
+    {
+      id: "requests",
+      heading: "Questions & approvals · oldest first",
+      items: requests,
+    },
+  ].filter((group) => group.items.length);
+}
+
+/** "requester · version N · HH:MM": the identities the read model has for a request. */
+export const requestIdentity = (
+  item: Pick<InboxItem, "requesterName" | "revision" | "createdAt">,
+) =>
+  [
+    item.requesterName ?? "Responsibility unknown",
+    ...(item.revision === null ? [] : [`version ${item.revision}`]),
+    item.createdAt === null ? "Age unknown" : clockLabel(item.createdAt),
+  ].join(" · ");
+
+/** Who asked whom, from the root to the requesting assignment ("Operator → Mira → Jonas"). */
+export function assignmentChain(
+  task: Pick<TaskRead["data"], "assignments">,
+  requestingAssignmentId: string | null,
+) {
+  const byId = new Map(task.assignments.map((a) => [a.assignmentId, a])),
+    chain: string[] = [],
+    seen = new Set<string>();
+  let id: string | null | undefined = requestingAssignmentId;
+  while (id) {
+    const assignment = byId.get(id);
+    if (!assignment || seen.has(id)) {
+      if (chain.length) chain.unshift("Requester unknown");
+      return chain;
+    }
+    seen.add(id);
+    chain.unshift(assignment.name ?? "Name unavailable");
+    id = assignment.requesterAssignmentId;
+  }
+  if (chain.length)
+    chain.unshift(id === null ? "Operator" : "Requester unknown");
+  return chain;
+}
+
+/** The inspector's task facts; before the task read lands only the item's facts are known. */
+export const taskContext = (
+  task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
+  item: Pick<InboxItem, "kind">,
+) => ({
+  source: !task
+    ? null
+    : task.source?.repositoryName && task.source.number !== null
+      ? `${task.source.repositoryName}#${task.source.number}`
+      : "Local task",
+  lead: task?.lead ? (task.lead.name ?? "Name unavailable") : null,
+  next: `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`,
+});

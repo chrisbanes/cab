@@ -3,11 +3,15 @@ import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import {
   ageLabel,
+  assignmentChain,
   clockLabel,
   filterCounts,
   holdNotices,
+  queueGroups,
   requestActionLabel,
+  requestIdentity,
   requestKindLabel,
+  taskContext,
 } from "../../web/src/inbox-presentation.js";
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
 import { orderWaits } from "../../src/operator/wait-reasons.js";
@@ -383,4 +387,123 @@ test("answering a question words each hold notice for answers, with the same tit
   assert.equal(unexplained[0]?.id, "held");
   assert.equal(unexplained[0]?.detail, "Answering does not clear it.");
   assert.deepEqual(answer([]), []);
+});
+
+test("the queue groups interventions first, then questions and approvals, keeping server order", () => {
+  const [i1, i2] = [item("intervention", "p"), item("intervention", "p")],
+    [q1, a1, q2] = [
+      item("question", "p"),
+      item("approval", "p"),
+      item("question", "p"),
+    ],
+    groups = queueGroups([i1, i2, q1, a1, q2]);
+  assert.deepEqual(
+    groups.map(({ id, heading }) => ({ id, heading })),
+    [
+      { id: "intervention", heading: "Intervention · 2" },
+      { id: "requests", heading: "Questions & approvals · oldest first" },
+    ],
+  );
+  assert.deepEqual(groups[0]?.items, [i1, i2]);
+  assert.deepEqual(groups[1]?.items, [q1, a1, q2]);
+  assert.deepEqual(
+    queueGroups([q1]).map((g) => g.id),
+    ["requests"],
+  );
+  assert.deepEqual(queueGroups([]), []);
+});
+
+test("a request's identity line names the requester, version and time from the read model", () => {
+  const at = new Date(2026, 9, 1, 10, 52).getTime();
+  assert.equal(
+    requestIdentity({ requesterName: "Mira", revision: 2, createdAt: at }),
+    "Mira · version 2 · 10:52",
+  );
+  assert.equal(
+    requestIdentity({ requesterName: "Mira", revision: null, createdAt: at }),
+    "Mira · 10:52",
+  );
+  assert.equal(
+    requestIdentity({
+      requesterName: null as unknown as string,
+      revision: 1,
+      createdAt: null,
+    }),
+    "Responsibility unknown · version 1 · Age unknown",
+  );
+});
+
+const assignment = (
+  assignmentId: string,
+  name: string,
+  requesterAssignmentId?: string | null,
+) =>
+  ({
+    assignmentId,
+    name,
+    ...(requesterAssignmentId === undefined ? {} : { requesterAssignmentId }),
+  }) as TaskRead["data"]["assignments"][number];
+
+test("the assignment chain runs from the operator to the requesting assignment", () => {
+  const [mira, jonas] = [randomUUID(), randomUUID()],
+    assignments = [
+      assignment(mira, "Mira", null),
+      assignment(jonas, "Jonas", mira),
+    ];
+  assert.deepEqual(assignmentChain({ assignments }, jonas), [
+    "Operator",
+    "Mira",
+    "Jonas",
+  ]);
+  assert.deepEqual(assignmentChain({ assignments }, mira), [
+    "Operator",
+    "Mira",
+  ]);
+  assert.deepEqual(
+    assignmentChain({ assignments: [assignment(jonas, "Jonas")] }, jonas),
+    ["Requester unknown", "Jonas"],
+  );
+  assert.deepEqual(
+    assignmentChain(
+      {
+        assignments: [
+          assignment(mira, "Mira", jonas),
+          assignment(jonas, "Jonas", mira),
+        ],
+      },
+      jonas,
+    ),
+    ["Requester unknown", "Mira", "Jonas"],
+  );
+  assert.deepEqual(assignmentChain({ assignments }, null), []);
+  assert.deepEqual(assignmentChain({ assignments }, randomUUID()), []);
+});
+
+test("task context reads the source, lead and the operator's next action", () => {
+  const local = {
+      source: null,
+      lead: { profileId: randomUUID(), name: "Mira" },
+    },
+    imported = {
+      source: { repositoryName: "acme/atlas", number: 142 },
+      lead: null,
+    } as unknown as TaskRead["data"];
+  assert.deepEqual(
+    taskContext(local as unknown as TaskRead["data"], item("question", "p")),
+    {
+      source: "Local task",
+      lead: "Mira",
+      next: "Next: you · answer question",
+    },
+  );
+  assert.deepEqual(taskContext(imported, item("approval", "p")), {
+    source: "acme/atlas#142",
+    lead: null,
+    next: "Next: you · review material & decide",
+  });
+  assert.deepEqual(taskContext(undefined, item("intervention", "p")), {
+    source: null,
+    lead: null,
+    next: "Next: you · inspect execution",
+  });
 });
