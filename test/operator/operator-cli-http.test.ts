@@ -565,6 +565,58 @@ test("Stop and Resume are receipted commands under bearer scope; retained forms 
   assert.equal(r.status, 409, "same key, other content");
 });
 
+test("task.stop on a finished task is a plain 409 and Resume still clears its Stop", async (t) => {
+  const s = await startCliService(t, {
+    service: { supervisor: { observationMs: 50 } },
+  });
+  const write = await s.issue("read-write", "finished-rw");
+  const post = (type: string) =>
+    s.bearer(write.token, "/api/operator/commands", {
+      method: "POST",
+      body: { type, key: randomUUID(), taskId: s.taskId },
+    });
+  for (const [state, label] of [
+    ["done", "Done"],
+    ["cancelled", "Cancelled"],
+  ] as const) {
+    s.f.seedPersistedState((db) => {
+      db.prepare("UPDATE domain_tasks SET state = ? WHERE id = ?").run(
+        state,
+        s.taskId,
+      );
+    });
+    const before = databaseDigest(s.f);
+    const r = await post("task.stop");
+    assert.equal(r.status, 409, state);
+    const { error } = (await r.json()) as {
+      error: { code: string; message: string };
+    };
+    assert.equal(error.code, "conflict");
+    assert.equal(
+      error.message,
+      `Only an open task can be stopped. This task is ${label}.`,
+    );
+    assert.equal(databaseDigest(s.f), before);
+    s.f.seedPersistedState((db) => {
+      db.prepare(
+        "INSERT INTO task_writer_holds (taskId, reason, holdKind) VALUES (?, 'Task stopped', 'operator-stop')",
+      ).run(s.taskId);
+    });
+    const resumed = await post("task.resume");
+    assert.equal(resumed.status, 200, state);
+    assert.equal(
+      ((await resumed.json()) as { stopCleared: boolean }).stopCleared,
+      true,
+    );
+  }
+  s.f.seedPersistedState((db) => {
+    db.prepare("UPDATE domain_tasks SET state = 'open' WHERE id = ?").run(
+      s.taskId,
+    );
+  });
+  assert.equal((await post("task.stop")).status, 200);
+});
+
 test("review commands need a browser review session: a bearer write token is forbidden, not unauthenticated", async (t) => {
   const s = await startCliService(t);
   const write = await s.issue("read-write", "review-rw");

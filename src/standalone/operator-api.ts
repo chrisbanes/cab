@@ -22,6 +22,7 @@ import {
   DomainNotFoundError,
   DomainOperationError,
   DomainPolicyError,
+  TaskNotOpenError,
 } from "../core/domain.js";
 import {
   LocalReviewAnchorRequiredError,
@@ -6283,7 +6284,19 @@ export class OperatorApi {
       }
       if (c.type === "task.stop" || c.type === "task.resume") {
         this.requireTask(c.taskId);
-        return commandReceiptSchema.parse(await this.service.controlTask(c));
+        try {
+          return commandReceiptSchema.parse(await this.service.controlTask(c));
+        } catch (error) {
+          if (error instanceof TaskNotOpenError)
+            throw new OperatorApiError(
+              409,
+              "conflict",
+              undefined,
+              undefined,
+              `Only an open task can be stopped. This task is ${error.taskState === "done" ? "Done" : "Cancelled"}.`,
+            );
+          throw error;
+        }
       }
       if ("projectId" in c) {
         this.requireProject(c.projectId);
