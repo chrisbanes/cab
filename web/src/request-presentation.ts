@@ -29,3 +29,19 @@ export const requestMeta = (item: Request) =>
     item.requesterName ?? "Responsibility unknown",
     requestTime(item.createdAt),
   ].join(" · ");
+/** A count is a total only when the whole Inbox was read and the last read succeeded. */
+export function inboxSummaryOf(state: {
+  data: {
+    complete: boolean;
+    unavailable: boolean;
+    items: readonly Pick<InboxItem, "projectId">[];
+  } | null;
+  error: string | null;
+}) {
+  return state.data?.complete && !state.data.unavailable && !state.error
+    ? {
+        count: state.data.items.length,
+        projects: new Set(state.data.items.map((item) => item.projectId)).size,
+      }
+    : null;
+}

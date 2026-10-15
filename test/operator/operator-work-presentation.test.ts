@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import {
-  taskListSummarySchema,
   taskSourceSummarySchema,
   type InboxItem,
   type TaskListSummary,
@@ -28,77 +27,7 @@ import {
   requestMeta,
   requestTime,
 } from "../../web/src/request-presentation.js";
-
-type Overrides = {
-  title?: string;
-  state?: "open" | "done" | "cancelled";
-  ready?: boolean;
-  projectId?: string;
-  execution?: string;
-  codes?: string[];
-  paused?: boolean;
-  closure?: "held" | "completed" | null;
-  reasons?: string[];
-  readiness?: object | undefined;
-};
-function summary(o: Overrides = {}): TaskListSummary {
-  const projectId = o.projectId ?? randomUUID();
-  return taskListSummarySchema.parse({
-    id: randomUUID(),
-    projectId,
-    title: o.title ?? "Task",
-    version: 1,
-    state: o.state ?? "open",
-    ready: o.ready ?? true,
-    project: {
-      id: projectId,
-      name: "Project",
-      version: 1,
-      paused: o.paused ?? false,
-      leadProfileId: null,
-    },
-    lead: null,
-    execution: {
-      state: o.execution ?? "idle",
-      holds: {
-        task: false,
-        stop: false,
-        uncertainty: false,
-        writer: false,
-        capacity: false,
-      },
-      reasonCodes: [],
-    },
-    admission: { eligible: !o.reasons?.length, reasons: o.reasons ?? [] },
-    capacity: {
-      globalUsage: 0,
-      globalLimit: 10,
-      projectUsage: 0,
-      projectLimit: 10,
-    },
-    source:
-      o.closure === undefined
-        ? null
-        : {
-            identity: {
-              provider: "github.com",
-              nodeId: "I_1",
-              repositoryId: "R_1",
-            },
-            repositoryName: "acme/atlas",
-            number: 1,
-            url: "https://github.com/acme/atlas/issues/1",
-            state: o.readiness ? "open" : "closed",
-            closure: o.closure,
-            readiness: o.readiness ?? {
-              rule: { kind: "none" },
-              outcome: "not-evaluated",
-              unmet: [],
-            },
-          },
-    attention: { codes: o.codes ?? [], count: o.codes?.length ?? 0 },
-  });
-}
+import { summary, type Overrides } from "../fixtures/task-summary.js";
 
 test("an imported Draft task names its unmet readiness conditions; other tasks keep the generic reason", () => {
   const label = (name: string) => ({ kind: "label", name });

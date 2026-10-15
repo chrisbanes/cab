@@ -1571,8 +1571,7 @@ The web app is the ground truth for these items.
   navigation beside the field. The capacity meter reads global turn usage from the
   task list, so it is absent while there are no tasks. Not found shows no
   breadcrumb or New task.
-- **Not yet adopted:** per-surface layouts — Overview attention cards and stat
-  strip, the three-pane Inbox, the task detail header, tabs and inspector, the
+- **Not yet adopted:** per-surface layouts — the three-pane Inbox, the task detail header, tabs and inspector, the
   all-columns Board and the composer prediction panel.
 
 ### Question actions, composer and test matrix
@@ -1626,7 +1625,7 @@ Production Inbox and shared question response
 - Kept or omitted on purpose: the shell Refresh stays on the Inbox; the frame's "Today · 11:00" clock and the phone "Search" header action are not built; the header title is 18/600, not the older large title of frames 07 and 08.
 - "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
-- Entry points that apply: Inbox desktop and phone; the shared `QuestionResponse` at `/app/tasks/:id?request=` (it does not show question holds yet); the Overview and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
+- Entry points that apply: Inbox desktop and phone; the shared `QuestionResponse` at `/app/tasks/:id?request=` (it does not show question holds yet); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
 - Hold copy in the approval pane, from the task read's `admission.reasons`; each reads "Approval does not clear it" or "Approving does not clear it":
   - Blocked GitHub dependencies: "Execution blocked by dependency", the open blockers as `owner/repo#n`, and "Source-owned hold … execution still waits for the GitHub blocker."
   - Unconfirmed dependencies (`imported-blockers-unknown`): "Execution held: dependencies unconfirmed", "GitHub blockers could not be confirmed." It never claims a blocker that was not found.
@@ -1646,10 +1645,37 @@ Production Overview, List and Board
   the subtitle ("Decisions first. Work and completed results stay separate.",
   "8 active tasks · 3 projects", "5 active tasks · accountable lead Mira Chen").
   The phone Tasks header keeps one New task action, not the drawn Search.
+- Overview (`01-attention-overview`): the stat strip sits under the page title
+  (right-aligned; a 2 × 2 grid on a phone). Needs you shows at most three cards in
+  Inbox order with interventions on an uncertain execution first; the rest collapse
+  into a dashed "N more · Project / Task, … · Inbox" row. Each card shows recorded
+  facts only: kind badge, "HH:MM · age" (or "Age unknown"), project / task, the
+  headline (the question label, the approval's exact action, else the request
+  reason), the requester or "Responsibility unknown", evidence and one response.
+  Approval cards show the exact action, target, version and holds ("Approval does
+  not clear it") and link to the retained destination; they never decide in place.
+  Intervention cards show the lead, recorded reasons and "Ownership stays held"
+  rather than the frame's "Last observation", which no read carries.
+- A pending request with one single-choice question is answered in its card
+  through the Inbox's `QuestionResponse`, so the command, validation, shared draft
+  and outcomes are the Inbox's: failed answer, Retry answer; stale read, Refresh
+  request; conflict, Review current request; unknown, Check whether it saved. A
+  recorded answer is not reversible, as in the Inbox; its confirmation stays on
+  the card until Overview is left. Grouped, multiple-choice and free-text forms,
+  and a failed question read, link to the Inbox. Overview has no notification,
+  deep-link or context-menu entry for answering.
+- "Next: you" reads in the attention colour on every task row and card (Overview,
+  List and Board), as the token table assigns it.
+- The work table has no Updated column and the Projects panel no sync time: the
+  task list carries no update time and no endpoint reports per-project sync. The
+  Projects panel shows lead, active work by state (uncertain first), "Project
+  paused" and "N from GitHub" or "No imported tasks". Column labels show where the
+  row grid has those columns (1121px and wider); the side panels sit beside the
+  work panel from 1280px and below it otherwise.
 - There is no Recent results strip. A result excerpt, time and counter are not in
   the task-list read model and no endpoint lists results across tasks. Overview
-  ends with a "Completed work" line (count, no recency claim) linking to
-  `/app/tasks?state=Done`. A real strip needs a read-model slice.
+  has a "Completed work" panel (count, up to three completed tasks, no recency
+  claim) linking to `/app/tasks?state=Done`. A real strip needs a read-model slice.
 - No short identifiers (AT-142, A-104, Q-204, R2) are shown: no read model
   carries them. Imported tasks show `repository#number`, local tasks "Local task",
   and no raw UUID appears on Overview, List or Board.
@@ -1669,7 +1695,8 @@ Production Overview, List and Board
 - "Refresh tasks" and "More filters" (Search, Source, Readiness) are existing
   capabilities the frames do not draw.
 - There is no phone Overview or phone List frame; both phone layouts are
-  composed from the shell and desktop frames.
+  composed from the shell and desktop frames (Overview: one column, stat strip
+  2 × 2, cards and panels stacked, 44px responses).
 
 ### Task detail, composer and Stop
 

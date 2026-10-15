@@ -8,7 +8,12 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { openMoreFilters, seedCatalog } from "../fixtures/operator-work.js";
-import { seedOwnQuestion } from "../fixtures/questions.js";
+import { choiceForm, guideForm } from "../fixtures/question-data.js";
+import {
+  seedOwnApproval,
+  seedOwnIntervention,
+  seedOwnQuestion,
+} from "../fixtures/questions.js";
 
 const test = browserSuite("operator-work-browser");
 const uuidText = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i;
@@ -58,6 +63,51 @@ const noPageOverflow = (page: Page) =>
       document.documentElement.clientWidth,
   );
 const mainText = (page: Page) => page.locator("main").innerText();
+const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+const responseName =
+  /^(Answer question|Review material & decide|Inspect execution)$/;
+/** One Overview stat strip value, as shown. */
+const stat = (page: Page, name: string) =>
+  page
+    .locator(".overview-stats > div")
+    .filter({ has: page.getByText(name, { exact: true }) })
+    .locator("dd")
+    .innerText();
+
+/** A fixture with only what `seed` adds, signed in on Overview; records each command body. */
+async function startBare<T>(
+  journey: BrowserJourney,
+  seed: (f: Awaited<ReturnType<typeof createOperatorFixture>>) => Promise<T>,
+) {
+  const fixture = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => fixture.close(browser, primary),
+    "fixture.close",
+    () => fixture.lifecycle.steps,
+  );
+  const seeded = await seed(fixture);
+  const web = await journey.start("fixture.web", () => fixture.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: desktop });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  const posts: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      posts.push(request.postDataJSON());
+  });
+  await page.goto(`${web.origin}/app`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.locator(".overview-card").first().waitFor();
+  return { f: Object.assign(fixture, { seeded }), web, page, posts };
+}
 
 test("toolbar puts the filters, switch and count on one row with Active tasks as the default", async (_t, journey) => {
   const { ids, web, page, commands } = await start(journey);
@@ -295,46 +345,42 @@ test("task rows show state, next actor and lead from recorded facts without raw 
   await shot(page, "390-list");
 });
 
-test("overview attention rows read the Inbox and cover its failure and partial states", async (_t, journey) => {
+test("overview cards read the Inbox and cover its failure and partial states", async (_t, journey) => {
   const { f, ids, web, page } = await start(journey, "/app");
   const attention = page.getByRole("region", {
-    name: "Needs your attention",
+    name: "Needs you",
     exact: true,
   });
   await attention
-    .getByRole("heading", { level: 2, name: "Needs your attention" })
+    .getByRole("heading", { level: 2, name: "Needs you" })
     .waitFor();
-  const rows = attention.locator(".work-request");
-  await rows.first().waitFor();
+  const cards = attention.locator(".overview-card");
+  await cards.first().waitFor();
   const navCount = await page
     .locator('.sidebar a[href="/app/inbox"] .nav-count')
     .innerText();
-  await attention
-    .getByText(`${navCount} unresolved`, { exact: true })
-    .waitFor();
-  assert.ok((await rows.count()) <= 3);
-  for (const text of await rows.evaluateAll((es) =>
+  assert.equal(await stat(page, "Needs you"), navCount);
+  const inboxLink = attention.getByRole("link", { name: /^Open Inbox/ });
+  assert.equal(squash(await inboxLink.innerText()), `Open Inbox · ${navCount}`);
+  assert.equal(await inboxLink.getAttribute("href"), "/app/inbox");
+  assert.ok((await cards.count()) <= 3);
+  for (const text of await cards.evaluateAll((es) =>
     es.map((e) => e.textContent ?? ""),
   )) {
-    assert.match(text, /Question|Approval|Intervention/);
-    assert.match(
-      text,
-      /Responsibility unknown|\w+ · \d\d:\d\d|Age unknown|\d\d:\d\d/,
-    );
+    assert.match(text, /Question|Approval|Execution uncertain|Intervention/);
+    assert.match(text, /\d\d:\d\d · |Age unknown/);
+    assert.match(text, /Responsibility unknown|Requested by /);
     assert.doesNotMatch(text, uuidText);
   }
-  for (let i = 0; i < (await rows.count()); i++) {
-    const row = rows.nth(i);
-    assert.equal(await row.getByRole("link").count(), 1);
-    const link = row.getByRole("link");
-    const name = (await link.innerText()).trim();
-    assert.match(
-      name,
-      /^(Answer question|Review material & decide|Inspect execution)$/,
-    );
-    const describedBy = await link.getAttribute("aria-describedby");
-    assert.ok(
-      describedBy && (await row.locator(`[id="${describedBy}"]`).count()) === 1,
+  for (let i = 0; i < (await cards.count()); i++) {
+    const card = cards.nth(i);
+    const response = card.getByRole("link", { name: responseName });
+    assert.equal(await response.count(), 1);
+    const describedBy = await response.getAttribute("aria-describedby");
+    assert.equal(
+      await card.locator(`h3[id="${describedBy}"]`).count(),
+      1,
+      "the response names its headline",
     );
   }
   assert.equal(
@@ -343,7 +389,7 @@ test("overview attention rows read the Inbox and cover its failure and partial s
       .count(),
     0,
   );
-  const question = rows.filter({ hasText: "Question requiring action" }),
+  const question = cards.filter({ hasText: "Question requiring action" }),
     questionLink = question.getByRole("link", {
       name: "Answer question",
       exact: true,
@@ -352,17 +398,16 @@ test("overview attention rows read the Inbox and cover its failure and partial s
     (await questionLink.getAttribute("href")) ?? "",
     new RegExp(`^/app/inbox\\?task=${ids.question.id}&request=`),
   );
-  const intervention = rows.filter({
+  const intervention = cards.filter({
     hasText: "Stop with uncertain ownership",
   });
   assert.equal(
-    await intervention.getByRole("link").getAttribute("href"),
+    await intervention
+      .getByRole("link", { name: "Inspect execution" })
+      .getAttribute("href"),
     `/app/tasks/${ids.uncertainStop.id}`,
   );
-  await attention
-    .getByRole("link", { name: "View inbox", exact: true })
-    .waitFor();
-  assert.equal(await attention.getByText(/more in the Inbox/).count(), 0);
+  assert.equal(await attention.locator(".overview-overflow").count(), 0);
   await shot(page, "1366-overview-attention");
 
   // Answering opens the Inbox with that request selected; Back restores Overview.
@@ -371,16 +416,27 @@ test("overview attention rows read the Inbox and cover its failure and partial s
   await page.goBack();
   await attention.waitFor();
 
-  // A fourth request shows "N more" and the badge follows the sidebar count.
+  // A fourth request becomes the dashed row and the counts follow the sidebar.
   await seedOwnQuestion(f, undefined, "Fourth request");
   await page
     .getByRole("button", { name: "Refresh tasks", exact: true })
     .click();
-  await attention.getByText("1 more in the Inbox", { exact: true }).waitFor();
-  assert.equal(await rows.count(), 3);
-  await attention
-    .getByText(`${Number(navCount) + 1} unresolved`, { exact: true })
-    .waitFor();
+  const overflow = attention.locator(".overview-overflow");
+  await overflow.waitFor();
+  assert.equal(
+    squash(await overflow.innerText()),
+    "1 more · Question project / Fourth request · Inbox",
+  );
+  assert.equal(await overflow.getAttribute("href"), "/app/inbox");
+  assert.equal(await cards.count(), 3);
+  await page.waitForFunction(
+    (n) => document.querySelector(".overview-stats dd")?.textContent === n,
+    String(Number(navCount) + 1),
+  );
+  assert.equal(
+    await page.locator('.sidebar a[href="/app/inbox"] .nav-count').innerText(),
+    String(Number(navCount) + 1),
+  );
 
   // Completed work stays reachable although Active tasks hides it.
   const completed = page.getByRole("region", {
@@ -398,7 +454,7 @@ test("overview attention rows read the Inbox and cover its failure and partial s
   );
   await shot(page, "1366-overview-completed");
 
-  // Unavailable Inbox: the work list still renders and the badge is absent.
+  // Unavailable Inbox: the work list still renders and no total is claimed.
   let release = () => {};
   const held = new Promise<void>((r) => (release = r));
   await page.route("**/api/operator/inbox**", async (route) => {
@@ -418,6 +474,8 @@ test("overview attention rows read the Inbox and cover its failure and partial s
     await page
       .locator(`.task-list [data-task-id="${ids.question.id}"]`)
       .waitFor();
+    assert.equal(await stat(page, "Needs you"), "—");
+    assert.equal(squash(await inboxLink.innerText()), "Open Inbox");
     assert.equal(await attention.getByText(/unresolved/).count(), 0);
   } finally {
     release();
@@ -426,7 +484,7 @@ test("overview attention rows read the Inbox and cover its failure and partial s
   await attention
     .getByRole("button", { name: "Try again", exact: true })
     .click();
-  await rows.first().waitFor();
+  await cards.first().waitFor();
 
   // A partial read says so and shows no total.
   await page.route("**/api/operator/inbox**", async (route) => {
@@ -443,6 +501,7 @@ test("overview attention rows read the Inbox and cover its failure and partial s
         { exact: true },
       )
       .waitFor();
+    assert.equal(await stat(page, "Needs you"), "—");
     assert.equal(await attention.getByText(/unresolved/).count(), 0);
   } finally {
     await page.unroute("**/api/operator/inbox**");
@@ -450,11 +509,439 @@ test("overview attention rows read the Inbox and cover its failure and partial s
 
   await page.setViewportSize(phone);
   await page.goto(`${web.origin}/app`);
-  await rows.first().waitFor();
+  await cards.first().waitFor();
   assert.ok(await noPageOverflow(page));
-  const action = await rows.first().getByRole("link").boundingBox();
+  const action = await cards
+    .first()
+    .getByRole("link", { name: responseName })
+    .boundingBox();
   assert.ok(action && action.height >= 44);
   await shot(page, "390-overview-attention");
+});
+
+test("the stat strip counts the installation and shows — until the task list loads", async (_t, journey) => {
+  const { page } = await start(journey, "/app");
+  await page.locator(".task-list .task-row").first().waitFor();
+  let release = () => {};
+  const held = new Promise<void>((r) => (release = r));
+  await page.route("**/api/operator/task-list**", async (route) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  try {
+    await page.reload();
+    await page.locator(".overview-stats").waitFor();
+    for (const name of ["Uncertain", "Active tasks", "Running turns"])
+      assert.equal(await stat(page, name), "—", name);
+  } finally {
+    release();
+    await page.unroute("**/api/operator/task-list**");
+  }
+  const rows = page.locator(".task-list .task-row");
+  await rows.first().waitFor();
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll(".overview-stats dd")[2]?.textContent !== "—",
+  );
+  assert.equal(await stat(page, "Active tasks"), String(await rows.count()));
+  assert.equal(
+    await stat(page, "Uncertain"),
+    String(
+      await rows
+        .filter({ hasText: "Execution ownership is uncertain" })
+        .count(),
+    ),
+  );
+  const meter = await page.locator(".capacity-meter .identifier").innerText();
+  assert.equal(
+    (await stat(page, "Running turns")).replace(/\s+/g, ""),
+    meter.replace(/\s+/g, ""),
+  );
+  await page.setViewportSize(phone);
+  // Phone: the strip is a 2 × 2 grid.
+  const tops = await page
+    .locator(".overview-stats > div")
+    .evaluateAll((es) =>
+      es.map((e) => Math.round(e.getBoundingClientRect().top)),
+    );
+  assert.equal(new Set(tops).size, 2, `two rows: ${tops}`);
+  assert.ok(await noPageOverflow(page));
+});
+
+test("cards put uncertain interventions first, then the oldest, with exact approval facts and recorded evidence", async (_t, journey) => {
+  const { f, page } = await startBare(journey, async (f) => {
+    const intervention = await seedOwnIntervention(f);
+    const approval = await seedOwnApproval(f);
+    const question = await seedOwnQuestion(
+      f,
+      choiceForm,
+      "Overview choice",
+      "Overview project",
+    );
+    return { intervention, approval, question };
+  });
+  const { approval } = f.seeded;
+  const cards = page.locator(".overview-card");
+  await page.locator(".overview-card[data-kind='approval'] dl").waitFor();
+  // The intervention leads; the rest keep the Inbox's oldest-first order.
+  const inbox = await page.evaluate(() =>
+    fetch("/api/operator/inbox").then((r) => r.json()),
+  );
+  assert.deepEqual(
+    await cards.evaluateAll((es) =>
+      es.map((e) => e.getAttribute("data-request-id")),
+    ),
+    inbox.data.items.map((i: { id: string }) => i.id),
+  );
+  assert.equal(await cards.first().getAttribute("data-kind"), "intervention");
+  const approvalCard = page.locator(".overview-card[data-kind='approval']");
+  const text = await approvalCard.innerText();
+  assert.match(text, /Approval/);
+  assert.ok(text.includes(approval.request.action), text);
+  assert.ok(text.includes(approval.request.target), text);
+  assert.match(text, /version \d+/);
+  assert.equal(
+    await approvalCard.getByRole("button", { name: /approve|deny/i }).count(),
+    0,
+  );
+  assert.equal(
+    await approvalCard
+      .getByRole("link", { name: "Review material & decide" })
+      .getAttribute("href"),
+    `/coordination/task/${approval.taskId}#${approval.interactionId}`,
+  );
+  // The paused approval project holds execution; the card says approval does not clear it.
+  await approvalCard.getByText(/Approval does not resume work/).waitFor();
+
+  // A failed task read never reads as "no holds".
+  await page.route(`**/api/operator/tasks/${approval.taskId}`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+    }),
+  );
+  await page.reload();
+  await approvalCard
+    .getByText("Independent holds could not be read; they remain in effect.", {
+      exact: true,
+    })
+    .waitFor();
+  await approvalCard
+    .getByRole("link", { name: "Review material & decide" })
+    .waitFor();
+  await page.unroute(`**/api/operator/tasks/${approval.taskId}`);
+
+  const intervention = page.locator(".overview-card[data-kind='intervention']");
+  const evidence = await intervention.innerText();
+  assert.match(evidence, /Execution uncertain/);
+  assert.match(evidence, / · lead|No lead configured/);
+  assert.match(evidence, /Execution ownership is uncertain/);
+  assert.match(evidence, /Ownership stays held/);
+  assert.doesNotMatch(evidence, /observation|heartbeat/i);
+  assert.equal(
+    await intervention.getByRole("link", { name: "Inspect execution" }).count(),
+    1,
+  );
+  assert.doesNotMatch(await mainText(page), uuidText);
+  await shot(page, "1366-overview-card-kinds");
+});
+
+test("a single-choice question is answered in its card with the Inbox's command and outcomes", async (_t, journey) => {
+  const { f, page, web, posts } = await startBare(journey, async (f) => ({
+    card: await seedOwnQuestion(
+      f,
+      choiceForm,
+      "Overview choice",
+      "Overview project",
+    ),
+    inbox: await seedOwnQuestion(
+      f,
+      choiceForm,
+      "Inbox choice",
+      "Inbox project",
+    ),
+    grouped: await seedOwnQuestion(
+      f,
+      guideForm,
+      "Grouped guide",
+      "Guide project",
+    ),
+  }));
+  const { card: a, inbox: b, grouped } = f.seeded;
+  const cardOf = (id: string) =>
+    page.locator(`.overview-card[data-request-id="${id}"]`);
+  const inline = cardOf(a.interactionId);
+  await inline.getByRole("radio", { name: /Every new member/ }).waitFor();
+  await inline.getByRole("radio", { name: /Team owners/ }).waitFor();
+  await inline.getByText("Separate owner setup.", { exact: true }).waitFor();
+  await inline
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .waitFor();
+  assert.match(await inline.innerText(), /Choose the guide's audience/);
+  assert.equal(
+    await inline.getByRole("link", { name: "Answer question" }).count(),
+    0,
+  );
+  const guide = cardOf(grouped.interactionId);
+  await guide
+    .getByRole("link", { name: "Answer question", exact: true })
+    .waitFor();
+  assert.equal(await guide.getByRole("radio").count(), 0);
+  await shot(page, "1366-overview-inline-question");
+
+  // A failed gate read falls back to the Inbox link.
+  await page.route(`**/questions/${a.interactionId}`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+    }),
+  );
+  await page.reload();
+  await inline
+    .getByRole("link", { name: "Answer question", exact: true })
+    .waitFor();
+  assert.equal(await inline.getByRole("radio").count(), 0);
+  await page.unroute(`**/questions/${a.interactionId}`);
+  await page.reload();
+  const submit = inline.getByRole("button", {
+    name: "Submit answer",
+    exact: true,
+  });
+  await submit.waitFor();
+
+  // Validation is the shared form's: an error beside the question, focus on it, nothing sent.
+  await submit.click();
+  await inline.locator("fieldset [role=alert]").waitFor();
+  const focused = await page.evaluate(() => ({
+    id: document.activeElement?.getAttribute("data-question-id"),
+    html: document.activeElement?.outerHTML.slice(0, 200),
+  }));
+  assert.equal(focused.id, "choice", String(focused.html));
+  assert.equal(posts.length, 0);
+
+  // Drafts are shared with the Inbox: a choice in the card is selected there too.
+  await cardOf(b.interactionId)
+    .getByRole("radio", { name: /Team owners/ })
+    .check();
+  // In-app navigation: drafts live in this tab's session, not across a reload.
+  await page.locator('.sidebar a[href="/app/inbox"]').click();
+  await page.locator(".inbox-row").filter({ hasText: "Inbox choice" }).click();
+  const inboxForm = page.locator(".inbox-detail");
+  await inboxForm.getByRole("radio", { name: /Team owners/ }).waitFor();
+  assert.equal(
+    await inboxForm.getByRole("radio", { name: /Team owners/ }).isChecked(),
+    true,
+  );
+  await inboxForm
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .click();
+  await inboxForm
+    .getByText("Answer sent. It reaches the requester on its next turn.", {
+      exact: true,
+    })
+    .waitFor();
+  const inboxCommand = posts.at(-1)!;
+
+  // Refused, then unconfirmed, then checked: the card keeps the choice and its outcomes.
+  await page.goto(`${web.origin}/app`);
+  await inline.getByRole("radio", { name: /Every new member/ }).check();
+  const before = Number(await stat(page, "Needs you"));
+  await page.route("**/api/operator/commands", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "invalid-input", message: "Rejected fixture" },
+      }),
+    }),
+  );
+  await submit.click();
+  await inline
+    .getByText(
+      "Couldn't send the answer: the service didn't accept it. Your answer is still here.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(
+    await inline.getByRole("radio", { name: /Every new member/ }).isChecked(),
+    true,
+  );
+  await page.unroute("**/api/operator/commands");
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort("failed");
+  });
+  await inline
+    .getByRole("button", { name: "Retry answer", exact: true })
+    .click();
+  await inline
+    .getByText(
+      "We couldn't confirm your answer was sent. Your answer is kept until you check.",
+      { exact: true },
+    )
+    .waitFor();
+  await page.unroute("**/api/operator/commands");
+  await inline
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await inline
+    .getByText("Answer sent. It reaches the requester on its next turn.", {
+      exact: true,
+    })
+    .waitFor();
+  const cardCommand = posts.at(-1)!;
+  for (const command of [cardCommand, inboxCommand]) {
+    assert.equal(typeof command.expectedRevision, "number");
+    assert.match(String(command.key), uuidText);
+  }
+  assert.equal(cardCommand.type, inboxCommand.type);
+  assert.deepEqual(
+    Object.keys(cardCommand.answers as object),
+    Object.keys(inboxCommand.answers as object),
+  );
+  for (const id of [a.taskId, b.taskId])
+    assert.notEqual(
+      f.service.coordinationView().readTask(id).questions[0]?.status,
+      "open",
+    );
+
+  // The confirmation stays in its card while the refreshed Inbox drops the request.
+  await page.waitForFunction(
+    (n) => document.querySelector(".overview-stats dd")?.textContent === n,
+    String(before - 1),
+  );
+  await inline
+    .getByText("Answer sent. It reaches the requester on its next turn.", {
+      exact: true,
+    })
+    .waitFor();
+  await inline.getByText(/does not resume execution/).waitFor();
+  assert.ok(
+    [null, a.interactionId].includes(
+      await page.evaluate(
+        () =>
+          document.activeElement
+            ?.closest(".overview-card")
+            ?.getAttribute("data-request-id") ?? null,
+      ),
+    ),
+    "no other card takes focus",
+  );
+  await shot(page, "1366-overview-answer-recorded");
+  await page.reload();
+  await guide.waitFor();
+  assert.equal(await inline.count(), 0);
+});
+
+test("overview work sits in a panel beside Projects and Completed work and stacks on a phone", async (_t, journey) => {
+  const { ids, web, page, commands } = await start(journey, "/app");
+  const work = page.getByRole("region", {
+    name: "Across your projects",
+    exact: true,
+  });
+  await work.locator(".task-row").first().waitFor();
+  const labels = work.locator(".overview-columns");
+  assert.equal(await labels.getAttribute("aria-hidden"), "true");
+  assert.deepEqual((await labels.innerText()).split(/\s+/).filter(Boolean), [
+    "Task",
+    "State",
+    "Next",
+    "Lead",
+  ]);
+  const tops = await Promise.all(
+    [
+      work.getByRole("combobox", { name: "Project", exact: true }),
+      work.getByRole("combobox", { name: "State", exact: true }),
+      work.getByRole("button", { name: "List", exact: true }),
+      work.getByRole("button", { name: "Board", exact: true }),
+    ].map((c) => c.evaluate((e) => e.getBoundingClientRect().top)),
+  );
+  assert.ok(Math.max(...tops) - Math.min(...tops) <= 4, `one row: ${tops}`);
+
+  // Next: you is amber; other next actors are not.
+  const operator = work.locator('.task-next[data-operator="true"]');
+  assert.ok((await operator.count()) > 0);
+  for (const text of await operator.allInnerTexts())
+    assert.match(text, /^Next: you · /);
+  const colour = (selector: string) =>
+    page
+      .locator(selector)
+      .first()
+      .evaluate((e) => getComputedStyle(e).color);
+  const attn = await page.evaluate(() => {
+    const probe = document.createElement("span");
+    probe.style.color = "var(--attn)";
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  });
+  assert.equal(await colour('.task-next[data-operator="true"]'), attn);
+  assert.notEqual(await colour(".task-next:not([data-operator])"), attn);
+
+  const projects = page.getByRole("region", { name: "Projects", exact: true });
+  const links = projects.getByRole("link");
+  assert.equal(await links.count(), 2);
+  const service = links.filter({ hasText: "Service integration" });
+  assert.equal(
+    await service.getAttribute("href"),
+    `/app/projects/${ids.projectId}`,
+  );
+  const serviceText = await service.innerText();
+  assert.match(serviceText, /Lead · Accountable lead/);
+  assert.match(serviceText, /1 from GitHub/);
+  assert.match(serviceText, /^\d+ uncertain( · \d+ \w+)*$/m);
+  const paused = await links.filter({ hasText: "Paused project" }).innerText();
+  assert.match(paused, /Project paused/);
+  assert.match(paused, /No imported tasks/);
+  assert.doesNotMatch(await projects.innerText(), /sync|Question|Approval/i);
+
+  const completed = page.getByRole("region", {
+    name: "Completed work",
+    exact: true,
+  });
+  assert.equal(
+    await completed
+      .getByRole("link", { name: "Completed result", exact: true })
+      .getAttribute("href"),
+    `/app/tasks/${ids.done}`,
+  );
+  // Beside the work panel at the desktop review width.
+  const [panel, side] = await Promise.all(
+    [work, page.locator(".overview-side")].map((l) => l.boundingBox()),
+  );
+  assert.ok(panel && side && side.x >= panel.x + panel.width - 1);
+  await shot(page, "1366-overview");
+
+  await page.getByRole("button", { name: "Board", exact: true }).click();
+  await page.locator(".board-columns").waitFor();
+  assert.equal(commands(), 0);
+
+  await page.setViewportSize(phone);
+  await page.goto(`${web.origin}/app`);
+  await work.locator(".task-row").first().waitFor();
+  assert.ok(await noPageOverflow(page));
+  assert.equal(await labels.isVisible(), false);
+  const [stackedPanel, stackedSide] = await Promise.all(
+    [work, page.locator(".overview-side")].map((l) => l.boundingBox()),
+  );
+  assert.ok(
+    stackedPanel &&
+      stackedSide &&
+      stackedSide.y >= stackedPanel.y + stackedPanel.height - 1,
+  );
+  const heights = await page
+    .locator(".work-toolbar button, .work-toolbar select")
+    .evaluateAll((es) =>
+      es.map((e) => Math.round(e.getBoundingClientRect().height)),
+    );
+  assert.ok(
+    heights.length >= 4 && heights.every((h) => h >= 44),
+    `touch targets ${heights}`,
+  );
+  await shot(page, "390-overview");
 });
 
 test("overview without requests or completed work says so and omits the completed line", async (_t, journey) => {

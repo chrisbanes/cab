@@ -3,6 +3,7 @@ import {
   taskSchema,
   type InboxItem,
   type Session,
+  type TaskRead,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button } from "./components.js";
@@ -15,7 +16,7 @@ import { Alert } from "./ui/alert.js";
  * The task read behind an Inbox detail's independent holds. Each change of `observedAt` (the
  * Inbox's last successful read: a poll or Refresh) rereads it, unless a read is already pending.
  */
-function useInboxTask(
+export function useInboxTask(
   client: OperatorClient,
   session: Session,
   taskId: string,
@@ -71,6 +72,33 @@ export function InboxQuestion({
   );
 }
 
+/** The exact action, target, revision and requester of an approval, or that it is unavailable. */
+export function ApprovalFacts({
+  task,
+  item,
+}: {
+  task: TaskRead["data"];
+  item: InboxItem;
+}) {
+  const approval = task.approvals.find(
+    (a) => a.interactionId === (item.interactionId ?? item.id),
+  );
+  return approval && !approval.materialUnavailable ? (
+    <dl className="inbox-approval-facts">
+      <dt>Exact action</dt>
+      <dd className="literal">{approval.action ?? "Unavailable"}</dd>
+      <dt>Target</dt>
+      <dd className="literal">{approval.target ?? "Unavailable"}</dd>
+      <dt>Version</dt>
+      <dd>version {approval.revision}</dd>
+      <dt>Requester</dt>
+      <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
+    </dl>
+  ) : (
+    <p role="status">Exact approval unavailable</p>
+  );
+}
+
 /**
  * An approval in the Inbox: the exact action, target and revision, and the independent holds an
  * approval does not clear. Deciding stays at the exact retained destination, where the control lives.
@@ -95,28 +123,11 @@ export function ApprovalDetail({
       "approval",
     ),
     task = resource.state.data?.data,
-    approval = task?.approvals.find(
-      (a) => a.interactionId === (item.interactionId ?? item.id),
-    ),
-    holds = task ? holdNotices(task) : [],
-    unavailable = Boolean(task && (!approval || approval.materialUnavailable));
+    holds = task ? holdNotices(task) : [];
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
-        {approval && !unavailable ? (
-          <dl className="inbox-approval-facts">
-            <dt>Exact action</dt>
-            <dd className="literal">{approval.action ?? "Unavailable"}</dd>
-            <dt>Target</dt>
-            <dd className="literal">{approval.target ?? "Unavailable"}</dd>
-            <dt>Version</dt>
-            <dd>version {approval.revision}</dd>
-            <dt>Requester</dt>
-            <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
-          </dl>
-        ) : task ? (
-          <p role="status">Exact approval unavailable</p>
-        ) : null}
+        {task && <ApprovalFacts task={task} item={item} />}
       </div>
       <div className="inbox-decision">
         {resource.state.error && (

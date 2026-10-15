@@ -24,11 +24,13 @@ import { Card } from "./ui/card.js";
 import type { ResourceState } from "./resource.js";
 import { requestActionLabel, requestHref } from "./request-presentation.js";
 import {
-  AttentionBar,
-  AttentionSection,
-  CompletedWork,
-  type Requests,
-} from "./task-attention.js";
+  CompletedPanel,
+  NeedsYou,
+  OverviewStats,
+  ProjectsPanel,
+  type OverviewOperator,
+} from "./overview-attention.js";
+import { AttentionBar, type Requests } from "./task-attention.js";
 import { TaskToolbar } from "./task-filters.js";
 import {
   columns as allColumns,
@@ -82,7 +84,14 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
           {reason}
         </p>
       ))}
-      <p className="body task-next">{taskNext(task)}</p>
+      <p
+        className="body task-next"
+        data-operator={
+          taskNext(task).startsWith("Next: you") ? "true" : undefined
+        }
+      >
+        {taskNext(task)}
+      </p>
     </>
   );
 }
@@ -341,6 +350,7 @@ export function TaskViews({
   navigate,
   projectId,
   overview = false,
+  operator,
 }: {
   state: ResourceState<TaskAggregate>;
   requests: Requests;
@@ -350,6 +360,8 @@ export function TaskViews({
   navigate: (path: string) => void;
   projectId?: string;
   overview?: boolean;
+  /** Overview only: what its request cards read and answer with. */
+  operator?: OverviewOperator | undefined;
 }) {
   const base = path.split("?")[0] ?? "/app/tasks",
     filters = parseTaskFilters(
@@ -361,8 +373,81 @@ export function TaskViews({
     tasks = filterTasks(all, filters, projectId);
   const project = workspace?.data.projects.find((p) => p.id === projectId),
     scope = projectId || filters.project;
+  const work = (
+    <section
+      aria-label={projectId ? "Project tasks" : "Across your projects"}
+      className={overview ? "overview-panel" : undefined}
+    >
+      <TaskToolbar
+        filters={filters}
+        update={update}
+        workspace={workspace}
+        projectId={projectId}
+        overview={overview}
+        count={tasks.length}
+        refresh={refresh}
+        pending={state.pending}
+      />
+      {/* Home with no project shows the getting-started checklist instead. */}
+      {state.data &&
+        !tasks.length &&
+        !(overview && !workspace?.data.projects.length) && (
+          <p className="body empty-state">
+            {all.some((t) => !projectId || t.projectId === projectId) ? (
+              "No tasks match these filters."
+            ) : workspace?.data.projects.length ? (
+              "Ready for your first task. Create an outcome or save a draft."
+            ) : (
+              <>
+                No projects yet.{" "}
+                <a href="/app/getting-started">See getting started</a>
+              </>
+            )}
+          </p>
+        )}
+      {filters.view === "board" ? (
+        <TaskBoard
+          // A new State filter picks its column again; other filters keep the operator's tab.
+          key={filters.state}
+          tasks={tasks}
+          columns={visibleColumns(filters.state)}
+          initial={allColumns.find((c) => c === filters.state)}
+          requests={requests}
+        />
+      ) : (
+        <>
+          {overview && tasks.length > 0 && (
+            <div className="overview-columns metadata muted" aria-hidden="true">
+              <span>Task</span>
+              <span>State</span>
+              <span>Next</span>
+              <span>Lead</span>
+            </div>
+          )}
+          <div
+            className="task-list"
+            data-density={overview ? "compact" : undefined}
+          >
+            {tasks.map((t) => (
+              <TaskRow key={t.id} task={t} />
+            ))}
+          </div>
+        </>
+      )}
+      {state.data && (
+        <p className="metadata muted">
+          Task states read{" "}
+          {new Date(state.data.firstObservedAt).toLocaleTimeString()}–
+          {new Date(state.data.lastObservedAt).toLocaleTimeString()}.
+        </p>
+      )}
+    </section>
+  );
   return (
     <>
+      {overview && (
+        <OverviewStats tasks={state.data?.tasks} requests={requests} />
+      )}
       {project?.paused && (
         <p className="body">
           <StatusBadge tone="warning">Project paused</StatusBadge> New turns are
@@ -379,71 +464,29 @@ export function TaskViews({
         <ResourceStatus state={state} retry={refresh} label="Tasks" />
       )}
       {overview ? (
-        <AttentionSection requests={requests} retry={refresh} />
+        <NeedsYou
+          requests={requests}
+          retry={refresh}
+          tasks={state.data?.tasks}
+          operator={operator}
+        />
       ) : (
         <AttentionBar
           tasks={all.filter((t) => !scope || t.projectId === scope)}
           requests={requests}
         />
       )}
-      <section
-        aria-label={projectId ? "Project tasks" : "Across your projects"}
-      >
-        <TaskToolbar
-          filters={filters}
-          update={update}
-          workspace={workspace}
-          projectId={projectId}
-          overview={overview}
-          count={tasks.length}
-          refresh={refresh}
-          pending={state.pending}
-        />
-        {/* Home with no project shows the getting-started checklist instead. */}
-        {state.data &&
-          !tasks.length &&
-          !(overview && !workspace?.data.projects.length) && (
-            <p className="body empty-state">
-              {all.some((t) => !projectId || t.projectId === projectId) ? (
-                "No tasks match these filters."
-              ) : workspace?.data.projects.length ? (
-                "Ready for your first task. Create an outcome or save a draft."
-              ) : (
-                <>
-                  No projects yet.{" "}
-                  <a href="/app/getting-started">See getting started</a>
-                </>
-              )}
-            </p>
-          )}
-        {filters.view === "board" ? (
-          <TaskBoard
-            // A new State filter picks its column again; other filters keep the operator's tab.
-            key={filters.state}
-            tasks={tasks}
-            columns={visibleColumns(filters.state)}
-            initial={allColumns.find((c) => c === filters.state)}
-            requests={requests}
-          />
-        ) : (
-          <div
-            className="task-list"
-            data-density={overview ? "compact" : undefined}
-          >
-            {tasks.map((t) => (
-              <TaskRow key={t.id} task={t} />
-            ))}
+      {overview ? (
+        <div className="overview-work">
+          {work}
+          <div className="overview-side">
+            <ProjectsPanel workspace={workspace} tasks={state.data?.tasks} />
+            <CompletedPanel tasks={all} project={filters.project} />
           </div>
-        )}
-        {state.data && (
-          <p className="metadata muted">
-            Task states read{" "}
-            {new Date(state.data.firstObservedAt).toLocaleTimeString()}–
-            {new Date(state.data.lastObservedAt).toLocaleTimeString()}.
-          </p>
-        )}
-      </section>
-      {overview && <CompletedWork tasks={all} project={filters.project} />}
+        </div>
+      ) : (
+        work
+      )}
     </>
   );
 }
