@@ -1223,12 +1223,17 @@ test("a partial read adds the closed issues it skips; a complete read replaces t
     f.read("repo", [f.at("I_1", { state: "closed" })], false);
     assert.equal(counts()?.observed, 1);
     assert.equal(counts()?.closedSkipped, 1);
-    f.read("repo", [f.at("I_2"), f.at("I_3", { state: "closed" })], false);
+    // I_1 reopens on this partial read: imported, and counted once.
+    f.read(
+      "repo",
+      [f.at("I_1"), f.at("I_2"), f.at("I_3", { state: "closed" })],
+      false,
+    );
     assert.deepEqual(counts(), {
       observed: 3,
-      open: 1,
-      closedSkipped: 2,
-      matching: 1,
+      open: 2,
+      closedSkipped: 1,
+      matching: 2,
       complete: false,
     });
     f.read("repo", [f.at("I_2"), f.at("I_4", { state: "closed" })]);

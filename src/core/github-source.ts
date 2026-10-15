@@ -851,12 +851,12 @@ export class GitHubSourceStore {
             "SELECT skippedClosedNodeIds FROM github_sync_state WHERE projectId = ? AND selectionId = ?",
           )
           .get(projectId, selectionId) as Row | undefined;
-        for (const id of z
+        const prior = z
           .array(z.string())
           .parse(
             JSON.parse(String(stored?.skippedClosedNodeIds ?? "[]")) as unknown,
-          ))
-          skipped.add(id);
+          );
+        for (const id of prior) skipped.add(id);
       }
       this.db
         .prepare(
