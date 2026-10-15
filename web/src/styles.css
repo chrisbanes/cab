@@ -150,7 +150,7 @@ p {
 .shell {
   min-height: 100dvh;
   display: grid;
-  grid-template-columns: minmax(0, 224px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 232px) minmax(0, 1fr);
 }
 
 .sidebar {
@@ -168,7 +168,154 @@ p {
 }
 
 .workspace-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
   padding: var(--space-8);
+}
+
+.workspace-mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-fill);
+}
+
+.search-work {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  height: 32px;
+  padding: 0 var(--space-8);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  color: var(--fg-3);
+}
+
+.search-work:focus-within {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.search-work input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  outline: none;
+}
+
+.search-work input::placeholder {
+  color: var(--fg-3);
+}
+
+.kbd {
+  display: inline-grid;
+  height: 18px;
+  place-items: center;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg-3);
+  font-size: 11px;
+}
+
+.capacity-meter {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-8);
+  border-top: 1px solid var(--line);
+}
+
+.capacity-meter p {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+}
+
+.capacity-meter meter {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  border-radius: 2px;
+  background: var(--raised);
+}
+
+.capacity-meter meter::-webkit-meter-bar {
+  border: 0;
+  border-radius: 2px;
+  background: var(--raised);
+}
+
+.capacity-meter meter::-webkit-meter-optimum-value {
+  border-radius: 2px;
+  background: var(--accent-fill);
+}
+
+.capacity-meter meter::-moz-meter-bar {
+  border-radius: 2px;
+  background: var(--accent-fill);
+}
+
+/* Not sticky: a fixed bar would cover restored scroll and focus targets. */
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  height: 48px;
+  padding: 0 var(--space-20);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.top-bar-trail {
+  min-width: 0;
+  flex: 1;
+}
+
+/* One bounded line: long names truncate so status and New task stay in the bar. */
+.top-bar-trail ol {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--fg-3);
+}
+
+.top-bar-trail li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-bar-trail li + li::before {
+  content: "/";
+  margin-right: var(--space-4);
+}
+
+.top-bar-trail a {
+  color: inherit;
+}
+
+.top-bar-trail [aria-current="page"] {
+  color: var(--fg);
+}
+
+@media (min-width: 1121px) {
+  .page-header-new-task {
+    display: none;
+  }
+
+  /* The Inbox fills the viewport below the 48px top bar. */
+  .page-inbox.page-inbox {
+    height: calc(100dvh - 48px);
+  }
 }
 
 .workspace-header p {
@@ -463,7 +610,7 @@ nav {
 .task-title {
   display: inline-block;
   overflow-wrap: anywhere;
-  font-size: var(--type-sm);
+  font-size: 14px;
   font-weight: var(--weight-semibold);
   line-height: var(--leading-1-25);
 }
@@ -713,7 +860,8 @@ nav {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .sidebar {
+  .sidebar,
+  .top-bar {
     display: none;
   }
 

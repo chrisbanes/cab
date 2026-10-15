@@ -117,10 +117,33 @@ test("production shell keeps direct task links usable and the navigation drawer 
       geometry.documentWidth <= geometry.viewportWidth,
       `${width}px page must not scroll horizontally`,
     );
-    if (width === 1121) assert.ok(geometry.pageContentWidth >= 856);
-    if (width === 1366) assert.ok(geometry.workspaceWidth >= 1142);
+    if (width === 1121) assert.ok(geometry.pageContentWidth >= 849);
+    if (width === 1366) assert.ok(geometry.workspaceWidth >= 1134);
   }
   await captureBrowserEvidence(page, "1121-shell-sidebar-threshold");
+
+  // An unbroken 512-character name stays on one line inside the 48px top bar.
+  const topBar = await page.evaluate(() => {
+    const current = document.querySelector<HTMLElement>(
+      '.top-bar-trail [aria-current="page"]',
+    );
+    if (current) current.textContent = "x".repeat(512);
+    const bar = document.querySelector<HTMLElement>(".top-bar");
+    const action = bar?.querySelector<HTMLElement>(":scope > a");
+    return {
+      height: bar?.getBoundingClientRect().height,
+      overflowX: (bar?.scrollWidth ?? 0) - (bar?.clientWidth ?? 0),
+      overflowY: (bar?.scrollHeight ?? 0) - (bar?.clientHeight ?? 0),
+      actionRight: action?.getBoundingClientRect().right ?? Infinity,
+      viewportWidth: document.documentElement.clientWidth,
+    };
+  });
+  assert.equal(topBar.height, 48);
+  assert.ok(
+    topBar.overflowX <= 0 && topBar.overflowY <= 0,
+    JSON.stringify(topBar),
+  );
+  assert.ok(topBar.actionRight <= topBar.viewportWidth, JSON.stringify(topBar));
 
   // A directly loaded task's Back returns to its project; the header has no menu.
   await page.setViewportSize({ width: 390, height: 844 });
@@ -390,7 +413,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     "2 unresolved",
   );
   assert.equal(
-    await sidebar.locator('nav a svg[aria-hidden="true"]').count(),
+    await sidebar.locator('nav a > svg.nav-icon[aria-hidden="true"]').count(),
     labels.length,
     "every sidebar item has a decorative icon",
   );
@@ -453,7 +476,7 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
   );
   assert.equal(
     await page
-      .locator(".page-header")
+      .locator(".top-bar")
       .getByRole("link", { name: "New task", exact: true })
       .count(),
     1,
@@ -462,6 +485,41 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
     await page.getByRole("link", { name: "New task", exact: true }).count(),
     1,
   );
+  // Connected only after a completed workspace read; nothing while the first read is pending.
+  await page.locator(".top-bar-connection", { hasText: "Connected" }).waitFor();
+  await page.route("**/api/operator/workspace", () => {});
+  await page.reload();
+  await page.locator(".top-bar").waitFor();
+  assert.equal(await page.locator(".top-bar-connection").count(), 0);
+  await page.unroute("**/api/operator/workspace");
+  // The Settings index, whose own trail is empty, still names the current page.
+  await page.goto(`${web.origin}/app/settings`);
+  assert.equal(
+    await page
+      .getByRole("navigation", { name: "Breadcrumb" })
+      .locator('[aria-current="page"]')
+      .textContent(),
+    "Settings",
+  );
+  await page.goto(`${web.origin}/app`);
+  await page.locator("main.page h1").waitFor();
+  // Ctrl+K focuses the sidebar field; in the drawer layout it opens Search's own field.
+  await page.keyboard.press("Control+k");
+  assert.equal(
+    await page.evaluate(() =>
+      document.activeElement?.getAttribute("aria-label"),
+    ),
+    "Search work",
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Control+k");
+  await page.waitForURL(`${web.origin}/app/search`);
+  await page.waitForFunction(
+    () => document.activeElement?.id === "retained-query",
+  );
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page.goto(`${web.origin}/app`);
+  await page.locator("main.page h1").waitFor();
 
   // A failed Inbox read shows no number rather than a stale or partial one.
   await page.route("**/api/operator/inbox*", (route) =>

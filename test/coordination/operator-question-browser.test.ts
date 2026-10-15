@@ -609,8 +609,9 @@ test("Inbox queue and selected detail scroll independently at phone heights", as
   await page.setViewportSize({ width: 390, height: 480 });
   await rows.evaluate((element) => {
     element.scrollTop = 0;
+    // Align the queue with the top so the page has room to scroll back up.
+    element.scrollIntoView({ block: "start" });
   });
-  await rows.scrollIntoViewIfNeeded();
   const queuePageScroll = await page.evaluate(() => window.scrollY);
   // A page that cannot scroll up would make the no-chaining check vacuous.
   assert.ok(queuePageScroll > 0, String(queuePageScroll));

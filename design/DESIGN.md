@@ -1549,10 +1549,31 @@ Presentation and interaction rules that the canvas does not show on its own.
 ## Implementation status
 
 The production web UI implements the reviewed behaviour on its own shadcn-based
-foundation (`web/src/tokens.css` and `web/src/ui/`). It does not yet use the
-canvas's visual direction, tokens or layouts. Where the production UI
+foundation (`web/src/tokens.css` and `web/src/ui/`). Where the production UI
 intentionally differs from the canvas in behaviour, the differences are below.
 The web app is the ground truth for these items.
+
+### Visual direction
+
+- **Implemented:** the canvas tokens are defined in `web/src/tokens.css` and the
+  shadcn names map onto them (surfaces, hairlines, indigo primary, focus, radii,
+  13px controls and body). State badges use the soft fill, border and text of their
+  state colour; non-neutral badges add a symbol, and task state marks show their
+  icon and word in the state colour (Running indigo, Uncertain rose, Done emerald,
+  the rest slate). Buttons use the primary, secondary and destructive treatments.
+- **Implemented shell:** the 232px sidebar with the mark, installation name, Search
+  work field (⌘K or Ctrl+K focuses it; submitting opens Search with the query),
+  navigation, projects with their active-task count, a running-turns capacity meter
+  and the account menu; and the 48px desktop top bar with the breadcrumb, connection
+  status (Connected, Updates delayed or Disconnected from the shell's workspace
+  read; nothing before the first read completes) and New task. On desktop the top bar owns New task and the breadcrumb; the
+  drawer shell keeps New task in the page header. The Search link stays in the
+  navigation beside the field. The capacity meter reads global turn usage from the
+  task list, so it is absent while there are no tasks. Not found shows no
+  breadcrumb or New task.
+- **Not yet adopted:** per-surface layouts — Overview attention cards and stat
+  strip, the three-pane Inbox, the task detail header, tabs and inspector, the
+  all-columns Board and the composer prediction panel.
 
 ### Question actions, composer and test matrix
 

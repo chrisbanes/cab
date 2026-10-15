@@ -672,8 +672,13 @@ test("the warning colours stay legible on the page and on a warning alert", () =
     new URL("../../../web/src/tokens.css", import.meta.url),
     "utf8",
   );
-  const token = (name: string) =>
-    new RegExp(`${name}:\\s*#([0-9a-f]{6})([0-9a-f]{2})?;`, "i").exec(css);
+  // Follows one var() alias, as the shadcn names map onto the workbench tokens.
+  const token = (name: string): RegExpExecArray | null => {
+    const alias = new RegExp(`${name}:\\s*var\\((--[\\w-]+)\\);`).exec(css);
+    return alias?.[1]
+      ? token(alias[1])
+      : new RegExp(`${name}:\\s*#([0-9a-f]{6})([0-9a-f]{2})?;`, "i").exec(css);
+  };
   const rgb = (hex: string) =>
     [0, 2, 4].map((i) => Number.parseInt(hex.slice(i, i + 2), 16));
   const luminance = ([r, g, b]: number[]) => {

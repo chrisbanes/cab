@@ -343,23 +343,47 @@
   margin: 0;
 }
 
+/* State badge: symbol + word in the state colour (design/DESIGN.md Tokens). */
 .task-state {
+  --state: var(--idle);
+  --state-soft: var(--idle-soft);
+  --state-border: var(--idle-border);
   display: inline-flex;
   align-items: center;
   gap: var(--space-4);
-  font-weight: var(--weight-semibold);
+  height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--state-border);
+  border-radius: var(--radius-sm);
+  background: var(--state-soft);
+  color: var(--state);
+  font-size: var(--type-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
 }
 
 .task-state svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   flex: none;
 }
 
-.task-state[data-column="Paused"],
-.task-state[data-column="Cancelled"] {
-  color: var(--muted-foreground);
-  font-weight: var(--weight-regular);
+.task-state[data-column="Running"] {
+  --state: var(--accent-text);
+  --state-soft: #6366f11f;
+  --state-border: #6366f159;
+}
+
+.task-state[data-column="Uncertain"] {
+  --state: var(--risk);
+  --state-soft: var(--risk-soft);
+  --state-border: var(--risk-border);
+}
+
+.task-state[data-column="Done"] {
+  --state: var(--ok);
+  --state-soft: var(--ok-soft);
+  --state-border: var(--ok-border);
 }
 
 /* Board: collapsed 150px empty columns, 360px minimum for the rest, 12px gaps, radius 14. */

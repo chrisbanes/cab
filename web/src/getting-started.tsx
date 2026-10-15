@@ -1,3 +1,4 @@
+import { CircleAlert, CircleCheck } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   discoveryStatusSchema,
@@ -28,12 +29,12 @@ const badges: Record<
   RowStatus,
   {
     label: string;
-    variant: "default" | "secondary" | "outline" | "destructive";
+    variant: "default" | "success" | "attention" | "outline";
   }
 > = {
-  done: { label: "Done", variant: "secondary" },
+  done: { label: "Done", variant: "success" },
   next: { label: "Next", variant: "default" },
-  attention: { label: "Needs attention", variant: "destructive" },
+  attention: { label: "Needs attention", variant: "attention" },
   "not-started": { label: "Not started", variant: "outline" },
   optional: { label: "Optional", variant: "outline" },
   checking: { label: "Checking", variant: "outline" },
@@ -152,6 +153,8 @@ export function GettingStarted({
               <p className="metadata muted">{row.detail}</p>
             </div>
             <Badge variant={badges[row.status].variant}>
+              {row.status === "done" && <CircleCheck aria-hidden="true" />}
+              {row.status === "attention" && <CircleAlert aria-hidden="true" />}
               {badges[row.status].label}
             </Badge>
             <div className="getting-started-action">

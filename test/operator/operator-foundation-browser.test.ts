@@ -155,8 +155,8 @@ test("retained HTML routes share the production foundation and native interactio
     });
     assert.match(style.href, /^\/assets\/[A-Za-z0-9_.-]+\.css$/);
     assert.equal(style.loaded, true, path);
-    assert.equal(style.background, "rgb(10, 10, 10)", path);
-    assert.equal(style.foreground, "rgb(250, 250, 250)", path);
+    assert.equal(style.background, "rgb(9, 10, 15)", path);
+    assert.equal(style.foreground, "rgb(241, 245, 249)", path);
     assert.match(style.family, /Geist/);
     assert.equal(style.scripts, 0, "legacy HTML remains non-hydrated");
     assert.equal(style.overflow, false, path);
@@ -409,10 +409,10 @@ test("Nova primitives keep 32px controls, the documented radii and tinted destru
       destructive,
     };
   }, variants);
-  assert.deepEqual(geometry.primary, { height: "32px", radius: "10px" });
-  assert.deepEqual(geometry.outline, { height: "32px", radius: "10px" });
-  assert.deepEqual(geometry.input, { height: "32px", radius: "10px" });
-  assert.equal(geometry.card?.radius, "14px");
+  assert.deepEqual(geometry.primary, { height: "32px", radius: "6px" });
+  assert.deepEqual(geometry.outline, { height: "32px", radius: "6px" });
+  assert.deepEqual(geometry.input, { height: "32px", radius: "6px" });
+  assert.equal(geometry.card?.radius, "8px");
   const alpha = (value: string) =>
     Number(/,\s*([\d.]+)\)$/.exec(value)?.[1] ?? "1");
   for (const [name, tint] of Object.entries(geometry.destructive)) {

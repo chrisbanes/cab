@@ -9,7 +9,14 @@ import {
 } from "react";
 import type { ResourceState } from "./resource.js";
 import * as Dialog from "@radix-ui/react-dialog";
-import { ChevronLeft, ChevronRight, Menu } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  CircleAlert,
+  CircleCheck,
+  CircleX,
+  Menu,
+} from "lucide-react";
 import { cn } from "./lib/utils.js";
 import { Alert, AlertDescription } from "./ui/alert.js";
 import { Badge } from "./ui/badge.js";
@@ -89,6 +96,13 @@ export const TextField = forwardRef<
   );
 });
 
+/** Colour never carries state alone: non-neutral tones add a symbol beside the word. */
+const badgeTones = {
+  neutral: { variant: "secondary", Icon: null },
+  warning: { variant: "attention", Icon: CircleAlert },
+  error: { variant: "destructive", Icon: CircleX },
+  success: { variant: "success", Icon: CircleCheck },
+} as const;
 export function StatusBadge({
   children,
   tone = "neutral",
@@ -98,14 +112,10 @@ export function StatusBadge({
   tone?: "neutral" | "warning" | "error" | "success";
   className?: string;
 }) {
-  const variant =
-    tone === "error"
-      ? "destructive"
-      : tone === "warning"
-        ? "outline"
-        : "secondary";
+  const { variant, Icon } = badgeTones[tone];
   return (
     <Badge variant={variant} className={cn("metadata", className)}>
+      {Icon && <Icon aria-hidden="true" />}
       {children}
     </Badge>
   );
@@ -246,7 +256,6 @@ export function PageHeader({
   back,
   desktopBack,
   plain,
-  trail,
   shortTitle,
 }: {
   title: string;
@@ -260,8 +269,6 @@ export function PageHeader({
   desktopBack?: boolean;
   /** Omit the desktop divider under the header (the Not found frame has none). */
   plain?: boolean;
-  /** Desktop breadcrumb above the title; the last item is the current page. */
-  trail?: { label: string; href?: string }[];
   /** Phone title, rendered in the same h1 and shown below 760px instead of `title`. */
   shortTitle?: string | undefined;
 }) {
@@ -299,25 +306,6 @@ export function PageHeader({
         </PrimitiveButton>
       )}
       <div className="page-header-title">
-        {trail && trail.length > 0 && (
-          <nav aria-label="Breadcrumb" className="page-header-trail metadata">
-            <ol>
-              {trail.map((c, i) => (
-                <li key={c.href ?? c.label}>
-                  {c.href && i < trail.length - 1 ? (
-                    <a href={c.href}>{c.label}</a>
-                  ) : (
-                    <span
-                      aria-current={i === trail.length - 1 ? "page" : undefined}
-                    >
-                      {c.label}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </nav>
-        )}
         <h1 className="page-heading">
           {shortTitle ? (
             <>
@@ -332,6 +320,52 @@ export function PageHeader({
       </div>
       {badge && (
         <StatusBadge className="page-header-count">{badge}</StatusBadge>
+      )}
+      {action}
+    </header>
+  );
+}
+
+/** Desktop top bar: breadcrumb (the last item is the current page), connection status and New task. */
+export function TopBar({
+  trail,
+  connection,
+  action,
+}: {
+  trail: { label: string; href?: string }[];
+  connection: {
+    tone: "success" | "warning" | "error";
+    label: "Connected" | "Updates delayed" | "Disconnected";
+  } | null;
+  action?: ReactNode;
+}) {
+  return (
+    <header className="top-bar">
+      {trail.length > 0 ? (
+        <nav aria-label="Breadcrumb" className="top-bar-trail metadata">
+          <ol>
+            {trail.map((c, i) => (
+              <li key={c.href ?? c.label}>
+                {c.href && i < trail.length - 1 ? (
+                  <a href={c.href}>{c.label}</a>
+                ) : (
+                  <span
+                    aria-current={i === trail.length - 1 ? "page" : undefined}
+                  >
+                    {c.label}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </nav>
+      ) : (
+        <span className="top-bar-trail" />
+      )}
+      {connection && (
+        <StatusBadge tone={connection.tone} className="top-bar-connection">
+          {connection.label}
+        </StatusBadge>
       )}
       {action}
     </header>
