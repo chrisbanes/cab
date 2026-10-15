@@ -158,8 +158,9 @@ dimensions.
   any decision card, then the shared brief (requirements with provenance, approach
   and decisions, the supplied-criteria table with evidence outcomes), the latest
   result, the assignments table and Message lead. The inspector holds source sync,
-  holds, dependencies, execution facts and results and artifacts; the hold that
-  blocks the current decision also appears as a line in the decision card. Requests remain
+  holds, dependencies, execution facts and results and artifacts; the holds a
+  decision does not clear also appear as lines in the decision card, and an open
+  approval is never listed both as a request and as a hold. Requests remain
   outside disclosure; independent holds stay beside approvals. History updates
   preserve position, disclosures and replies.
 - **Imported task:** source content and Ensemble execution are visually separate:
@@ -1644,14 +1645,15 @@ Production Inbox and shared question response
 - Three-pane workbench against frame 02 (composed from the read model, with no new contract): there are no short identifiers (AP-17, A-104, C-104), so the identity line reads "requester · version N · HH:MM" and the Chain row uses assignment names ("Operator → Mira → Jonas"). The request headline stays the task title, because an approval's prompt and reason are system-composed and a question's text is its form's own legends. There is no reviewed-material excerpt, tabs or file counts, no "Version N is out of date" note and no approved state: the exact action, target and version facts and the one Review link stand in for them. The kind badge reads "Approval", "Question" or "Intervention" (no "Pending approval" or execution-uncertain subtype in the Inbox read). The breadcrumb stays "Inbox"; the bar statement keeps the existing bound-decision sentence. Grouped questions read in two columns only where the request pane is at least 640px wide (1121–1279px, and from about 1530px with the inspector); at 1366 beside the inspector they are one column. The inspector shows no task state badge or synced-at time, and its Evidence section has the request's "Task evidence" and "Requesting conversation" links, which appear there instead of in the request pane from 1280px.
 - "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
-- Entry points that apply: Inbox desktop three-pane, tablet two-pane and phone, and the `/app/inbox?task=&request=` deep link (it opens the request pane and the inspector); the shared `QuestionResponse` at `/app/tasks/:id?request=` (it does not show question holds yet); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
+- Entry points that apply: Inbox desktop three-pane, tablet two-pane and phone, and the `/app/inbox?task=&request=` deep link (it opens the request pane and the inspector); the shared `QuestionResponse` at `/app/tasks/:id?request=` (it shows the holds an answer does not clear, in the answering wording); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Refresh request; conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
+- Open approvals as holds: every hold surface passes the approval in view and omits only that one. Any other open approval on the task is listed as "Execution held (approval needs a decision)" in the surface's wording. The task-page decision card and inspector already list every open approval as its own row ("Your decision · approval pending", "Approval pending"), so they list that hold only for the other open approvals when `?request=` selects an approval, and none when no approval is selected: no approval is listed twice. The Overview approval card and the Inbox approval pane omit their own approval; the Inbox and Overview question footers list every open approval as a hold, since no approval is in view.
 - Hold copy in the approval pane, from the task read's `admission.reasons`; each reads "Approval does not clear it" or "Approving does not clear it":
   - Blocked GitHub dependencies: "Execution blocked by dependency", the open blockers as `owner/repo#n`, and "Source-owned hold … execution still waits for the GitHub blocker."
   - Unconfirmed dependencies (`imported-blockers-unknown`): "Execution held: dependencies unconfirmed", "GitHub blockers could not be confirmed." It never claims a blocker that was not found.
   - A source review or hold (`source-held`, which the read folds `source-hold`, `source-unknown` and `source-review-required` into): "Execution held by the source".
   - Local dependencies: "Execution blocked by dependency" with the unfinished tasks. Project paused: "Project paused. Approval does not resume work."
   - Any other reason (`task-unready`, `task-not-open`, `project-lead-unconfigured`, `project-lead-revoked`, `admission-blocked`): "Execution held (<reason label>)". An ineligible task with no known reason reads "Execution held".
-- Hold copy in the Inbox question footer (frames 06, 19, 10 and 21), from the same notices with the same titles and items as the approval pane, shown as compact lines above the Submit action and kept on the "Answer recorded" card. Answering details: blocked GitHub dependencies "Source-owned hold. Answering does not clear it; execution still waits for the GitHub blocker."; unconfirmed dependencies "GitHub blockers could not be confirmed. Answering does not clear this hold."; source hold "Source review or hold is unresolved. Answering does not clear it."; local dependencies "Dependency hold. Answering does not clear it."; project paused "Task paused. Recording answers does not resume execution."; any other reason, and an ineligible task with no known reason, "Answering does not clear it." A loading or failed task read shows no hold and never blocks answering; the next Inbox poll or Refresh rereads it.
+- Hold copy in the Inbox question footer (frames 06, 19, 10 and 21), from the same notices with the same titles and items as the approval pane, shown as compact lines above the Submit action and kept on the "Answer recorded" card. Answering details: blocked GitHub dependencies "Source-owned hold. Answering does not clear it; execution still waits for the GitHub blocker."; unconfirmed dependencies "GitHub blockers could not be confirmed. Answering does not clear this hold."; source hold "Source review or hold is unresolved. Answering does not clear it."; local dependencies "Dependency hold. Answering does not clear it."; project paused "Task paused. Recording answers does not resume execution."; any other reason, and an ineligible task with no known reason, "Answering does not clear it." A pending approval beside the question is a hold, "Execution held (approval needs a decision)" with "Answering does not clear it." A loading or failed task read shows no hold and never blocks answering; the next Inbox poll or Refresh rereads it.
 - "· confirmation retained" in the Inbox subtitle appears only when this session recorded the answer; a request answered elsewhere that has left the queue keeps the neutral count.
 
 ### Overview, task list and Board
@@ -1672,7 +1674,8 @@ Production Overview, List and Board
   headline (the question label, the approval's exact action, else the request
   reason), the requester or "Responsibility unknown", evidence and one response.
   Approval cards show the exact action, target, version and holds ("Approval does
-  not clear it") and link to the retained destination; they never decide in place.
+  not clear it", including any other open approval on the task but not the card's
+  own) and link to the retained destination; they never decide in place.
   Intervention cards show the lead, recorded reasons and "Ownership stays held"
   rather than the frame's "Last observation", which no read carries.
 - A pending request with one single-choice question is answered in its card
@@ -1807,7 +1810,8 @@ as follows:
   links, a "Review rejected completion" link for a completion rejected at the
   current task version and "Inspect uncertain execution" for an uncertain execution
   without its hold line, then, once and only while a request is open, the holds it does not clear
-  in the Inbox's wording, then the waits and execution hold lines. Its amber edge
+  in the Inbox's wording (the other open approvals when one is selected, never the
+  approvals the card already lists), then the waits and execution hold lines. Its amber edge
   shows only while a request is open. The assignments table has Assignment (short
   id and the history button), Requested by → result to and Known state columns,
   and reflows to stacked rows on a phone.
@@ -1818,7 +1822,8 @@ as follows:
   Ensemble coordinates the work.", the native blockers as "Dependencies · managed
   in GitHub" and whether GitHub commenting is permitted), then "Ensemble
   execution"; then for every task Holds (each open request and each hold title,
-  counted), Dependencies (local dependencies as links, or "None"), Execution
+  counted; the other open approvals when one is selected, never a repeat of the
+  listed approvals), Dependencies (local dependencies as links, or "None"), Execution
   (state, running assignments, the lead's runtime, delivery mode and bound pull
   request) and Results & artifacts (each recorded result, newest first, opening
   it in the latest-result card, and the bound pull request). The per-selection
