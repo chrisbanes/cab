@@ -181,8 +181,8 @@ for operator input on unresolved material scope or authority still applies.
 Initial assignment results return to the task-scoped lead conversation. Nested
 assignment results return to their requester; the lead can inspect all work without
 being woken for every child result. These destinations survive restart. All lead
-turns use normal admission and capacity accounting, including task pause/stop and
-writer controls. Project-wide coordination uses project context, separate from
+turns use normal admission and capacity accounting, including project pause, task
+stop and writer controls. Project-wide coordination uses project context, separate from
 individual task histories. The lead assesses initial results and requests further
 work or task completion; the service enforces completion conditions and permissions.
 

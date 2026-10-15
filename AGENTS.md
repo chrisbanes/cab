@@ -53,13 +53,11 @@ authorise dispatch while paused.
 ## Working conventions
 
 - Use `rg --files` for discovery and `rg` for text searches.
-- UX designs live in `design/design.pen`; read and edit it only through the Pen MCP
-  server, never by parsing the file. `design/DESIGN.md` is the portable snapshot with
-  node references; refresh it through MCP after design changes.
-- Pen MCP edits stay in memory until saved. Make the target `.pen` file the active Pen
-  window, then run `osascript scripts/pen-save-all.applescript` to save every open
-  window. It exits non-zero if an untitled window could not be saved; confirm the
-  target file's modification time or hash changed.
+- UX designs live on the Ensemble operator UI Design canvas on claude.ai, linked
+  from `design/DESIGN.md`. Read and edit its artboards through the Artifact tool or
+  the canvas editor; reuse the shared `Sidebar` and `TopBar` components and an
+  existing artboard's tokens. `design/DESIGN.md` is the portable snapshot with
+  artboard references; update it in the same change as any design change.
 - Keep implementation and validation proportional to the current task.
 - Keep architectural decisions with the lead and use delegation only when useful.
 - Keep development methods in agent instructions; do not recreate configured step

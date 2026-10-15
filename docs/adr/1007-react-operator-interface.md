@@ -17,9 +17,11 @@ Browser state never establishes execution, persistence or external-write success
 This decision adds a frontend build and an API presentation boundary; it does not
 replace the coordination core or require a separate production frontend service.
 
-The foundation uses the Dark / Neutral / Default token set with self-hosted Geist
-and Geist Mono, owned Button/Input/Textarea/NativeSelect/Badge/Alert/Card/Sheet
-source, and Tailwind v4 build integration. The same validated bundle stylesheet
+The foundation maps the [design handoff's tokens](../../design/DESIGN.md#tokens)
+onto shadcn's token layer, with self-hosted Geist and Geist Mono, owned
+Button/Input/Textarea/NativeSelect/Badge/Alert/Card/Sheet source, and Tailwind v4
+build integration. The build still uses the Dark / Neutral / Default token set
+until it adopts the handoff's palette (see the handoff's Implementation status). The same validated bundle stylesheet
 styles retained server-rendered HTML through the existing document wrapper without
 hydrating those pages or changing their forms. See the
 [foundation contract](../design/ui08-foundation.md) and

@@ -10,7 +10,7 @@ their retained destinations.
 The [operator interface requirements](../SPEC.md#operator-interface-and-human-requests)
 call for evidence-backed next actors, separate attention and work state, and
 progressive composer disclosure; the [design handoff](../../design/DESIGN.md)
-records the static Pen design and the implemented differences. The composer shows
+records the static design and the implemented differences. The composer shows
 one Optional settings disclosure (context, reference links, assignee and
 dependencies) whose collapsed summary lists supplied values or the error count,
 beside an "Inherited from <project>" panel. The board mapping and

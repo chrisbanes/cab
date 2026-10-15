@@ -23,6 +23,7 @@ service sees rather than the operator's interactive shell.
 
 | Check               | Pass                                                                                               | Fix line on failure                                                                                                                                                                                                                                                  |
 | ------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An execution runtime is enabled | At least one enabled runtime's executable resolves on the service `PATH` | Enable a runtime in Settings → Runtime. If one is enabled but its executable is missing, install Codex or Claude Code into the fixed `PATH`, then turn it off and on in Settings → Runtime. |
 | Codex executable    | Resolves on the service `PATH`                                                                     | Install Codex into the fixed `PATH`                                                                                                                                                                                                                                  |
 | Codex login         | App Server initializes authenticated, without a model turn                                         | Run `codex login` as the service user. If Codex's approval policy or sandbox mode is not the one Ensemble requires, set it to `never` and `workspace-write` and restart the service.                                                                                  |
 | Git                 | Resolves on the service `PATH`                                                                     | Install git                                                                                                                                                                                                                                                          |
@@ -32,9 +33,10 @@ service sees rather than the operator's interactive shell.
 | Runtime harness     | Each runtime a profile uses is running, and each profile's model and reasoning effort are accepted | Turn the runtime off and on in Settings → Runtime, or restart the service, or edit the profile's model or reasoning effort. A runtime that is not enabled needs its executable installed into the fixed `PATH` instead, as for Claude executable.                                                                          |
 | Data and auth paths | Private, canonical, owned by the service user                                                      | Named path rule, without the path value in shared output                                                                                                                                                                                                             |
 
-- A check that is not configured is reported as such, not as a failure. Claude
-  executable is not configured while Claude is unused (no token reference and no
-  active Claude profile); once either exists, a missing `claude` is a failure.
+- A check that is not configured is reported as such, not as a failure. A missing
+  `claude`, or Claude disabled in Settings → Runtime, leaves Claude executable not
+  configured; an active Claude profile then fails Runtime harness instead
+  ([ADR-1012](../adr/1012-operator-controlled-runtime-enablement.md)).
 - Claude executable shows the version that `claude --version` prints, as in
   `Claude executable (2.1.296)`. Ensemble reports it and never compares it. Only the
   Claude Code version the pinned SDK declares was qualified; any other version is a

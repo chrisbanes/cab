@@ -32,6 +32,22 @@ external work item. It is distinct from readiness, source membership, and
 dependencies between assignments within a task.
 _Avoid_: Assignment dependency when referring to a relationship between tasks
 
+**Project pause**:
+An operator hold on a project that lets active turns finish while holding its
+queued and new turns. Pause belongs to the project; a task has no pause of its own.
+_Avoid_: Task pause
+
+**Task stop**:
+An operator hold on an open task that holds its pending work and requests
+best-effort cancellation of its active executions. It is neither cancellation
+nor completion, and it does not apply to a finished task.
+_Avoid_: Cancel or abort when referring to a stop
+
+**Closure hold**:
+The hold on an imported open task whose external item was closed without
+Ensemble delivering it. It is distinct from a project pause.
+_Avoid_: Paused when referring to an externally closed task
+
 **Task source**:
 A project-scoped origin of tasks: built-in local creation or a configured external source supplied by a plugin.
 _Avoid_: Project when referring to a source such as a GitHub Project
@@ -85,7 +101,7 @@ a service environment variable; `file:/absolute/path` an owner-only file (Claude
 token only); `gh:github.com` the GitHub CLI's login for github.com (discovery or
 an explicitly configured project source), read per use without caching. Delivery
 and routing references remain env-only. Reads report whether a reference is configured
-and usable, never its value.
+and usable and its kind, never its variable name, path or value.
 _Avoid_: Token or secret when referring to the stored reference
 
 **Execution binding**:

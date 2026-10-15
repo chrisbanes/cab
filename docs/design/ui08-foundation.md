@@ -88,7 +88,7 @@ Browser evidence is recorded in `docs/evidence/ui08-foundation.md`. It includes 
 keyboard/focus, populated/empty/waiting/error states, screenshot hashes and
 matched Pen frames. Login, setup and recovery are explicitly labelled as
 shared-foundation comparisons because the handoff has no complete matching
-composition. Static Pen pixels do not qualify runtime behavior.
+composition. Static design pixels do not qualify runtime behavior.
 
 ## Retained control scope
 

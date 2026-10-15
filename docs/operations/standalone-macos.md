@@ -357,9 +357,9 @@ the not-enabled reason; it never falls back to another runtime. Codex and the
 service are unaffected. The Claude switch can already be on: after installing
 `claude`, turn Claude off and on in Settings → Runtime (or restart the service) to
 start it. A `claude` that resolves but whose runtime fails shows as unavailable
-instead. Readiness shows the Claude executable as Not configured while Claude is
-unused, and as Fail with the fix once a token reference or an active Claude profile
-needs it.
+instead. Readiness shows the Claude executable as Not configured while `claude` is
+missing or Claude is disabled in Settings → Runtime; an active Claude profile then
+fails Runtime harness instead.
 
 Ensemble reports the version `claude --version` prints and never compares it. Only
 the Claude Code version the pinned SDK declares was qualified; another version may
