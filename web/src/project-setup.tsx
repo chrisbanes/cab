@@ -46,6 +46,7 @@ import {
   rowsFromDraft,
   rowsToDraft,
   type SetupRow,
+  setupSourceCredentialCopy,
   typeRepository,
   verificationCopy,
 } from "./setup-model.js";
@@ -147,19 +148,30 @@ export function ProjectSetup(
     setProjectReads({});
     setAttempt((n) => n + 1);
   };
-  // Offered only while discovery is unconfigured; Ensemble never uses a login the operator did not choose.
+  // The discovery offer appears only while discovery is unconfigured; discovery never uses a
+  // login the operator did not choose there.
   const ghDraft = useDraft(p.drafts, "discovery.configure:setup");
   // A new visit starts clean; an unsettled login stays until it is checked.
   useEffect(() => ghDraft.startOperation({ key: key() }), [ghDraft]);
   const unconfigured =
     discovery.state === "unavailable" && discovery.reason === "unconfigured";
   const [ghLogin, setGhLogin] = useState<GhLogin | null>(null);
+  // The login a new project's source would use: undefined while pending, null after a
+  // failed read; neither records a credential.
+  const [sourceGh, setSourceGh] = useState<GhLogin | null | undefined>();
   useEffect(() => {
-    if (!unconfigured) return setGhLogin(null);
     let live = true;
     p.client.read("/api/operator/discovery", discoveryStatusSchema).then(
-      (r) => live && setGhLogin(r.data.gh),
-      () => live && setGhLogin(null),
+      (r) => {
+        if (!live) return;
+        setGhLogin(unconfigured ? r.data.gh : null);
+        setSourceGh(r.data.sourceGh);
+      },
+      () => {
+        if (!live) return;
+        setGhLogin(null);
+        setSourceGh(null);
+      },
     );
     return () => {
       live = false;
@@ -349,6 +361,7 @@ export function ProjectSetup(
     rows.map((r) => adoptListed(r, false)),
     // Only a Project the current list shows can be sent; the control is empty otherwise.
     listedProject(chosenProject, projectList),
+    sourceGh,
   );
   const fieldError = (i: number, ...fields: string[]) => {
     const k = rowIndex.indexOf(i);
@@ -530,9 +543,10 @@ export function ProjectSetup(
                 Resume is a separate step after creation; nothing runs until you
                 choose it.
               </li>
+              <li>{setupSourceCredentialCopy(sourceGh)}</li>
               <li>
-                Routing, GitHub discovery, credential references and capacity
-                overrides are configured after creation.
+                Routing, GitHub discovery, other credential references and
+                capacity overrides are configured after creation.
               </li>
               <li>Repository access is exactly the list in step 3.</li>
               <li>
@@ -631,8 +645,8 @@ export function ProjectSetup(
             discovery.reason === "unconfigured" && (
               <p className="metadata muted">
                 Signed in to github.com as @{ghLogin.login} with the GitHub CLI
-                on this Mac. Ensemble reads GitHub with it only for discovery
-                and never passes it to agents.
+                on this Mac. Choosing it here lets Ensemble read GitHub with it
+                for discovery; it is never passed to agents.
               </p>
             )}
           <DraftMessage

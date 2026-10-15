@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { test } from "node:test";
 import type { SourceCredentialReason } from "../../src/standalone/github-source-credential.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { createFakeGh } from "../fixtures/fake-gh.js";
+import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import { startCliOperator } from "../fixtures/operator-cli.js";
 import {
   seedImportedConflict,
@@ -493,4 +493,59 @@ test("place-task chooses a matching project once, with the domain's placement ru
   assert.equal(rerun.data.receipt, null);
   assert.equal(rerun.data.current.projectId, relay);
   assert.equal(version(third), applied, "placed once");
+});
+
+test("a setup-recorded GitHub CLI source credential reads back the same in JSON, HTML and the CLI, and after Clear", async (t) => {
+  const gh = createFakeGh();
+  t.after(() => gh.close());
+  const w = await world(t, gh.executable);
+  const projectId = randomUUID();
+  const created = await w.s.sessionPost("/api/operator/commands", {
+    type: "project.create",
+    key: randomUUID(),
+    projectId,
+    name: "Defaulted",
+    leadProfileId: null,
+    sourceCredentialRef: "gh:github.com",
+  });
+  assert.equal(created.status, 200);
+  const readBack = async () => {
+    const source = (await w.config(projectId)).source;
+    const html = await (await w.s.sessionGet(`/project/${projectId}`)).text();
+    const human = await w.h.run([
+      "project",
+      "sources",
+      projectId,
+      "--connection",
+      "ro",
+    ]);
+    assert.equal(human.code, 0, human.err);
+    assert.ok(!html.includes(fakeGhToken) && !human.out.includes(fakeGhToken));
+    return { source, html, cli: human.out };
+  };
+  const defaulted = await readBack();
+  assert.equal(defaulted.source.version, 1);
+  assert.equal(defaulted.source.credential.source, "gh");
+  assert.equal(defaulted.source.credential.usable, true);
+  assert.match(defaulted.html, /Credential: GitHub CLI\. Usable\./);
+  assert.match(defaulted.html, /Detected GitHub CLI account @octo\./);
+  assert.match(defaulted.cli, /Credential:\s+GitHub CLI\n/);
+  assert.match(defaulted.cli, /Detected GitHub CLI account:\s+@octo/);
+  const cleared = await w.s.sessionPost("/api/operator/commands", {
+    type: "github.configure",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: null,
+    selections: [],
+    readiness: defaulted.source.readiness,
+    repositories: [],
+  });
+  assert.equal(cleared.status, 200);
+  const after = await readBack();
+  assert.equal(after.source.version, 2);
+  assert.equal(after.source.credentialConfigured, false);
+  assert.equal(after.source.credential.configured, false);
+  assert.match(after.html, /Credential: not configured\./);
+  assert.match(after.cli, /Credential:\s+not configured\n/);
 });

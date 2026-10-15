@@ -1764,6 +1764,7 @@ export const operatorCommandSchema = z.discriminatedUnion("type", [
         .object({ projectNodeId: z.string().trim().min(1).max(512) })
         .strict()
         .optional(),
+      sourceCredentialRef: z.literal("gh:github.com").optional(),
     })
     .strict(),
   z
@@ -2796,7 +2797,7 @@ export const claudeTokenStatusSchema = envelope(
 );
 /**
  * Installation discovery credential: whether a reference is set, its kind and whether it
- * resolves, plus the detected GitHub CLI login. Never the variable name or a token.
+ * resolves, plus the detected GitHub CLI logins. Never the variable name or a token.
  */
 export const discoveryStatusSchema = envelope(
   z
@@ -2805,6 +2806,8 @@ export const discoveryStatusSchema = envelope(
       available: z.boolean(),
       source: z.enum(["env", "gh"]).nullable(),
       gh: ghLoginStateSchema,
+      /** The login a new project's `gh:github.com` source would use; status only. */
+      sourceGh: ghLoginStateSchema,
     })
     .strict(),
 );

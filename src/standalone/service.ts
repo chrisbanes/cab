@@ -470,6 +470,7 @@ function gitHubCredentialExclusions(domain: DomainStore) {
         (project) =>
           domain.githubConfiguration(String(project.id)).credentialRef,
       ),
+    ...domain.pendingCredentialReferences(),
   ];
   const excluded = references.map((ref) => credentialReferenceExclusions(ref));
   return {

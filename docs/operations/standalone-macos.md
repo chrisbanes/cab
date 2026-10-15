@@ -231,15 +231,19 @@ from the Codex runtime after the next restart.
 
 Each project's GitHub source configuration chooses its own `gh:github.com` or
 `env:NAME` reference. Discovery configuration does not select a source credential
-or provide a fallback. Configure the source in project settings, preview its
+or provide a fallback. When guided setup detects a signed-in GitHub CLI account in
+the source's candidate environment, it shows the account and records
+`gh:github.com` for the new project's source; otherwise the source starts without a
+credential and the ready check says so. Change or Clear it in the project's GitHub
+source settings; a cleared source stays cleared. Configure the source in project settings, preview its
 current version to activate it, then refresh observations to import tasks.
 Preview activation and successful import are separate evidence.
 
-The offered GitHub CLI account uses the same candidate environment as an
-explicit gh source selection: `GH_TOKEN` takes precedence over `GITHUB_TOKEN`,
+The offered GitHub CLI account, in setup and source settings, uses the same
+candidate environment as an explicit gh source selection: `GH_TOKEN` takes precedence over `GITHUB_TOKEN`,
 then the stored login. An invalid overriding token does not fall back to the
-stored account. This status-only offer does not select credentials or activate a
-source, and does not run `gh auth token` for a null/env source. Status uses the
+stored account, so setup records no default. This status-only detection does not
+activate a source, and does not run `gh auth token` for a null/env source. Status uses the
 candidate environment credentials to identify the offered account. Current
 env-source usability remains independent of an unavailable candidate gh account.
 Configured unrelated credentials, their aliases and lifetime old-token aliases
