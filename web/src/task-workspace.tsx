@@ -1667,8 +1667,10 @@ export function TaskWorkspace({
                   !Object.values(data.execution.holds).some(Boolean) && (
                     <p className="muted">No operator decision needed.</p>
                   )}
+                {/* The merged approval wait is left out: the open approvals are rows above, and the
+                    hold line names the others when one is selected. */}
                 <WaitReasons
-                  waits={data.waits}
+                  waits={data.waits.filter((wait) => wait.code !== "approval")}
                   taskId={taskId}
                   projectId={data.task.projectId}
                   client={client}

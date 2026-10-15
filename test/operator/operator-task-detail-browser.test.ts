@@ -1927,19 +1927,25 @@ test("The decision card and inspector list only the other open approvals as hold
     `/app/tasks/${a.taskId}?request=${a.interactionId}`,
   );
   const holds = page.locator("section#decisions .question-holds"),
-    aside = page.getByRole("complementary", { name: "Task context" });
+    aside = page.getByRole("complementary", { name: "Task context" }),
+    card = page.locator("section#decisions"),
+    // The merged approval wait, which the card's rows and hold line already cover.
+    waitLabel = /Approval needs a decision/;
   // Two open approvals, one in view: the other is the hold, once on each surface.
   await holds.getByText(approvalHold, { exact: true }).waitFor();
   assert.equal(await holds.getByText(approvalHold).count(), 1);
   // Two request rows, the paused project and the other approval.
   await aside.getByText("Holds · 4", { exact: true }).waitFor();
   assert.equal(await aside.getByText(approvalHold).count(), 1);
+  assert.equal(await card.getByText(approvalHold).count(), 1);
+  assert.equal(await card.getByText(waitLabel).count(), 0);
 
   // Only the approval in view: it is not a hold on itself.
   await serveApprovals(page, a.taskId, [a.interactionId]);
   await page.reload();
   await aside.getByText("Holds · 2", { exact: true }).waitFor();
   assert.equal(await page.getByText(approvalHold).count(), 0);
+  assert.equal(await card.getByText(waitLabel).count(), 0);
 
   // Nothing selected: both approvals are rows already, so neither surface repeats them as a hold.
   await serveApprovals(page, a.taskId, [a.interactionId, other]);
@@ -1947,4 +1953,5 @@ test("The decision card and inspector list only the other open approvals as hold
   await aside.getByText("Holds · 3", { exact: true }).waitFor();
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await page.getByText(approvalHold).count(), 0);
+  assert.equal(await card.getByText(waitLabel).count(), 0);
 });

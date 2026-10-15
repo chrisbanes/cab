@@ -1811,7 +1811,8 @@ as follows:
   current task version and "Inspect uncertain execution" for an uncertain execution
   without its hold line, then, once and only while a request is open, the holds it does not clear
   in the Inbox's wording (the other open approvals when one is selected, none when no
-  approval is selected), then the waits and execution hold lines. Its amber edge
+  approval is selected), then the waits, except the merged approval wait that the
+  request rows and that hold line already cover, and the execution hold lines. Its amber edge
   shows only while a request is open. The assignments table has Assignment (short
   id and the history button), Requested by → result to and Known state columns,
   and reflows to stacked rows on a phone.
