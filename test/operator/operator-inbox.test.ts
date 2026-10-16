@@ -13,7 +13,11 @@ import {
   startOwnWork,
 } from "../fixtures/questions.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { mixedAnswers, mixedForm } from "../fixtures/question-data.js";
+import {
+  choiceForm,
+  mixedAnswers,
+  mixedForm,
+} from "../fixtures/question-data.js";
 import {
   nativeQuestionForm,
   nativeQuestionAnswers,
@@ -146,6 +150,75 @@ test("Inbox headlines are the approval action, a plain prompt, or null for an in
     ]).readInbox();
     assert.equal(headlineOf(withheld.data.items, approval.taskId), null);
     assert.equal(JSON.stringify(withheld).includes("pull request"), false);
+  } finally {
+    await f.close();
+  }
+});
+test("a corrupt stored form leaves its row without a headline and the rest of the queue listed", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const bad = await seedOwnQuestion(f),
+      good = await seedOwnQuestion(f, choiceForm, "Second task");
+    f.seedPersistedState((db) => {
+      db.prepare(
+        "UPDATE coordination_question_forms SET schemaJson='{}' WHERE interactionId=?",
+      ).run(bad.interactionId);
+    });
+    const queue = await new OperatorApi(f.service, [f.directory]).readInbox();
+    assert.equal(queue.data.unavailable, false);
+    const byTask = new Map(queue.data.items.map((i) => [i.taskId, i]));
+    assert.equal(byTask.size, 2);
+    assert.equal(byTask.get(bad.taskId)?.headline, null);
+    assert.equal(
+      byTask.get(good.taskId)?.headline,
+      choiceForm.questions[0]!.label,
+    );
+  } finally {
+    await f.close();
+  }
+});
+test("a native question whose recorded answer is withheld has no headline, as its exact read has no form", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const started = await startOwnWork(f, "Native ask", "Native project");
+    const call = await f.runtime.callTool({
+      threadId: started.work.threadId!,
+      turnId: started.work.turnId!,
+      callId: randomUUID(),
+      tool: "ensemble_ask_question",
+      arguments: { question: "Where should this run?" },
+    });
+    assert.equal(call.success, true, call.text);
+    await finishOwnWork(f, started);
+    const q = f.service.coordinationView().readTask(started.a.taskId)
+      .questions[0]!;
+    const native = {
+      request: {
+        questions: [
+          {
+            id: "q",
+            header: "Location",
+            question: "Where?",
+            isOther: true,
+            isSecret: false,
+            options: [{ label: "Local", description: "This machine" }],
+          },
+        ],
+      },
+      answers: { q: { answers: ["Hunter2 cluster"] } },
+    };
+    const headline = (excluded: string[]) =>
+      (
+        new OperatorApi(f.service, excluded) as unknown as {
+          requestHeadline(
+            q: unknown,
+            native: unknown,
+            excluded: string[],
+          ): string | null;
+        }
+      ).requestHeadline(q, native, excluded);
+    assert.equal(headline(["Nothing relevant"]), "Location");
+    assert.equal(headline(["Hunter2"]), null);
   } finally {
     await f.close();
   }

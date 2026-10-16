@@ -40,8 +40,7 @@ export function requestHeading(
     | "attentionCode"
   >,
 ) {
-  const task = item.taskTitle ?? "Unavailable task",
-    title = item.headline ?? task,
+  const title = item.headline ?? item.taskTitle,
     subtitle = (
       item.headline ? [item.projectName, item.taskTitle] : [item.projectName]
     )

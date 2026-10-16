@@ -317,7 +317,9 @@ export function Inbox({
           <Icon aria-hidden="true" />
           {requestKindLabel(item.kind)}
         </span>
-        <strong title={heading.title}>{heading.title}</strong>
+        <strong title={heading.title ?? undefined}>
+          {heading.title ?? "Unavailable task"}
+        </strong>
         {heading.subtitle && (
           <span className="inbox-row-subtitle">{heading.subtitle}</span>
         )}
@@ -544,7 +546,7 @@ export function Inbox({
                       {selectedHeading.subtitle}
                     </p>
                   )}
-                  <h2>{selectedHeading?.title}</h2>
+                  <h2>{selectedHeading?.title ?? "Selected request"}</h2>
                   {selectedHeading?.reason && (
                     <p className="inbox-reason">{selectedHeading.reason}</p>
                   )}

@@ -1743,9 +1743,9 @@ The web app is the ground truth for these items.
   the read withholds it), an intervention's or delivery row's reason, the request's
   own material and a sticky response bar. The "requester · version N · HH:MM" line
   follows a question's form, with its conversation revision, evidence links and
-  drafts note; an approval or intervention keeps the line under the heading. The inspector lists the task with its source
-  and, while the request is still open in the queue, the next action; Lead (or "No
-  lead configured"), Requester, the assignment Chain, Holds and Evidence. A field
+  drafts note; an approval or intervention keeps the line under the heading. The
+  inspector lists the task with its source and, while the request is still open in
+  the queue, the next action; Lead (or "No lead configured"), Requester, the assignment Chain, Holds and Evidence. A field
   the task read cannot supply reads unavailable. A deep link to a request that is
   no longer in the queue shows no inspector. One
   task read per selection serves the holds, the approval facts and the inspector.

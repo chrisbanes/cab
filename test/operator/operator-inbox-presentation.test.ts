@@ -135,6 +135,20 @@ test("a request leads with its question or exact action and keeps only the reaso
   );
 });
 
+test("a request with neither headline nor task title has no title, so the page words its own fallback", () => {
+  assert.deepEqual(
+    requestHeading({
+      kind: "question",
+      headline: null,
+      taskTitle: null,
+      projectName: "Docs",
+      reason: null,
+      attentionCode: null,
+    }),
+    { title: null, subtitle: "Docs", reason: null },
+  );
+});
+
 test("filter counts add up per project and per kind", () => {
   const [a, b, c] = [randomUUID(), randomUUID(), randomUUID()],
     counts = filterCounts([

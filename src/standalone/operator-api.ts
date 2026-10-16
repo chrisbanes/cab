@@ -2735,10 +2735,18 @@ export class OperatorApi {
     return visit(value);
   }
   // One composition for the exact read and the queue headline, so they cannot disagree.
-  private composedQuestionForm(
-    prompt: string,
-    own: { form: QuestionForm } | null | undefined,
-    native: { request: { questions: StructuredQuestionSet } } | undefined,
+  private composedQuestion(
+    interaction: Pick<CoordinationInteraction, "prompt" | "response">,
+    own:
+      | { form: QuestionForm; answers: QuestionAnswers | null }
+      | null
+      | undefined,
+    native:
+      | {
+          request: { questions: StructuredQuestionSet };
+          answers?: Record<string, { answers: string[] }> | null | undefined;
+        }
+      | undefined,
   ) {
     const source = native ? "native" : own ? "ensemble" : "plain";
     const form =
@@ -2752,33 +2760,12 @@ export class OperatorApi {
                 id: "answer",
                 kind: "free-text",
                 label: "Answer",
-                description: prompt,
+                description: interaction.prompt,
                 required: true,
                 minLength: 1,
               },
             ],
           }));
-    return { source, form } as const;
-  }
-  async readQuestion(taskId: string, interactionId: string) {
-    uuid.parse(interactionId);
-    const visibility = this.visibilityToken(),
-      workspaceVisibility = this.service.taskWorkspaceVisibility(taskId),
-      task = this.requireTask(taskId),
-      excluded = await this.exclusions(String(task.projectId), taskId);
-    const view = this.coordination(),
-      v = view.readTask(taskId),
-      interaction = v.questions.find((q) => q.interactionId === interactionId);
-    if (!interaction) throw new OperatorApiError(404, "not-found");
-    const own = view.questionForm(interactionId),
-      native = v.runtimeQuestions?.find(
-        (q) => q.interactionId === interactionId,
-      );
-    const { source, form } = this.composedQuestionForm(
-      interaction.prompt,
-      own,
-      native,
-    );
     let answers: QuestionAnswers | null = own?.answers ?? null;
     if (native?.answers)
       answers = Object.fromEntries(
@@ -2796,6 +2783,27 @@ export class OperatorApi {
       );
     if (source === "plain" && interaction.response !== null)
       answers = { answer: { optionIds: [], text: interaction.response } };
+    return { source, form, answers } as const;
+  }
+  async readQuestion(taskId: string, interactionId: string) {
+    uuid.parse(interactionId);
+    const visibility = this.visibilityToken(),
+      workspaceVisibility = this.service.taskWorkspaceVisibility(taskId),
+      task = this.requireTask(taskId),
+      excluded = await this.exclusions(String(task.projectId), taskId);
+    const view = this.coordination(),
+      v = view.readTask(taskId),
+      interaction = v.questions.find((q) => q.interactionId === interactionId);
+    if (!interaction) throw new OperatorApiError(404, "not-found");
+    const own = view.questionForm(interactionId),
+      native = v.runtimeQuestions?.find(
+        (q) => q.interactionId === interactionId,
+      );
+    const { source, form, answers } = this.composedQuestion(
+      interaction,
+      own,
+      native,
+    );
     const intact =
       this.intactQuestion(form, excluded) &&
       this.intactQuestion(answers, excluded);
@@ -2854,15 +2862,24 @@ export class OperatorApi {
       const approval = this.interaction(q, excluded);
       return approval.approvable ? approval.action : null;
     }
-    const { source, form } = this.composedQuestionForm(
-      q.prompt,
-      this.coordination().questionForm(q.interactionId),
-      native,
-    );
-    if (!this.intactQuestion(form, excluded)) return null;
-    return source === "plain"
-      ? this.safe(q.prompt, excluded)
-      : (form.questions[0]?.label ?? null);
+    // A corrupt stored form must not take the task's other rows down with it.
+    try {
+      const { source, form, answers } = this.composedQuestion(
+        q,
+        this.coordination().questionForm(q.interactionId),
+        native,
+      );
+      if (
+        !this.intactQuestion(form, excluded) ||
+        !this.intactQuestion(answers, excluded)
+      )
+        return null;
+      return source === "plain"
+        ? this.safe(q.prompt, excluded)
+        : (form.questions[0]?.label ?? null);
+    } catch {
+      return null;
+    }
   }
   async readInbox(params = new URLSearchParams()) {
     const allowed = ["cursor", "limit", "kind", "project"];
