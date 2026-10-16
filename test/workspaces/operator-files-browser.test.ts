@@ -732,7 +732,9 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   );
   // The hashes moved into the notice's Details instead of the message.
   // Read without opening it: expanding would scroll the reading position under test.
-  const changeDetails = page.locator(".action-outcome-details");
+  const changeDetails = page
+    .getByRole("tabpanel", { name: "Files" })
+    .locator(".action-outcome-details");
   assert.equal(await changeDetails.locator("summary").innerText(), "Details");
   assert.deepEqual(await changeDetails.locator("dd").allTextContents(), [
     stableHash,
@@ -1064,7 +1066,10 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .waitFor();
   assert.ok(
     (
-      await page.locator(".action-outcome-details dd").allTextContents()
+      await page
+        .getByRole("tabpanel", { name: "Files" })
+        .locator(".action-outcome-details dd")
+        .allTextContents()
     ).includes("missing"),
   );
 
