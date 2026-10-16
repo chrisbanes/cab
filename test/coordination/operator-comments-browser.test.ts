@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { type Browser, type Page, type Request, chromium } from "playwright";
+import {
+  type Browser,
+  type Page,
+  type Request,
+  type Route,
+  chromium,
+} from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -180,6 +186,24 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   });
   j.observe(page);
   page.setDefaultTimeout(5000);
+  // Page-side evidence for the source segment: whether the app itself started and
+  // settled each task read, independent of Playwright's request events.
+  await page.addInitScript((taskPath) => {
+    const counts = { started: 0, settled: 0, failed: 0 };
+    Object.assign(window, { taskFetches: counts });
+    const original = window.fetch;
+    window.fetch = (input, init) => {
+      const result = original(input, init);
+      if (new URL(String(input), location.href).pathname !== taskPath)
+        return result;
+      counts.started++;
+      result.then(
+        () => counts.settled++,
+        () => counts.failed++,
+      );
+      return result;
+    };
+  }, `/api/operator/tasks/${taskId}`);
   await page.goto(`${web.origin}/app/tasks/${taskId}`);
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
@@ -597,6 +621,17 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   }[] = [];
   let omittedMilestones = 0,
     step = "restored-task";
+  type TaskFetches = { started: number; settled: number; failed: number };
+  await page.evaluate(() =>
+    Object.assign(
+      (window as unknown as { taskFetches: TaskFetches }).taskFetches,
+      {
+        started: 0,
+        settled: 0,
+        failed: 0,
+      },
+    ),
+  );
   const started = performance.now();
   const taskPath = `/api/operator/tasks/${taskId}`;
   const mark = (
@@ -634,17 +669,18 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     page.off("request", observeRequest);
     page.off("requestfailed", observeFailure);
   };
-  // Each action owns its actual request, acknowledgement and first task request
-  // started after that acknowledgement; a prior view GET cannot satisfy source.
+  // Each action owns its actual request and acknowledgement, and settles on the first
+  // task read answered among the task GETs started after that request. Request events
+  // arrive in issue order, so a prior view GET cannot satisfy source, and an aborted
+  // read has no response; nothing depends on the acknowledgement arriving first.
   const settleAction = async (action: "view" | "source" | "task") => {
-    let sent: Request | undefined, task: Request | undefined;
-    let acknowledged = action === "task";
+    let sent: Request | undefined;
+    const reads = new Set<Request>();
     const post =
       action === "task"
         ? null
         : page.waitForResponse((response) => {
             if (response.request() !== sent) return false;
-            acknowledged = true;
             mark(
               action === "view"
                 ? "view-command-recorded"
@@ -670,30 +706,25 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       if (matches) {
         sent = request;
         if (action === "view") mark("view-command-entered", "POST", pathname);
-        if (action === "task") task = request;
       }
       return matches;
     });
-    const taskRequest =
-      action === "task"
-        ? request
-        : page.waitForRequest((request) => {
-            if (
-              !acknowledged ||
-              request.method() !== "GET" ||
-              new URL(request.url()).pathname !== taskPath
-            )
-              return false;
-            task = request;
-            return true;
-          });
-    const taskRead = page.waitForResponse(
-      (response) => response.request() === task,
+    // Registered after the waiter above, so a "task" action's own GET is recorded.
+    const recordRead = (request: Request) => {
+      if (
+        sent &&
+        request.method() === "GET" &&
+        new URL(request.url()).pathname === taskPath
+      )
+        reads.add(request);
+    };
+    page.on("request", recordRead);
+    const taskRead = page.waitForResponse((response) =>
+      reads.has(response.request()),
     );
     const outcomes = await Promise.allSettled([
       post ?? Promise.resolve(null),
       request,
-      taskRequest,
       taskRead,
       page
         .getByRole("button", {
@@ -707,16 +738,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
         })
         .click(),
     ]);
+    page.off("request", recordRead);
     // All waiters are owned immediately, even if actionability or an assertion fails.
-    const [acknowledgement, originating, nextRequest, currentRead, click] =
-      outcomes;
-    for (const outcome of [
-      click,
-      originating,
-      acknowledgement,
-      nextRequest,
-      currentRead,
-    ])
+    const [acknowledgement, originating, currentRead, click] = outcomes;
+    for (const outcome of [click, originating, acknowledgement, currentRead])
       if (outcome.status === "rejected") throw outcome.reason;
     if (
       originating.status !== "fulfilled" ||
@@ -771,6 +796,11 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     releaseView();
     removeObservers();
   }, "source-segment.release");
+  // Keeps a route registered while each `times: 1` route below expires. Otherwise
+  // Playwright turns request interception off as the follow-up task GET starts, the
+  // likely cause of a CI run where that GET never produced a request event.
+  const passThrough = (route: Route) => route.fallback();
+  await page.route("**/api/operator/**", passThrough);
   try {
     await settleAction("task");
     step = "restored-view";
@@ -896,6 +926,8 @@ test("approval-mode exact operator review and unknown remote comment retain orig
           changed: text.includes("source requirements changed"),
           sourceRefreshFailed: text.includes("Source refresh failed"),
           unknownNotice: text.includes("unknown:"),
+          taskFetches: (window as unknown as { taskFetches: TaskFetches })
+            .taskFetches,
         };
       })
       .catch(() => ({ unavailable: true }));
@@ -918,6 +950,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
       JSON.stringify({ events: milestones, omitted: omittedMilestones }),
     );
   }
+  await page.unroute("**/api/operator/**", passThrough);
   let releaseSource!: () => void, enterSource!: () => void;
   const sourceBarrier = new Promise<void>((r) => (releaseSource = r)),
     sourceEntry = new Promise<void>((r) => (enterSource = r));
