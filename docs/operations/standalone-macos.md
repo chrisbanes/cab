@@ -200,7 +200,8 @@ and check `/app`.
 
 ### Not yet proven
 
-The [bounded live run](../evidence/980-service-lifecycle-2026-10-14.md) used a
+The bounded live runs ([lifecycle](../evidence/980-service-lifecycle-2026-10-14.md),
+[one-command install](../evidence/1080-one-command-install-2026-10-16.md)) used a
 throwaway label and temporary directories. These still need the maintainer:
 
 - the first install with the default label into the real
@@ -211,6 +212,8 @@ throwaway label and temporary directories. These still need the maintainer:
   turn, where the bootout interrupts work and recovery holds apply;
 - installing from a CI-built tagged release, or from a browser-downloaded tarball
   with quarantine attributes;
+- the install's Keychain write and browser open, which the live run replaced with
+  `--token-file` and `--no-open`;
 - Claude turns under launchd;
 - the [#761](https://github.com/chrisbanes/ensemble/issues/761) cutover.
 
