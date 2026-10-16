@@ -183,21 +183,21 @@ function RefreshObservations(
         disabled={pending}
         onClick={async () => {
           setPending(true);
-          setNotice("Observation refresh requested.");
+          setNotice("Refresh requested.");
           try {
             await p.client.refreshSources(p.session.csrfToken);
-            setNotice("Observation request completed.");
+            setNotice("Sources refreshed.");
             p.observations.refresh();
           } catch {
             setNotice(
-              "Observation refresh unconfirmed. Read observations again or deliberately request another refresh.",
+              "We couldn't confirm the refresh. Check the sources again before refreshing.",
             );
           } finally {
             setPending(false);
           }
         }}
       >
-        Refresh source observations
+        Refresh sources
       </Button>
       {notice && <p className="body">{notice}</p>}
     </>
@@ -222,11 +222,11 @@ function SourceObservations(
   );
   return (
     <Panel
-      title="Source observations"
-      description="Refresh requests observations for all enabled sources in this installation. An attempt is separate from successful provider sync; it creates no domain receipt."
+      title="Source status"
+      description="Refresh checks every enabled source in this installation. A refresh attempt doesn't mean the provider sync succeeded."
     >
       <ResourceStatus
-        label="Source observations"
+        label="Sources"
         state={resource.state}
         retry={resource.refresh}
       />
@@ -283,23 +283,21 @@ function SourceObservations(
         disabled={pending}
         onClick={async () => {
           setPending(true);
-          setNotice("Observation refresh requested.");
+          setNotice("Refresh requested.");
           try {
             await p.client.refreshSources(p.session.csrfToken);
-            setNotice(
-              "Observation request completed. Review complete, partial and unavailable states below.",
-            );
+            setNotice("Sources refreshed. Check each source's state below.");
             resource.refresh();
           } catch {
             setNotice(
-              "Observation refresh unconfirmed. Read observations again or deliberately request another refresh.",
+              "We couldn't confirm the refresh. Check the sources again before refreshing.",
             );
           } finally {
             setPending(false);
           }
         }}
       >
-        Request installation-wide source observations
+        Refresh all sources
       </Button>
       {notice && (
         <p className="body" role="status">
@@ -317,12 +315,12 @@ function UnsettledPlacement(
 ) {
   const d = useDraft(p.drafts, `github.place:${p.command.taskId}`);
   return (
-    <Panel title="Placement submission outcome">
+    <Panel title="Placement outcome">
       <p className="body">
         Original project {p.command.projectId}, task {p.command.taskId},
         submitted task version {p.command.expectedVersion}, chosen project{" "}
-        {p.command.chosenProjectId}. Current conflict observations cannot
-        confirm this submission.
+        {p.command.chosenProjectId}. The current source state can't confirm this
+        placement.
       </p>
       <DraftOutcome
         draft={d}

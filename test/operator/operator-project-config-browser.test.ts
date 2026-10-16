@@ -56,7 +56,7 @@ test("General tab edits in place with a change list, saved line and tabs that ke
   assert.equal(await trail(page), "Settings / Projects / Atlas");
   const status = page.locator(".settings-status");
   await status.getByText("Enabled").waitFor();
-  await status.getByText("Existing admission rules still apply.").waitFor();
+  await status.getByText("Existing start rules still apply.").waitFor();
   assert.doesNotMatch(await status.innerText(), /version|\d\d:\d\d/);
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
@@ -1029,7 +1029,7 @@ test("Sync & placement shows preview, observations and the placement status line
   await page.getByLabel("Selection to preview", { exact: true }).waitFor();
   await page
     .getByRole("button", {
-      name: "Request installation-wide source observations",
+      name: "Refresh all sources",
     })
     .waitFor();
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);

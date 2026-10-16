@@ -497,7 +497,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   // Delivery is observed on Changes; the reply and its check stay on Overview.
   await openTaskTab(page, "Changes");
   await page
-    .getByRole("button", { name: "Refresh delivery observation", exact: true })
+    .getByRole("button", { name: "Refresh delivery status", exact: true })
     .click();
   await page.getByText(/issue.comment: confirmed-success/).waitFor();
   await openTaskTab(page, "Overview");
@@ -547,7 +547,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   );
   await page.goto(`${web.origin}/app/tasks/${taskId}`);
   await page
-    .getByText(/source comparison unknown; current observation unavailable/)
+    .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor();
   assert.deepEqual(
     f.service.taskReview().read(taskId).viewed,
@@ -701,7 +701,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
             action === "view"
               ? "Set viewing reference"
               : action === "source"
-                ? "Refresh source observation"
+                ? "Refresh source"
                 : "Refresh task",
           exact: true,
         })
@@ -860,7 +860,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     );
     await settleAction("source");
     await page
-      .getByText(/source comparison unknown; current observation unavailable/)
+      .getByText(/source comparison unknown; current source state unavailable/)
       .waitFor();
     assert.equal(
       await page
@@ -873,7 +873,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     step = "ordinary-task";
     await settleAction("task");
     await page
-      .getByText(/source comparison unknown; current observation unavailable/)
+      .getByText(/source comparison unknown; current source state unavailable/)
       .waitFor();
     assert.equal(
       await page
@@ -931,7 +931,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     });
   });
   await page
-    .getByRole("button", { name: "Refresh source observation", exact: true })
+    .getByRole("button", { name: "Refresh source", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
   await sourceEntry;
   await page
@@ -945,7 +945,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   );
   releaseSource();
   await page
-    .getByText(/source comparison unknown; current observation unavailable/)
+    .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor({ state: "attached" });
   // The failed refresh speaks even though an earlier viewing-reference outcome is still set.
   await page
@@ -970,7 +970,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
   await page
-    .getByText(/source comparison unknown; current observation unavailable/)
+    .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor({ state: "attached" });
   await page.unroute("**/api/operator/source-refresh");
   await page.route("**/api/operator/tasks/*", (route) =>
@@ -981,10 +981,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     }),
   );
   await page
-    .getByRole("button", { name: "Refresh source observation", exact: true })
+    .getByRole("button", { name: "Refresh source", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
   await page
-    .getByText(/source comparison unknown; current observation unavailable/)
+    .getByText(/source comparison unknown; current source state unavailable/)
     .waitFor({ state: "attached" });
   await page
     .getByText("Refresh failed. Showing the last fetched data.", {
@@ -999,7 +999,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   );
   await page.unroute("**/api/operator/tasks/*");
   await page
-    .getByRole("button", { name: "Refresh source observation", exact: true })
+    .getByRole("button", { name: "Refresh source", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
   await page.getByText(/source unchanged/).waitFor({ state: "attached" });
   // A successful observation's delayed task read cannot settle a newer failure.
@@ -1016,7 +1016,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   });
   const refreshSource = () =>
     page
-      .getByRole("button", { name: "Refresh source observation", exact: true })
+      .getByRole("button", { name: "Refresh source", exact: true })
       .evaluate((el) => (el as HTMLElement).click());
   const failSource = (route: import("playwright").Route) =>
     route.fulfill({
@@ -1026,7 +1026,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     });
   const assertUnknown = async () => {
     await page
-      .getByText(/source comparison unknown; current observation unavailable/)
+      .getByText(/source comparison unknown; current source state unavailable/)
       .waitFor({ state: "attached" });
     assert.equal(
       await page
@@ -1093,7 +1093,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByLabel("Editable reply")
     .fill("Private old-session source draft");
   await page
-    .getByRole("button", { name: "Refresh source observation", exact: true })
+    .getByRole("button", { name: "Refresh source", exact: true })
     .evaluate((el) => (el as HTMLElement).click());
   await lateSourceEntry;
   await signOutFromSidebar(page);

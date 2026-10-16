@@ -1057,7 +1057,7 @@ function AnchorContext({ anchorId }: { anchorId: string }) {
         · <StatusBadge>{anchorStatusLabel[data.status]}</StatusBadge>
         {" · "}
         {a.observedAt
-          ? `observed ${timeLabel(a.observedAt)}`
+          ? `as of ${timeLabel(a.observedAt)}`
           : `captured ${timeLabel(a.capturedAt)}`}
       </p>
       {excerpt !== null ? (

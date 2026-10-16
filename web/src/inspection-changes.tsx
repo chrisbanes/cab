@@ -688,7 +688,7 @@ export function TaskWorkspaceChanges({
               : current.state}
           </StatusBadge>
           {id && <span className="identifier">Comparison {id}</span>}
-          {snapshot && <span>Observed {dateLabel(snapshot.observedAt)}</span>}
+          {snapshot && <span>As of {dateLabel(snapshot.observedAt)}</span>}
           {snapshot && snapshot.target !== "turn" && (
             <span className="changes-baseline">
               Baseline: repository {snapshot.repositoryId} ·{" "}

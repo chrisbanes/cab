@@ -265,7 +265,7 @@ test("ordinary links stay distinct while styled actions and long controls fit sm
     `${web.origin}/app/projects/${ids.projectId}/settings?tab=sync`,
   );
   const observationButton = page.getByRole("button", {
-    name: "Request installation-wide source observations",
+    name: "Refresh all sources",
     exact: true,
   });
   assert.equal(
@@ -694,7 +694,7 @@ test("source replacement verifies repositories without diagnostic echo and obser
   await sections.getByRole("link", { name: "Sync & placement" }).click();
   await page
     .getByRole("button", {
-      name: "Request installation-wide source observations",
+      name: "Refresh all sources",
       exact: true,
     })
     .click();
