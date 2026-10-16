@@ -30,8 +30,8 @@ each screen leading to the next and nothing to look up.
 
 | Entry point | Screens to a running task | First screen must show |
 | --- | --- | --- |
-| Install command | 4 (sign-in, setup, ready check, composer) | after install: the sign-in page, opened for the operator |
-| Fresh sign-in, no project | 3 (setup, ready check, composer) | the getting-started card with one primary action |
+| Install command | 5 (sign-in, Home, setup, ready check, composer) | after install: the sign-in page, opened for the operator |
+| Fresh sign-in, no project | 4 (Home, setup, ready check, composer) | the getting-started card with one primary action |
 
 Each getting-started row has one action and no two rows open the same screen.
 

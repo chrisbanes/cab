@@ -42,8 +42,10 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 
 ## Recovery
 
-- Resume project is not offered as a Fix while stop, task or writer holds remain;
-  the card says what clears them.
+- A paused project keeps Resume project as the Fix for that reason, and its
+  confirmation states that stop, task, writer and uncertainty holds remain. Those
+  holds are shown as holds with their recovery link, never as a Fix, so clearing
+  the pause is not mistaken for clearing them.
 - Unknown ownership or age is stated once, in the headline, and not repeated as
   field values.
 - The page refreshes without losing the selected generation.

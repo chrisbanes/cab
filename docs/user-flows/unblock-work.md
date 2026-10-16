@@ -1,7 +1,8 @@
 # Unblock waiting work
 
-**Status:** planned. Wait reasons with a Fix are implemented on the task, Inbox
-and composer; the project page entry point and the budget below are not.
+**Status:** planned. Wait reasons with a Fix are implemented on the task and the
+composer; the Inbox shows holds without a Fix, and the Inbox path, the project
+page entry point and the budget below are not implemented.
 
 ## Goal
 

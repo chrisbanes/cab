@@ -38,5 +38,7 @@ they are, and gets one confirmation that the answer was recorded.
 - A failed submission keeps the input and names the cause; a stale or already
   answered request refuses a new answer and says so.
 - Recording an answer never resumes a paused project or clears a hold; the
-  confirmation states any remaining wait with its Fix.
+  confirmation states any remaining wait, with its Fix where the
+  [specification](../SPEC.md#task-creation-and-project-setup) gives it one and
+  otherwise with the link to what blocks it.
 - An unsupported runtime request stays unresolved and is never converted to chat.
