@@ -1960,3 +1960,34 @@ test("a listener failure in the same output chunk as ready keeps admission held 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a listener failure during a poll's history read keeps the durable hold and its reason", async () => {
+  await signallingPower(
+    "failure-in-read",
+    async ({ state, events, power, reconciles }) => {
+      await power.start();
+      await power.poll();
+      events.signals?.transition("wake");
+      const reason = "Sleep/wake listener exited (1)";
+      // The poll's own hold, installed after this read, has a newer revision.
+      events.onRead = () => {
+        events.onRead = undefined;
+        events.signals?.failure(reason);
+      };
+      events.startFailure = new Error(reason);
+      await power.poll();
+      assert.equal(reconciles.count, 1, "the held poll reconciled");
+      assert.deepEqual(
+        [state.powerAdmissionState().held, state.powerAdmissionState().reason],
+        [true, reason],
+        "the in-flight poll cannot clear the failure hold",
+      );
+      assert.equal(power.observedForAdmission(), false);
+
+      events.startFailure = undefined;
+      await power.poll();
+      assert.equal(state.powerAdmissionState().held, false);
+      assert.equal(power.observedForAdmission(), true);
+    },
+  );
+});

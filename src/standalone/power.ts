@@ -958,6 +958,12 @@ export class ExecutionPower {
       }
       if (next.events.length === 0) {
         if (this.state.powerReconciliationPending() > 0) return;
+        // A listener that failed during this poll keeps its hold and reason,
+        // even though this poll's own hold has a newer revision.
+        if (this.listenerFailure !== null) {
+          this.state.holdPowerAdmission(this.listenerFailure);
+          return;
+        }
         const resumed = this.state.completePowerReconciliation(
           next.cursor ?? cursor,
           revision,
