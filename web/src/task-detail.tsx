@@ -99,7 +99,7 @@ export function AssignmentRows({
               </td>
               <td>{row.flow}</td>
               <td>
-                {a.state} · {row.runtime} · {row.wait}
+                {row.state} · {row.runtime} · {row.wait}
                 <ExecutionNotices assignment={a} />
               </td>
             </tr>

@@ -620,7 +620,7 @@ nav {
   display: inline-block;
   overflow-wrap: anywhere;
   font-size: 14px;
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   line-height: var(--leading-1-25);
 }
 

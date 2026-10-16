@@ -348,6 +348,10 @@ test("assignmentRow names requester, destination, wait and short id", () => {
   assert.equal(row.title, `Builder · ${"x".repeat(80)}…`);
   assert.equal(row.flow, "Mira → Mira");
   assert.equal(row.wait, "Waiting reason unknown");
+  assert.equal(
+    assignmentRow({ ...one, state: "held" } as never, all).state,
+    "Held",
+  );
   const waiting = (waitReason: string) =>
     assignmentRow({ ...one, waitReason } as never, all).wait;
   assert.equal(

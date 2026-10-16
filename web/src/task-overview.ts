@@ -251,6 +251,14 @@ export function stopConsequences(
   return { affected, held: data.execution.holds.stop };
 }
 
+const assignmentStates = {
+  pending: "Pending",
+  running: "Running",
+  completed: "Completed",
+  held: "Held",
+  cancelled: "Cancelled",
+} satisfies Record<TaskRead["data"]["assignments"][number]["state"], string>;
+
 /** A compact delegation row: responsibility, short id, requester → result destination, wait. */
 export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
   const name = (id: string) =>
@@ -283,6 +291,7 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
         )
         .join("; ") ?? "Waiting reason unknown",
     runtime: executionSummary(a).line,
+    state: assignmentStates[a.state],
   };
 }
 
