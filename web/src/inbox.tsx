@@ -24,6 +24,7 @@ import {
   filterCounts,
   queueGroups,
   requestActionLabel,
+  requestHeading,
   requestIdentity,
   requestKindLabel,
 } from "./inbox-presentation.js";
@@ -300,7 +301,8 @@ export function Inbox({
     render((v) => v + 1);
   };
   const row = (item: InboxItem) => {
-    const Icon = requestKindIcons[item.kind];
+    const Icon = requestKindIcons[item.kind],
+      heading = requestHeading(item);
     return (
       <button
         type="button"
@@ -313,13 +315,15 @@ export function Inbox({
       >
         <span className="inbox-row-label">
           <Icon aria-hidden="true" />
-          {item.projectName ?? "Unavailable project"} /{" "}
           {requestKindLabel(item.kind)}
         </span>
-        <strong>{item.taskTitle ?? "Unavailable task"}</strong>
-        <span className="inbox-row-reason">
-          {item.reason ?? "Exact details unavailable"}
-        </span>
+        <strong title={heading.title}>{heading.title}</strong>
+        {heading.subtitle && (
+          <span className="inbox-row-subtitle">{heading.subtitle}</span>
+        )}
+        {heading.reason && (
+          <span className="inbox-row-reason">{heading.reason}</span>
+        )}
         <span className="inbox-row-action">{requestActionLabel(item)} →</span>
         {(item.requesterName || item.createdAt !== null) && (
           <span className="inbox-row-meta">
@@ -335,9 +339,34 @@ export function Inbox({
       </button>
     );
   };
-  const KindIcon = selected ? requestKindIcons[selected.kind] : null,
+  const isQuestion =
+      selected?.kind === "question" ||
+      (!selected && !selectedId?.startsWith("intervention:")),
+    selectedHeading = selected ? requestHeading(selected) : null,
+    KindIcon = selected ? requestKindIcons[selected.kind] : null,
     previous = position > 0 ? rows[position - 1] : undefined,
     next = position >= 0 ? rows[position + 1] : undefined;
+  const meta = selected && (
+    <div className="inbox-detail-meta">
+      {requestIdentity(selected) && (
+        <p className="inbox-identity">{requestIdentity(selected)}</p>
+      )}
+      {!inspector && (selected.evidence || selected.conversation) && (
+        <div className="inbox-detail-links">
+          {selected.evidence && (
+            <ActionLink variant="secondary" href={selected.evidence}>
+              Task evidence
+            </ActionLink>
+          )}
+          {selected.conversation && (
+            <ActionLink variant="secondary" href={selected.conversation}>
+              Requesting conversation
+            </ActionLink>
+          )}
+        </div>
+      )}
+    </div>
+  );
   return (
     <section
       className={`action-inbox ${selectedId ? "inbox-selected" : ""} ${empty && !selectedId ? "inbox-empty" : ""}`}
@@ -510,49 +539,25 @@ export function Inbox({
             <div className="inbox-detail-body">
               {selected && (
                 <div className="inbox-detail-intro">
-                  <p className="inbox-detail-project">
-                    {selected.projectName ?? "Unavailable project"}
-                  </p>
-                  <h2>{selected.taskTitle ?? "Selected request"}</h2>
-                  {requestIdentity(selected) && (
-                    <p className="inbox-identity">
-                      {requestIdentity(selected)}
+                  {selectedHeading?.subtitle && (
+                    <p className="inbox-detail-project">
+                      {selectedHeading.subtitle}
                     </p>
                   )}
-                  <p className="inbox-reason">
-                    {selected.reason ?? "Exact details unavailable"}
-                  </p>
+                  <h2>{selectedHeading?.title}</h2>
+                  {selectedHeading?.reason && (
+                    <p className="inbox-reason">{selectedHeading.reason}</p>
+                  )}
                   {leftQueue && (
                     <p role="status">
                       This request has left the current queue. Its exact detail
                       remains selected.
                     </p>
                   )}
-                  {!inspector &&
-                    (selected.evidence || selected.conversation) && (
-                      <div className="inbox-detail-links">
-                        {selected.evidence && (
-                          <ActionLink
-                            variant="secondary"
-                            href={selected.evidence}
-                          >
-                            Task evidence
-                          </ActionLink>
-                        )}
-                        {selected.conversation && (
-                          <ActionLink
-                            variant="secondary"
-                            href={selected.conversation}
-                          >
-                            Requesting conversation
-                          </ActionLink>
-                        )}
-                      </div>
-                    )}
                 </div>
               )}
-              {selected?.kind === "question" ||
-              (!selected && !selectedId.startsWith("intervention:")) ? (
+              {!isQuestion && meta}
+              {isQuestion ? (
                 <QuestionResponse
                   client={client}
                   session={session}
@@ -560,6 +565,7 @@ export function Inbox({
                   interactionId={selectedId}
                   states={questions}
                   onRecorded={resource.refresh}
+                  observedAt={resource.state.fetchedAt}
                   requesterName={selected?.requesterName}
                   compactContext={Boolean(selected)}
                   onBack={back}
@@ -572,6 +578,7 @@ export function Inbox({
               ) : (
                 <p>Selected request is unavailable.</p>
               )}
+              {isQuestion && meta}
             </div>
           </>
         ) : (

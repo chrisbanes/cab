@@ -11,6 +11,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { unpairedBadges } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 import {
   seedOwnApproval,
   seedOwnIntervention,
@@ -135,8 +136,15 @@ test("queue rows are request cards with kind, action and relative age; filters a
     assert.ok(text.includes(expected), `${expected} in ${text}`);
   assert.equal(
     await first.locator(".inbox-row-label").textContent(),
-    "Atlas / Question",
+    "Question",
   );
+  // The title is the question; the task and project are the subtitle.
+  assert.equal(await first.locator("strong").textContent(), "Explain");
+  assert.equal(
+    await first.locator(".inbox-row-subtitle").textContent(),
+    "Atlas / Request 1",
+  );
+  assert.doesNotMatch(text, /Operator answer requested/);
   const created = await createdAtOf(page, web.origin, "Request 1");
   assert.ok(created);
   assert.equal(
@@ -230,6 +238,162 @@ test("queue rows are full-width touch targets without horizontal scroll (phone)"
     true,
   );
   await captureBrowserEvidence(page, "390-inbox-queue", { fullPage: false });
+});
+
+test("queue rows lead with the question or the approval's exact action, not the generic reason", async (_t, j) => {
+  const { page, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    async (f) => ({
+      question: await seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+      approval: await seedOwnApproval(f, "Release task", "Shipping"),
+      held: await seedOwnIntervention(f),
+    }),
+  );
+  const row = (id: string) =>
+    page.locator(`.inbox-row[data-record-id="${id}"]`);
+  const question = row(more.question.interactionId),
+    approval = row(more.approval.interactionId);
+  await question.waitFor();
+  assert.equal(
+    await question.locator("strong").textContent(),
+    "Choose the guide's audience",
+  );
+  assert.equal(
+    await question.locator(".inbox-row-subtitle").textContent(),
+    "Docs / Guide task",
+  );
+  assert.equal(
+    await approval.locator("strong").textContent(),
+    "Create a pull request. No merge or deployment.",
+  );
+  assert.equal(
+    await approval.locator(".inbox-row-subtitle").textContent(),
+    "Shipping / Release task",
+  );
+  // An intervention has no headline: the task title leads and its reason stays.
+  const held = page.locator('.inbox-row[data-kind="intervention"]');
+  assert.equal(
+    await held.locator("strong").textContent(),
+    "Restore webhook delivery",
+  );
+  assert.equal(
+    await held.locator(".inbox-row-subtitle").textContent(),
+    "Relay",
+  );
+  await held.getByText("Execution ownership is uncertain").waitFor();
+  const queue = await page.locator(".inbox-rows").innerText();
+  assert.doesNotMatch(
+    queue,
+    /Operator answer requested|Review exact approval material/,
+  );
+});
+
+test("the request pane leads with the question and keeps its scaffolding below the form (desktop)", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+  );
+  const detail = page.getByRole("region", { name: "Selected request" });
+  await detail
+    .getByRole("heading", {
+      level: 2,
+      name: "Choose the guide's audience",
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await detail.locator(".inbox-detail-project").textContent(),
+    "Docs / Guide task",
+  );
+  // Nothing generic precedes the form.
+  assert.equal(await detail.getByText("Awaiting answer").count(), 0);
+  assert.equal(await detail.getByText("Operator answer requested").count(), 0);
+  assert.equal(
+    await detail.getByRole("button", { name: /^Refresh/ }).count(),
+    0,
+  );
+  const field = (await detail.locator("fieldset").last().boundingBox())!;
+  for (const below of [
+    detail.locator(".inbox-identity"),
+    detail.getByText(/^Conversation revision \d+\.$/),
+    detail.getByText(/^Preselected and recommended choices are drafts/),
+    detail.getByRole("link", { name: "Question evidence", exact: true }),
+  ]) {
+    const box = (await below.boundingBox())!;
+    assert.ok(box.y >= field.y + field.height, "below the form");
+  }
+  assert.match(
+    (await detail.locator(".inbox-identity").textContent())!,
+    /^.+ · version \d+ · \d\d:\d\d$/,
+  );
+});
+
+test("phone: the options are above the sticky submit bar on first view and the evidence links follow the form", async (_t, j) => {
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 390, height: 844 },
+    "/app/inbox",
+    (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+  );
+  await page.locator(".inbox-row").click();
+  const detail = page.locator(".inbox-detail");
+  await detail.getByRole("radio", { name: /^Team owners/ }).waitFor();
+  const submit = (await detail.locator(".question-submit").boundingBox())!;
+  for (const name of [/^Every new member/, /^Team owners/]) {
+    const option = (await detail
+      .locator(".question-option", { hasText: name })
+      .boundingBox())!;
+    assert.ok(
+      option.y + option.height <= submit.y,
+      `${name} above the bar: ${JSON.stringify({ option, submit })}`,
+    );
+  }
+  const field = (await detail.locator("fieldset").last().boundingBox())!;
+  for (const link of ["Task evidence", "Requesting conversation"]) {
+    const box = (await detail
+      .getByRole("link", { name: link, exact: true })
+      .boundingBox())!;
+    assert.ok(box.y >= field.y + field.height, `${link} below the form`);
+  }
+  await captureBrowserEvidence(page, "390-inbox-question-first-view", {
+    fullPage: false,
+  });
+});
+
+test("the page Refresh rereads the open request: an answer recorded elsewhere shows without an in-pane control", async (_t, j) => {
+  const { f, page, more } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (f) => seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+  );
+  const form = page.getByRole("region", { name: "Exact question response" });
+  await form.getByRole("radio", { name: /^Team owners/ }).check();
+  await form.getByText(/^Selected: .*Team owners.* · unsent$/).waitFor();
+  const receipt = await new OperatorApi(f.service, [f.directory]).execute({
+    type: "question.form.answer",
+    key: randomUUID(),
+    taskId: more.taskId,
+    interactionId: more.interactionId,
+    expectedRevision: 1,
+    answers: { choice: { optionIds: ["members"], text: "" } },
+  });
+  assert.equal(receipt.kind, "coordination");
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await form.getByText("Answer recorded", { exact: true }).first().waitFor();
+  assert.equal(
+    await form.getByRole("button", { name: "Submit answer" }).count(),
+    0,
+  );
+  assert.equal(await form.getByRole("button", { name: /^Refresh/ }).count(), 0);
 });
 
 /** Serves the task read with an open source-owned GitHub blocker, as a contract-valid read. */
@@ -585,9 +749,18 @@ test("an approval shows its exact action, target and independent holds, and deci
   });
   const detail = page.getByRole("region", { name: "Selected request" });
   await page.locator(".inbox-row").click();
+  // The exact action leads the pane and is stated again as the fact the decision is bound to.
   await detail
-    .getByText("Create a pull request. No merge or deployment.")
+    .getByRole("heading", {
+      level: 2,
+      name: "Create a pull request. No merge or deployment.",
+      exact: true,
+    })
     .waitFor();
+  assert.equal(
+    await detail.locator(".inbox-approval-facts dd").first().textContent(),
+    "Create a pull request. No merge or deployment.",
+  );
   await detail.getByText("acme/atlas · main ← command-menu").waitFor();
   await detail.getByText(/^version \d+$/).waitFor();
   await detail.getByText("Task lead", { exact: true }).waitFor();
@@ -806,7 +979,9 @@ test("an Inbox question in a paused project shows its hold in the footer, record
   await footer.getByText(pausedDetail).waitFor();
   assert.equal(await footer.getByText(/Approv/).count(), 0);
   // The request status is a worded state badge with its symbol, and unclassed text is 13px body.
-  await form.getByText("Awaiting answer", { exact: true }).waitFor();
+  // A pending request needs no badge: the form states what to do.
+  await footer.getByText("Not submitted", { exact: true }).waitFor();
+  assert.equal(await form.getByText("Awaiting answer").count(), 0);
   assert.deepEqual(await unpairedBadges(page.locator(".inbox-detail")), []);
   assert.equal(
     await footer

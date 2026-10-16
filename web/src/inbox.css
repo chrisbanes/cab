@@ -119,6 +119,14 @@
 }
 .inbox-row strong {
   font-weight: var(--weight-medium);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.inbox-row-subtitle {
+  font-size: var(--type-xs);
+  color: var(--fg-2);
 }
 .inbox-row-label {
   display: inline-flex;
@@ -264,6 +272,15 @@
   font-size: 14px;
   line-height: 20px;
   color: var(--fg-2);
+}
+.inbox-detail-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-bottom: var(--space-12);
+}
+.inbox-detail-meta > p {
+  margin: 0;
 }
 .inbox-detail-links {
   display: flex;

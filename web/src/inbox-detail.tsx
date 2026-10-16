@@ -71,7 +71,13 @@ export function InboxQuestion({
     observedAt,
     "question",
   );
-  return <QuestionResponse {...props} holds={answerHolds(state)} />;
+  return (
+    <QuestionResponse
+      {...props}
+      observedAt={observedAt}
+      holds={answerHolds(state)}
+    />
+  );
 }
 
 /** The exact action, target, revision and requester of an approval, or that it is unavailable. */

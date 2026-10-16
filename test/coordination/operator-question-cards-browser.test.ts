@@ -53,6 +53,10 @@ async function openQuestions(
   return { f, page, web, group, more };
 }
 
+/** The Inbox's one Refresh: it rereads the queue and, with it, the open request. */
+const pageRefresh = (page: Page) =>
+  page.getByRole("button", { name: "Refresh", exact: true });
+
 const settle = (page: Page) =>
   page.evaluate(
     () =>
@@ -339,7 +343,7 @@ for (const [name, engine] of engines) {
           name: "Submit answers",
           exact: true,
         });
-      // (f) a failed read leaves the form stale: input retained, Submit off, Refresh primary.
+      // (f) a failed read leaves the form stale: input retained, Submit off, Try again recovers.
       const readUrl = `**/api/operator/tasks/${group.taskId}/questions/${group.interactionId}`;
       await page.route(readUrl, (route) =>
         route.fulfill({
@@ -348,18 +352,17 @@ for (const [name, engine] of engines) {
           body: JSON.stringify({ error: { code: "unavailable" } }),
         }),
       );
-      await form
-        .getByRole("button", { name: "Refresh request", exact: true })
-        .click();
+      await pageRefresh(page).click();
       await status
         .filter({ hasText: /^Stale read · last read \d\d:\d\d/ })
         .waitFor();
       assert.equal(await submit.isDisabled(), true);
+      // The request has no refresh control of its own: recovery is the read's Try again.
       assert.equal(
         await form
           .getByRole("button", { name: "Refresh request", exact: true })
-          .evaluate((el) => el.classList.contains("bg-primary")),
-        true,
+          .count(),
+        0,
       );
       assert.equal(
         await form
@@ -369,7 +372,7 @@ for (const [name, engine] of engines) {
       );
       await page.unroute(readUrl);
       await form
-        .getByRole("button", { name: "Refresh request", exact: true })
+        .getByRole("button", { name: "Try again", exact: true })
         .click();
       await submit.waitFor();
       // The refresh settles when Submit is available again.
@@ -535,10 +538,7 @@ for (const [name, engine] of engines) {
           body.data.reason = reason;
           await route.fulfill({ response, json: body });
         });
-        await form
-          .getByRole("button", { name: "Refresh request", exact: true })
-          .first()
-          .click();
+        await pageRefresh(page).click();
         await form.getByRole("heading", { name: title, exact: true }).waitFor();
         await form.getByText(reason, { exact: true }).waitFor();
         assert.equal(
@@ -574,12 +574,7 @@ for (const [name, engine] of engines) {
           );
           continue;
         }
-        await form
-          .getByRole("button", {
-            name: /Refresh request|Review current request|Check connection/,
-          })
-          .first()
-          .click();
+        await pageRefresh(page).click();
         await form
           .getByRole("heading", { name: title, exact: true })
           .waitFor({ state: "detached" });

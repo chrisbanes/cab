@@ -1030,12 +1030,10 @@ test("mounted Inbox discovers new requests and holds through timer and header re
     `.inbox-row[data-record-id="${firstQuestion.interactionId}"]`,
   );
   await firstLink.waitFor();
+  // The queue row leads with the question (a plain question's headline is its prompt).
   assert.equal(
-    await page
-      .getByText("New timer-discovered question", { exact: true })
-      .count(),
-    0,
-    "Queue remains summary-only; exact prompt belongs to selected view",
+    await firstLink.locator("strong").textContent(),
+    "New timer-discovered question",
   );
   await firstLink.focus();
   await question("Second question on known Inbox task");
