@@ -1742,7 +1742,9 @@ async function signallingPower(
   const events = new SignallingPowerEvents();
   events.cursor = powerCursor("baseline");
   events.lastSleepOrWakeAt = async () => 0;
-  const reconciles: { count: number; during?: (() => void) | undefined } = { count: 0 };
+  const reconciles: { count: number; during?: (() => void) | undefined } = {
+    count: 0,
+  };
   const power = new ExecutionPower(
     state,
     events,

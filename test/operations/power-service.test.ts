@@ -113,7 +113,8 @@ class FakeRuntime implements Runtime {
   identityEntered: (() => void) | undefined;
   identityGate: Promise<void> | undefined;
   private toolCall:
-    ((call: RuntimeToolCall) => Promise<RuntimeToolResult>) | undefined;
+    | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
+    | undefined;
 
   async start() {}
   async stop() {}
