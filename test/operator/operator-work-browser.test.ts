@@ -442,6 +442,149 @@ test("a recorded resume hides the banner's action while the workspace read is st
   assert.equal(sent, 1);
 });
 
+test("a recorded resume stays suppressed across navigation until a read shows the project paused again", async (_t, journey) => {
+  const { f, ids, page, web } = await start(journey);
+  const d = f.service.domain();
+  const sent: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      sent.push(request.postDataJSON());
+  });
+  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  const banner = page
+    .getByRole("status")
+    .filter({ hasText: "Project paused · New turns are held." });
+  const resume = page.getByRole("button", {
+    name: "Resume project",
+    exact: true,
+  });
+  const resumed = page.getByText("Project resumed.", { exact: true });
+  await banner.waitFor();
+  // The save is recorded, but every later workspace read fails: the page keeps the old one.
+  await page.route("**/api/operator/workspace", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unavailable", message: "Unavailable." },
+      }),
+    }),
+  );
+  await resume.click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
+  await resumed.waitFor();
+  assert.equal(sent.length, 1);
+  const recordedVersion = Number(d.project(ids.pausedProject).version);
+
+  // Leave the project and come back inside the app: the stale read still says paused.
+  await page
+    .locator(".sidebar")
+    .getByRole("link", { name: "Tasks" })
+    .first()
+    .click();
+  await resumed.waitFor({ state: "hidden" });
+  await page
+    .locator(".sidebar")
+    .getByRole("link", { name: "Paused project" })
+    .click();
+  await page
+    .getByRole("link", { name: "Project settings", exact: true })
+    .waitFor();
+  // The mount purge clears the earlier confirmation; nothing else may take its place.
+  await resumed.waitFor({ state: "hidden" });
+  assert.equal(await banner.count(), 0);
+  assert.equal(await page.getByRole("button", { name: /Resum/ }).count(), 0);
+  assert.equal(sent.length, 1);
+  assert.equal(await page.getByText(/saved elsewhere/).count(), 0);
+
+  // Once a read shows the project paused again at a newer version, Resume is offered again.
+  await page.unroute("**/api/operator/workspace");
+  d.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: ids.pausedProject,
+    expectedVersion: recordedVersion,
+    paused: true,
+  });
+  const pausedVersion = Number(d.project(ids.pausedProject).version);
+  assert.ok(pausedVersion > recordedVersion);
+  await page
+    .getByRole("button", { name: "Refresh tasks", exact: true })
+    .click();
+  await banner.waitFor();
+  assert.equal(await resumed.count(), 0);
+  await resume.click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
+  await resumed.waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]?.expectedVersion, pausedVersion);
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+});
+
+test("a project paused again after a recorded resume offers Resume project on the same page", async (_t, journey) => {
+  const { f, ids, page, web } = await start(journey);
+  const d = f.service.domain();
+  const sent: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      sent.push(request.postDataJSON());
+  });
+  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  const banner = page
+    .getByRole("status")
+    .filter({ hasText: "Project paused · New turns are held." });
+  const resume = page.getByRole("button", {
+    name: "Resume project",
+    exact: true,
+  });
+  const resumed = page.getByText("Project resumed.", { exact: true });
+  const confirm = async () => {
+    await resume.click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Resume", exact: true })
+      .click();
+  };
+  await banner.waitFor();
+  await confirm();
+  await resumed.waitFor();
+  await banner.waitFor({ state: "hidden" });
+  // Someone pauses it again; the next read shows the newer version, so the old confirmation goes.
+  d.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: ids.pausedProject,
+    expectedVersion: Number(d.project(ids.pausedProject).version),
+    paused: true,
+  });
+  const pausedVersion = Number(d.project(ids.pausedProject).version);
+  await page
+    .getByRole("button", { name: "Refresh tasks", exact: true })
+    .click();
+  await banner.waitFor();
+  await resumed.waitFor({ state: "hidden" });
+  await confirm();
+  await resumed.waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]?.expectedVersion, pausedVersion);
+  assert.equal(await page.getByText(/saved elsewhere/).count(), 0);
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+});
+
 test("a routing fallback row names Ensemble as the next actor without the operator tone", async (_t, journey) => {
   const { ids, page } = await start(journey, "/app/tasks?state=all");
   await page.route("**/api/operator/task-list*", async (route) => {
