@@ -578,7 +578,7 @@ async function loadToken(connection: Connection, deps: CliDeps) {
       "credential-store-unavailable",
       "The macOS Keychain is unavailable; use --token-file.",
     );
-  return deps.keychain().get(credential.account);
+  return deps.keychain().get(credential.account, deps.signal);
 }
 
 /** Validates the token against the service, then stores it and records the connection. */
@@ -626,7 +626,11 @@ export async function saveLogin(
       await (prior === undefined
         ? keychain.delete(name, bound)
         : keychain.set(name, prior, bound)
-      ).catch(() => undefined);
+      ).catch(() =>
+        deps.stderr.write(
+          `The previous ${name} login could not be restored in the Keychain; run 'ensemble auth login --connection ${name}' again.\n`,
+        ),
+      );
     }
     throw error;
   }
@@ -667,10 +671,12 @@ export function installCli(deps: CliDeps): InstallCli {
         throw error;
       }
     },
-    doctor: async (name) => {
+    doctor: async (name, signal) => {
       await main(["doctor", "--connection", name], {
         ...deps,
         stdout: deps.stderr,
+        signal,
+        fetch: (input, init) => deps.fetch(input, { ...init, signal }),
       });
     },
   };

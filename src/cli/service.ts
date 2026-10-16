@@ -90,7 +90,7 @@ const POLL_MS = 1_000;
 const HEALTH_PROBE_MS = 5_000;
 // Above the service's own 10 s bound on its slowest readiness checks.
 const READINESS_PROBE_MS = 20_000;
-// Doctor reads readiness with the CLI's own request bound; this stops a stalled one.
+// Stops a stalled doctor read.
 const DOCTOR_MS = 60_000;
 
 /** An identity from `captureIdentity`, passed back unchanged to `exited`. */
@@ -115,7 +115,7 @@ export type ServiceHost = {
   /** Unpacks a release tarball into `dir`, dropping its top directory; false on failure. */
   extract(tarball: string, dir: string, signal?: AbortSignal): Promise<boolean>;
   /** Opens a URL in the default browser. */
-  open(url: string): Promise<void>;
+  open(url: string, signal?: AbortSignal): Promise<void>;
   hostname(): string;
 };
 
@@ -132,7 +132,8 @@ export type InstallCli = {
     /** Aborts the identity check and the storage; the caller then revokes the credential. */
     signal: AbortSignal,
   ): Promise<void>;
-  doctor(connection: string): Promise<void>;
+  /** Stops reading when `signal` aborts. */
+  doctor(connection: string, signal: AbortSignal): Promise<void>;
 };
 
 /** What install adds beyond the LaunchAgent: unpack, password, login, doctor, open. */
@@ -834,7 +835,11 @@ export async function issueInstallCredential(
     if (login.status !== 200) return;
     signedIn = true;
     await nextSession(login);
-    // Not interruptible: an abort after the server minted it would orphan the credential.
+    // Nothing is minted once interrupted; past this point the mint is not interruptible, as an
+    // abort after the server minted it would orphan the credential.
+    if (signal?.aborted) return;
+    // A mint that times out or resets in flight may still exist on the server.
+    mintAccepted = true;
     const minted = await call(
       "POST",
       "/api/operator/credentials",
@@ -1000,8 +1005,8 @@ async function installServiceLocked(
     stage = "health";
     await service.waitForApp(service.origin);
     // From here the service stays installed whatever happens: nothing below may throw.
-    const signedIn = await signIn(service, first, password);
-    const { connection, credentialActive, sessionOpen } = signedIn;
+    const signInResult = await signIn(service, first, password);
+    const { connection, credentialActive, sessionOpen } = signInResult;
     service.write("stdout", {
       ok: true,
       operation: "install",
@@ -1014,7 +1019,7 @@ async function installServiceLocked(
       credentialActive,
       sessionOpen,
     });
-    await finishInstall(service, first, signedIn);
+    await finishInstall(service, first, signInResult);
     return 0;
   } catch (error) {
     let jobStopped: boolean | null = null;
@@ -1039,7 +1044,7 @@ async function installServiceLocked(
   }
 }
 
-/** Issues and stores the CLI credential; the connection name when stored, else null. Never throws. */
+/** What the sign-in left behind: the stored connection name (else null) and any cleanup that failed. */
 type SignIn = {
   connection: string | null;
   credentialName: string;
@@ -1047,6 +1052,7 @@ type SignIn = {
   sessionOpen: boolean;
 };
 
+/** Issues and stores the CLI credential. Never throws. */
 async function signIn(
   service: Service,
   first: FirstRun,
@@ -1101,15 +1107,14 @@ async function finishInstall(
   const line = (text: string) => service.io.stderr.write(`${text}\n`);
   const interrupted = () => service.io.signal?.aborted === true;
   try {
-    // Abandoning doctor on the bound or an interrupt loses only its stderr output.
-    if (connection !== null && !interrupted() && first.cli)
-      await bounded(
-        first.cli.doctor(connection),
-        AbortSignal.any([
-          service.host.timeout(DOCTOR_MS),
-          ...(service.io.signal ? [service.io.signal] : []),
-        ]),
-      );
+    if (connection !== null && !interrupted() && first.cli) {
+      const stop = AbortSignal.any([
+        service.host.timeout(DOCTOR_MS),
+        ...(service.io.signal ? [service.io.signal] : []),
+      ]);
+      // Doctor stops its own reads on `stop`; `bounded` only backs that up.
+      await bounded(first.cli.doctor(connection, stop), stop);
+    }
   } catch {
     // The URL below is still printed.
   }
@@ -1129,7 +1134,8 @@ async function finishInstall(
       line("Then run: ensemble doctor");
     }
     line(`Open ${app}`);
-    if (first.open && !interrupted()) await service.host.open(app);
+    if (first.open && !interrupted())
+      await service.host.open(app, service.io.signal);
   } catch {
     // Install already succeeded; a doctor or open failure is not an install failure.
   }
@@ -1372,8 +1378,8 @@ export function defaultServiceHost(): ServiceHost {
           signal,
         )
       ).status === 0,
-    open: async (url) => {
-      await run("/usr/bin/open", [url]);
+    open: async (url, signal) => {
+      await run("/usr/bin/open", [url], 20_000, signal);
     },
     hostname,
   };

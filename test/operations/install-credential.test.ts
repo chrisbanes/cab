@@ -207,7 +207,7 @@ test("installCli doctor writes the readiness table to stderr only", async (t) =>
   } as unknown as CliDeps;
   const cli = installCli(deps);
   await cli.login("local", f.origin, issued.token, undefined, never);
-  await cli.doctor("local");
+  await cli.doctor("local", never);
   assert.equal(out, "");
   assert.match(err, /Check\s+Status\s+Reason/);
 });
@@ -494,6 +494,8 @@ test("a Keychain cleanup that blocks is bounded: the new login stays, the restor
       new Promise<void>((_, reject) => {
         seen.push({ op: "delete", signal });
         signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        // The interrupt arrives while the delete is blocked.
+        setTimeout(() => interrupt.abort(), 10);
       }),
   };
   const deps = {
@@ -518,7 +520,7 @@ test("a Keychain cleanup that blocks is bounded: the new login stays, the restor
   const host = {
     fetch: f.rewritten,
     // Only the 20 s storage bound is shortened.
-    timeout: (ms: number) => AbortSignal.timeout(ms === 20_000 ? 200 : ms),
+    timeout: (ms: number) => AbortSignal.timeout(ms),
   } as unknown as ServiceHost;
   const result = await issueInstallCredential(
     host,
@@ -543,6 +545,14 @@ test("a Keychain cleanup that blocks is bounded: the new login stays, the restor
     seen.find((call) => call.op === "delete")?.signal?.aborted,
     true,
   );
+  const saved = JSON.parse(
+    readFileSync(join(h.configDir, "connections.json"), "utf8"),
+  ).connections.local;
+  assert.deepEqual(saved.credential, {
+    kind: "token-file",
+    path: join(h.dir, "install.token"),
+  });
+  assert.ok(existsSync(join(h.dir, "install.token")));
 
   // A failed config write restores the prior token with a bound that outlives the interrupt.
   await installCli(deps).login(
@@ -575,4 +585,68 @@ test("a Keychain cleanup that blocks is bounded: the new login stays, the restor
   assert.equal(restore?.op, "set");
   assert.notEqual(restore?.signal, interrupt.signal);
   assert.equal(restore?.signal?.aborted, false);
+  assert.equal(await memory.get("prior"), first.token);
+});
+
+test("a mint whose creation is not confirmed is reported as possibly active", async (t) => {
+  const mint = (path: string) => path === "/api/operator/credentials";
+  const cases: [string, (path: string) => Response | undefined][] = [
+    [
+      "connection lost in flight",
+      (path) => {
+        if (mint(path)) throw new TypeError("fetch failed");
+      },
+    ],
+    [
+      "unusable reply",
+      (path) =>
+        mint(path) ? new Response("not json", { status: 200 }) : undefined,
+    ],
+  ];
+  for (const [name, intercept] of cases) {
+    const { result } = await failedStore(t, intercept);
+    assert.equal(result.outcome, "failed", name);
+    assert.equal(result.credentialActive, true, name);
+  }
+  // A refused mint (4xx) created nothing.
+  const refused = await failedStore(t, (path) =>
+    mint(path) ? new Response("{}", { status: 400 }) : undefined,
+  );
+  assert.equal(refused.result.credentialActive, false);
+});
+
+test("installCli doctor stops reading when its signal aborts", async (t) => {
+  const f = await installFixture(t);
+  const issued = await f.s.issue("read", "install · test-host", 90);
+  const h = harness(t);
+  const keychain = new MemoryKeychain();
+  const requests: string[] = [];
+  const stalled: typeof fetch = (input, init) => {
+    if (!String(input).endsWith("/api/operator/readiness"))
+      return f.rewritten(input, init);
+    requests.push(String(input));
+    return new Promise((_, reject) =>
+      init?.signal?.addEventListener("abort", () =>
+        reject(init.signal?.reason),
+      ),
+    );
+  };
+  const deps = {
+    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    fetch: stalled,
+    platform: "darwin",
+    keychain: () => keychain,
+    now: Date.now,
+  } as unknown as CliDeps;
+  const cli = installCli(deps);
+  await cli.login("local", f.origin, issued.token, undefined, never);
+  const stop = new AbortController();
+  setTimeout(() => stop.abort(), 50);
+  const started = Date.now();
+  await cli.doctor("local", stop.signal);
+  assert.equal(requests.length, 1, "the readiness read was in flight");
+  assert.ok(Date.now() - started < 5000, "doctor returned on the abort");
 });
