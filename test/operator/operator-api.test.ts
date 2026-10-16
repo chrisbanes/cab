@@ -2253,10 +2253,22 @@ test("an answered native question awaiting delivery is Ensemble's, not an operat
   assert.deepEqual(await listedAttention(api, task.taskId), [
     "question-delivery",
   ]);
-  // Ensemble owns the delivery, so the task leaves the Inbox.
+  // The recorded answer stays listed as Ensemble's delivery, with no intervention.
   assert.deepEqual(
-    (await api.readInbox()).data.items.filter((i) => i.taskId === task.taskId),
-    [],
+    (await api.readInbox()).data.items
+      .filter((i) => i.taskId === task.taskId)
+      .map(({ kind, attentionCode, reason }) => ({
+        kind,
+        attentionCode,
+        reason,
+      })),
+    [
+      {
+        kind: "question",
+        attentionCode: "question-delivery",
+        reason: "Answer recorded; native delivery remains unresolved",
+      },
+    ],
   );
 });
 test("a routing fallback on a task with no project lead clears without operator action", async (t) => {

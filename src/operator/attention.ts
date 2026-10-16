@@ -17,7 +17,8 @@ export const attentionCodeSchema = z.enum(attentionCodes);
  * Who acts next for each code, shared by the List, the Inbox and the task detail. Ensemble owns
  * `question-delivery` (a recorded answer it is still delivering to the agent) and `lead-review`
  * (a routing fallback it commits to the project lead, or marks stale, on its next coordination
- * pass); the operator owns the rest, and only those raise Inbox interventions.
+ * pass); the operator owns the rest, and only those raise Inbox interventions. A recorded answer
+ * still keeps its Inbox question item, labelled from this table.
  */
 export const attentionNext: Record<
   AttentionCode,

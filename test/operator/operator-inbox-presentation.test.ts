@@ -55,6 +55,14 @@ test("kind and action labels cover every request kind", () => {
       requestActionLabel({ kind: "intervention", attentionCode: code }),
       action,
     );
+  // A recorded answer awaiting native delivery offers no answer action.
+  assert.equal(
+    requestActionLabel({
+      kind: "question",
+      attentionCode: "question-delivery",
+    }),
+    "View task",
+  );
 });
 
 const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
@@ -654,6 +662,14 @@ test("task context reads the source, lead and the task's next actor", () => {
     lead: "Unavailable",
     next: "Next: you · inspect execution",
   });
+  assert.equal(
+    taskContext(
+      undefined,
+      { ...item("question", "p"), attentionCode: "question-delivery" },
+      true,
+    ).next,
+    "Next: Ensemble · delivering answer",
+  );
   // Once it lands, the task's codes and column name it, as on the List and the task page.
   for (const [codes, execution, request, next] of [
     [

@@ -14,14 +14,13 @@ const kindLabels: Record<InboxItem["kind"], string> = {
 };
 export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 
-/** The request's action; an intervention's comes from its attention code. */
+/** The request's action: its attention code's when it has one, otherwise its kind's. */
 export const requestActionLabel = (
   item: Pick<InboxItem, "kind" | "attentionCode">,
 ) =>
   attentionNext[
-    item.kind === "intervention"
-      ? (item.attentionCode ?? "execution-uncertain")
-      : item.kind
+    item.attentionCode ??
+      (item.kind === "intervention" ? "execution-uncertain" : item.kind)
   ].inboxAction;
 
 /** Relative age such as "8m", "1h 46m" or "1d 1h"; a future time reads as just now. */
@@ -287,7 +286,7 @@ export const taskContext = (
     ? null
     : task
       ? nextActor(task.attention.codes, taskColumnOf(task)).text
-      : item.kind === "intervention" && item.attentionCode
+      : item.attentionCode
         ? (nextAttention([item.attentionCode])?.text ?? null)
         : `Next: you · ${lowerFirst(requestActionLabel(item))}`,
 });

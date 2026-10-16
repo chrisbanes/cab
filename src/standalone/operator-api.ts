@@ -2868,8 +2868,16 @@ export class OperatorApi {
             conversation: null,
           });
         for (const q of [...view.questions, ...view.approvals]) {
-          // An answer awaiting native delivery is Ensemble's (`question-delivery`), not an item.
-          if (q.status !== "open") continue;
+          const native = view.runtimeQuestions?.find(
+            (n) => n.interactionId === q.interactionId,
+          );
+          if (
+            q.status !== "open" &&
+            (!native || native.deliveryState === "confirmed")
+          )
+            continue;
+          // A recorded answer whose native delivery is unresolved stays listed, as Ensemble's.
+          const delivering = q.status === "answered";
           const requester = this.domain()
             .assignments(taskId)
             .find((a) => a.id === q.requestingAssignmentId);
@@ -2892,8 +2900,10 @@ export class OperatorApi {
             reason:
               q.kind === "approval"
                 ? "Review exact approval material"
-                : "Operator answer requested",
-            attentionCode: null,
+                : delivering
+                  ? "Answer recorded; native delivery remains unresolved"
+                  : "Operator answer requested",
+            attentionCode: delivering ? "question-delivery" : null,
             destination:
               q.kind === "question"
                 ? `/app/tasks/${taskId}?request=${q.interactionId}`
