@@ -65,15 +65,19 @@ const parsePmsetPowerLog = powerModule.parsePmsetPowerLog as (
 type PowerLogReader = (
   command: string,
   args: string[],
-  options: { timeoutMs: number; maxLineBytes: number },
+  options: { timeoutMs: number; idleTimeoutMs: number; maxLineBytes: number },
 ) => AsyncIterable<string>;
 const MacPowerEventSource = powerModule.MacPowerEventSource as unknown as new (
   readLog?: PowerLogReader,
   timeoutMs?: number,
+  idleTimeoutMs?: number,
   maxLineBytes?: number,
   now?: () => number,
 ) => PowerEventSource;
 const spawnPowerLogReader = powerModule.spawnPowerLogReader as PowerLogReader;
+const PowerLogReadTimeout = powerModule.PowerLogReadTimeout as new (
+  kind: "idle" | "total",
+) => Error & { kind: "idle" | "total" };
 
 class FakePowerEvents implements PowerEventSource {
   cursor: PowerEventCursor | null = null;
@@ -273,14 +277,25 @@ test("admission observation needs a completed poll started after the last execut
     await inFlight;
     assert.equal(power.observedForAdmission(), false, "poll began before end");
 
+    // Freshness counts from completion, so a read longer than 15 s still counts.
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((resolve) => (releaseSlow = resolve));
+    events.readSince = async (cursor) => {
+      await slowGate;
+      return readSince(cursor);
+    };
     clock += 1;
-    await power.poll();
-    const startedAt = clock;
-    assert.equal(power.observedForAdmission(), true, "later poll is fresh");
-    assert.equal(power.observedForAdmission(startedAt + 14_999), true);
-    assert.equal(power.observedForAdmission(startedAt + 15_000), false);
+    const slow = power.poll();
+    clock += 20_000;
+    releaseSlow();
+    await slow;
+    events.readSince = readSince;
+    const completedAt = clock;
+    assert.equal(power.observedForAdmission(), true, "slow poll is fresh");
+    assert.equal(power.observedForAdmission(completedAt + 14_999), true);
+    assert.equal(power.observedForAdmission(completedAt + 15_000), false);
     assert.equal(
-      power.observedForAdmission(startedAt - 1),
+      power.observedForAdmission(completedAt - 1),
       false,
       "a wall clock that moved backwards is stale",
     );
@@ -856,7 +871,13 @@ test("macOS pmset source accepts ordered sleep/wake rows and rejects gaps or amb
     yield* fixture.split(/\r?\n/);
   };
   const baselineMs = Date.parse("2026-09-29T08:59:00Z");
-  const source = new MacPowerEventSource(readLog, 2500, 4096, () => baselineMs);
+  const source = new MacPowerEventSource(
+    readLog,
+    2500,
+    2500,
+    4096,
+    () => baselineMs,
+  );
   const baseline = await source.readSince(null);
   assert.equal(baseline.complete, true);
   assert.deepEqual(baseline.cursor, powerCursor(`pmset-time:${baselineMs}`));
@@ -907,6 +928,7 @@ test("the default pmset reader streams lines so cursors match the whole-output p
       const source = new MacPowerEventSource(
         reader,
         10_000,
+        10_000,
         65_536,
         () => baselineMs,
       );
@@ -955,6 +977,7 @@ test("a macOS 27 column header gives a complete baseline and follow-up with curs
   const source = new MacPowerEventSource(
     readLog,
     2500,
+    2500,
     4096,
     () => macos27BaselineMs,
   );
@@ -984,6 +1007,7 @@ test("macOS 27 preamble output streams to the same batch as whole-output parsing
         spawnPowerLogReader(process.execPath, printLines(text, eol), options);
       const source = new MacPowerEventSource(
         reader,
+        10_000,
         10_000,
         65_536,
         () => macos27BaselineMs,
@@ -1156,7 +1180,13 @@ test("power supervision establishes its baseline from macOS 27 output but holds 
     };
     const power = new ExecutionPower(
       store.state,
-      new MacPowerEventSource(readLog, 2500, 4096, () => macos27BaselineMs),
+      new MacPowerEventSource(
+        readLog,
+        2500,
+        2500,
+        4096,
+        () => macos27BaselineMs,
+      ),
       new CaffeinateAssertion(() => new FakeChild()),
       async () => {},
     );
@@ -1182,6 +1212,7 @@ process.stdout.write(out+"2026-09-29 10:00:00 +0100 Sleep\\tx\\n");`;
   const source = new MacPowerEventSource(
     reader,
     20_000,
+    10_000,
     65_536,
     () => baselineMs,
   );
@@ -1195,7 +1226,7 @@ process.stdout.write(out+"2026-09-29 10:00:00 +0100 Sleep\\tx\\n");`;
   );
 });
 
-test("an over-long line, a timeout, a failing exit or a reader error make the batch incomplete and stop the child", async () => {
+test("an over-long line, a timeout, a failing exit or a reader error stop the child, and only a timeout is distinguishable", async () => {
   const dir = mkdtempSync(join(tmpdir(), "ensemble-power-reader-"));
   try {
     const pidFile = join(dir, "pid");
@@ -1208,31 +1239,18 @@ test("an over-long line, a timeout, a failing exit or a reader error make the ba
     ];
     for (const [label, args, timeoutMs] of cases) {
       const reader: PowerLogReader = (_c, _a, options) =>
-        spawnPowerLogReader(process.execPath, args, { ...options, timeoutMs });
+        spawnPowerLogReader(process.execPath, args, options);
       const source = new MacPowerEventSource(
         reader,
+        timeoutMs,
         timeoutMs,
         64 * 1024,
         () => 0,
       );
-      const batch = await source.readSince(null);
-      assert.equal(batch.complete, false, label);
-      if (label === "non-zero exit") continue;
-      const pid = Number(readFileSync(pidFile, "utf8"));
-      const deadline = Date.now() + 2000;
-      while (Date.now() < deadline) {
-        try {
-          process.kill(pid, 0);
-        } catch {
-          break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      }
-      assert.throws(
-        () => process.kill(pid, 0),
-        /ESRCH/,
-        `${label}: child stopped`,
-      );
+      if (label === "timeout")
+        await assert.rejects(source.readSince(null), PowerLogReadTimeout);
+      else assert.equal((await source.readSince(null)).complete, false, label);
+      if (label !== "non-zero exit") await childPidGone(pidFile, label);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1246,12 +1264,184 @@ test("an over-long line, a timeout, a failing exit or a reader error make the ba
   assert.equal(batch.complete, false);
 });
 
-test("the pmset source defaults to a 10 second timeout and 64 KiB lines", async () => {
-  let seen: { timeoutMs: number; maxLineBytes: number } | undefined;
+test("the pmset source defaults to a 10 second idle bound, a 60 second total bound and 64 KiB lines", async () => {
+  let seen: Parameters<PowerLogReader>[2] | undefined;
   const reader: PowerLogReader = async function* (_c, _a, options) {
     seen = options;
     yield* pmsetRows;
   };
   await new MacPowerEventSource(reader).readSince(null);
-  assert.deepEqual(seen, { timeoutMs: 10_000, maxLineBytes: 64 * 1024 });
+  assert.deepEqual(seen, {
+    timeoutMs: 60_000,
+    idleTimeoutMs: 10_000,
+    maxLineBytes: 64 * 1024,
+  });
+  for (const [timeoutMs, idleTimeoutMs, maxLineBytes] of [
+    [0, 1, 1],
+    [1, 0, 1],
+    [1, 1, 0],
+    [1.5, 1, 1],
+    [10, 5.5, 1],
+    [10, 11, 1],
+  ] as const)
+    assert.throws(
+      () =>
+        new MacPowerEventSource(reader, timeoutMs, idleTimeoutMs, maxLineBytes),
+      /Power-event (read bounds|idle bound)/,
+    );
+});
+
+async function childPidGone(pidFile: string, label: string): Promise<void> {
+  const pid = Number(readFileSync(pidFile, "utf8"));
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.throws(() => process.kill(pid, 0), /ESRCH/, `${label}: child stopped`);
+}
+
+test("a read slower than the idle bound completes while it keeps producing output, including from a legacy cursor", async () => {
+  const baselineMs = Date.parse("2026-09-29T08:59:00Z");
+  const slowly = (lines: string[]) =>
+    `const lines=${JSON.stringify(lines)};let i=0;const t=setInterval(()=>{process.stdout.write(lines[i++]+"\\n");if(i===lines.length)clearInterval(t)},100)`;
+  const slowSource = (lines: string[]) =>
+    new MacPowerEventSource(
+      (_c, _a, options) =>
+        spawnPowerLogReader(process.execPath, ["-e", slowly(lines)], options),
+      10_000,
+      500,
+      65_536,
+      () => baselineMs,
+    );
+  const source = slowSource(pmsetRows);
+  const baseline = await source.readSince(null);
+  assert.equal(baseline.complete, true);
+  const batch = await source.readSince(baseline.cursor);
+  assert.equal(batch.complete, true);
+  assert.deepEqual(
+    batch,
+    parsePmsetPowerLog(`${pmsetRows.join("\n")}\n`, baseline.cursor),
+  );
+
+  // A pre-macOS 27 cursor resolves through the slow reader like the exact one.
+  const old = parsePmsetPowerLog(pmsetRows.join("\n"), baseline.cursor)
+    .events[0]?.cursor;
+  assert.ok(old);
+  const text = `${macos27Log.join("\n")}\n`;
+  const exact = parsePmsetPowerLog(text, baseline.cursor).events[0]?.cursor;
+  assert.ok(exact);
+  const modern = slowSource(macos27Log);
+  const legacy = await modern.readSince(old);
+  assert.equal(legacy.complete, true);
+  assert.deepEqual(
+    legacy.events.map((event) => event.cursor),
+    parsePmsetPowerLog(text, exact).events.map((event) => event.cursor),
+  );
+  assert.equal(
+    (await modern.readSince(powerCursor("pmset-unknown:1"))).complete,
+    false,
+    "an unusable cursor still fails closed",
+  );
+});
+
+test("a stalled read hits the idle bound and an endless read hits the total bound, each as a typed timeout that stops the child", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "ensemble-power-bounds-"));
+  try {
+    const pidFile = join(dir, "pid");
+    const record = `require("fs").writeFileSync(${JSON.stringify(pidFile)},String(process.pid));`;
+    const row = "2026-09-29 09:50:00 +0100 Assertions\\tPID 10(app) x\\n";
+    const cases = [
+      [
+        "idle",
+        `${record}process.stdout.write("${row}");setInterval(()=>{},1000)`,
+        10_000,
+      ],
+      [
+        "total",
+        `${record}setInterval(()=>process.stdout.write("${row}"),50)`,
+        1000,
+      ],
+    ] as const;
+    for (const [kind, script, timeoutMs] of cases) {
+      const source = new MacPowerEventSource(
+        (_c, _a, options) =>
+          spawnPowerLogReader(process.execPath, ["-e", script], options),
+        timeoutMs,
+        500,
+        65_536,
+        () => 0,
+      );
+      await assert.rejects(
+        source.readSince(null),
+        (error: unknown) =>
+          error instanceof PowerLogReadTimeout && error.kind === kind,
+      );
+      await childPidGone(pidFile, kind);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a timed-out read holds admission with its own reason, distinct from an unavailable or incomplete history", async () => {
+  const outcomes: Array<[string, (() => Promise<never>) | null, string]> = [
+    [
+      "timeout",
+      () => Promise.reject(new PowerLogReadTimeout("idle")),
+      "read timed out",
+    ],
+    [
+      "error",
+      () => Promise.reject(new Error("injected read failure")),
+      "is unavailable",
+    ],
+    ["incomplete", null, "is incomplete or ambiguous"],
+  ];
+  for (const [label, fail, suffix] of outcomes) {
+    for (const stage of ["history", "advancement"] as const) {
+      const root = mkdtempSync(join(tmpdir(), "ensemble-power-reason-"));
+      const { db, state } = powerStore(join(root, "power.sqlite"));
+      const events = new FakePowerEvents();
+      events.cursor = powerCursor("baseline");
+      const readSince = events.readSince.bind(events);
+      const power = new ExecutionPower(
+        state,
+        events,
+        new CaffeinateAssertion(() => new FakeChild()),
+        async () => {},
+      );
+      try {
+        await power.start();
+        let reads = 0;
+        if (stage === "advancement") {
+          await power.poll();
+          state.holdPowerAdmission("Injected power-admission hold");
+        }
+        // The advancement re-read is the second read of a held poll.
+        const failAt = stage === "advancement" ? 2 : 1;
+        events.readSince = async (cursor) => {
+          if (++reads !== failAt) return readSince(cursor);
+          if (fail) return fail();
+          return { ...(await readSince(cursor)), complete: false };
+        };
+        await power.poll();
+        assert.equal(reads, failAt, `${label} ${stage}: reads`);
+        assert.deepEqual(
+          state.powerAdmissionState().reason,
+          `Power-event ${stage} ${suffix}`,
+          `${label} ${stage}`,
+        );
+        assert.equal(power.admissionHeld(), true, `${label} ${stage}: held`);
+      } finally {
+        await power.stop();
+        db.close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  }
 });

@@ -28,8 +28,16 @@ export interface PowerEventSource {
 export type PowerLogReader = (
   command: string,
   args: string[],
-  options: { timeoutMs: number; maxLineBytes: number },
+  options: { timeoutMs: number; idleTimeoutMs: number; maxLineBytes: number },
 ) => AsyncIterable<string>;
+
+/** A power-log read killed for making no output progress or for running too long. */
+export class PowerLogReadTimeout extends Error {
+  constructor(readonly kind: "idle" | "total") {
+    super(`Power-log read timed out (${kind})`);
+    this.name = "PowerLogReadTimeout";
+  }
+}
 
 const pmsetTimeCursor = /^pmset-time:(\d+)$/;
 const pmsetEventCursorPattern = /^pmset-event:(\d+):(\d+):([a-f0-9]{16})$/;
@@ -236,13 +244,14 @@ export function parsePmsetPowerLog(
 
 /**
  * Streams stdout of a child as the same pieces `split(/\r?\n/)` yields, with no
- * total-size cap. An over-long line, timeout or non-zero exit rejects, and the
- * child is killed on any of those or when the consumer stops early.
+ * total-size cap. An over-long line or non-zero exit rejects; no output for
+ * `idleTimeoutMs` or a read over `timeoutMs` rejects with `PowerLogReadTimeout`.
+ * The child is killed on any of those or when the consumer stops early.
  */
 export async function* spawnPowerLogReader(
   command: string,
   args: string[],
-  options: { timeoutMs: number; maxLineBytes: number },
+  options: { timeoutMs: number; idleTimeoutMs: number; maxLineBytes: number },
 ): AsyncGenerator<string> {
   const child = spawn(command, args, {
     stdio: ["ignore", "pipe", "ignore"],
@@ -257,7 +266,15 @@ export async function* spawnPowerLogReader(
     );
   });
   exited.catch(() => {});
-  const timer = setTimeout(() => child.kill("SIGKILL"), options.timeoutMs);
+  let timedOut: "idle" | "total" | undefined;
+  const expire = (kind: "idle" | "total") => () => {
+    timedOut ??= kind;
+    child.kill("SIGKILL");
+  };
+  const total = setTimeout(expire("total"), options.timeoutMs);
+  const idle = setTimeout(expire("idle"), options.idleTimeoutMs);
+  const timeout = (error: unknown) =>
+    timedOut ? new PowerLogReadTimeout(timedOut) : error;
   const checked = (line: string) => {
     if (Buffer.byteLength(line) > options.maxLineBytes)
       throw new Error("Power-log line exceeds the line limit");
@@ -267,6 +284,7 @@ export async function* spawnPowerLogReader(
     child.stdout.setEncoding("utf8");
     let pending = "";
     for await (const chunk of child.stdout) {
+      idle.refresh();
       pending += chunk;
       let newline = pending.indexOf("\n");
       while (newline >= 0) {
@@ -277,30 +295,40 @@ export async function* spawnPowerLogReader(
       }
       checked(pending);
     }
+    if (timedOut) throw new PowerLogReadTimeout(timedOut);
     yield checked(pending);
-    await exited;
+    await exited.catch((error: unknown) => {
+      throw timeout(error);
+    });
   } finally {
-    clearTimeout(timer);
+    clearTimeout(total);
+    clearTimeout(idle);
     if (child.exitCode === null && child.signalCode === null)
       child.kill("SIGKILL");
   }
 }
 
-/** Reads a bounded macOS power history; missing or unfamiliar history is incomplete. */
+/**
+ * Reads a bounded macOS power history; missing or unfamiliar history is incomplete
+ * and a read killed by its idle or total bound throws `PowerLogReadTimeout`. The
+ * total bound matches the longest power poll interval.
+ */
 export class MacPowerEventSource implements PowerEventSource {
   constructor(
     private readonly readLog: PowerLogReader = spawnPowerLogReader,
-    private readonly timeoutMs = 10_000,
+    private readonly timeoutMs = 60_000,
+    private readonly idleTimeoutMs = 10_000,
     private readonly maxLineBytes = 64 * 1024,
     private readonly now: () => number = Date.now,
   ) {
     if (
-      !Number.isSafeInteger(timeoutMs) ||
-      timeoutMs <= 0 ||
-      !Number.isSafeInteger(maxLineBytes) ||
-      maxLineBytes <= 0
+      ![timeoutMs, idleTimeoutMs, maxLineBytes].every(
+        (bound) => Number.isSafeInteger(bound) && bound > 0,
+      )
     )
       throw new Error("Power-event read bounds must be positive integers");
+    if (idleTimeoutMs > timeoutMs)
+      throw new Error("Power-event idle bound must not exceed the total bound");
   }
 
   async readSince(cursor: PowerEventCursor | null): Promise<PowerEventBatch> {
@@ -308,6 +336,7 @@ export class MacPowerEventSource implements PowerEventSource {
       const parser = createPmsetParser(cursor);
       for await (const line of this.readLog("/usr/bin/pmset", ["-g", "log"], {
         timeoutMs: this.timeoutMs,
+        idleTimeoutMs: this.idleTimeoutMs,
         maxLineBytes: this.maxLineBytes,
       }))
         parser.line(line);
@@ -322,7 +351,8 @@ export class MacPowerEventSource implements PowerEventSource {
             events: [],
           }
         : parsed;
-    } catch {
+    } catch (error) {
+      if (error instanceof PowerLogReadTimeout) throw error;
       return { complete: false, fromCursor: cursor, cursor, events: [] };
     }
   }
@@ -496,6 +526,7 @@ export class ExecutionPower {
   // Wall clock: a monotonic clock may not advance while the Mac sleeps.
   private lastEndedAt: number | undefined;
   private observedPollStartedAt: number | undefined;
+  private observedPollCompletedAt: number | undefined;
 
   constructor(
     private readonly state: ExecutionState,
@@ -556,6 +587,7 @@ export class ExecutionPower {
     const startedAt = Date.now();
     const current = this.pollUnlocked().then(() => {
       this.observedPollStartedAt = startedAt;
+      this.observedPollCompletedAt = Date.now();
     });
     this.polling = current;
     try {
@@ -570,8 +602,12 @@ export class ExecutionPower {
     let batch: unknown;
     try {
       batch = await this.events.readSince(persisted.cursor);
-    } catch {
-      await this.holdAndReconcile("Power-event history is unavailable");
+    } catch (error) {
+      await this.holdAndReconcile(
+        error instanceof PowerLogReadTimeout
+          ? "Power-event history read timed out"
+          : "Power-event history is unavailable",
+      );
       return;
     }
 
@@ -622,8 +658,12 @@ export class ExecutionPower {
       let next: unknown;
       try {
         next = await this.events.readSince(cursor);
-      } catch {
-        this.state.holdPowerAdmission("Power-event advancement is unavailable");
+      } catch (error) {
+        this.state.holdPowerAdmission(
+          error instanceof PowerLogReadTimeout
+            ? "Power-event advancement read timed out"
+            : "Power-event advancement is unavailable",
+        );
         return;
       }
       if (!validBatch(next, cursor) || !next.complete) {
@@ -670,15 +710,17 @@ export class ExecutionPower {
   }
 
   /**
-   * True when a poll that started after the last execution ended has completed
-   * within 15 s (longer than the 10 s read timeout, so a slow poll still counts).
+   * True when a poll that started after the last execution ended completed less
+   * than 15 s ago. Age counts from completion, so a read slower than 15 s still
+   * lets admission proceed instead of re-polling forever.
    */
   observedForAdmission(now = Date.now()): boolean {
     const startedAt = this.observedPollStartedAt;
-    if (startedAt === undefined) return false;
+    const completedAt = this.observedPollCompletedAt;
+    if (startedAt === undefined || completedAt === undefined) return false;
     if (this.lastEndedAt !== undefined && startedAt <= this.lastEndedAt)
       return false;
-    const age = now - startedAt;
+    const age = now - completedAt;
     return age >= 0 && age < 15_000;
   }
 
