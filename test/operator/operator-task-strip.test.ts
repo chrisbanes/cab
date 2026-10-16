@@ -9,6 +9,8 @@ import {
   taskIdentity,
   taskNextActor,
 } from "../../web/src/task-overview.js";
+import { operatorNext, taskNext } from "../../web/src/tasks.js";
+import { summary } from "../fixtures/task-summary.js";
 
 type Data = TaskRead["data"];
 const holds = {
@@ -29,6 +31,7 @@ const data = (patch: Record<string, unknown> = {}) =>
     approvals: [],
     unresolvedResults: [],
     completionRequests: [],
+    attention: { codes: [], count: 0 },
     ...patch,
   }) as unknown as Data;
 
@@ -65,60 +68,44 @@ test("taskColumnOf follows the Board's precedence from the task read", () => {
     assert.equal(taskColumnOf(data(patch)), column, JSON.stringify(patch));
 });
 
-test("taskNextActor names only recorded operator decisions", () => {
-  const open = { status: "open" };
-  assert.deepEqual(
-    taskNextActor(
+test("taskNextActor reads the List's next actor from the same attention codes", () => {
+  const cases: [string[], string, string][] = [
+    [[], "idle", "No operator decision"],
+    [["execution-uncertain"], "idle", "Next: you · inspect execution"],
+    [[], "uncertain", "Next: you · inspect execution"],
+    [["question", "approval"], "idle", "Next: you · review material & decide"],
+    [["question"], "idle", "Next: you · answer question"],
+    [["unresolved-result"], "idle", "Next: you · resolve result destination"],
+    [["completion-rejected"], "idle", "Next: you · review rejected completion"],
+    [["lead-review"], "idle", "Next: Ensemble · recording routing fallback"],
+    [["question-delivery"], "idle", "Next: Ensemble · delivering answer"],
+    [["question-delivery", "question"], "idle", "Next: you · answer question"],
+    [
+      ["lead-review", "approval"],
+      "idle",
+      "Next: you · review material & decide",
+    ],
+  ];
+  for (const [codes, execution, text] of cases) {
+    const read = taskNextActor(
       data({
-        execution: { state: "uncertain", holds },
-        approvals: [open],
-        questions: [open],
+        execution: { state: execution, holds },
+        attention: { codes, count: codes.length },
       }),
-    ),
-    {
-      kind: "uncertain",
-      text: "Next: you · inspect execution",
-      operator: true,
-    },
-  );
-  assert.equal(
-    taskNextActor(data({ approvals: [open], questions: [open] })).text,
-    "Next: you · review material & decide",
-  );
-  assert.equal(
-    taskNextActor(data({ questions: [open] })).text,
-    "Next: you · answer question",
-  );
-  assert.equal(
-    taskNextActor(data({ unresolvedResults: [{}] })).text,
-    "Next: you · resolve result destination",
-  );
-  const rejected = (taskVersion: number) => ({
-    completionRequests: [{ status: "rejected", taskVersion }],
-  });
-  assert.deepEqual(taskNextActor(data(rejected(3))), {
-    kind: "rejected-completion",
-    text: "Next: you · review rejected completion",
-    operator: true,
-  });
-  // A rejection of an earlier task version is not the current decision.
-  assert.deepEqual(taskNextActor(data(rejected(2))), {
-    kind: "none",
-    text: "No operator decision",
-    operator: false,
-  });
-  assert.deepEqual(
-    taskNextActor(data({ approvals: [{ status: "approved" }] })),
-    { kind: "none", text: "No operator decision", operator: false },
-  );
-  assert.equal(
-    taskNextActor(data({ task: { state: "done", version: 3 } })).text,
-    "Next: none · no decision",
-  );
-  assert.equal(
-    taskNextActor(data({ task: { state: "cancelled", version: 3 } })).text,
-    "Next: none · history retained",
-  );
+    );
+    const row = summary({ codes, execution });
+    assert.equal(read.text, text, JSON.stringify(codes));
+    assert.equal(read.text, taskNext(row));
+    assert.equal(read.operator, operatorNext(row));
+  }
+  for (const [state, text] of [
+    ["done", "Next: none · no decision"],
+    ["cancelled", "Next: none · history retained"],
+  ] as const) {
+    const read = taskNextActor(data({ task: { state, version: 3 } }));
+    assert.equal(read.text, text);
+    assert.equal(read.text, taskNext(summary({ state })));
+  }
 });
 
 test("taskIdentity reads repository#number or Local task, never a UUID", () => {

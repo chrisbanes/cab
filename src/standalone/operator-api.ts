@@ -108,6 +108,11 @@ import {
 } from "../operator/contracts.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
 import {
+  type AttentionCode,
+  attentionNext,
+  interventionCode,
+} from "../operator/attention.js";
+import {
   claudeTokenExclusions,
   claudeTokenSource,
   readClaudeToken,
@@ -118,7 +123,10 @@ import {
   prepareExclusions,
   sanitizeConversationText,
 } from "./conversation-history.js";
-import type { CoordinationView } from "./coordination-view.js";
+import type {
+  CoordinationTaskView,
+  CoordinationView,
+} from "./coordination-view.js";
 import {
   boundDetail,
   DiagnosticCursorError,
@@ -2460,32 +2468,31 @@ export class OperatorApi {
   ) {
     return (await this.taskSummaryRead(taskId, base, readiness)).summary;
   }
-  /** The summary plus the coordination view and exclusions it was derived from. */
-  private async taskSummaryRead(
-    taskId: string,
-    base?: ExclusionBase,
-    readiness?: ReadinessByTask,
+  /** The List's attention codes, shared by the task summary, the task read and the Inbox. */
+  private taskAttention(
+    task: Row,
+    view: CoordinationTaskView,
+    execution: Execution,
+    assignments: ReturnType<
+      ReturnType<StandaloneService["domain"]>["assignments"]
+    >,
   ) {
-    const d = this.domain(),
-      task = d.task(taskId),
-      projectId = String(task.projectId),
-      excluded = await this.exclusions(projectId, taskId, [], [], base),
-      view = this.coordination().readTask(taskId),
-      execution = this.execution(task),
-      assignments = d.assignments(taskId);
-    const codes: string[] = [];
+    const taskId = String(task.id);
+    const codes: AttentionCode[] = [];
     let count = 0;
-    const add = (code: string, n: number) => {
+    const add = (code: AttentionCode, n: number) => {
       if (n) {
         codes.push(code);
         count += n;
       }
     };
+    add("question", view.questions.filter((i) => i.status === "open").length);
+    // An answer recorded for a native question that Ensemble has not yet confirmed delivering.
     add(
-      "question",
+      "question-delivery",
       view.questions.filter(
         (i) =>
-          i.status === "open" ||
+          i.status === "answered" &&
           view.runtimeQuestions?.some(
             (q) =>
               q.interactionId === i.interactionId &&
@@ -2530,6 +2537,21 @@ export class OperatorApi {
         ? 1
         : 0,
     );
+    return { codes, count };
+  }
+  /** The summary plus the coordination view and exclusions it was derived from. */
+  private async taskSummaryRead(
+    taskId: string,
+    base?: ExclusionBase,
+    readiness?: ReadinessByTask,
+  ) {
+    const d = this.domain(),
+      task = d.task(taskId),
+      projectId = String(task.projectId),
+      excluded = await this.exclusions(projectId, taskId, [], [], base),
+      view = this.coordination().readTask(taskId),
+      execution = this.execution(task),
+      assignments = d.assignments(taskId);
     const summary = {
       id: taskId,
       projectId,
@@ -2543,7 +2565,7 @@ export class OperatorApi {
       admission: this.admission(taskId),
       capacity: this.capacity(projectId),
       source: this.sourceSummary(taskId, excluded, readiness),
-      attention: { codes, count },
+      attention: this.taskAttention(task, view, execution, assignments),
     };
     return { summary, view, excluded };
   }
@@ -2828,16 +2850,8 @@ export class OperatorApi {
           taskTitle: summary.title,
           evidence: `/app/tasks/${taskId}#history`,
         };
-        if (
-          summary.attention.codes.some((code) =>
-            [
-              "execution-uncertain",
-              "unresolved-result",
-              "completion-rejected",
-              "lead-review",
-            ].includes(code),
-          )
-        )
+        const attentionCode = interventionCode(summary.attention.codes);
+        if (attentionCode)
           items.push({
             ...base,
             id: `intervention:${taskId}`,
@@ -2848,8 +2862,8 @@ export class OperatorApi {
             requesterName: null,
             interactionId: null,
             revision: null,
-            reason:
-              "Recorded intervention requires exact recovery or review; responsibility unknown",
+            reason: attentionNext[attentionCode].reason,
+            attentionCode,
             destination: `/app/tasks/${taskId}`,
             conversation: null,
           });
@@ -2862,6 +2876,8 @@ export class OperatorApi {
             (!native || native.deliveryState === "confirmed")
           )
             continue;
+          // A recorded answer whose native delivery is unresolved stays listed, as Ensemble's.
+          const delivering = q.status === "answered";
           const requester = this.domain()
             .assignments(taskId)
             .find((a) => a.id === q.requestingAssignmentId);
@@ -2884,9 +2900,10 @@ export class OperatorApi {
             reason:
               q.kind === "approval"
                 ? "Review exact approval material"
-                : native && q.status === "answered"
+                : delivering
                   ? "Answer recorded; native delivery remains unresolved"
                   : "Operator answer requested",
+            attentionCode: delivering ? "question-delivery" : null,
             destination:
               q.kind === "question"
                 ? `/app/tasks/${taskId}?request=${q.interactionId}`
@@ -3244,6 +3261,7 @@ export class OperatorApi {
           reasonCode: "routing-fallback",
           createdAt: f.createdAt,
         })),
+        ...this.taskAttention(t, view, execution, assignments),
       },
       review: await this.reviewProjection(taskId, excluded, selection),
       delivery: this.deliveryProjection(taskId, excluded),

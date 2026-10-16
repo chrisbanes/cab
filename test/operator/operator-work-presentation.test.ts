@@ -157,7 +157,11 @@ test("the next actor is derived from recorded attention and state only", () => {
     next({ codes: ["question", "execution-uncertain"] }),
     "Next: you · inspect execution",
   );
-  assert.equal(next({ codes: ["lead-review"] }), "Next: you · review task");
+  assert.equal(
+    next({ codes: ["lead-review"] }),
+    "Next: Ensemble · recording routing fallback",
+  );
+  assert.equal(operatorNext(summary({ codes: ["lead-review"] })), false);
   assert.equal(next({ state: "done" }), "Next: none · no decision");
   assert.equal(next({ state: "cancelled" }), "Next: none · history retained");
   assert.equal(next({}), "No operator decision");
@@ -279,11 +283,10 @@ test("request wording is exhaustive and links match the Inbox selection", () => 
     "Approval",
     "Intervention",
   ]);
-  assert.deepEqual(kinds.map(requestActionLabel), [
-    "Answer question",
-    "Review material & decide",
-    "Inspect execution",
-  ]);
+  assert.deepEqual(
+    kinds.map((kind) => requestActionLabel({ kind, attentionCode: null })),
+    ["Answer question", "Review material & decide", "Inspect execution"],
+  );
   const taskId = randomUUID();
   const item = (kind: InboxItem["kind"], rest: object = {}) => ({
     id: "interaction:1/x",

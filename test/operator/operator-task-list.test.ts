@@ -308,6 +308,7 @@ import {
   taskReasons,
   reasonLabels,
 } from "../../web/src/tasks.js";
+import { attentionNext } from "../../src/operator/attention.js";
 test("a complete task aggregate rejects changing membership and repeated page cursors", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
@@ -618,7 +619,7 @@ test("shared task reasons retain all current interventions and deduplicate uncer
       attention: { codes: [code], count: 1 },
     };
     assert.ok(
-      taskReasons(task).includes(reasonLabels[code] ?? ""),
+      taskReasons(task).includes(attentionNext[code].reason),
       `current ${code} action is legible`,
     );
   }
@@ -633,7 +634,7 @@ test("shared task reasons retain all current interventions and deduplicate uncer
   };
   assert.ok(
     taskReasons(runtimeUnconfirmed).includes(
-      reasonLabels["execution-uncertain"] ?? "",
+      attentionNext["execution-uncertain"].reason,
     ),
   );
   const uncertainStop = {
@@ -647,7 +648,7 @@ test("shared task reasons retain all current interventions and deduplicate uncer
   };
   assert.equal(
     taskReasons(uncertainStop).filter(
-      (r) => r === reasonLabels["execution-uncertain"],
+      (r) => r === attentionNext["execution-uncertain"].reason,
     ).length,
     1,
   );
@@ -663,7 +664,9 @@ test("shared task reasons retain all current interventions and deduplicate uncer
     },
   };
   assert.equal(
-    taskReasons(normalStop).includes(reasonLabels["execution-uncertain"] ?? ""),
+    taskReasons(normalStop).includes(
+      attentionNext["execution-uncertain"].reason,
+    ),
     false,
   );
   for (const state of ["done", "cancelled"] as const) {
@@ -684,7 +687,7 @@ test("shared task reasons retain all current interventions and deduplicate uncer
       },
     };
     for (const code of codes)
-      assert.ok(taskReasons(terminal).includes(reasonLabels[code] ?? ""));
+      assert.ok(taskReasons(terminal).includes(attentionNext[code].reason));
     assert.equal(
       taskReasons(terminal).some((r) =>
         /Draft: not Ready|dependency|Capacity is full/.test(r),
@@ -693,7 +696,7 @@ test("shared task reasons retain all current interventions and deduplicate uncer
     );
     assert.equal(
       taskReasons(terminal).filter(
-        (r) => r === reasonLabels["execution-uncertain"],
+        (r) => r === attentionNext["execution-uncertain"].reason,
       ).length,
       1,
     );

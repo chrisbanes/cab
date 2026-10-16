@@ -1,5 +1,8 @@
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
+import { attentionNext, nextAttention } from "../../src/operator/attention.js";
+import { taskColumnOf } from "./task-overview.js";
+import { nextActor } from "./tasks.js";
 
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
@@ -11,13 +14,14 @@ const kindLabels: Record<InboxItem["kind"], string> = {
 };
 export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 
-const actionLabels: Record<InboxItem["kind"], string> = {
-  question: "Answer question",
-  approval: "Review material & decide",
-  intervention: "Inspect execution",
-};
-export const requestActionLabel = (kind: InboxItem["kind"]) =>
-  actionLabels[kind];
+/** The request's action: its attention code's when it has one, otherwise its kind's. */
+export const requestActionLabel = (
+  item: Pick<InboxItem, "kind" | "attentionCode">,
+) =>
+  attentionNext[
+    item.attentionCode ??
+      (item.kind === "intervention" ? "execution-uncertain" : item.kind)
+  ].inboxAction;
 
 /** Relative age such as "8m", "1h 46m" or "1d 1h"; a future time reads as just now. */
 export function ageLabel(createdAt: number | null, now: number) {
@@ -257,8 +261,13 @@ export function assignmentChain(
  * next action is the operator's only while the request is still open in the queue.
  */
 export const taskContext = (
-  task: Pick<TaskRead["data"], "source" | "lead"> | undefined,
-  item: Pick<InboxItem, "kind">,
+  task:
+    | Pick<
+        TaskRead["data"],
+        "task" | "execution" | "admission" | "source" | "lead" | "attention"
+      >
+    | undefined,
+  item: Pick<InboxItem, "kind" | "attentionCode">,
   open: boolean,
 ) => ({
   source: !task
@@ -272,7 +281,12 @@ export const taskContext = (
     : task.lead
       ? (task.lead.name ?? "Name unavailable")
       : "No lead configured",
-  next: open
-    ? `Next: you · ${lowerFirst(requestActionLabel(item.kind))}`
-    : null,
+  // The task's next actor once its read lands, as on the List and the task page.
+  next: !open
+    ? null
+    : task
+      ? nextActor(task.attention.codes, taskColumnOf(task)).text
+      : item.attentionCode
+        ? (nextAttention([item.attentionCode])?.text ?? null)
+        : `Next: you · ${lowerFirst(requestActionLabel(item))}`,
 });

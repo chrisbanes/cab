@@ -725,11 +725,7 @@ test("an intervention shows its recorded reason and links to the execution", asy
   const detail = page.getByRole("region", { name: "Selected request" });
   await page.locator(".inbox-row").click();
   await detail.getByText("Intervention", { exact: true }).waitFor();
-  await detail
-    .getByText(
-      "Recorded intervention requires exact recovery or review; responsibility unknown",
-    )
-    .waitFor();
+  await detail.getByText("Execution ownership is uncertain").waitFor();
   assert.equal(
     await detail
       .getByRole("link", { name: "Inspect execution", exact: true })

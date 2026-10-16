@@ -32,6 +32,7 @@ function item(o: Partial<InboxItem> = {}): InboxItem {
     interactionId: null,
     revision: null,
     reason: null,
+    attentionCode: null,
     destination: "/",
     evidence: "/",
     conversation: null,
@@ -134,7 +135,7 @@ test("intervention evidence is the lead, recorded reasons and the ownership hold
   assert.equal(held.ownershipHeld, true);
   const calm = interventionEvidence(summary({ codes: ["lead-review"] }));
   assert.equal(calm.lead, "No lead configured");
-  assert.deepEqual(calm.reasons, ["Allocation requires lead review"]);
+  assert.deepEqual(calm.reasons, ["Routing fell back to the project lead"]);
   assert.equal(calm.ownershipHeld, false);
 });
 

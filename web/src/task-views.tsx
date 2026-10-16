@@ -195,7 +195,7 @@ export function TaskCard({
           </span>
           {request && (
             <a className="task-request" href={requestHref(request)}>
-              {requestActionLabel(request.kind)} →
+              {requestActionLabel(request)} →
             </a>
           )}
         </div>

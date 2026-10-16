@@ -2,7 +2,7 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
 import { waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
-import type { TaskColumn } from "./tasks.js";
+import { nextActor, type TaskColumn } from "./tasks.js";
 
 type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
@@ -163,53 +163,10 @@ export function taskColumnOf(
   return "Ready";
 }
 
-/** Who acts next. Only decisions the task read records name the operator. */
-export function taskNextActor(
-  data: Pick<
-    Data,
-    | "task"
-    | "execution"
-    | "questions"
-    | "approvals"
-    | "unresolvedResults"
-    | "completionRequests"
-  >,
-) {
-  const you = (
-    kind:
-      | "uncertain"
-      | "approval"
-      | "question"
-      | "unresolved-result"
-      | "rejected-completion",
-    action: string,
-  ) => ({ kind, text: `Next: you · ${action}`, operator: true });
-  const none = (text: string) => ({
-    kind: "none" as const,
-    text,
-    operator: false,
-  });
-  const { execution } = data,
-    open = (q: { status: string }) => q.status === "open";
-  if (execution.holds.uncertainty || execution.state === "uncertain")
-    return you("uncertain", "inspect execution");
-  if (data.approvals.some(open))
-    return you("approval", "review material & decide");
-  if (data.questions.some(open)) return you("question", "answer question");
-  if (data.unresolvedResults.length)
-    return you("unresolved-result", "resolve result destination");
-  if (
-    data.completionRequests.some(
-      (r) => r.status === "rejected" && r.taskVersion === data.task.version,
-    )
-  )
-    return you("rejected-completion", "review rejected completion");
-  // The list's wording (`taskNext`).
-  if (data.task.state === "done") return none("Next: none · no decision");
-  if (data.task.state === "cancelled")
-    return none("Next: none · history retained");
-  return none("No operator decision");
-}
+/** Who acts next, from the task read's attention codes by the List's rule (`nextActor`). */
+export const taskNextActor = (
+  data: Pick<Data, "task" | "execution" | "admission" | "source" | "attention">,
+) => nextActor(data.attention.codes, taskColumnOf(data));
 
 /** The ID slot: `repository#number` for an imported task, otherwise "Local task". */
 export function taskIdentity(data: Pick<Data, "source">) {

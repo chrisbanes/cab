@@ -1,3 +1,8 @@
+import {
+  type AttentionCode,
+  attentionNext,
+  nextAttention,
+} from "../../src/operator/attention.js";
 import { unmetReason } from "../../src/operator/readiness-text.js";
 import {
   taskListPageSchema,
@@ -162,17 +167,11 @@ export const reasonLabels = {
   "imported-blockers-blocked": "Waiting on a GitHub dependency",
   "source-held": "Source requires review",
   "admission-blocked": "Waiting to start",
-  question: "Question needs an answer",
-  approval: "Approval needs a decision",
-  "unresolved-result": "Result destination needs attention",
-  "completion-rejected": "Completion requires review",
-  "execution-uncertain": "Execution ownership is uncertain",
-  "lead-review": "Allocation requires lead review",
 } satisfies Record<string, string>;
 export function taskReasons(task: TaskListSummary) {
   const terminal = task.state === "done" || task.state === "cancelled";
   const reasons: string[] = [
-    ...task.attention.codes.map((code) => reasonLabels[code]),
+    ...task.attention.codes.map((code) => attentionNext[code].reason),
     ...(terminal ? [] : task.admission.reasons)
       // A closure-held task is Paused, never Draft.
       .filter((r) => !(r === "task-unready" && task.source?.closure === "held"))
@@ -192,7 +191,7 @@ export function taskReasons(task: TaskListSummary) {
     task.execution.holds.uncertainty ||
     task.execution.reasonCodes.includes("runtime-unconfirmed")
   )
-    reasons.unshift(reasonLabels["execution-uncertain"]);
+    reasons.unshift(attentionNext["execution-uncertain"].reason);
   if (
     !terminal &&
     (task.capacity.globalUsage >= task.capacity.globalLimit ||
@@ -201,34 +200,33 @@ export function taskReasons(task: TaskListSummary) {
     reasons.push("Capacity is full; it rechecks as turns finish");
   return [...new Set(reasons)];
 }
-const nextActions = [
-  ["execution-uncertain", "inspect execution"],
-  ["approval", "review material & decide"],
-  ["question", "answer question"],
-  ["unresolved-result", "resolve result destination"],
-  ["completion-rejected", "review rejected completion"],
-  ["lead-review", "review task"],
-] as const;
 /** One rule for "ownership uncertain", shared by the row, the card and the attention bar. */
 export const isUncertain = (task: TaskListSummary) =>
   task.attention.codes.includes("execution-uncertain") ||
   taskColumn(task) === "Uncertain";
-/** Who acts next, from recorded facts only; an attention code always names the operator. */
-export function taskNext(task: TaskListSummary) {
-  const action = nextActions.find(([code]) =>
-    code === "execution-uncertain"
-      ? isUncertain(task)
-      : task.attention.codes.includes(code),
-  );
-  if (action) return `Next: you · ${action[1]}`;
-  const column = taskColumn(task);
-  if (column === "Done") return "Next: none · no decision";
-  if (column === "Cancelled") return "Next: none · history retained";
-  return "No operator decision";
+/**
+ * Who acts next, from the attention codes in the shared precedence and the task's column: one
+ * rule for the List and the task detail.
+ */
+export function nextActor(
+  codes: readonly AttentionCode[],
+  column: TaskColumn,
+): { code?: AttentionCode; text: string; operator: boolean } {
+  const next = nextAttention(codes, column === "Uncertain");
+  if (next) return next;
+  const text =
+    column === "Done"
+      ? "Next: none · no decision"
+      : column === "Cancelled"
+        ? "Next: none · history retained"
+        : "No operator decision";
+  return { text, operator: false };
 }
+export const taskNext = (task: TaskListSummary) =>
+  nextActor(task.attention.codes, taskColumn(task)).text;
 /** One rule for "Next: you": the row and card text and the card's attention tone. */
 export const operatorNext = (task: TaskListSummary) =>
-  taskNext(task).startsWith("Next: you");
+  nextActor(task.attention.codes, taskColumn(task)).operator;
 /** Ready work that admission holds (dependency, blocker, lead), shown in Waiting with its Ready label. */
 export const readyButBlocked = (task: TaskListSummary) =>
   taskColumn(task) === "Waiting" && task.ready && !task.admission.eligible;

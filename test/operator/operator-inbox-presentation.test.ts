@@ -44,8 +44,25 @@ test("kind and action labels cover every request kind", () => {
     ["intervention", "Intervention", "Inspect execution"],
   ] as const) {
     assert.equal(requestKindLabel(kind), label);
-    assert.equal(requestActionLabel(kind), action);
+    assert.equal(requestActionLabel({ kind, attentionCode: null }), action);
   }
+  for (const [code, action] of [
+    ["execution-uncertain", "Inspect execution"],
+    ["unresolved-result", "Inspect execution"],
+    ["completion-rejected", "Inspect execution"],
+  ] as const)
+    assert.equal(
+      requestActionLabel({ kind: "intervention", attentionCode: code }),
+      action,
+    );
+  // A recorded answer awaiting native delivery offers no answer action.
+  assert.equal(
+    requestActionLabel({
+      kind: "question",
+      attentionCode: "question-delivery",
+    }),
+    "View task",
+  );
 });
 
 const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
@@ -63,6 +80,7 @@ const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
   revision: null,
   reason: "r",
   destination: "/",
+  attentionCode: null,
   evidence: "/",
   conversation: null,
 });
@@ -588,27 +606,41 @@ test("the assignment chain runs from the operator to the requesting assignment",
   assert.deepEqual(assignmentChain({ assignments }, randomUUID()), []);
 });
 
-test("task context reads the source, lead and the operator's next action", () => {
-  const local = {
-      source: null,
-      lead: { profileId: randomUUID(), name: "Mira" },
-    },
-    imported = {
-      source: { repositoryName: "acme/atlas", number: 142 },
-      lead: null,
-    } as unknown as TaskRead["data"];
-  assert.deepEqual(
-    taskContext(
-      local as unknown as TaskRead["data"],
-      item("question", "p"),
-      true,
+test("task context reads the source, lead and the task's next actor", () => {
+  const read = (
+    patch: Record<string, unknown>,
+    codes: string[] = [],
+    execution = "idle",
+  ) =>
+    ({
+      task: { state: "open", ready: true, version: 1 },
+      execution: {
+        state: execution,
+        holds: {
+          stop: false,
+          writer: false,
+          capacity: false,
+          uncertainty: false,
+          task: false,
+        },
+      },
+      admission: { eligible: true, reasons: [] },
+      attention: { codes, count: codes.length },
+      ...patch,
+    }) as unknown as TaskRead["data"];
+  const local = read(
+      { source: null, lead: { profileId: randomUUID(), name: "Mira" } },
+      ["question"],
     ),
-    {
-      source: "Local task",
-      lead: "Mira",
-      next: "Next: you · answer question",
-    },
-  );
+    imported = read(
+      { source: { repositoryName: "acme/atlas", number: 142 }, lead: null },
+      ["approval"],
+    );
+  assert.deepEqual(taskContext(local, item("question", "p"), true), {
+    source: "Local task",
+    lead: "Mira",
+    next: "Next: you · answer question",
+  });
   assert.deepEqual(taskContext(imported, item("approval", "p"), true), {
     source: "acme/atlas#142",
     // Lead accountability stays visible, in the task views' wording.
@@ -618,20 +650,56 @@ test("task context reads the source, lead and the operator's next action", () =>
   // An imported task with an unreadable identity is never called local.
   assert.equal(
     taskContext(
-      {
-        source: { repositoryName: null, number: null },
-        lead: null,
-      } as unknown as TaskRead["data"],
+      read({ source: { repositoryName: null, number: null }, lead: null }),
       item("approval", "p"),
       true,
     ).source,
     "repository unavailable#?",
   );
+  // Before the task read lands, the item's own action or attention code names the next actor.
   assert.deepEqual(taskContext(undefined, item("intervention", "p"), true), {
     source: null,
     lead: "Unavailable",
     next: "Next: you · inspect execution",
   });
+  assert.equal(
+    taskContext(
+      undefined,
+      { ...item("question", "p"), attentionCode: "question-delivery" },
+      true,
+    ).next,
+    "Next: Ensemble · delivering answer",
+  );
+  // Once it lands, the task's codes and column name it, as on the List and the task page.
+  for (const [codes, execution, request, next] of [
+    [
+      ["question-delivery"],
+      "idle",
+      "question",
+      "Next: Ensemble · delivering answer",
+    ],
+    [
+      ["question", "approval"],
+      "idle",
+      "question",
+      "Next: you · review material & decide",
+    ],
+    [["question"], "uncertain", "question", "Next: you · inspect execution"],
+    [
+      ["unresolved-result", "approval"],
+      "idle",
+      "intervention",
+      "Next: you · review material & decide",
+    ],
+  ] as const)
+    assert.equal(
+      taskContext(
+        read({ source: null, lead: null }, [...codes], execution),
+        item(request, "p"),
+        true,
+      ).next,
+      next,
+    );
   // A recorded or resolved request is no longer the operator's next action.
   assert.equal(taskContext(imported, item("question", "p"), false).next, null);
 });
