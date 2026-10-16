@@ -349,8 +349,8 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
-| 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short` |
-| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
+| 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `23b-atlas-project-paused`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short` |
+| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
 | 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
 | 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
@@ -492,9 +492,9 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   four required rows ("1 of 4 required steps done"); GitHub and Claude are optional.
   In 143b the paused fixture-app is not Done: the Project row reads Not started with
   Resume, which confirms as in 149b. After the first turn Home keeps only rows that
-  need attention. Not drawn: the account menu's Getting started opens
+  need attention. The account menu's Getting started (`113-account-menu`) opens
   `/app/getting-started`, the same card with a secondary Dismiss; once dismissed the
-  menu shows Show getting started, which undoes it.
+  menu item reads Show getting started, which undoes it.
 - **Project setup (145, 145b):** with no profiles, step 1 replaces the Lead profile
   select with an inline profile form: a help line ("No lead profiles yet. Create one
   here, or leave this blank and choose a lead later; tasks wait for a lead before
@@ -537,15 +537,25 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   Task detail shows "Waiting · <reason>" with its Fix; any further reasons are listed
   beneath it in the flow's order, each with its own Fix or link. Fix: Resume project
   confirms first (149b). A dependency wait has no Fix, only a link to the blocking
-  task (149c). Inbox notices and the CLI use the same order.
+  task (149c). Inbox notices and the CLI use the same order. A paused project keeps
+  Fix: Resume project while stop, task or writer holds remain; those holds are
+  listed under it as "Also held · Resume project doesn't clear these", each with
+  what clears it ("Clears when the task's Stop is resumed.", "Clears when recovery
+  is applied for this assignment.", "Clears when we know the execution ended.") and a
+  Recovery details link to the assignment recovery page, never as a Fix (149c).
+  The Fix confirmation then names the holds that stay.
 - **Readiness and Add Claude (151, 152, 152b):** Readiness sits at the top of the
   Settings right column with Pass, Fail and Not configured badges, a Geist Mono fix
   line under each failure, and Run again as its only action. Add Claude sits at the
   top of the runtime page's left column: copyable token-file commands, a Token
   reference field (`file:` or `env:`), Save, and a live Token readable row. A
   failure names neither the path nor the value and offers Clear.
-- **Execution runtimes (126b, 126c, 151b):** each runtime row on the runtime page
-  has a "<Runtime> enabled" switch beside its status badge, in four states: enabled
+- **Execution runtimes (126, 126b, 126c, 151b):** the runtime page opens with an
+  Execution runtimes section above Capacity (126). Each runtime row shows its
+  status, the first two lines of its effective policy and a "Limits and untested
+  surfaces · N" disclosure, closed by default, holding the remaining policy lines
+  and the runtime's disclosed limits; its open state is a per-viewer convenience.
+  The row's "<Runtime> enabled" switch sits beside its status badge, in four states: enabled
   and Available; enabled and Unavailable with the Fix "Turn it off and on, or restart
   the service."; disabled, "Not enabled · Disabled in Settings", with no shell alert;
   and refused because the binary is missing, an inline error naming it while the
@@ -1460,6 +1470,19 @@ regions scroll or resize.
 
 Presentation and interaction rules that the canvas does not show on its own.
 
+### Presentation
+
+- No placeholders or raw tokens as content. A missing field is omitted, never
+  printed as "Age unknown", "Responsibility unknown" or "unavailable". A reason or
+  state code reads as a sentence in the web UI, with the code in Details. Where an
+  unknown is the message itself (ownership uncertain), the headline states it once.
+- Identifiers are short mono metadata (R1, A-9bd4, an 8-character SHA), never part
+  of a sentence. The full value is on hover, copy or in Details.
+- One refresh per page. Read views keep the page-level Refresh; create forms and
+  sub-panels have none.
+- Times use the app's clock label ("synced 17:50", "Updated 4:48 PM"). A range
+  appears only when two reads differ.
+
 ### Composer
 
 - Submitting with an error in a collapsed optional group opens that group and
@@ -1471,6 +1494,19 @@ Presentation and interaction rules that the canvas does not show on its own.
 
 - No raw output is needed to understand the task. Assignments and captured
   conversations open through disclosure (`03-task-detail`).
+- The Overview tab reads in this order: pending decisions, holds and wait reasons;
+  the latest result with its criterion evidence; the reply to the lead; then the
+  shared brief and assignments as collapsed disclosures with a one-line summary
+  (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
+  conversations, earlier results and delivery evidence live in History, Changes and
+  Review, and the Overview tab does not repeat those tabs as sections.
+- The task header keeps Execution and Stop… only. On a phone (`47-phone-task-overview`)
+  the detail header has Back, the task title, a mono subtitle (the source, such as
+  `acme/atlas#142`, or Local task) and one outline overflow action holding
+  Execution and Stop…; the decision card sits in the first viewport, and Message
+  lead is the bottom action.
+- A task's legacy page is linked once, from its History tab. The project page
+  keeps Project settings and links to no legacy page.
 - The reading anchor is the top visible message and its pixel offset. Updates keep
   that anchor, open groups, expanded message previews and the unfinished reply.
 - Auto-follow is on only while the reader is at the bottom. Scrolling away turns it
@@ -1489,8 +1525,11 @@ Presentation and interaction rules that the canvas does not show on its own.
   - Execution uncertain: the process may still be active, so check its state
     before attempting new work (Inspect execution).
   - Project paused: the project holds new turns, messages queue for the lead, and
-    sending does not resume work. Resume project, in project configuration or the
-    wait's Fix, releases it.
+    sending does not resume work. Resume project, in project configuration, the
+    project page's paused banner (`23b-atlas-project-paused`) or the wait's Fix,
+    releases it. The banner's Resume project confirms as in 149b and shows the
+    shared save outcomes (recorded, failed, or unknown with Check again); Pause
+    project stays in project configuration.
 
 ### Approval review
 
@@ -1563,8 +1602,28 @@ Presentation and interaction rules that the canvas does not show on its own.
   name from discovery, falling back to typed node IDs when discovery is unavailable.
 - On settings pages no primary navigation item is selected. Project configuration
   selects its own project in the sidebar.
-- The account menu links to Settings (`/app/settings`) and Runtime
-  (`/app/settings/runtime`).
+- The account menu (`113-account-menu`) lists Settings (`/app/settings`), Getting
+  started (Show getting started once the card is dismissed, which restores it),
+  Legacy controls and Sign out. Runtime is reached from Settings. Legacy controls
+  opens the legacy coordination index; the label is a placeholder until the pages
+  are named for what they still do.
+- Project names are unique ignoring case. Project setup and project configuration
+  refuse a matching name as a field error on the 116 pattern: "Another project is
+  named Atlas. Choose a different name." (`116b-project-setup-duplicate-name`).
+  Saving a project under its own current name is allowed. Where projects created
+  before this rule share a name, the sidebar, filters and selects add the lead's
+  name ("Atlas · Mira"), or the creation date when the leads match too
+  (`116c-project-name-suffix-specimen`).
+- GitHub sources are named by what they read (acme/atlas issues, a search, the
+  Atlas roadmap GitHub Project), with the S-n id in Details. The GitHub source tab
+  numbers its sections 1–3 in reading order (`119-project-config-github-source`).
+  After a save, the same screen offers Preview and import now, which runs the
+  preview-and-activate command and then the refresh, and records one receipt per
+  step (`119d-github-source-import-ready`, `119e-github-source-imported`). Sync &
+  placement remains for later refreshes and placement.
+- Source status lines are sentences with the clock label: "Synced 10:47 · 4 issues
+  observed, 2 ready" or "Not synced yet" (`120-project-config-sync-placement`). A
+  panel's caveat is one line under its primary action, not in its intro.
 - In Settings → Projects (`114-settings-index`), each project shows its lead, state,
   repository access and discovery sources. Access and sources are labelled
   separately so that discovery never reads as access. Routing has its own
@@ -1589,8 +1648,9 @@ Presentation and interaction rules that the canvas does not show on its own.
 - Every Inspect execution or Recovery details control opens the same assignment
   recovery destination (`127-assignment-recovery-relay`). These controls are in
   `01-attention-overview`, `49-state-comparisons`,
-  `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain` and Runtime →
-  Task recovery destinations (`126-runtime-capacity-recovery`).
+  `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain`, each hold line
+  on a task (`149c-wait-reasons-specimen`) and Runtime → Task recovery destinations
+  (`126-runtime-capacity-recovery`), which stays.
 
 ### First run
 
@@ -1599,7 +1659,9 @@ Presentation and interaction rules that the canvas does not show on its own.
 - The header New task button stays next to the getting-started card.
 - Before a project is created, the sidebar Projects group shows only New project.
 - The Fix confirmation (`149b-task-fix-resume-confirm`) states that holds and
-  access are unchanged.
+  access are unchanged. When stop, task or writer holds remain, it names them
+  ("The Operator Stop and writer ownership stay."); the task lists them under the
+  Fix with their recovery links (`149c-wait-reasons-specimen`).
 
 ### Action feedback
 
@@ -1747,9 +1809,10 @@ Production Overview, List and Board
   (right-aligned; a 2 × 2 grid on a phone). Needs you shows at most three cards in
   Inbox order with interventions on an uncertain execution first; the rest collapse
   into a dashed "N more · Project / Task, … · Inbox" row. Each card shows recorded
-  facts only: kind badge, "HH:MM · age" (or "Age unknown"), project / task, the
-  headline (the question label, the approval's exact action, else the request
-  reason), the requester or "Responsibility unknown", evidence and one response.
+  facts only: kind badge, "HH:MM · age", project / task, the headline (the question
+  label, the approval's exact action, else the request reason), the requester,
+  evidence and one response. A missing time, age, requester or evidence line is
+  omitted ([Presentation](#presentation)).
   Approval cards show the exact action, target, version and holds ("Approval does
   not clear it", including any other open approval on the task but not the card's
   own) and link to the retained destination; they never decide in place.
@@ -2049,11 +2112,16 @@ frames 114 and 118–128 as follows:
   raises the source version, and activation counts only at the version it was
   previewed, so every kept selection reads "Inactive" and is not synced until it
   is previewed again in Sync & placement.
-- Frames 118–121 draw no activation result. Production's "Preview and activate
-  selection" names the selection (or says it was already active), states that
-  tasks aren't imported until sources are refreshed, and offers
-  "Refresh sources" inside that outcome. Selections and Source
-  status rows also read active or inactive.
+- Frames `119d-github-source-import-ready` and `119e-github-source-imported` chain
+  activation and import on the GitHub source tab after a save: Preview and import
+  now runs the preview-and-activate command and then the refresh, with one receipt
+  per step, and activation and a successful import stay separate evidence.
+  Production does not chain them yet: "Preview and activate selection" in Sync &
+  placement names the selection (or says it was already active), states that
+  tasks aren't imported until sources are refreshed, and offers "Refresh sources"
+  inside that outcome. Production names sources S-1, S-2 and so on where the frames
+  name them by content, and its Selections and Source status rows read active or
+  inactive.
 - Frames 118–121 draw no readiness counts. Production adds, as body text after each
   Source status row heading and in the GitHub source Readiness panel, the
   selection's stored counts ("9 observed · 9 open · 0 match label `ready`"); a
@@ -2081,14 +2149,16 @@ frames 114 and 118–128 as follows:
   re-reads the open page's own resources.
 - Switches are native checkboxes drawn as switches.
 - Execution runtimes ([#826](https://github.com/chrisbanes/ensemble/issues/826)),
-  which frames 114 and 118–128 do not draw, use existing fields, rows and asides:
+  which frames 114, 118–125, 127 and 128 do not draw, use existing fields, rows and asides:
   profile pages add a Runtime select (Codex or Claude) with Model and Reasoning
   effort for Claude (selects once the runtime has read its supported values, else
   text), a not-enabled or unavailable note, a "Runtime change" aside (new
   conversations only) and an "Execution policy" aside for the selected runtime;
   each Settings profile row adds a "Runtime: …" line; the Runtime and recovery
   panel carries the Claude subscription token row (like the discovery row); Runtime
-  adds an "Execution runtimes" panel with each runtime's state and effective policy.
+  adds an "Execution runtimes" panel with each runtime's state and effective policy,
+  with the disclosed limits listed in full rather than behind frame 126's "Limits
+  and untested surfaces" disclosure.
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
   execution policy" disclosure. The shell raises one alert per unavailable runtime.
