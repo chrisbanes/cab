@@ -634,8 +634,11 @@ test("the lead recovery candidate query is driven by recovery receipts, not assi
       prepared.push(sql);
       return prepare(sql);
     };
-    coordination.awaitsRecoveryContinuation(f.taskId, assignmentId);
-    db.prepare = prepare;
+    try {
+      coordination.awaitsRecoveryContinuation(f.taskId, assignmentId);
+    } finally {
+      db.prepare = prepare;
+    }
     const sql = prepared.find((text) =>
       text.includes("coordination_recovery_continuations"),
     );
@@ -643,7 +646,9 @@ test("the lead recovery candidate query is driven by recovery receipts, not assi
     const plan = db
       .prepare(`EXPLAIN QUERY PLAN ${sql}`)
       .all(f.taskId, assignmentId) as Array<{ parent: number; detail: string }>;
-    const driving = plan.find((row) => /^(SCAN|SEARCH)\b/.test(row.detail));
+    const driving = plan.find(
+      (row) => row.parent === 0 && /^(SCAN|SEARCH)\b/.test(row.detail),
+    );
     assert.match(driving?.detail ?? "", /execution_recovery_receipts|receipt/);
     assert.ok(!plan.some((row) => /assignmentId/.test(row.detail)));
   } finally {
