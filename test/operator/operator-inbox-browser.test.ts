@@ -738,6 +738,7 @@ test("an intervention shows its recorded reason and links to the execution", asy
     assert.doesNotMatch(text, /Age unknown|Responsibility unknown/);
   assert.equal(await aside.getByText("Requester", { exact: true }).count(), 0);
   assert.equal(await detail.locator(".inbox-identity").count(), 0);
+  assert.equal(await page.locator(".inbox-row-meta").count(), 0);
   // Uncertain ownership is stated once in the request pane's headline, not again in the inspector.
   assert.equal(
     await detail.getByText("Execution ownership is uncertain").count(),

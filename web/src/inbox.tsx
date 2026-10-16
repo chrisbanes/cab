@@ -321,15 +321,17 @@ export function Inbox({
           {item.reason ?? "Exact details unavailable"}
         </span>
         <span className="inbox-row-action">{requestActionLabel(item)} →</span>
-        <span className="inbox-row-meta">
-          {item.requesterName}
-          {item.requesterName && item.createdAt !== null && " · "}
-          {item.createdAt !== null && (
-            <time dateTime={new Date(item.createdAt).toISOString()}>
-              {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, now)}
-            </time>
-          )}
-        </span>
+        {(item.requesterName || item.createdAt !== null) && (
+          <span className="inbox-row-meta">
+            {item.requesterName}
+            {item.requesterName && item.createdAt !== null && " · "}
+            {item.createdAt !== null && (
+              <time dateTime={new Date(item.createdAt).toISOString()}>
+                {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, now)}
+              </time>
+            )}
+          </span>
+        )}
       </button>
     );
   };
