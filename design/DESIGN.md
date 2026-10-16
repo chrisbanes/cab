@@ -541,8 +541,10 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   Fix: Resume project while stop, task or writer holds remain; those holds are
   listed under it as "Also held · Resume project doesn't clear these", each with
   what clears it ("Clears when the task's Stop is resumed.", "Clears when recovery
-  is applied for this assignment.", "Clears when we know the execution ended.") and a
-  Recovery details link to the assignment recovery page, never as a Fix (149c).
+  is applied for this task.", "Clears when we know the execution ended.") and an
+  Execution details link to the task's Execution view, never as a Fix (149c). These
+  holds are task-wide and name no assignment; only a wait that names its assignment
+  links to that assignment's recovery page.
   The Fix confirmation then names the holds that stay.
 - **Readiness and Add Claude (151, 152, 152b):** Readiness sits at the top of the
   Settings right column with Pass, Fail and Not configured badges, a Geist Mono fix
@@ -1630,7 +1632,7 @@ Presentation and interaction rules that the canvas does not show on its own.
   (`119d-github-source-import-ready`, `119e-github-source-imported`). Sync &
   placement remains for later refreshes and placement.
 - Source status lines are sentences with the clock label: "Synced 10:47 · 4 issues
-  observed, 2 ready" or "Not synced yet" (`120-project-config-sync-placement`). A
+  observed, 2 match the readiness rule" or "Not synced yet" (`120-project-config-sync-placement`). A
   panel's caveat is one line under its primary action, not in its intro.
 - In Settings → Projects (`114-settings-index`), each project shows its lead, state,
   repository access and discovery sources. Access and sources are labelled
@@ -1656,9 +1658,11 @@ Presentation and interaction rules that the canvas does not show on its own.
 - Every Inspect execution or Recovery details control opens the same assignment
   recovery destination (`127-assignment-recovery-relay`). These controls are in
   `01-attention-overview`, `49-state-comparisons`,
-  `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain`, each hold line
-  on a task (`149c-wait-reasons-specimen`) and Runtime → Task recovery destinations
-  (`126-runtime-capacity-recovery`), which stays.
+  `53-phone-failed-refresh-uncertain`, `25b-phone-board-uncertain`, a task wait that
+  names its assignment, and Runtime → Task recovery destinations
+  (`126-runtime-capacity-recovery`), which stays. A task's Stop, task and writer
+  hold lines are task-wide, so they link to the task's Execution view instead
+  (`149c-wait-reasons-specimen`).
 
 ### First run
 
@@ -1669,7 +1673,7 @@ Presentation and interaction rules that the canvas does not show on its own.
 - The Fix confirmation (`149b-task-fix-resume-confirm`) states that holds and
   access are unchanged. When stop, task or writer holds remain, it names them
   ("The Operator Stop and writer ownership stay."); the task lists them under the
-  Fix with their recovery links (`149c-wait-reasons-specimen`).
+  Fix with an Execution details link (`149c-wait-reasons-specimen`).
 
 ### Action feedback
 
