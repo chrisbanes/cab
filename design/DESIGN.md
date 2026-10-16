@@ -27,7 +27,8 @@ that issues and evidence records cite (06, 133, 800B and so on).
   responsive composition, shared components
 - Guidance: operator refinement brief, interaction guidance, fixtures and journeys,
   canvas map
-- Screens: settings, credentials, onboarding and action feedback; task overview;
+- Screens: settings, credentials, onboarding and action feedback; settings,
+  recovery and responsive states; task overview;
   review interactions; assignment context, delivery and search; workspace
   inspection and local review; Files and diff editor; tablet and short viewport
 - Interaction notes
@@ -350,6 +351,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
 | 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
+| 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
 | 00 Foundations & components | `Main`, `Sidebar`, `TopBar`, `ds-domain-components` |
 
 ## Settings, credentials, onboarding and feedback
@@ -601,6 +603,78 @@ screen follows the same rules.
   with any further reasons listed beneath.
 
 Warnings use the attention tokens (`--attn`, `--attn-soft`, `--attn-border`).
+
+### Settings, recovery and responsive states
+
+Canvas page **11 Settings, recovery & responsive states** draws the settings,
+recovery and layout states that the other pages leave out. They reuse the shared
+Sidebar, TopBar, settings section navigation and the action-feedback rules above.
+
+| State | Artboards |
+| --- | --- |
+| Field errors: profile, routing, capacity | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error` |
+| Revoke an available profile, unsaved | `178-profile-revoke-available` |
+| GitHub source changed elsewhere, then latest loaded | `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded` |
+| GitHub source save outcome unknown | `171-source-config-unknown-outcome` |
+| Routing with TypeSafe unavailable | `172-routing-typesafe-unavailable` |
+| Recovery: evidence unavailable, no generation in use, before-turn and no-turn witnesses | `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness` |
+| Repository ref list open in project setup | `177-project-setup-ref-open` |
+| Tablet: settings index, setup, profile, routing, runtime | `180a-tablet-settings-index` – `180e-tablet-runtime` (1024 wide) |
+| Phone: settings index, setup, profile, routing, runtime | `179a-phone-settings-index` – `179e-phone-runtime` (390 wide) |
+
+- **Field errors:** each invalid field shows its own fix under the control ("Enter
+  a profile name.", "Keep the summary to 120 characters or fewer. It has 128.",
+  "Enter a whole number of 1 or more.", the `env:NAME` format), and the first takes
+  focus. One destructive Alert below the form reads "Couldn’t save." and "Fix the
+  highlighted fields. Your changes are still here." with Details. Fields stay
+  editable and Save stays enabled; errors clear on the next save. A per-project
+  capacity override is highlighted on its own field, like the global cap. As
+  built, every field shows "Check this field." apart from the runtime model and
+  effort errors, and a per-project override error highlights no field.
+- **Revoke an available profile:** Revoke profile is a destructive button that
+  marks the change; nothing is sent until Save profile. Marked, it becomes Undo
+  revoke, Changes to save lists "Revoke Builder", and the helper says revoking
+  does not stop, cancel or recover running work. Saving follows the shared
+  outcomes and ends in `123-profile-revoked`, whose Restore profile is the
+  counterpart. There is no confirmation dialog because the change is reversible
+  and listed before saving.
+- **GitHub source changed elsewhere:** the shared warning "A newer version was saved
+  elsewhere." with Review changes; fields stay editable. Review changes loads the
+  latest version, keeps your edits, and says which edited rows were removed
+  elsewhere ("Loaded the latest version. S-3 was removed elsewhere, so your edits
+  to it were discarded."). Rows added elsewhere appear as kept rows, not changes.
+- **GitHub source outcome unknown:** the three source sections lock, Save and
+  Discard changes are replaced by "We couldn’t confirm the save." with Check
+  whether it saved, and Changes to save stays frozen to the draft.
+- **TypeSafe unavailable:** the Routing section names the availability in words
+  and, when routing can’t choose, a status notice says why and who allocates
+  instead ("Routing has no credential reference, so it can’t choose assignees. New
+  tasks without an assignee go to Jonas to allocate."). The form stays editable so
+  the reference can be set. The other states read "No eligible candidates" and
+  "Routing off". A TypeSafe failure during a task wakes the lead and is not shown
+  in Settings. As built, the panel prints the raw availability value and has no
+  notice.
+- **Recovery variants:** all four reuse the `127-assignment-recovery-relay` layout
+  and stay read-only with Inspect execution as the only action. Evidence
+  unavailable reads "We can’t show recovery details for this assignment." and says
+  that having no record doesn’t mean the execution ended or its holds were
+  released. With no generation in use, the Generation in use row reads Unavailable
+  and says this doesn’t mean the execution ended. A before-turn witness ("Before-turn
+  refusal") and a no-turn witness ("No turn sent", with "An idle conversation may
+  still exist") sit inside their generation’s record with their ID and source, and
+  both say "Evidence only. It doesn’t recover the assignment or allow new work."
+  Recovery is applied in the advanced recovery destination. As built, the witness
+  lines read "Historical no-turn submission witness" and "Before-turn archived
+  resume witness".
+- **Ref list in project setup:** Ref is the platform select. Open, it lists the
+  default branch first and checked, then the current ref if unlisted, then other
+  branches in GitHub’s order. Loading, unavailable discovery and lists over 500
+  branches use a typed Ref field with the reason in its caption. The local checkout
+  is verified again for the chosen ref.
+- **Tablet and phone settings:** tablet keeps the section navigation beside the
+  content behind the drawer; side panels stack below the form. Phone replaces the
+  section navigation with a section select, uses 44px controls, turns project rows
+  into cards, and keeps one persistent save area at the bottom.
 
 ## Task overview
 
