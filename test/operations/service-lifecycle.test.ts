@@ -1595,7 +1595,7 @@ test("an interrupt while signing in leaves the service installed", async (t) => 
   const f = await tarballSetup(t);
   const interrupt = new AbortController();
   f.launchd.onApi = (path) => {
-    if (path === "/api/operator/credentials") interrupt.abort();
+    if (path === "/api/operator/login") interrupt.abort();
   };
   const result = await f.run({}, new FakeCli(), interrupt.signal);
   assert.equal(result.code, 0, result.stderr);
@@ -1672,4 +1672,22 @@ test("install accepts a tarball, a connection, a token file and --no-open; other
     1,
   );
   assert.deepEqual(fake.mutations(), []);
+});
+
+test("a first install with no state directory creates it and still holds the lock", async (t) => {
+  const f = await tarballSetup(t, { auth: false });
+  rmSync(f.stateDir, { recursive: true });
+  const lock = join(f.stateDir, `.${f.options.label}.lock`);
+  let lockedAtBootstrap = false;
+  f.launchd.onBootstrap = () => {
+    lockedAtBootstrap = existsSync(lock);
+  };
+  const cli = new FakeCli();
+  f.launchd.password = "test-password";
+  const result = await f.run({}, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(lockedAtBootstrap, true);
+  assert.equal(existsSync(lock), false);
+  assert.equal(statSync(f.stateDir).mode & 0o777, 0o700);
+  assert.equal(statSync(f.authFile).mode & 0o777, 0o600);
 });

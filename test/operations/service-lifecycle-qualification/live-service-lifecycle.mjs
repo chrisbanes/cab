@@ -89,9 +89,14 @@ function runOnPty(command, args, { env, prompt, password }) {
     );
     let output = "";
     let typed = false;
-    const timer = setTimeout(() => child.kill("SIGTERM"), 600_000);
+    const timer = setTimeout(() => {
+      child.stdin.end();
+      child.kill("SIGTERM");
+    }, 600_000);
     child.stdout.on("data", (chunk) => {
       output += chunk;
+      // A refusal before the prompt must not leave `cat` waiting for input.
+      if (!typed && output.includes('{"ok":false')) child.stdin.end();
       if (!typed && output.includes(prompt)) {
         typed = true;
         child.stdin.end(`${password}\r`);

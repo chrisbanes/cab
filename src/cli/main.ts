@@ -615,6 +615,7 @@ export function installCli(deps: CliDeps): InstallCli {
     readPassword: (prompt) =>
       readHiddenPassword(deps.stdin, deps.stderr, prompt),
     login: async (name, origin, token, tokenFile) => {
+      rejectManaged(deps.env);
       if (tokenFile)
         writeFileSync(tokenFile, `${token}\n`, { flag: "wx", mode: 0o600 });
       try {

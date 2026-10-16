@@ -1,6 +1,6 @@
 # Readiness check
 
-**Status:** implemented. `ensemble service install` runs it as its last step; the
+**Status:** implemented. `ensemble service install` runs it after it signs the CLI in; the
 procedure is in [standalone macOS operations](../operations/standalone-macos.md).
 The Getting started Runtime row and first-task Fix actions that read these checks
 are planned.
@@ -14,7 +14,7 @@ what the service can and cannot use, with one fix line per problem.
 
 - `ensemble doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
 - `ensemble service install`, which prints this table with its `Fix` lines on
-  stderr before it opens the app. A failed check does not fail the install.
+  stderr after it signs the CLI in, before it opens the app. A failed check does not fail the install.
 - Settings → Readiness panel.
 - [Getting started](getting-started.md) Runtime row and [first task](first-task.md)
   Fix actions.

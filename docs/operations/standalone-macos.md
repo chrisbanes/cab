@@ -21,6 +21,7 @@ directory. The defaults are:
 | Logs | `~/Library/Logs/Ensemble/<label>.<version>.<UTC time>.{out,err}.log` |
 | LaunchAgent | `~/Library/LaunchAgents/<label>.plist` |
 
+Commands below use `STATE="$HOME/Library/Application Support/Ensemble"`.
 The label defaults to `local.ensemble.service` and the port to `8787`
 (`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
 `--label` and, at install only, `--port` override them; upgrade keeps the
@@ -50,8 +51,8 @@ directory. If that version directory already exists with the same
 `manifest.json`, it is reused; with a different one, install refuses and changes
 nothing. A later failure keeps the unpacked version, so a rerun reuses it.
 `service install` with no tarball binds to the release it runs from, which must
-already sit in `STATE/versions` (for example one unpacked by hand with `tar
---strip-components 1 -C "$STATE/versions/0.1.0"`).
+already sit in `STATE/versions` (for example one you unpacked there with
+`tar -xzf FILE --strip-components 1 -C "$STATE/versions/0.1.0"`).
 
 Install refuses, changing nothing, unless the tarball is a readable file (or the
 release sits directly in `STATE/versions` with a `manifest.json` naming the same
@@ -68,10 +69,12 @@ waits up to 120 seconds for `/app`. The plist names the release's own
 `node/bin/node` and `dist/src/standalone/cli.js`, so each version keeps its exact
 executable.
 
-If unpacking, bootstrap or the wait fails, install boots out any job it started,
-confirms the process exited, removes the LaunchAgent and its record, keeps the
-data, auth and logs, reports the log paths and exits 1. Run it again after fixing
-the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
+If unpacking fails, install exits 1 before any job exists and keeps what it
+created (the unpacked version, and the auth file once created, so a rerun asks for
+the existing password). If bootstrap or the wait fails, install boots out the job it
+started, confirms the process exited, removes the LaunchAgent and its record, keeps
+the data, auth and logs, reports the log paths and exits 1. Run it again after
+fixing the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
 keeps the record so that `service uninstall` can finish.
 
 Once `/app` answers, the service stays installed whatever follows. Install signs
@@ -85,7 +88,8 @@ connection, prints its table and `Fix` lines on stderr, and opens
 stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in.
 The password and token are never printed or put on a command line.
 
-If the prompt is cancelled or skipped, the password is wrong (one attempt only),
+If the prompt is cancelled (Ctrl-C there skips sign-in; it does not stop the install)
+or skipped, the password is wrong (one attempt only),
 the credential cannot be stored (it is then revoked), or doctor or the browser
 open fails, install still exits 0 with the service running. It prints the manual
 step and you finish it yourself, using a read credential issued in Settings → CLI
@@ -621,8 +625,9 @@ service against a fresh data directory, and expects the operator UI and one of i
 assets within 120 seconds before stopping that service. It does not exercise a real
 Codex login.
 
-To run a release as the service, unpack it into `STATE/versions/<version>` and
-use [`ensemble service install`](#install) or [`upgrade`](#upgrade).
+To run a release as the service, use [`ensemble service install`](#install) with its
+tarball, or [`upgrade`](#upgrade) with a release unpacked into
+`STATE/versions/<version>`.
 
 ### Tagged releases
 

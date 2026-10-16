@@ -195,5 +195,5 @@ test("installCli doctor writes the readiness table to stderr only", async (t) =>
   await cli.login("local", f.origin, issued.token, undefined);
   await cli.doctor("local");
   assert.equal(out, "");
-  assert.match(err, /\S/);
+  assert.match(err, /Check\s+Status\s+Reason/);
 });

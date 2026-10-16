@@ -1,7 +1,9 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  accessSync,
   closeSync,
+  constants,
   existsSync,
   fsyncSync,
   lstatSync,
@@ -748,12 +750,14 @@ export async function issueInstallCredential(
     signedIn = true;
     await nextSession(login);
     const issued = operatorCredentialIssuedSchema.parse(
-      await (
-        await call("POST", "/api/operator/credentials", {
-          name,
-          scope: "read",
-          expiresInDays: 90,
-        })
+      await // Not interruptible: an abort after the server minted it would orphan the credential.
+      (
+        await call(
+          "POST",
+          "/api/operator/credentials",
+          { name, scope: "read", expiresInDays: 90 },
+          false,
+        )
       ).json(),
     );
     try {
@@ -786,6 +790,16 @@ export function installService(
   io: ServiceIo,
   first: FirstRun = { connection: "local", open: false },
 ): Promise<number> {
+  // A first install has no state directory yet; create it so the lock below covers it.
+  try {
+    if (
+      first.tarball &&
+      statSync(first.tarball, { throwIfNoEntry: false })?.isFile()
+    )
+      mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
+  } catch {
+    // The locked preflight reports what is wrong.
+  }
   return withLock(options, host, io, "install", () =>
     installServiceLocked(options, releaseRoot, host, io, first),
   );
@@ -808,8 +822,15 @@ async function installServiceLocked(
   try {
     let root = releaseRoot;
     let version = tarball ? undefined : service.releaseVersion(root);
-    if (tarball && !statSync(tarball, { throwIfNoEntry: false })?.isFile())
-      throw refuse(`${tarball} is not a readable file`);
+    if (tarball) {
+      try {
+        accessSync(tarball, constants.R_OK);
+      } catch {
+        throw refuse(`${tarball} is not a readable file`);
+      }
+      if (!statSync(tarball).isFile())
+        throw refuse(`${tarball} is not a readable file`);
+    }
     if (await service.loadedJob())
       throw refuse(`The ${options.label} job is already loaded`);
     if (existsSync(service.recordPath) || existsSync(service.activation))
@@ -841,7 +862,6 @@ async function installServiceLocked(
       throw refuse("An operator password is required to create the auth file");
     if (tarball) {
       stage = "unpack";
-      mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
       root = await service.unpack(tarball);
       version = service.releaseVersion(root);
     }
@@ -945,6 +965,10 @@ async function finishInstall(
   try {
     if (connection !== null && !interrupted())
       await first.cli?.doctor(connection);
+  } catch {
+    // The URL below is still printed.
+  }
+  try {
     if (connection === null) {
       line(
         `Log in the CLI with a read credential from Settings → CLI credentials: ensemble auth login --connection ${first.connection} --url ${service.origin}`,
