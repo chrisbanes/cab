@@ -280,12 +280,18 @@ export function ResumeProjectFix({
           variant={variant}
           disabled={!project || draft.phase === "pending"}
           onClick={() => {
-            // A new operation from the shown version; a newer one comes back as a conflict.
-            if (draft.phase !== "editing" || !draft.values.key)
-              draft.startOperation({
-                key: key(),
-                expectedVersion: String(project?.version ?? 1),
-              });
+            // Each open starts a fresh operation, so a cancelled one never keeps an old version.
+            // Review changes may already have adopted a version newer than the shown one.
+            // An operation in flight or unknown is kept: starting is a no-op for it.
+            draft.startOperation({
+              key: key(),
+              expectedVersion: String(
+                Math.max(
+                  project?.version ?? 1,
+                  Number(draft.values.expectedVersion) || 0,
+                ),
+              ),
+            });
           }}
         >
           {draft.phase === "pending" ? "Resuming…" : label}

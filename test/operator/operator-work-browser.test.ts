@@ -585,6 +585,111 @@ test("a project paused again after a recorded resume offers Resume project on th
   assert.equal(d.project(ids.pausedProject).paused, 0);
 });
 
+test("reopening Resume project after cancelling uses the version now shown", async (_t, journey) => {
+  const { f, ids, page, web } = await start(journey);
+  const d = f.service.domain();
+  const sent: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      sent.push(request.postDataJSON());
+  });
+  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  const resume = page.getByRole("button", {
+    name: "Resume project",
+    exact: true,
+  });
+  const dialog = page.getByRole("alertdialog");
+  await resume.waitFor();
+  await resume.click();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(sent.length, 0);
+  // The project changes while it stays paused, and the page reads it.
+  const before = Number(d.project(ids.pausedProject).version);
+  d.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: ids.pausedProject,
+    expectedVersion: before,
+    instructions: "Changed elsewhere",
+  });
+  const after = Number(d.project(ids.pausedProject).version);
+  assert.ok(after > before);
+  await page
+    .getByRole("button", { name: "Refresh tasks", exact: true })
+    .click();
+  await page
+    .getByRole("status")
+    .filter({ hasText: "Project paused" })
+    .waitFor();
+  await resume.click();
+  await dialog.getByRole("button", { name: "Resume", exact: true }).click();
+  await page.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.expectedVersion, after);
+  assert.equal(await page.getByText(/saved elsewhere/).count(), 0);
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+});
+
+test("a Resume conflict reviewed while the project is still paused resumes with the newer version", async (_t, journey) => {
+  const { f, ids, page, web } = await start(journey);
+  const d = f.service.domain();
+  const sent: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      sent.push(request.postDataJSON());
+  });
+  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  const resume = page.getByRole("button", {
+    name: "Resume project",
+    exact: true,
+  });
+  const confirm = async () => {
+    await resume.click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "Resume", exact: true })
+      .click();
+  };
+  await resume.waitFor();
+  // Another actor changes the project while it stays paused; this page has not read it.
+  const before = Number(d.project(ids.pausedProject).version);
+  d.execute({
+    type: "project.configure",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: ids.pausedProject,
+    expectedVersion: before,
+    instructions: "Changed elsewhere",
+  });
+  const after = Number(d.project(ids.pausedProject).version);
+  await confirm();
+  const review = page.getByRole("button", {
+    name: "Review changes",
+    exact: true,
+  });
+  await review.waitFor();
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]?.expectedVersion, before);
+  assert.equal(d.project(ids.pausedProject).paused, 1);
+  await review.click();
+  await review.waitFor({ state: "hidden" });
+  await resume.waitFor();
+  await confirm();
+  await page.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]?.expectedVersion, after);
+  assert.notEqual(sent[1]?.key, sent[0]?.key);
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+});
+
 test("a routing fallback row names Ensemble as the next actor without the operator tone", async (_t, journey) => {
   const { ids, page } = await start(journey, "/app/tasks?state=all");
   await page.route("**/api/operator/task-list*", async (route) => {
