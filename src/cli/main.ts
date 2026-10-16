@@ -616,17 +616,10 @@ export function installCli(deps: CliDeps): InstallCli {
       readHiddenPassword(deps.stdin, deps.stderr, prompt),
     login: async (name, origin, token, tokenFile, signal) => {
       rejectManaged(deps.env);
-      // The identity check honors both its own timeout and the install's cancellation.
+      // The identity check stops with the install's timeout or interrupt.
       const cancellable: CliDeps = {
         ...deps,
-        fetch: (input, init) =>
-          deps.fetch(input, {
-            ...init,
-            signal: AbortSignal.any([
-              signal,
-              ...(init?.signal ? [init.signal] : []),
-            ]),
-          }),
+        fetch: (input, init) => deps.fetch(input, { ...init, signal }),
       };
       if (tokenFile)
         writeFileSync(tokenFile, `${token}\n`, { flag: "wx", mode: 0o600 });

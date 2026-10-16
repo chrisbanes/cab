@@ -222,14 +222,18 @@ test("a stalled or interrupted credential store is bounded, revokes the credenti
       return response;
     };
     // The CLI's identity request never answers; only its signal ends it.
-    const stalled: typeof fetch = (input, init) =>
-      String(input).endsWith("/api/operator/cli")
-        ? new Promise((_, reject) =>
-            init?.signal?.addEventListener("abort", () =>
-              reject(init.signal?.reason),
-            ),
-          )
-        : f.rewritten(input, init);
+    const interrupt = new AbortController();
+    const stalled: typeof fetch = (input, init) => {
+      if (!String(input).endsWith("/api/operator/cli"))
+        return f.rewritten(input, init);
+      // The interrupt lands while the identity request is in flight.
+      if (cause === "interrupt") setTimeout(() => interrupt.abort(), 20);
+      return new Promise((_, reject) =>
+        init?.signal?.addEventListener("abort", () =>
+          reject(init.signal?.reason),
+        ),
+      );
+    };
     const keychain = new MemoryKeychain();
     const deps = {
       env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
@@ -241,14 +245,12 @@ test("a stalled or interrupted credential store is bounded, revokes the credenti
       keychain: () => keychain,
       now: Date.now,
     } as unknown as CliDeps;
-    const interrupt = new AbortController();
-    if (cause === "interrupt") setTimeout(() => interrupt.abort(), 50);
     const started = Date.now();
     const outcome = await issueInstallCredential(
       {
         fetch: api,
-        // The 20 s store bound runs 100 times faster, as in the lifecycle tests.
-        timeout: (ms: number) => AbortSignal.timeout(ms / 100),
+        // Only the 20 s store bound is shortened; the sign-in requests keep real time.
+        timeout: (ms: number) => AbortSignal.timeout(ms === 20_000 ? 200 : ms),
       } as unknown as ServiceHost,
       f.origin,
       "fixture-password",

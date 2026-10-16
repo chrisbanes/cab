@@ -767,12 +767,15 @@ export async function issueInstallCredential(
     );
     const issued = operatorCredentialIssuedSchema.parse(await minted.json());
     try {
-      // Bounded and interruptible; an abandoned store falls through to the revoke below.
-      const storing = AbortSignal.any([
-        host.timeout(READINESS_PROBE_MS),
-        ...(signal ? [signal] : []),
-      ]);
-      await bounded(store(issued.token, storing), storing);
+      // `store` is awaited to the end so that what it persisted always matches what is
+      // reported; its signal bounds and cancels its network check, and a failure revokes.
+      await store(
+        issued.token,
+        AbortSignal.any([
+          host.timeout(READINESS_PROBE_MS),
+          ...(signal ? [signal] : []),
+        ]),
+      );
     } catch {
       await call(
         "POST",
@@ -887,8 +890,8 @@ async function installServiceLocked(
         throw new ServiceFailure("The operator auth file could not be created");
       }
     }
-    stage = "render";
     service.checkInterrupt();
+    stage = "render";
     service.prepareDirectories();
     ({ record, logs } = await service.activate(version as string, root, {
       dataDirectory: service.dataDir,

@@ -1303,6 +1303,7 @@ class FakeCli implements InstallCli {
   prompts: string[] = [];
   calls: string[] = [];
   logins: unknown[][] = [];
+  signals: unknown[] = [];
 
   async readPassword(prompt: string) {
     this.prompts.push(prompt);
@@ -1312,6 +1313,7 @@ class FakeCli implements InstallCli {
   async login(...args: unknown[]) {
     this.calls.push("login");
     this.logins.push(args.slice(0, 4));
+    this.signals.push(args[4]);
     if (this.failLogin) throw new Error("keychain unavailable");
   }
   async doctor(connection: string) {
@@ -1393,6 +1395,7 @@ test("install TARBALL unpacks, asks for the password, signs in, runs doctor and 
   assert.equal(credential?.headers["x-csrf-token"], "c".repeat(43));
   assert.equal(credential?.headers.cookie, "session=abc");
   assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, undefined]]);
+  assert.ok(result.cli.signals[0] instanceof AbortSignal);
   assert.deepEqual(result.cli.calls, ["login", "doctor local"]);
   assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
   const output = JSON.parse(result.stdout);
@@ -1728,9 +1731,9 @@ test("the default tar extraction is killed when its signal aborts", async (t) =>
   const destination = join(root, "out");
   mkdirSync(destination);
   const running = () =>
-    execFileSync("ps", ["-axo", "command"], { encoding: "utf8" }).includes(
-      fifo,
-    );
+    execFileSync("ps", ["-axww", "-o", "command"], {
+      encoding: "utf8",
+    }).includes(fifo);
   const interrupt = new AbortController();
   const extraction = defaultServiceHost().extract(
     fifo,
