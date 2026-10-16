@@ -2633,7 +2633,7 @@ function Changes({
         state={state.changes}
         changed={changed}
       />
-      {changes ? (
+      {changes && (
         <>
           <p>Recorded files: {changes.files.join(", ") || "not supplied"}</p>
           <p>
@@ -2655,10 +2655,8 @@ function Changes({
             </p>
           ))}
         </>
-      ) : (
-        <p>No recorded file, commit or diff metadata for this result.</p>
       )}
-      {d?.binding ? (
+      {d?.binding && (
         <>
           <p>
             PR #{d.binding.number} · {d.binding.repositoryName} ·{" "}
@@ -2707,8 +2705,6 @@ function Changes({
             </p>
           )}
         </>
-      ) : (
-        <p>No bound PR. Provider checks and repair ownership unavailable.</p>
       )}
       {d && d.omittedBlockerCount > 0 && (
         <p>

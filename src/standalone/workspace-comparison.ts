@@ -274,7 +274,7 @@ function parseRawChanges(output: Buffer): RawChange[] | undefined {
   const fields = decoded.split("\0");
   if (fields.at(-1) !== "") return undefined;
   const changes: RawChange[] = [];
-  for (let index = 0; index < fields.length - 1;) {
+  for (let index = 0; index < fields.length - 1; ) {
     const header = fields[index++];
     if (!header) return undefined;
     const match =

@@ -979,8 +979,8 @@ Execution admission always rereads Git.
 #### Comparisons and turn capture
 
 Authenticated JSON comparison reads are served at
-`/api/operator/tasks/{taskId}/comparisons`. Branch reads use the task repository's
-configured ref when it names a local branch, otherwise an explicit
+`/api/operator/tasks/{taskId}/comparisons`. Branch reads use the task
+repository's configured ref when it names a local branch, otherwise an explicit
 operator-selected local base branch, and its exact merge-base commit; they do
 not guess a base or fetch or check out refs. Uncommitted reads support all,
 staged and unstaged changes. Repository-free tasks can be observed around an
@@ -1228,11 +1228,11 @@ Contract details:
   Replay returns the same receipt.
 - Refusals for a completed lead are definitive 409s: `conflict` for messages
   (`Follow-up unavailable: task is not open`, `Follow-up unavailable: latest
-result is not the newest unambiguous work`, or the existing
+  result is not the newest unambiguous work`, or the existing
   pending-or-running refusal for a held lead or non-lead) and
   `local-review-recipient-unavailable` for reviews. A defensive guard also
   refuses a result that already has a follow-up (`Follow-up unavailable: latest
-result already has a follow-up`); a follow-up returns the lead to pending and
+  result already has a follow-up`); a follow-up returns the lead to pending and
   any turn that completes it again has newer work, so this is not expected to
   occur.
 - Resumability keys on the result's work identity, not the assignment version:

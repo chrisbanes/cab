@@ -239,10 +239,15 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     .getByText(/Newer source revision 2/)
     .first()
     .waitFor({ state: "attached" });
-  await page
-    .getByText(/No bound PR/)
-    .first()
+  const changesSection = page.locator("#changes");
+  await changesSection
+    .getByText("Refresh delivery status", { exact: true })
     .waitFor({ state: "attached" });
+  const changesText = await changesSection.textContent();
+  assert.ok(!changesText?.includes("No bound PR"));
+  assert.ok(
+    !changesText?.includes("No recorded file, commit or diff metadata"),
+  );
   await page
     .getByRole("button", { name: "Set viewing reference", exact: true })
     .click();

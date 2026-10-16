@@ -101,7 +101,15 @@ class ChangesRuntime extends OperatorFixtureRuntime {
 
 async function startChangesJourney(
   j: BrowserJourney,
-  { recordResult = true }: { recordResult?: boolean } = {},
+  {
+    recordResult = true,
+    alphaRef,
+    beforeOpen,
+  }: {
+    recordResult?: boolean;
+    alphaRef?: string;
+    beforeOpen?: (alphaWorkspacePath: string) => void;
+  } = {},
 ) {
   const fixture = await j.start("fixture.create", () =>
     createOperatorFixture(
@@ -128,7 +136,11 @@ async function startChangesJourney(
     "Inspect exact workspace changes",
     "Keep repository comparisons local",
     [
-      { repositoryId: "repo-alpha", path: alphaSource },
+      {
+        repositoryId: "repo-alpha",
+        path: alphaSource,
+        ...(alphaRef ? { ref: alphaRef } : {}),
+      },
       { repositoryId: "repo-beta", path: betaSource },
     ],
   );
@@ -154,6 +166,7 @@ async function startChangesJourney(
   );
   assert.ok(alpha);
   assert.ok(beta);
+  beforeOpen?.(alpha.workspacePath);
   const alphaHead = git(alpha.workspacePath, "rev-parse", "HEAD");
 
   const web = await j.start("fixture.web", () => fixture.startWeb());
@@ -261,6 +274,78 @@ async function startChangesJourney(
   };
 }
 
+test("Changes opens on the Branch comparison against the configured ref", async (_t, j) => {
+  const { alpha, changes, page, comparisonTargetControl, comparisonRequests } =
+    await startChangesJourney(j, {
+      recordResult: false,
+      alphaRef: "main",
+      beforeOpen: (workspace) => {
+        writeFileSync(join(workspace, "default-ref.md"), "opened by default\n");
+        git(workspace, "add", "default-ref.md");
+        git(workspace, "commit", "--quiet", "-m", "default ref change");
+      },
+    });
+  const mergeBase = git(alpha.workspacePath, "merge-base", "main", "HEAD");
+
+  // Choosing a repository is not a base-branch step; the fixture lists beta
+  // first and it keeps the HEAD ref, so it still needs a base.
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption("repo-alpha");
+  const list = changes.getByLabel("Workspace comparison files");
+  await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
+  const branchRead = new URL(
+    comparisonRequests.find((url) => {
+      const params = new URL(url).searchParams;
+      return (
+        params.get("repositoryId") === "repo-alpha" &&
+        !params.has("comparisonId")
+      );
+    }) ?? "http://missing.invalid/",
+  );
+  assert.equal(branchRead.searchParams.get("target"), "branch");
+  assert.equal(branchRead.searchParams.has("baseBranch"), false);
+  assert.equal(
+    await changes.getByLabel("Local base branch").inputValue(),
+    "main",
+  );
+  assert.equal(
+    await changes.locator(".changes-baseline").innerText(),
+    `main @ ${mergeBase.slice(0, 8)}`,
+  );
+  const strip = await changes.locator(".changes-observation").innerText();
+  assert.doesNotMatch(strip, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
+  assert.doesNotMatch(strip, /[0-9a-f]{40}/);
+  assert.doesNotMatch(strip, /Reason:/);
+  const details = changes.locator(
+    ".changes-observation .action-outcome-details",
+  );
+  await details.locator("summary").click();
+  const detailText = await details.innerText();
+  assert.ok(detailText.includes(mergeBase));
+  assert.match(detailText, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
+
+  // Last turn and Uncommitted stay selectable, and Branch still works after them.
+  for (const target of ["uncommitted", "last-turn", "branch"])
+    await comparisonTargetControl.selectOption(target);
+  await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
+
+  // A refresh that finds nothing new shows no "since you last looked" notice.
+  const refreshed = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.get("refresh") === "true"
+    );
+  });
+  await changes
+    .getByRole("button", { name: "Refresh comparison", exact: true })
+    .click();
+  await refreshed;
+  await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
+  assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
+});
+
 test("production Changes preserves exact repository baselines and last-good refreshes", async (t, j) => {
   const {
     fixture,
@@ -366,9 +451,9 @@ test("production Changes preserves exact repository baselines and last-good refr
     "exact alpha branch comparison read by comparisonId",
   );
   await changes
-    .locator(".changes-observation .identifier")
-    .getByText(`Comparison ${alphaBody.data.comparisonId}`, { exact: true })
-    .waitFor();
+    .locator(".changes-observation .action-outcome-fields dd")
+    .getByText(alphaBody.data.comparisonId, { exact: true })
+    .waitFor({ state: "attached" });
   const alphaRequestUrl = new URL(alphaResponse.url());
   if (alphaBody.data.state !== "available")
     t.diagnostic(
@@ -394,7 +479,9 @@ test("production Changes preserves exact repository baselines and last-good refr
           truncated: alphaBody.data.comparison?.truncated,
           entries: alphaBody.data.comparison?.entries,
         },
-        observation: await changes.locator(".changes-observation").innerText(),
+        observation: await changes
+          .locator(".changes-observation")
+          .textContent(),
         boundedDom: (await changes.innerText()).slice(0, 2000),
       })}`,
     );
@@ -511,7 +598,8 @@ test("production Changes preserves exact repository baselines and last-good refr
         .getByLabel("Repository", { exact: true })
         .inputValue(),
       selectedBase: await baseBranchControl.inputValue(),
-      observation: await changes.locator(".changes-observation").innerText(),
+      observation:
+        (await changes.locator(".changes-observation").textContent()) ?? "",
       responses: comparisonResponses.slice(-5),
       dom: (await changes.innerText()).slice(0, 1800),
     })}`,
@@ -522,7 +610,7 @@ test("production Changes preserves exact repository baselines and last-good refr
   );
   assert.equal(await baseBranchControl.inputValue(), "unrelated");
   assert.match(
-    await changes.locator(".changes-observation").innerText(),
+    (await changes.locator(".changes-observation").textContent()) ?? "",
     new RegExp(noMergeBaseBody.data.comparisonId),
   );
   const requestCountBeforeCachedRestore = comparisonRequests.length;
@@ -532,11 +620,11 @@ test("production Changes preserves exact repository baselines and last-good refr
     .waitFor();
   assert.equal(await baseBranchControl.inputValue(), "base-alpha");
   assert.match(
-    await changes.locator(".changes-observation").innerText(),
+    (await changes.locator(".changes-observation").textContent()) ?? "",
     new RegExp(alphaBody.data.comparisonId),
   );
   assert.doesNotMatch(
-    await changes.locator(".changes-observation").innerText(),
+    (await changes.locator(".changes-observation").textContent()) ?? "",
     /no-merge-base/,
   );
   assert.equal(
@@ -743,7 +831,8 @@ test("production Changes preserves exact repository baselines and last-good refr
       };
     });
   const beforeFailure = {
-    comparison: await changes.locator(".changes-observation").innerText(),
+    comparison:
+      (await changes.locator(".changes-observation").textContent()) ?? "",
     selection: await changes.locator(".changes-selection").innerText(),
     anchor: await inspectReadingAnchor(),
   };
@@ -781,7 +870,8 @@ test("production Changes preserves exact repository baselines and last-good refr
     timeout: 1_000,
   });
   const whileFailureHeld = {
-    comparison: await changes.locator(".changes-observation").innerText(),
+    comparison:
+      (await changes.locator(".changes-observation").textContent()) ?? "",
     selection: await changes.locator(".changes-selection").innerText(),
     anchor: await inspectReadingAnchor(),
     refreshDisabled: await changes
@@ -810,7 +900,8 @@ test("production Changes preserves exact repository baselines and last-good refr
   expected503WindowEndedAt = Date.now();
   consoleState.expected503Window = false;
   const afterFailure = {
-    comparison: await changes.locator(".changes-observation").innerText(),
+    comparison:
+      (await changes.locator(".changes-observation").textContent()) ?? "",
     selection: await changes.locator(".changes-selection").innerText(),
     anchor: await inspectReadingAnchor(),
   };
@@ -925,7 +1016,7 @@ test("production Changes preserves exact repository baselines and last-good refr
     "base-alpha",
   );
   assert.match(
-    await changes.locator(".changes-observation").innerText(),
+    (await changes.locator(".changes-observation").textContent()) ?? "",
     new RegExp(alphaBody.data.comparisonId),
   );
   assert.equal(
@@ -1091,7 +1182,9 @@ test("production Changes separates staged and unstaged snapshots and retains exp
           truncated: allBody.data.comparison?.truncated,
           entries: allBody.data.comparison?.entries,
         },
-        observation: await changes.locator(".changes-observation").innerText(),
+        observation: await changes
+          .locator(".changes-observation")
+          .textContent(),
         boundedDom: (await changes.innerText()).slice(0, 2000),
       })}`,
     );
@@ -1108,7 +1201,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
     .waitFor();
   assert.equal(partialComparisonId, allBody.data.comparisonId);
   assert.match(
-    await changes.locator(".changes-observation").innerText(),
+    (await changes.locator(".changes-observation").textContent()) ?? "",
     new RegExp(partialComparisonId),
   );
   await page.unroute(failRefreshRoute);
@@ -1226,7 +1319,7 @@ test("production Changes separates staged and unstaged snapshots and retains exp
     )
     .waitFor();
   assert.match(
-    await changes.locator(".changes-observation").innerText(),
+    (await changes.locator(".changes-observation").textContent()) ?? "",
     new RegExp(allBody.data.comparisonId),
   );
   assert.equal(
@@ -1603,10 +1696,8 @@ test("production Changes retains pending and latest-finished Last-turn provenanc
   ])
     assert.ok(finishedText.includes(expected), expected);
   assert.doesNotMatch(finishedText, /Capture incomplete/);
-  assert.match(
-    await changes.locator(".changes-refresh-notice").innerText(),
-    /^Refresh found a different comparison since you last looked: \d+ added, \d+ removed, \d+ changed file entries\.$/,
-  );
+  // The finished capture adds no file entries over the previous one, so there is no change to announce.
+  assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
   await captureBrowserEvidence(page, "1366-finished-last-turn-identity");
 
   // An incomplete finished capture discloses its gap instead of looking complete.

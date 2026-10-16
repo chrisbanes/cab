@@ -10,9 +10,10 @@ import {
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
-import { OutcomeDetails } from "./action-feedback.js";
+import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
 import { failureCause } from "./outcome-copy.js";
+import { codeSentence, shortId } from "./presentation.js";
 import { DiffHunk, DiffLayoutControls, type Anchor } from "./diff-view.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
 import { RangeControls } from "./range-controls.js";
@@ -186,7 +187,8 @@ function refreshSummary(
   previous: Snapshot | undefined,
   next: Snapshot | undefined,
 ) {
-  if (!previous || !next)
+  if (!previous) return null;
+  if (!next)
     return "Refresh found a different comparison; it could not be compared with the one you last looked at.";
   const identity = (entry: Entry) =>
     [entry.repositoryId ?? "", entry.path, entry.changeSet ?? ""].join(
@@ -206,6 +208,7 @@ function refreshSummary(
     else if (old !== signature) changed++;
   }
   const removed = [...before.keys()].filter((key) => !after.has(key)).length;
+  if (!added && !removed && !changed) return null;
   return `Refresh found a different comparison since you last looked: ${added} added, ${removed} removed, ${changed} changed file entries.`;
 }
 
@@ -394,13 +397,11 @@ export function TaskWorkspaceChanges({
         const previousRead = state.comparisonReads[key];
         const oldId = responseId(previousRead);
         const newId = responseId(finalRead.data);
-        state.refreshNotice =
+        const refreshText =
           previousRead && oldId !== newId
-            ? {
-                key,
-                text: refreshSummary(snapshotFor(previousRead), snapshot),
-              }
+            ? refreshSummary(snapshotFor(previousRead), snapshot)
             : null;
+        state.refreshNotice = refreshText ? { key, text: refreshText } : null;
         if (state.selection && oldId !== newId) {
           const match =
             snapshot && selectionMatch(state.selection, snapshot, taskId);
@@ -458,6 +459,28 @@ export function TaskWorkspaceChanges({
   const snapshot = snapshotFor(current);
   const currentRequest = request.key === key ? request : null;
   const id = responseId(current);
+  const reason = current && "reason" in current ? current.reason : undefined;
+  const reasonSentence = reason
+    ? codeSentence(
+        reason,
+        {
+          "base-branch-required":
+            "No base branch is configured for this repository. Select a local branch; none is inferred or checked out.",
+          "base-branch-unavailable":
+            "The selected local branch is not available. Select another local branch.",
+          "no-merge-base":
+            "The selected local branch has no usable merge base.",
+        },
+        "",
+      )
+    : "";
+  const detailFields: OutcomeField[] = [
+    ...(id ? ([["Comparison", id]] as const) : []),
+    ...(snapshot?.target !== "turn" && snapshot?.baseline
+      ? ([["Baseline commit", snapshot.baseline.commit]] as const)
+      : []),
+    ...(reason ? ([["Reason", reason]] as const) : []),
+  ];
   const selectedIndex =
     snapshot && state.selectedEntryKey
       ? snapshot.entries.findIndex(
@@ -615,7 +638,13 @@ export function TaskWorkspaceChanges({
               <NativeSelect
                 id="changes-base-branch"
                 aria-label="Local base branch"
-                value={baseBranch ?? ""}
+                value={
+                  baseBranch ??
+                  (snapshot?.target === "branch"
+                    ? snapshot.baseline?.branch
+                    : undefined) ??
+                  ""
+                }
                 onChange={(event) => {
                   state.baseBranchByRepository[repositoryId] =
                     event.target.value || "";
@@ -687,14 +716,11 @@ export function TaskWorkspaceChanges({
               ? "Current turn unsettled"
               : current.state}
           </StatusBadge>
-          {id && <span className="identifier">Comparison {id}</span>}
           {snapshot && <span>As of {dateLabel(snapshot.observedAt)}</span>}
-          {snapshot && snapshot.target !== "turn" && (
-            <span className="changes-baseline">
-              Baseline: repository {snapshot.repositoryId} ·{" "}
-              {snapshot.baseline
-                ? `${snapshot.baseline.kind}${snapshot.baseline.branch ? ` of ${snapshot.baseline.branch}` : ""} @ ${snapshot.baseline.commit}`
-                : "not established"}
+          {snapshot && snapshot.target !== "turn" && snapshot.baseline && (
+            <span className="changes-baseline" title={snapshot.baseline.commit}>
+              {snapshot.baseline.branch ?? "HEAD"} @{" "}
+              {shortId(snapshot.baseline.commit)}
             </span>
           )}
           {currentRequest?.pending && <span>Refreshing…</span>}
@@ -705,19 +731,10 @@ export function TaskWorkspaceChanges({
               <span className="identifier">{currentRequest.error}</span>
             </span>
           )}
-          {current.state === "unavailable" &&
-            current.reason === "base-branch-required" && (
-              <span>
-                Select a local branch. No branch is inferred or checked out.
-              </span>
-            )}
-          {current.state === "unavailable" &&
-            current.reason === "no-merge-base" && (
-              <span>The selected local branch has no usable merge base.</span>
-            )}
-          {"reason" in current && current.reason && (
-            <span className="identifier">Reason: {current.reason}</span>
+          {current.state === "unavailable" && reasonSentence && (
+            <span>{reasonSentence}</span>
           )}
+          <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>
           )}
@@ -885,7 +902,7 @@ export function TaskWorkspaceChanges({
                 <p className="changes-provenance">
                   {snapshot.target === "turn"
                     ? `Last turn · work ${snapshot.workId} · assignment ${snapshot.assignmentId} · profile ${snapshot.profileId}`
-                    : `Current workspace · repository ${snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline?.commit ?? ""}`}
+                    : `Current workspace · repository ${snapshot.repositoryId} · ${snapshot.baseline?.kind ?? "baseline unavailable"} ${snapshot.baseline?.branch ?? ""} ${snapshot.baseline ? shortId(snapshot.baseline.commit) : ""}`}
                 </p>
                 {state.selection && (
                   <p role="status" className="changes-selection">
