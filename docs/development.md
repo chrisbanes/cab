@@ -106,6 +106,9 @@ telemetry, settled effects, ended callbacks, and no Stop or known survivor. Code
 and Ensemble retries share a two-retry limit; uncertain or other failures remain
 held.
 On first use, the directory must be empty or carry Ensemble's standalone marker.
+Claiming an empty directory owned by the service user sets its mode to `0700`; an
+existing marked directory keeps its mode, and readiness reports one that permits
+group or other access.
 Startup can also recover an interrupted first start when the only files are an
 empty `.ensemble-owner.sqlite`, its SQLite journal if present, and an absent or
 partial marker whose contents match the beginning of the expected marker.

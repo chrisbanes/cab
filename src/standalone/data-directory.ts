@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -205,6 +206,13 @@ export class StandaloneDataDirectory {
           throw new Error(
             "Data directory is not a marked standalone directory",
           );
+        if (lstatSync(canonical).uid === process.getuid?.()) {
+          try {
+            chmodSync(canonical, 0o700);
+          } catch {
+            // Readiness reports a mode that could not be changed.
+          }
+        }
         const markerPath = join(canonical, STANDALONE_MARKER_NAME);
         (options.markerWriter ?? defaultMarkerWriter)(
           markerPath,

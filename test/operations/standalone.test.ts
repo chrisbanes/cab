@@ -12,6 +12,7 @@ import {
   realpathSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -170,6 +171,22 @@ async function ownerProcess(
   });
   return child;
 }
+
+test("claiming an empty data directory makes it private; a claimed one keeps its mode", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-claim-mode-"));
+  const data = join(root, "data");
+  try {
+    mkdirSync(data);
+    chmodSync(data, 0o755);
+    StandaloneDataDirectory.openExclusive(data).close();
+    assert.equal(statSync(data).mode & 0o777, 0o700);
+    chmodSync(data, 0o755);
+    StandaloneDataDirectory.openExclusive(data).close();
+    assert.equal(statSync(data).mode & 0o777, 0o755);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("canonical directory has one process owner; crash and failed startup release ownership", async () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-owner-"));
