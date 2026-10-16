@@ -749,17 +749,14 @@ export async function issueInstallCredential(
     if (login.status !== 200) return "failed";
     signedIn = true;
     await nextSession(login);
-    const issued = operatorCredentialIssuedSchema.parse(
-      await // Not interruptible: an abort after the server minted it would orphan the credential.
-      (
-        await call(
-          "POST",
-          "/api/operator/credentials",
-          { name, scope: "read", expiresInDays: 90 },
-          false,
-        )
-      ).json(),
+    // Not interruptible: an abort after the server minted it would orphan the credential.
+    const minted = await call(
+      "POST",
+      "/api/operator/credentials",
+      { name, scope: "read", expiresInDays: 90 },
+      false,
     );
+    const issued = operatorCredentialIssuedSchema.parse(await minted.json());
     try {
       await store(issued.token);
     } catch {

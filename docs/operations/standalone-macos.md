@@ -54,7 +54,7 @@ nothing. A later failure keeps the unpacked version, so a rerun reuses it.
 already sit in `STATE/versions` (for example one you unpacked there with
 `tar -xzf FILE --strip-components 1 -C "$STATE/versions/0.1.0"`).
 
-Install refuses, changing nothing, unless the tarball is a readable file (or the
+Install refuses, changing nothing beyond creating an empty `STATE` (mode `0700`), unless the tarball is a readable file (or the
 release sits directly in `STATE/versions` with a `manifest.json` naming the same
 version), the label is not loaded, no install record or LaunchAgent for the label
 exists, and the port is free. A missing auth file also refuses outside an
@@ -69,12 +69,12 @@ waits up to 120 seconds for `/app`. The plist names the release's own
 `node/bin/node` and `dist/src/standalone/cli.js`, so each version keeps its exact
 executable.
 
-If unpacking fails, install exits 1 before any job exists and keeps what it
-created (the unpacked version, and the auth file once created, so a rerun asks for
-the existing password). If bootstrap or the wait fails, install boots out the job it
-started, confirms the process exited, removes the LaunchAgent and its record, keeps
-the data, auth and logs, reports the log paths and exits 1. Run it again after
-fixing the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
+If unpacking fails, install exits 1 before any job exists. If bootstrap or the
+wait fails, install boots out the job it started, confirms the process exited,
+removes the LaunchAgent and its record, keeps the data, auth and logs, reports the
+log paths and exits 1. Either way it keeps what it already created: the unpacked
+version, and the auth file once created, so a rerun asks for the existing password
+instead of a new one. Run it again after fixing the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
 keeps the record so that `service uninstall` can finish.
 
 Once `/app` answers, the service stays installed whatever follows. Install signs

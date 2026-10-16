@@ -85,13 +85,18 @@ function runOnPty(command, args, { env, prompt, password }) {
         command,
         ...args,
       ],
-      { env: { ...env, TERM: "dumb" }, stdio: ["pipe", "pipe", "pipe"] },
+      {
+        env: { ...env, TERM: "dumb" },
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: true,
+      },
     );
     let output = "";
     let typed = false;
     const timer = setTimeout(() => {
       child.stdin.end();
-      child.kill("SIGTERM");
+      // The whole group: `cat`, `script` and `ensemble` outlive a kill of `sh` alone.
+      process.kill(-child.pid, "SIGTERM");
     }, 600_000);
     child.stdout.on("data", (chunk) => {
       output += chunk;
@@ -153,7 +158,10 @@ function baseline() {
       .out.split("\n")
       .slice(1)
       .map((line) => line.split("\t")[2])
-      .filter(Boolean)
+      // Spotlight's mdworker.shared labels come and go on their own.
+      .filter(
+        (label) => label && !label.startsWith("com.apple.mdworker.shared."),
+      )
       .sort(),
     launchAgents: listing(join(library, "LaunchAgents"), true),
     applicationSupportEnsemble: listing(
