@@ -348,6 +348,16 @@ test("assignmentRow names requester, destination, wait and short id", () => {
   assert.equal(row.title, `Builder · ${"x".repeat(80)}…`);
   assert.equal(row.flow, "Mira → Mira");
   assert.equal(row.wait, "Waiting reason unknown");
+  const waiting = (waitReason: string) =>
+    assignmentRow({ ...one, waitReason } as never, all).wait;
+  assert.equal(
+    waiting("project-paused; task-unready"),
+    "Project paused; Draft: not Ready",
+  );
+  assert.equal(
+    waiting("Claude runtime is not configured"),
+    "Claude runtime is not configured",
+  );
   assert.equal(row.runtime, "Claude · sonnet · default effort");
   assert.equal(assignmentRow(lead as never, all).runtime, "Codex");
   assert.equal(

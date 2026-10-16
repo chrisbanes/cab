@@ -8,6 +8,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { unpairedBadges } from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
 import {
@@ -786,6 +787,15 @@ test("an Inbox question in a paused project shows its hold in the footer, record
   await footer.getByText(pausedHold, { exact: true }).waitFor();
   await footer.getByText(pausedDetail).waitFor();
   assert.equal(await footer.getByText(/Approv/).count(), 0);
+  // The request status is a worded state badge with its symbol, and unclassed text is 13px body.
+  await form.getByText("Awaiting answer", { exact: true }).waitFor();
+  assert.deepEqual(await unpairedBadges(page.locator(".inbox-detail")), []);
+  assert.equal(
+    await footer
+      .locator(".question-status")
+      .evaluate((e) => getComputedStyle(e).fontSize),
+    "13px",
+  );
   await captureBrowserEvidence(page, "1366-inbox-question-hold", {
     fullPage: false,
   });
