@@ -626,7 +626,7 @@ test("first source activation names the selection, says nothing was imported and
   await observationRow(page, "S-1")
     .getByText(/^Synced/)
     .waitFor();
-  await outcome.getByText("Sources refreshed.").waitFor();
+  await outcome.getByText("Refresh finished.").waitFor();
   await savedOutcome(page, firstActivation);
   await page.setViewportSize(phone);
   await noPageOverflow(page);

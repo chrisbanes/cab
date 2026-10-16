@@ -186,7 +186,7 @@ function RefreshObservations(
           setNotice("Refresh requested.");
           try {
             await p.client.refreshSources(p.session.csrfToken);
-            setNotice("Sources refreshed.");
+            setNotice("Refresh finished.");
             p.observations.refresh();
           } catch {
             setNotice(
@@ -286,7 +286,7 @@ function SourceObservations(
           setNotice("Refresh requested.");
           try {
             await p.client.refreshSources(p.session.csrfToken);
-            setNotice("Sources refreshed. Check each source's state below.");
+            setNotice("Refresh finished. Check each source's state below.");
             resource.refresh();
           } catch {
             setNotice(
