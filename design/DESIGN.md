@@ -625,12 +625,13 @@ Sidebar, TopBar, settings section navigation and the action-feedback rules above
 - **Field errors:** each invalid field shows its own fix under the control ("Enter
   a profile name.", "Keep the summary to 120 characters or fewer. It has 128.",
   "Enter a whole number of 1 or more.", the `env:NAME` format), and the first takes
-  focus. One destructive Alert below the form reads "Couldn’t save." and "Fix the
-  highlighted fields. Your changes are still here." with Details. Fields stay
+  focus. One destructive Alert below the form reads "Couldn’t save." above "Fix the
+  highlighted field." (or "Fix the 3 highlighted fields.") and "Your changes are
+  still here.", with Details. Fields stay
   editable and Save stays enabled; errors clear on the next save. A per-project
-  capacity override is highlighted on its own field, like the global cap. As
-  built, every field shows "Check this field." apart from the runtime model and
-  effort errors, and a per-project override error highlights no field.
+  capacity override is highlighted on its own field, like the global cap. A
+  field with no drawn fix, or one the service rejects without a reason, reads
+  "Check this field."
 - **Revoke an available profile:** Revoke profile is a destructive button that
   marks the change; nothing is sent until Save profile. Marked, it becomes Undo
   revoke, Changes to save lists "Revoke Builder", and the helper says revoking
@@ -652,8 +653,9 @@ Sidebar, TopBar, settings section navigation and the action-feedback rules above
   tasks without an assignee go to Jonas to allocate."). The form stays editable so
   the reference can be set. The other states read "No eligible candidates" and
   "Routing off". A TypeSafe failure during a task wakes the lead and is not shown
-  in Settings. As built, the panel prints the raw availability value and has no
-  notice.
+  in Settings. When a reference is configured but the service can’t use it, the
+  notice reads "Routing can’t use its credential reference, so it can’t choose
+  assignees."
 - **Recovery variants:** all four reuse the `127-assignment-recovery-relay` layout
   and stay read-only with Inspect execution as the only action. Evidence
   unavailable reads "We can’t show recovery details for this assignment." and says
@@ -663,9 +665,7 @@ Sidebar, TopBar, settings section navigation and the action-feedback rules above
   refusal") and a no-turn witness ("No turn sent", with "An idle conversation may
   still exist") sit inside their generation’s record with their ID and source, and
   both say "Evidence only. It doesn’t recover the assignment or allow new work."
-  Recovery is applied in the advanced recovery destination. As built, the witness
-  lines read "Historical no-turn submission witness" and "Before-turn archived
-  resume witness".
+  Recovery is applied in the advanced recovery destination.
 - **Ref list in project setup:** Ref is the platform select. Open, it lists the
   default branch first and checked, then the current ref if unlisted, then other
   branches in GitHub’s order. Loading, unavailable discovery and lists over 500

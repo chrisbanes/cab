@@ -31,6 +31,7 @@ export const detailRows = (d: ReceiptDetails): OutcomeField[] =>
  */
 export function ActionOutcome({
   tone,
+  title,
   message,
   action,
   focus = false,
@@ -38,6 +39,8 @@ export function ActionOutcome({
   children,
 }: {
   tone: OutcomeTone;
+  /** A short first line above the message, such as "Couldn't save." */
+  title?: string | undefined;
   message: ReactNode;
   /** The single thing to do next. */
   action?: { label: string; onClick: () => void | Promise<void> } | undefined;
@@ -59,7 +62,10 @@ export function ActionOutcome({
     <>
       <p className="body action-outcome-message">
         {tone === "success" && <Check aria-hidden="true" />}
-        <span>{message}</span>
+        <span>
+          {title && <strong className="action-outcome-title">{title}</strong>}
+          {message}
+        </span>
       </p>
       {children}
       {action && (

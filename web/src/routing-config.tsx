@@ -5,6 +5,7 @@ import {
   savedCandidates,
   type Values,
 } from "./settings-changes.js";
+import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
 import type { TabProps } from "./project-config.js";
 import { joinNames } from "./settings-view.js";
@@ -25,6 +26,48 @@ import {
 
 const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
   [r.name ?? "Name unavailable", r.summary].filter(Boolean).join(" · ");
+
+/** TypeSafe availability in words (frame 172); disabled is the only state with routing off. */
+const availabilityLabel = {
+  available: "TypeSafe available",
+  "missing-client-credentials": "TypeSafe unavailable",
+  "no-eligible-candidates": "No eligible candidates",
+  disabled: "Routing off",
+} as const;
+
+/** Why routing can't choose and who allocates instead; nothing while it can choose. */
+function AvailabilityNotice({ data }: { data: ProjectConfigurationData }) {
+  const { availability } = data.routing;
+  if (availability === "available") return null;
+  const lead =
+      data.profiles.find((r) => r.id === data.project.leadProfileId)?.name ??
+      "the lead",
+    allocate = `New tasks without an assignee go to ${lead} to allocate.`;
+  return (
+    <Alert variant="warning">
+      {availability === "missing-client-credentials" ? (
+        <p className="body">
+          <strong className="action-outcome-title">
+            TypeSafe isn't available for {data.project.name ?? "this project"}.
+          </strong>
+          {data.routing.credentialConfigured
+            ? "Routing can't use its credential reference, so it can't choose assignees."
+            : "Routing has no credential reference, so it can't choose assignees."}{" "}
+          {allocate}
+        </p>
+      ) : availability === "no-eligible-candidates" ? (
+        <p className="body">
+          No candidate profile can be chosen. Add an available profile.{" "}
+          {allocate}
+        </p>
+      ) : (
+        <p className="body">
+          Routing is off. Every new task needs an assignee or goes to {lead}.
+        </p>
+      )}
+    </Alert>
+  );
+}
 
 export function RoutingTab(p: TabProps) {
   const { data, projectId } = p,
@@ -55,8 +98,9 @@ export function RoutingTab(p: TabProps) {
       <div className="settings-column">
         <Panel
           title="Routing"
-          description={`${data.routing.enabled ? "Enabled" : "Disabled"} · availability ${data.routing.availability} · credential ${data.routing.credentialConfigured ? "configured" : "unconfigured"}`}
+          description={`${data.routing.enabled ? "Enabled · " : ""}${availabilityLabel[data.routing.availability]} · ${data.routing.credentialConfigured ? "credential configured" : "no credential reference"}`}
         >
+          <AvailabilityNotice data={data} />
           <form
             onSubmit={(e) =>
               void submitDraft(

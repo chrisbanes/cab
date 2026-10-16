@@ -474,7 +474,7 @@ test("configuration inline validation stale revision and revoked lead failures r
   await signIn(page, web, `/app/projects/${ids.projectId}/settings`);
   await page.getByLabel("Project name", { exact: true }).fill("");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
-  await page.getByText("Check this field.", { exact: true }).waitFor();
+  await page.getByText("Enter a project name.", { exact: true }).waitFor();
   // submitDraft focuses the invalid field on the commit that shows the rejection.
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-label") === "Project name",
@@ -990,6 +990,44 @@ test("Runtime Settings records lowered capacity separately from usage and retain
     height: "20px",
     checked: false,
   });
+  // An invalid override is highlighted on its own field, not only in the Alert.
+  const override = page.getByLabel(
+    "Set capacity override for Paused configuration project",
+    { exact: true },
+  );
+  await override.check();
+  const projectCap = page.getByLabel(
+    "Active-turn cap for Paused configuration project",
+    { exact: true },
+  );
+  await projectCap.fill("2.5");
+  await page
+    .getByRole("button", { name: "Save capacity", exact: true })
+    .click();
+  await page
+    .getByText("Fix the highlighted field. Your changes are still here.")
+    .waitFor();
+  assert.equal(await projectCap.getAttribute("aria-invalid"), "true");
+  assert.equal(
+    await projectCap.evaluate(
+      (e) =>
+        document.getElementById(e.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    ),
+    "Enter a whole number of 1 or more.",
+  );
+  assert.equal(
+    await page
+      .getByLabel("Global active-turn cap", { exact: true })
+      .getAttribute("aria-invalid"),
+    "false",
+  );
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("aria-label") ===
+      "Active-turn cap for Paused configuration project",
+  );
+  await override.uncheck();
   await page.getByLabel("Global active-turn cap", { exact: true }).fill("1");
   await page
     .getByRole("button", { name: "Save capacity", exact: true })

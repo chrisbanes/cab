@@ -283,6 +283,76 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
   await captureBrowserEvidence(page, "1366-recovery");
 });
 
+test("Assignment recovery reads witnesses and missing evidence in plain words", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/assignments/:assignment/recovery",
+  );
+  await page
+    .getByRole("heading", { level: 1, name: "Assignment recovery evidence" })
+    .waitFor();
+  const preTurn = randomUUID(),
+    noTurn = randomUUID();
+  // Witness adoption needs a held runtime generation; the copy only needs the read's fields.
+  let evidence: "witnesses" | "none" = "witnesses";
+  await page.route("**/api/operator/assignments/*/recovery", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    if (evidence === "witnesses") {
+      assert.ok(body.data.records.length >= 2);
+      body.data.records[0].preTurnRejection = {
+        id: preTurn,
+        source: "runtime",
+        predecessorThreadId: "thread-1",
+      };
+      body.data.records[1].noTurnSubmission = {
+        id: noTurn,
+        source: "operator-adopted",
+        idleThreadMayExist: true,
+      };
+    } else {
+      body.data.evidenceAvailable = false;
+      body.data.records = [];
+      body.data.omittedCount = 0;
+      body.data.assignment.executionGeneration = null;
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+  const witness = async (title: string) =>
+    (
+      await page.getByRole("region", { name: title, exact: true }).innerText()
+    ).replace(/\s+/g, " ");
+  assert.equal(
+    await witness("Before-turn refusal"),
+    `Before-turn refusal Witness ${preTurn} · from the runtime The runtime refused to resume the archived conversation before any turn was sent. This attempt never reached a turn. Evidence only. It doesn't recover the assignment or allow new work.`,
+  );
+  assert.equal(
+    await witness("No turn sent"),
+    `No turn sent Witness ${noTurn} · added by an operator An operator confirmed that no turn was sent for this attempt. An idle conversation may still exist that Ensemble hasn't seen. Evidence only. It doesn't recover the assignment or allow new work.`,
+  );
+  evidence = "none";
+  await page.reload();
+  await page
+    .getByText("We can't show recovery details for this assignment.", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByText(
+      "No recovery record was found. That alone doesn't mean the execution ended or that its holds were released.",
+      { exact: false },
+    )
+    .waitFor();
+  await page
+    .getByText(
+      "Generation in use: Unavailable. No turn request for this assignment was accepted with its versions, so the generation in use can't be named. This doesn't mean the execution ended.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await page.getByText("Witness", { exact: false }).count(), 0);
+});
+
 test("phone recovery shows Recovery, current holds and the next step", async (_t, journey) => {
   const { page } = await startSettings(
     journey,

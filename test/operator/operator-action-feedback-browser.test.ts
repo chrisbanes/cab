@@ -183,7 +183,7 @@ for (const [device, viewport] of [
       assert.equal(await alert.getAttribute("role"), "alert");
       assert.equal(
         (await alert.locator("p").innerText()).trim(),
-        "Couldn't save: check the highlighted fields. Your changes are still here.",
+        "Couldn't save.\nFix the highlighted field. Your changes are still here.",
       );
       assert.equal(await alert.getByRole("button").count(), 0);
       assert.doesNotMatch(await alert.locator("p").innerText(), serviceWords);

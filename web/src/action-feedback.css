@@ -18,6 +18,15 @@
   overflow-wrap: anywhere;
 }
 
+.action-outcome-title {
+  display: block;
+  font-weight: 500;
+}
+
+.action-outcome[data-tone="error"] .action-outcome-title {
+  color: var(--nova-destructive-fg);
+}
+
 .action-outcome-message svg {
   flex: none;
   width: 16px;

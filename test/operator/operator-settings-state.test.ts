@@ -881,7 +881,7 @@ test("every outcome reads in plain words and keeps the receipt fields for Detail
       ),
     ),
   );
-  assert.equal(highlighted.notice, outcomeCopy.fields);
+  assert.equal(highlighted.notice, outcomeCopy.fields(1));
 
   const preflight = new ConfigurationDraft();
   await preflight.submit(
@@ -889,7 +889,10 @@ test("every outcome reads in plain words and keeps the receipt fields for Detail
     { type: "project.configure" },
     "csrf",
   );
-  assert.equal(preflight.notice, outcomeCopy.fields);
+  assert.equal(
+    preflight.notice,
+    outcomeCopy.fields(Object.keys(preflight.errors).length),
+  );
 
   const conflict = await run(
     answer(() =>
@@ -914,12 +917,19 @@ test("every outcome reads in plain words and keeps the receipt fields for Detail
   assert.equal(lost.details.code, "command-outcome-unknown");
 
   // The copy names no command, ID, key, number or service term; those live in Details.
+  // The one number allowed is how many fields are highlighted (frame 167).
   for (const draft of [saved, rejected, highlighted, preflight, conflict, lost])
-    assert.doesNotMatch(draft.notice, plain, draft.notice);
+    assert.doesNotMatch(
+      draft.notice.replace(/^Fix the \d+ highlighted/, "Fix the highlighted"),
+      plain,
+      draft.notice,
+    );
   for (const draft of [rejected, highlighted, preflight])
     assert.match(draft.notice, /Your changes are still here\.$/);
-  for (const text of Object.values(outcomeCopy))
+  for (const copy of Object.values(outcomeCopy)) {
+    const text = typeof copy === "string" ? copy : copy(2);
     assert.ok(text.split(/(?<=\.)\s/).length <= 2, text);
+  }
 });
 
 test("a save stays confirmed across a re-read of the same version, not across another writer's", async () => {
@@ -1050,4 +1060,58 @@ test("a callback after render runs at once when nothing is waiting to show, else
   // With every change committed, the next callback runs at once.
   draft.afterRender(() => runs.push("settled"));
   assert.deepEqual(runs, ["fresh", "rejected", "settled"]);
+});
+
+test("schema rejections name each field's fix and keep project override keys", async () => {
+  const offline = new OperatorClient(async () =>
+    assert.fail("nothing is sent"),
+  );
+  const rejected = async (command: Record<string, unknown>) => {
+    const draft = new ConfigurationDraft();
+    await draft.submit(offline, { key: randomUUID(), ...command }, "csrf");
+    assert.equal(draft.phase, "rejected");
+    return draft;
+  };
+  const profile = await rejected({
+    type: "profile.create",
+    profileId: randomUUID(),
+    name: " ",
+    summary: "s".repeat(128),
+    instructions: "",
+    capabilities: "",
+  });
+  assert.deepEqual(profile.errors, {
+    name: "Enter a profile name.",
+    summary: "Keep the summary to 120 characters or fewer. It has 128.",
+  });
+  assert.equal(
+    profile.notice,
+    "Fix the 2 highlighted fields. Your changes are still here.",
+  );
+  const routing = await rejected({
+    type: "routing.configure",
+    projectId: randomUUID(),
+    expectedVersion: 1,
+    enabled: true,
+    credentialRef: "env:typesafe-key",
+    candidateProfileIds: [],
+  });
+  assert.deepEqual(routing.errors, {
+    credentialRef:
+      "Use env: followed by capital letters, digits or underscores, such as env:TYPESAFE_API_KEY.",
+  });
+  assert.equal(
+    routing.notice,
+    "Fix the highlighted field. Your changes are still here.",
+  );
+  const projectId = randomUUID();
+  const capacity = await rejected({
+    type: "capacity.configure",
+    globalLimit: 0,
+    projectOverrides: { [projectId]: 2.5 },
+  });
+  assert.deepEqual(capacity.errors, {
+    globalLimit: "Enter a whole number of 1 or more.",
+    [`projectOverrides.${projectId}`]: "Enter a whole number of 1 or more.",
+  });
 });

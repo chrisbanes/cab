@@ -1,3 +1,4 @@
+import type { z } from "zod";
 import {
   operatorCommandSchema,
   type OperatorCommand,
@@ -10,8 +11,10 @@ import type { ReceiptDetails } from "./outcome-copy.js";
 /** The plain outcome copy of a configuration save. Details, not these lines, carry the codes. */
 export const outcomeCopy = {
   saved: "Saved.",
-  fields:
-    "Couldn't save: check the highlighted fields. Your changes are still here.",
+  /** The title above `fields` when the save was refused for highlighted fields. */
+  fieldsTitle: "Couldn't save.",
+  fields: (count: number) =>
+    `Fix the ${count > 1 ? `${count} highlighted fields` : "highlighted field"}. Your changes are still here.`,
   tooLarge:
     "Couldn't save: the change is too large. Your changes are still here.",
   rejected: "Couldn't save. Your changes are still here.",
@@ -81,6 +84,46 @@ function matchesConfigurationReceipt(c: OperatorCommand, r: CommandReceipt) {
   if (c.type === "project.create" || c.type === "profile.create")
     return result.version === 1;
   return "expectedVersion" in c && result.version === c.expectedVersion + 1;
+}
+
+/** A UUID record key, such as a project override, kept so the error names its own field. */
+const uuidSegment =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const namedLengths = new Set([
+  "name",
+  "summary",
+  "instructions",
+  "capabilities",
+  "guidance",
+]);
+/**
+ * The fix a schema issue asks for under its field (frames 156 and 167–169). Fields
+ * without drawn copy keep the generic line.
+ */
+function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
+  const [field] = issue.path,
+    command = (input ?? {}) as Record<PropertyKey, unknown>;
+  if (field === "globalLimit" || field === "projectOverrides")
+    return "Enter a whole number of 1 or more.";
+  if (issue.path.length !== 1 || typeof field !== "string")
+    return "Check this field.";
+  const noun = String(command.type).split(".")[0],
+    value = command[field];
+  if (field === "credentialRef" && command.type === "routing.configure")
+    return "Use env: followed by capital letters, digits or underscores, such as env:TYPESAFE_API_KEY.";
+  if (
+    field === "name" &&
+    issue.code === "too_small" &&
+    (noun === "profile" || noun === "project")
+  )
+    return `Enter a ${noun} name.`;
+  if (
+    namedLengths.has(field) &&
+    issue.code === "too_big" &&
+    typeof value === "string"
+  )
+    return `Keep the ${field} to ${issue.maximum} characters or fewer. It has ${value.length}.`;
+  return "Check this field.";
 }
 
 export class ConfigurationDraft {
@@ -265,7 +308,7 @@ export class ConfigurationDraft {
       return;
     this.errors = errors;
     this.phase = "rejected";
-    this.notice = outcomeCopy.fields;
+    this.notice = outcomeCopy.fields(Object.keys(errors).length);
     this.details = { code: "invalid-input" };
     this.credentialRefusal = false;
     this.changed();
@@ -284,14 +327,16 @@ export class ConfigurationDraft {
         const path = issue.path
           .filter(
             (p) =>
-              (typeof p === "string" && /^[A-Za-z][A-Za-z0-9]*$/.test(p)) ||
+              (typeof p === "string" &&
+                (/^[A-Za-z][A-Za-z0-9]*$/.test(p) || uuidSegment.test(p))) ||
               (typeof p === "number" && Number.isSafeInteger(p) && p >= 0),
           )
           .join(".");
-        this.errors[path] = "Check this field.";
+        // The first issue on a field is the one it shows.
+        this.errors[path] ??= fieldFix(issue, input);
       }
       this.phase = "rejected";
-      this.notice = outcomeCopy.fields;
+      this.notice = outcomeCopy.fields(Object.keys(this.errors).length);
       this.details = { code: "invalid-input" };
       this.credentialRefusal = false;
       this.changed();
@@ -299,6 +344,7 @@ export class ConfigurationDraft {
     }
     const bytes = JSON.stringify(parsed.data);
     if (new TextEncoder().encode(bytes).length > 65536) {
+      this.errors = {};
       this.notice = outcomeCopy.tooLarge;
       this.phase = "rejected";
       this.details = { code: "request-too-large" };
@@ -371,7 +417,7 @@ export class ConfigurationDraft {
           : disposition === "conflict"
             ? outcomeCopy.conflict
             : Object.keys(this.errors).length
-              ? outcomeCopy.fields
+              ? outcomeCopy.fields(Object.keys(this.errors).length)
               : outcomeCopy.rejected;
     }
     this.changed();

@@ -164,7 +164,7 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
   await name.waitFor();
   await name.fill("");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
-  await page.getByText("Check this field.").first().waitFor();
+  await page.getByText("Enter a project name.", { exact: true }).waitFor();
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-label") === "Project name",
   );
@@ -383,6 +383,66 @@ test("Routing saves candidates in place without sending guidance, and replaces g
   } finally {
     await page.unroute("**/api/operator/commands");
   }
+});
+
+test("Routing names TypeSafe availability in words and who allocates when it can't choose", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  // The fixture service has no TypeSafe client, so Relay's configured reference can't be used.
+  await page
+    .getByText("Enabled · TypeSafe unavailable · credential configured", {
+      exact: true,
+    })
+    .waitFor();
+  const notice = page.locator('[data-slot="alert"]', {
+    hasText: "TypeSafe isn't available for Relay.",
+  });
+  assert.equal(
+    (await notice.innerText()).trim(),
+    "TypeSafe isn't available for Relay.\nRouting can't use its credential reference, so it can't choose assignees. New tasks without an assignee go to Jonas to allocate.",
+  );
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    credentialRef: null,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  await page.reload();
+  await page
+    .getByText("Enabled · TypeSafe unavailable · no credential reference", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByText(
+      "Routing has no credential reference, so it can't choose assignees. New tasks without an assignee go to Jonas to allocate.",
+      { exact: false },
+    )
+    .waitFor();
+  // The form stays editable so the reference can be set.
+  assert.equal(
+    await page
+      .getByLabel("Credential reference change", { exact: true })
+      .isDisabled(),
+    false,
+  );
+  await page.goto(page.url().replace(ids.relay, ids.atlas));
+  await page
+    .getByText("Routing off · no credential reference", { exact: true })
+    .waitFor();
+  await page
+    .getByText(
+      "Routing is off. Every new task needs an assignee or goes to Mira.",
+      { exact: true },
+    )
+    .waitFor();
 });
 
 test("Routing conflict keeps the checked candidates until the newer version is reviewed", async (_t, journey) => {
