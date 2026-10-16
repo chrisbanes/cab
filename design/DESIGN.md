@@ -1472,14 +1472,19 @@ Presentation and interaction rules that the canvas does not show on its own.
 
 ### Presentation
 
-- No placeholders or raw tokens as content. A missing field is omitted, never
-  printed as "Age unknown", "Responsibility unknown" or "unavailable". A reason or
-  state code reads as a sentence in the web UI, with the code in Details. Where an
-  unknown is the message itself (ownership uncertain), the headline states it once.
+- No placeholders or raw tokens as content. Missing optional metadata (a time, an
+  age, a requester, an empty evidence line) is omitted, never printed as "Age
+  unknown" or "Responsibility unknown". Material a read could not supply, withheld
+  or unavailable evidence and unknown execution or ownership state stay explicit,
+  as a sentence that says so rather than "unavailable" as a value. A reason or state
+  code reads as a sentence in the web UI, with the code in Details. Where an unknown
+  is the message itself (ownership uncertain), the headline states it once.
 - Identifiers are short mono metadata (R1, A-9bd4, an 8-character SHA), never part
   of a sentence. The full value is on hover, copy or in Details.
-- One refresh per page. Read views keep the page-level Refresh; create forms and
-  sub-panels have none.
+- One refresh per page. Read views keep the page-level Refresh, which only
+  re-reads; create forms and sub-panels have none. Asking a provider for a new
+  observation is not a re-read: an imported task keeps its source refresh (Refresh
+  source) as a separate action beside the source.
 - Times use the app's clock label ("synced 17:50", "Updated 4:48 PM"). A range
   appears only when two reads differ.
 
@@ -1612,8 +1617,8 @@ Presentation and interaction rules that the canvas does not show on its own.
   named Atlas. Choose a different name." (`116b-project-setup-duplicate-name`).
   Saving a project under its own current name is allowed. Where projects created
   before this rule share a name, the sidebar, filters and selects add the lead's
-  name ("Atlas · Mira"), or the creation date when the leads match too
-  (`116c-project-name-suffix-specimen`).
+  name ("Atlas · Mira"), or the project ID's first eight characters in mono when
+  the leads match or a project has no lead (`116c-project-name-suffix-specimen`).
 - GitHub sources are named by what they read (acme/atlas issues, a search, the
   Atlas roadmap GitHub Project), with the S-n id in Details. The GitHub source tab
   numbers its sections 1–3 in reading order (`119-project-config-github-source`).
