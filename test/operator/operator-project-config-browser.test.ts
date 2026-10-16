@@ -433,6 +433,22 @@ test("Routing names TypeSafe availability in words and who allocates when it can
       .isDisabled(),
     false,
   );
+  // A revoked lead can't allocate either, so unassigned tasks wait.
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.profiles.Jonas as string,
+    expectedVersion: Number(d.profile(ids.profiles.Jonas as string).version),
+    revoked: true,
+  });
+  await page.reload();
+  await page
+    .getByText(
+      "New tasks without an assignee wait until the project has an available lead.",
+      { exact: false },
+    )
+    .waitFor();
   await page.goto(page.url().replace(ids.relay, ids.atlas));
   await page
     .getByText("Routing off · no credential reference", { exact: true })
@@ -455,7 +471,7 @@ test("Routing names TypeSafe availability in words and who allocates when it can
   await page.reload();
   await page
     .getByText(
-      "Routing is off. Every new task needs an assignee or waits until you set a project lead.",
+      "Routing is off. Every new task needs an assignee or waits until the project has an available lead.",
       { exact: true },
     )
     .waitFor();

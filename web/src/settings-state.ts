@@ -110,7 +110,7 @@ function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
   const noun = String(command.type).split(".")[0],
     value = command[field];
   if (field === "credentialRef" && command.type === "routing.configure")
-    return "Use env: followed by capital letters, digits or underscores, such as env:TYPESAFE_API_KEY.";
+    return "Use env: followed by a capital letter, then capital letters, digits or underscores, such as env:TYPESAFE_API_KEY.";
   if (
     field === "name" &&
     issue.code === "too_small" &&

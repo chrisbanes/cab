@@ -1098,7 +1098,7 @@ test("schema rejections name each field's fix and keep project override keys", a
   });
   assert.deepEqual(routing.errors, {
     credentialRef:
-      "Use env: followed by capital letters, digits or underscores, such as env:TYPESAFE_API_KEY.",
+      "Use env: followed by a capital letter, then capital letters, digits or underscores, such as env:TYPESAFE_API_KEY.",
   });
   assert.equal(
     routing.notice,

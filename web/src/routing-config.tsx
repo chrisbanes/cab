@@ -39,13 +39,16 @@ const availabilityLabel = {
 function AvailabilityNotice({ data }: { data: ProjectConfigurationData }) {
   const { availability } = data.routing;
   if (availability === "available") return null;
-  // Without a lead, unassigned tasks wait (project-lead-unconfigured) instead of being allocated.
-  const lead = data.profiles.find(
-      (r) => r.id === data.project.leadProfileId,
-    )?.name,
+  // Without a usable lead, unassigned tasks wait (project-lead-unconfigured or -revoked).
+  const leadId = data.project.leadProfileId,
+    profile = data.profiles.find((r) => r.id === leadId),
+    lead =
+      leadId !== null && !profile?.revoked
+        ? (profile?.name ?? "the lead")
+        : null,
     allocate = lead
       ? `New tasks without an assignee go to ${lead} to allocate.`
-      : "New tasks without an assignee wait until you set a project lead.";
+      : "New tasks without an assignee wait until the project has an available lead.";
   return (
     <Alert variant="warning">
       {availability === "missing-client-credentials" ? (
@@ -67,7 +70,7 @@ function AvailabilityNotice({ data }: { data: ProjectConfigurationData }) {
         <p className="body">
           {lead
             ? `Routing is off. Every new task needs an assignee or goes to ${lead}.`
-            : "Routing is off. Every new task needs an assignee or waits until you set a project lead."}
+            : "Routing is off. Every new task needs an assignee or waits until the project has an available lead."}
         </p>
       )}
     </Alert>
