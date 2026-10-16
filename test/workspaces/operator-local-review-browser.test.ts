@@ -1075,12 +1075,11 @@ async function loseStageAnswer(
     )
     .waitFor({ state: "attached" });
   // The composer stays open in Files, so the warning waits on the marked Review tab.
-  assert.equal(
-    await page
-      .getByRole("tab", { name: "Review", exact: true })
-      .getAttribute("aria-description"),
-    "A review write needs a check",
-  );
+  // The tab is marked in a later render than the outcome text.
+  await page
+    .getByRole("tab", { name: "Review", exact: true })
+    .and(page.locator('[aria-description="A review write needs a check"]'))
+    .waitFor();
   return { stages, saves, review };
 }
 
