@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "../fixtures/temp.js";
 import { join } from "node:path";
@@ -15,10 +16,14 @@ import type {
   ExecutionInspection,
   RuntimeProcessIdentity,
 } from "../../src/standalone/recovery-types.js";
-import { CaffeinateAssertion } from "../../src/standalone/power.js";
+import {
+  CaffeinateAssertion,
+  SleepWakeListener,
+} from "../../src/standalone/power.js";
 import type {
   PowerEventBatch,
   PowerEventSource,
+  PowerSignalListener,
 } from "../../src/standalone/power.js";
 import type { PowerEventCursor } from "../../src/standalone/state.js";
 import { acquiredOf, startedOf } from "../fixtures/service-internals.js";
@@ -43,6 +48,13 @@ class FakePowerEvents implements PowerEventSource {
   readGate: Promise<void> | undefined;
   failAdvancement = false;
   reads = 0;
+  signals: PowerSignalListener | undefined;
+  startFailure: Error | undefined;
+
+  async start(signals: PowerSignalListener) {
+    if (this.startFailure) throw this.startFailure;
+    this.signals = signals;
+  }
 
   wake() {
     const next = cursor("wake-1");
@@ -101,8 +113,7 @@ class FakeRuntime implements Runtime {
   identityEntered: (() => void) | undefined;
   identityGate: Promise<void> | undefined;
   private toolCall:
-    | ((call: RuntimeToolCall) => Promise<RuntimeToolResult>)
-    | undefined;
+    ((call: RuntimeToolCall) => Promise<RuntimeToolResult>) | undefined;
 
   async start() {}
   async stop() {}
@@ -444,4 +455,117 @@ test("a turn ending while admission awaits still requires a later power poll", a
       await waitUntil(() => runtime.starts === 2);
     },
   );
+});
+
+test("a sleep/wake notification after a fresh poll holds queued work until a later poll reconciles", async () => {
+  await postTurnPowerFixture(
+    async ({ service, runtime, events, secondWorkspace }) => {
+      const power = startedOf(service).power;
+      assert.ok(power);
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+      await power.poll();
+      assert.equal(power.observedForAdmission(), true);
+
+      events.signals?.transition("wake");
+      assert.equal(service.powerStatus()?.admissionHeld, true);
+      const read = deferred();
+      events.readGate = read.promise;
+      const readsBefore = events.reads;
+      await service.submit("second", "second prompt", secondWorkspace);
+      await waitUntil(() => events.reads > readsBefore);
+      assert.equal(runtime.starts, 1, "not admitted before reconciliation");
+
+      read.resolve();
+      await waitUntil(() => runtime.starts === 2);
+      assert.equal(service.powerStatus()?.admissionHeld, false);
+    },
+  );
+});
+
+test("a failed sleep/wake listener explains queued work and power status with its reason until it recovers", async () => {
+  await postTurnPowerFixture(
+    async ({ service, runtime, events, secondWorkspace, queued }) => {
+      const power = startedOf(service).power;
+      assert.ok(power);
+      const reason = "Sleep/wake listener exited (1)";
+      events.signals?.failure(reason);
+      events.startFailure = new Error(reason);
+      const readsBefore = events.reads;
+      await service.submit("second", "second prompt", secondWorkspace);
+      assert.deepEqual(
+        { state: queued().state, reason: queued().reason },
+        { state: "queued", reason },
+      );
+      assert.deepEqual(service.powerStatus(), {
+        assertionFailure: null,
+        admissionHeld: true,
+        admissionReason: reason,
+      });
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      assert.equal(events.reads, readsBefore, "admission does not spin polls");
+      assert.equal(runtime.starts, 1);
+
+      await power.poll();
+      assert.equal(runtime.starts, 1, "a poll alone cannot release");
+      assert.equal(service.powerStatus()?.admissionReason, reason);
+
+      events.startFailure = undefined;
+      await power.poll();
+      await waitUntil(() => runtime.starts === 2);
+      assert.equal(service.powerStatus()?.admissionHeld, false);
+    },
+  );
+});
+
+class ListenerChild extends EventEmitter {
+  readonly stdout = new PassThrough();
+  readonly signals: string[] = [];
+
+  kill(signal: string) {
+    this.signals.push(signal);
+    queueMicrotask(() => this.emit("close", null, signal));
+    return true;
+  }
+}
+
+test("service stop stops the sleep/wake listener child", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-power-listener-stop-"));
+  const children: ListenerChild[] = [];
+  const listener = new SleepWakeListener((() => {
+    const child = new ListenerChild();
+    children.push(child);
+    setImmediate(() => child.stdout.write("ready\n"));
+    return child;
+  }) as never);
+  class ListenerPowerEvents extends FakePowerEvents {
+    override start(signals: PowerSignalListener) {
+      return listener.start(signals);
+    }
+    stop() {
+      return listener.stop();
+    }
+  }
+  const service = new StandaloneService(
+    join(root, "data"),
+    () => new FakeRuntime(),
+    undefined,
+    {
+      power: {
+        enabled: true,
+        eventSource: new ListenerPowerEvents(),
+        pollIntervalMs: 60_000,
+      },
+    },
+  );
+  try {
+    await service.start();
+    assert.equal(children.length, 1);
+    assert.equal(service.powerStatus()?.admissionHeld, false);
+    await service.stop();
+    assert.deepEqual(children[0]?.signals, ["SIGTERM"]);
+    assert.equal(children.length, 1, "no listener is respawned on stop");
+  } finally {
+    await service.stop().catch(() => {});
+    rmSync(root, { recursive: true, force: true });
+  }
 });

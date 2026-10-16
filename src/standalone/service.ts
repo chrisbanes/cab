@@ -485,10 +485,7 @@ const backgroundDiagnosticFallback =
   '{"errorCode":"diagnostic-writer-failed"}\n';
 
 export type RoutingAvailabilityReason =
-  | "disabled"
-  | "missing-client-credentials"
-  | "no-eligible-candidates"
-  | null;
+  "disabled" | "missing-client-credentials" | "no-eligible-candidates" | null;
 
 export interface RoutingAvailability {
   enabled: boolean;
@@ -858,19 +855,19 @@ export class StandaloneService {
             ? deliveryStore.operatorApprovalCurrent(request, caller)
             : Boolean(
                 request.approval &&
-                  deliveryStore.approvalCurrent(
-                    request.approval.interactionId,
-                    caller,
-                    request.action,
-                    request.operationId,
-                  ) &&
-                  coordination.authorizationFor({
-                    assignmentId: caller.assignmentId,
-                    ...request.approval,
-                    action: request.action.kind,
-                    target: canonicalMaterial(request.action.target),
-                    material: request.action,
-                  }),
+                deliveryStore.approvalCurrent(
+                  request.approval.interactionId,
+                  caller,
+                  request.action,
+                  request.operationId,
+                ) &&
+                coordination.authorizationFor({
+                  assignmentId: caller.assignmentId,
+                  ...request.approval,
+                  action: request.action.kind,
+                  target: canonicalMaterial(request.action.target),
+                  material: request.action,
+                }),
               ),
         activationAllowed: (policy) =>
           !policy.credentialRef ||
@@ -2048,8 +2045,7 @@ export class StandaloneService {
 
   /** In-memory only: a manual service restart is the recovery path. */
   runtimeStatus():
-    | { state: "available" }
-    | { state: "unavailable"; since: number } {
+    { state: "available" } | { state: "unavailable"; since: number } {
     const since = this.runtimeUnavailableSince.get(defaultExecutionHarness);
     return since === undefined
       ? { state: "available" }
@@ -2095,8 +2091,7 @@ export class StandaloneService {
     "verified" | "policy" | "failed" | "unavailable"
   > {
     const runtime = this.runtimes.get("codex") as
-      | (Runtime & { verifyLoginAndPolicy?: () => Promise<void> })
-      | undefined;
+      (Runtime & { verifyLoginAndPolicy?: () => Promise<void> }) | undefined;
     if (!runtime || this.runtimeUnavailableSince.has("codex"))
       return "unavailable";
     if (!runtime.verifyLoginAndPolicy) return "failed";
@@ -2113,8 +2108,7 @@ export class StandaloneService {
   /** Supported model and effort values from a started runtime that has read them, else null. */
   harnessSettings(harness: ExecutionHarness): SupportedRuntimeSettings | null {
     const runtime = this.runtimes.get(harness) as
-      | (Runtime & { supportedSettings?: () => unknown })
-      | undefined;
+      (Runtime & { supportedSettings?: () => unknown }) | undefined;
     if (
       !runtime?.supportedSettings ||
       this.runtimeUnavailableSince.has(harness)
@@ -3962,10 +3956,10 @@ export class StandaloneService {
       const binding = state.taskBinding(delivery.deliveryWorkId);
       return Boolean(
         intent?.state === "completed" &&
-          binding?.workId === delivery.deliveryWorkId &&
-          binding.taskId === delivery.taskId &&
-          binding.assignmentId === delivery.recipientAssignmentId &&
-          binding.assignmentVersion === delivery.assignmentVersion,
+        binding?.workId === delivery.deliveryWorkId &&
+        binding.taskId === delivery.taskId &&
+        binding.assignmentId === delivery.recipientAssignmentId &&
+        binding.assignmentVersion === delivery.assignmentVersion,
       );
     };
     for (const delivery of coordination.queuedDeliveries())
@@ -4683,11 +4677,11 @@ export class StandaloneService {
       priorBinding = state.taskBinding(request.previousWorkId);
       waitsForPredecessor = Boolean(
         context &&
-          previous &&
-          previous.state !== "completed" &&
-          previous.workspace === workspaceKey &&
-          priorBinding?.taskId === context.taskId &&
-          priorBinding.assignmentId === context.assignmentId,
+        previous &&
+        previous.state !== "completed" &&
+        previous.workspace === workspaceKey &&
+        priorBinding?.taskId === context.taskId &&
+        priorBinding.assignmentId === context.assignmentId,
       );
       if (
         !previous ||
@@ -4758,13 +4752,14 @@ export class StandaloneService {
     try {
       // Known-unavailable runtimes are never awaited: the scheduler is serial.
       if (waitForRuntime()) return;
-      const processIdentity = await (runtime
-        ? this.untilFailure(
-            runtime,
-            Promise.resolve(runtime.processIdentity?.() ?? null),
-            () => null,
-          )
-        : Promise.resolve(null)
+      const processIdentity = await (
+        runtime
+          ? this.untilFailure(
+              runtime,
+              Promise.resolve(runtime.processIdentity?.() ?? null),
+              () => null,
+            )
+          : Promise.resolve(null)
       ).catch(() => null);
       if (
         this.runtimes.get(harness) !== runtime ||
@@ -4806,10 +4801,13 @@ export class StandaloneService {
       // first. No await may separate this check from state.begin.
       const power = this.current?.power;
       if (power && !power.observedForAdmission()) {
-        const reason = "Waiting for power-event observation";
+        const listenerFailure = power.sleepWakeListenerFailure();
+        const reason = listenerFailure ?? "Waiting for power-event observation";
         state.wait(intent.id, reason);
         store.wait(request.workId, reason);
-        this.pollPowerThenWake(power, generation);
+        // The interval poll retries a failed listener; polling here would spin
+        // because each poll wakes this scheduler again.
+        if (listenerFailure === null) this.pollPowerThenWake(power, generation);
         return;
       }
       const admitted = state.begin(intent.id, {
@@ -5522,8 +5520,7 @@ export class StandaloneService {
     let observed: Record<string, unknown> | undefined;
     try {
       observed = runtime.observedSettings?.(threadId) as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
     } catch {
       observed = undefined;
     }

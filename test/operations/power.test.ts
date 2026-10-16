@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,6 +78,32 @@ const MacPowerEventSource = powerModule.MacPowerEventSource as unknown as new (
   readSleepTimes?: () => Promise<string>,
 ) => PowerEventSource;
 const spawnPowerLogReader = powerModule.spawnPowerLogReader as PowerLogReader;
+interface PowerSignals {
+  transition(kind: "sleep" | "wake"): void;
+  failure(reason: string): void;
+}
+interface SleepWakeListenerPort {
+  start(signals: PowerSignals): Promise<void>;
+  stop(): Promise<void>;
+}
+const SleepWakeListener = powerModule.SleepWakeListener as new (
+  spawn?: (command: string, args: string[]) => ListenerChild,
+  startTimeoutMs?: number,
+  stopTimeoutMs?: number,
+) => SleepWakeListenerPort;
+const MacPowerEventSourceWithListener =
+  powerModule.MacPowerEventSource as unknown as new (
+    readLog: PowerLogReader | undefined,
+    timeoutMs: number,
+    idleTimeoutMs: number,
+    maxLineBytes: number,
+    now: () => number,
+    readSleepTimes: (() => Promise<string>) | undefined,
+    listener: SleepWakeListenerPort,
+  ) => PowerEventSource & {
+    start(signals: PowerSignals): Promise<void>;
+    stop(): Promise<void>;
+  };
 const PowerLogReadTimeout = powerModule.PowerLogReadTimeout as new (
   kind: "idle" | "total",
 ) => Error & { kind: "idle" | "total" };
@@ -137,6 +164,50 @@ class FakeChild extends EventEmitter {
       queueMicrotask(() => this.emit("close", 0, "SIGTERM"));
     return true;
   }
+}
+
+/** A listener child whose stdout the test writes; it closes when killed unless told otherwise. */
+class ListenerChild extends EventEmitter {
+  readonly stdout = new PassThrough();
+  readonly signals: string[] = [];
+
+  constructor(private readonly closeOn: "SIGTERM" | "SIGKILL" | "any" = "any") {
+    super();
+  }
+
+  write(text: string) {
+    this.stdout.write(text);
+  }
+
+  kill(signal: string) {
+    this.signals.push(signal);
+    if (this.closeOn === "any" || this.closeOn === signal)
+      queueMicrotask(() => this.emit("close", null, signal));
+    return true;
+  }
+}
+
+/** A spawn that records listener children and makes each one ready. */
+function readyListenerSpawn(children: ListenerChild[] = []) {
+  return (command: string, args: string[]) => {
+    assert.equal(command, "/usr/bin/osascript");
+    assert.deepEqual(args.slice(0, 3), ["-l", "JavaScript", "-e"]);
+    const child = new ListenerChild();
+    children.push(child);
+    setImmediate(() => child.write("ready\n"));
+    return child;
+  };
+}
+
+function signalRecorder() {
+  const seen: string[] = [];
+  return {
+    seen,
+    signals: {
+      transition: (kind: string) => seen.push(kind),
+      failure: (reason: string) => seen.push(`failure: ${reason}`),
+    } as PowerSignals,
+  };
 }
 
 function powerStore(path: string) {
@@ -1214,12 +1285,14 @@ test("power supervision establishes its baseline from macOS 27 output but holds 
     };
     const power = new ExecutionPower(
       store.state,
-      new MacPowerEventSource(
+      new MacPowerEventSourceWithListener(
         readLog,
         2500,
         2500,
         4096,
         () => macos27BaselineMs,
+        undefined,
+        new SleepWakeListener(readyListenerSpawn()),
       ),
       new CaffeinateAssertion(() => new FakeChild()),
       async () => {},
@@ -1508,4 +1581,329 @@ test("the pmset source reports the later of the kernel's sleep and wake times an
     new Error("injected sysctl failure"),
   ])
     await assert.rejects(source(output).lastSleepOrWakeAt());
+});
+
+test("the sleep/wake listener reports transitions only after it is ready and stops its child", async () => {
+  const children: ListenerChild[] = [];
+  const listener = new SleepWakeListener(readyListenerSpawn(children));
+  const { seen, signals } = signalRecorder();
+  await listener.start(signals);
+  await listener.start(signals);
+  assert.equal(children.length, 1, "a running listener is not respawned");
+  children[0]?.write("sleep\nwa");
+  children[0]?.write("ke\n");
+  await waitUntil(() => seen.length === 2);
+  assert.deepEqual(seen, ["sleep", "wake"]);
+  await listener.stop();
+  assert.deepEqual(children[0]?.signals, ["SIGTERM"]);
+  assert.deepEqual(seen, ["sleep", "wake"], "a requested stop is no failure");
+  await listener.start(signals);
+  assert.equal(children.length, 2, "a stopped listener can start again");
+  await listener.stop();
+});
+
+test("sleep/wake listener startup failures reject with distinct reasons and kill the child", async () => {
+  const cases: Array<{
+    name: string;
+    act: (child: ListenerChild) => void;
+    reason: RegExp;
+  }> = [
+    {
+      name: "malformed",
+      act: (child) => child.write("hello\n"),
+      reason: /unexpected output/,
+    },
+    {
+      name: "output before ready",
+      act: (child) => child.write("wake\nready\n"),
+      reason: /unexpected output/,
+    },
+    {
+      name: "over-long line",
+      act: (child) => child.write("x".repeat(65)),
+      reason: /unexpected output/,
+    },
+    {
+      name: "exit",
+      act: (child) => child.emit("close", 1, null),
+      reason: /exited \(1\)/,
+    },
+    {
+      name: "error",
+      act: (child) => child.emit("error", new Error("ENOENT")),
+      reason: /listener failed$/,
+    },
+    { name: "start timeout", act: () => {}, reason: /did not become ready/ },
+  ];
+  for (const { name, act, reason } of cases) {
+    const children: ListenerChild[] = [];
+    const listener = new SleepWakeListener(() => {
+      const child = new ListenerChild();
+      children.push(child);
+      setImmediate(() => act(child));
+      return child;
+    }, 50);
+    const { seen, signals } = signalRecorder();
+    await assert.rejects(listener.start(signals), reason, name);
+    if (name !== "exit")
+      assert.deepEqual(children[0]?.signals, ["SIGKILL"], name);
+    assert.deepEqual(seen, [], `${name}: a start failure is not a signal`);
+  }
+  const throwing = new SleepWakeListener(() => {
+    throw new Error("spawn EACCES");
+  });
+  await assert.rejects(
+    throwing.start(signalRecorder().signals),
+    /failed to start/,
+  );
+});
+
+test("a running sleep/wake listener reports exit and malformed output as failures", async () => {
+  for (const [act, reason] of [
+    [
+      (child: ListenerChild) => child.emit("close", null, "SIGSEGV"),
+      /exited \(SIGSEGV\)/,
+    ],
+    [(child: ListenerChild) => child.write("ready\n"), /unexpected output/],
+  ] as const) {
+    const children: ListenerChild[] = [];
+    const listener = new SleepWakeListener(readyListenerSpawn(children));
+    const { seen, signals } = signalRecorder();
+    await listener.start(signals);
+    act(children[0] as ListenerChild);
+    await waitUntil(() => seen.length === 1);
+    assert.match(seen[0] ?? "", reason);
+    children[0]?.write("wake\n");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.length, 1, "a failed child sends no more signals");
+    await listener.stop();
+  }
+});
+
+test("stopping a sleep/wake listener settles a pending start and kills a child that ignores SIGTERM", async () => {
+  const child = new ListenerChild("SIGKILL");
+  const listener = new SleepWakeListener(() => child, 5000, 20);
+  const starting = listener.start(signalRecorder().signals);
+  await listener.stop();
+  assert.deepEqual(child.signals, ["SIGTERM", "SIGKILL"]);
+  await assert.rejects(starting, /stopped/);
+});
+
+test("the macOS source owns its sleep/wake listener", async () => {
+  const children: ListenerChild[] = [];
+  const source = new MacPowerEventSourceWithListener(
+    undefined,
+    60_000,
+    10_000,
+    65_536,
+    Date.now,
+    undefined,
+    new SleepWakeListener(readyListenerSpawn(children)),
+  );
+  const { seen, signals } = signalRecorder();
+  await source.start(signals);
+  children[0]?.write("wake\n");
+  await waitUntil(() => seen.length === 1);
+  await source.stop();
+  assert.deepEqual(children[0]?.signals, ["SIGTERM"]);
+});
+
+class SignallingPowerEvents extends FakePowerEvents {
+  signals: PowerSignals | undefined;
+  starts = 0;
+  startFailure: Error | undefined;
+  onRead: (() => void) | undefined;
+
+  async start(signals: PowerSignals) {
+    this.starts++;
+    if (this.startFailure) throw this.startFailure;
+    this.signals = signals;
+  }
+
+  override async readSince(cursor: PowerEventCursor | null) {
+    this.onRead?.();
+    return super.readSince(cursor);
+  }
+}
+
+async function signallingPower(
+  label: string,
+  run: (context: {
+    state: ExecutionState;
+    events: SignallingPowerEvents;
+    power: ExecutionPowerPort & {
+      sleepWakeListenerFailure(): string | null;
+    };
+    reconciles: { count: number; during?: (() => void) | undefined };
+  }) => Promise<void>,
+) {
+  const root = mkdtempSync(join(tmpdir(), `ensemble-power-${label}-`));
+  const { db, state } = powerStore(join(root, "power.sqlite"));
+  const events = new SignallingPowerEvents();
+  events.cursor = powerCursor("baseline");
+  events.lastSleepOrWakeAt = async () => 0;
+  const reconciles: { count: number; during?: (() => void) | undefined } = { count: 0 };
+  const power = new ExecutionPower(
+    state,
+    events,
+    new CaffeinateAssertion(() => new FakeChild()),
+    async () => {
+      reconciles.count++;
+      reconciles.during?.();
+    },
+  ) as ExecutionPowerPort & { sleepWakeListenerFailure(): string | null };
+  try {
+    await run({ state, events, power, reconciles });
+  } finally {
+    await power.stop();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test("a sleep/wake notification after the post-poll kernel snapshot stales admission until a later poll reconciles", async () => {
+  await signallingPower(
+    "notified",
+    async ({ state, events, power, reconciles }) => {
+      await power.start();
+      await power.poll();
+      assert.equal(power.observedForAdmission(), true);
+      assert.equal(state.powerAdmissionState().held, false);
+
+      events.signals?.transition("sleep");
+      events.signals?.transition("wake");
+      assert.equal(power.observedForAdmission(), false);
+      assert.equal(state.powerAdmissionState().held, true);
+      assert.match(state.powerAdmissionState().reason ?? "", /notification/);
+      const queued = state.create(
+        "queued-after-wake",
+        "prompt",
+        "/workspace/q",
+      );
+      assert.equal(state.begin(queued.id), false, "no admission before a poll");
+      assert.equal(reconciles.count, 0);
+
+      await power.poll();
+      assert.equal(reconciles.count, 1, "the later poll reconciles");
+      assert.equal(state.powerAdmissionState().held, false);
+      assert.equal(power.observedForAdmission(), true);
+      assert.equal(state.begin(queued.id), true);
+    },
+  );
+});
+
+test("a notification during a poll's read, kernel snapshot or reconciliation keeps that poll from clearing it", async () => {
+  await signallingPower(
+    "during",
+    async ({ state, events, power, reconciles }) => {
+      await power.start();
+      await power.poll();
+
+      events.onRead = () => {
+        events.onRead = undefined;
+        events.signals?.transition("wake");
+      };
+      await power.poll();
+      assert.equal(power.observedForAdmission(), false, "notified during read");
+      assert.equal(state.powerAdmissionState().held, true);
+
+      await power.poll();
+      assert.equal(power.observedForAdmission(), true);
+      const clock = events.lastSleepOrWakeAt as () => Promise<number>;
+      events.lastSleepOrWakeAt = async () => {
+        events.signals?.transition("sleep");
+        return 0;
+      };
+      await power.poll();
+      events.lastSleepOrWakeAt = clock;
+      assert.equal(power.observedForAdmission(), false, "notified at snapshot");
+      assert.equal(state.powerAdmissionState().held, true);
+
+      reconciles.during = () => {
+        reconciles.during = undefined;
+        events.signals?.transition("wake");
+      };
+      await power.poll();
+      assert.equal(
+        state.powerAdmissionState().held,
+        true,
+        "the older reconciliation cannot clear the newer hold",
+      );
+      assert.equal(power.observedForAdmission(), false);
+      await power.poll();
+      assert.equal(state.powerAdmissionState().held, false);
+      assert.equal(power.observedForAdmission(), true);
+    },
+  );
+});
+
+test("a failed sleep/wake listener holds admission with its reason until it restarts and a later poll reconciles", async () => {
+  await signallingPower(
+    "listener-failure",
+    async ({ state, events, power }) => {
+      await power.start();
+      await power.poll();
+      assert.equal(power.observedForAdmission(), true);
+
+      events.signals?.failure("Sleep/wake listener exited (1)");
+      assert.equal(power.observedForAdmission(), false);
+      assert.equal(
+        power.sleepWakeListenerFailure(),
+        "Sleep/wake listener exited (1)",
+      );
+      assert.deepEqual(
+        [state.powerAdmissionState().held, state.powerAdmissionState().reason],
+        [true, "Sleep/wake listener exited (1)"],
+      );
+
+      events.startFailure = new Error(
+        "Sleep/wake listener did not become ready",
+      );
+      await power.poll();
+      assert.equal(events.starts, 2, "the poll retried the listener once");
+      assert.equal(
+        power.observedForAdmission(),
+        false,
+        "a poll alone cannot release",
+      );
+      assert.deepEqual(
+        [state.powerAdmissionState().held, state.powerAdmissionState().reason],
+        [true, "Sleep/wake listener did not become ready"],
+      );
+
+      events.startFailure = undefined;
+      await power.poll();
+      assert.equal(events.starts, 3);
+      assert.equal(power.sleepWakeListenerFailure(), null);
+      assert.equal(state.powerAdmissionState().held, false);
+      assert.equal(power.observedForAdmission(), true);
+    },
+  );
+});
+
+test("a listener that cannot start holds admission without failing supervision startup, and stop ends signal handling", async () => {
+  await signallingPower("listener-start", async ({ state, events, power }) => {
+    events.startFailure = new Error("Sleep/wake listener failed to start");
+    await power.start();
+    assert.equal(
+      power.sleepWakeListenerFailure(),
+      "Sleep/wake listener failed to start",
+    );
+    assert.equal(state.powerAdmissionState().held, true);
+    await power.poll();
+    assert.equal(power.observedForAdmission(), false);
+
+    events.startFailure = undefined;
+    await power.poll();
+    assert.equal(power.observedForAdmission(), true);
+    await power.stop();
+    assert.equal(events.stopCalls, 1);
+    events.signals?.transition("wake");
+    events.signals?.failure("late");
+    assert.equal(
+      state.powerAdmissionState().held,
+      false,
+      "no handling after stop",
+    );
+  });
 });

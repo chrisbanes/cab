@@ -19,11 +19,22 @@ export interface PowerEventBatch {
   events: PowerEvent[];
 }
 
+/** Asynchronous sleep/wake signals from a running listener. */
+export interface PowerSignalListener {
+  transition(kind: "sleep" | "wake"): void;
+  /** The listener stopped working; no further signals arrive until it restarts. */
+  failure(reason: string): void;
+}
+
 export interface PowerEventSource {
   readSince(cursor: PowerEventCursor | null): Promise<PowerEventBatch>;
   /** Wall-clock ms of the latest sleep or wake since boot (0 for none); throws when unknown. */
   lastSleepOrWakeAt?(): Promise<number>;
-  start?(): Promise<void>;
+  /**
+   * Starts the sleep/wake listener; resolves once it is subscribed and rejects
+   * with the reason it is not. A source with `start` reports every later failure.
+   */
+  start?(signals: PowerSignalListener): Promise<void>;
   stop?(): Promise<void>;
 }
 
@@ -322,8 +333,152 @@ const readSleepClock: SleepClockReader = async () =>
 
 const sysctlTimeval = /^\{ sec = (\d+), usec = (\d+) \}/;
 
+// JXA keeps the listener in a supported system binary with no native addon. It
+// exits on its own once its parent changes, so a crashed service cannot leak it.
+const sleepWakeHelper = `ObjC.import("AppKit");
+ObjC.bindFunction("getppid", ["int", []]);
+const parent = $.getppid();
+const stdout = $.NSFileHandle.fileHandleWithStandardOutput;
+const out = (line) => stdout.writeData($(line + "\\n").dataUsingEncoding($.NSUTF8StringEncoding));
+const center = $.NSWorkspace.sharedWorkspace.notificationCenter;
+center.addObserverForNameObjectQueueUsingBlock("NSWorkspaceWillSleepNotification", $(), $.NSOperationQueue.mainQueue, () => out("sleep"));
+center.addObserverForNameObjectQueueUsingBlock("NSWorkspaceDidWakeNotification", $(), $.NSOperationQueue.mainQueue, () => out("wake"));
+out("ready");
+while ($.getppid() === parent)
+  $.NSRunLoop.currentRunLoop.runUntilDate($.NSDate.dateWithTimeIntervalSinceNow(1));
+`;
+
+export type ListenerSpawn = (command: string, args: string[]) => ChildProcess;
+
+const maxListenerLineBytes = 64;
+
 /**
- * Reads a bounded macOS power history; missing or unfamiliar history is incomplete
+ * Owns one `osascript` child observing NSWorkspace sleep and wake. Its stdout is
+ * exactly `ready`, then `sleep` or `wake` lines; anything else, no `ready` within
+ * the start bound, or an exit not caused by `stop()` is a failure.
+ */
+export class SleepWakeListener {
+  private child: ChildProcess | undefined;
+  private stopping = false;
+  // Settles the current child's start or failure once; stop() uses it after a kill.
+  private release: ((reason: string) => void) | undefined;
+
+  constructor(
+    private readonly spawnProcess: ListenerSpawn = (command, args) =>
+      spawn(command, args, {
+        stdio: ["ignore", "pipe", "ignore"],
+        env: childProcessEnvironment(),
+      }),
+    private readonly startTimeoutMs = 5000,
+    private readonly stopTimeoutMs = 1000,
+  ) {
+    if (
+      ![startTimeoutMs, stopTimeoutMs].every(
+        (bound) => Number.isSafeInteger(bound) && bound > 0,
+      )
+    )
+      throw new Error("Sleep/wake listener bounds must be positive integers");
+  }
+
+  start(signals: PowerSignalListener): Promise<void> {
+    if (this.child) return Promise.resolve();
+    this.stopping = false;
+    let child: ChildProcess;
+    try {
+      child = this.spawnProcess("/usr/bin/osascript", [
+        "-l",
+        "JavaScript",
+        "-e",
+        sleepWakeHelper,
+      ]);
+    } catch {
+      return Promise.reject(new Error("Sleep/wake listener failed to start"));
+    }
+    this.child = child;
+    return new Promise<void>((resolve, reject) => {
+      let ready = false;
+      const timer = setTimeout(
+        () => fail("Sleep/wake listener did not become ready"),
+        this.startTimeoutMs,
+      );
+      const settle = (reason: string) => {
+        clearTimeout(timer);
+        if (!ready) reject(new Error(reason));
+        else if (!this.stopping) signals.failure(reason);
+      };
+      const release = (reason: string) => {
+        if (this.child !== child) return;
+        this.child = undefined;
+        this.release = undefined;
+        settle(this.stopping ? "Sleep/wake listener stopped" : reason);
+      };
+      this.release = release;
+      const fail = (reason: string) => {
+        if (this.child !== child) return;
+        child.kill("SIGKILL");
+        release(reason);
+      };
+      child.once("error", () => fail("Sleep/wake listener failed"));
+      child.once(
+        "close",
+        (code: number | null, signal: NodeJS.Signals | null) =>
+          release(
+            `Sleep/wake listener exited (${code ?? signal ?? "unknown"})`,
+          ),
+      );
+      let pending = "";
+      child.stdout?.setEncoding("utf8");
+      child.stdout?.on("data", (chunk: string) => {
+        pending += chunk;
+        let newline = pending.indexOf("\n");
+        while (newline >= 0 && this.child === child) {
+          const line = pending.slice(0, newline);
+          pending = pending.slice(newline + 1);
+          if (!ready && line === "ready") {
+            ready = true;
+            clearTimeout(timer);
+            resolve();
+          } else if (ready && (line === "sleep" || line === "wake")) {
+            if (!this.stopping) signals.transition(line);
+          } else fail("Sleep/wake listener sent unexpected output");
+          newline = pending.indexOf("\n");
+        }
+        if (pending.length > maxListenerLineBytes)
+          fail("Sleep/wake listener sent unexpected output");
+      });
+    });
+  }
+
+  async stop(): Promise<void> {
+    const child = this.child;
+    if (!child) return;
+    this.stopping = true;
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        child.removeListener("close", finish);
+        resolve();
+      };
+      // A child that ignores SIGTERM is killed so no listener outlives stop().
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        finish();
+      }, this.stopTimeoutMs);
+      timer.unref();
+      child.once("close", finish);
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        finish();
+      }
+    });
+    this.release?.("Sleep/wake listener stopped");
+  }
+}
+
+/**
+ * Reads a bounded macOS power history and owns the asynchronous sleep/wake
+ * listener; missing or unfamiliar history is incomplete
  * and a read killed by its idle or total bound throws `PowerLogReadTimeout`. The
  * total bound matches the longest power poll interval.
  */
@@ -335,6 +490,7 @@ export class MacPowerEventSource implements PowerEventSource {
     private readonly maxLineBytes = 64 * 1024,
     private readonly now: () => number = Date.now,
     private readonly readSleepTimes: SleepClockReader = readSleepClock,
+    private readonly listener = new SleepWakeListener(),
   ) {
     if (
       ![timeoutMs, idleTimeoutMs, maxLineBytes].every(
@@ -360,6 +516,14 @@ export class MacPowerEventSource implements PowerEventSource {
         return ms;
       }),
     );
+  }
+
+  start(signals: PowerSignalListener): Promise<void> {
+    return this.listener.start(signals);
+  }
+
+  stop(): Promise<void> {
+    return this.listener.stop();
   }
 
   async readSince(cursor: PowerEventCursor | null): Promise<PowerEventBatch> {
@@ -558,6 +722,20 @@ export class ExecutionPower {
   private lastEndedAt: number | undefined;
   private observedPollStartedAt: number | undefined;
   private observedPollCompletedAt: number | undefined;
+  // Counts notifications and listener failures; a poll that saw it change is not fresh.
+  private invalidations = 0;
+  private listenerFailure: string | null = null;
+  private readonly signals: PowerSignalListener = {
+    transition: () =>
+      this.invalidate(
+        "Power sleep/wake notification requires execution reconciliation",
+      ),
+    failure: (reason) => {
+      if (!this.started) return;
+      this.listenerFailure = reason.slice(0, 200);
+      this.invalidate(this.listenerFailure);
+    },
+  };
 
   constructor(
     private readonly state: ExecutionState,
@@ -586,9 +764,45 @@ export class ExecutionPower {
     });
   }
 
+  /** A listener that cannot start holds admission instead of failing startup. */
   async start(): Promise<void> {
-    await this.events.start?.();
     this.started = true;
+    await this.startListener();
+  }
+
+  private async startListener(): Promise<void> {
+    if (!this.events.start) return;
+    try {
+      await this.events.start(this.signals);
+    } catch (error) {
+      this.signals.failure(
+        error instanceof Error && error.message
+          ? error.message
+          : "Sleep/wake listener failed to start",
+      );
+      return;
+    }
+    if (!this.started) return;
+    this.listenerFailure = null;
+    // Only a poll that starts after recovery can be fresh.
+    this.invalidations++;
+  }
+
+  /**
+   * A sleep/wake notification or listener failure stales the observation and holds
+   * admission durably. The hold's new revision fences any older reconciliation, so
+   * only a later poll can release it.
+   */
+  private invalidate(reason: string): void {
+    if (!this.started) return;
+    this.invalidations++;
+    this.observedPollStartedAt = undefined;
+    this.observedPollCompletedAt = undefined;
+    try {
+      this.state.holdPowerAdmission(reason);
+    } catch {
+      // Freshness is already gone; the next poll installs the hold.
+    }
   }
 
   async executionStarted(workId: string): Promise<void> {
@@ -615,25 +829,37 @@ export class ExecutionPower {
     if (!this.started)
       throw new Error("Execution power supervision is not started");
     if (this.polling) return this.polling;
-    const startedAt = Date.now();
-    const current = this.pollUnlocked().then(() => {
-      // Node's monotonic clock keeps running during macOS sleep, so only the
-      // kernel's sleep/wake times show whether the Mac slept during this poll.
-      // Completion is taken first; a later sleep still ages it by wall clock.
-      const completedAt = Date.now();
-      const observe = (freshFrom: number | undefined) => {
-        this.observedPollStartedAt =
-          freshFrom === undefined ? undefined : startedAt;
-        this.observedPollCompletedAt = freshFrom;
-      };
-      // Without a sleep clock, record synchronously as before (no extra tick).
-      if (!this.events.lastSleepOrWakeAt) return observe(startedAt);
-      return this.events.lastSleepOrWakeAt().then(
-        (transitionAt) =>
-          observe(transitionAt < startedAt ? completedAt : undefined),
-        () => observe(undefined),
-      );
-    });
+    const run = () => {
+      const startedAt = Date.now();
+      const invalidations = this.invalidations;
+      return this.pollUnlocked().then(() => {
+        // Node's monotonic clock keeps running during macOS sleep, so only the
+        // kernel's sleep/wake times show whether the Mac slept during this poll.
+        // Completion is taken first; a later sleep still ages it by wall clock.
+        const completedAt = Date.now();
+        const observe = (freshFrom: number | undefined) => {
+          // A notification or listener failure since this poll started wins.
+          if (
+            invalidations !== this.invalidations ||
+            this.listenerFailure !== null
+          )
+            freshFrom = undefined;
+          this.observedPollStartedAt =
+            freshFrom === undefined ? undefined : startedAt;
+          this.observedPollCompletedAt = freshFrom;
+        };
+        // Without a sleep clock, record synchronously as before (no extra tick).
+        if (!this.events.lastSleepOrWakeAt) return observe(startedAt);
+        return this.events.lastSleepOrWakeAt().then(
+          (transitionAt) =>
+            observe(transitionAt < startedAt ? completedAt : undefined),
+          () => observe(undefined),
+        );
+      });
+    };
+    // A failed listener is restarted at most once per poll, so the poll interval bounds churn.
+    const current =
+      this.listenerFailure === null ? run() : this.startListener().then(run);
     this.polling = current;
     try {
       await current;
@@ -643,6 +869,10 @@ export class ExecutionPower {
   }
 
   private async pollUnlocked(): Promise<void> {
+    if (this.listenerFailure !== null) {
+      await this.holdAndReconcile(this.listenerFailure);
+      return;
+    }
     const persisted = this.state.powerAdmissionState();
     let batch: unknown;
     try {
@@ -761,6 +991,7 @@ export class ExecutionPower {
    * of re-polling forever; otherwise, or without that proof, from its start.
    */
   observedForAdmission(now = Date.now()): boolean {
+    if (this.listenerFailure !== null) return false;
     const startedAt = this.observedPollStartedAt;
     const completedAt = this.observedPollCompletedAt;
     if (startedAt === undefined || completedAt === undefined) return false;
@@ -768,6 +999,11 @@ export class ExecutionPower {
       return false;
     const age = now - completedAt;
     return age >= 0 && age < 15_000;
+  }
+
+  /** Why the sleep/wake listener is unhealthy, or null while it is healthy. */
+  sleepWakeListenerFailure(): string | null {
+    return this.listenerFailure;
   }
 
   admissionHeld(): boolean {
