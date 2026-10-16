@@ -540,9 +540,10 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   task (149c). Inbox notices and the CLI use the same order. A paused project keeps
   Fix: Resume project while stop, task or writer holds remain; those holds are
   listed under it as "Also held · Resume project doesn't clear these", each with
-  what clears it ("Clears when the task's Stop is resumed.", "Clears when recovery
-  is applied for this task.", "Clears when we know the execution ended.") and an
-  Execution details link to the task's Execution view, never as a Fix (149c). These
+  what clears it ("Clears when the task's Stop is resumed.", "Clears when we know
+  the execution ended.") or, for a task hold, which no operator action clears, its
+  recorded reason and "Recovery stays blocked while it remains." Each line also
+  links to the task's Execution view (Execution details); none is a Fix (149c). These
   holds are task-wide and name no assignment; only a wait that names its assignment
   links to that assignment's recovery page.
   The Fix confirmation then names the holds that stay.
