@@ -3,7 +3,7 @@ import { existsSync, globSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { join, resolve } from "node:path";
 import { profileTimings } from "./test-timings.mjs";
-import { constants } from "node:os";
+import { availableParallelism, constants } from "node:os";
 import {
   createTestEvidenceDirectory,
   writeTestEvidence,
@@ -402,6 +402,8 @@ async function main() {
   );
   const args = [
     "--test",
+    // Half the cores plus one: Node's default (cores - 1) overloads dev machines.
+    `--test-concurrency=${Math.ceil((availableParallelism() + 1) / 2)}`,
     ...(preflight
       ? [
           "--test-name-pattern=fixture preflight|failed browser assertion surfaces",
