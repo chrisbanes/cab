@@ -4806,10 +4806,13 @@ export class StandaloneService {
       // first. No await may separate this check from state.begin.
       const power = this.current?.power;
       if (power && !power.observedForAdmission()) {
-        const reason = "Waiting for power-event observation";
+        const listenerFailure = power.sleepWakeListenerFailure();
+        const reason = listenerFailure ?? "Waiting for power-event observation";
         state.wait(intent.id, reason);
         store.wait(request.workId, reason);
-        this.pollPowerThenWake(power, generation);
+        // The interval poll retries a failed listener; polling here would spin
+        // because each poll wakes this scheduler again.
+        if (listenerFailure === null) this.pollPowerThenWake(power, generation);
         return;
       }
       const admitted = state.begin(intent.id, {

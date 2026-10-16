@@ -322,7 +322,14 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   turn, a normal follow-up in the same Codex conversation and a task Stop pass against
   the existing operator login, with limits. Physical sleep/wake is not qualified (R03
   stays unproved), nor is exact execution recovery after a host or service restart.
-  Evidence: [live runtime](evidence/s03b-live-runtime-2026-09-29.md).
+  A macOS sleep/wake listener invalidates admission freshness and holds admission
+  while it is unhealthy. Its remaining limit: a sleep line Node does not read before
+  suspension, or a wake line read after Node's first post-wake admission, leaves
+  that admission to the next poll's reconciliation. Delivery of real sleep/wake
+  notifications to the listener is not exercised; a listener that reports ready but
+  never receives them leaves admission on the poll window without a visible reason.
+  Evidence: [live runtime](evidence/s03b-live-runtime-2026-09-29.md),
+  [sleep/wake listener](evidence/power-wake-listener-2026-10-16.md).
 - **Domain commands and coordination** (R05, R07–R10) — **Bounded.** Deterministic
   domain, coordination, routing, inbox, interaction and completion tests pass with
   real SQLite and local HTTP fixtures, and one bounded live runtime journey passed.
