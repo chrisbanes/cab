@@ -628,7 +628,7 @@ export async function saveLogin(
         : keychain.set(name, prior, bound)
       ).catch(() =>
         deps.stderr.write(
-          `The previous ${name} login could not be restored in the Keychain; run 'ensemble auth login --connection ${name}' again.\n`,
+          `The previous ${name} login could not be restored in the Keychain; run 'ensemble auth login --connection ${name} --url ${origin}' again.\n`,
         ),
       );
     }

@@ -621,10 +621,13 @@ test("installCli doctor stops reading when its signal aborts", async (t) => {
   const h = harness(t);
   const keychain = new MemoryKeychain();
   const requests: string[] = [];
+  const stop = new AbortController();
   const stalled: typeof fetch = (input, init) => {
     if (!String(input).endsWith("/api/operator/readiness"))
       return f.rewritten(input, init);
     requests.push(String(input));
+    // Abort while the readiness read is in flight, not on a timer.
+    setTimeout(() => stop.abort(), 10);
     return new Promise((_, reject) =>
       init?.signal?.addEventListener("abort", () =>
         reject(init.signal?.reason),
@@ -643,8 +646,6 @@ test("installCli doctor stops reading when its signal aborts", async (t) => {
   } as unknown as CliDeps;
   const cli = installCli(deps);
   await cli.login("local", f.origin, issued.token, undefined, never);
-  const stop = new AbortController();
-  setTimeout(() => stop.abort(), 50);
   const started = Date.now();
   await cli.doctor("local", stop.signal);
   assert.equal(requests.length, 1, "the readiness read was in flight");
