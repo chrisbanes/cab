@@ -771,6 +771,58 @@ test("authenticated repository comparisons require explicit bases, stable IDs an
   assert.equal(missingTask.status, 404);
 });
 
+test("branch reads default to a configured local-branch ref and keep requiring a base otherwise", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const taskId = seedUnprovisionedTask(f, "Comparison default ref");
+  const sourceRoot = join(f.directory, "comparison-sources");
+  const branched = sourceRepository(sourceRoot, "branched");
+  const detached = sourceRepository(sourceRoot, "detached");
+  const branch = execFileSync(
+    "git",
+    ["-C", branched, "branch", "--show-current"],
+    { encoding: "utf8" },
+  ).trim();
+  await f.service.provisionTask(taskId, [
+    { repositoryId: "branched", path: branched, ref: branch },
+    { repositoryId: "detached", path: detached },
+  ]);
+  const web = await f.startWeb([f.directory]);
+  const credentials = await login(web);
+  const get = async (repositoryId: string) => {
+    const response = await fetch(
+      comparisonUrl(
+        web.origin,
+        taskId,
+        new URLSearchParams({ target: "branch", repositoryId }),
+      ),
+      { headers: { cookie: credentials.cookie } },
+    );
+    assert.equal(response.status, 200);
+    return (await response.json()) as {
+      data: {
+        state: string;
+        reason?: string;
+        comparisonId?: string;
+        comparison?: { baseline?: { branch?: string } };
+      };
+    };
+  };
+
+  const first = await get("branched");
+  assert.notEqual(first.data.reason, "base-branch-required");
+  assert.equal(first.data.comparison?.baseline?.branch, branch);
+  assert.ok(first.data.comparisonId);
+  assert.equal(
+    (await get("branched")).data.comparisonId,
+    first.data.comparisonId,
+  );
+
+  const headRef = await get("detached");
+  assert.equal(headRef.data.state, "unavailable");
+  assert.equal(headRef.data.reason, "base-branch-required");
+});
+
 test("stored comparison reads recheck privacy and session after awaited path validation", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

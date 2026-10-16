@@ -105,8 +105,13 @@ export interface CompareRepositoryRequest {
   taskId: string;
   repositoryId: string;
   target: WorkspaceComparisonTarget;
-  /** Only a user-selected local branch may be supplied; refs are never inferred. */
+  /** Only a user-selected local branch may be supplied; refs are never guessed. */
   baseBranch?: string;
+  /**
+   * The binding's configured ref, used only when no `baseBranch` is selected
+   * and it names a listed local branch; otherwise the base stays required.
+   */
+  defaultBaseBranch?: string;
   changeSet?: "all" | "staged" | "unstaged";
 }
 
@@ -269,7 +274,7 @@ function parseRawChanges(output: Buffer): RawChange[] | undefined {
   const fields = decoded.split("\0");
   if (fields.at(-1) !== "") return undefined;
   const changes: RawChange[] = [];
-  for (let index = 0; index < fields.length - 1; ) {
+  for (let index = 0; index < fields.length - 1;) {
     const header = fields[index++];
     if (!header) return undefined;
     const match =
@@ -1114,7 +1119,11 @@ export async function compareRepository(
   let observedHeadCommit: string;
   let selectedBranchCommit: string | undefined;
   if (request.target === "branch") {
-    const selected = request.baseBranch;
+    const selected =
+      request.baseBranch ??
+      (request.defaultBaseBranch && branches.includes(request.defaultBaseBranch)
+        ? request.defaultBaseBranch
+        : undefined);
     if (!selected) {
       result.reason = "base-branch-required";
       return result;

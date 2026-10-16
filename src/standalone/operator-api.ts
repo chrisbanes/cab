@@ -327,12 +327,12 @@ function exactRetainedAnchorExcerpt(
   const range = retainedAnchorRange(source, anchor.startLine, anchor.endLine);
   return Boolean(
     range &&
-      range.byteStart === anchor.byteStart &&
-      range.byteEnd === anchor.byteEnd &&
-      range.bytes.equals(excerpt) &&
-      range.bytes.byteLength === anchor.size &&
-      createHash("sha256").update(range.bytes).digest("hex") ===
-        anchor.excerptSha256,
+    range.byteStart === anchor.byteStart &&
+    range.byteEnd === anchor.byteEnd &&
+    range.bytes.equals(excerpt) &&
+    range.bytes.byteLength === anchor.size &&
+    createHash("sha256").update(range.bytes).digest("hex") ===
+      anchor.excerptSha256,
   );
 }
 function retainedTextLineCount(text: string) {
@@ -781,10 +781,10 @@ export class OperatorApi {
   ) {
     return Boolean(
       current &&
-        current.taskId === initial.taskId &&
-        current.projectId === initial.projectId &&
-        current.taskVersion === initial.taskVersion &&
-        current.fingerprint === initial.fingerprint,
+      current.taskId === initial.taskId &&
+      current.projectId === initial.projectId &&
+      current.taskVersion === initial.taskVersion &&
+      current.fingerprint === initial.fingerprint,
     );
   }
   private async retainedPathUnavailable(
@@ -1760,11 +1760,28 @@ export class OperatorApi {
       request.target,
     );
     const snapshot = existing?.comparison;
+    // The binding's configured ref is only a default; compareRepository applies
+    // it solely when it names a listed local branch.
+    const configuredRef =
+      request.target === "branch" && request.baseBranch === undefined
+        ? current.repositories
+            .find(
+              (repository) => repository.repositoryId === request.repositoryId,
+            )
+            ?.ref.replace(/^refs\/heads\//, "")
+        : undefined;
+    const defaultListed =
+      !!configuredRef &&
+      !!snapshot &&
+      "availableBaseBranches" in snapshot &&
+      snapshot.availableBaseBranches.includes(configuredRef);
     const selectionMatches = snapshot
       ? request.target === "branch"
         ? snapshot.target === "branch" &&
           (request.baseBranch === undefined
-            ? snapshot.reason === "base-branch-required"
+            ? (!!configuredRef &&
+                snapshot.baseline?.branch === configuredRef) ||
+              (snapshot.reason === "base-branch-required" && !defaultListed)
             : snapshot.baseline?.branch === request.baseBranch)
         : snapshot.target === "uncommitted" &&
           snapshot.changeSet === (request.changeSet ?? "all")
@@ -1792,6 +1809,7 @@ export class OperatorApi {
     if (
       request.target === "branch" &&
       request.baseBranch === undefined &&
+      !defaultListed &&
       snapshot &&
       (snapshot.target !== "branch" ||
         snapshot.reason !== "base-branch-required") &&
@@ -1816,6 +1834,7 @@ export class OperatorApi {
         ...(request.target === "branch" && request.baseBranch
           ? { baseBranch: request.baseBranch }
           : {}),
+        ...(configuredRef ? { defaultBaseBranch: configuredRef } : {}),
         ...(request.target === "uncommitted" && request.changeSet
           ? { changeSet: request.changeSet }
           : {}),
@@ -3864,8 +3883,7 @@ export class OperatorApi {
         ];
       });
       const submitted = items.find((i) => i.name === "submitted")?.payload as
-        | { bytes?: unknown; sha256?: unknown }
-        | undefined;
+        { bytes?: unknown; sha256?: unknown } | undefined;
       const instructionCaptured = segments.some((x) =>
         x.name.endsWith("-instructions"),
       );
