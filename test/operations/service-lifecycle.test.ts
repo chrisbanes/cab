@@ -1338,12 +1338,21 @@ class FakeCli implements InstallCli {
     this.signals.push(args[4]);
     if (this.failLogin) throw new Error("keychain unavailable");
   }
-  /** Doctor never answers. */
+  /** Doctor never answers until released. */
   doctorHangs = false;
+  releaseDoctor: () => void = () => {};
 
   async doctor(connection: string) {
     this.calls.push(`doctor ${connection}`);
-    if (this.doctorHangs) await new Promise(() => {});
+    // A referenced timer, so a lone run keeps the event loop alive until the bound fires.
+    if (this.doctorHangs)
+      await new Promise<void>((resolve) => {
+        this.releaseDoctor = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(resolve, 10_000);
+      });
   }
 }
 
@@ -1664,6 +1673,7 @@ test("a doctor that never answers is abandoned on its bound and the URL is still
   const f = await tarballSetup(t);
   const cli = new FakeCli();
   cli.doctorHangs = true;
+  t.after(() => cli.releaseDoctor());
   const result = await f.run({}, cli);
   assert.equal(result.code, 0, result.stderr);
   assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
