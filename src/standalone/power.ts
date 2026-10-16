@@ -616,27 +616,23 @@ export class ExecutionPower {
       throw new Error("Execution power supervision is not started");
     if (this.polling) return this.polling;
     const startedAt = Date.now();
-    const current = this.pollUnlocked().then(async () => {
+    const current = this.pollUnlocked().then(() => {
       // Node's monotonic clock keeps running during macOS sleep, so only the
       // kernel's sleep/wake times show whether the Mac slept during this poll.
       // Completion is taken first; a later sleep still ages it by wall clock.
       const completedAt = Date.now();
-      let freshFrom = startedAt;
-      if (this.events.lastSleepOrWakeAt) {
-        let transitionAt: number;
-        try {
-          transitionAt = await this.events.lastSleepOrWakeAt();
-        } catch {
-          transitionAt = Number.POSITIVE_INFINITY;
-        }
-        if (transitionAt >= startedAt) {
-          this.observedPollStartedAt = undefined;
-          return;
-        }
-        freshFrom = completedAt;
-      }
-      this.observedPollStartedAt = startedAt;
-      this.observedPollCompletedAt = freshFrom;
+      const observe = (freshFrom: number | undefined) => {
+        this.observedPollStartedAt =
+          freshFrom === undefined ? undefined : startedAt;
+        this.observedPollCompletedAt = freshFrom;
+      };
+      // Without a sleep clock, record synchronously as before (no extra tick).
+      if (!this.events.lastSleepOrWakeAt) return observe(startedAt);
+      return this.events.lastSleepOrWakeAt().then(
+        (transitionAt) =>
+          observe(transitionAt < startedAt ? completedAt : undefined),
+        () => observe(undefined),
+      );
     });
     this.polling = current;
     try {
