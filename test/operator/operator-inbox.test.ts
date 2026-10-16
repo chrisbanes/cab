@@ -5,7 +5,13 @@ import { test } from "node:test";
 import { randomUUID } from "node:crypto";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
+import {
+  finishOwnWork,
+  seedOwnApproval,
+  seedOwnIntervention,
+  seedOwnQuestion,
+  startOwnWork,
+} from "../fixtures/questions.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { mixedAnswers, mixedForm } from "../fixtures/question-data.js";
 import {
@@ -32,6 +38,11 @@ test("action Inbox is cross-project summary-only, selected form is exact and ans
       true,
     );
     assert.equal(JSON.stringify(queue).includes("options"), false);
+    // The queue leads with the first question's label, matching the exact read.
+    assert.deepEqual(
+      queue.data.items.map((i) => i.headline),
+      [mixedForm.questions[0]!.label, mixedForm.questions[0]!.label],
+    );
     const full = await api.readQuestion(a.taskId, a.interactionId);
     assert.deepEqual(full.data.form, mixedForm);
     assert.equal(full.data.status, "pending");
@@ -73,6 +84,11 @@ test("privacy exclusions withhold an entire exact form or stored answer without 
     assert.equal(full.data.form, null);
     assert.equal(full.data.status, "unavailable");
     assert.equal(JSON.stringify(full).includes("Blue"), false);
+    // The queue withholds the headline exactly when the exact read withholds the form.
+    const queue = await api.readInbox();
+    assert.equal(queue.data.items.length, 1);
+    assert.equal(queue.data.items[0]!.headline, null);
+    assert.equal(JSON.stringify(queue).includes("Blue"), false);
     await assert.rejects(
       api.execute({
         type: "question.form.answer",
@@ -87,6 +103,49 @@ test("privacy exclusions withhold an entire exact form or stored answer without 
       f.service.coordinationView().readTask(a.taskId).questions[0]?.status,
       "open",
     );
+  } finally {
+    await f.close();
+  }
+});
+test("Inbox headlines are the approval action, a plain prompt, or null for an intervention, and an excluded approval action is withheld", async () => {
+  const f = await createOperatorFixture();
+  try {
+    const approval = await seedOwnApproval(f),
+      intervention = await seedOwnIntervention(f);
+    const started = await startOwnWork(f, "Plain ask", "Plain project");
+    const call = await f.runtime.callTool({
+      threadId: started.work.threadId!,
+      turnId: started.work.turnId!,
+      callId: randomUUID(),
+      tool: "ensemble_ask_question",
+      arguments: { question: "Which release channel should we use?" },
+    });
+    assert.equal(call.success, true, call.text);
+    await finishOwnWork(f, started);
+    const headlineOf = (
+      items: Awaited<ReturnType<OperatorApi["readInbox"]>>["data"]["items"],
+      taskId: string,
+    ) => items.find((i) => i.taskId === taskId)?.headline;
+    const items = (await new OperatorApi(f.service, [f.directory]).readInbox())
+      .data.items;
+    assert.equal(
+      headlineOf(items, approval.taskId),
+      "Create a pull request. No merge or deployment.",
+    );
+    assert.equal(
+      headlineOf(items, started.a.taskId),
+      "Which release channel should we use?",
+    );
+    assert.equal(headlineOf(items, intervention.taskId), null);
+    assert.equal(
+      items.find((i) => i.taskId === intervention.taskId)?.kind,
+      "intervention",
+    );
+    const withheld = await new OperatorApi(f.service, [
+      "pull request",
+    ]).readInbox();
+    assert.equal(headlineOf(withheld.data.items, approval.taskId), null);
+    assert.equal(JSON.stringify(withheld).includes("pull request"), false);
   } finally {
     await f.close();
   }

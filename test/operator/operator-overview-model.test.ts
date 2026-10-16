@@ -31,6 +31,7 @@ function item(o: Partial<InboxItem> = {}): InboxItem {
     requesterName: null,
     interactionId: null,
     revision: null,
+    headline: null,
     reason: null,
     attentionCode: null,
     destination: "/",

@@ -71,6 +71,7 @@ const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
   requesterName: "R",
   interactionId: null,
   revision: null,
+  headline: null,
   reason: "r",
   destination: "/",
   attentionCode: null,
