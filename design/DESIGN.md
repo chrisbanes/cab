@@ -1623,8 +1623,11 @@ Presentation and interaction rules that the canvas does not show on its own.
   Atlas roadmap GitHub Project), with the S-n id in Details. The GitHub source tab
   numbers its sections 1–3 in reading order (`119-project-config-github-source`).
   After a save, the same screen offers Preview and import now, which runs the
-  preview-and-activate command and then the refresh, and records one receipt per
-  step (`119d-github-source-import-ready`, `119e-github-source-imported`). Sync &
+  preview-and-activate command and then the refresh. It shows the activation
+  receipt, then the refresh's observation state (complete, partial, never or
+  unavailable) with the observed counts. The refresh creates no receipt, and a
+  partial or unavailable read says so and claims no import
+  (`119d-github-source-import-ready`, `119e-github-source-imported`). Sync &
   placement remains for later refreshes and placement.
 - Source status lines are sentences with the clock label: "Synced 10:47 · 4 issues
   observed, 2 ready" or "Not synced yet" (`120-project-config-sync-placement`). A
@@ -2119,8 +2122,9 @@ frames 114 and 118–128 as follows:
   is previewed again in Sync & placement.
 - Frames `119d-github-source-import-ready` and `119e-github-source-imported` chain
   activation and import on the GitHub source tab after a save: Preview and import
-  now runs the preview-and-activate command and then the refresh, with one receipt
-  per step, and activation and a successful import stay separate evidence.
+  now runs the preview-and-activate command and then the refresh, showing the
+  activation receipt and then the refresh's observation state; activation and a
+  successful import stay separate evidence.
   Production does not chain them yet: "Preview and activate selection" in Sync &
   placement names the selection (or says it was already active), states that
   tasks aren't imported until sources are refreshed, and offers "Refresh sources"
