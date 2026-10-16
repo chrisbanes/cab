@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { performance } from "node:perf_hooks";
 import { mock, test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
@@ -230,7 +231,10 @@ test("caffeinate holds exactly one idle-sleep assertion only while execution is 
 
 test("admission observation needs a completed poll started after the last execution ended", async () => {
   let clock = 1_000_000;
+  // The monotonic clock stops while the Mac sleeps; tests move it with `awake`.
+  let awake = 0;
   const clockMock = mock.method(Date, "now", () => clock);
+  const awakeMock = mock.method(performance, "now", () => awake);
   const root = mkdtempSync(join(tmpdir(), "ensemble-power-observed-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const events = new FakePowerEvents();
@@ -277,20 +281,25 @@ test("admission observation needs a completed poll started after the last execut
     await inFlight;
     assert.equal(power.observedForAdmission(), false, "poll began before end");
 
-    // Freshness counts from completion, so a read longer than 15 s still counts.
-    let releaseSlow!: () => void;
-    const slowGate = new Promise<void>((resolve) => (releaseSlow = resolve));
-    events.readSince = async (cursor) => {
-      await slowGate;
-      return readSince(cursor);
+    // A read awake for longer than 15 s is fresh from its completion, but time
+    // the Mac slept during the read still ages the observation.
+    const slowPoll = async (awakeMs: number, asleepMs: number) => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      events.readSince = async (cursor) => {
+        await gate;
+        return readSince(cursor);
+      };
+      clock += 1;
+      const slow = power.poll();
+      clock += awakeMs + asleepMs;
+      awake += awakeMs;
+      release();
+      await slow;
+      events.readSince = readSince;
+      return clock;
     };
-    clock += 1;
-    const slow = power.poll();
-    clock += 20_000;
-    releaseSlow();
-    await slow;
-    events.readSince = readSince;
-    const completedAt = clock;
+    const completedAt = await slowPoll(20_000, 0);
     assert.equal(power.observedForAdmission(), true, "slow poll is fresh");
     assert.equal(power.observedForAdmission(completedAt + 14_999), true);
     assert.equal(power.observedForAdmission(completedAt + 15_000), false);
@@ -298,6 +307,18 @@ test("admission observation needs a completed poll started after the last execut
       power.observedForAdmission(completedAt - 1),
       false,
       "a wall clock that moved backwards is stale",
+    );
+    const wokeAt = await slowPoll(5_000, 10_000);
+    assert.equal(power.observedForAdmission(wokeAt + 4_999), true);
+    assert.equal(
+      power.observedForAdmission(wokeAt + 5_000),
+      false,
+      "sleep during the read counts towards its age",
+    );
+    assert.equal(
+      power.observedForAdmission(await slowPoll(5_000, 15_000)),
+      false,
+      "a read spanning a 15 s sleep is stale on completion",
     );
 
     // A poll that throws does not refresh the observation.
@@ -311,6 +332,7 @@ test("admission observation needs a completed poll started after the last execut
     assert.equal(power.observedForAdmission(), false, "failed poll is stale");
   } finally {
     clockMock.mock.restore();
+    awakeMock.mock.restore();
     await power.stop();
     db.close();
     rmSync(root, { recursive: true, force: true });

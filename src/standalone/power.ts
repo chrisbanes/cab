@@ -2,6 +2,7 @@ import { childProcessEnvironment } from "../core/child-environment.js";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
+import { performance } from "node:perf_hooks";
 import { isDeepStrictEqual } from "node:util";
 import type { PowerEventCursor } from "./state.js";
 import type { ExecutionState } from "./state.js";
@@ -273,8 +274,6 @@ export async function* spawnPowerLogReader(
   };
   const total = setTimeout(expire("total"), options.timeoutMs);
   const idle = setTimeout(expire("idle"), options.idleTimeoutMs);
-  const timeout = (error: unknown) =>
-    timedOut ? new PowerLogReadTimeout(timedOut) : error;
   const checked = (line: string) => {
     if (Buffer.byteLength(line) > options.maxLineBytes)
       throw new Error("Power-log line exceeds the line limit");
@@ -297,9 +296,10 @@ export async function* spawnPowerLogReader(
     }
     if (timedOut) throw new PowerLogReadTimeout(timedOut);
     yield checked(pending);
-    await exited.catch((error: unknown) => {
-      throw timeout(error);
-    });
+    await exited;
+  } catch (error) {
+    // Any failure after a bound fired, such as the killed child's exit, is that timeout.
+    throw timedOut ? new PowerLogReadTimeout(timedOut) : error;
   } finally {
     clearTimeout(total);
     clearTimeout(idle);
@@ -526,7 +526,7 @@ export class ExecutionPower {
   // Wall clock: a monotonic clock may not advance while the Mac sleeps.
   private lastEndedAt: number | undefined;
   private observedPollStartedAt: number | undefined;
-  private observedPollCompletedAt: number | undefined;
+  private observedPollAwakeMs: number | undefined;
 
   constructor(
     private readonly state: ExecutionState,
@@ -585,9 +585,10 @@ export class ExecutionPower {
       throw new Error("Execution power supervision is not started");
     if (this.polling) return this.polling;
     const startedAt = Date.now();
+    const startedMonotonic = performance.now();
     const current = this.pollUnlocked().then(() => {
       this.observedPollStartedAt = startedAt;
-      this.observedPollCompletedAt = Date.now();
+      this.observedPollAwakeMs = performance.now() - startedMonotonic;
     });
     this.polling = current;
     try {
@@ -711,16 +712,17 @@ export class ExecutionPower {
 
   /**
    * True when a poll that started after the last execution ended completed less
-   * than 15 s ago. Age counts from completion, so a read slower than 15 s still
-   * lets admission proceed instead of re-polling forever.
+   * than 15 s ago. The poll's own awake running time does not count towards that
+   * age, so a read slower than 15 s still admits instead of re-polling forever,
+   * while time the Mac slept during the read (wall clock only) still does.
    */
   observedForAdmission(now = Date.now()): boolean {
     const startedAt = this.observedPollStartedAt;
-    const completedAt = this.observedPollCompletedAt;
-    if (startedAt === undefined || completedAt === undefined) return false;
+    const awakeMs = this.observedPollAwakeMs;
+    if (startedAt === undefined || awakeMs === undefined) return false;
     if (this.lastEndedAt !== undefined && startedAt <= this.lastEndedAt)
       return false;
-    const age = now - completedAt;
+    const age = now - startedAt - awakeMs;
     return age >= 0 && age < 15_000;
   }
 
