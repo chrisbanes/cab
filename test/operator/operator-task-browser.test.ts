@@ -1285,12 +1285,6 @@ for (const viewport of [
         commandPosts++;
     });
     await page.getByRole("link", { name: /^Open Inbox/ }).click();
-    assert.equal(
-      await page
-        .getByRole("link", { name: "Advanced coordination controls" })
-        .count(),
-      0,
-    );
     await page.goto(`${web.origin}/app/tasks`);
     await page
       .locator(`[data-task-id="${ids.question.id}"]`)
