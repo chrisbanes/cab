@@ -22,6 +22,14 @@
   grid-area: title;
 }
 
+/* Task titles are 20/600; the phone keeps the shared 16/500 detail title. */
+@media (min-width: 760px) {
+  .page-header[data-desktop-back] h1 {
+    font-size: 20px;
+    line-height: 28px;
+  }
+}
+
 /* The recorded desired outcome, clamped to three lines; the brief keeps the full text. */
 .page-header[data-desktop-back] .page-header-title p {
   display: -webkit-box;

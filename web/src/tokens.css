@@ -174,9 +174,10 @@
   font-weight: var(--weight-semibold);
   line-height: var(--leading-1-25);
 }
+/* Section headings are 15/600 on every screen artboard. */
 .card-heading,
 .section-heading {
-  font-size: var(--type-md);
+  font-size: 15px;
   font-weight: var(--weight-semibold);
   line-height: var(--leading-1-25);
 }

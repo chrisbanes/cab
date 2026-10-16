@@ -74,8 +74,8 @@
 
 .settings-panel-title {
   margin: 0;
-  font-size: var(--type-md);
-  font-weight: var(--weight-medium);
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
   line-height: var(--leading-1-25);
 }
 
