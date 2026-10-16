@@ -54,11 +54,11 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page.locator(`[data-search-record="${r.resultId}"]`).waitFor();
   const searchURL = page.url();
   await page
-    .getByText(/Alpha · result/)
+    .getByText(/^Alpha · /)
     .first()
     .waitFor({ state: "attached" });
   await page
-    .getByText(/Beta · result/)
+    .getByText(/^Beta · /)
     .first()
     .waitFor({ state: "attached" });
   const desktopBounds = await page
@@ -97,6 +97,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
       .evaluate((el) => document.activeElement === el),
     true,
   );
+  await captureBrowserEvidence(page, "1366-restored-selected-match");
   await page
     .getByLabel("Search retained task, decision and result records")
     .fill("Absent record");
@@ -164,6 +165,13 @@ test("shared Search preserves exact historical target, dates, selected focus and
   assert.ok(
     phoneBounds.every((h) => h >= 44),
     JSON.stringify(phoneBounds),
+  );
+  // Checklist requirements read as plain excerpts, not raw Markdown.
+  const excerpts = await page.locator(".search-excerpt").allTextContents();
+  assert.ok(
+    excerpts.some((t) => t.includes("Restore focus · Retain drafts")) &&
+      !excerpts.some((t) => t.includes("[ ]")),
+    JSON.stringify(excerpts),
   );
   await captureBrowserEvidence(page, "390-shared-search");
   await page

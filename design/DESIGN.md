@@ -1824,6 +1824,42 @@ Production Overview, List and Board
   composed from the shell and desktop frames (Overview: one column, stat strip
   2 × 2, cards and panels stacked, 44px responses).
 
+### Search
+
+Production Search (`web/src/search.tsx`, `web/src/search.css`) follows `73-search`
+and `75-search-states`: the query field with its search icon, one compact inline
+filter row, then one bordered results panel whose header carries the count. Each
+match shows its type chip, task title, Selected and Historical badges, the quoted
+excerpt with the query marked, a 12px mono provenance line and an "Open task →
+matching requirement / decision / result" link; the restored selection is the
+`--overlay` fill with a 2px indigo left edge. Body copy is 13px. The page has no
+primary of its own; the top bar's New task stays the one primary. It differs from
+the frames as follows:
+
+- The route title stays "Search" in the page header rather than the frame's
+  "Search work" heading.
+- "Back to originating workspace", "Refresh results" and "Search records" are
+  secondary buttons the frames do not draw; Enter in the field also searches.
+- Date is From and Through date fields rather than one "Any date" select, and
+  history is the "Include historical records" checkbox.
+- Provenance is "project · current/historical · time". The search read model
+  carries no task short ID (AT-142), source revision, assignment, result revision
+  or commit, so those are not shown; record, source and result UUIDs are not shown.
+- Excerpts drop Markdown list, checklist and heading markers, join lines with
+  " · " and show about 240 characters around the first literal match.
+- The header reads "N matches · retained records only · N omitted or
+  inaccessible", and the coverage note sits under the filters, rather than "across
+  Atlas and Relay" and "Saved excerpts, not full conversations".
+- Loading, refresh failure with retained matches and no matches use the shared
+  `ResourceStatus` alert and plain notes, not the `75-search-states` panels; there
+  is no partial-coverage or destination-unavailable panel, Edit query or Clear
+  filters action. There is no "Returned to match N of M" note; the restored
+  selection is the Selected badge, the row highlight and focus on its link.
+- Phone (`74-phone-search`) keeps the inline Back and Refresh, places Search
+  records beside the field and shows the filters as a two-column grid with 44px
+  controls instead of the one summary filter button; results stay in the bordered
+  panel.
+
 ### Task detail, composer and Stop
 
 Production task detail, composer and Stop confirmation
