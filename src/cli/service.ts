@@ -12,6 +12,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
@@ -807,7 +808,7 @@ async function installServiceLocked(
   try {
     let root = releaseRoot;
     let version = tarball ? undefined : service.releaseVersion(root);
-    if (tarball && !lstatSync(tarball, { throwIfNoEntry: false })?.isFile())
+    if (tarball && !statSync(tarball, { throwIfNoEntry: false })?.isFile())
       throw refuse(`${tarball} is not a readable file`);
     if (await service.loadedJob())
       throw refuse(`The ${options.label} job is already loaded`);
