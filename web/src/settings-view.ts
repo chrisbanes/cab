@@ -133,8 +133,7 @@ export function savedLine(version: number, saved: SavedRecord | undefined) {
     : null;
 }
 
-const tasksNotImported =
-  "Tasks aren't imported until you refresh source observations.";
+const tasksNotImported = "Tasks aren't imported until you refresh sources.";
 
 /**
  * The sentence after "Preview and activate selection". It claims only what a confirmed

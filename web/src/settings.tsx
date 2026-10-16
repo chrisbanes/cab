@@ -194,6 +194,11 @@ export function DraftMessage({
       return (
         <ActionOutcome
           tone="error"
+          title={
+            !draft.credentialRefusal && Object.keys(draft.errors).length
+              ? outcomeCopy.fieldsTitle
+              : undefined
+          }
           message={draft.notice}
           focus={answersCheck}
           details={details}

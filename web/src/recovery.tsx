@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Circle, CirclePause, CircleSlash } from "lucide-react";
 import {
   executionHarnessLabels,
@@ -324,6 +331,7 @@ export function RuntimeSettings(p: SettingsProps) {
                           <DraftField
                             draft={d}
                             field={`limit-${r.project.id}`}
+                            errorField={`projectOverrides.${r.project.id}`}
                             label={`Active-turn cap for ${name}`}
                             type="number"
                           />
@@ -461,6 +469,33 @@ export function RuntimeSettings(p: SettingsProps) {
     </div>
   );
 }
+/** A recovery witness inside its generation's record (frames 175 and 176): evidence only. */
+function Witness({
+  title,
+  id,
+  source,
+  children,
+}: {
+  title: string;
+  id: string;
+  source: "runtime" | "operator-adopted";
+  children: ReactNode;
+}) {
+  return (
+    <section className="settings-row" aria-label={title}>
+      <h4 className="small-heading">{title}</h4>
+      <p className="metadata muted">
+        Witness <span className="identifier">{id}</span> ·{" "}
+        {source === "runtime" ? "from the runtime" : "added by an operator"}
+      </p>
+      <p className="body">{children}</p>
+      <p className="body">
+        Evidence only. It doesn't recover the assignment or allow new work.
+      </p>
+    </section>
+  );
+}
+
 export function AssignmentRecovery(
   p: SettingsProps & { assignmentId: string },
 ) {
@@ -563,8 +598,10 @@ export function AssignmentRecovery(
                   </p>
                 ) : (
                   <p className="body">
-                    The generation in use is unavailable. This does not prove
-                    execution ended.
+                    Generation in use: Unavailable. No turn request for this
+                    assignment was accepted with its versions, so the generation
+                    in use can't be named. This doesn't mean the execution
+                    ended.
                   </p>
                 )}
                 <p className="body">
@@ -582,8 +619,11 @@ export function AssignmentRecovery(
               >
                 {!data.evidenceAvailable && (
                   <p className="body">
-                    Recovery evidence unavailable for this assignment. Absence
-                    of records does not prove release.
+                    <strong className="action-outcome-title">
+                      We can't show recovery details for this assignment.
+                    </strong>
+                    No recovery record was found. That alone doesn't mean the
+                    execution ended or that its holds were released.
                   </p>
                 )}
                 {data.records.map((r) => (
@@ -607,21 +647,27 @@ export function AssignmentRecovery(
                       . Pending effects: {r.pendingEffectCount}. Receipt{" "}
                       {`${r.receiptRecorded ? "recorded" : "not recorded"}; workspace ${r.workspace}.`}
                     </p>
-                    {r.noTurnSubmission && (
-                      <p className="body">
-                        Historical no-turn submission witness{" "}
-                        {r.noTurnSubmission.id}. Operator-adopted evidence; an
-                        unobserved idle thread may exist. This records evidence,
-                        not recovery or permission to dispatch.
-                      </p>
-                    )}
                     {r.preTurnRejection && (
-                      <p className="body">
-                        Before-turn archived resume witness{" "}
-                        {r.preTurnRejection.id}. Source{" "}
-                        {r.preTurnRejection.source}. This records rejection
-                        evidence, not recovery or permission to dispatch.
-                      </p>
+                      <Witness
+                        title="Before-turn refusal"
+                        id={r.preTurnRejection.id}
+                        source={r.preTurnRejection.source}
+                      >
+                        The runtime refused to resume the archived conversation
+                        before any turn was sent. This attempt never reached a
+                        turn.
+                      </Witness>
+                    )}
+                    {r.noTurnSubmission && (
+                      <Witness
+                        title="No turn sent"
+                        id={r.noTurnSubmission.id}
+                        source={r.noTurnSubmission.source}
+                      >
+                        An operator confirmed that no turn was sent for this
+                        attempt. An idle conversation may still exist that
+                        Ensemble hasn't seen.
+                      </Witness>
                     )}
                     <p className="metadata muted">
                       Stop {r.holds.stop ? "active" : "inactive"}; writer{" "}

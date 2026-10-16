@@ -559,7 +559,7 @@ test("production workspace retains literal history, pending request, focused rep
       await openTaskTab(page, "Changes");
       await page
         .getByRole("button", {
-          name: "Refresh delivery observation",
+          name: "Refresh delivery status",
           exact: true,
         })
         .click();
@@ -569,7 +569,7 @@ test("production workspace retains literal history, pending request, focused rep
   assert.equal(await outcome.count(), 1);
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
-    "Refresh delivery observation",
+    "Refresh delivery status",
   );
   await openTaskTab(page, "Overview");
   assert.ok(
@@ -606,7 +606,7 @@ test("production workspace retains literal history, pending request, focused rep
     ["review.view", "Set viewing reference", "Viewing reference set."],
     [
       "delivery.refresh",
-      "Refresh delivery observation",
+      "Refresh delivery status",
       "Delivery status refreshed.",
     ],
   ] as const) {
@@ -847,7 +847,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
       ["review.view", "Set viewing reference", "Viewing reference set."],
       [
         "delivery.refresh",
-        "Refresh delivery observation",
+        "Refresh delivery status",
         "Delivery status refreshed.",
       ],
     ] as const) {

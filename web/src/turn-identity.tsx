@@ -102,7 +102,7 @@ export function PendingTurn({
           : dateLabel(pending.beforeObservedAt)}
         {" · "}after the turn{" "}
         {pending.afterObservedAt === undefined
-          ? (pending.afterState ?? "not observed")
+          ? (pending.afterState ?? "not read")
           : dateLabel(pending.afterObservedAt)}
       </p>
       {pending.reason && (

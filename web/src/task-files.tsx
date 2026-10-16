@@ -1352,13 +1352,13 @@ export function TaskFiles({
                 </details>
                 {directoryObservedAt !== null && (
                   <p className="file-observation">
-                    Current workspace · observed{" "}
+                    Current workspace · as of{" "}
                     {new Date(directoryObservedAt).toLocaleTimeString()}
                   </p>
                 )}
                 {previewObservedAt !== null && (
                   <p className="file-observation">
-                    Selected bytes · observed{" "}
+                    Selected bytes · as of{" "}
                     {new Date(previewObservedAt).toLocaleTimeString()}
                   </p>
                 )}

@@ -21,7 +21,7 @@ import type {
 } from "./task-workspace-state.js";
 
 const time = (value: number | null) =>
-  value === null ? "not observed" : new Date(value).toLocaleString();
+  value === null ? "not read" : new Date(value).toLocaleString();
 
 const diffSideSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("absent") }),
@@ -296,7 +296,7 @@ export function RetainedResultEvidence({
                 {data.identity.captureTaskVersion} at capture ·{" "}
                 {data.identity.taskVersion} at result
               </dd>
-              <dt>Source observation</dt>
+              <dt>Source state</dt>
               <dd>
                 {data.sourceObservation.captureState}
                 {data.sourceObservation.outcome
@@ -305,7 +305,7 @@ export function RetainedResultEvidence({
                 {data.sourceObservation.comparisonId
                   ? ` · comparison ${data.sourceObservation.comparisonId}`
                   : ""}{" "}
-                · observed {time(data.sourceObservation.observedAt)}
+                · as of {time(data.sourceObservation.observedAt)}
               </dd>
             </dl>
           </details>

@@ -214,10 +214,7 @@ test("Source settings choose gh explicitly, cancel, retain an unknown Clear and 
   await page.getByLabel("New environment reference").fill("env:lower");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page
-    .getByText(
-      "Couldn't save: check the highlighted fields. Your changes are still here.",
-      { exact: true },
-    )
+    .getByText("Fix the highlighted field. Your changes are still here.")
     .waitFor();
   assert.equal(
     await page.getByLabel("New environment reference").inputValue(),

@@ -56,7 +56,7 @@ test("General tab edits in place with a change list, saved line and tabs that ke
   assert.equal(await trail(page), "Settings / Projects / Atlas");
   const status = page.locator(".settings-status");
   await status.getByText("Enabled").waitFor();
-  await status.getByText("Existing admission rules still apply.").waitFor();
+  await status.getByText("Existing start rules still apply.").waitFor();
   assert.doesNotMatch(await status.innerText(), /version|\d\d:\d\d/);
   const tabs = page.getByRole("navigation", {
     name: "Project configuration sections",
@@ -164,7 +164,7 @@ test("General tab validation, conflict and revoked-lead failures keep input", as
   await name.waitFor();
   await name.fill("");
   await page.getByRole("button", { name: "Save project", exact: true }).click();
-  await page.getByText("Check this field.").first().waitFor();
+  await page.getByText("Enter a project name.", { exact: true }).waitFor();
   await page.waitForFunction(
     () => document.activeElement?.getAttribute("aria-label") === "Project name",
   );
@@ -383,6 +383,98 @@ test("Routing saves candidates in place without sending guidance, and replaces g
   } finally {
     await page.unroute("**/api/operator/commands");
   }
+});
+
+test("Routing names TypeSafe availability in words and who allocates when it can't choose", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  // The fixture service has no TypeSafe client, so Relay's configured reference can't be used.
+  await page
+    .getByText("Enabled · TypeSafe unavailable · credential configured", {
+      exact: true,
+    })
+    .waitFor();
+  const notice = page.locator('[data-slot="alert"]', {
+    hasText: "TypeSafe isn't available for Relay.",
+  });
+  assert.equal(
+    (await notice.innerText()).trim(),
+    "TypeSafe isn't available for Relay.\nRouting can't use its credential reference, so it can't choose assignees. New tasks without an assignee go to Jonas to allocate.",
+  );
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    credentialRef: null,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  await page.reload();
+  await page
+    .getByText("Enabled · TypeSafe unavailable · no credential reference", {
+      exact: true,
+    })
+    .waitFor();
+  await page
+    .getByText(
+      "Routing has no credential reference, so it can't choose assignees. New tasks without an assignee go to Jonas to allocate.",
+      { exact: false },
+    )
+    .waitFor();
+  // The form stays editable so the reference can be set.
+  assert.equal(
+    await page
+      .getByLabel("Credential reference change", { exact: true })
+      .isDisabled(),
+    false,
+  );
+  // A revoked lead can't allocate either, so unassigned tasks wait.
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: ids.profiles.Jonas as string,
+    expectedVersion: Number(d.profile(ids.profiles.Jonas as string).version),
+    revoked: true,
+  });
+  await page.reload();
+  await page
+    .getByText(
+      "New tasks without an assignee wait until the project has an available lead.",
+      { exact: false },
+    )
+    .waitFor();
+  await page.goto(page.url().replace(ids.relay, ids.atlas));
+  await page
+    .getByText("Routing off · no credential reference", { exact: true })
+    .waitFor();
+  await page
+    .getByText(
+      "Routing is off. Every new task needs an assignee or goes to Mira.",
+      { exact: true },
+    )
+    .waitFor();
+  // Without a lead, unassigned tasks wait rather than being allocated.
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    leadProfileId: null,
+  });
+  await page.reload();
+  await page
+    .getByText(
+      "Routing is off. Every new task needs an assignee or waits until the project has an available lead.",
+      { exact: true },
+    )
+    .waitFor();
 });
 
 test("Routing conflict keeps the checked candidates until the newer version is reviewed", async (_t, journey) => {
@@ -1029,7 +1121,7 @@ test("Sync & placement shows preview, observations and the placement status line
   await page.getByLabel("Selection to preview", { exact: true }).waitFor();
   await page
     .getByRole("button", {
-      name: "Request installation-wide source observations",
+      name: "Refresh all sources",
     })
     .waitFor();
   assert.deepEqual(await unpairedBadges(page.locator("main")), []);

@@ -200,7 +200,7 @@ test("every other admission reason still produces a hold notice", () => {
     ["task-not-open", "task not open"],
     ["project-lead-unconfigured", "project lead not configured"],
     ["project-lead-revoked", "project lead revoked"],
-    ["admission-blocked", "admission blocked"],
+    ["admission-blocked", "waiting to start"],
   ] as const) {
     const notices = holdNotices(task([reason]), "approve", null);
     assert.equal(notices.length, 1, reason);
@@ -483,7 +483,7 @@ test("answering a question words each hold notice for answers, with the same tit
     ["task-not-open", "task not open"],
     ["project-lead-unconfigured", "project lead not configured"],
     ["project-lead-revoked", "project lead revoked"],
-    ["admission-blocked", "admission blocked"],
+    ["admission-blocked", "waiting to start"],
   ] as const) {
     cases.push([
       [reason],

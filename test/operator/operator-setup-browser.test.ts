@@ -27,7 +27,7 @@ import {
 const test = browserSuite("operator-setup-browser");
 
 const fixFields =
-  "Couldn't save: check the highlighted fields. Your changes are still here.";
+  /Fix the (\d+ )?highlighted fields?\. Your changes are still here\./;
 const mismatch =
   "This folder is a checkout of acme/relay, not acme/atlas. Choose another folder or change the repository.";
 

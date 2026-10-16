@@ -55,10 +55,9 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     await openTask();
     const changes = page.locator("#changes");
     await changes
-      .getByText(
-        `PR #7 · org/repo · OPEN · observed head ${f.scripted.state.head}`,
-        { exact: true },
-      )
+      .getByText(`PR #7 · org/repo · OPEN · head ${f.scripted.state.head}`, {
+        exact: true,
+      })
       .waitFor();
     await changes
       .getByText(`build: success · head ${f.scripted.state.head}`, {
@@ -71,7 +70,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     f.scripted.state.check = "failure";
     await changes
       .getByRole("button", {
-        name: "Refresh delivery observation",
+        name: "Refresh delivery status",
         exact: true,
       })
       .click();
@@ -85,7 +84,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     f.scripted.state.feedback = true;
     await changes
       .getByRole("button", {
-        name: "Refresh delivery observation",
+        name: "Refresh delivery status",
         exact: true,
       })
       .click();
@@ -100,24 +99,23 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     f.scripted.state.head = "3".repeat(40);
     await changes
       .getByRole("button", {
-        name: "Refresh delivery observation",
+        name: "Refresh delivery status",
         exact: true,
       })
       .click();
     await changes
-      .getByText(
-        `PR #7 · org/repo · OPEN · observed head ${f.scripted.state.head}`,
-        { exact: true },
-      )
+      .getByText(`PR #7 · org/repo · OPEN · head ${f.scripted.state.head}`, {
+        exact: true,
+      })
       .waitFor();
     assert.equal(
-      await changes.getByText(new RegExp(`observed head ${oldHead}`)).count(),
+      await changes.getByText(new RegExp(`head ${oldHead}`)).count(),
       0,
     );
     f.scripted.state.outage = true;
     await changes
       .getByRole("button", {
-        name: "Refresh delivery observation",
+        name: "Refresh delivery status",
         exact: true,
       })
       .click();
@@ -128,7 +126,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     f.scripted.state.check = "success";
     await changes
       .getByRole("button", {
-        name: "Refresh delivery observation",
+        name: "Refresh delivery status",
         exact: true,
       })
       .click();
