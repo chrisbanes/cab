@@ -1,0 +1,41 @@
+# Create a task
+
+**Status:** implemented, except the budget assertion in the journey test.
+
+## Goal
+
+The operator describes the outcome, sees whether it would start now, and creates
+it in one submission.
+
+## Entry points
+
+- New task in the top bar.
+- Project page New task.
+- Getting-started First task row.
+- [Project setup](project-setup.md) ready check → Resume and create first task.
+- Operator CLI `task create`.
+
+## Steps
+
+1. The composer opens with the project selected when the entry point names one.
+2. Project, title and desired outcome are the form; optional context, references,
+   assignee and dependencies disclose beneath them.
+3. "If you create it now" states Starts now or Will wait with the reasons; the bar
+   repeats the verdict beside Create and start and Save draft.
+4. Create and start shows "Task created" with Open task and any wait, with its
+   Fix where the specification gives one and otherwise the link to what blocks it.
+
+## Budget
+
+| Entry point | Interactions to a created task | First screen must show |
+| --- | --- | --- |
+| Any | 3 (open, fill, Create and start) | project, title, outcome and the verdict |
+
+Unfinished input survives navigation on this device and is offered for recovery.
+The operator CLI is outside the budget: it has no screens.
+
+## Recovery
+
+- Save draft keeps the task without starting it; drafts are not Ready.
+- A refused creation keeps the input and names the field.
+- An unknown outcome offers Check whether it saved, which replays the exact request.

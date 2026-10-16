@@ -491,6 +491,17 @@ web-disabled diagnostic fallback is not qualified for production visual parity.
 
 ### Everyday navigation and attention
 
+The daily operator flows each state their entry points, steps and an interaction
+budget the interface must meet: [first run to first task](user-flows/first-run.md),
+[create a task](user-flows/create-task.md),
+[answer a question](user-flows/answer-question.md),
+[approve an exact action](user-flows/approve-action.md),
+[inspect changes and reply](user-flows/inspect-changes.md),
+[review a result](user-flows/review-result.md),
+[unblock waiting work](user-flows/unblock-work.md) and
+[triage an uncertain execution](user-flows/triage-uncertainty.md). A flow's
+budget never overrides the rules in this specification; it bounds the path to them.
+
 Open on an attention-first overview, with actionable items above a compact
 cross-project work list and recent results shown separately. Keep projects in the
 desktop sidebar. Present task activity, assignments, dependencies, results and
