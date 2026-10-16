@@ -891,7 +891,7 @@ async function installServiceLocked(
     }
     if (cli && first.tokenFile) {
       // Found only after the mint it would waste a credential.
-      if (existsSync(first.tokenFile))
+      if (lstatSync(first.tokenFile, { throwIfNoEntry: false }))
         throw refuse(
           `${first.tokenFile} already exists; choose another --token-file`,
         );

@@ -1311,13 +1311,18 @@ class FakeCli implements InstallCli {
 
   /** Set to make the prompt wait until its signal aborts, like an open terminal prompt. */
   hang = false;
+  /** Runs once the hanging prompt is open. */
+  onPrompt: () => void = () => {};
 
   async readPassword(prompt: string, signal?: AbortSignal) {
     this.prompts.push(prompt);
-    if (this.hang)
-      return new Promise<string>((_, reject) =>
+    if (this.hang) {
+      const closed = new Promise<string>((_, reject) =>
         signal?.addEventListener("abort", () => reject(new Error("aborted"))),
       );
+      this.onPrompt();
+      return closed;
+    }
     if (this.password === undefined) throw new Error("cancelled");
     return this.password;
   }
@@ -1745,7 +1750,6 @@ test("an interrupt during the tarball extraction stops before the auth file, the
 
 test("the default tar extraction is killed when its signal aborts", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-extract-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
   // tar blocks opening a FIFO that has no writer, standing in for a long extraction.
   const fifo = join(root, "release.tar.gz");
   execFileSync("mkfifo", [fifo]);
@@ -1767,11 +1771,13 @@ test("the default tar extraction is killed when its signal aborts", async (t) =>
         return Number(parent) === process.pid && line.includes(fifo);
       });
   t.after(() => {
+    // Release a blocked GNU helper first, then remove the directory.
     try {
       closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
     } catch {
       // No reader is waiting.
     }
+    rmSync(root, { recursive: true, force: true });
   });
   const interrupt = new AbortController();
   const extraction = defaultServiceHost().extract(
@@ -1801,7 +1807,7 @@ test("an interrupt before or during the password prompt stops the install before
     if (when === "before") interrupt.abort();
     else {
       cli.hang = true;
-      setTimeout(() => interrupt.abort(), 30);
+      cli.onPrompt = () => interrupt.abort();
     }
     const before = tree(f.home);
     const result = await f.run({}, cli, interrupt.signal);
@@ -1809,7 +1815,10 @@ test("an interrupt before or during the password prompt stops the install before
     const report = JSON.parse(result.stderr);
     assert.equal(report.stage, "preflight", when);
     assert.equal(report.error, "interrupted", when);
-    assert.deepEqual(cli.prompts, when === "before" ? [] : cli.prompts);
+    assert.deepEqual(
+      cli.prompts,
+      when === "before" ? [] : ["New Ensemble operator password: "],
+    );
     assert.equal(existsSync(f.authFile), false, when);
     assert.deepEqual(f.launchd.mutations(), [], when);
     assert.deepEqual(tree(f.home), before, when);

@@ -158,6 +158,8 @@ export const runSecurity: SecurityRunner = (args, input, signal) =>
       stdout += chunk;
     });
     child.once("error", reject);
+    // An abort-kill can close the pipe under the write; the exit settles the promise.
+    child.stdin.on("error", () => {});
     child.once("close", (code) => resolve({ code: code ?? 1, stdout }));
     child.stdin.end(input ?? "");
   });

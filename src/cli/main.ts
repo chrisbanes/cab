@@ -598,13 +598,16 @@ export async function saveLogin(
   const keychain = deps.keychain();
   const priorKeychain =
     current.connections[name]?.credential?.kind === "keychain";
-  // A failed write must leave the prior Keychain token in place for the prior connection.
+  // A failure from here on must leave the prior connection's Keychain token in place. Only
+  // "not found" means there is none; any other read failure stops before anything is replaced.
   let prior: string | undefined;
-  if (!tokenFile) {
-    if (priorKeychain)
-      prior = await keychain.get(name, signal).catch(() => undefined);
-    await keychain.set(name, token, signal);
-  }
+  if (!tokenFile && priorKeychain)
+    try {
+      prior = await keychain.get(name, signal);
+    } catch (error) {
+      if (!(error instanceof CliError && error.code === "credential-not-found"))
+        throw error;
+    }
   current.connections[name] = {
     url: origin,
     installationId: identity.service.installationId,
@@ -613,6 +616,7 @@ export async function saveLogin(
       : { kind: "keychain", account: name },
   };
   try {
+    if (!tokenFile) await keychain.set(name, token, signal);
     await config.write(current);
   } catch (error) {
     if (!tokenFile)

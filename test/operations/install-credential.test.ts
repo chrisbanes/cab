@@ -319,6 +319,30 @@ test("a login whose config write fails restores the prior Keychain token and rem
     200,
   );
 
+  // A Keychain write that saves the token and then fails also restores the prior one.
+  const savesThenFails = {
+    get: (account: string) => keychain.get(account),
+    delete: (account: string) => keychain.delete(account),
+    set: async (account: string, token: string) => {
+      await keychain.set(account, token);
+      if (token === second.token) throw new Error("read-back mismatch");
+    },
+  };
+  await assert.rejects(
+    saveLogin(
+      good,
+      { ...deps, keychain: () => savesThenFails } as unknown as CliDeps,
+      "local",
+      f.origin,
+      second.token,
+      undefined,
+      never,
+    ),
+    /read-back mismatch/,
+  );
+  assert.equal(keychain.items.get("local"), first.token);
+  assert.deepEqual(readFileSync(file), config);
+
   // A token-file login keeps the prior Keychain item until the config is written.
   await assert.rejects(
     save(failing, second.token, join(h.dir, "install.token")),
