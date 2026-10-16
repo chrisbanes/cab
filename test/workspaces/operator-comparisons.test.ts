@@ -818,6 +818,21 @@ test("branch reads default to a configured local-branch ref and keep requiring a
     first.data.comparisonId,
   );
 
+  // A row stored before `baseBranch` existed still matches through its baseline.
+  const stored = f.service.currentWorkspaceComparison(
+    taskId,
+    "branched",
+    "branch",
+  )?.comparison;
+  assert.ok(stored && stored.target === "branch");
+  const { baseBranch: _dropped, ...legacy } = stored;
+  const legacyId = randomUUID();
+  f.service.replaceWorkspaceComparison(
+    { ...legacy, comparisonId: legacyId },
+    [],
+  );
+  assert.equal((await get("branched")).data.comparisonId, legacyId);
+
   const headRef = await get("detached");
   assert.equal(headRef.data.state, "unavailable");
   assert.equal(headRef.data.reason, "base-branch-required");
@@ -901,6 +916,13 @@ test("a configured default with no merge base keeps its comparison id and names 
   assert.notEqual(
     (await get({ refresh: "true" })).comparisonId,
     first.comparisonId,
+  );
+  // An explicit no-merge-base selection also stays put until Refresh.
+  const explicit = await get({ baseBranch: branch, refresh: "true" });
+  assert.equal(explicit.reason, "no-merge-base");
+  assert.equal(
+    (await get({ baseBranch: branch })).comparisonId,
+    explicit.comparisonId,
   );
 });
 
