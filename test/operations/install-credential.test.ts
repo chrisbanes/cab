@@ -13,6 +13,7 @@ import { MemoryKeychain, harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
+const never = new AbortController().signal;
 
 /** The fixture's auth origin is fixed at 8787; requests for it go to the served port. */
 async function installFixture(t: Parameters<typeof startCliService>[0]) {
@@ -136,7 +137,13 @@ test("installCli stores the login like auth login: token file at 0600, or the ke
     JSON.parse(readFileSync(join(h.configDir, "connections.json"), "utf8"));
 
   const tokenFile = join(h.dir, "install.token");
-  await installCli(deps()).login("local", f.origin, issued.token, tokenFile);
+  await installCli(deps()).login(
+    "local",
+    f.origin,
+    issued.token,
+    tokenFile,
+    never,
+  );
   assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
   const saved = connections().connections.local;
   assert.equal(saved.url, f.origin);
@@ -144,11 +151,17 @@ test("installCli stores the login like auth login: token file at 0600, or the ke
   assert.match(saved.installationId, /^[0-9a-f-]{36}$/);
   // An existing token file is never overwritten.
   await assert.rejects(
-    installCli(deps()).login("again", f.origin, issued.token, tokenFile),
+    installCli(deps()).login("again", f.origin, issued.token, tokenFile, never),
   );
   assert.equal(readFileSync(tokenFile, "utf8").trim(), issued.token);
 
-  await installCli(deps()).login("kept", f.origin, issued.token, undefined);
+  await installCli(deps()).login(
+    "kept",
+    f.origin,
+    issued.token,
+    undefined,
+    never,
+  );
   assert.equal(keychain.items.get("kept"), issued.token);
   assert.deepEqual(connections().connections.kept.credential, {
     kind: "keychain",
@@ -161,7 +174,7 @@ test("installCli stores the login like auth login: token file at 0600, or the ke
     installCli({
       ...deps(),
       fetch: async () => new Response("{}", { status: 500 }),
-    }).login("bad", f.origin, issued.token, bad),
+    }).login("bad", f.origin, issued.token, bad, never),
   );
   assert.equal(existsSync(bad), false);
 });
@@ -192,8 +205,73 @@ test("installCli doctor writes the readiness table to stderr only", async (t) =>
     now: Date.now,
   } as unknown as CliDeps;
   const cli = installCli(deps);
-  await cli.login("local", f.origin, issued.token, undefined);
+  await cli.login("local", f.origin, issued.token, undefined, never);
   await cli.doctor("local");
   assert.equal(out, "");
   assert.match(err, /Check\s+Status\s+Reason/);
+});
+
+test("a stalled or interrupted credential store is bounded, revokes the credential and logs the session out", async (t) => {
+  for (const cause of ["timeout", "interrupt"] as const) {
+    const f = await installFixture(t);
+    const h = harness(t);
+    let cookie = "";
+    const api: typeof fetch = async (input, init) => {
+      const response = await f.rewritten(input, init);
+      cookie = response.headers.get("set-cookie")?.split(";")[0] || cookie;
+      return response;
+    };
+    // The CLI's identity request never answers; only its signal ends it.
+    const stalled: typeof fetch = (input, init) =>
+      String(input).endsWith("/api/operator/cli")
+        ? new Promise((_, reject) =>
+            init?.signal?.addEventListener("abort", () =>
+              reject(init.signal?.reason),
+            ),
+          )
+        : f.rewritten(input, init);
+    const keychain = new MemoryKeychain();
+    const deps = {
+      env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      fetch: stalled,
+      platform: "darwin",
+      keychain: () => keychain,
+      now: Date.now,
+    } as unknown as CliDeps;
+    const interrupt = new AbortController();
+    if (cause === "interrupt") setTimeout(() => interrupt.abort(), 50);
+    const started = Date.now();
+    const outcome = await issueInstallCredential(
+      {
+        fetch: api,
+        // The 20 s store bound runs 100 times faster, as in the lifecycle tests.
+        timeout: (ms: number) => AbortSignal.timeout(ms / 100),
+      } as unknown as ServiceHost,
+      f.origin,
+      "fixture-password",
+      "install · test-host",
+      (token, signal) =>
+        installCli(deps).login("local", f.origin, token, undefined, signal),
+      interrupt.signal,
+    );
+    assert.equal(outcome, "failed", cause);
+    assert.ok(Date.now() - started < 5000, `${cause} is bounded`);
+    const named = f
+      .credentials()
+      .filter((credential) => credential.name === "install · test-host");
+    assert.equal(named.length, 1, cause);
+    assert.equal(named[0]?.state, "revoked", cause);
+    assert.equal(keychain.items.size, 0, cause);
+    const session = await fetch(`${f.s.origin}/api/operator/session`, {
+      headers: { cookie },
+    });
+    assert.equal(
+      ((await session.json()) as { authenticated: boolean }).authenticated,
+      false,
+      cause,
+    );
+  }
 });

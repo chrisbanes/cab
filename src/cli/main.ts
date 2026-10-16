@@ -614,14 +614,26 @@ export function installCli(deps: CliDeps): InstallCli {
     interactive: Boolean(deps.stdin.isTTY && deps.stderr.isTTY),
     readPassword: (prompt) =>
       readHiddenPassword(deps.stdin, deps.stderr, prompt),
-    login: async (name, origin, token, tokenFile) => {
+    login: async (name, origin, token, tokenFile, signal) => {
       rejectManaged(deps.env);
+      // The identity check honors both its own timeout and the install's cancellation.
+      const cancellable: CliDeps = {
+        ...deps,
+        fetch: (input, init) =>
+          deps.fetch(input, {
+            ...init,
+            signal: AbortSignal.any([
+              signal,
+              ...(init?.signal ? [init.signal] : []),
+            ]),
+          }),
+      };
       if (tokenFile)
         writeFileSync(tokenFile, `${token}\n`, { flag: "wx", mode: 0o600 });
       try {
         await saveLogin(
           new ConnectionConfig(configDirectory(deps.env)),
-          deps,
+          cancellable,
           name,
           origin,
           token,

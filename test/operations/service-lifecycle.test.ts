@@ -19,6 +19,7 @@ import { createServer } from "node:net";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import {
+  defaultServiceHost,
   type FirstRun,
   type InstallCli,
   installService,
@@ -1310,7 +1311,7 @@ class FakeCli implements InstallCli {
   }
   async login(...args: unknown[]) {
     this.calls.push("login");
-    this.logins.push(args);
+    this.logins.push(args.slice(0, 4));
     if (this.failLogin) throw new Error("keychain unavailable");
   }
   async doctor(connection: string) {
@@ -1690,4 +1691,62 @@ test("a first install with no state directory creates it and still holds the loc
   assert.equal(existsSync(lock), false);
   assert.equal(statSync(f.stateDir).mode & 0o777, 0o700);
   assert.equal(statSync(f.authFile).mode & 0o777, 0o600);
+});
+
+test("an interrupt during the tarball extraction stops before the auth file, the LaunchAgent or any launchd change", async (t) => {
+  for (const extracted of [false, true]) {
+    const f = await tarballSetup(t, { auth: false });
+    const interrupt = new AbortController();
+    const real = f.launchd.host().extract;
+    // `false` is tar killed by the signal; `true` is tar finishing just as the interrupt lands.
+    f.launchd.overrides.extract = async (tarball, dir, signal) => {
+      assert.equal(signal, interrupt.signal);
+      if (extracted) await real(tarball, dir);
+      interrupt.abort();
+      return extracted;
+    };
+    const result = await f.run({}, new FakeCli(), interrupt.signal);
+    assert.equal(result.code, 1, String(extracted));
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "unpack");
+    assert.equal(report.error, "interrupted");
+    assert.equal(existsSync(f.authFile), false);
+    assert.equal(existsSync(f.activation), false);
+    assert.equal(existsSync(f.recordPath), false);
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), []);
+    assert.deepEqual(f.launchd.requests, []);
+  }
+});
+
+test("the default tar extraction is killed when its signal aborts", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-extract-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // tar blocks opening a FIFO that has no writer, standing in for a long extraction.
+  const fifo = join(root, "release.tar.gz");
+  execFileSync("mkfifo", [fifo]);
+  const destination = join(root, "out");
+  mkdirSync(destination);
+  const running = () =>
+    execFileSync("ps", ["-axo", "command"], { encoding: "utf8" }).includes(
+      fifo,
+    );
+  const interrupt = new AbortController();
+  const extraction = defaultServiceHost().extract(
+    fifo,
+    destination,
+    interrupt.signal,
+  );
+  const deadline = Date.now() + 5000;
+  while (!running() && Date.now() < deadline)
+    await new Promise((done) => setTimeout(done, 25));
+  assert.equal(running(), true, "tar started");
+  const started = Date.now();
+  interrupt.abort();
+  assert.equal(await extraction, false);
+  assert.ok(Date.now() - started < 5000, "returns promptly");
+  while (running() && Date.now() < deadline + 5000)
+    await new Promise((done) => setTimeout(done, 25));
+  assert.equal(running(), false, "tar was terminated");
+  assert.deepEqual(readdirSync(destination), []);
 });

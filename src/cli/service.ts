@@ -103,7 +103,7 @@ export type ServiceHost = {
   /** A signal that aborts after `ms`; tests shorten it. */
   timeout(ms: number): AbortSignal;
   /** Unpacks a release tarball into `dir`, dropping its top directory; false on failure. */
-  extract(tarball: string, dir: string): Promise<boolean>;
+  extract(tarball: string, dir: string, signal?: AbortSignal): Promise<boolean>;
   /** Opens a URL in the default browser. */
   open(url: string): Promise<void>;
   hostname(): string;
@@ -118,6 +118,8 @@ export type InstallCli = {
     origin: string,
     token: string,
     tokenFile: string | undefined,
+    /** Aborts the identity check and the storage; the caller then revokes the credential. */
+    signal: AbortSignal,
   ): Promise<void>;
   doctor(connection: string): Promise<void>;
 };
@@ -304,7 +306,14 @@ class Service {
     mkdirSync(versions, { recursive: true, mode: 0o700 });
     const staging = mkdtempSync(join(versions, ".staging-"));
     try {
-      if (!(await this.host.extract(tarball, staging)))
+      const unpacked = await this.host.extract(
+        tarball,
+        staging,
+        this.io.signal,
+      );
+      // An interrupt kills the extraction; report it as such, not as a bad tarball.
+      this.checkInterrupt();
+      if (!unpacked)
         throw new ServiceFailure("The tarball could not be unpacked");
       let manifest: Buffer;
       let version: string;
@@ -706,7 +715,7 @@ export async function issueInstallCredential(
   origin: string,
   password: string,
   name: string,
-  store: (token: string) => Promise<void>,
+  store: (token: string, signal: AbortSignal) => Promise<void>,
   signal?: AbortSignal,
 ): Promise<"stored" | "wrong-password" | "failed"> {
   let cookie = "";
@@ -758,7 +767,12 @@ export async function issueInstallCredential(
     );
     const issued = operatorCredentialIssuedSchema.parse(await minted.json());
     try {
-      await store(issued.token);
+      // Bounded and interruptible; an abandoned store falls through to the revoke below.
+      const storing = AbortSignal.any([
+        host.timeout(READINESS_PROBE_MS),
+        ...(signal ? [signal] : []),
+      ]);
+      await bounded(store(issued.token, storing), storing);
     } catch {
       await call(
         "POST",
@@ -862,6 +876,7 @@ async function installServiceLocked(
       root = await service.unpack(tarball);
       version = service.releaseVersion(root);
     }
+    service.checkInterrupt();
     if (authMissing && password !== undefined) {
       stage = "auth";
       mkdirSync(dirname(service.authFile), { recursive: true, mode: 0o700 });
@@ -873,6 +888,7 @@ async function installServiceLocked(
       }
     }
     stage = "render";
+    service.checkInterrupt();
     service.prepareDirectories();
     ({ record, logs } = await service.activate(version as string, root, {
       dataDirectory: service.dataDir,
@@ -940,8 +956,14 @@ async function signIn(
       service.origin,
       password,
       name,
-      (token) =>
-        cli.login(first.connection, service.origin, token, first.tokenFile),
+      (token, storing) =>
+        cli.login(
+          first.connection,
+          service.origin,
+          token,
+          first.tokenFile,
+          storing,
+        ),
       service.io.signal,
     );
     return outcome === "stored" ? first.connection : null;
@@ -1162,12 +1184,19 @@ function run(
   command: string,
   args: string[],
   timeout = 20_000,
+  signal?: AbortSignal,
 ): Promise<{ status: number; stdout: string }> {
   return new Promise((done) =>
     execFile(
       command,
       args,
-      { encoding: "utf8", timeout, env: childProcessEnvironment() },
+      {
+        encoding: "utf8",
+        timeout,
+        env: childProcessEnvironment(),
+        // Aborting kills the child.
+        ...(signal ? { signal } : {}),
+      },
       (error, stdout) =>
         done({
           status: !error ? 0 : typeof error.code === "number" ? error.code : -1,
@@ -1200,12 +1229,13 @@ export function defaultServiceHost(): ServiceHost {
     timeout: (ms) => AbortSignal.timeout(ms),
     rename: renameSync,
     // bsdtar refuses absolute and `..` member paths by default.
-    extract: async (tarball, dir) =>
+    extract: async (tarball, dir, signal) =>
       (
         await run(
           "/usr/bin/tar",
           ["-xzf", tarball, "--strip-components", "1", "-C", dir],
           300_000,
+          signal,
         )
       ).status === 0,
     open: async (url) => {
