@@ -360,7 +360,7 @@ for (const viewport of [
     assert.ok(contrast(badge.foreground, badge.background) >= 4.5);
     if (viewport.width === 683) await screenshot(page, "1366-zoom200");
     const action = page.getByRole("link", {
-      name: "Open existing project controls",
+      name: "Project settings",
       exact: true,
     });
     await action.scrollIntoViewIfNeeded();
@@ -379,12 +379,8 @@ for (const viewport of [
       }),
       true,
     );
-    await page
-      .getByRole("link", {
-        name: "Open existing project controls",
-        exact: true,
-      })
-      .click();
+    // The legacy project page keeps its zoom and styling coverage by direct navigation.
+    await page.goto(`${web.origin}/project/${projectId}`);
     await page
       .getByRole("heading", { name: "Project configuration", exact: true })
       .waitFor();

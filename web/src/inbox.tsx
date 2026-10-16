@@ -450,13 +450,6 @@ export function Inbox({
           Only items that need your decision or intervention. Routine progress
           stays in task views.
         </p>
-        <ActionLink
-          variant="secondary"
-          className="inbox-advanced"
-          href="/coordination"
-        >
-          Advanced coordination controls
-        </ActionLink>
       </div>
       <section className="inbox-detail" aria-label="Selected request">
         {selectedId && taskId ? (

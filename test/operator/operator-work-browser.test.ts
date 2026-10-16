@@ -234,9 +234,12 @@ test("headers carry the new subtitles, one New task action and the page-owned re
   await page
     .getByRole("link", { name: "Project settings", exact: true })
     .waitFor();
-  await page
-    .getByRole("link", { name: "Open existing project controls", exact: true })
-    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Open existing project controls" })
+      .count(),
+    0,
+  );
   assert.equal(await page.locator(".task-actions").count(), 0);
   await page.getByText(/^Task states read /).waitFor();
   const reads = [
