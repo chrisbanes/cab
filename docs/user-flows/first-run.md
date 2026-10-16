@@ -1,8 +1,9 @@
 # First run to first task
 
-**Status:** planned. The screens exist ([getting started](getting-started.md),
-[project setup](project-setup.md), [first task](first-task.md)); the one-command
-install and the budget below are not yet implemented or asserted.
+**Status:** partly implemented. The screens exist ([getting started](getting-started.md),
+[project setup](project-setup.md), [first task](first-task.md)) and the one-command
+install is implemented ([operations](../operations/standalone-macos.md#install));
+the budget below is not yet asserted.
 
 ## Goal
 

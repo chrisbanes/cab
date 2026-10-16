@@ -34,48 +34,73 @@ private. The state directory may already hold unrelated files, such as the
 earlier pipeline implementation's `config.yaml` and `state/`; the commands read
 and change only the entries above.
 
-Unpack a release into its version directory, then initialize the operator
-password once. `init-auth` reads the password from a hidden terminal prompt and
-writes a mode `0600` verifier, not the password:
-
-```sh
-STATE="$HOME/Library/Application Support/Ensemble"
-mkdir -p "$STATE/versions/0.1.0"
-tar -xzf ensemble-0.1.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/0.1.0"
-"$STATE/versions/0.1.0/bin/ensemble" service init-auth
-```
-
 ### Install
 
-```sh
-"$STATE/versions/0.1.0/bin/ensemble" service install
-```
-
-Install binds the LaunchAgent to the release it runs from. It refuses, changing
-nothing, unless that release sits directly in `STATE/versions` with a
-`manifest.json` naming the same version, the label is not loaded, no install
-record or LaunchAgent for the label exists, the auth file exists, and the port is
-free. It then renders the plist with the same validation as before (absolute
-canonical paths, no symlinks, new log files, the fixed `PATH`, `RunAtLoad=true`,
-`KeepAlive=false`, no secrets), lints it with `plutil -lint`, records it, moves it
-into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and waits up to 120
-seconds for `/app`. The plist names the release's own `node/bin/node` and
-`dist/src/standalone/cli.js`, so each version keeps its exact executable.
-
-If bootstrap or the wait fails, install boots out the job it started, confirms
-the process exited, removes the LaunchAgent and its record, keeps the data, auth
-and logs, reports the log paths and exits 1. Run it again after fixing the cause.
-If the exit cannot be confirmed, it reports `"jobStopped":false` and keeps the
-record so that `service uninstall` can finish.
-
-Then log in the operator CLI with a read credential issued in Settings →
-Credentials. Upgrade reads readiness through this connection, and `ensemble
-doctor` shows the same checks:
+Install a release tarball with one command. It unpacks the tarball, installs the
+service, signs the CLI in and opens the app:
 
 ```sh
-"$STATE/versions/0.1.0/bin/ensemble" auth login --connection local --url http://127.0.0.1:8787
-"$STATE/versions/0.1.0/bin/ensemble" doctor
+tar -xzf ensemble-0.1.0-darwin-arm64.tar.gz
+ensemble-0.1.0-darwin-arm64/bin/ensemble service install ensemble-0.1.0-darwin-arm64.tar.gz
 ```
+
+The first `tar` only makes the tarball's own `ensemble` available to run. Install
+unpacks the tarball again into `STATE/versions/<version>` through a staging
+directory. If that version directory already exists with the same
+`manifest.json`, it is reused; with a different one, install refuses and changes
+nothing. A later failure keeps the unpacked version, so a rerun reuses it.
+`service install` with no tarball binds to the release it runs from, which must
+already sit in `STATE/versions` (for example one unpacked by hand with `tar
+--strip-components 1 -C "$STATE/versions/0.1.0"`).
+
+Install refuses, changing nothing, unless the tarball is a readable file (or the
+release sits directly in `STATE/versions` with a `manifest.json` naming the same
+version), the label is not loaded, no install record or LaunchAgent for the label
+exists, and the port is free. A missing auth file also refuses outside an
+interactive terminal; run install in one, or run `ensemble service init-auth`
+first. It then asks once, on a hidden prompt, for the operator password (a new
+password when the auth file is missing, which it creates as a mode `0600`
+verifier, not the password). It renders the plist with the same validation as
+before (absolute canonical paths, no symlinks, new log files, the fixed `PATH`,
+`RunAtLoad=true`, `KeepAlive=false`, no secrets), lints it with `plutil -lint`,
+records it, moves it into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and
+waits up to 120 seconds for `/app`. The plist names the release's own
+`node/bin/node` and `dist/src/standalone/cli.js`, so each version keeps its exact
+executable.
+
+If unpacking, bootstrap or the wait fails, install boots out any job it started,
+confirms the process exited, removes the LaunchAgent and its record, keeps the
+data, auth and logs, reports the log paths and exits 1. Run it again after fixing
+the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
+keeps the record so that `service uninstall` can finish.
+
+Once `/app` answers, the service stays installed whatever follows. Install signs
+in with the password over the session API the UI uses, issues one `read`
+credential named `install · <hostname>` that expires in 90 days, and stores it as
+the CLI connection `local` (`--connection NAME` renames it). The token goes to the
+login Keychain, or with `--token-file PATH` to a new `0600` file at that path
+(an existing file is refused). Install then runs `ensemble doctor` for that
+connection, prints its table and `Fix` lines on stderr, and opens
+`http://127.0.0.1:PORT/app` unless you pass `--no-open`. The JSON result stays on
+stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in.
+The password and token are never printed or put on a command line.
+
+If the prompt is cancelled or skipped, the password is wrong (one attempt only),
+the credential cannot be stored (it is then revoked), or doctor or the browser
+open fails, install still exits 0 with the service running. It prints the manual
+step and you finish it yourself, using a read credential issued in Settings → CLI
+credentials:
+
+```sh
+ensemble auth login --connection local --url http://127.0.0.1:8787
+ensemble doctor
+```
+
+The issued credential widens nothing: whoever runs install as the service user
+already holds the auth file and the data directory. It is listed, rotatable and
+revocable in Settings → CLI credentials like any other. Upgrade never signs in or
+issues a credential; it reads readiness through this connection, so an expired or
+revoked credential stops upgrade with the existing message until you log in again.
 
 ### Upgrade
 

@@ -19,6 +19,8 @@ import { createServer } from "node:net";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import {
+  type FirstRun,
+  type InstallCli,
   installService,
   type OperatorConnection,
   type ServiceHost,
@@ -29,6 +31,7 @@ import {
 } from "../../src/cli/service.js";
 import type { CliDeps } from "../../src/cli/types.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { markedDataDirectory } from "../fixtures/marked-data.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -51,6 +54,17 @@ class FakeLaunchd {
   identityUnavailable = false;
   printPath: string | undefined;
   health = 200;
+  /** Operator API requests the install's sign-in made. */
+  requests: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body: unknown;
+  }[] = [];
+  password = "test-password";
+  loginStatus: number | undefined;
+  onApi: (path: string) => void = () => {};
+  opened: string[] = [];
   onBootstrap: () => void = () => {};
   overrides: Partial<ServiceHost> = {};
 
@@ -105,7 +119,10 @@ class FakeLaunchd {
         if (exited) this.events.push("exited");
         return exited;
       },
-      fetch: async (url) => {
+      fetch: async (url, init) => {
+        const { pathname } = new URL(String(url));
+        if (pathname.startsWith("/api/operator/"))
+          return this.api(pathname, init);
         this.fetched.push(String(url));
         return new Response(null, { status: this.health });
       },
@@ -123,12 +140,72 @@ class FakeLaunchd {
           });
         renameSync(from, to);
       },
+      extract: async (tarball, dir) => {
+        execFileSync("tar", [
+          "-xzf",
+          tarball,
+          "--strip-components",
+          "1",
+          "-C",
+          dir,
+        ]);
+        return true;
+      },
+      open: async (url) => {
+        this.opened.push(url);
+      },
+      hostname: () => "test-host",
       ...this.overrides,
     };
   }
 
   mutations() {
     return this.calls.filter(([command]) => command !== "print");
+  }
+
+  /** The operator session, login, credential, revoke and logout routes, as the contract states them. */
+  api(path: string, init: RequestInit | undefined): Response {
+    const headers = Object.fromEntries(
+      Object.entries((init?.headers ?? {}) as Record<string, string>),
+    );
+    const body =
+      typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    this.requests.push({
+      method: init?.method ?? "GET",
+      path,
+      headers,
+      body,
+    });
+    this.onApi(path);
+    init?.signal?.throwIfAborted();
+    const json = (value: unknown, status = 200) =>
+      new Response(JSON.stringify(value), {
+        status,
+        headers: { "set-cookie": "session=abc; HttpOnly" },
+      });
+    const csrfToken = "c".repeat(43);
+    if (path === "/api/operator/session")
+      return json({ authenticated: false, csrfToken });
+    if (path === "/api/operator/login")
+      return body.password === this.password
+        ? json({ authenticated: true, csrfToken })
+        : new Response(null, { status: this.loginStatus ?? 401 });
+    if (path === "/api/operator/credentials")
+      return json({
+        credential: {
+          id: "11111111-1111-4111-8111-111111111111",
+          name: body.name,
+          scope: body.scope,
+          createdAt: 1,
+          expiresAt: 2,
+          lastUsedAt: null,
+          revokedAt: null,
+          replacesId: null,
+          state: "active",
+        },
+        token: `ens_11111111-1111-4111-8111-111111111111_${"s".repeat(43)}`,
+      });
+    return json({});
   }
 }
 
@@ -194,7 +271,11 @@ function capture() {
   return { out, io };
 }
 
-async function setup(t: { after(fn: () => void): void }, data = false) {
+async function setup(
+  t: { after(fn: () => void): void },
+  data = false,
+  { unpacked = true, auth = true } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-service-"));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -204,8 +285,10 @@ async function setup(t: { after(fn: () => void): void }, data = false) {
   chmodSync(join(stateDir, "auth"), 0o700);
   writeFileSync(join(stateDir, "config.yaml"), "legacy: pipeline\n");
   const authFile = join(stateDir, "auth", "operator-auth.json");
-  writeFileSync(authFile, "{}\n", { mode: 0o600 });
-  const releaseA = release(stateDir, "0.1.0");
+  if (auth) writeFileSync(authFile, "{}\n", { mode: 0o600 });
+  const releaseA = unpacked
+    ? release(stateDir, "0.1.0")
+    : join(stateDir, "versions", "0.1.0");
   if (data) markedDataDirectory(join(stateDir, "data"));
   const options: ServiceOptions = {
     stateDir,
@@ -1207,4 +1290,386 @@ test("a record holding an out-of-range diagnostic value is refused before anythi
   assert.equal(f.launchd.jobs.has(f.options.label), true);
   writeFileSync(f.recordPath, original);
   assert.equal((await f.upgrade()).code, 0);
+});
+
+const TOKEN = `ens_11111111-1111-4111-8111-111111111111_${"s".repeat(43)}`;
+
+class FakeCli implements InstallCli {
+  interactive = true;
+  /** undefined cancels the prompt. */
+  password: string | undefined = "test-password";
+  failLogin = false;
+  prompts: string[] = [];
+  calls: string[] = [];
+  logins: unknown[][] = [];
+
+  async readPassword(prompt: string) {
+    this.prompts.push(prompt);
+    if (this.password === undefined) throw new Error("cancelled");
+    return this.password;
+  }
+  async login(...args: unknown[]) {
+    this.calls.push("login");
+    this.logins.push(args);
+    if (this.failLogin) throw new Error("keychain unavailable");
+  }
+  async doctor(connection: string) {
+    this.calls.push(`doctor ${connection}`);
+  }
+}
+
+/** A release tarball whose single top directory holds the release; `note` makes its manifest differ. */
+function tarballOf(root: string, version: string, note?: string) {
+  const build = mkdtempSync(join(root, "build-"));
+  release(build, version);
+  if (note)
+    writeFileSync(
+      join(build, "versions", version, "manifest.json"),
+      JSON.stringify({
+        schema: "ensemble.release/v1",
+        platform: "darwin-arm64",
+        version,
+        note,
+      }),
+    );
+  const file = join(root, `ensemble-${version}${note ?? ""}.tar.gz`);
+  execFileSync("tar", ["-czf", file, "-C", join(build, "versions"), version]);
+  rmSync(build, { recursive: true, force: true });
+  return file;
+}
+
+async function tarballSetup(
+  t: { after(fn: () => void): void },
+  fixture: Parameters<typeof setup>[2] & { data?: boolean } = {},
+) {
+  const f = await setup(t, fixture.data, { unpacked: false, ...fixture });
+  const tarball = tarballOf(dirname(f.home), "0.1.0");
+  const origin = `http://127.0.0.1:${f.options.port}`;
+  const run = async (
+    overrides: Partial<FirstRun> = {},
+    cli: FakeCli = new FakeCli(),
+    signal?: AbortSignal,
+  ) => {
+    const { out, io } = capture();
+    const code = await installService(
+      f.options,
+      f.releaseA,
+      f.launchd.host(),
+      { ...io, signal },
+      { tarball, cli, connection: "local", open: true, ...overrides },
+    );
+    return { code, ...out, cli };
+  };
+  return { ...f, tarball, origin, run };
+}
+
+test("install TARBALL unpacks, asks for the password, signs in, runs doctor and opens the app", async (t) => {
+  const f = await tarballSetup(t);
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(readdirSync(join(f.stateDir, "versions")), ["0.1.0"]);
+  assert.equal(
+    programArguments(f.activation)[0],
+    join(f.stateDir, "versions", "0.1.0", "node", "bin", "node"),
+  );
+  assert.deepEqual(result.cli.prompts, ["Ensemble operator password: "]);
+  assert.deepEqual(
+    f.launchd.requests.map(({ method, path }) => `${method} ${path}`),
+    [
+      "GET /api/operator/session",
+      "POST /api/operator/login",
+      "POST /api/operator/credentials",
+      "POST /api/operator/logout",
+    ],
+  );
+  const credential = f.launchd.requests[2];
+  assert.deepEqual(credential?.body, {
+    name: "install · test-host",
+    scope: "read",
+    expiresInDays: 90,
+  });
+  assert.equal(credential?.headers.origin, f.origin);
+  assert.equal(credential?.headers["x-csrf-token"], "c".repeat(43));
+  assert.equal(credential?.headers.cookie, "session=abc");
+  assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, undefined]]);
+  assert.deepEqual(result.cli.calls, ["login", "doctor local"]);
+  assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.ok, true);
+  assert.equal(output.connection, "local");
+  assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
+  assert.doesNotMatch(result.stderr + result.stdout, /test-password|ens_/);
+});
+
+test("install creates the auth file from the password when it is missing", async (t) => {
+  const f = await tarballSetup(t, { auth: false });
+  f.launchd.password = "new-password";
+  const cli = new FakeCli();
+  cli.password = "new-password";
+  const result = await f.run({}, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(cli.prompts, ["New Ensemble operator password: "]);
+  assert.equal(statSync(f.authFile).mode & 0o777, 0o600);
+  const auth = await OperatorAuth.open({
+    authFile: f.authFile,
+    origin: "http://127.0.0.1:8787",
+  });
+  try {
+    assert.ok(
+      await auth.authenticate(auth.createAnonymousSession().id, "new-password"),
+    );
+  } finally {
+    auth.close();
+  }
+  assert.equal(JSON.parse(result.stdout).connection, "local");
+});
+
+test("a missing auth file without a usable password refuses before anything changes", async (t) => {
+  for (const arrange of [
+    (cli: FakeCli) => {
+      cli.interactive = false;
+    },
+    (cli: FakeCli) => {
+      cli.password = undefined;
+    },
+    (cli: FakeCli) => {
+      cli.password = "";
+    },
+  ]) {
+    const f = await tarballSetup(t, { auth: false });
+    const cli = new FakeCli();
+    arrange(cli);
+    const before = tree(f.home);
+    const result = await f.run({}, cli);
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stderr).stage, "preflight");
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(tree(f.home), before);
+    assert.equal(existsSync(f.authFile), false);
+  }
+});
+
+test("tarball install keeps every refusal and creates nothing for the cheap ones", async (t) => {
+  const cases: [
+    string,
+    (f: Awaited<ReturnType<typeof tarballSetup>>) => unknown,
+    RegExp,
+  ][] = [
+    [
+      "label already loaded",
+      (f) => f.launchd.jobs.set(f.options.label, { path: "/x", pid: 1 }),
+      /already loaded/,
+    ],
+    [
+      "existing record",
+      (f) => {
+        mkdirSync(join(f.stateDir, "launchd"), { mode: 0o700 });
+        writeFileSync(f.recordPath, "{}");
+      },
+      /already installed/,
+    ],
+    ["tarball is not a file", (f) => rmSync(f.tarball), /not a readable file/],
+  ];
+  for (const [name, arrange, reason] of cases) {
+    const f = await tarballSetup(t);
+    arrange(f);
+    const before = tree(f.home);
+    const result = await f.run();
+    assert.equal(result.code, 1, name);
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "preflight", name);
+    assert.match(report.error, reason, name);
+    assert.deepEqual(f.launchd.mutations(), [], name);
+    assert.deepEqual(tree(f.home), before, name);
+    assert.deepEqual(result.cli.prompts, [], name);
+  }
+  const f = await tarballSetup(t);
+  const busy = createServer().listen(f.options.port, "127.0.0.1");
+  await new Promise((done) => busy.once("listening", done));
+  try {
+    const before = tree(f.home);
+    const result = await f.run();
+    assert.equal(result.code, 1);
+    assert.match(JSON.parse(result.stderr).error, /in use/);
+    assert.deepEqual(tree(f.home), before);
+  } finally {
+    await new Promise((done) => busy.close(done));
+  }
+});
+
+test("an existing version directory is reused when its manifest matches and refused otherwise", async (t) => {
+  const same = await setup(t);
+  writeFileSync(join(same.releaseA, "marker"), "kept");
+  const reused = await installService(
+    same.options,
+    same.releaseA,
+    same.launchd.host(),
+    capture().io,
+    {
+      tarball: tarballOf(dirname(same.home), "0.1.0"),
+      cli: new FakeCli(),
+      connection: "local",
+      open: false,
+    },
+  );
+  assert.equal(reused, 0);
+  assert.equal(readFileSync(join(same.releaseA, "marker"), "utf8"), "kept");
+  assert.deepEqual(readdirSync(join(same.stateDir, "versions")), ["0.1.0"]);
+
+  const other = await setup(t);
+  const before = tree(join(other.stateDir, "versions"));
+  const { out, io } = capture();
+  const code = await installService(
+    other.options,
+    other.releaseA,
+    other.launchd.host(),
+    io,
+    {
+      tarball: tarballOf(dirname(other.home), "0.1.0", "different"),
+      cli: new FakeCli(),
+      connection: "local",
+      open: false,
+    },
+  );
+  assert.equal(code, 1);
+  const report = JSON.parse(out.stderr);
+  assert.equal(report.stage, "unpack");
+  assert.equal(report.jobStopped, null);
+  assert.match(report.error, /already holds a different release/);
+  assert.deepEqual(tree(join(other.stateDir, "versions")), before);
+  assert.deepEqual(other.launchd.mutations(), []);
+});
+
+test("a wrong password, cancelled prompt or failed store leaves the service installed with the manual login line", async (t) => {
+  const login = (f: { origin: string }) =>
+    `ensemble auth login --connection local --url ${f.origin}`;
+  const settled = async (
+    f: Awaited<ReturnType<typeof tarballSetup>>,
+    result: Awaited<ReturnType<typeof f.run>>,
+  ) => {
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(f.recordPath), true);
+    assert.equal(existsSync(f.activation), true);
+    assert.deepEqual(f.launchd.mutations(), [
+      ["bootstrap", `gui/${UID}`, f.activation],
+    ]);
+    assert.equal(JSON.parse(result.stdout).connection, null);
+    assert.ok(result.stderr.includes(login(f)));
+    assert.ok(result.stderr.includes("Then run: ensemble doctor"));
+    assert.deepEqual(
+      result.cli.calls.filter((c) => c.startsWith("doctor")),
+      [],
+    );
+  };
+
+  let f = await tarballSetup(t);
+  f.launchd.password = "other-password";
+  await settled(f, await f.run());
+  assert.deepEqual(
+    f.launchd.requests.map(({ path }) => path),
+    ["/api/operator/session", "/api/operator/login"],
+  );
+
+  f = await tarballSetup(t);
+  const cancelled = new FakeCli();
+  cancelled.password = undefined;
+  await settled(f, await f.run({}, cancelled));
+  assert.deepEqual(f.launchd.requests, []);
+
+  f = await tarballSetup(t);
+  const failing = new FakeCli();
+  failing.failLogin = true;
+  await settled(f, await f.run({}, failing));
+  const revokes = f.launchd.requests.filter(({ path }) =>
+    path.endsWith("/revoke"),
+  );
+  assert.equal(revokes.length, 1);
+  assert.equal(
+    revokes[0]?.path,
+    "/api/operator/credentials/11111111-1111-4111-8111-111111111111/revoke",
+  );
+  assert.equal(f.launchd.requests.at(-1)?.path, "/api/operator/logout");
+});
+
+test("an interrupt while signing in leaves the service installed", async (t) => {
+  const f = await tarballSetup(t);
+  const interrupt = new AbortController();
+  f.launchd.onApi = (path) => {
+    if (path === "/api/operator/credentials") interrupt.abort();
+  };
+  const result = await f.run({}, new FakeCli(), interrupt.signal);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.launchd.mutations(), [
+    ["bootstrap", `gui/${UID}`, f.activation],
+  ]);
+  assert.equal(existsSync(f.recordPath), true);
+  assert.equal(JSON.parse(result.stdout).connection, null);
+  assert.deepEqual(result.cli.calls, []);
+  assert.deepEqual(f.launchd.opened, []);
+});
+
+test("--no-open skips the browser and --token-file reaches the CLI login", async (t) => {
+  const f = await tarballSetup(t);
+  const result = await f.run({ open: false, tokenFile: "/x/token" });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.launchd.opened, []);
+  assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, "/x/token"]]);
+});
+
+test("upgrade never signs in or mints a credential", async (t) => {
+  const f = await tarballSetup(t, { data: true });
+  assert.equal((await f.run()).code, 0);
+  f.launchd.requests = [];
+  f.launchd.clock += 60_000;
+  const releaseB = release(f.stateDir, "0.2.0");
+  const code = await upgradeService(
+    { ...f.options, port: 1 },
+    releaseB,
+    {
+      origin: async () => f.origin,
+      readiness: async () => [{ id: "codex-login", status: "pass" }],
+    },
+    f.launchd.host(),
+    capture().io,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(f.launchd.requests, []);
+});
+
+test("install accepts a tarball, a connection, a token file and --no-open; other commands do not", async (t) => {
+  const f = await setup(t);
+  const fake = new FakeLaunchd(f.snapshots);
+  const { io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const unused = (): OperatorConnection => {
+    throw new Error("unused");
+  };
+  const run = (...argv: string[]) =>
+    serviceCommand(argv, deps, unused, () => fake.host());
+  for (const argv of [
+    ["install", "a.tgz", "b.tgz"],
+    ["install", "--connection", "bad name"],
+    ["upgrade", f.releaseA, "--token-file", "x"],
+    ["upgrade", f.releaseA, "--no-open"],
+    ["uninstall", "--token-file", "x"],
+    ["uninstall", "--no-open"],
+    ["uninstall", "--connection", "x"],
+  ])
+    assert.equal(await run(...argv), 2, argv.join(" "));
+  // Accepted: it then refuses the missing tarball before touching launchd.
+  assert.equal(
+    await run(
+      "install",
+      join(f.home, "missing.tar.gz"),
+      "--connection",
+      "live",
+      "--token-file",
+      join(f.home, "token"),
+      "--no-open",
+      "--label",
+      f.options.label,
+    ),
+    1,
+  );
+  assert.deepEqual(fake.mutations(), []);
 });

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -22,6 +22,8 @@ import {
 import { coverage, uuidArg } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
 import {
+  defaultServiceHost,
+  type InstallCli,
   type OperatorConnection,
   SERVICE_USAGE,
   serviceCommand,
@@ -142,8 +144,12 @@ export async function main(
 ): Promise<number> {
   // Local commands on the service's own Mac, outside the operator CLI's options.
   if (argv[0] === "service")
-    return serviceCommand(argv.slice(1), deps, (name) =>
-      operatorConnection(deps, name),
+    return serviceCommand(
+      argv.slice(1),
+      deps,
+      (name) => operatorConnection(deps, name),
+      defaultServiceHost,
+      installCli(deps),
     );
   if (argv[0] === "snapshot") return snapshotCommand(argv.slice(1), deps);
   let json = false;
@@ -574,6 +580,67 @@ async function loadToken(connection: Connection, deps: CliDeps) {
   return deps.keychain().get(credential.account);
 }
 
+/** Validates the token against the service, then stores it and records the connection. */
+async function saveLogin(
+  config: ConnectionConfig,
+  deps: CliDeps,
+  name: string,
+  origin: string,
+  token: string,
+  tokenFile: string | undefined,
+) {
+  // Validate before storing anything.
+  const identity = await new ServiceClient(origin, token, deps.fetch).identity([
+    "cli.identity",
+  ]);
+  const current: CliConfig = await config.read();
+  if (!tokenFile) await deps.keychain().set(name, token);
+  else if (current.connections[name]?.credential?.kind === "keychain")
+    await deps.keychain().delete(name);
+  current.connections[name] = {
+    url: origin,
+    installationId: identity.service.installationId,
+    credential: tokenFile
+      ? { kind: "token-file", path: tokenFile }
+      : { kind: "keychain", account: name },
+  };
+  await config.write(current);
+  return identity;
+}
+
+/** The CLI half of `service install`: password prompt, login and doctor. */
+export function installCli(deps: CliDeps): InstallCli {
+  return {
+    interactive: Boolean(deps.stdin.isTTY && deps.stderr.isTTY),
+    readPassword: (prompt) =>
+      readHiddenPassword(deps.stdin, deps.stderr, prompt),
+    login: async (name, origin, token, tokenFile) => {
+      if (tokenFile)
+        writeFileSync(tokenFile, `${token}\n`, { flag: "wx", mode: 0o600 });
+      try {
+        await saveLogin(
+          new ConnectionConfig(configDirectory(deps.env)),
+          deps,
+          name,
+          origin,
+          token,
+          tokenFile,
+        );
+      } catch (error) {
+        // The token is revoked on failure; do not leave a dead one on disk.
+        if (tokenFile) rmSync(tokenFile, { force: true });
+        throw error;
+      }
+    },
+    doctor: async (name) => {
+      await main(["doctor", "--connection", name], {
+        ...deps,
+        stdout: deps.stderr,
+      });
+    },
+  };
+}
+
 async function login(
   config: ConnectionConfig,
   values: Values,
@@ -606,22 +673,14 @@ async function login(
     );
   if (!operatorCredentialTokenSchema.safeParse(token).success)
     throw new CliError("invalid-input", "That is not an Ensemble CLI token.");
-  // Validate before storing anything.
-  const identity = await new ServiceClient(origin, token, deps.fetch).identity([
-    "cli.identity",
-  ]);
-  const current: CliConfig = await config.read();
-  if (!tokenFile) await deps.keychain().set(name, token);
-  else if (current.connections[name]?.credential?.kind === "keychain")
-    await deps.keychain().delete(name);
-  current.connections[name] = {
-    url: origin,
-    installationId: identity.service.installationId,
-    credential: tokenFile
-      ? { kind: "token-file", path: tokenFile }
-      : { kind: "keychain", account: name },
-  };
-  await config.write(current);
+  const identity = await saveLogin(
+    config,
+    deps,
+    name,
+    origin,
+    token,
+    tokenFile,
+  );
   return {
     connection: name,
     service: {
