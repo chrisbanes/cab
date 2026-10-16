@@ -646,7 +646,7 @@ export function TaskWorkspaceChanges({
                 value={
                   (baseBranch ||
                     (snapshot?.target === "branch"
-                      ? snapshot.baseline?.branch
+                      ? (snapshot.baseBranch ?? snapshot.baseline?.branch)
                       : undefined)) ??
                   ""
                 }

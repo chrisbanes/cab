@@ -366,6 +366,33 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
 });
 
+test("Changes names the configured default branch when it has no merge base", async (_t, j) => {
+  const { changes, page } = await startChangesJourney(j, {
+    recordResult: false,
+    alphaRef: "main",
+    beforeOpen: (workspace) => {
+      const emptyTree = execFileSync("git", ["-C", workspace, "mktree"], {
+        input: "",
+        encoding: "utf8",
+      }).trim();
+      const orphan = git(workspace, "commit-tree", emptyTree, "-m", "orphan");
+      git(workspace, "checkout", "--quiet", "--detach", orphan);
+    },
+  });
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption("repo-alpha");
+  await changes
+    .getByText("The selected local branch has no usable merge base.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await changes.getByLabel("Local base branch").inputValue(),
+    "main",
+  );
+});
+
 test("production Changes preserves exact repository baselines and last-good refreshes", async (t, j) => {
   const {
     fixture,

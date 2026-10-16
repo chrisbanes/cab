@@ -1775,14 +1775,18 @@ export class OperatorApi {
       !!snapshot &&
       "availableBaseBranches" in snapshot &&
       snapshot.availableBaseBranches.includes(configuredRef);
+    // Rows stored before `baseBranch` existed carry the branch only in the baseline.
+    const attemptedBranch =
+      snapshot?.target === "branch"
+        ? (snapshot.baseBranch ?? snapshot.baseline?.branch)
+        : undefined;
     const selectionMatches = snapshot
       ? request.target === "branch"
         ? snapshot.target === "branch" &&
           (request.baseBranch === undefined
-            ? (!!configuredRef &&
-                snapshot.baseline?.branch === configuredRef) ||
+            ? (!!configuredRef && attemptedBranch === configuredRef) ||
               (snapshot.reason === "base-branch-required" && !defaultListed)
-            : snapshot.baseline?.branch === request.baseBranch)
+            : attemptedBranch === request.baseBranch)
         : snapshot.target === "uncommitted" &&
           snapshot.changeSet === (request.changeSet ?? "all")
       : false;

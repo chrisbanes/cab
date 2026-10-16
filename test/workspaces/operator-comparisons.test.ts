@@ -823,6 +823,87 @@ test("branch reads default to a configured local-branch ref and keep requiring a
   assert.equal(headRef.data.reason, "base-branch-required");
 });
 
+test("a configured default with no merge base keeps its comparison id and names the attempted branch", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const taskId = seedUnprovisionedTask(f, "Comparison default no merge base");
+  const source = sourceRepository(
+    join(f.directory, "comparison-sources"),
+    "diverged",
+  );
+  const branch = execFileSync(
+    "git",
+    ["-C", source, "branch", "--show-current"],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+  const binding = await f.service.provisionTask(taskId, [
+    { repositoryId: "diverged", path: source, ref: branch },
+  ]);
+  const workspace = binding.repositories[0]?.workspacePath;
+  assert.ok(workspace);
+  const emptyTree = execFileSync("git", ["-C", workspace, "mktree"], {
+    input: "",
+    encoding: "utf8",
+  }).trim();
+  const orphan = execFileSync(
+    "git",
+    ["-C", workspace, "commit-tree", emptyTree, "-m", "disconnected"],
+    { encoding: "utf8" },
+  ).trim();
+  execFileSync("git", [
+    "-C",
+    workspace,
+    "checkout",
+    "--quiet",
+    "--detach",
+    orphan,
+  ]);
+  const web = await f.startWeb([f.directory]);
+  const credentials = await login(web);
+  const get = async (extra: Record<string, string> = {}) => {
+    const response = await fetch(
+      comparisonUrl(
+        web.origin,
+        taskId,
+        new URLSearchParams({
+          target: "branch",
+          repositoryId: "diverged",
+          ...extra,
+        }),
+      ),
+      { headers: { cookie: credentials.cookie } },
+    );
+    assert.equal(response.status, 200);
+    return (
+      (await response.json()) as {
+        data: {
+          reason?: string;
+          comparisonId?: string;
+          comparison?: { baseBranch?: string; baseline?: unknown };
+        };
+      }
+    ).data;
+  };
+
+  const first = await get();
+  assert.equal(first.reason, "no-merge-base");
+  assert.equal(first.comparison?.baseBranch, branch);
+  assert.equal(first.comparison?.baseline, undefined);
+  assert.ok(first.comparisonId);
+  assert.equal((await get()).comparisonId, first.comparisonId);
+  // An explicit read of the same branch is the same selection.
+  assert.equal(
+    (await get({ baseBranch: branch })).comparisonId,
+    first.comparisonId,
+  );
+  assert.notEqual(
+    (await get({ refresh: "true" })).comparisonId,
+    first.comparisonId,
+  );
+});
+
 test("stored comparison reads recheck privacy and session after awaited path validation", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

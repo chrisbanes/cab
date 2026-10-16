@@ -598,6 +598,7 @@ const workspaceRepositoryComparisonSchema = workspaceComparisonSnapshotBase
       .extend({ branch: z.string().min(1).max(255).optional() })
       .strict()
       .optional(),
+    baseBranch: z.string().min(1).max(255).optional(),
     availableBaseBranches: z.array(z.string().min(1).max(255)).max(4096),
     entries: workspaceComparisonEntriesSchema,
   })

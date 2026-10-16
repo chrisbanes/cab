@@ -135,6 +135,9 @@ export const workspaceComparisonSnapshotBase = z
       })
       .strict()
       .optional(),
+    // The local base branch a Branch read attempted (selected or the configured
+    // default), kept even when no baseline could be established.
+    baseBranch: z.string().optional(),
     availableBaseBranches: z.array(z.string()).max(4096),
     entries: z.array(workspaceComparisonEntryBase).max(256),
     truncated: z.boolean(),

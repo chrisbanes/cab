@@ -1133,6 +1133,7 @@ export async function compareRepository(
       result.reason = "base-branch-unavailable";
       return result;
     }
+    result.baseBranch = selected;
     const checked = await run(["check-ref-format", "--branch", selected]);
     if (!checked) return result;
     const branchCommitRaw = await run(

@@ -896,6 +896,14 @@ test("Branch requires explicit local base selection and reports missing merge ba
   );
   assert.equal(noMergeBase.state, "unavailable");
   assert.equal(noMergeBase.reason, "no-merge-base");
+  assert.equal(noMergeBase.baseBranch, "main");
+  const defaultedNoMergeBase = await compareRepository(
+    { ...request, defaultBaseBranch: "main" },
+    f.current,
+  );
+  assert.equal(defaultedNoMergeBase.reason, "no-merge-base");
+  assert.equal(defaultedNoMergeBase.baseBranch, "main");
+  assert.equal(defaultedNoMergeBase.baseline, undefined);
   assert.equal(noMergeBase.entries.length, 0);
 });
 
