@@ -1,9 +1,8 @@
 import { childProcessEnvironment } from "../core/child-environment.js";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
-import { performance } from "node:perf_hooks";
-import { isDeepStrictEqual } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 import type { PowerEventCursor } from "./state.js";
 import type { ExecutionState } from "./state.js";
 
@@ -22,6 +21,8 @@ export interface PowerEventBatch {
 
 export interface PowerEventSource {
   readSince(cursor: PowerEventCursor | null): Promise<PowerEventBatch>;
+  /** Wall-clock ms of the latest sleep or wake since boot (0 for none); throws when unknown. */
+  lastSleepOrWakeAt?(): Promise<number>;
   start?(): Promise<void>;
   stop?(): Promise<void>;
 }
@@ -308,6 +309,19 @@ export async function* spawnPowerLogReader(
   }
 }
 
+export type SleepClockReader = () => Promise<string>;
+
+const readSleepClock: SleepClockReader = async () =>
+  (
+    await promisify(execFile)(
+      "/usr/sbin/sysctl",
+      ["-n", "kern.sleeptime", "kern.waketime"],
+      { timeout: 5000, env: childProcessEnvironment() },
+    )
+  ).stdout;
+
+const sysctlTimeval = /^\{ sec = (\d+), usec = (\d+) \}/;
+
 /**
  * Reads a bounded macOS power history; missing or unfamiliar history is incomplete
  * and a read killed by its idle or total bound throws `PowerLogReadTimeout`. The
@@ -320,6 +334,7 @@ export class MacPowerEventSource implements PowerEventSource {
     private readonly idleTimeoutMs = 10_000,
     private readonly maxLineBytes = 64 * 1024,
     private readonly now: () => number = Date.now,
+    private readonly readSleepTimes: SleepClockReader = readSleepClock,
   ) {
     if (
       ![timeoutMs, idleTimeoutMs, maxLineBytes].every(
@@ -329,6 +344,22 @@ export class MacPowerEventSource implements PowerEventSource {
       throw new Error("Power-event read bounds must be positive integers");
     if (idleTimeoutMs > timeoutMs)
       throw new Error("Power-event idle bound must not exceed the total bound");
+  }
+
+  /** The later of `kern.sleeptime` and `kern.waketime`; unfamiliar output throws. */
+  async lastSleepOrWakeAt(): Promise<number> {
+    const lines = (await this.readSleepTimes()).trimEnd().split("\n");
+    if (lines.length !== 2)
+      throw new Error("Sleep and wake times are not readable");
+    return Math.max(
+      ...lines.map((line) => {
+        const [, sec, usec] = sysctlTimeval.exec(line) ?? [];
+        const ms = Number(sec) * 1000 + Math.floor(Number(usec) / 1000);
+        if (!sec || !Number.isSafeInteger(ms))
+          throw new Error("Sleep and wake times are not readable");
+        return ms;
+      }),
+    );
   }
 
   async readSince(cursor: PowerEventCursor | null): Promise<PowerEventBatch> {
@@ -585,16 +616,27 @@ export class ExecutionPower {
       throw new Error("Execution power supervision is not started");
     if (this.polling) return this.polling;
     const startedAt = Date.now();
-    const startedMonotonic = performance.now();
-    const current = this.pollUnlocked().then(() => {
+    const current = this.pollUnlocked().then(async () => {
+      // Node's monotonic clock keeps running during macOS sleep, so only the
+      // kernel's sleep/wake times show whether the Mac slept during this poll.
+      // Completion is taken first; a later sleep still ages it by wall clock.
+      const completedAt = Date.now();
+      let freshFrom = startedAt;
+      if (this.events.lastSleepOrWakeAt) {
+        let transitionAt: number;
+        try {
+          transitionAt = await this.events.lastSleepOrWakeAt();
+        } catch {
+          transitionAt = Number.POSITIVE_INFINITY;
+        }
+        if (transitionAt >= startedAt) {
+          this.observedPollStartedAt = undefined;
+          return;
+        }
+        freshFrom = completedAt;
+      }
       this.observedPollStartedAt = startedAt;
-      // Wall start plus awake (monotonic) running time excludes time the Mac
-      // slept during the read; flooring and min() keep it a whole wall-clock
-      // millisecond no later than the completion's own Date.now().
-      this.observedPollCompletedAt = Math.min(
-        Date.now(),
-        startedAt + Math.floor(performance.now() - startedMonotonic),
-      );
+      this.observedPollCompletedAt = freshFrom;
     });
     this.polling = current;
     try {
@@ -718,9 +760,9 @@ export class ExecutionPower {
 
   /**
    * True when a poll that started after the last execution ended is less than
-   * 15 s old, counting its age from when it would have completed had the Mac not
-   * slept. A read slower than 15 s therefore still admits instead of re-polling
-   * forever, while time the Mac slept during the read still ages it.
+   * 15 s old. When the source proves no sleep or wake happened during the poll,
+   * age counts from completion, so a read slower than 15 s still admits instead
+   * of re-polling forever; otherwise, or without that proof, from its start.
    */
   observedForAdmission(now = Date.now()): boolean {
     const startedAt = this.observedPollStartedAt;

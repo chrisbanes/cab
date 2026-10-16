@@ -4,7 +4,6 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { performance } from "node:perf_hooks";
 import { mock, test } from "node:test";
 import { DomainStore } from "../../src/core/domain.js";
 import { Store } from "../../src/core/store.js";
@@ -28,6 +27,7 @@ interface PowerEventSource {
     cursor: PowerEventCursor | null;
     events: TestPowerEvent[];
   }>;
+  lastSleepOrWakeAt?(): Promise<number>;
 }
 
 interface CaffeinateAssertionPort {
@@ -74,6 +74,7 @@ const MacPowerEventSource = powerModule.MacPowerEventSource as unknown as new (
   idleTimeoutMs?: number,
   maxLineBytes?: number,
   now?: () => number,
+  readSleepTimes?: () => Promise<string>,
 ) => PowerEventSource;
 const spawnPowerLogReader = powerModule.spawnPowerLogReader as PowerLogReader;
 const PowerLogReadTimeout = powerModule.PowerLogReadTimeout as new (
@@ -87,6 +88,7 @@ class FakePowerEvents implements PowerEventSource {
   stopCalls = 0;
   failStop = false;
   stopFailure: unknown;
+  lastSleepOrWakeAt?: () => Promise<number>;
 
   async readSince(cursor: PowerEventCursor | null) {
     const requested = cursor;
@@ -231,10 +233,7 @@ test("caffeinate holds exactly one idle-sleep assertion only while execution is 
 
 test("admission observation needs a completed poll started after the last execution ended", async () => {
   let clock = 1_000_000;
-  // The monotonic clock stops while the Mac sleeps; tests move it with `awake`.
-  let awake = 0;
   const clockMock = mock.method(Date, "now", () => clock);
-  const awakeMock = mock.method(performance, "now", () => awake);
   const root = mkdtempSync(join(tmpdir(), "ensemble-power-observed-"));
   const { db, state } = powerStore(join(root, "power.sqlite"));
   const events = new FakePowerEvents();
@@ -281,9 +280,7 @@ test("admission observation needs a completed poll started after the last execut
     await inFlight;
     assert.equal(power.observedForAdmission(), false, "poll began before end");
 
-    // A read awake for longer than 15 s is fresh from its completion, but time
-    // the Mac slept during the read still ages the observation.
-    const slowPoll = async (awakeMs: number, asleepMs: number) => {
+    const slowPoll = async (readMs: number) => {
       let release!: () => void;
       const gate = new Promise<void>((resolve) => (release = resolve));
       events.readSince = async (cursor) => {
@@ -292,34 +289,20 @@ test("admission observation needs a completed poll started after the last execut
       };
       clock += 1;
       const slow = power.poll();
-      clock += awakeMs + asleepMs;
-      awake += awakeMs;
+      clock += readMs;
       release();
       await slow;
       events.readSince = readSince;
       return clock;
     };
-    // A check in the same wall-clock millisecond as a sub-millisecond read.
-    let releaseFast!: () => void;
-    const fastGate = new Promise<void>((resolve) => (releaseFast = resolve));
-    events.readSince = async (cursor) => {
-      await fastGate;
-      return readSince(cursor);
-    };
-    clock += 1;
-    awake += 0.25;
-    const fast = power.poll();
-    awake += 0.5;
-    releaseFast();
-    await fast;
-    events.readSince = readSince;
-    assert.equal(
-      power.observedForAdmission(),
-      true,
-      "a poll completed within the current millisecond is fresh",
-    );
+    // Without proof that the Mac did not sleep, age counts from the poll's start.
+    await slowPoll(20_000);
+    assert.equal(power.observedForAdmission(), false, "unproven slow read");
 
-    const completedAt = await slowPoll(20_000, 0);
+    // With no sleep or wake since the poll started, age counts from completion.
+    let transitionAt = 0;
+    events.lastSleepOrWakeAt = async () => transitionAt;
+    const completedAt = await slowPoll(20_000);
     assert.equal(power.observedForAdmission(), true, "slow poll is fresh");
     assert.equal(power.observedForAdmission(completedAt + 14_999), true);
     assert.equal(power.observedForAdmission(completedAt + 15_000), false);
@@ -328,18 +311,28 @@ test("admission observation needs a completed poll started after the last execut
       false,
       "a wall clock that moved backwards is stale",
     );
-    const wokeAt = await slowPoll(5_000, 10_000);
-    assert.equal(power.observedForAdmission(wokeAt + 4_999), true);
+    await slowPoll(0);
     assert.equal(
-      power.observedForAdmission(wokeAt + 5_000),
-      false,
-      "sleep during the read counts towards its age",
+      power.observedForAdmission(),
+      true,
+      "a check in the poll's own millisecond is fresh",
     );
-    assert.equal(
-      power.observedForAdmission(await slowPoll(5_000, 15_000)),
-      false,
-      "a read spanning a 15 s sleep is stale on completion",
-    );
+
+    // A sleep or wake at or after the poll's start, or an unreadable time, is
+    // not an observation; one before the start is.
+    events.lastSleepOrWakeAt = async () => clock;
+    await slowPoll(5_000);
+    assert.equal(power.observedForAdmission(), false, "slept during the poll");
+    transitionAt = clock;
+    events.lastSleepOrWakeAt = async () => transitionAt;
+    await slowPoll(5_000);
+    assert.equal(power.observedForAdmission(), true, "woke before the poll");
+    events.lastSleepOrWakeAt = async () => {
+      throw new Error("injected sleep-clock failure");
+    };
+    await slowPoll(0);
+    assert.equal(power.observedForAdmission(), false, "unknown sleep time");
+    events.lastSleepOrWakeAt = async () => transitionAt;
 
     // A poll that throws does not refresh the observation.
     clock += 20_000;
@@ -352,7 +345,6 @@ test("admission observation needs a completed poll started after the last execut
     assert.equal(power.observedForAdmission(), false, "failed poll is stale");
   } finally {
     clockMock.mock.restore();
-    awakeMock.mock.restore();
     await power.stop();
     db.close();
     rmSync(root, { recursive: true, force: true });
@@ -1486,4 +1478,34 @@ test("a timed-out read holds admission with its own reason, distinct from an una
       }
     }
   }
+});
+
+test("the pmset source reports the later of the kernel's sleep and wake times and fails closed on unfamiliar output", async () => {
+  const source = (output: string | Error) =>
+    new MacPowerEventSource(undefined, 60_000, 10_000, 65_536, Date.now, () =>
+      output instanceof Error
+        ? Promise.reject(output)
+        : Promise.resolve(output),
+    ) as PowerEventSource & { lastSleepOrWakeAt(): Promise<number> };
+  const timeval = (sec: number, usec: number) =>
+    `{ sec = ${sec}, usec = ${usec} } Thu Oct 15 10:00:00 2026`;
+  assert.equal(
+    await source(
+      `${timeval(1_792_000_000, 123_456)}\n${timeval(1_792_000_100, 999_999)}\n`,
+    ).lastSleepOrWakeAt(),
+    1_792_000_100_999,
+  );
+  assert.equal(
+    await source(`${timeval(0, 0)}\n${timeval(0, 0)}\n`).lastSleepOrWakeAt(),
+    0,
+    "never slept since boot",
+  );
+  for (const output of [
+    "",
+    `${timeval(1, 0)}\n`,
+    `${timeval(1, 0)}\nsurprise\n`,
+    `${timeval(1, 0)}\n${timeval(1, 0)}\n${timeval(1, 0)}\n`,
+    new Error("injected sysctl failure"),
+  ])
+    await assert.rejects(source(output).lastSleepOrWakeAt());
 });
