@@ -1760,12 +1760,41 @@ export class OperatorApi {
       request.target,
     );
     const snapshot = existing?.comparison;
+    // The binding's configured ref is only a default; compareRepository applies
+    // it solely when it names a listed local branch.
+    const configuredRef =
+      request.target === "branch" && request.baseBranch === undefined
+        ? current.repositories
+            .find(
+              (repository) => repository.repositoryId === request.repositoryId,
+            )
+            ?.ref.replace(/^refs\/heads\//, "")
+        : undefined;
+    const defaultListed =
+      !!configuredRef &&
+      !!snapshot &&
+      "availableBaseBranches" in snapshot &&
+      snapshot.availableBaseBranches.includes(configuredRef);
+    // Rows stored before `baseBranch` existed carry the branch only in the baseline.
+    const attemptedBranch =
+      snapshot?.target === "branch"
+        ? (snapshot.baseBranch ?? snapshot.baseline?.branch)
+        : undefined;
+    // A read that failed before any branch was listed records no selection, so
+    // it answers the default read like any other stored outcome.
+    const failedBeforeListing =
+      snapshot?.target === "branch" &&
+      attemptedBranch === undefined &&
+      snapshot.availableBaseBranches.length === 0 &&
+      snapshot.reason !== "base-branch-unavailable";
     const selectionMatches = snapshot
       ? request.target === "branch"
         ? snapshot.target === "branch" &&
           (request.baseBranch === undefined
-            ? snapshot.reason === "base-branch-required"
-            : snapshot.baseline?.branch === request.baseBranch)
+            ? (!!configuredRef && attemptedBranch === configuredRef) ||
+              (snapshot.reason === "base-branch-required" && !defaultListed) ||
+              failedBeforeListing
+            : attemptedBranch === request.baseBranch)
         : snapshot.target === "uncommitted" &&
           snapshot.changeSet === (request.changeSet ?? "all")
       : false;
@@ -1792,6 +1821,7 @@ export class OperatorApi {
     if (
       request.target === "branch" &&
       request.baseBranch === undefined &&
+      !defaultListed &&
       snapshot &&
       (snapshot.target !== "branch" ||
         snapshot.reason !== "base-branch-required") &&
@@ -1816,6 +1846,7 @@ export class OperatorApi {
         ...(request.target === "branch" && request.baseBranch
           ? { baseBranch: request.baseBranch }
           : {}),
+        ...(configuredRef ? { defaultBaseBranch: configuredRef } : {}),
         ...(request.target === "uncommitted" && request.changeSet
           ? { changeSet: request.changeSet }
           : {}),

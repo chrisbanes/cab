@@ -850,6 +850,27 @@ test("Branch requires explicit local base selection and reports missing merge ba
   assert.equal(missingSelection.reason, "base-branch-required");
   assert.deepEqual(missingSelection.availableBaseBranches, ["main"]);
 
+  const defaulted = await compareRepository(
+    { ...request, defaultBaseBranch: "main" },
+    f.current,
+  );
+  assert.equal(defaulted.state, "available", defaulted.reason ?? "");
+  assert.equal(defaulted.baseline?.branch, "main");
+  assert.equal(defaulted.baseline?.kind, "merge-base");
+  for (const defaultBaseBranch of ["not-present", "HEAD"]) {
+    const unusable = await compareRepository(
+      { ...request, defaultBaseBranch },
+      f.current,
+    );
+    assert.equal(unusable.reason, "base-branch-required");
+    assert.deepEqual(unusable.availableBaseBranches, ["main"]);
+  }
+  const explicit = await compareRepository(
+    { ...request, baseBranch: "not-present", defaultBaseBranch: "main" },
+    f.current,
+  );
+  assert.equal(explicit.reason, "base-branch-unavailable");
+
   const missingBranch = await compareRepository(
     { ...request, baseBranch: "not-present" },
     f.current,
@@ -875,6 +896,14 @@ test("Branch requires explicit local base selection and reports missing merge ba
   );
   assert.equal(noMergeBase.state, "unavailable");
   assert.equal(noMergeBase.reason, "no-merge-base");
+  assert.equal(noMergeBase.baseBranch, "main");
+  const defaultedNoMergeBase = await compareRepository(
+    { ...request, defaultBaseBranch: "main" },
+    f.current,
+  );
+  assert.equal(defaultedNoMergeBase.reason, "no-merge-base");
+  assert.equal(defaultedNoMergeBase.baseBranch, "main");
+  assert.equal(defaultedNoMergeBase.baseline, undefined);
   assert.equal(noMergeBase.entries.length, 0);
 });
 

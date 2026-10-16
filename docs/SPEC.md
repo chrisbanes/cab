@@ -979,9 +979,11 @@ Execution admission always rereads Git.
 #### Comparisons and turn capture
 
 Authenticated JSON comparison reads are served at
-`/api/operator/tasks/{taskId}/comparisons`. Branch reads use an explicit
-operator-selected local base branch and its exact merge-base commit; they do
-not guess a base or fetch or check out refs. Uncommitted reads support all,
+`/api/operator/tasks/{taskId}/comparisons`. Branch reads compare against the
+exact merge-base commit of an operator-selected local base branch. Without a
+selection they default to the task repository's configured ref when it names a
+local branch; otherwise the operator selects one. They do not guess a base or
+fetch or check out refs. Uncommitted reads support all,
 staged and unstaged changes. Repository-free tasks can be observed around an
 actual workspace-capable turn, while Git comparisons remain unavailable.
 Comparison IDs stay stable until an explicit refresh; an old ID is never

@@ -105,8 +105,13 @@ export interface CompareRepositoryRequest {
   taskId: string;
   repositoryId: string;
   target: WorkspaceComparisonTarget;
-  /** Only a user-selected local branch may be supplied; refs are never inferred. */
+  /** Only a user-selected local branch may be supplied; refs are never guessed. */
   baseBranch?: string;
+  /**
+   * The binding's configured ref, used only when no `baseBranch` is selected
+   * and it names a listed local branch; otherwise the base stays required.
+   */
+  defaultBaseBranch?: string;
   changeSet?: "all" | "staged" | "unstaged";
 }
 
@@ -1113,8 +1118,13 @@ export async function compareRepository(
   let baselineCommit: string;
   let observedHeadCommit: string;
   let selectedBranchCommit: string | undefined;
+  let selectedBranch: string | undefined;
   if (request.target === "branch") {
-    const selected = request.baseBranch;
+    const selected =
+      request.baseBranch ??
+      (request.defaultBaseBranch && branches.includes(request.defaultBaseBranch)
+        ? request.defaultBaseBranch
+        : undefined);
     if (!selected) {
       result.reason = "base-branch-required";
       return result;
@@ -1123,6 +1133,7 @@ export async function compareRepository(
       result.reason = "base-branch-unavailable";
       return result;
     }
+    result.baseBranch = selected;
     const checked = await run(["check-ref-format", "--branch", selected]);
     if (!checked) return result;
     const branchCommitRaw = await run(
@@ -1141,6 +1152,7 @@ export async function compareRepository(
       return result;
     }
     selectedBranchCommit = branchCommit;
+    selectedBranch = selected;
     const headRaw = await run(
       ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
       { reason: "head-unavailable", exitCode: 128 },
@@ -1614,7 +1626,7 @@ export async function compareRepository(
       "rev-parse",
       "--verify",
       "--end-of-options",
-      `refs/heads/${request.baseBranch}^{commit}`,
+      `refs/heads/${selectedBranch}^{commit}`,
     ]);
     if (!branchRef) return result;
     if (branchRef.toString("ascii").trim() !== selectedBranchCommit) {

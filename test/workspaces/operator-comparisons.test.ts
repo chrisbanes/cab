@@ -771,6 +771,432 @@ test("authenticated repository comparisons require explicit bases, stable IDs an
   assert.equal(missingTask.status, 404);
 });
 
+test("branch reads default to a configured local-branch ref and keep requiring a base otherwise", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const taskId = seedUnprovisionedTask(f, "Comparison default ref");
+  const sourceRoot = join(f.directory, "comparison-sources");
+  const branched = sourceRepository(sourceRoot, "branched");
+  const detached = sourceRepository(sourceRoot, "detached");
+  const branch = execFileSync(
+    "git",
+    ["-C", branched, "branch", "--show-current"],
+    { encoding: "utf8" },
+  ).trim();
+  await f.service.provisionTask(taskId, [
+    { repositoryId: "branched", path: branched, ref: branch },
+    { repositoryId: "detached", path: detached },
+  ]);
+  const web = await f.startWeb([f.directory]);
+  const credentials = await login(web);
+  const get = async (repositoryId: string) => {
+    const response = await fetch(
+      comparisonUrl(
+        web.origin,
+        taskId,
+        new URLSearchParams({ target: "branch", repositoryId }),
+      ),
+      { headers: { cookie: credentials.cookie } },
+    );
+    assert.equal(response.status, 200);
+    return (await response.json()) as {
+      data: {
+        state: string;
+        reason?: string;
+        comparisonId?: string;
+        comparison?: { baseline?: { branch?: string } };
+      };
+    };
+  };
+
+  const first = await get("branched");
+  assert.equal(first.data.state, "available", first.data.reason ?? "");
+  assert.equal(first.data.comparison?.baseline?.branch, branch);
+  assert.ok(first.data.comparisonId);
+  assert.equal(
+    (await get("branched")).data.comparisonId,
+    first.data.comparisonId,
+  );
+
+  // A row stored before `baseBranch` existed still matches through its baseline.
+  const stored = f.service.currentWorkspaceComparison(
+    taskId,
+    "branched",
+    "branch",
+  )?.comparison;
+  assert.ok(stored && stored.target === "branch");
+  const { baseBranch: _dropped, ...legacy } = stored;
+  const legacyId = randomUUID();
+  f.service.replaceWorkspaceComparison(
+    { ...legacy, comparisonId: legacyId },
+    [],
+  );
+  assert.equal((await get("branched")).data.comparisonId, legacyId);
+
+  const headRef = await get("detached");
+  assert.equal(headRef.data.state, "unavailable");
+  assert.equal(headRef.data.reason, "base-branch-required");
+});
+
+test("a configured default with no merge base keeps its comparison id and names the attempted branch", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const taskId = seedUnprovisionedTask(f, "Comparison default no merge base");
+  const source = sourceRepository(
+    join(f.directory, "comparison-sources"),
+    "diverged",
+  );
+  const branch = execFileSync(
+    "git",
+    ["-C", source, "branch", "--show-current"],
+    {
+      encoding: "utf8",
+    },
+  ).trim();
+  const binding = await f.service.provisionTask(taskId, [
+    { repositoryId: "diverged", path: source, ref: branch },
+  ]);
+  const workspace = binding.repositories[0]?.workspacePath;
+  assert.ok(workspace);
+  const emptyTree = execFileSync("git", ["-C", workspace, "mktree"], {
+    input: "",
+    encoding: "utf8",
+  }).trim();
+  const orphan = execFileSync(
+    "git",
+    ["-C", workspace, "commit-tree", emptyTree, "-m", "disconnected"],
+    { encoding: "utf8" },
+  ).trim();
+  execFileSync("git", [
+    "-C",
+    workspace,
+    "checkout",
+    "--quiet",
+    "--detach",
+    orphan,
+  ]);
+  const web = await f.startWeb([f.directory]);
+  const credentials = await login(web);
+  const get = async (extra: Record<string, string> = {}) => {
+    const response = await fetch(
+      comparisonUrl(
+        web.origin,
+        taskId,
+        new URLSearchParams({
+          target: "branch",
+          repositoryId: "diverged",
+          ...extra,
+        }),
+      ),
+      { headers: { cookie: credentials.cookie } },
+    );
+    assert.equal(response.status, 200);
+    return (
+      (await response.json()) as {
+        data: {
+          reason?: string;
+          comparisonId?: string;
+          comparison?: { baseBranch?: string; baseline?: unknown };
+        };
+      }
+    ).data;
+  };
+
+  const first = await get();
+  assert.equal(first.reason, "no-merge-base");
+  assert.equal(first.comparison?.baseBranch, branch);
+  assert.equal(first.comparison?.baseline, undefined);
+  assert.ok(first.comparisonId);
+  assert.equal((await get()).comparisonId, first.comparisonId);
+  // An explicit read of the same branch is the same selection.
+  assert.equal(
+    (await get({ baseBranch: branch })).comparisonId,
+    first.comparisonId,
+  );
+  assert.notEqual(
+    (await get({ refresh: "true" })).comparisonId,
+    first.comparisonId,
+  );
+  // An explicit no-merge-base selection also stays put until Refresh.
+  const explicit = await get({ baseBranch: branch, refresh: "true" });
+  assert.equal(explicit.reason, "no-merge-base");
+  assert.equal(
+    (await get({ baseBranch: branch })).comparisonId,
+    explicit.comparisonId,
+  );
+});
+
+type StoredOutcome = "stored" | "new" | "no-id";
+
+test("stored Branch snapshots answer a no-refresh read only for the selection they record", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const taskId = seedUnprovisionedTask(f, "Comparison stored selections");
+  const root = join(f.directory, "comparison-sources");
+  const names = ["listed", "fullref", "headref", "shaRef"] as const;
+  const paths = new Map<string, string>();
+  let sha = "";
+  for (const name of names) {
+    const path = sourceRepository(root, name);
+    execFileSync("git", ["-C", path, "branch", "-M", "main"]);
+    execFileSync("git", ["-C", path, "branch", "other"]);
+    paths.set(name, path);
+    sha = execFileSync("git", ["-C", path, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+  }
+  await f.service.provisionTask(taskId, [
+    { repositoryId: "listed", path: paths.get("listed") ?? "", ref: "main" },
+    {
+      repositoryId: "fullref",
+      path: paths.get("fullref") ?? "",
+      ref: "refs/heads/main",
+    },
+    { repositoryId: "headref", path: paths.get("headref") ?? "" },
+    { repositoryId: "shaRef", path: paths.get("shaRef") ?? "", ref: sha },
+  ]);
+  const web = await f.startWeb([f.directory]);
+  const credentials = await login(web);
+  const read = async (repositoryId: string, extra: Record<string, string>) => {
+    const response = await fetch(
+      comparisonUrl(
+        web.origin,
+        taskId,
+        new URLSearchParams({ target: "branch", repositoryId, ...extra }),
+      ),
+      { headers: { cookie: credentials.cookie } },
+    );
+    assert.equal(response.status, 200);
+    return (
+      (await response.json()) as {
+        data: { state: string; reason?: string; comparisonId?: string };
+      }
+    ).data;
+  };
+  const stored = (repositoryId: string) =>
+    f.service.currentWorkspaceComparison(taskId, repositoryId, "branch")
+      ?.comparison;
+  // Real computed snapshots are the templates for injected shapes.
+  const templates = new Map<string, NonNullable<ReturnType<typeof stored>>>();
+  for (const name of names) {
+    await read(name, { baseBranch: "main", refresh: "true" });
+    const template = stored(name);
+    assert.ok(template && template.target === "branch");
+    templates.set(name, template);
+  }
+  const inject = (repositoryId: string, shape: Record<string, unknown>) => {
+    const template = templates.get(repositoryId);
+    assert.ok(template && template.target === "branch");
+    const {
+      baseline: _baseline,
+      baseBranch: _baseBranch,
+      reason: _reason,
+      ...rest
+    } = template;
+    const comparisonId = randomUUID();
+    f.service.replaceWorkspaceComparison(
+      {
+        ...rest,
+        entries: [],
+        truncated: false,
+        observedAt: Date.now(),
+        ...shape,
+        comparisonId,
+      } as never,
+      [],
+    );
+    return comparisonId;
+  };
+  const outcome = async (
+    repositoryId: string,
+    storedId: string,
+    extra: Record<string, string>,
+  ): Promise<StoredOutcome> => {
+    const { comparisonId } = await read(repositoryId, extra);
+    return comparisonId === storedId
+      ? "stored"
+      : comparisonId
+        ? "new"
+        : "no-id";
+  };
+  const lists = ["main", "other"];
+  const cases: Array<{
+    name: string;
+    repositories: readonly string[];
+    shape: (repositoryId: string) => Record<string, unknown>;
+    expected: Partial<Record<"default" | "main" | "other", StoredOutcome>>;
+  }> = [
+    ...[
+      ["gap", "time-limit"],
+      ["gap", "output-limit"],
+      ["gap", "workspace-changed"],
+      ["unavailable", "workspace-unavailable"],
+    ].map(([state, reason]) => ({
+      name: `${reason} before any branch was listed`,
+      repositories: names,
+      shape: () => ({ state, reason, availableBaseBranches: [] }),
+      expected: { default: "stored" as const },
+    })),
+    {
+      name: "available main with baseBranch",
+      repositories: ["listed", "fullref"],
+      shape: () => ({
+        state: "available",
+        baseBranch: "main",
+        baseline: {
+          kind: "merge-base",
+          branch: "main",
+          commit: "a".repeat(40),
+        },
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "stored", main: "stored", other: "new" },
+    },
+    {
+      name: "no-merge-base on main with baseBranch",
+      repositories: ["listed", "fullref"],
+      shape: () => ({
+        state: "unavailable",
+        reason: "no-merge-base",
+        baseBranch: "main",
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "stored", main: "stored", other: "new" },
+    },
+    {
+      name: "explicit other on a HEAD-ref repository",
+      repositories: ["headref", "shaRef"],
+      shape: () => ({
+        state: "available",
+        baseBranch: "other",
+        baseline: {
+          kind: "merge-base",
+          branch: "other",
+          commit: "a".repeat(40),
+        },
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "no-id", other: "stored" },
+    },
+    {
+      name: "base-branch-unavailable on a HEAD-ref repository",
+      repositories: ["headref"],
+      shape: () => ({
+        state: "unavailable",
+        reason: "base-branch-unavailable",
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "no-id" },
+    },
+    {
+      name: "legacy no-merge-base row without baseBranch",
+      repositories: ["listed"],
+      shape: () => ({
+        state: "unavailable",
+        reason: "no-merge-base",
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "new" },
+    },
+    {
+      name: "legacy base-branch-required row listing the configured ref",
+      repositories: ["listed"],
+      shape: () => ({
+        state: "unavailable",
+        reason: "base-branch-required",
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "new" },
+    },
+    {
+      name: "base-branch-required for a HEAD ref",
+      repositories: ["headref"],
+      shape: () => ({
+        state: "unavailable",
+        reason: "base-branch-required",
+        availableBaseBranches: lists,
+      }),
+      expected: { default: "stored" },
+    },
+  ];
+  for (const testCase of cases)
+    for (const repositoryId of testCase.repositories)
+      for (const [label, extra] of [
+        ["default", {}],
+        ["main", { baseBranch: "main" }],
+        ["other", { baseBranch: "other" }],
+      ] as const) {
+        const expected = testCase.expected[label];
+        if (!expected) continue;
+        const storedId = inject(repositoryId, testCase.shape(repositoryId));
+        assert.equal(
+          await outcome(repositoryId, storedId, extra),
+          expected,
+          `${testCase.name} / ${repositoryId} / ${label} read`,
+        );
+      }
+});
+
+test("a real Git failure before branch listing is stored for the configured default", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const taskId = seedUnprovisionedTask(f, "Comparison pre-listing gap");
+  const source = sourceRepository(
+    join(f.directory, "comparison-sources"),
+    "gap",
+  );
+  execFileSync("git", ["-C", source, "branch", "-M", "main"]);
+  const binding = await f.service.provisionTask(taskId, [
+    { repositoryId: "gap", path: source, ref: "main" },
+  ]);
+  const workspace = binding.repositories[0]?.workspacePath;
+  assert.ok(workspace);
+  const web = await f.startWeb([f.directory]);
+  const credentials = await login(web);
+  const get = async (extra: Record<string, string> = {}) => {
+    const response = await fetch(
+      comparisonUrl(
+        web.origin,
+        taskId,
+        new URLSearchParams({
+          target: "branch",
+          repositoryId: "gap",
+          ...extra,
+        }),
+      ),
+      { headers: { cookie: credentials.cookie } },
+    );
+    return (
+      (await response.json()) as {
+        data: { state: string; reason?: string; comparisonId?: string };
+      }
+    ).data;
+  };
+  assert.equal((await get()).state, "available");
+  // A packed ref whose name is not UTF-8 makes branch listing fail.
+  const head = execFileSync("git", ["-C", workspace, "rev-parse", "HEAD"], {
+    encoding: "utf8",
+  }).trim();
+  writeFileSync(
+    join(source, ".git", "packed-refs"),
+    Buffer.concat([
+      Buffer.from(`${head} refs/heads/b`),
+      Buffer.from([0xff]),
+      Buffer.from("\n"),
+    ]),
+  );
+  const gap = await get({ refresh: "true" });
+  assert.equal(gap.state, "gap");
+  assert.equal(gap.reason, "unsafe-path");
+  const again = await get();
+  assert.equal(again.comparisonId, gap.comparisonId);
+  assert.equal(again.reason, "unsafe-path");
+  assert.notEqual(
+    (await get({ refresh: "true" })).comparisonId,
+    gap.comparisonId,
+  );
+});
+
 test("stored comparison reads recheck privacy and session after awaited path validation", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());
