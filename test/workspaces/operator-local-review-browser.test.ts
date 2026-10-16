@@ -251,7 +251,7 @@ test("production local review composes exact multi-origin anchors and sends one 
     (draftText.match(/Current at last comparison/g) ?? []).length,
     2,
   );
-  assert.match(draftText, /(observed|captured) .*\d/);
+  assert.match(draftText, /(as of|captured) .*\d/);
 
   // Edit, add summary, reload: draft persists within the live session.
   await comments.getByRole("button", { name: "Edit" }).first().click();
