@@ -321,7 +321,8 @@ export function ProjectPausedBanner({
   const resume = useResumeDraft(p, projectId);
   return (
     <>
-      {paused && (
+      {/* A recorded Resume hides the action at once; the workspace read may lag behind it. */}
+      {paused && resume.phase !== "recorded" && (
         <div role="status" className="project-paused-banner">
           <div className="project-paused-text">
             <p className="body">

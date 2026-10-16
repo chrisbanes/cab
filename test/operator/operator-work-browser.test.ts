@@ -396,6 +396,52 @@ test("a paused project's banner resumes it with confirmation and shows the save 
   assert.ok(await noPageOverflow(page));
 });
 
+test("a recorded resume hides the banner's action while the workspace read is still stale", async (_t, journey) => {
+  const { f, ids, page, web } = await start(journey);
+  const d = f.service.domain();
+  let sent = 0;
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      sent++;
+  });
+  await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+  const resume = page.getByRole("button", {
+    name: "Resume project",
+    exact: true,
+  });
+  await resume.waitFor();
+  // The save is recorded, but the workspace read that clears the pause never arrives.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/workspace", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await resume.click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
+  await page.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+  assert.equal(await page.getByRole("button", { name: /Resum/ }).count(), 0);
+  assert.equal(
+    await page.getByText("Project paused · New turns are held.").count(),
+    0,
+  );
+  assert.equal(await page.getByText("Project resumed.").count(), 1);
+  assert.equal(sent, 1);
+  release();
+  await page.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: /Resum/ }).count(), 0);
+  assert.equal(sent, 1);
+});
+
 test("a routing fallback row names Ensemble as the next actor without the operator tone", async (_t, journey) => {
   const { ids, page } = await start(journey, "/app/tasks?state=all");
   await page.route("**/api/operator/task-list*", async (route) => {
