@@ -526,7 +526,7 @@ export class ExecutionPower {
   // Wall clock: a monotonic clock may not advance while the Mac sleeps.
   private lastEndedAt: number | undefined;
   private observedPollStartedAt: number | undefined;
-  private observedPollAwakeMs: number | undefined;
+  private observedPollCompletedAt: number | undefined;
 
   constructor(
     private readonly state: ExecutionState,
@@ -588,7 +588,13 @@ export class ExecutionPower {
     const startedMonotonic = performance.now();
     const current = this.pollUnlocked().then(() => {
       this.observedPollStartedAt = startedAt;
-      this.observedPollAwakeMs = performance.now() - startedMonotonic;
+      // Wall start plus awake (monotonic) running time excludes time the Mac
+      // slept during the read; flooring and min() keep it a whole wall-clock
+      // millisecond no later than the completion's own Date.now().
+      this.observedPollCompletedAt = Math.min(
+        Date.now(),
+        startedAt + Math.floor(performance.now() - startedMonotonic),
+      );
     });
     this.polling = current;
     try {
@@ -711,18 +717,18 @@ export class ExecutionPower {
   }
 
   /**
-   * True when a poll that started after the last execution ended completed less
-   * than 15 s ago. The poll's own awake running time does not count towards that
-   * age, so a read slower than 15 s still admits instead of re-polling forever,
-   * while time the Mac slept during the read (wall clock only) still does.
+   * True when a poll that started after the last execution ended is less than
+   * 15 s old, counting its age from when it would have completed had the Mac not
+   * slept. A read slower than 15 s therefore still admits instead of re-polling
+   * forever, while time the Mac slept during the read still ages it.
    */
   observedForAdmission(now = Date.now()): boolean {
     const startedAt = this.observedPollStartedAt;
-    const awakeMs = this.observedPollAwakeMs;
-    if (startedAt === undefined || awakeMs === undefined) return false;
+    const completedAt = this.observedPollCompletedAt;
+    if (startedAt === undefined || completedAt === undefined) return false;
     if (this.lastEndedAt !== undefined && startedAt <= this.lastEndedAt)
       return false;
-    const age = now - startedAt - awakeMs;
+    const age = now - completedAt;
     return age >= 0 && age < 15_000;
   }
 

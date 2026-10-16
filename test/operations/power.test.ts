@@ -299,6 +299,26 @@ test("admission observation needs a completed poll started after the last execut
       events.readSince = readSince;
       return clock;
     };
+    // A check in the same wall-clock millisecond as a sub-millisecond read.
+    let releaseFast!: () => void;
+    const fastGate = new Promise<void>((resolve) => (releaseFast = resolve));
+    events.readSince = async (cursor) => {
+      await fastGate;
+      return readSince(cursor);
+    };
+    clock += 1;
+    awake += 0.25;
+    const fast = power.poll();
+    awake += 0.5;
+    releaseFast();
+    await fast;
+    events.readSince = readSince;
+    assert.equal(
+      power.observedForAdmission(),
+      true,
+      "a poll completed within the current millisecond is fresh",
+    );
+
     const completedAt = await slowPoll(20_000, 0);
     assert.equal(power.observedForAdmission(), true, "slow poll is fresh");
     assert.equal(power.observedForAdmission(completedAt + 14_999), true);
