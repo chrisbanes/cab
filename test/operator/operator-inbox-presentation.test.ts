@@ -4,7 +4,6 @@ import { randomUUID } from "node:crypto";
 import {
   ageLabel,
   assignmentChain,
-  clockLabel,
   filterCounts,
   holdNotices,
   holdNoticesBesideRequests,
@@ -20,7 +19,6 @@ import { orderWaits } from "../../src/operator/wait-reasons.js";
 const minute = 60_000;
 test("relative age reads at the largest useful unit and never goes negative", () => {
   const now = 1_700_000_000_000;
-  assert.equal(ageLabel(null, now), "Age unknown");
   assert.equal(ageLabel(now - 0, now), "just now");
   assert.equal(ageLabel(now - 59_000, now), "just now");
   assert.equal(ageLabel(now + 5 * minute, now), "just now");
@@ -30,11 +28,6 @@ test("relative age reads at the largest useful unit and never goes negative", ()
   assert.equal(ageLabel(now - 120 * minute, now), "2h");
   assert.equal(ageLabel(now - 25 * 60 * minute, now), "1d 1h");
   assert.equal(ageLabel(now - 48 * 60 * minute, now), "2d");
-});
-
-test("clock label is two-digit local hours and minutes", () => {
-  assert.equal(clockLabel(new Date(2026, 9, 1, 9, 5).getTime()), "09:05");
-  assert.equal(clockLabel(new Date(2026, 9, 1, 23, 59).getTime()), "23:59");
 });
 
 test("kind and action labels cover every request kind", () => {
@@ -550,13 +543,14 @@ test("a request's identity line names the requester, version and time from the r
     requestIdentity({ requesterName: "Mira", revision: null, createdAt: at }),
     "Mira · 10:52",
   );
+  // A missing requester or time is omitted, never printed as a placeholder.
   assert.equal(
-    requestIdentity({
-      requesterName: null as unknown as string,
-      revision: 1,
-      createdAt: null,
-    }),
-    "Responsibility unknown · version 1 · Age unknown",
+    requestIdentity({ requesterName: null, revision: 1, createdAt: null }),
+    "version 1",
+  );
+  assert.equal(
+    requestIdentity({ requesterName: null, revision: null, createdAt: null }),
+    "",
   );
 });
 

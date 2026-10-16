@@ -1,6 +1,7 @@
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { attentionNext, nextAttention } from "../../src/operator/attention.js";
+import { clockLabel } from "./presentation.js";
 import { taskColumnOf } from "./task-overview.js";
 import { nextActor } from "./tasks.js";
 
@@ -24,8 +25,7 @@ export const requestActionLabel = (
   ].inboxAction;
 
 /** Relative age such as "8m", "1h 46m" or "1d 1h"; a future time reads as just now. */
-export function ageLabel(createdAt: number | null, now: number) {
-  if (createdAt === null) return "Age unknown";
+export function ageLabel(createdAt: number, now: number) {
   const minutes = Math.floor(Math.max(0, now - createdAt) / 60_000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m`;
@@ -34,12 +34,6 @@ export function ageLabel(createdAt: number | null, now: number) {
     return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
   const days = Math.floor(hours / 24);
   return hours % 24 ? `${days}d ${hours % 24}h` : `${days}d`;
-}
-
-/** Local HH:MM. */
-export function clockLabel(at: number) {
-  const date = new Date(at);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
 /** Facet counts over every loaded item, so each option shows what choosing it would list. */
@@ -222,15 +216,17 @@ export function queueGroups<T extends Pick<InboxItem, "kind">>(
   ].filter((group) => group.items.length);
 }
 
-/** "requester · version N · HH:MM": the identities the read model has for a request. */
+/** "requester · version N · HH:MM": the identities the read model has; a missing one is omitted. */
 export const requestIdentity = (
   item: Pick<InboxItem, "requesterName" | "revision" | "createdAt">,
 ) =>
   [
-    item.requesterName ?? "Responsibility unknown",
-    ...(item.revision === null ? [] : [`version ${item.revision}`]),
-    item.createdAt === null ? "Age unknown" : clockLabel(item.createdAt),
-  ].join(" · ");
+    item.requesterName,
+    item.revision === null ? null : `version ${item.revision}`,
+    item.createdAt === null ? null : clockLabel(item.createdAt),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
 /** Who asked whom, from the root to the requesting assignment ("Operator → Mira → Jonas"). */
 export function assignmentChain(

@@ -7,7 +7,6 @@ import {
   holdNotices,
   taskContext,
 } from "./inbox-presentation.js";
-import { requestTime } from "./request-presentation.js";
 
 /**
  * The selected request's task context: task, lead, requester, assignment chain, holds and
@@ -58,8 +57,12 @@ export function InboxContext({
       <dl>
         <dt>Lead</dt>
         <dd>{context.lead}</dd>
-        <dt>Requester</dt>
-        <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
+        {item.requesterName && (
+          <>
+            <dt>Requester</dt>
+            <dd>{item.requesterName}</dd>
+          </>
+        )}
         {/* An intervention has no requesting assignment, so no chain. */}
         {item.requestingAssignmentId && (!task || chain.length > 0) && (
           <>
@@ -81,17 +84,22 @@ export function InboxContext({
           ))}
         </section>
       )}
-      <section className="inbox-context-evidence">
-        <h3>Evidence</h3>
-        <a href={item.evidence}>Task evidence</a>
-        {item.conversation && (
-          <a href={item.conversation}>Requesting conversation</a>
-        )}
-        <p className="muted">
-          Reported by {item.requesterName ?? "Responsibility unknown"} ·{" "}
-          {requestTime(item.createdAt)}
-        </p>
-      </section>
+      {(item.evidence || item.conversation) && (
+        <section className="inbox-context-evidence">
+          <h3>Evidence</h3>
+          {item.evidence && (
+            <a href={item.evidence}>
+              Task evidence <ArrowUpRight aria-hidden="true" size={12} />
+            </a>
+          )}
+          {item.conversation && (
+            <a href={item.conversation}>
+              Requesting conversation{" "}
+              <ArrowUpRight aria-hidden="true" size={12} />
+            </a>
+          )}
+        </section>
+      )}
     </aside>
   );
 }

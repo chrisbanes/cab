@@ -93,8 +93,12 @@ export function ApprovalFacts({
       <dd className="literal">{approval.target ?? "Unavailable"}</dd>
       <dt>Version</dt>
       <dd>version {approval.revision}</dd>
-      <dt>Requester</dt>
-      <dd>{item.requesterName ?? "Responsibility unknown"}</dd>
+      {item.requesterName && (
+        <>
+          <dt>Requester</dt>
+          <dd>{item.requesterName}</dd>
+        </>
+      )}
     </dl>
   ) : (
     <p role="status">Exact approval unavailable</p>

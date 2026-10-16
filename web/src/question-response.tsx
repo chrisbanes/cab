@@ -36,7 +36,8 @@ import {
   completedQuestionCount,
   type QuestionResponseStates,
 } from "./question-response-state.js";
-import { clockLabel, type HoldNotice } from "./inbox-presentation.js";
+import type { HoldNotice } from "./inbox-presentation.js";
+import { clockLabel } from "./presentation.js";
 export function QuestionResponse({
   client,
   session,

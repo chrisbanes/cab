@@ -21,13 +21,13 @@ import { Badge } from "./ui/badge.js";
 import { useMediaQuery } from "./use-media-query.js";
 import {
   ageLabel,
-  clockLabel,
   filterCounts,
   queueGroups,
   requestActionLabel,
   requestIdentity,
   requestKindLabel,
 } from "./inbox-presentation.js";
+import { clockLabel } from "./presentation.js";
 import { inboxSummaryOf, requestKindIcons } from "./request-presentation.js";
 import { useOperatorResource } from "./resource.js";
 import {
@@ -322,10 +322,9 @@ export function Inbox({
         </span>
         <span className="inbox-row-action">{requestActionLabel(item)} →</span>
         <span className="inbox-row-meta">
-          {item.requesterName ?? "Responsibility unknown"} ·{" "}
-          {item.createdAt === null ? (
-            <time>{ageLabel(null, now)}</time>
-          ) : (
+          {item.requesterName}
+          {item.requesterName && item.createdAt !== null && " · "}
+          {item.createdAt !== null && (
             <time dateTime={new Date(item.createdAt).toISOString()}>
               {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, now)}
             </time>
@@ -520,7 +519,11 @@ export function Inbox({
                     {selected.projectName ?? "Unavailable project"}
                   </p>
                   <h2>{selected.taskTitle ?? "Selected request"}</h2>
-                  <p className="inbox-identity">{requestIdentity(selected)}</p>
+                  {requestIdentity(selected) && (
+                    <p className="inbox-identity">
+                      {requestIdentity(selected)}
+                    </p>
+                  )}
                   <p className="inbox-reason">
                     {selected.reason ?? "Exact details unavailable"}
                   </p>
@@ -530,21 +533,27 @@ export function Inbox({
                       remains selected.
                     </p>
                   )}
-                  {!inspector && (
-                    <div className="inbox-detail-links">
-                      <ActionLink variant="secondary" href={selected.evidence}>
-                        Task evidence
-                      </ActionLink>
-                      {selected.conversation && (
-                        <ActionLink
-                          variant="secondary"
-                          href={selected.conversation}
-                        >
-                          Requesting conversation
-                        </ActionLink>
-                      )}
-                    </div>
-                  )}
+                  {!inspector &&
+                    (selected.evidence || selected.conversation) && (
+                      <div className="inbox-detail-links">
+                        {selected.evidence && (
+                          <ActionLink
+                            variant="secondary"
+                            href={selected.evidence}
+                          >
+                            Task evidence
+                          </ActionLink>
+                        )}
+                        {selected.conversation && (
+                          <ActionLink
+                            variant="secondary"
+                            href={selected.conversation}
+                          >
+                            Requesting conversation
+                          </ActionLink>
+                        )}
+                      </div>
+                    )}
                 </div>
               )}
               {selected?.kind === "question" ||

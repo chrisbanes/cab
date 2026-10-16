@@ -448,9 +448,6 @@
   font-size: var(--type-xs);
   color: var(--fg-3);
 }
-.inbox-context-evidence a {
-  text-decoration: none;
-}
 
 /* Nothing unresolved and nothing open: the card owns the whole body. */
 .action-inbox.inbox-empty {
