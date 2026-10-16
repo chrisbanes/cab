@@ -39,7 +39,10 @@ const plainExcerpt = (text: string) =>
 const excerptAround = (text: string, query: string, span = 240) => {
   const plain = plainExcerpt(text);
   if (plain.length <= span) return `“${plain}”`;
-  const at = Math.max(0, plain.toLowerCase().indexOf(query.toLowerCase()));
+  const at = Math.max(
+    0,
+    plain.toLowerCase().indexOf(query.trim().toLowerCase()),
+  );
   const start = Math.max(0, Math.min(at - span / 3, plain.length - span));
   const end = start + span;
   return `“${start > 0 ? "…" : ""}${plain.slice(start, end).trim()}${end < plain.length ? "…" : ""}”`;
