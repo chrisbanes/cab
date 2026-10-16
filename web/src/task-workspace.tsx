@@ -1299,7 +1299,7 @@ export function TaskWorkspace({
     ) ?? [];
   const newestViewed = Math.max(-1, ...viewedIndexes);
   const changes = review?.viewed
-    ? `${newestViewed >= 0 ? `${data.results.length - newestViewed - 1} new result(s)` : "Newer results unknown; no retained viewed result ordering"}; ${sourceObservation === "pending" ? "source comparison pending" : sourceObservation === "unknown" ? "source comparison unknown; current observation unavailable" : review.viewed.sourceId !== latestSource?.sourceId ? "source requirements changed" : "source unchanged"}`
+    ? `${newestViewed >= 0 ? `${data.results.length - newestViewed - 1} new result(s)` : "Newer results unknown; no retained viewed result ordering"}; ${sourceObservation === "pending" ? "source comparison pending" : sourceObservation === "unknown" ? "source comparison unknown; current source state unavailable" : review.viewed.sourceId !== latestSource?.sourceId ? "source requirements changed" : "source unchanged"}`
     : "No viewing baseline. Comparison with previously viewed material is unknown.";
   // An unknown reply outcome stays until it is checked; otherwise the latest message wins.
   // Delivery's outcome shows on Changes, beside its control; the rest stay with the reply.
@@ -1509,7 +1509,7 @@ export function TaskWorkspace({
                   variant="secondary"
                   onClick={() => void refreshSource()}
                 >
-                  Refresh source observation
+                  Refresh source
                 </Button>
               </>
             )}
@@ -2665,13 +2665,13 @@ function Changes({
         <>
           <p>
             PR #{d.binding.number} · {d.binding.repositoryName} ·{" "}
-            {d.binding.state} · observed head {d.binding.headSha}
+            {d.binding.state} · head {d.binding.headSha}
           </p>
           <p>
-            Provider observed {date(d.binding.observedAt)} ·{" "}
+            Provider state as of {date(d.binding.observedAt)} ·{" "}
             {d.binding.readError
               ? "Stale / failed read"
-              : "last successful observation"}
+              : "last successful read"}
           </p>
           {d.binding.omittedCheckCount > 0 && (
             <p>
@@ -2728,7 +2728,7 @@ function Changes({
         onClick={refresh}
         disabled={refreshDisabled}
       >
-        Refresh delivery observation
+        Refresh delivery status
       </Button>
       {unconfirmed}
       <p>

@@ -1090,7 +1090,7 @@ behaviour remains an implementation acceptance obligation.
 
 ### Observation, provenance and preview semantics
 
-Three contexts remain unmistakable: **Current workspace · observed time**,
+Three contexts remain unmistakable: **Current workspace · as of time**,
 **Last turn · actual turn/agent/outcome and before/after times**, and **Retained
 result evidence · result/capture time**. Detailed root, repository, baseline,
 content identity, assignment/work/result provenance and capture limits disclose
@@ -1785,7 +1785,7 @@ as follows:
   coordination pass. Otherwise
   "No operator decision", and a finished task reads "Next: none". There is no
   "Updated" time. The persistent tools row follows ("Open
-  GitHub to edit source" and "Refresh source observation" for an imported task,
+  GitHub to edit source" and "Refresh source" for an imported task,
   "Advanced task controls", "Requests and coordination", "Refresh task").
 - Tabs: Overview, Files, Changes, Review and History, with no counts (History is
   read per assignment; Review's count lives in the local draft). Every panel stays
@@ -1938,11 +1938,11 @@ frames 114 and 118–128 as follows:
   is previewed again in Sync & placement.
 - Frames 118–121 draw no activation result. Production's "Preview and activate
   selection" names the selection (or says it was already active), states that
-  tasks aren't imported until source observations are refreshed, and offers
-  "Refresh source observations" inside that outcome. Selections and Source
-  observation rows also read active or inactive.
+  tasks aren't imported until sources are refreshed, and offers
+  "Refresh sources" inside that outcome. Selections and Source
+  status rows also read active or inactive.
 - Frames 118–121 draw no readiness counts. Production adds, as body text after each
-  Source observation row heading and in the GitHub source Readiness panel, the
+  Source status row heading and in the GitHub source Readiness panel, the
   selection's stored counts ("9 observed · 9 open · 0 match label `ready`"); a
   complete read with no match adds a warning `StatusBadge` and a "Check readiness
   conditions" link, and the phone "Current state" card appends the counts. Task

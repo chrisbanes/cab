@@ -593,9 +593,9 @@ test("Sync & placement marks active selections and drops the marker when the sou
 });
 
 const firstActivation =
-  /^Activated S-1\. Tasks aren't imported until you refresh source observations\./;
+  /^Activated S-1\. Tasks aren't imported until you refresh sources\./;
 const repeatActivation =
-  /^S-1 was already active\. Tasks aren't imported until you refresh source observations\./;
+  /^S-1 was already active\. Tasks aren't imported until you refresh sources\./;
 /** The sentence itself, apart from the Refresh action and its status. */
 const message = async (page: Page) =>
   (
@@ -603,7 +603,7 @@ const message = async (page: Page) =>
   ).trim();
 const refreshButton = (page: Page) =>
   outcomeMessages(page).getByRole("button", {
-    name: "Refresh source observations",
+    name: "Refresh sources",
   });
 
 test("first source activation names the selection, says nothing was imported and offers Refresh", async (_t, journey) => {
@@ -618,7 +618,7 @@ test("first source activation names the selection, says nothing was imported and
   const outcome = await savedOutcome(page, firstActivation);
   assert.equal(
     await message(page),
-    "Activated S-1. Tasks aren't imported until you refresh source observations.",
+    "Activated S-1. Tasks aren't imported until you refresh sources.",
   );
   await refreshButton(page).waitFor();
   await observationRow(page, "S-1").getByText("Not synced").waitFor();
@@ -626,7 +626,7 @@ test("first source activation names the selection, says nothing was imported and
   await observationRow(page, "S-1")
     .getByText(/^Synced/)
     .waitFor();
-  await outcome.getByText("Observation request completed.").waitFor();
+  await outcome.getByText("Refresh finished.").waitFor();
   await savedOutcome(page, firstActivation);
   await page.setViewportSize(phone);
   await noPageOverflow(page);
@@ -648,7 +648,7 @@ test("repeat activation says it was already active without claiming a refresh", 
   await savedOutcome(page, repeatActivation);
   assert.equal(
     await message(page),
-    "S-1 was already active. Tasks aren't imported until you refresh source observations.",
+    "S-1 was already active. Tasks aren't imported until you refresh sources.",
   );
   await observationRow(page, "S-1").getByText("Not synced").waitFor();
 });
@@ -676,7 +676,7 @@ test("activation by another client after the page loaded reads as already active
   await savedOutcome(page, repeatActivation);
   assert.equal(
     await message(page),
-    "S-1 was already active. Tasks aren't imported until you refresh source observations.",
+    "S-1 was already active. Tasks aren't imported until you refresh sources.",
   );
 });
 

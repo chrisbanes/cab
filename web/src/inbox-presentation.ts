@@ -66,7 +66,7 @@ const heldLabels: Partial<Record<string, string>> = {
   "task-not-open": "task not open",
   "project-lead-unconfigured": "project lead not configured",
   "project-lead-revoked": "project lead revoked",
-  "admission-blocked": "admission blocked",
+  "admission-blocked": "waiting to start",
 };
 
 /** What answering a question says about each notice; any id not listed falls back to a generic line. */

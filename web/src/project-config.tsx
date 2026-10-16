@@ -175,14 +175,14 @@ function statusLine(
   const saved = (key: string, version: number) =>
     savedLine(version, p.drafts.saved(`${key}:${p.projectId}`));
   const admission = data.project.paused
-    ? "Paused: new admission is held."
-    : "Existing admission rules still apply.";
+    ? "Paused: new tasks wait to start."
+    : "Existing start rules still apply.";
   const withSaved = (line: string, savedAt: string | null) =>
     savedAt ? `${line} ${savedAt}.` : line;
   if (tab === "routing")
     return withSaved(
       data.project.paused
-        ? `Paused: new admission is held. Routing changes do not resume ${data.project.name ?? "this project"}.`
+        ? `Paused: new tasks wait to start. Routing changes do not resume ${data.project.name ?? "this project"}.`
         : admission,
       saved("routing.configure", data.routing.version),
     );

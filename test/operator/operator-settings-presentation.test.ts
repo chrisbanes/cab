@@ -733,7 +733,7 @@ test("the activation line claims only a confirmed preview at the loaded source v
     });
   const line = (...args: Parameters<typeof activation>) =>
     activation(...args)?.line ?? null;
-  const next = "Tasks aren't imported until you refresh source observations.";
+  const next = "Tasks aren't imported until you refresh sources.";
   assert.equal(line(false), `Activated S-1. ${next}`);
   assert.equal(line(true), `S-1 was already active. ${next}`);
   // A receipt recorded before the prior state existed claims neither.

@@ -577,7 +577,7 @@ function statusNotice(status: string | undefined): Notice | null {
     case "cancelled":
       return {
         title: "Cancelled request",
-        text: "The requester withdrew this request. No answer is required and submission is unavailable.",
+        text: "The requester withdrew this request. No answer is needed.",
         label: "Return to task",
         action: "task",
       };
