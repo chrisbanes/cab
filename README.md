@@ -216,7 +216,8 @@ authentication, service management and backups.
 ## Read further
 
 - [Behavioural specification](docs/SPEC.md): the intended product experience.
-- [User flows](docs/user-flows/): first-run journeys from install to a running task.
+- [User flows](docs/user-flows/): first-run and daily operator journeys, each with
+  the interaction budget the interface must meet.
 - [Standalone design](docs/design/standalone.md): how the service fits together.
 - [Architecture decisions](docs/adr/): the choices behind the design.
 - [Operator integration](docs/design/s04d-operator-integration.md): runtime and
