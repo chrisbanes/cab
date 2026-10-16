@@ -4,12 +4,15 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentProps,
 } from "react";
+import { CircleSlash } from "lucide-react";
 import {
   questionReadSchema,
   operatorCommandSchema,
   type Session,
   type OperatorCommand,
+  type QuestionRead,
 } from "../../src/operator/contracts.js";
 import {
   nativeQuestionAnswers,
@@ -202,7 +205,7 @@ export function QuestionResponse({
       {data && (
         <>
           <div className="question-context">
-            <StatusBadge>{data.status}</StatusBadge>
+            <StatusBadge {...statusBadges[data.status]} />
             {state && total > 1 && (
               <span
                 className="question-progress metadata muted"
@@ -557,6 +560,19 @@ function draftStatus(
     : `All ${state.form.questions.length} answers ready · not submitted`;
 }
 
+/** Each request status as a worded state badge; the tone supplies its symbol. */
+const statusBadges = {
+  pending: { tone: "warning", children: "Awaiting answer" },
+  recorded: { tone: "success", children: "Answer recorded" },
+  stale: { tone: "idle", children: "Stale" },
+  cancelled: { tone: "idle", icon: CircleSlash, children: "Cancelled" },
+  offline: { tone: "error", children: "Offline" },
+  unsupported: { tone: "error", children: "Unsupported" },
+  unavailable: { tone: "error", children: "Unavailable" },
+} as const satisfies Record<
+  QuestionRead["data"]["status"],
+  ComponentProps<typeof StatusBadge>
+>;
 type Notice = {
   title: string;
   text: string;

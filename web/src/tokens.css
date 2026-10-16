@@ -168,15 +168,16 @@
   font-weight: var(--weight-regular);
   line-height: var(--leading-1-5);
 }
-/* Task and request titles stay 14px while body and controls are 13px. */
+/* Task and request titles are 14/500 while body and controls are 13px. */
 .small-heading {
   font-size: 14px;
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   line-height: var(--leading-1-25);
 }
+/* Section headings are 15/600 on every screen artboard. */
 .card-heading,
 .section-heading {
-  font-size: var(--type-md);
+  font-size: 15px;
   font-weight: var(--weight-semibold);
   line-height: var(--leading-1-25);
 }

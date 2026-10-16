@@ -14,6 +14,8 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+  font-size: var(--type-sm);
+  line-height: var(--leading-1-5);
 }
 
 h1,
@@ -618,7 +620,7 @@ nav {
   display: inline-block;
   overflow-wrap: anywhere;
   font-size: 14px;
-  font-weight: var(--weight-semibold);
+  font-weight: var(--weight-medium);
   line-height: var(--leading-1-25);
 }
 

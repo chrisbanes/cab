@@ -1434,7 +1434,7 @@ and state semantics:
   error sit above the enabled actions. The supplied-values panel keeps its
   unfinished-input notice concise and omits creation-receipt/admission explanation
   before submission.
-- Screen and task titles are 18/600 and section headings 16/600. The tablet
+- Screen titles are 18/600, task titles 20/600 and section headings 15/600. The tablet
   Overview header has no extra product label.
 
 Implementation notes: measure navigation and textarea behaviour, verify scroll

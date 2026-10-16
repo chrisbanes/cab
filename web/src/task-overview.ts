@@ -1,8 +1,8 @@
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
-import { waitLabels } from "../../src/operator/wait-reasons.js";
+import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
-import { nextActor, type TaskColumn } from "./tasks.js";
+import { nextActor, reasonLabels, type TaskColumn } from "./tasks.js";
 
 type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
@@ -251,6 +251,14 @@ export function stopConsequences(
   return { affected, held: data.execution.holds.stop };
 }
 
+const assignmentStates = {
+  pending: "Pending",
+  running: "Running",
+  completed: "Completed",
+  held: "Held",
+  cancelled: "Cancelled",
+} satisfies Record<TaskRead["data"]["assignments"][number]["state"], string>;
+
 /** A compact delegation row: responsibility, short id, requester → result destination, wait. */
 export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
   const name = (id: string) =>
@@ -271,8 +279,19 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
         ? name(a.resultRecipientAssignmentId)
         : (a.resultDestination ?? "Destination unknown")
     }`,
-    wait: a.waitReason ?? "Waiting reason unknown",
+    // Admission reasons arrive as "; "-joined codes; a runtime intent reason is already prose.
+    wait:
+      a.waitReason
+        ?.split("; ")
+        .map(
+          (r) =>
+            waitLabels[r as WaitCode] ??
+            reasonLabels[r as keyof typeof reasonLabels] ??
+            r,
+        )
+        .join("; ") ?? "Waiting reason unknown",
     runtime: executionSummary(a).line,
+    state: assignmentStates[a.state],
   };
 }
 

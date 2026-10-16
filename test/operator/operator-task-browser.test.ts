@@ -110,7 +110,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
     });
   assert.deepEqual(taskTitleType, {
     fontSize: "14px",
-    fontWeight: "600",
+    fontWeight: "500",
     decoration: "underline",
   });
   const beforeSwitch = await Promise.all(
