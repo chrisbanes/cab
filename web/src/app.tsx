@@ -1191,7 +1191,18 @@ export function App() {
                 workspace={workspace.state.data}
                 path={path}
                 navigate={navigate}
-                {...(projectId ? { projectId } : {})}
+                {...(projectId
+                  ? {
+                      projectId,
+                      resume: {
+                        ...waitProps,
+                        onChanged: () => {
+                          tasks.refresh();
+                          refreshAll();
+                        },
+                      },
+                    }
+                  : {})}
                 overview={pathname === "/app"}
                 operator={
                   pathname === "/app"

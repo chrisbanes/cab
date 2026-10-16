@@ -272,6 +272,130 @@ test("headers carry the new subtitles, one New task action and the page-owned re
   await shot(page, "390-tasks-toolbar");
 });
 
+test("a paused project's banner resumes it with confirmation and shows the save outcome", async (_t, journey) => {
+  const { f, ids, page, web } = await start(journey);
+  const d = f.service.domain();
+  const sent: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      sent.push(request.postDataJSON());
+  });
+  const open = async () => {
+    await page.goto(`${web.origin}/app/projects/${ids.pausedProject}`);
+    await banner.waitFor();
+  };
+  const pauseAgain = () =>
+    d.execute({
+      type: "project.configure",
+      key: randomUUID(),
+      actor: "operator",
+      projectId: ids.pausedProject,
+      expectedVersion: Number(d.project(ids.pausedProject).version),
+      paused: true,
+    });
+  const banner = page
+    .getByRole("status")
+    .filter({ hasText: "Project paused · New turns are held." });
+  const resume = page.getByRole("button", {
+    name: "Resume project",
+    exact: true,
+  });
+  const dialog = page.getByRole("alertdialog");
+  const confirm = () =>
+    dialog.getByRole("button", { name: "Resume", exact: true }).click();
+  await open();
+  await banner
+    .getByText("Resume doesn't clear stop, task or writer holds.")
+    .waitFor();
+  assert.equal(
+    await page
+      .getByRole("link", { name: "Project settings", exact: true })
+      .count(),
+    1,
+  );
+  // Pause stays in project configuration.
+  assert.equal(await banner.getByRole("button", { name: /Pause/ }).count(), 0);
+
+  // Cancel sends nothing.
+  await resume.click();
+  await dialog.getByText("Resume Paused project?").waitFor();
+  await dialog.getByText("Holds and access are unchanged.").waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(sent.length, 0);
+  assert.equal(d.project(ids.pausedProject).paused, 1);
+
+  // Confirm sends exactly one project.configure and the outcome outlives the banner.
+  await resume.click();
+  await confirm();
+  await page.getByText("Project resumed.", { exact: true }).waitFor();
+  await banner.waitFor({ state: "hidden" });
+  assert.equal(sent.length, 1);
+  const first = sent[0];
+  assert.ok(first);
+  assert.deepEqual(
+    { type: first.type, projectId: first.projectId, paused: first.paused },
+    { type: "project.configure", projectId: ids.pausedProject, paused: false },
+  );
+  assert.deepEqual(Object.keys(first).sort(), [
+    "expectedVersion",
+    "key",
+    "paused",
+    "projectId",
+    "type",
+  ]);
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+  assert.equal(await page.getByText("Project resumed.").count(), 1);
+  assert.equal(await page.getByRole("button", { name: /Resum/ }).count(), 0);
+
+  // A lost reply is unknown: Resume leaves, and Check resends the exact request.
+  pauseAgain();
+  await open();
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await resume.click();
+  await confirm();
+  const check = page.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+  assert.equal(await page.getByRole("button", { name: /Resum/ }).count(), 0);
+  assert.equal(sent.length, 2);
+  await page.unroute("**/api/operator/commands");
+  await check.click();
+  await page.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(sent.length, 3);
+  assert.deepEqual(sent[2], sent[1]);
+  assert.equal(d.project(ids.pausedProject).paused, 0);
+
+  // A rejected save says so and leaves the banner with Resume project to try again.
+  pauseAgain();
+  await open();
+  await page.route("**/api/operator/commands", (route) =>
+    route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "invalid-input", message: "Rejected" },
+      }),
+    }),
+  );
+  await resume.click();
+  await confirm();
+  await page
+    .getByText("Couldn't save. Your changes are still here.", { exact: true })
+    .waitFor();
+  await resume.waitFor();
+  assert.equal(await page.getByText("Project resumed.").count(), 0);
+  await page.unroute("**/api/operator/commands");
+
+  // On a phone the banner and its button fit without page scroll.
+  await page.setViewportSize(phone);
+  await banner.waitFor();
+  await resume.waitFor();
+  assert.ok(await noPageOverflow(page));
+});
+
 test("a routing fallback row names Ensemble as the next actor without the operator tone", async (_t, journey) => {
   const { ids, page } = await start(journey, "/app/tasks?state=all");
   await page.route("**/api/operator/task-list*", async (route) => {

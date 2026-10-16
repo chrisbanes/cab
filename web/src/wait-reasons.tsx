@@ -12,7 +12,7 @@ import {
   waitLabels,
 } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button } from "./components.js";
+import { ActionLink, Button, StatusBadge } from "./components.js";
 import { DraftMessage, key, useDraft } from "./settings.js";
 import type {
   ConfigurationDraft,
@@ -302,6 +302,47 @@ export function ResumeProjectFix({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The project page's paused banner (23b): Resume project while the project is paused. The
+ * outcome stays after the pause clears, so a recorded save still reads "Project resumed.".
+ */
+export function ProjectPausedBanner({
+  p,
+  projectId,
+  paused,
+}: {
+  p: WaitProps;
+  projectId: string;
+  paused: boolean;
+}) {
+  const resume = useResumeDraft(p, projectId);
+  return (
+    <>
+      {paused && (
+        <div role="status" className="project-paused-banner">
+          <div className="project-paused-text">
+            <p className="body">
+              <StatusBadge tone="warning">Project paused</StatusBadge> · New
+              turns are held.
+            </p>
+            <p className="metadata muted">
+              Running turns finish. Messages queue for the lead. Resume doesn't
+              clear stop, task or writer holds.
+            </p>
+          </div>
+          <ResumeProjectFix
+            p={p}
+            draft={resume}
+            projectId={projectId}
+            label="Resume project"
+          />
+        </div>
+      )}
+      <ResumeOutcome p={p} draft={resume} projectId={projectId} />
+    </>
   );
 }
 

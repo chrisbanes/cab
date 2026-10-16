@@ -258,6 +258,7 @@ export async function seedCatalog(
     uncertain,
     running,
     paused,
+    pausedProject,
     importedId: String(imported.id),
   };
 }
