@@ -2233,6 +2233,12 @@ test("an answered native question awaiting delivery is Ensemble's, not an operat
   const question = coordination.runtimeQuestionByEndpoint(identity);
   assert.ok(question);
   assert.deepEqual(await listedAttention(api, task.taskId), ["question"]);
+  assert.deepEqual(
+    (await api.readInbox()).data.items
+      .filter((i) => i.taskId === task.taskId)
+      .map((i) => i.kind),
+    ["question"],
+  );
   await f.service.coordinationView().answerRuntimeQuestion({
     taskId: task.taskId,
     key: randomUUID(),
@@ -2247,12 +2253,10 @@ test("an answered native question awaiting delivery is Ensemble's, not an operat
   assert.deepEqual(await listedAttention(api, task.taskId), [
     "question-delivery",
   ]);
-  // Ensemble owns the delivery, so it raises no Inbox intervention.
-  assert.equal(
-    (await api.readInbox()).data.items.some(
-      (i) => i.taskId === task.taskId && i.kind === "intervention",
-    ),
-    false,
+  // Ensemble owns the delivery, so the task leaves the Inbox.
+  assert.deepEqual(
+    (await api.readInbox()).data.items.filter((i) => i.taskId === task.taskId),
+    [],
   );
 });
 test("a routing fallback on a task with no project lead clears without operator action", async (t) => {
