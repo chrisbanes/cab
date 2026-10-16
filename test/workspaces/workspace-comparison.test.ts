@@ -854,7 +854,7 @@ test("Branch requires explicit local base selection and reports missing merge ba
     { ...request, defaultBaseBranch: "main" },
     f.current,
   );
-  assert.notEqual(defaulted.reason, "base-branch-required");
+  assert.equal(defaulted.state, "available", defaulted.reason ?? "");
   assert.equal(defaulted.baseline?.branch, "main");
   assert.equal(defaulted.baseline?.kind, "merge-base");
   for (const defaultBaseBranch of ["not-present", "HEAD"]) {

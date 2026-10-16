@@ -317,6 +317,7 @@ test("Changes opens on the Branch comparison against the configured ref", async 
   assert.doesNotMatch(strip, /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/);
   assert.doesNotMatch(strip, /[0-9a-f]{40}/);
   assert.doesNotMatch(strip, /Reason:/);
+  assert.match(strip, /^available\b/);
   const details = changes.locator(
     ".changes-observation .action-outcome-details",
   );
@@ -338,10 +339,29 @@ test("Changes opens on the Branch comparison against the configured ref", async 
       url.searchParams.get("refresh") === "true"
     );
   });
-  await changes
-    .getByRole("button", { name: "Refresh comparison", exact: true })
-    .click();
+  // The client re-reads the refreshed comparison by id before it decides on a notice.
+  const refreshedExactRead = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      url.pathname.endsWith("/comparisons") &&
+      url.searchParams.has("comparisonId")
+    );
+  });
+  const refreshButton = changes.getByRole("button", {
+    name: "Refresh comparison",
+    exact: true,
+  });
+  await refreshButton.click();
   await refreshed;
+  await refreshedExactRead;
+  await page.waitForFunction(
+    () =>
+      !document.body.innerText.includes("Refreshing…") &&
+      !Array.from(document.querySelectorAll("button")).some(
+        (button) =>
+          button.textContent === "Refresh comparison" && button.disabled,
+      ),
+  );
   await list.getByRole("button", { name: /default-ref\.md/ }).waitFor();
   assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
 });

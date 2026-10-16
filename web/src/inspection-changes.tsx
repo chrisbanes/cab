@@ -10,7 +10,7 @@ import {
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
-import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
+import { OutcomeDetails } from "./action-feedback.js";
 import { Button, StatusBadge } from "./components.js";
 import { failureCause } from "./outcome-copy.js";
 import { codeSentence, shortId } from "./presentation.js";
@@ -465,22 +465,27 @@ export function TaskWorkspaceChanges({
         reason,
         {
           "base-branch-required":
-            "No base branch is configured for this repository. Select a local branch; none is inferred or checked out.",
+            "The configured ref is not a local branch. Select a local branch; none is inferred or checked out.",
           "base-branch-unavailable":
             "The selected local branch is not available. Select another local branch.",
           "no-merge-base":
             "The selected local branch has no usable merge base.",
+          "workspace-changed":
+            "The workspace changed while this comparison was read. Refresh to read it again.",
         },
-        "",
+        "The comparison could not be read completely.",
       )
     : "";
-  const detailFields: OutcomeField[] = [
-    ...(id ? ([["Comparison", id]] as const) : []),
-    ...(snapshot?.target !== "turn" && snapshot?.baseline
-      ? ([["Baseline commit", snapshot.baseline.commit]] as const)
-      : []),
-    ...(reason ? ([["Reason", reason]] as const) : []),
-  ];
+  const detailFields = (
+    [
+      ["Comparison", id ?? undefined],
+      [
+        "Baseline commit",
+        snapshot?.target !== "turn" ? snapshot?.baseline?.commit : undefined,
+      ],
+      ["Reason", reason],
+    ] as [string, string | undefined][]
+  ).filter((field): field is [string, string] => !!field[1]);
   const selectedIndex =
     snapshot && state.selectedEntryKey
       ? snapshot.entries.findIndex(
@@ -639,10 +644,10 @@ export function TaskWorkspaceChanges({
                 id="changes-base-branch"
                 aria-label="Local base branch"
                 value={
-                  baseBranch ??
-                  (snapshot?.target === "branch"
-                    ? snapshot.baseline?.branch
-                    : undefined) ??
+                  (baseBranch ||
+                    (snapshot?.target === "branch"
+                      ? snapshot.baseline?.branch
+                      : undefined)) ??
                   ""
                 }
                 onChange={(event) => {
@@ -731,9 +736,7 @@ export function TaskWorkspaceChanges({
               <span className="identifier">{currentRequest.error}</span>
             </span>
           )}
-          {current.state === "unavailable" && reasonSentence && (
-            <span>{reasonSentence}</span>
-          )}
+          {reasonSentence && <span>{reasonSentence}</span>}
           <OutcomeDetails fields={detailFields} />
           {snapshot?.truncated && (
             <span>Comparison output is bounded and truncated.</span>

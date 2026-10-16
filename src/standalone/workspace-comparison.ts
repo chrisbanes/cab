@@ -1118,6 +1118,7 @@ export async function compareRepository(
   let baselineCommit: string;
   let observedHeadCommit: string;
   let selectedBranchCommit: string | undefined;
+  let selectedBranch: string | undefined;
   if (request.target === "branch") {
     const selected =
       request.baseBranch ??
@@ -1150,6 +1151,7 @@ export async function compareRepository(
       return result;
     }
     selectedBranchCommit = branchCommit;
+    selectedBranch = selected;
     const headRaw = await run(
       ["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
       { reason: "head-unavailable", exitCode: 128 },
@@ -1623,7 +1625,7 @@ export async function compareRepository(
       "rev-parse",
       "--verify",
       "--end-of-options",
-      `refs/heads/${request.baseBranch}^{commit}`,
+      `refs/heads/${selectedBranch}^{commit}`,
     ]);
     if (!branchRef) return result;
     if (branchRef.toString("ascii").trim() !== selectedBranchCommit) {

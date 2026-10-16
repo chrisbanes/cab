@@ -810,7 +810,7 @@ test("branch reads default to a configured local-branch ref and keep requiring a
   };
 
   const first = await get("branched");
-  assert.notEqual(first.data.reason, "base-branch-required");
+  assert.equal(first.data.state, "available", first.data.reason ?? "");
   assert.equal(first.data.comparison?.baseline?.branch, branch);
   assert.ok(first.data.comparisonId);
   assert.equal(
