@@ -622,6 +622,35 @@ test("lead recovery candidates prove only receipt-backed reconciled turns, not o
   }
 });
 
+test("the lead recovery candidate query is driven by recovery receipts, not assignment history", async () => {
+  const f = await heldFixture();
+  try {
+    await f.service.resolveHeldExecution(f.receipt);
+    const { db, coordination } = internals(f.service);
+    const assignmentId = String(f.old.assignmentId);
+    const prepare = db.prepare.bind(db);
+    const prepared: string[] = [];
+    db.prepare = (sql: string) => {
+      prepared.push(sql);
+      return prepare(sql);
+    };
+    coordination.awaitsRecoveryContinuation(f.taskId, assignmentId);
+    db.prepare = prepare;
+    const sql = prepared.find((text) =>
+      text.includes("coordination_recovery_continuations"),
+    );
+    assert.ok(sql);
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+      .all(f.taskId, assignmentId) as Array<{ parent: number; detail: string }>;
+    const driving = plan.find((row) => /^(SCAN|SEARCH)\b/.test(row.detail));
+    assert.match(driving?.detail ?? "", /execution_recovery_receipts|receipt/);
+    assert.ok(!plan.some((row) => /assignmentId/.test(row.detail)));
+  } finally {
+    await close(f);
+  }
+});
+
 test("wrong or unproved recovery never upgrades a pre-recovery message on replay", async () => {
   const f = await heldFixture();
   try {

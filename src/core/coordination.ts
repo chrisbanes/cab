@@ -3447,13 +3447,15 @@ export class CoordinationStore {
   }> {
     if (!this.reconciledAssignmentProof) return [];
     // Pre-filter on the conjuncts reconciledAssignmentProof requires (the reason literal
-    // is its own) so ordinary held history is never proved; the proof still runs per row.
+    // is its own) so ordinary held history is never proved. CROSS JOIN pins receipts as
+    // the driving table, so cost follows recovery receipts, not the assignment's history.
     const requests = this.db
-      .prepare(`SELECT request.workId FROM turn_requests request
+      .prepare(`SELECT request.workId
+      FROM execution_recovery_receipts receipt
+      CROSS JOIN turn_requests request ON request.workId = receipt.workId
       WHERE request.taskId = ? AND request.assignmentId = ? AND request.state = 'held'
         AND request.kind = 'assignment'
         AND request.reason = 'Execution reconciled; no automatic successor'
-        AND EXISTS (SELECT 1 FROM execution_recovery_receipts receipt WHERE receipt.workId = request.workId)
         AND EXISTS (SELECT 1 FROM execution_intents intent WHERE intent.workId = request.workId AND intent.state = 'reconciled')
         AND NOT EXISTS (SELECT 1 FROM coordination_recovery_continuations recorded WHERE recorded.workId = request.workId)
       ORDER BY request.sequence`)
