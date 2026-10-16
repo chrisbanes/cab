@@ -40,6 +40,7 @@ import { rejectUnusedFlags } from "./write.js";
 export type { CliDeps } from "./types.js";
 
 const SCHEMA = "ensemble.cli/v1";
+const KEYCHAIN_CLEANUP_MS = 20_000;
 const TASK_CAPABILITIES = ["cli.identity", "task.read"] as const;
 
 export const EXIT: Record<string, [number, string]> = {
@@ -619,15 +620,19 @@ export async function saveLogin(
     if (!tokenFile) await keychain.set(name, token, signal);
     await config.write(current);
   } catch (error) {
-    if (!tokenFile)
+    if (!tokenFile) {
+      // The restore must finish even after an interrupt, so it has its own bound.
+      const bound = AbortSignal.timeout(KEYCHAIN_CLEANUP_MS);
       await (prior === undefined
-        ? keychain.delete(name)
-        : keychain.set(name, prior)
+        ? keychain.delete(name, bound)
+        : keychain.set(name, prior, bound)
       ).catch(() => undefined);
+    }
     throw error;
   }
+  // Best effort, and it stops with the storage signal: the new login is already in place.
   if (tokenFile && priorKeychain)
-    await keychain.delete(name).catch(() => undefined);
+    await keychain.delete(name, signal).catch(() => undefined);
   return identity;
 }
 

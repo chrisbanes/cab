@@ -90,7 +90,11 @@ login Keychain, or with `--token-file PATH` to a new `0600` file at that path
 (an existing file is refused). Install then runs `ensemble doctor` for that
 connection, prints its table and `Fix` lines on stderr, and opens
 `http://127.0.0.1:PORT/app` unless you pass `--no-open`. The JSON result stays on
-stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in.
+stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in,
+plus `"credentialActive"` and `"sessionOpen"`, which are true only when a credential
+revoke (tried twice) or the sign-in logout was not confirmed. Install then prints the
+credential's name and tells you to revoke it in Settings → CLI credentials; the exit
+status stays 0 because the service is installed.
 The password and token are never printed or put on a command line.
 
 If the prompt is cancelled (the Ctrl-C keypress there skips sign-in; it does not

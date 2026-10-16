@@ -33,7 +33,7 @@ async function installFixture(t: Parameters<typeof startCliService>[0]) {
 test("install issues one 90-day read credential, hands it to the store and logs the session out", async (t) => {
   const f = await installFixture(t);
   let stored = "";
-  const outcome = await issueInstallCredential(
+  const { outcome } = await issueInstallCredential(
     f.host,
     f.origin,
     "fixture-password",
@@ -61,7 +61,7 @@ test("a wrong password issues nothing and never calls the store", async (t) => {
   const f = await installFixture(t);
   const before = f.credentials().length;
   let calls = 0;
-  const outcome = await issueInstallCredential(
+  const { outcome } = await issueInstallCredential(
     f.host,
     f.origin,
     "not-the-password",
@@ -77,7 +77,7 @@ test("a wrong password issues nothing and never calls the store", async (t) => {
 
 test("a store that fails revokes the issued credential", async (t) => {
   const f = await installFixture(t);
-  const outcome = await issueInstallCredential(
+  const { outcome } = await issueInstallCredential(
     f.host,
     f.origin,
     "fixture-password",
@@ -247,7 +247,7 @@ test("a stalled or interrupted credential store is bounded, revokes the credenti
       now: Date.now,
     } as unknown as CliDeps;
     const started = Date.now();
-    const outcome = await issueInstallCredential(
+    const { outcome } = await issueInstallCredential(
       {
         fetch: api,
         // Only the 20 s store bound is shortened; the sign-in requests keep real time.
@@ -381,7 +381,7 @@ test("a Keychain write that blocks is cancelled by the interrupt and nothing is 
     now: Date.now,
   } as unknown as CliDeps;
   const interrupt = new AbortController();
-  const outcome = await issueInstallCredential(
+  const { outcome } = await issueInstallCredential(
     {
       fetch: f.rewritten,
       timeout: (ms: number) => AbortSignal.timeout(ms),
@@ -399,4 +399,180 @@ test("a Keychain write that blocks is cancelled by the interrupt and nothing is 
     .filter((credential) => credential.name === "install · test-host");
   assert.equal(named[0]?.state, "revoked");
   assert.equal(existsSync(join(h.configDir, "connections.json")), false);
+});
+
+/** The install's cleanup after a failed store, with the revoke or logout answered by `intercept`. */
+async function failedStore(
+  t: Parameters<typeof startCliService>[0],
+  intercept: (path: string) => Response | Promise<Response> | undefined,
+) {
+  const f = await installFixture(t);
+  const api: typeof fetch = async (input, init) =>
+    (await intercept(new URL(String(input)).pathname)) ??
+    f.rewritten(input, init);
+  const result = await issueInstallCredential(
+    {
+      fetch: api,
+      timeout: (ms: number) => AbortSignal.timeout(ms),
+    } as unknown as ServiceHost,
+    f.origin,
+    "fixture-password",
+    "install · test-host",
+    async () => {
+      throw new Error("keychain unavailable");
+    },
+  );
+  const state = f
+    .credentials()
+    .find((credential) => credential.name === "install · test-host")?.state;
+  return { result, state };
+}
+
+test("a revoke that is not confirmed is reported and the credential is not treated as revoked", async (t) => {
+  const revoke = (path: string) => path.endsWith("/revoke");
+  const cases: [string, (path: string) => Response | undefined][] = [
+    [
+      "server error",
+      (path) =>
+        revoke(path) ? new Response("{}", { status: 500 }) : undefined,
+    ],
+    [
+      "forbidden",
+      (path) =>
+        revoke(path) ? new Response("{}", { status: 403 }) : undefined,
+    ],
+  ];
+  for (const [name, intercept] of cases) {
+    const { result, state } = await failedStore(t, intercept);
+    assert.equal(result.outcome, "failed", name);
+    assert.equal(result.credentialActive, true, name);
+    assert.equal(state, "active", name);
+  }
+  // A network error on both attempts is reported the same way.
+  const network = await failedStore(t, (path) => {
+    if (revoke(path)) throw new TypeError("fetch failed");
+  });
+  assert.equal(network.result.credentialActive, true);
+  assert.equal(network.state, "active");
+  // One failed attempt is retried and then confirmed.
+  let attempts = 0;
+  const retried = await failedStore(t, (path) => {
+    if (!revoke(path)) return undefined;
+    attempts += 1;
+    return attempts === 1 ? new Response("{}", { status: 503 }) : undefined;
+  });
+  assert.equal(retried.result.credentialActive, false);
+  assert.equal(retried.state, "revoked");
+  assert.equal(attempts, 2);
+});
+
+test("a logout that is not confirmed is reported", async (t) => {
+  const { result, state } = await failedStore(t, (path) =>
+    path.endsWith("/logout") ? new Response("{}", { status: 500 }) : undefined,
+  );
+  assert.equal(state, "revoked");
+  assert.equal(result.credentialActive, false);
+  assert.equal(result.sessionOpen, true);
+});
+
+test("a Keychain cleanup that blocks is bounded: the new login stays, the restore ignores the interrupt", async (t) => {
+  const f = await installFixture(t);
+  const h = harness(t);
+  const first = await f.s.issue("read", "install · first", 90);
+  const second = await f.s.issue("read", "install · second", 90);
+  const memory = new MemoryKeychain();
+  const seen: { op: string; signal?: AbortSignal | undefined }[] = [];
+  const interrupt = new AbortController();
+  // delete blocks until its signal fires; set records the signal it was given.
+  const keychain = {
+    get: (account: string) => memory.get(account),
+    set: async (account: string, token: string, signal?: AbortSignal) => {
+      seen.push({ op: "set", signal });
+      await memory.set(account, token);
+    },
+    delete: (_account: string, signal?: AbortSignal) =>
+      new Promise<void>((_, reject) => {
+        seen.push({ op: "delete", signal });
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      }),
+  };
+  const deps = {
+    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    fetch: f.rewritten,
+    platform: "darwin",
+    keychain: () => keychain,
+    now: Date.now,
+  } as unknown as CliDeps;
+  // A prior Keychain-backed `local`, then an install login by token file replaces it.
+  await installCli(deps).login(
+    "local",
+    f.origin,
+    first.token,
+    undefined,
+    never,
+  );
+  const started = Date.now();
+  const host = {
+    fetch: f.rewritten,
+    // Only the 20 s storage bound is shortened.
+    timeout: (ms: number) => AbortSignal.timeout(ms === 20_000 ? 200 : ms),
+  } as unknown as ServiceHost;
+  const result = await issueInstallCredential(
+    host,
+    f.origin,
+    "fixture-password",
+    "install · test-host",
+    (token, signal) =>
+      installCli(deps).login(
+        "local",
+        f.origin,
+        token,
+        join(h.dir, "install.token"),
+        signal,
+      ),
+    interrupt.signal,
+  );
+  assert.ok(Date.now() - started < 5000, "bounded");
+  // The delete is best effort after the config write: the new login is kept and reported.
+  assert.equal(result.outcome, "stored");
+  assert.equal(result.sessionOpen, false);
+  assert.equal(
+    seen.find((call) => call.op === "delete")?.signal?.aborted,
+    true,
+  );
+
+  // A failed config write restores the prior token with a bound that outlives the interrupt.
+  await installCli(deps).login(
+    "prior",
+    f.origin,
+    first.token,
+    undefined,
+    never,
+  );
+  seen.length = 0;
+  class Failing extends ConnectionConfig {
+    override async write(): Promise<void> {
+      throw new Error("disk full");
+    }
+  }
+  interrupt.abort();
+  await assert.rejects(
+    saveLogin(
+      new Failing(h.configDir),
+      deps,
+      "prior",
+      f.origin,
+      second.token,
+      undefined,
+      interrupt.signal,
+    ),
+    /disk full/,
+  );
+  const restore = seen.at(-1);
+  assert.equal(restore?.op, "set");
+  assert.notEqual(restore?.signal, interrupt.signal);
+  assert.equal(restore?.signal?.aborted, false);
 });

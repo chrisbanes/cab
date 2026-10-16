@@ -136,7 +136,7 @@ export interface CredentialStore {
   /** `signal` aborts a store that blocks, for example on a locked Keychain. */
   set(account: string, token: string, signal?: AbortSignal): Promise<void>;
   get(account: string, signal?: AbortSignal): Promise<string>;
-  delete(account: string): Promise<void>;
+  delete(account: string, signal?: AbortSignal): Promise<void>;
 }
 
 export type SecurityRunner = (
@@ -220,14 +220,18 @@ export class KeychainCredentialStore implements CredentialStore {
     return result.stdout.replace(/\n$/, "");
   }
 
-  async delete(account: string): Promise<void> {
-    const result = await this.run([
-      "delete-generic-password",
-      "-s",
-      this.service,
-      "-a",
-      connectionNameSchema.parse(account),
-    ]).catch(() => {
+  async delete(account: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.run(
+      [
+        "delete-generic-password",
+        "-s",
+        this.service,
+        "-a",
+        connectionNameSchema.parse(account),
+      ],
+      undefined,
+      signal,
+    ).catch(() => {
       throw unavailable();
     });
     if (result.code !== 0 && result.code !== 44) throw unavailable();

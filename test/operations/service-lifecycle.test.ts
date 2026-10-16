@@ -68,6 +68,8 @@ class FakeLaunchd {
   }[] = [];
   password = "test-password";
   loginStatus: number | undefined;
+  revokeStatus = 200;
+  logoutStatus = 200;
   onApi: (path: string) => void = () => {};
   opened: string[] = [];
   onBootstrap: () => void = () => {};
@@ -210,6 +212,10 @@ class FakeLaunchd {
         },
         token: `ens_11111111-1111-4111-8111-111111111111_${"s".repeat(43)}`,
       });
+    if (path.endsWith("/revoke"))
+      return new Response("{}", { status: this.revokeStatus });
+    if (path === "/api/operator/logout")
+      return new Response("{}", { status: this.logoutStatus });
     return json({});
   }
 }
@@ -1332,8 +1338,12 @@ class FakeCli implements InstallCli {
     this.signals.push(args[4]);
     if (this.failLogin) throw new Error("keychain unavailable");
   }
+  /** Doctor never answers. */
+  doctorHangs = false;
+
   async doctor(connection: string) {
     this.calls.push(`doctor ${connection}`);
+    if (this.doctorHangs) await new Promise(() => {});
   }
 }
 
@@ -1618,6 +1628,46 @@ test("a wrong password, cancelled prompt or failed store leaves the service inst
     "/api/operator/credentials/11111111-1111-4111-8111-111111111111/revoke",
   );
   assert.equal(f.launchd.requests.at(-1)?.path, "/api/operator/logout");
+});
+
+test("an unconfirmed revoke or logout is reported in the result and on stderr, and the install still succeeds", async (t) => {
+  const f = await tarballSetup(t);
+  f.launchd.revokeStatus = 500;
+  f.launchd.logoutStatus = 500;
+  const failing = new FakeCli();
+  failing.failLogin = true;
+  const result = await f.run({}, failing);
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.connection, null);
+  assert.equal(output.credentialActive, true);
+  assert.equal(output.sessionOpen, true);
+  assert.match(
+    result.stderr,
+    /The credential "install · test-host" may still be active; revoke it in Settings → CLI credentials\./,
+  );
+  assert.match(result.stderr, /could not be closed/);
+  assert.equal(existsSync(f.recordPath), true);
+  // The revoke is tried twice.
+  assert.equal(
+    f.launchd.requests.filter(({ path }) => path.endsWith("/revoke")).length,
+    2,
+  );
+
+  const clean = await tarballSetup(t);
+  const ok = await clean.run();
+  assert.equal(JSON.parse(ok.stdout).credentialActive, false);
+  assert.equal(JSON.parse(ok.stdout).sessionOpen, false);
+});
+
+test("a doctor that never answers is abandoned on its bound and the URL is still printed and opened", async (t) => {
+  const f = await tarballSetup(t);
+  const cli = new FakeCli();
+  cli.doctorHangs = true;
+  const result = await f.run({}, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
+  assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
 });
 
 test("an interrupt while signing in leaves the service installed", async (t) => {

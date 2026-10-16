@@ -90,6 +90,8 @@ const POLL_MS = 1_000;
 const HEALTH_PROBE_MS = 5_000;
 // Above the service's own 10 s bound on its slowest readiness checks.
 const READINESS_PROBE_MS = 20_000;
+// Doctor reads readiness with the CLI's own request bound; this stops a stalled one.
+const DOCTOR_MS = 60_000;
 
 /** An identity from `captureIdentity`, passed back unchanged to `exited`. */
 export type ProcessIdentity = object;
@@ -752,7 +754,9 @@ const message = (error: unknown) =>
 /**
  * Sign in with the operator password over the session API the UI uses, issue one 90-day read
  * credential and hand its token to `store`. The session is always logged out again, and a
- * credential that could not be stored is revoked, so no active credential is left orphaned.
+ * credential that could not be stored is revoked. Cleanup ignores the interrupt but is
+ * bounded, and its result is verified: `credentialActive` and `sessionOpen` report a revoke
+ * or logout that did not succeed, so the caller can tell the operator.
  */
 export async function issueInstallCredential(
   host: ServiceHost,
@@ -761,8 +765,16 @@ export async function issueInstallCredential(
   name: string,
   store: (token: string, signal: AbortSignal) => Promise<void>,
   signal?: AbortSignal,
-): Promise<"stored" | "wrong-password" | "failed"> {
+): Promise<{
+  outcome: "stored" | "wrong-password" | "failed";
+  /** A minted credential that could not be confirmed revoked. */
+  credentialActive: boolean;
+  /** The sign-in session that could not be confirmed logged out. */
+  sessionOpen: boolean;
+}> {
   let cookie = "";
+  let credentialActive = false;
+  let sessionOpen = false;
   let csrf = "";
   // Cleanup calls ignore the interrupt: a minted credential must still be revoked.
   const call = async (
@@ -791,15 +803,35 @@ export async function issueInstallCredential(
   const nextSession = async (response: Response) => {
     csrf = sessionSchema.parse(await response.json()).csrfToken;
   };
+  // One retry: a revoke that is not confirmed leaves a 90-day credential active.
+  const revoke = async (id: string) => {
+    for (let attempt = 0; attempt < 2; attempt += 1)
+      try {
+        const response = await call(
+          "POST",
+          `/api/operator/credentials/${id}/revoke`,
+          {},
+          false,
+        );
+        await response.body?.cancel();
+        if (response.ok) return true;
+      } catch {
+        // Retried once, then reported.
+      }
+    return false;
+  };
   let signedIn = false;
-  try {
+  let mintAccepted = false;
+  let outcome: "stored" | "wrong-password" | "failed" = "failed";
+  const attempt = async () => {
     await nextSession(await call("GET", "/api/operator/session"));
     const login = await call("POST", "/api/operator/login", { password });
     if (login.status === 401) {
       await login.body?.cancel();
-      return "wrong-password";
+      outcome = "wrong-password";
+      return;
     }
-    if (login.status !== 200) return "failed";
+    if (login.status !== 200) return;
     signedIn = true;
     await nextSession(login);
     // Not interruptible: an abort after the server minted it would orphan the credential.
@@ -809,7 +841,9 @@ export async function issueInstallCredential(
       { name, scope: "read", expiresInDays: 90 },
       false,
     );
+    mintAccepted = minted.ok;
     const issued = operatorCredentialIssuedSchema.parse(await minted.json());
+    mintAccepted = false;
     try {
       // `store` is awaited to the end so that what it persisted always matches what is
       // reported; its signal bounds and cancels its network check, and a failure revokes.
@@ -821,23 +855,28 @@ export async function issueInstallCredential(
         ]),
       );
     } catch {
-      await call(
-        "POST",
-        `/api/operator/credentials/${issued.credential.id}/revoke`,
-        {},
-        false,
-      ).then((r) => r.body?.cancel());
-      return "failed";
+      credentialActive = !(await revoke(issued.credential.id));
+      return;
     }
-    return "stored";
+    outcome = "stored";
+    return;
+  };
+  try {
+    await attempt();
   } catch {
-    return "failed";
+    // A mint the server accepted but whose reply was unusable cannot be revoked by id.
+    credentialActive ||= mintAccepted;
   } finally {
+    // The result is read after this runs, so a failed logout is reported.
     if (signedIn)
-      await call("POST", "/api/operator/logout", {}, false)
-        .then((r) => r.body?.cancel())
-        .catch(() => {});
+      sessionOpen = !(await call("POST", "/api/operator/logout", {}, false)
+        .then(async (r) => {
+          await r.body?.cancel();
+          return r.ok;
+        })
+        .catch(() => false));
   }
+  return { outcome, credentialActive, sessionOpen };
 }
 
 /** Install the LaunchAgent for the release at `releaseRoot`; undoes itself on failure. */
@@ -961,7 +1000,8 @@ async function installServiceLocked(
     stage = "health";
     await service.waitForApp(service.origin);
     // From here the service stays installed whatever happens: nothing below may throw.
-    const connection = await signIn(service, first, password);
+    const signedIn = await signIn(service, first, password);
+    const { connection, credentialActive, sessionOpen } = signedIn;
     service.write("stdout", {
       ok: true,
       operation: "install",
@@ -971,8 +1011,10 @@ async function installServiceLocked(
       plist: service.activation,
       logs,
       connection,
+      credentialActive,
+      sessionOpen,
     });
-    await finishInstall(service, first, connection);
+    await finishInstall(service, first, signedIn);
     return 0;
   } catch (error) {
     let jobStopped: boolean | null = null;
@@ -998,19 +1040,32 @@ async function installServiceLocked(
 }
 
 /** Issues and stores the CLI credential; the connection name when stored, else null. Never throws. */
+type SignIn = {
+  connection: string | null;
+  credentialName: string;
+  credentialActive: boolean;
+  sessionOpen: boolean;
+};
+
 async function signIn(
   service: Service,
   first: FirstRun,
   password: string | undefined,
-): Promise<string | null> {
+): Promise<SignIn> {
   const { cli } = first;
-  if (!cli || password === undefined) return null;
+  const none = {
+    connection: null,
+    credentialName: "",
+    credentialActive: false,
+    sessionOpen: false,
+  };
+  if (!cli || password === undefined) return none;
   try {
     const name = [...`install · ${service.host.hostname()}`]
       .filter((c) => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127)
       .slice(0, 64)
       .join("");
-    const outcome = await issueInstallCredential(
+    const issued = await issueInstallCredential(
       service.host,
       service.origin,
       password,
@@ -1025,9 +1080,14 @@ async function signIn(
         ),
       service.io.signal,
     );
-    return outcome === "stored" ? first.connection : null;
+    return {
+      connection: issued.outcome === "stored" ? first.connection : null,
+      credentialName: name,
+      credentialActive: issued.credentialActive,
+      sessionOpen: issued.sessionOpen,
+    };
   } catch {
-    return null;
+    return none;
   }
 }
 
@@ -1035,18 +1095,33 @@ async function signIn(
 async function finishInstall(
   service: Service,
   first: FirstRun,
-  connection: string | null,
+  { connection, credentialName, credentialActive, sessionOpen }: SignIn,
 ) {
   const app = `${service.origin}/app`;
   const line = (text: string) => service.io.stderr.write(`${text}\n`);
   const interrupted = () => service.io.signal?.aborted === true;
   try {
-    if (connection !== null && !interrupted())
-      await first.cli?.doctor(connection);
+    // Abandoning doctor on the bound or an interrupt loses only its stderr output.
+    if (connection !== null && !interrupted() && first.cli)
+      await bounded(
+        first.cli.doctor(connection),
+        AbortSignal.any([
+          service.host.timeout(DOCTOR_MS),
+          ...(service.io.signal ? [service.io.signal] : []),
+        ]),
+      );
   } catch {
     // The URL below is still printed.
   }
   try {
+    if (credentialActive)
+      line(
+        `The credential "${credentialName}" may still be active; revoke it in Settings → CLI credentials.`,
+      );
+    if (sessionOpen)
+      line(
+        "The install's sign-in session could not be closed; it ends on its own.",
+      );
     if (connection === null) {
       line(
         `Log in the CLI with a read credential from Settings → CLI credentials: ensemble auth login --connection ${first.connection} --url ${service.origin}`,
