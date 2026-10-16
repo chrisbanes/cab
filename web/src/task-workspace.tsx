@@ -1513,15 +1513,6 @@ export function TaskWorkspace({
                 </Button>
               </>
             )}
-            <ActionLink variant="secondary" href={`/task/${taskId}`}>
-              Advanced task controls
-            </ActionLink>
-            <ActionLink
-              variant="secondary"
-              href={`/coordination/task/${taskId}`}
-            >
-              Requests and coordination
-            </ActionLink>
             <Button variant="secondary" onClick={refreshAll}>
               Refresh task
             </Button>
@@ -1970,6 +1961,12 @@ export function TaskWorkspace({
           <LocalReviewPanel />
         </TabPanel>
         <TabPanel tab="history" active={state.tab}>
+          <p className="metadata">
+            {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
+            <a href={`/coordination/task/${encodeURIComponent(taskId)}`}>
+              Approval and delivery forms
+            </a>
+          </p>
           <section id="context">
             <h3 className="section-heading">Captured context</h3>
             <p>

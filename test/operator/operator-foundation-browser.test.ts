@@ -112,10 +112,7 @@ test("retained HTML routes share the production foundation and native interactio
       .count(),
     0,
   );
-  await desktop.goto(`${web.origin}/app/projects/${projectId}`);
-  await desktop
-    .getByRole("link", { name: "Open existing project controls", exact: true })
-    .click();
+  await desktop.goto(`${web.origin}/project/${projectId}`);
   await desktop
     .getByRole("heading", { name: "Foundation project", exact: true })
     .waitFor();

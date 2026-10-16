@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   ChevronsUpDown,
+  ExternalLink,
   Gauge,
   ListChecks,
   LogOut,
@@ -209,6 +210,17 @@ export function AccountMenu({
               Show getting started
             </button>
           )}
+          {/* Server-rendered page outside the app shell: a plain anchor, so it loads as a document. */}
+          <a
+            role="menuitem"
+            tabIndex={-1}
+            className="account-menu-item"
+            href="/coordination"
+            onClick={() => setOpen(false)}
+          >
+            <ExternalLink aria-hidden="true" />
+            Approval and delivery forms
+          </a>
           <hr />
           <button
             type="button"

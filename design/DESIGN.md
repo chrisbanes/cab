@@ -1513,8 +1513,10 @@ Presentation and interaction rules that the canvas does not show on its own.
   `acme/atlas#142`, or Local task) and one outline overflow action holding
   Execution and Stop…; the decision card sits in the first viewport, and Message
   lead is the bottom action.
-- A task's legacy page is linked once, from its History tab. The project page
-  keeps Project settings and links to no legacy page.
+- A task's legacy page (`/coordination/task/:id`) is linked once, as Approval and
+  delivery forms, from its History tab; that page links `/task/:id` (Edit task and
+  review source). The project page keeps Project settings and links to no legacy
+  page.
 - The reading anchor is the top visible message and its pixel offset. Updates keep
   that anchor, open groups, expanded message previews and the unfinished reply.
 - Auto-follow is on only while the reader is at the bottom. Scrolling away turns it
@@ -1612,9 +1614,10 @@ Presentation and interaction rules that the canvas does not show on its own.
   selects its own project in the sidebar.
 - The account menu (`113-account-menu`) lists Settings (`/app/settings`), Getting
   started (Show getting started once the card is dismissed, which restores it),
-  Legacy controls and Sign out. Runtime is reached from Settings. Legacy controls
-  opens the legacy coordination index; the label is a placeholder until the pages
-  are named for what they still do.
+  Approval and delivery forms and Sign out. Runtime is reached from Settings.
+  Approval and delivery forms opens the legacy coordination index (`/coordination`)
+  as a document load, for approval decisions, delivery settlement, result
+  destinations and assignment messages that the app does not offer.
 - Project names are unique ignoring case. Project setup and project configuration
   refuse a matching name as a field error on the 116 pattern: "Another project is
   named Atlas. Choose a different name." (`116b-project-setup-duplicate-name`).
@@ -1975,7 +1978,7 @@ as follows:
   "No operator decision", and a finished task reads "Next: none". There is no
   "Updated" time. The persistent tools row follows ("Open
   GitHub to edit source" and "Refresh source" for an imported task,
-  "Advanced task controls", "Requests and coordination", "Refresh task").
+  "Refresh task").
 - Tabs: Overview, Files, Changes, Review and History, with no counts (History is
   read per assignment; Review's count lives in the local draft). Every panel stays
   mounted and only the selected one shows, so drafts, expansions, selections and
@@ -2096,7 +2099,8 @@ composer is reached from the top bar's New task on every route, Overview, List, 
 project's New task, setup's ready check and Getting started, all opening the same `/app/tasks/new` (`?project=` is the
 only deep link). The retained
 `/task/:id`, `/runtime/task/:id` and `/coordination/task/:id` pages are unchanged
-and linked (Advanced task controls, Execution, Requests and coordination). No
+and linked from Execution (`/runtime/task/:id`) and the History tab's Approval and
+delivery forms (`/coordination/task/:id`, which links `/task/:id`). No
 context menu, extension or notification surface applies. Counterparts: Stop →
 Execution → Resume (retained); Keep running and Escape send nothing; a tab switch
 sends nothing and keeps drafts, and Refresh task only re-reads; Optional

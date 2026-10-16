@@ -253,6 +253,12 @@ test("operator status follows a newer queued continuation over completed history
         `<a href="/runtime/task/${taskId}">Task-scoped runtime controls and recovery</a>`,
       ),
     );
+  if (coordinationPage.kind === "html")
+    assert.ok(
+      coordinationPage.body.includes(
+        `<a href="/task/${taskId}">Edit task and review source</a>`,
+      ),
+    );
 });
 
 test("operator pages retain an active worker turn after applying next-turn revisions", async (t) => {

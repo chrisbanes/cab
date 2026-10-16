@@ -1285,15 +1285,6 @@ for (const viewport of [
         commandPosts++;
     });
     await page.getByRole("link", { name: /^Open Inbox/ }).click();
-    assert.equal(
-      await page
-        .getByRole("link", {
-          name: "Advanced coordination controls",
-          exact: true,
-        })
-        .getAttribute("href"),
-      "/coordination",
-    );
     await page.goto(`${web.origin}/app/tasks`);
     await page
       .locator(`[data-task-id="${ids.question.id}"]`)
@@ -1493,15 +1484,11 @@ for (const viewport of [
         .count(),
       1,
     );
-    assert.equal(
-      await page
-        .getByRole("link", {
-          name: "Requests and coordination",
-          exact: true,
-        })
-        .count(),
-      1,
-    );
+    for (const name of ["Advanced task controls", "Requests and coordination"])
+      assert.equal(
+        await page.getByRole("link", { name, exact: true }).count(),
+        0,
+      );
     await page.goBack();
     await page
       .getByRole("heading", { name: "Service integration", exact: true })

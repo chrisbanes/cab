@@ -487,7 +487,6 @@ export function TaskViews({
       {projectId && (
         <p className="metadata muted work-project-links">
           <a href={`/app/projects/${projectId}/settings`}>Project settings</a>
-          <a href={`/project/${projectId}`}>Open existing project controls</a>
         </p>
       )}
       {state.status !== "fresh" && (

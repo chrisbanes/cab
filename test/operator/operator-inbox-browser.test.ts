@@ -151,15 +151,12 @@ test("queue rows are request cards with kind, action and relative age; filters a
     (await first.locator(".inbox-row-meta").innerText()).endsWith("1h 46m"),
   );
 
-  const advanced = page.getByRole("link", {
-    name: "Advanced coordination controls",
-    exact: true,
-  });
-  assert.equal(await advanced.getAttribute("href"), "/coordination");
-  // Not the primary-filled variant used for the one primary action of a view.
+  // The legacy coordination index is reached from the account menu, not the queue.
   assert.equal(
-    await advanced.evaluate((el) => el.classList.contains("bg-primary")),
-    false,
+    await page
+      .getByRole("link", { name: "Advanced coordination controls" })
+      .count(),
+    0,
   );
   await captureBrowserEvidence(page, "1366-inbox-queue", { fullPage: false });
 });

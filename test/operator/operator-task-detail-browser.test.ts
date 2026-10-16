@@ -302,13 +302,28 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
   }
   assert.equal(await page.evaluate(() => history.length), before);
   for (const name of ["Advanced task controls", "Requests and coordination"])
-    assert.ok(await page.getByRole("link", { name, exact: true }).isVisible());
+    assert.equal(
+      await page.getByRole("link", { name, exact: true }).count(),
+      0,
+    );
   assert.equal(
     await page.locator(".assignment-row").count(),
     4,
     "lead and three delegated assignments",
   );
+  // The legacy pages are one History link, not a header button.
+  const forms = page.getByRole("link", {
+    name: "Approval and delivery forms",
+    exact: true,
+  });
+  await openTaskTab(page, "History");
+  assert.equal(await forms.count(), 1);
+  assert.equal(
+    await forms.getAttribute("href"),
+    `/coordination/task/${a.taskId}`,
+  );
   await openTaskTab(page, "Overview");
+  assert.equal(await forms.count(), 0, "History carries the link alone");
   await page.evaluate(() => scrollTo(0, 0));
   await captureBrowserEvidence(page, "task-detail-desktop", {
     fullPage: false,
@@ -1456,8 +1471,9 @@ test("Tab switches, Refresh task and polls keep the reply, expansions and each t
   for (const name of ["Overview", "Files", "Changes", "Review", "History"]) {
     await openTaskTab(page, name as "Overview");
     for (const tool of ["Advanced task controls", "Requests and coordination"])
-      assert.ok(
-        await page.getByRole("link", { name: tool, exact: true }).isVisible(),
+      assert.equal(
+        await page.getByRole("link", { name: tool, exact: true }).count(),
+        0,
       );
     assert.ok(
       await page

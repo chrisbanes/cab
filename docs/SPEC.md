@@ -479,10 +479,14 @@ Keep known state and uncertainty legible and retain unfinished drafts across
 transient failures.
 
 The operator UI is a React application at `/app`, served with same-origin
-`/api/operator` JSON by the production `operator` command. Advanced controls remain
-on retained server-rendered routes: local mutation and imported source review on
-`/task/:id`, Stop/Resume and recovery on `/runtime/task/:id`, and exact request,
-approval and completion controls on `/coordination/task/:id`. The technical
+`/api/operator` JSON by the production `operator` command. Controls the app does not offer
+remain on retained server-rendered routes: approval decisions, delivery settlement,
+result-destination reconciliation and messages to non-lead assignments on
+`/coordination/task/:id`; local task edits and source review decisions on
+`/task/:id`; delivery policy on `/project/:id`; and Stop/Resume and recovery on
+`/runtime/task/:id`. They are reached from the account menu's Approval and delivery
+forms (`/coordination`), a task's History tab, Project settings' Open advanced
+editor and a task's Execution link. The technical
 contracts are the [foundation](design/ui02-foundation.md),
 [tasks](design/ui03-tasks.md), [configuration and recovery](design/ui06-configuration.md),
 [components and tokens](design/ui08-foundation.md) and

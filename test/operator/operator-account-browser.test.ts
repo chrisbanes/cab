@@ -372,8 +372,18 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
       .getAttribute("href"),
     "/app/getting-started",
   );
+  // A plain anchor: the legacy pages are server-rendered, outside the app shell.
+  assert.equal(
+    await menu
+      .getByRole("menuitem", {
+        name: "Approval and delivery forms",
+        exact: true,
+      })
+      .getAttribute("href"),
+    "/coordination",
+  );
   await menu.getByRole("menuitem", { name: "Sign out", exact: true }).waitFor();
-  assert.equal(await menu.getByRole("menuitem").count(), 4);
+  assert.equal(await menu.getByRole("menuitem").count(), 5);
   await captureBrowserEvidence(page, "desktop-account-menu");
   await page.locator("main h1").click();
   await menu.waitFor({ state: "detached" });
@@ -402,11 +412,15 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Getting started");
   await page.keyboard.press("ArrowDown");
+  assert.equal(await focused(), "Approval and delivery forms");
+  await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Sign out");
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Settings", "wraps to the first item");
   await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), "Sign out", "wraps to the last item");
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await focused(), "Approval and delivery forms");
   await page.keyboard.press("ArrowUp");
   assert.equal(await focused(), "Getting started");
   await page.keyboard.press("Home");
@@ -477,6 +491,19 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await page
     .getByRole("menuitem", { name: "Runtime" })
     .waitFor({ state: "detached" });
+
+  // Approval and delivery forms loads the server-rendered coordination index as a document.
+  await trigger.click();
+  await menu
+    .getByRole("menuitem", { name: "Approval and delivery forms", exact: true })
+    .click();
+  await page.waitForURL("**/coordination");
+  await page
+    .getByRole("heading", { name: "Coordination", exact: true })
+    .waitFor();
+  await page.goBack();
+  await page.waitForURL("**/app/settings/runtime");
+  await trigger.waitFor();
 
   // Pending sign-out keeps the menu open and the item disabled.
   // A failed assertion must not leave the held request blocking cleanup.
@@ -549,7 +576,12 @@ test("phone drawer shows the account group with Settings, Runtime and Sign out",
   await open();
   const dialog = page.getByRole("dialog");
   await dialog.getByText("Signed in as Operator", { exact: true }).waitFor();
-  for (const name of ["Settings", "Runtime", "Getting started"]) {
+  for (const name of [
+    "Settings",
+    "Runtime",
+    "Getting started",
+    "Approval and delivery forms",
+  ]) {
     const row = dialog.getByRole("link", { name, exact: true });
     assert.ok(
       (await row.evaluate((el) => el.getBoundingClientRect().height)) >= 44,
