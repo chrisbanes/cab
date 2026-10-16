@@ -1780,12 +1780,20 @@ export class OperatorApi {
       snapshot?.target === "branch"
         ? (snapshot.baseBranch ?? snapshot.baseline?.branch)
         : undefined;
+    // A read that failed before any branch was listed records no selection, so
+    // it answers the default read like any other stored outcome.
+    const failedBeforeListing =
+      snapshot?.target === "branch" &&
+      attemptedBranch === undefined &&
+      snapshot.availableBaseBranches.length === 0 &&
+      snapshot.reason !== "base-branch-unavailable";
     const selectionMatches = snapshot
       ? request.target === "branch"
         ? snapshot.target === "branch" &&
           (request.baseBranch === undefined
             ? (!!configuredRef && attemptedBranch === configuredRef) ||
-              (snapshot.reason === "base-branch-required" && !defaultListed)
+              (snapshot.reason === "base-branch-required" && !defaultListed) ||
+              failedBeforeListing
             : attemptedBranch === request.baseBranch)
         : snapshot.target === "uncommitted" &&
           snapshot.changeSet === (request.changeSet ?? "all")

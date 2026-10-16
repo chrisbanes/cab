@@ -108,7 +108,13 @@ async function startChangesJourney(
   }: {
     recordResult?: boolean;
     alphaRef?: string;
-    beforeOpen?: (alphaWorkspacePath: string) => void;
+    beforeOpen?: (
+      alphaWorkspacePath: string,
+      context: {
+        fixture: Awaited<ReturnType<typeof createOperatorFixture>>;
+        taskId: string;
+      },
+    ) => void;
   } = {},
 ) {
   const fixture = await j.start("fixture.create", () =>
@@ -166,7 +172,7 @@ async function startChangesJourney(
   );
   assert.ok(alpha);
   assert.ok(beta);
-  beforeOpen?.(alpha.workspacePath);
+  beforeOpen?.(alpha.workspacePath, { fixture, taskId: task.taskId });
   const alphaHead = git(alpha.workspacePath, "rev-parse", "HEAD");
 
   const web = await j.start("fixture.web", () => fixture.startWeb());
@@ -391,6 +397,44 @@ test("Changes names the configured default branch when it has no merge base", as
     await changes.getByLabel("Local base branch").inputValue(),
     "main",
   );
+});
+
+test("Changes shows a stored gap from before branch listing instead of asking for a base", async (_t, j) => {
+  const { changes, page } = await startChangesJourney(j, {
+    recordResult: false,
+    alphaRef: "main",
+    beforeOpen: (_workspace, { fixture, taskId }) =>
+      fixture.service.replaceWorkspaceComparison(
+        {
+          comparisonId: randomUUID(),
+          taskId,
+          repositoryId: "repo-alpha",
+          target: "branch",
+          state: "gap",
+          reason: "time-limit",
+          observedAt: Date.now(),
+          availableBaseBranches: [],
+          entries: [],
+          truncated: false,
+        },
+        [],
+      ),
+  });
+  await page
+    .getByLabel("Repository", { exact: true })
+    .selectOption("repo-alpha");
+  await changes
+    .getByText(
+      "This comparison has gaps; unavailable or unsupported entries stay marked as such.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal(await changes.getByLabel("Local base branch").inputValue(), "");
+  assert.equal(
+    await changes.getByText(/configured ref is not a local branch/).count(),
+    0,
+  );
+  assert.equal(await changes.locator(".changes-refresh-notice").count(), 0);
 });
 
 test("production Changes preserves exact repository baselines and last-good refreshes", async (t, j) => {
