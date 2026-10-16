@@ -1909,3 +1909,54 @@ test("a listener that cannot start holds admission without failing supervision s
     );
   });
 });
+
+test("a listener failure in the same output chunk as ready keeps admission held until a restart succeeds", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-power-ready-then-fail-"));
+  const { db, state } = powerStore(join(root, "power.sqlite"));
+  const children: ListenerChild[] = [];
+  const listener = new SleepWakeListener((() => {
+    const child = new ListenerChild();
+    children.push(child);
+    const first = children.length === 1;
+    setImmediate(() => child.write(first ? "ready\nbogus\n" : "ready\n"));
+    return child;
+  }) as never);
+  const source = new MacPowerEventSourceWithListener(
+    async function* () {},
+    60_000,
+    10_000,
+    65_536,
+    Date.now,
+    undefined,
+    listener,
+  );
+  const events = new FakePowerEvents();
+  events.cursor = powerCursor("baseline");
+  Object.assign(events, {
+    start: (signals: PowerSignals) => source.start(signals),
+    stop: () => source.stop(),
+  });
+  const power = new ExecutionPower(
+    state,
+    events,
+    new CaffeinateAssertion(() => new FakeChild()),
+    async () => {},
+  ) as ExecutionPowerPort & { sleepWakeListenerFailure(): string | null };
+  try {
+    await power.start();
+    assert.deepEqual(children[0]?.signals, ["SIGKILL"]);
+    assert.match(power.sleepWakeListenerFailure() ?? "", /unexpected output/);
+    assert.equal(state.powerAdmissionState().held, true);
+    assert.equal(power.observedForAdmission(), false);
+
+    await power.poll();
+    assert.equal(children.length, 2, "the poll restarted the listener");
+    assert.equal(power.sleepWakeListenerFailure(), null);
+    assert.equal(state.powerAdmissionState().held, false);
+    assert.equal(power.observedForAdmission(), true);
+  } finally {
+    await power.stop();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});

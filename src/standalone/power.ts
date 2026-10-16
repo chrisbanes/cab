@@ -725,6 +725,8 @@ export class ExecutionPower {
   // Counts notifications and listener failures; a poll that saw it change is not fresh.
   private invalidations = 0;
   private listenerFailure: string | null = null;
+  // Counts listener failures only; a start that saw one cannot report health.
+  private listenerFailures = 0;
   private readonly signals: PowerSignalListener = {
     transition: () =>
       this.invalidate(
@@ -732,8 +734,11 @@ export class ExecutionPower {
       ),
     failure: (reason) => {
       if (!this.started) return;
+      this.listenerFailures++;
       this.listenerFailure = reason.slice(0, 200);
       this.invalidate(this.listenerFailure);
+      // Queued work re-reads its wait reason; no poll runs while unhealthy.
+      this.admissionResumed().catch(() => {});
     },
   };
 
@@ -772,6 +777,7 @@ export class ExecutionPower {
 
   private async startListener(): Promise<void> {
     if (!this.events.start) return;
+    const failures = this.listenerFailures;
     try {
       await this.events.start(this.signals);
     } catch (error) {
@@ -782,7 +788,8 @@ export class ExecutionPower {
       );
       return;
     }
-    if (!this.started) return;
+    // A failure reported in the same output chunk as `ready` stays in force.
+    if (!this.started || failures !== this.listenerFailures) return;
     this.listenerFailure = null;
     // Only a poll that starts after recovery can be fresh.
     this.invalidations++;
@@ -830,6 +837,8 @@ export class ExecutionPower {
       throw new Error("Execution power supervision is not started");
     if (this.polling) return this.polling;
     const run = () => {
+      // stop() during a listener restart skips the poll.
+      if (!this.started) return Promise.resolve();
       const startedAt = Date.now();
       const invalidations = this.invalidations;
       return this.pollUnlocked().then(() => {

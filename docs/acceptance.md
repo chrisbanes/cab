@@ -325,7 +325,9 @@ evidence. Per-scenario dispositions for A01–A30 and R01–R10 are in the
   A macOS sleep/wake listener invalidates admission freshness and holds admission
   while it is unhealthy. Its remaining limit: a sleep line Node does not read before
   suspension, or a wake line read after Node's first post-wake admission, leaves
-  that admission to the next poll's reconciliation.
+  that admission to the next poll's reconciliation. Delivery of real sleep/wake
+  notifications to the listener is not exercised; a listener that reports ready but
+  never receives them leaves admission on the poll window without a visible reason.
   Evidence: [live runtime](evidence/s03b-live-runtime-2026-09-29.md),
   [sleep/wake listener](evidence/power-wake-listener-2026-10-16.md).
 - **Domain commands and coordination** (R05, R07–R10) — **Bounded.** Deterministic

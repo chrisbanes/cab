@@ -45,4 +45,6 @@ A will-sleep notification closes the window only if Node reads the listener's
 line before the system suspends. After wake, the listener's wake line races
 Node's own timers. An admission that runs in that interval, with an observation
 younger than 15 s, still depends on the next poll's `pmset` history and kernel
-sleep/wake check to reconcile.
+sleep/wake check to reconcile. Because real delivery is unexercised, a listener
+that reports `ready` but never receives sleep or wake notifications counts as
+healthy and leaves admission on that poll window without a visible reason.

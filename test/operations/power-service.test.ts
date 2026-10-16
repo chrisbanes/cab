@@ -506,9 +506,12 @@ test("a failed sleep/wake listener explains queued work and power status with it
       assert.equal(events.reads, readsBefore, "admission does not spin polls");
       assert.equal(runtime.starts, 1);
 
+      const restartReason = "Sleep/wake listener did not become ready";
+      events.startFailure = new Error(restartReason);
       await power.poll();
       assert.equal(runtime.starts, 1, "a poll alone cannot release");
-      assert.equal(service.powerStatus()?.admissionReason, reason);
+      assert.equal(service.powerStatus()?.admissionReason, restartReason);
+      await waitUntil(() => queued().reason === restartReason);
 
       events.startFailure = undefined;
       await power.poll();
