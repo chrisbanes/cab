@@ -3,15 +3,19 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -1305,8 +1309,15 @@ class FakeCli implements InstallCli {
   logins: unknown[][] = [];
   signals: unknown[] = [];
 
-  async readPassword(prompt: string) {
+  /** Set to make the prompt wait until its signal aborts, like an open terminal prompt. */
+  hang = false;
+
+  async readPassword(prompt: string, signal?: AbortSignal) {
     this.prompts.push(prompt);
+    if (this.hang)
+      return new Promise<string>((_, reject) =>
+        signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+      );
     if (this.password === undefined) throw new Error("cancelled");
     return this.password;
   }
@@ -1322,9 +1333,15 @@ class FakeCli implements InstallCli {
 }
 
 /** A release tarball whose single top directory holds the release; `note` makes its manifest differ. */
-function tarballOf(root: string, version: string, note?: string) {
+function tarballOf(
+  root: string,
+  version: string,
+  note?: string,
+  omit?: string,
+) {
   const build = mkdtempSync(join(root, "build-"));
   release(build, version);
+  if (omit) rmSync(join(build, "versions", version, omit));
   if (note)
     writeFileSync(
       join(build, "versions", version, "manifest.json"),
@@ -1335,7 +1352,10 @@ function tarballOf(root: string, version: string, note?: string) {
         note,
       }),
     );
-  const file = join(root, `ensemble-${version}${note ?? ""}.tar.gz`);
+  const file = join(
+    root,
+    `ensemble-${version}${note ?? ""}${omit ? "-incomplete" : ""}.tar.gz`,
+  );
   execFileSync("tar", ["-czf", file, "-C", join(build, "versions"), version]);
   rmSync(build, { recursive: true, force: true });
   return file;
@@ -1614,10 +1634,11 @@ test("an interrupt while signing in leaves the service installed", async (t) => 
 
 test("--no-open skips the browser and --token-file reaches the CLI login", async (t) => {
   const f = await tarballSetup(t);
-  const result = await f.run({ open: false, tokenFile: "/x/token" });
+  const tokenFile = join(dirname(f.home), "install.token");
+  const result = await f.run({ open: false, tokenFile });
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(f.launchd.opened, []);
-  assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, "/x/token"]]);
+  assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, tokenFile]]);
 });
 
 test("upgrade never signs in or mints a credential", async (t) => {
@@ -1730,10 +1751,28 @@ test("the default tar extraction is killed when its signal aborts", async (t) =>
   execFileSync("mkfifo", [fifo]);
   const destination = join(root, "out");
   mkdirSync(destination);
+  // Only this process's own child counts: GNU tar forks a helper that the abort cannot reach,
+  // which is released below.
   const running = () =>
-    execFileSync("ps", ["-axww", "-o", "command"], {
-      encoding: "utf8",
-    }).includes(fifo);
+    execFileSync(
+      "ps",
+      ["-A", "-ww", "-o", "pid=", "-o", "ppid=", "-o", "args="],
+      {
+        encoding: "utf8",
+      },
+    )
+      .split("\n")
+      .some((line) => {
+        const [, parent] = line.trim().split(/\s+/);
+        return Number(parent) === process.pid && line.includes(fifo);
+      });
+  t.after(() => {
+    try {
+      closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+    } catch {
+      // No reader is waiting.
+    }
+  });
   const interrupt = new AbortController();
   const extraction = defaultServiceHost().extract(
     fifo,
@@ -1752,4 +1791,107 @@ test("the default tar extraction is killed when its signal aborts", async (t) =>
     await new Promise((done) => setTimeout(done, 25));
   assert.equal(running(), false, "tar was terminated");
   assert.deepEqual(readdirSync(destination), []);
+});
+
+test("an interrupt before or during the password prompt stops the install before it changes anything", async (t) => {
+  for (const when of ["before", "during"] as const) {
+    const f = await tarballSetup(t, { auth: false });
+    const interrupt = new AbortController();
+    const cli = new FakeCli();
+    if (when === "before") interrupt.abort();
+    else {
+      cli.hang = true;
+      setTimeout(() => interrupt.abort(), 30);
+    }
+    const before = tree(f.home);
+    const result = await f.run({}, cli, interrupt.signal);
+    assert.equal(result.code, 1, when);
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "preflight", when);
+    assert.equal(report.error, "interrupted", when);
+    assert.deepEqual(cli.prompts, when === "before" ? [] : cli.prompts);
+    assert.equal(existsSync(f.authFile), false, when);
+    assert.deepEqual(f.launchd.mutations(), [], when);
+    assert.deepEqual(tree(f.home), before, when);
+    assert.equal(
+      existsSync(join(f.stateDir, `.${f.options.label}.lock`)),
+      false,
+      when,
+    );
+  }
+});
+
+test("a tarball with an incomplete release is refused before publishing, and a rerun with a good one succeeds", async (t) => {
+  for (const omit of ["node/bin/node", "dist/src/standalone/cli.js"]) {
+    const f = await tarballSetup(t);
+    const bad = tarballOf(dirname(f.home), "0.1.0", undefined, omit);
+    const refused = await f.run({ tarball: bad });
+    assert.equal(refused.code, 1, omit);
+    const report = JSON.parse(refused.stderr);
+    assert.equal(report.stage, "unpack", omit);
+    assert.match(report.error, /incomplete/, omit);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), [], omit);
+    assert.deepEqual(f.launchd.mutations(), [], omit);
+    const retried = await f.run();
+    assert.equal(retried.code, 0, retried.stderr);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), ["0.1.0"]);
+  }
+});
+
+test("an incomplete or empty version directory is replaced, a complete different one is not", async (t) => {
+  for (const damage of ["missing node", "empty"]) {
+    const f = await tarballSetup(t);
+    const target = join(f.stateDir, "versions", "0.1.0");
+    release(f.stateDir, "0.1.0");
+    if (damage === "empty") {
+      rmSync(target, { recursive: true });
+      mkdirSync(target);
+    } else rmSync(join(target, "node", "bin", "node"));
+    const result = await f.run();
+    assert.equal(result.code, 0, `${damage}: ${result.stderr}`);
+    assert.ok(existsSync(join(target, "node", "bin", "node")), damage);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), ["0.1.0"]);
+  }
+});
+
+test("a symlinked versions directory is refused before anything is extracted", async (t) => {
+  const f = await tarballSetup(t);
+  const elsewhere = join(dirname(f.home), "elsewhere");
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, join(f.stateDir, "versions"));
+  const result = await f.run();
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.stderr).stage, "unpack");
+  assert.deepEqual(readdirSync(elsewhere), []);
+  assert.deepEqual(f.launchd.mutations(), []);
+});
+
+test("a staging directory left by a dead install is swept, a live one is kept", async (t) => {
+  const f = await tarballSetup(t);
+  const versions = join(f.stateDir, "versions");
+  mkdirSync(versions, { recursive: true });
+  const dead = spawnSync("true").pid;
+  mkdirSync(join(versions, `.staging-${dead}-abc`));
+  mkdirSync(join(versions, `.staging-${process.pid}-abc`));
+  assert.equal((await f.run()).code, 0);
+  assert.deepEqual(
+    readdirSync(versions).sort(),
+    ["0.1.0", `.staging-${process.pid}-abc`].sort(),
+  );
+});
+
+test("a token file that already exists is refused before anything changes or any credential is minted", async (t) => {
+  for (const tokenFile of [
+    (f: { home: string }) => f.home,
+    (f: { home: string }) => join(f.home, "missing", "token"),
+  ]) {
+    const f = await tarballSetup(t);
+    const before = tree(f.home);
+    const result = await f.run({ tokenFile: tokenFile(f) });
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stderr).stage, "preflight");
+    assert.deepEqual(f.launchd.requests, []);
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(tree(f.home), before);
+  }
 });

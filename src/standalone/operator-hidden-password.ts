@@ -4,7 +4,10 @@ export function readHiddenPassword(
   input: NodeJS.ReadStream = process.stdin,
   output: NodeJS.WriteStream = process.stdout,
   prompt = "Ensemble operator password: ",
+  signal?: AbortSignal,
 ): Promise<string> {
+  if (signal?.aborted)
+    return Promise.reject(new Error("Operator password input aborted"));
   if (!input.isTTY || !output.isTTY || !input.setRawMode) {
     return Promise.reject(new Error("An interactive terminal is required"));
   }
@@ -27,6 +30,7 @@ export function readHiddenPassword(
       cleanup(() => input.off("keypress", onKeypress));
       cleanup(() => input.off("close", onClose));
       cleanup(() => input.off("error", onError));
+      cleanup(() => signal?.removeEventListener("abort", onAbort));
       cleanup(() => input.setRawMode(Boolean(wasRaw)));
       cleanup(() => input.pause());
       cleanup(() => output.write("\n"));
@@ -49,12 +53,14 @@ export function readHiddenPassword(
     };
     const onClose = () => finish(new Error("Operator password input closed"));
     const onError = () => finish(new Error("Operator password input failed"));
+    const onAbort = () => finish(new Error("Operator password input aborted"));
 
     try {
       emitKeypressEvents(input);
       input.on("keypress", onKeypress);
       input.once("close", onClose);
       input.once("error", onError);
+      signal?.addEventListener("abort", onAbort, { once: true });
       input.setRawMode(true);
       output.write(prompt);
       input.resume();

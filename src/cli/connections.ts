@@ -133,20 +133,24 @@ export class ConnectionConfig {
 }
 
 export interface CredentialStore {
-  set(account: string, token: string): Promise<void>;
-  get(account: string): Promise<string>;
+  /** `signal` aborts a store that blocks, for example on a locked Keychain. */
+  set(account: string, token: string, signal?: AbortSignal): Promise<void>;
+  get(account: string, signal?: AbortSignal): Promise<string>;
   delete(account: string): Promise<void>;
 }
 
 export type SecurityRunner = (
   args: string[],
   input?: string,
+  signal?: AbortSignal,
 ) => Promise<{ code: number; stdout: string }>;
 
-export const runSecurity: SecurityRunner = (args, input) =>
+export const runSecurity: SecurityRunner = (args, input, signal) =>
   new Promise((resolve, reject) => {
     const child = spawn("/usr/bin/security", args, {
       stdio: ["pipe", "pipe", "ignore"],
+      // Aborting kills `security`, which rejects below.
+      ...(signal ? { signal } : {}),
     });
     let stdout = "";
     child.stdout.setEncoding("utf8");
@@ -171,29 +175,38 @@ export class KeychainCredentialStore implements CredentialStore {
     private readonly run: SecurityRunner = runSecurity,
   ) {}
 
-  async set(account: string, token: string): Promise<void> {
+  async set(
+    account: string,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const name = connectionNameSchema.parse(account);
     operatorCredentialTokenSchema.parse(token);
     // `security -i` reads the command from stdin, keeping the token out of argv.
     const result = await this.run(
       ["-i"],
       `add-generic-password -U -s ${this.service} -a ${name} -w ${token}\n`,
+      signal,
     ).catch(() => {
       throw unavailable();
     });
     if (result.code !== 0) throw unavailable();
-    if ((await this.get(name)) !== token) throw unavailable();
+    if ((await this.get(name, signal)) !== token) throw unavailable();
   }
 
-  async get(account: string): Promise<string> {
-    const result = await this.run([
-      "find-generic-password",
-      "-s",
-      this.service,
-      "-a",
-      connectionNameSchema.parse(account),
-      "-w",
-    ]).catch(() => {
+  async get(account: string, signal?: AbortSignal): Promise<string> {
+    const result = await this.run(
+      [
+        "find-generic-password",
+        "-s",
+        this.service,
+        "-a",
+        connectionNameSchema.parse(account),
+        "-w",
+      ],
+      undefined,
+      signal,
+    ).catch(() => {
       throw unavailable();
     });
     if (result.code === 44)

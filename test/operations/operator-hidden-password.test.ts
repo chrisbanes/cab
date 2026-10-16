@@ -109,3 +109,35 @@ test("operator auth CLI exits safely when hidden input is not a terminal", () =>
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("hidden password reader rejects an aborted signal without prompting", async () => {
+  const input = ttyInput();
+  const terminal = output();
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(
+    readHiddenPassword(
+      input,
+      terminal.stream,
+      "Fixture password: ",
+      aborted.signal,
+    ),
+  );
+  assert.equal(input.isRaw, false);
+  assert.equal(terminal.text(), "");
+
+  const pending = new AbortController();
+  const result = readHiddenPassword(
+    input,
+    terminal.stream,
+    "Fixture password: ",
+    pending.signal,
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(input.isRaw, true);
+  pending.abort();
+  await assert.rejects(result);
+  assert.equal(input.isRaw, false);
+  assert.equal(input.isPaused(), true);
+  input.destroy();
+});

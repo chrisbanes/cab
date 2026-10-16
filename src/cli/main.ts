@@ -581,22 +581,30 @@ async function loadToken(connection: Connection, deps: CliDeps) {
 }
 
 /** Validates the token against the service, then stores it and records the connection. */
-async function saveLogin(
+export async function saveLogin(
   config: ConnectionConfig,
   deps: CliDeps,
   name: string,
   origin: string,
   token: string,
   tokenFile: string | undefined,
+  signal?: AbortSignal,
 ) {
   // Validate before storing anything.
   const identity = await new ServiceClient(origin, token, deps.fetch).identity([
     "cli.identity",
   ]);
   const current: CliConfig = await config.read();
-  if (!tokenFile) await deps.keychain().set(name, token);
-  else if (current.connections[name]?.credential?.kind === "keychain")
-    await deps.keychain().delete(name);
+  const keychain = deps.keychain();
+  const priorKeychain =
+    current.connections[name]?.credential?.kind === "keychain";
+  // A failed write must leave the prior Keychain token in place for the prior connection.
+  let prior: string | undefined;
+  if (!tokenFile) {
+    if (priorKeychain)
+      prior = await keychain.get(name, signal).catch(() => undefined);
+    await keychain.set(name, token, signal);
+  }
   current.connections[name] = {
     url: origin,
     installationId: identity.service.installationId,
@@ -604,7 +612,18 @@ async function saveLogin(
       ? { kind: "token-file", path: tokenFile }
       : { kind: "keychain", account: name },
   };
-  await config.write(current);
+  try {
+    await config.write(current);
+  } catch (error) {
+    if (!tokenFile)
+      await (prior === undefined
+        ? keychain.delete(name)
+        : keychain.set(name, prior)
+      ).catch(() => undefined);
+    throw error;
+  }
+  if (tokenFile && priorKeychain)
+    await keychain.delete(name).catch(() => undefined);
   return identity;
 }
 
@@ -612,8 +631,8 @@ async function saveLogin(
 export function installCli(deps: CliDeps): InstallCli {
   return {
     interactive: Boolean(deps.stdin.isTTY && deps.stderr.isTTY),
-    readPassword: (prompt) =>
-      readHiddenPassword(deps.stdin, deps.stderr, prompt),
+    readPassword: (prompt, signal) =>
+      readHiddenPassword(deps.stdin, deps.stderr, prompt, signal),
     login: async (name, origin, token, tokenFile, signal) => {
       rejectManaged(deps.env);
       // The identity check stops with the install's timeout or interrupt.
@@ -631,6 +650,7 @@ export function installCli(deps: CliDeps): InstallCli {
           origin,
           token,
           tokenFile,
+          signal,
         );
       } catch (error) {
         // The token is revoked on failure; do not leave a dead one on disk.

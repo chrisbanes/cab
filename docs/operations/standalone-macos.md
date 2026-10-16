@@ -48,8 +48,12 @@ ensemble-0.1.0-darwin-arm64/bin/ensemble service install ensemble-0.1.0-darwin-a
 The first `tar` only makes the tarball's own `ensemble` available to run. Install
 unpacks the tarball again into `STATE/versions/<version>` through a staging
 directory. If that version directory already exists with the same
-`manifest.json`, it is reused; with a different one, install refuses and changes
-nothing. A later failure keeps the unpacked version, so a rerun reuses it.
+`manifest.json`, it is reused; with a different complete one, install refuses and
+changes nothing. The release is published only once it holds `node/bin/node` and
+`dist/src/standalone/cli.js`, and an incomplete version directory (for example
+from an interrupted hand unpack) is replaced. A later failure keeps the unpacked
+version, so a rerun reuses it, and a leftover `.staging-<pid>-*` directory from a
+killed install is removed by the next one.
 `service install` with no tarball binds to the release it runs from, which must
 already sit in `STATE/versions` (for example one you unpacked there with
 `tar -xzf FILE --strip-components 1 -C "$STATE/versions/0.1.0"`).
@@ -57,7 +61,8 @@ already sit in `STATE/versions` (for example one you unpacked there with
 Install refuses, changing nothing beyond creating an empty `STATE` (mode `0700`), unless the tarball is a readable file (or the
 release sits directly in `STATE/versions` with a `manifest.json` naming the same
 version), the label is not loaded, no install record or LaunchAgent for the label
-exists, and the port is free. A missing auth file also refuses outside an
+exists, and the port is free. With `--token-file`, the path must not exist and its
+directory must. A missing auth file also refuses outside an
 interactive terminal; run install in one, or run `ensemble service init-auth`
 first. It then asks once, on a hidden prompt, for the operator password (a new
 password when the auth file is missing, which it creates as a mode `0600`
@@ -88,7 +93,8 @@ connection, prints its table and `Fix` lines on stderr, and opens
 stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in.
 The password and token are never printed or put on a command line.
 
-If the prompt is cancelled (Ctrl-C there skips sign-in; it does not stop the install)
+If the prompt is cancelled (the Ctrl-C keypress there skips sign-in; it does not
+stop the install, whereas a SIGINT sent from outside stops it before anything changes)
 or skipped, the password is wrong (one attempt only),
 the credential cannot be stored (it is then revoked), or doctor or the browser
 open fails, install still exits 0 with the service running. It prints the manual

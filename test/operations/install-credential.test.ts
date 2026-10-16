@@ -3,7 +3,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { installCli } from "../../src/cli/main.js";
+import { installCli, saveLogin } from "../../src/cli/main.js";
+import { ConnectionConfig } from "../../src/cli/connections.js";
 import {
   issueInstallCredential,
   type ServiceHost,
@@ -276,4 +277,102 @@ test("a stalled or interrupted credential store is bounded, revokes the credenti
       cause,
     );
   }
+});
+
+/** A connection config whose write fails after the login validated the token. */
+class FailingWrite extends ConnectionConfig {
+  override async write(): Promise<void> {
+    throw new Error("disk full");
+  }
+}
+
+test("a login whose config write fails restores the prior Keychain token and removes a new one", async (t) => {
+  const f = await installFixture(t);
+  const h = harness(t);
+  const first = await f.s.issue("read", "install · first", 90);
+  const second = await f.s.issue("read", "install · second", 90);
+  const keychain = new MemoryKeychain();
+  const deps = {
+    env: {},
+    fetch: f.rewritten,
+    platform: "darwin",
+    keychain: () => keychain,
+  } as unknown as CliDeps;
+  const good = new ConnectionConfig(h.configDir);
+  const failing = new FailingWrite(h.configDir);
+  const save = (config: ConnectionConfig, token: string, tokenFile?: string) =>
+    saveLogin(config, deps, "local", f.origin, token, tokenFile, never);
+
+  // No prior connection: the failed login leaves no Keychain item behind.
+  await assert.rejects(save(failing, second.token), /disk full/);
+  assert.equal(keychain.items.size, 0);
+
+  // A prior Keychain connection keeps its token and its config entry.
+  await save(good, first.token);
+  const file = join(h.configDir, "connections.json");
+  const config = readFileSync(file);
+  await assert.rejects(save(failing, second.token), /disk full/);
+  assert.equal(keychain.items.get("local"), first.token);
+  assert.deepEqual(readFileSync(file), config);
+  assert.equal(
+    (await f.s.bearer(first.token, "/api/operator/cli")).status,
+    200,
+  );
+
+  // A token-file login keeps the prior Keychain item until the config is written.
+  await assert.rejects(
+    save(failing, second.token, join(h.dir, "install.token")),
+    /disk full/,
+  );
+  assert.equal(keychain.items.get("local"), first.token);
+  await save(good, second.token, join(h.dir, "install.token"));
+  assert.equal(keychain.items.has("local"), false);
+});
+
+test("a Keychain write that blocks is cancelled by the interrupt and nothing is stored", async (t) => {
+  const f = await installFixture(t);
+  const h = harness(t);
+  const stored: string[] = [];
+  const blocking = {
+    set: (_account: string, _token: string, signal?: AbortSignal) =>
+      new Promise<void>((_, reject) => {
+        signal?.addEventListener("abort", () => reject(new Error("aborted")));
+        setTimeout(() => interrupt.abort(), 20);
+      }),
+    get: async () => {
+      throw new Error("none");
+    },
+    delete: async () => {
+      stored.push("delete");
+    },
+  };
+  const deps = {
+    env: { ENSEMBLE_CLI_CONFIG_DIR: h.configDir },
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    fetch: f.rewritten,
+    platform: "darwin",
+    keychain: () => blocking,
+    now: Date.now,
+  } as unknown as CliDeps;
+  const interrupt = new AbortController();
+  const outcome = await issueInstallCredential(
+    {
+      fetch: f.rewritten,
+      timeout: (ms: number) => AbortSignal.timeout(ms),
+    } as unknown as ServiceHost,
+    f.origin,
+    "fixture-password",
+    "install · test-host",
+    (token, signal) =>
+      installCli(deps).login("local", f.origin, token, undefined, signal),
+    interrupt.signal,
+  );
+  assert.equal(outcome, "failed");
+  const named = f
+    .credentials()
+    .filter((credential) => credential.name === "install · test-host");
+  assert.equal(named[0]?.state, "revoked");
+  assert.equal(existsSync(join(h.configDir, "connections.json")), false);
 });

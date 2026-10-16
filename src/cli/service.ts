@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -19,7 +20,14 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { hostname } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
@@ -112,7 +120,8 @@ export type ServiceHost = {
 /** The interactive CLI work around install; absent when a caller cannot sign in. */
 export type InstallCli = {
   interactive: boolean;
-  readPassword(prompt: string): Promise<string>;
+  /** Rejects when `signal` aborts. */
+  readPassword(prompt: string, signal?: AbortSignal): Promise<string>;
   login(
     connection: string,
     origin: string,
@@ -194,6 +203,22 @@ const manifestSchema = z.object({
   platform: z.literal("darwin-arm64"),
   version: z.string().regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/),
 });
+
+/** The first file a release needs to run that is missing from `root`, if any. */
+const missingReleaseFile = (root: string) =>
+  [
+    join(root, "node", "bin", "node"),
+    join(root, "dist", "src", "standalone", "cli.js"),
+  ].find((file) => !lstatSync(file, { throwIfNoEntry: false })?.isFile());
+
+const processAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
 
 /** A failure with a fixed message; raw causes can hold paths or secrets and are never shown. */
 class ServiceFailure extends Error {}
@@ -287,24 +312,33 @@ class Service {
       throw refuse(
         "The release's manifest.json does not describe its version directory",
       );
-    for (const file of [
-      join(root, "node", "bin", "node"),
-      join(root, "dist", "src", "standalone", "cli.js"),
-    ])
-      if (!lstatSync(file, { throwIfNoEntry: false })?.isFile())
-        throw refuse(`The release is incomplete: ${file} is missing`);
+    const missing = missingReleaseFile(root);
+    if (missing)
+      throw refuse(`The release is incomplete: ${missing} is missing`);
     return version;
   }
 
   /**
-   * Unpack `tarball` into STATE/versions/<manifest version> through a staging directory.
-   * An existing version with the same manifest is reused; a different one is refused.
+   * Unpack `tarball` into STATE/versions/<manifest version> through a staging directory,
+   * publishing it only once complete. An existing complete version with the same manifest
+   * is reused and a complete one with a different manifest is refused; an incomplete one
+   * cannot be a running release, so it is replaced.
    */
   async unpack(tarball: string): Promise<string> {
     const { stateDir } = this.options;
+    this.requireDirectory(stateDir, "State directory", false);
     const versions = join(stateDir, "versions");
     mkdirSync(versions, { recursive: true, mode: 0o700 });
-    const staging = mkdtempSync(join(versions, ".staging-"));
+    if (realpathSync(versions) !== versions)
+      throw refuse(`${versions} must be a real directory`);
+    // A killed install leaves its staging directory, named for its pid.
+    for (const name of readdirSync(versions)) {
+      const pid = /^\.staging-(\d+)-/.exec(name)?.[1];
+      if (pid && !processAlive(Number(pid)))
+        rmSync(join(versions, name), { recursive: true, force: true });
+    }
+    const staging = mkdtempSync(join(versions, `.staging-${process.pid}-`));
+    const aside = `${staging}-old`;
     try {
       const unpacked = await this.host.extract(
         tarball,
@@ -325,21 +359,31 @@ class Service {
       } catch {
         throw refuse("The tarball holds no valid release manifest.json");
       }
+      const missing = missingReleaseFile(staging);
+      if (missing)
+        throw refuse(
+          `The tarball's release is incomplete: ${relative(staging, missing)} is missing`,
+        );
       const target = join(versions, version);
-      if (!lstatSync(target, { throwIfNoEntry: false })) {
-        renameSync(staging, target);
-        return target;
+      const existing = lstatSync(target, { throwIfNoEntry: false });
+      if (existing) {
+        let same = false;
+        try {
+          same = readFileSync(join(target, "manifest.json")).equals(manifest);
+        } catch {
+          same = false;
+        }
+        if (existing.isDirectory() && !missingReleaseFile(target)) {
+          if (same) return target;
+          throw refuse(`${target} already holds a different release`);
+        }
+        renameSync(target, aside);
       }
-      let same = false;
-      try {
-        same = readFileSync(join(target, "manifest.json")).equals(manifest);
-      } catch {
-        same = false;
-      }
-      if (!same) throw refuse(`${target} already holds a different release`);
+      renameSync(staging, target);
       return target;
     } finally {
       rmSync(staging, { recursive: true, force: true });
+      rmSync(aside, { recursive: true, force: true });
     }
   }
 
@@ -845,6 +889,15 @@ async function installServiceLocked(
       if (!statSync(tarball).isFile())
         throw refuse(`${tarball} is not a readable file`);
     }
+    if (cli && first.tokenFile) {
+      // Found only after the mint it would waste a credential.
+      if (existsSync(first.tokenFile))
+        throw refuse(
+          `${first.tokenFile} already exists; choose another --token-file`,
+        );
+      if (!existsSync(dirname(first.tokenFile)))
+        throw refuse(`The directory for ${first.tokenFile} does not exist`);
+    }
     if (await service.loadedJob())
       throw refuse(`The ${options.label} job is already loaded`);
     if (existsSync(service.recordPath) || existsSync(service.activation))
@@ -861,6 +914,7 @@ async function installServiceLocked(
     // The one password prompt. A cancelled prompt only skips sign-in, unless the password
     // is needed to create the auth file.
     let password: string | undefined;
+    service.checkInterrupt();
     if (cli?.interactive)
       try {
         password =
@@ -868,10 +922,12 @@ async function installServiceLocked(
             authMissing
               ? "New Ensemble operator password: "
               : "Ensemble operator password: ",
+            io.signal,
           )) || undefined;
       } catch {
         password = undefined;
       }
+    service.checkInterrupt();
     if (authMissing && password === undefined)
       throw refuse("An operator password is required to create the auth file");
     if (tarball) {
