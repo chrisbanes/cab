@@ -41,6 +41,15 @@ import {
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { tmpdir } from "../fixtures/temp.js";
+import {
+  createNativeWork,
+  createTask as createNativeTask,
+  fixture as nativeFixture,
+  generation as nativeGeneration,
+  nativeRequest,
+  until as untilNative,
+  type RuntimeInternals,
+} from "../fixtures/runtime-retention.js";
 
 test("API preserves original durable task receipts independently of current version and paused admission", async (t) => {
   const f = await createOperatorFixture();
@@ -2168,12 +2177,11 @@ test("catalog attention tracks current rejected completion and lead review, excl
     });
   });
   assert.ok((await codes(other.taskId)).includes("lead-review"));
-  const intervention = (await api.readInbox()).data.items.find(
-    (i) => i.taskId === other.taskId,
+  // Ensemble owns a routing fallback, so it raises no Inbox intervention.
+  assert.deepEqual(
+    (await api.readInbox()).data.items.filter((i) => i.taskId === other.taskId),
+    [],
   );
-  assert.equal(intervention?.kind, "intervention");
-  assert.equal(intervention?.attentionCode, "lead-review");
-  assert.equal(intervention?.reason, "Routing fell back to the project lead");
   f.service.domain().execute({
     type: "task.configure",
     key: randomUUID(),
@@ -2187,6 +2195,64 @@ test("catalog attention tracks current rejected completion and lead review, excl
   assert.equal(
     f.service.coordinationView().readTask(other.taskId).routing.attempts.length,
     1,
+  );
+});
+test("an answered native question awaiting delivery is Ensemble's, not an operator question", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-question-delivery-"));
+  const f = nativeFixture(root);
+  t.after(async () => {
+    await f.service.stop();
+    rmSync(root, { recursive: true, force: true });
+  });
+  await f.service.start();
+  f.internals().scheduler.stop();
+  const task = createNativeTask(f.service),
+    work = createNativeWork(f, task, 0),
+    coordination = f.internals().coordination,
+    api = new OperatorApi(f.service, [root]);
+  const identity = {
+    requestId: 1,
+    runtimeGeneration: nativeGeneration,
+    threadId: work.threadId,
+    turnId: work.turnId,
+    itemId: "delivery-item",
+  };
+  // The reply is never confirmed: the fake runtime resolves it for an unrelated thread.
+  (f.runtime() as unknown as RuntimeInternals).receive(
+    f.child,
+    JSON.stringify({
+      id: 1,
+      method: "item/tool/requestUserInput",
+      params: nativeRequest(work.threadId, work.turnId, "delivery-item"),
+    }),
+  );
+  await untilNative(
+    () => Boolean(coordination.runtimeQuestionByEndpoint(identity)),
+    "durable native question",
+  );
+  const question = coordination.runtimeQuestionByEndpoint(identity);
+  assert.ok(question);
+  assert.deepEqual(await listedAttention(api, task.taskId), ["question"]);
+  await f.service.coordinationView().answerRuntimeQuestion({
+    taskId: task.taskId,
+    key: randomUUID(),
+    interactionId: question.interactionId,
+    expectedRevision: question.revision,
+    answers: { q: { answers: ["A"] } },
+  });
+  assert.notEqual(
+    coordination.runtimeQuestionByEndpoint(identity)?.deliveryState,
+    "confirmed",
+  );
+  assert.deepEqual(await listedAttention(api, task.taskId), [
+    "question-delivery",
+  ]);
+  // Ensemble owns the delivery, so it raises no Inbox intervention.
+  assert.equal(
+    (await api.readInbox()).data.items.some(
+      (i) => i.taskId === task.taskId && i.kind === "intervention",
+    ),
+    false,
   );
 });
 test("a routing fallback on a task with no project lead clears without operator action", async (t) => {
@@ -2289,10 +2355,11 @@ test("a routing fallback on a task with no project lead clears without operator 
   assert.ok(
     (await listedAttention(api, seeded.taskId)).includes("lead-review"),
   );
-  assert.equal(
-    (await api.readInbox()).data.items.find((i) => i.taskId === seeded.taskId)
-      ?.attentionCode,
-    "lead-review",
+  assert.deepEqual(
+    (await api.readInbox()).data.items.filter(
+      (i) => i.taskId === seeded.taskId,
+    ),
+    [],
   );
   // The next coordination pass, woken without a task edit, retires the fallback.
   d.execute({

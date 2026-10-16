@@ -161,16 +161,12 @@ export function ApprovalDetail({
   );
 }
 
-/** An intervention in the Inbox: what it needs and the way to the task or its execution. */
+/** An intervention in the Inbox: the recorded reason and its attention code's action. */
 export function InterventionDetail({ item }: { item: InboxItem }) {
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
-        <p>
-          {item.attentionCode === "lead-review"
-            ? "Ensemble assigns the project lead or retires the fallback on its next coordination pass; no operator decision is needed."
-            : "Review the exact execution state before acting."}
-        </p>
+        <p>Review the exact execution state before acting.</p>
       </div>
       <div className="inbox-decision">
         <ActionLink href={item.destination}>

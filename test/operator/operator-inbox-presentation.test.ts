@@ -50,7 +50,6 @@ test("kind and action labels cover every request kind", () => {
     ["execution-uncertain", "Inspect execution"],
     ["unresolved-result", "Inspect execution"],
     ["completion-rejected", "Inspect execution"],
-    ["lead-review", "View task"],
   ] as const)
     assert.equal(
       requestActionLabel({ kind: "intervention", attentionCode: code }),
@@ -655,21 +654,13 @@ test("task context reads the source, lead and the task's next actor", () => {
     lead: "Unavailable",
     next: "Next: you · inspect execution",
   });
-  assert.equal(
-    taskContext(
-      undefined,
-      { ...item("intervention", "p"), attentionCode: "lead-review" },
-      true,
-    ).next,
-    "Next: Ensemble · recording routing fallback",
-  );
   // Once it lands, the task's codes and column name it, as on the List and the task page.
   for (const [codes, execution, request, next] of [
     [
-      ["lead-review"],
+      ["question-delivery"],
       "idle",
-      "intervention",
-      "Next: Ensemble · recording routing fallback",
+      "question",
+      "Next: Ensemble · delivering answer",
     ],
     [
       ["question", "approval"],

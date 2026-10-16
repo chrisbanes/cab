@@ -78,6 +78,8 @@ test("taskNextActor reads the List's next actor from the same attention codes", 
     [["unresolved-result"], "idle", "Next: you · resolve result destination"],
     [["completion-rejected"], "idle", "Next: you · review rejected completion"],
     [["lead-review"], "idle", "Next: Ensemble · recording routing fallback"],
+    [["question-delivery"], "idle", "Next: Ensemble · delivering answer"],
+    [["question-delivery", "question"], "idle", "Next: you · answer question"],
     [
       ["lead-review", "approval"],
       "idle",

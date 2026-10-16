@@ -2486,11 +2486,13 @@ export class OperatorApi {
         count += n;
       }
     };
+    add("question", view.questions.filter((i) => i.status === "open").length);
+    // An answer recorded for a native question that Ensemble has not yet confirmed delivering.
     add(
-      "question",
+      "question-delivery",
       view.questions.filter(
         (i) =>
-          i.status === "open" ||
+          i.status === "answered" &&
           view.runtimeQuestions?.some(
             (q) =>
               q.interactionId === i.interactionId &&

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { waitCodes, waitSchema } from "./wait-reasons.js";
-import { attentionCodeSchema } from "./attention.js";
+import { attentionCodes, attentionCodeSchema } from "./attention.js";
 import { discoveryCredentialReference } from "../core/credential-reference.js";
 import {
   closedIssuesSchema,
@@ -63,7 +63,9 @@ const revision = z.number().int().positive().safe();
 const time = z.number().int().nonnegative().safe();
 const text = z.string().max(16000);
 const safeText = text.nullable();
-const attentionCodesSchema = z.array(attentionCodeSchema).max(6);
+const attentionCodesSchema = z
+  .array(attentionCodeSchema)
+  .max(attentionCodes.length);
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export type JsonValue =
   | null

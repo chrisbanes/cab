@@ -7,15 +7,17 @@ export const attentionCodes = [
   "question",
   "unresolved-result",
   "completion-rejected",
+  "question-delivery",
   "lead-review",
 ] as const;
 export type AttentionCode = (typeof attentionCodes)[number];
 export const attentionCodeSchema = z.enum(attentionCodes);
 
 /**
- * Who acts next for each code, shared by the List, the Inbox and the task detail. Every code
- * names the operator except `lead-review`: Ensemble commits that fallback to the project lead,
- * or marks it stale, on its next coordination pass.
+ * Who acts next for each code, shared by the List, the Inbox and the task detail. Ensemble owns
+ * `question-delivery` (a recorded answer it is still delivering to the agent) and `lead-review`
+ * (a routing fallback it commits to the project lead, or marks stale, on its next coordination
+ * pass); the operator owns the rest, and only those raise Inbox interventions.
  */
 export const attentionNext: Record<
   AttentionCode,
@@ -51,6 +53,12 @@ export const attentionNext: Record<
     reason: "Completion requires review",
     inboxAction: "Inspect execution",
   },
+  "question-delivery": {
+    operator: false,
+    action: "delivering answer",
+    reason: "Answer recorded; delivery to the agent is pending",
+    inboxAction: "View task",
+  },
   "lead-review": {
     operator: false,
     action: "recording routing fallback",
@@ -80,8 +88,15 @@ export function nextAttention(
   };
 }
 
-/** The code an Inbox intervention stands for; questions and approvals have their own items. */
+/**
+ * The operator-owned code an Inbox intervention stands for. Questions and approvals have their
+ * own items, and Ensemble-owned codes raise none.
+ */
 export const interventionCode = (codes: readonly AttentionCode[]) =>
   attentionCodes.find(
-    (c) => c !== "question" && c !== "approval" && codes.includes(c),
+    (c) =>
+      c !== "question" &&
+      c !== "approval" &&
+      attentionNext[c].operator &&
+      codes.includes(c),
   );
