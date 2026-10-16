@@ -22,7 +22,8 @@ it in one submission.
    assignee and dependencies disclose beneath them.
 3. "If you create it now" states Starts now or Will wait with the reasons; the bar
    repeats the verdict beside Create and start and Save draft.
-4. Create and start shows "Task created" with Open task and any wait with its Fix.
+4. Create and start shows "Task created" with Open task and any wait, with its
+   Fix where the specification gives one and otherwise the link to what blocks it.
 
 ## Budget
 
@@ -31,6 +32,7 @@ it in one submission.
 | Any | 3 (open, fill, Create and start) | project, title, outcome and the verdict |
 
 Unfinished input survives navigation on this device and is offered for recovery.
+The operator CLI is outside the budget: it has no screens.
 
 ## Recovery
 

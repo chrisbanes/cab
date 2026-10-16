@@ -40,6 +40,10 @@ Recovery that releases a generation needs the evidence-bearing operations whose
 | Home card or Inbox row | 1 (Inspect execution) | what is uncertain and when it was last observed |
 | Task detail | 1 (the hold line) | the hold named with a link |
 
+Settings → Runtime → Task recovery destinations is the fallback list and is
+outside the budget.
+The operator CLI is outside the budget: it has no screens.
+
 ## Recovery
 
 - A paused project keeps Resume project as the Fix for that reason, and its

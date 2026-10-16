@@ -32,9 +32,15 @@ place.
 
 | Entry point | Interactions to the fix sent or its screen open | First screen must show |
 | --- | --- | --- |
-| Task detail | 2 (Fix, confirm) | the first reason and its Fix |
+| Task detail | 2 (Fix, confirm) | the first reason, with its Fix where one exists |
+| Getting-started Project row | 2 (Resume, confirm) | the paused project and Resume |
 | Project page | 2 (Resume project, confirm) | the paused state and Resume |
 | Composer | 2 (Fix, confirm) | the verdict and the first reason |
+
+The budget applies where the specification gives the wait a Fix; a dependency,
+approval, source, capacity, power-supervision, held-assignment or recovery wait
+shows its blocking link or explanation instead, and no Fix is invented for it.
+The operator CLI is outside the budget: it has no screens.
 
 ## Recovery
 

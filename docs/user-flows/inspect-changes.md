@@ -36,11 +36,15 @@ feedback to the lead without leaving the task.
 | Latest result | 2 (Changes link, file) | the result summary and its changed-file count |
 
 The reply box is reachable from the diff without scrolling past the brief or
-retained evidence.
+retained evidence. An Inbox evidence link lands on the diff it names (1).
+The operator CLI is outside the budget: it has no screens.
 
 ## Recovery
 
 - A comparison that cannot be computed names the reason in a sentence and keeps the
   last computed one visible as stale.
 - A sent review shows its receipt; a failed send keeps the comments as a draft.
-- Refresh re-reads the workspace; it never discards an unsent draft.
+- An ordinary refresh re-reads the workspace and keeps an unsent draft. When
+  repository access or exclusions change, the draft's text and anchors are
+  rechecked and any content the session may no longer read is removed, as the
+  [specification](../SPEC.md#task-workspace-inspection-and-local-review) requires.

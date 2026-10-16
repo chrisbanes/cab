@@ -24,7 +24,8 @@ each screen leading to the next and nothing to look up.
 3. Project setup creates the lead profile inline and the project in one submission;
    the ready check replaces the form and offers Resume and create first task.
 4. The composer opens with the project selected; Create and start.
-5. Task detail shows the running turn, or the wait and its Fix.
+5. Task detail shows the running turn, or the wait with its Fix where one exists
+   and otherwise the link to what blocks it.
 
 ## Budget
 

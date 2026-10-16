@@ -34,8 +34,11 @@ to say to the lead.
 | Task detail | 1 (the criterion's link) | the result summary and every criterion with its outcome |
 | Home recent results | 2 (the result, the criterion's link) | the result summary |
 
+An Inbox evidence link lands on the evidence it names (1).
+
 Identifiers (result, assignment, revision) appear as short metadata, never in a
 sentence.
+The operator CLI is outside the budget: it has no screens.
 
 ## Recovery
 

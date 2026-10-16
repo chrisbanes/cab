@@ -33,6 +33,8 @@ they are, and gets one confirmation that the answer was recorded.
 | Inbox row | 3 (row, choose, Submit) | the question text in the row |
 | Task decision card | 3 (Answer question, choose, Submit) | the question text on the card |
 
+The operator CLI is outside the budget: it has no screens.
+
 ## Recovery
 
 - A failed submission keeps the input and names the cause; a stale or already

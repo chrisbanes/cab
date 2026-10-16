@@ -35,8 +35,11 @@ material invalidates approval".
 
 | Entry point | Interactions to a recorded decision | First screen must show |
 | --- | --- | --- |
+| Home card | 3 (Review material & decide, Approve, confirm) | the exact action and the task |
 | Inbox row | 4 (row, Review material & decide, Approve, confirm) | the exact action in the row |
 | Task decision card | 3 (Review material & decide, Approve, confirm) | action, target and material version |
+
+The operator CLI is outside the budget: it has no screens.
 
 ## Recovery
 
