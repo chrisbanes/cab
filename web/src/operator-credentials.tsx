@@ -10,6 +10,7 @@ import {
 } from "./action-feedback.js";
 import { Button, StatusBadge, TextField } from "./components.js";
 import { failureCause, type ReceiptDetails } from "./outcome-copy.js";
+import { shortId } from "./presentation.js";
 import { useOperatorResource } from "./resource.js";
 import { Panel, useHeaderRefresh, type SettingsProps } from "./settings.js";
 import {
@@ -32,7 +33,6 @@ interface Outcome {
 }
 const lifetimes = [7, 30, 60, 90];
 // A rotation keeps the name, so the short id tells the two apart.
-const shortId = (id: string) => id.slice(0, 8);
 const scopeLabel = (s: Scope) => (s === "read" ? "Read-only" : "Read-write");
 
 function When({ at }: { at: number }) {

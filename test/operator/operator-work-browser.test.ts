@@ -387,8 +387,12 @@ test("overview cards read the Inbox and cover its failure and partial states", a
     es.map((e) => e.textContent ?? ""),
   )) {
     assert.match(text, /Question|Approval|Execution uncertain|Intervention/);
-    assert.match(text, /\d\d:\d\d · |Age unknown/);
-    assert.match(text, /Responsibility unknown|Requested by /);
+    // A missing time or requester is omitted, never printed as a placeholder.
+    assert.doesNotMatch(text, /Age unknown|Responsibility unknown/);
+    if (!/Intervention|Execution uncertain/.test(text)) {
+      assert.match(text, /\d\d:\d\d · /);
+      assert.match(text, /Requested by /);
+    }
     assert.doesNotMatch(text, uuidText);
   }
   for (let i = 0; i < (await cards.count()); i++) {
@@ -1694,8 +1698,8 @@ test("attention summary names the uncertain or stopping task and links to the In
   const text = await summary.innerText();
   assert.match(text, /^Inspect execution · /);
   // The requester of the matching Inbox request, as on Overview; never the task lead.
-  assert.match(text, /Responsibility unknown/);
-  assert.doesNotMatch(text, /Accountable lead/);
+  assert.match(text, /Execution may still be active; ownership stays held\./);
+  assert.doesNotMatch(text, /Responsibility unknown|Accountable lead/);
   assert.equal(await summary.locator("[data-task-id]").count(), 0);
   const action = summary.getByRole("link", {
     name: "Inspect execution",

@@ -2,6 +2,7 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { unmetText } from "../../src/operator/readiness-text.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
+import { shortId } from "./presentation.js";
 import { nextActor, reasonLabels, type TaskColumn } from "./tasks.js";
 
 type Data = TaskRead["data"];
@@ -267,7 +268,7 @@ export function assignmentRow(a: Assignment, all: readonly Assignment[]) {
   const excerpt = brief.length > 80 ? `${brief.slice(0, 80)}…` : brief;
   return {
     title: [a.name ?? "Assignment", excerpt].filter(Boolean).join(" · "),
-    id: a.assignmentId.slice(0, 8),
+    id: shortId(a.assignmentId),
     flow: `${
       a.requesterAssignmentId === undefined
         ? "Requester unknown"

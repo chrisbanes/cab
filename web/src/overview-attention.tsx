@@ -10,7 +10,8 @@ import {
 import type { OperatorClient } from "./api.js";
 import { ActionLink, ResourceStatus } from "./components.js";
 import { ApprovalFacts, InboxQuestion, useInboxTask } from "./inbox-detail.js";
-import { ageLabel, clockLabel, holdNotices } from "./inbox-presentation.js";
+import { ageLabel, holdNotices } from "./inbox-presentation.js";
+import { clockLabel } from "./presentation.js";
 import {
   completedWork,
   furtherRequests,
@@ -199,11 +200,12 @@ function RequestCard({
                 ? "Approval"
                 : "Intervention"}
         </span>
-        <span className="metadata muted identifier">
-          {item.createdAt === null
-            ? "Age unknown"
-            : `${clockLabel(item.createdAt)} · ${ageLabel(item.createdAt, Date.now())}`}
-        </span>
+        {item.createdAt !== null && (
+          <span className="metadata muted identifier">
+            {clockLabel(item.createdAt)} ·{" "}
+            {ageLabel(item.createdAt, Date.now())}
+          </span>
+        )}
       </div>
       <p className="metadata muted overview-card-place">
         {item.projectName ?? "Unavailable project"} /{" "}
@@ -212,11 +214,9 @@ function RequestCard({
       <h3 className="small-heading" id={headline}>
         {title ?? item.reason ?? "Exact details unavailable"}
       </h3>
-      <p className="metadata muted">
-        {item.requesterName
-          ? `Requested by ${item.requesterName}`
-          : "Responsibility unknown"}
-      </p>
+      {item.requesterName && (
+        <p className="metadata muted">Requested by {item.requesterName}</p>
+      )}
     </>
   );
   const respond = (
@@ -271,7 +271,7 @@ function RequestCard({
               )}
             </div>
           )}
-          {item.kind === "question" && (
+          {item.kind === "question" && item.evidence && (
             <a className="metadata" href={item.evidence}>
               Task evidence
             </a>
@@ -337,9 +337,11 @@ function QuestionCard({
             ? null
             : (read?.form?.questions[0]?.label ?? null),
         )}
-        <a className="metadata" href={item.evidence}>
-          Task evidence
-        </a>
+        {item.evidence && (
+          <a className="metadata" href={item.evidence}>
+            Task evidence
+          </a>
+        )}
         {respond}
       </>
     );

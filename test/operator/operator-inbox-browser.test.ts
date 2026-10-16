@@ -727,6 +727,27 @@ test("an intervention shows its recorded reason and links to the execution", asy
   await page.locator(".inbox-row").click();
   await detail.getByText("Intervention", { exact: true }).waitFor();
   await detail.getByText("Execution ownership is uncertain").waitFor();
+  // The seeded intervention has no requester and no timestamp: both are omitted everywhere.
+  const aside = page.getByRole("complementary", { name: "Task context" });
+  await aside.waitFor();
+  for (const text of [
+    await page.locator(".inbox-row").innerText(),
+    await detail.innerText(),
+    await aside.innerText(),
+  ])
+    assert.doesNotMatch(text, /Age unknown|Responsibility unknown/);
+  assert.equal(await aside.getByText("Requester", { exact: true }).count(), 0);
+  assert.equal(await detail.locator(".inbox-identity").count(), 0);
+  assert.equal(await page.locator(".inbox-row-meta").count(), 0);
+  // Uncertain ownership is stated once in the request pane's headline, not again in the inspector.
+  assert.equal(
+    await detail.getByText("Execution ownership is uncertain").count(),
+    1,
+  );
+  assert.equal(
+    await aside.getByText("Execution ownership is uncertain").count(),
+    0,
+  );
   assert.equal(
     await detail
       .getByRole("link", { name: "Inspect execution", exact: true })
@@ -1250,6 +1271,14 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
   );
   await aside.getByText("Holds · 1", { exact: true }).waitFor();
   await aside.getByText("acme/design-system#87", { exact: true }).waitFor();
+  // Evidence is links only: no "Reported by" line.
+  assert.equal(await aside.getByText(/Reported by/).count(), 0);
+  assert.match(
+    (await aside
+      .getByRole("link", { name: "Task evidence" })
+      .getAttribute("href")) ?? "",
+    /#history$/,
+  );
   // Evidence links appear once on the page, in the inspector.
   assert.equal(
     await page.getByRole("link", { name: "Task evidence" }).count(),
@@ -1303,6 +1332,45 @@ test("the inspector lists task, lead, requester, assignment chain, holds and evi
   assert.equal(
     await page.getByRole("link", { name: "Task evidence" }).count(),
     1,
+  );
+});
+
+test("the Evidence block and its links are omitted when the request has none", async (_t, j) => {
+  const { page } = await openInbox(j, 1, { width: 1366, height: 900 });
+  await page.route("**/api/operator/inbox", async (route) => {
+    const response = await route.fetch(),
+      body = (await response.json()) as {
+        data: {
+          items: Array<{ evidence: string; conversation: string | null }>;
+        };
+      };
+    for (const item of body.data.items) {
+      item.evidence = "";
+      item.conversation = null;
+    }
+    await route.fulfill({ response, json: body });
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  const aside = page.getByRole("complementary", { name: "Task context" });
+  await page.locator(".inbox-row").click();
+  await aside.getByRole("heading", { name: "Task", exact: true }).waitFor();
+  // The refreshed read has landed once the inspector's evidence link is gone.
+  await aside
+    .getByRole("link", { name: "Task evidence" })
+    .waitFor({ state: "detached" });
+  assert.equal(
+    await aside.getByRole("heading", { name: "Evidence" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByRole("link", { name: "Task evidence" }).count(),
+    0,
+  );
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole("region", { name: "Selected request" }).waitFor();
+  assert.equal(
+    await page.getByRole("link", { name: "Task evidence" }).count(),
+    0,
   );
 });
 

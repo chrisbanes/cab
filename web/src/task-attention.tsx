@@ -35,7 +35,7 @@ export function AttentionBar({
         </p>
         <p className="metadata muted">
           {uncertain
-            ? `${requester ?? "Responsibility unknown"} · execution may still be active; ownership stays held.`
+            ? `${requester ? `${requester} · ` : ""}Execution may still be active; ownership stays held.`
             : "Next: runtime · confirm execution ended. No operator request recorded."}
         </p>
       </div>

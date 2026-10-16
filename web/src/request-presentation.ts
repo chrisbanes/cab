@@ -5,11 +5,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { InboxItem } from "../../src/operator/contracts.js";
-import {
-  clockLabel,
-  requestActionLabel,
-  requestKindLabel,
-} from "./inbox-presentation.js";
+import { requestActionLabel, requestKindLabel } from "./inbox-presentation.js";
 export { requestActionLabel, requestKindLabel };
 /** One symbol per request kind, shared by the Inbox and the Overview cards. */
 export const requestKindIcons: Record<InboxItem["kind"], LucideIcon> = {
@@ -33,14 +29,6 @@ export const interventionRequester = (
 ) =>
   items.find((i) => i.taskId === taskId && i.kind === "intervention")
     ?.requesterName ?? null;
-export const requestTime = (createdAt: number | null) =>
-  createdAt === null ? "Age unknown" : clockLabel(createdAt);
-export const requestMeta = (item: Request) =>
-  [
-    requestKindLabel(item.kind),
-    item.requesterName ?? "Responsibility unknown",
-    requestTime(item.createdAt),
-  ].join(" · ");
 /** A count is a total only when the whole Inbox was read and the last read succeeded. */
 export function inboxSummaryOf(state: {
   data: {

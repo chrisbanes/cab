@@ -26,8 +26,6 @@ import {
   requestActionLabel,
   requestHref,
   requestKindLabel,
-  requestMeta,
-  requestTime,
 } from "../../web/src/request-presentation.js";
 import { summary, type Overrides } from "../fixtures/task-summary.js";
 
@@ -317,12 +315,6 @@ test("request wording is exhaustive and links match the Inbox selection", () => 
   );
   assert.equal(requestHref(item("approval")), `/coordination/task/${taskId}#a`);
   assert.equal(requestHref(item("intervention")), `/app/tasks/${taskId}`);
-  assert.equal(requestMeta(item("question")), "Question · Jonas · 09:05");
-  assert.equal(
-    requestMeta(item("intervention", { requesterName: null, createdAt: null })),
-    "Intervention · Responsibility unknown · Age unknown",
-  );
-  assert.equal(requestTime(null), "Age unknown");
   // Only an intervention names who is responsible for execution; a question's requester does not.
   const other = { taskId, kind: "question", requesterName: "Nora" } as const;
   assert.equal(interventionRequester([other], taskId), null);
