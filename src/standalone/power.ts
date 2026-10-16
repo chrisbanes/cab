@@ -554,7 +554,7 @@ export class ExecutionPower {
   private lastAssertionRestartAt = 0;
   private started = false;
   private polling: Promise<void> | undefined;
-  // Wall clock: a monotonic clock may not advance while the Mac sleeps.
+  // Wall clock, comparable with the kernel's sleep and wake times.
   private lastEndedAt: number | undefined;
   private observedPollStartedAt: number | undefined;
   private observedPollCompletedAt: number | undefined;
