@@ -186,7 +186,8 @@ export async function deliveryFixture(
       if (identity.expectedPrNodeId === otherPr?.nodeId) return otherPr;
       if (readFailure) throw new Error("unavailable");
       await inspectionHook?.();
-      return pr;
+      // GitHub lists only closed issues; a reopened one leaves the merged PR's list.
+      return issueOpen === true ? { ...pr, closedIssueNodeIds: [] } : pr;
     },
   };
   const service = new StandaloneService(

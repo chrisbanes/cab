@@ -1584,7 +1584,7 @@ export class DomainStore {
     )
       return null;
     const row = this.one(
-      `SELECT t.state, e.observedState,
+      `SELECT t.state, e.nodeId, e.observedState,
         EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed,
         EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
           AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending,
@@ -1597,11 +1597,14 @@ export class DomainStore {
       return "completed";
     if (row?.state === "open" && Number(row.unattributed) === 1)
       return "unattributed";
-    // Ensemble's own closure awaits proof; it is not provider closure.
+    // Ensemble's own closure, proved or awaiting proof, is not provider closure.
     return row?.state === "open" &&
       row.observedState === "closed" &&
       Number(row.ownProofPending) === 0 &&
-      !this.hasOwnDeliveryClosure(taskId)
+      !new DeliveryStore(this.db).ownsConfirmedClosure(
+        taskId,
+        String(row.nodeId),
+      )
       ? "held"
       : null;
   }

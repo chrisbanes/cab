@@ -975,11 +975,19 @@ test("unproved merge attribution gets an explained hold, distinct from a failed 
       sources.completeFromProviderClosure(f.taskId, () => true),
       false,
     );
-    // Reopening, the recovery, supersedes the own closure.
+    // Reopening, the recovery, supersedes the own closure although the reopened issue
+    // has left the merged PR's closed list; a later closure is provider closure.
     f.setClosedIssue({ state: "open" });
+    f.setIssueOpen(true);
     await f.service.refreshGitHub();
+    assert.deepEqual(f.getPr().closedIssueNodeIds, ["I1"]);
     assert.equal(sources.hold("I1")?.reason, "closed");
     assert.equal(supersessions(f).length, 1);
+    assert.equal(f.domain.providerClosure(f.taskId), null);
+    f.setClosedIssue(independentClose);
+    f.setIssueOpen(false);
+    await settleInto(f, "done");
+    assert.notEqual(sources.providerCompletion(f.taskId), undefined);
   } finally {
     await f.close();
   }

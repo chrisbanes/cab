@@ -1741,3 +1741,24 @@ test("migration adds supersession storage and keeps delivery closures", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an unproved own closure over lost readiness is never provider-completed", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    confirmOwnClose(w, taskId);
+    w.observe({ labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+    w.sources.recordDeliveryClosureAttributionUnproved("I_1");
+    w.observe({ state: "closed", labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+    assert.equal(w.domain.providerClosure(taskId), null);
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    assert.equal(w.completion(taskId), false);
+  } finally {
+    w.close();
+  }
+});

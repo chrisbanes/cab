@@ -1,3 +1,4 @@
+import { DeliveryStore } from "./delivery.js";
 import { TaskReviewStore } from "./task-review.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
@@ -326,7 +327,15 @@ export class GitHubSourceStore {
             WHERE h.nodeId = e.nodeId AND h.active = 1 AND h.reason = 'closed')
           AND NOT ${effectiveOwnClosure("e.nodeId")}`)
         .get(taskId) as Row | undefined;
-      if (!task) return false;
+      // An unsuperseded own closure is never provider closure, proved or not.
+      if (
+        !task ||
+        new DeliveryStore(this.db).ownsConfirmedClosure(
+          taskId,
+          String(task.nodeId),
+        )
+      )
+        return false;
       const memberships = this.db
         .prepare(`SELECT CASE WHEN a.configVersion = c.version THEN s.complete ELSE 0 END AS complete
         FROM github_memberships m
@@ -1142,10 +1151,11 @@ export class GitHubSourceStore {
         this.db
           .prepare(`SELECT ${effectiveOwnClosure("?")} AS present`)
           .get(nodeId) as Row
-      ).present
+      ).present &&
+      !new DeliveryStore(this.db).ownsConfirmedClosure(taskId, nodeId)
     ) {
       // Closure after import holds the task whatever its readiness. Stricter text review
-      // and a pending own-delivery closure proof (closure-read-unavailable) keep their hold.
+      // keeps its hold; an unsuperseded own closure, proved or not, is not this closure.
       if (
         !hold?.active ||
         ["withdrawn", "readiness-lost"].includes(String(hold.reason))

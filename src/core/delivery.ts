@@ -1253,6 +1253,17 @@ export class DeliveryStore {
         : [],
     );
     const binding = this.delivery(taskId);
+    // Any recorded observation counts: a reopened issue leaves the merged PR's closed list.
+    const mergedClosure = (prNodeId: string) =>
+      binding?.observation.nodeId === prNodeId &&
+      !!this.db
+        .prepare(
+          `SELECT 1 FROM delivery_observations WHERE taskId = ?
+            AND json_extract(observationJson, '$.nodeId') = ?
+            AND json_extract(observationJson, '$.merged') = 1
+            AND EXISTS (SELECT 1 FROM json_each(observationJson, '$.closedIssueNodeIds') WHERE value = ?)`,
+        )
+        .get(taskId, prNodeId, nodeId);
     return this.actions(taskId)
       .filter(
         (a) =>
@@ -1264,8 +1275,7 @@ export class DeliveryStore {
             a.beforeState?.state === "open") ||
             (a.request.action.kind === "pr.merge" &&
               a.observation?.receipt?.merged === true &&
-              binding?.observation.nodeId === a.request.action.target.nodeId &&
-              binding.observation.closedIssueNodeIds.includes(nodeId))),
+              mergedClosure(a.request.action.target.nodeId))),
       )
       .at(-1);
   }
