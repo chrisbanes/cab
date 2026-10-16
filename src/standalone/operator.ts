@@ -86,12 +86,20 @@ function textarea(name: string, value = ""): string {
 const ruleView = (rule: Readiness | null) =>
   rule ? { kind: "rule" as const, ...rule } : { kind: "none" as const };
 
-const closureText = (closure: "held" | "completed" | null) =>
+const closureText = (closure: "held" | "completed" | "unattributed" | null) =>
   closure === "held"
     ? ", closed on GitHub; held"
     : closure === "completed"
       ? ", closed on GitHub"
-      : "";
+      : closure === "unattributed"
+        ? ", closed on GitHub; closure not attributed to Ensemble; held"
+        : "";
+const closureDetail = {
+  held: "Held · closed on GitHub. Resolve the source hold after the issue reopens.",
+  completed: "Done · closed on GitHub, not delivered by Ensemble.",
+  unattributed:
+    "Held · closed on GitHub; Ensemble could not prove its delivery closed it. Reopen the issue on GitHub, then resolve the source hold.",
+};
 
 function selectField(
   name: string,
@@ -408,7 +416,7 @@ export class LocalOperatorUi {
       : undefined;
     const closure = this.store.providerClosure(taskId);
     const provenance = external
-      ? `<h2>GitHub source</h2>${closure ? `<p>${closure === "held" ? "Held · closed on GitHub. Resolve the source hold after the issue reopens." : "Done · closed on GitHub, not delivered by Ensemble."}</p>` : ""}<p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
+      ? `<h2>GitHub source</h2>${closure ? `<p>${closureDetail[closure]}</p>` : ""}<p>${escapeHtml(external.providerInstance)} ${escapeHtml(external.repositoryName)}#${escapeHtml(external.issueNumber)} (${escapeHtml(external.nodeId)}); observed ${escapeHtml(external.observedState)}.</p><p>Observed title: ${escapeHtml(external.observedTitle)}. Observed body: ${escapeHtml(external.observedBody)}</p><p>Memberships: ${escapeHtml(memberships.map((item) => `${item.projectId}/${item.selectionId}`).join(", ") || "none")}. Fields: ${escapeHtml(memberships.map((item) => item.projectFields).join(", "))}</p><p>Native blockers: ${escapeHtml(blockers.map((item) => `${item.repositoryName}#${item.issueNumber}: ${item.status}`).join(", ") || task.importedBlockers)}</p><p>Source hold: ${hold?.active ? escapeHtml(hold.reason) : "none"}.</p>${
           review &&
           (review.observedDigest !== review.acceptedDigest || hold?.active)
             ? form(

@@ -808,8 +808,11 @@ function taskSchemaAdmission() {
 }
 // The server only builds https GitHub URLs; reject javascript: and data: links.
 const sourceUrl = z.url().startsWith("https://");
-/** Provider-closure provenance: closed on GitHub while held, or completed by that closure. */
-const sourceClosure = z.enum(["held", "completed"]).nullable();
+/**
+ * Provider-closure provenance: closed on GitHub while held, completed by that closure, or
+ * held because GitHub's closure could not be attributed to Ensemble's own delivery.
+ */
+const sourceClosure = z.enum(["held", "completed", "unattributed"]).nullable();
 /**
  * A project's readiness rule as a read may show it: `none` only for a stored null rule
  * (no filtering); `unavailable` when disclosure is withheld, so no condition text leaves.

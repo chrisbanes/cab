@@ -120,19 +120,21 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
             : terminal
         : data.source?.closure === "held"
           ? `Held · closed on GitHub${active ? ` · ${execution.state}` : ""}`
-          : paused
-            ? `${task.ready ? "Ready" : "Draft"} · project paused`
-            : !task.ready
-              ? unmet
-                ? `Draft · ${unmet}`
-                : "Draft"
-              : blocker
-                ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
-                : reason
-                  ? `Ready · ${lowerFirst(waitLabels[reason])}`
-                  : execution.state === "idle"
-                    ? "Ready"
-                    : `Ready · ${execution.state}`;
+          : data.source?.closure === "unattributed"
+            ? `Held · closure not attributed to Ensemble${active ? ` · ${execution.state}` : ""}`
+            : paused
+              ? `${task.ready ? "Ready" : "Draft"} · project paused`
+              : !task.ready
+                ? unmet
+                  ? `Draft · ${unmet}`
+                  : "Draft"
+                : blocker
+                  ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
+                  : reason
+                    ? `Ready · ${lowerFirst(waitLabels[reason])}`
+                    : execution.state === "idle"
+                      ? "Ready"
+                      : `Ready · ${execution.state}`;
 }
 
 /** The readiness text, then the accountable lead. */
@@ -154,6 +156,7 @@ export function taskColumnOf(
   if (
     s === "paused" ||
     data.source?.closure === "held" ||
+    data.source?.closure === "unattributed" ||
     data.admission.reasons.includes("project-paused")
   )
     return "Paused";

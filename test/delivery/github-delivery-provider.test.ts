@@ -448,25 +448,26 @@ test("effective pull-request merge methods and conversation requirements constra
   assert.ok(p.mergeBlockers.includes("unresolved-review-thread"));
 });
 
-test("fresh closed-issue readback attributes merge closure to the exact ClosedEvent closer", async () => {
-  let closer = "P_other";
-  const f = prProviderFixture();
+test("fresh closed-issue readback reports the latest ClosedEvent and its closer as facts", async () => {
+  let state = "closed";
+  let nodes: unknown[] = [];
+  let nodeId = "I1";
   const fetcher: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     if (url.pathname === "/graphql") {
       const body = JSON.parse(String(init?.body));
-      if (body.query.includes("EnsembleDeliveryClosure"))
+      if (body.query.includes("EnsembleDeliveryClosure")) {
+        assert.match(body.query, /ClosedEvent\{id closer/);
         return Response.json({
           data: {
             node: {
-              id: "I1",
+              id: nodeId,
               repository: { id: "R1" },
-              timelineItems: {
-                nodes: [{ closer: { __typename: "PullRequest", id: closer } }],
-              },
+              timelineItems: { nodes },
             },
           },
         });
+      }
       return Response.json({
         data: { node: { id: "R1", nameWithOwner: "org/repo" } },
       });
@@ -483,7 +484,7 @@ test("fresh closed-issue readback attributes merge closure to the exact ClosedEv
       return Response.json({
         node_id: "I1",
         number: 1,
-        state: "closed",
+        state,
         title: "T",
         body: "O",
         labels: [{ name: "ready" }],
@@ -491,20 +492,43 @@ test("fresh closed-issue readback attributes merge closure to the exact ClosedEv
     throw new Error("unexpected read");
   };
   const provider = new GitHubHttpDeliveryProvider("fixture-marker", fetcher),
-    target = {
-      repositoryId: "R1",
-      nodeId: "I1",
-      number: 1,
-      expectedCloserPrNodeId: f.identity.expectedPrNodeId,
-    };
+    target = { repositoryId: "R1", nodeId: "I1", number: 1 };
+  const event = async () => {
+    const inspection = await provider.inspectClosedIssue(target);
+    assert.equal(inspection.state, "closed");
+    return inspection.state === "closed" ? inspection : assert.fail();
+  };
+  nodes = [{ id: "CE1", closer: { __typename: "PullRequest", id: "P7" } }];
+  const merged = await event();
+  assert.deepEqual(merged.snapshot.labels, ["ready"]);
+  assert.deepEqual(merged.closedEvent, {
+    id: "CE1",
+    closerKind: "pull-request",
+    closerPrNodeId: "P7",
+  });
+  nodes = [{ id: "CE2", closer: null }];
+  assert.deepEqual((await event()).closedEvent, {
+    id: "CE2",
+    closerKind: "none",
+    closerPrNodeId: null,
+  });
+  nodes = [{ id: "CE3", closer: { __typename: "Commit" } }];
+  assert.deepEqual((await event()).closedEvent, {
+    id: "CE3",
+    closerKind: "other",
+    closerPrNodeId: null,
+  });
+  nodes = [];
+  assert.equal((await event()).closedEvent, null);
+  nodeId = "I_other";
   await assert.rejects(
     () => provider.inspectClosedIssue(target),
-    /attribution-unproved/,
+    /identity-mismatch/,
   );
-  closer = "P7";
-  assert.deepEqual((await provider.inspectClosedIssue(target)).labels, [
-    "ready",
-  ]);
+  state = "open";
+  assert.deepEqual(await provider.inspectClosedIssue(target), {
+    state: "open",
+  });
 });
 
 import type { ExternalAction } from "../../src/core/delivery.js";
@@ -633,7 +657,15 @@ function redirectFixture(routes: Record<string, () => Response>) {
     });
     if (url.pathname === "/graphql")
       return Response.json({
-        data: { node: { id: "R1", nameWithOwner: "org/repo" } },
+        data: {
+          node: String(init?.body).includes("EnsembleDeliveryClosure")
+            ? {
+                id: "I7",
+                repository: { id: "R1" },
+                timelineItems: { nodes: [] },
+              }
+            : { id: "R1", nameWithOwner: "org/repo" },
+        },
       });
     const route = routes[url.pathname];
     if (route) return route();
@@ -674,8 +706,11 @@ test("a GET follows up to three same-origin redirects and a fourth fails", async
     "/repositories/3": repositoryJson,
   };
   const followed = redirectFixture(routes);
-  const snapshot = await followed.provider.inspectClosedIssue(target);
-  assert.equal(snapshot.nodeId, "I7");
+  const inspection = await followed.provider.inspectClosedIssue(target);
+  assert.equal(
+    inspection.state === "closed" && inspection.snapshot.nodeId,
+    "I7",
+  );
   assert.deepEqual(
     followed.calls
       .filter((call) => call.method === "GET")

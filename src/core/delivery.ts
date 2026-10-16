@@ -1230,21 +1230,54 @@ export class DeliveryStore {
     };
   }
   ownsConfirmedClosure(taskId: string, nodeId: string): boolean {
-    return this.actions(taskId).some(
-      (a) =>
-        a.state === "confirmed-success" &&
-        ((a.request.action.kind === "issue.close" &&
-          a.request.action.target.nodeId === nodeId &&
-          a.observation?.receipt?.issueClosed === true &&
-          a.beforeState?.state === "open") ||
-          (a.request.action.kind === "pr.merge" &&
-            a.observation?.receipt?.merged === true &&
-            this.delivery(taskId)?.observation.nodeId ===
-              a.request.action.target.nodeId &&
-            this.delivery(taskId)?.observation.closedIssueNodeIds.includes(
-              nodeId,
-            ))),
+    return !!this.ownClosureOperation(taskId, nodeId);
+  }
+  /** The latest confirmed operation that closed the issue, unless a reopen superseded it. */
+  ownClosureOperation(
+    taskId: string,
+    nodeId: string,
+  ): DeliveryActionRecord | undefined {
+    const superseded = new Set(
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_delivery_closure_supersessions'",
+        )
+        .get()
+        ? (
+            this.db
+              .prepare(
+                "SELECT operationId FROM github_delivery_closure_supersessions WHERE nodeId=?",
+              )
+              .all(nodeId) as { operationId: string }[]
+          ).map((row) => row.operationId)
+        : [],
     );
+    const binding = this.delivery(taskId);
+    // Any recorded observation counts: a reopened issue leaves the merged PR's closed list.
+    const mergedClosure = (prNodeId: string) =>
+      binding?.observation.nodeId === prNodeId &&
+      !!this.db
+        .prepare(
+          `SELECT 1 FROM delivery_observations WHERE taskId = ?
+            AND json_extract(observationJson, '$.nodeId') = ?
+            AND json_extract(observationJson, '$.merged') = 1
+            AND EXISTS (SELECT 1 FROM json_each(observationJson, '$.closedIssueNodeIds') WHERE value = ?)`,
+        )
+        .get(taskId, prNodeId, nodeId);
+    return this.actions(taskId)
+      .filter(
+        (a) =>
+          a.state === "confirmed-success" &&
+          !superseded.has(a.operationId) &&
+          ((a.request.action.kind === "issue.close" &&
+            a.request.action.target.nodeId === nodeId &&
+            a.observation?.receipt?.issueClosed === true &&
+            a.beforeState?.state === "open") ||
+            (a.request.action.kind === "pr.merge" &&
+              a.observation?.receipt?.merged === true &&
+              mergedClosure(a.request.action.target.nodeId))),
+      )
+      .at(-1);
   }
   hasWaitingPr(workId: string): boolean {
     return Boolean(

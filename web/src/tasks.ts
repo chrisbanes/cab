@@ -96,7 +96,12 @@ export function taskColumn(task: TaskListSummary): TaskColumn {
   if (task.state === "done") return "Done";
   if (task.state === "cancelled") return "Cancelled";
   // Closed on GitHub without own delivery: paused until resolved, never Draft or Ready.
-  if (task.project.paused || s === "paused" || task.source?.closure === "held")
+  if (
+    task.project.paused ||
+    s === "paused" ||
+    task.source?.closure === "held" ||
+    task.source?.closure === "unattributed"
+  )
     return "Paused";
   if (!task.ready) return "Draft";
   if (!task.admission.eligible || s === "waiting" || task.execution.holds.task)
@@ -174,7 +179,14 @@ export function taskReasons(task: TaskListSummary) {
     ...task.attention.codes.map((code) => attentionNext[code].reason),
     ...(terminal ? [] : task.admission.reasons)
       // A closure-held task is Paused, never Draft.
-      .filter((r) => !(r === "task-unready" && task.source?.closure === "held"))
+      .filter(
+        (r) =>
+          !(
+            r === "task-unready" &&
+            (task.source?.closure === "held" ||
+              task.source?.closure === "unattributed")
+          ),
+      )
       .map((r) =>
         r === "task-unready"
           ? (unmetReason(task.source?.readiness) ?? reasonLabels[r])
@@ -185,6 +197,8 @@ export function taskReasons(task: TaskListSummary) {
     reasons.unshift("Held · closed on GitHub");
   if (task.source?.closure === "completed")
     reasons.unshift("Closed on GitHub, not delivered by Ensemble");
+  if (task.source?.closure === "unattributed")
+    reasons.unshift("Held · closure not attributed to Ensemble");
   if (task.execution.holds.stop)
     reasons.unshift("Stop requested; effects may continue");
   if (

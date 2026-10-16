@@ -1088,6 +1088,7 @@ test("blocker reads skip closed issues unless their still-open imported task own
       closedOwned,
       operationId,
       null,
+      null,
     );
     assert.equal(domain.hasOwnDeliveryClosure(taskId), true);
 

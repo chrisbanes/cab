@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { mock, test } from "node:test";
+import { DeliveryStore } from "../../src/core/delivery.js";
 import { DomainPolicyError, DomainStore } from "../../src/core/domain.js";
 import { evaluateReadiness } from "../../src/core/github-source-contracts.js";
 import { GitHubSourceStore } from "../../src/core/github-source.js";
@@ -721,7 +722,7 @@ test("provider-closure completion requires done mode, complete membership, settl
     w.observe({ state: "closed" });
     w.db
       .prepare(
-        "INSERT INTO github_delivery_closures VALUES ('I_1', 'op', NULL, '{}')",
+        "INSERT INTO github_delivery_closures (nodeId, operationId, closerPrNodeId, snapshotJson) VALUES ('I_1', 'op', NULL, '{}')",
       )
       .run();
     assert.equal(
@@ -1490,5 +1491,274 @@ test("a partial read adds the closed issues it skips; a complete read replaces t
     });
   } finally {
     f.db.close();
+  }
+});
+
+/** Confirms an Ensemble `issue.close` of I_1 for the task and returns its operation. */
+function confirmOwnClose(
+  w: ReturnType<typeof closedIssueWorld>,
+  taskId: string,
+): string {
+  if (w.domain.deliveryConfiguration(w.projectId).version === 1)
+    w.domain.execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: w.projectId,
+      expectedVersion: 1,
+      mode: "reviewable-pr",
+      credentialRef: null,
+      grants: [{ action: "issue.close", repositoryId: "R_1", mode: "allow" }],
+      requiredChecks: [],
+    });
+  const delivery = new DeliveryStore(w.db),
+    operationId = randomUUID();
+  delivery.prepareAction(
+    {
+      operationId,
+      action: {
+        kind: "issue.close",
+        target: { repositoryId: "R_1", nodeId: "I_1", number: 1 },
+        reviewedResultIds: [],
+      },
+    },
+    {
+      projectId: w.projectId,
+      taskId,
+      taskVersion: Number(w.domain.task(taskId).version),
+      assignmentId: randomUUID(),
+      assignmentVersion: 1,
+      workId: "w",
+      workRevision: 1,
+      conversationRevision: 1,
+    },
+    false,
+  );
+  delivery.beginAttempt(operationId, { state: "open" });
+  delivery.recordObservation(operationId, {
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "I_1", issueClosed: true },
+  });
+  return operationId;
+}
+
+function recordOwnClosure(
+  w: ReturnType<typeof closedIssueWorld>,
+  operationId: string,
+  closedEventId: string | null = "CE1",
+) {
+  assert.equal(
+    w.sources.recordDeliveryClosure(
+      w.projectId,
+      w.domain.githubConfiguration(w.projectId).version,
+      { ...issue, state: "closed", projectFields: [] },
+      operationId,
+      null,
+      closedEventId,
+    ),
+    true,
+  );
+}
+
+for (const mode of ["done", "skip"] as const)
+  test(`a superseded own closure lets a later closure be provider closure (${mode})`, () => {
+    const w = closedIssueWorld(mode);
+    try {
+      const taskId = String(w.observe({})?.id);
+      const operationId = confirmOwnClose(w, taskId);
+      recordOwnClosure(w, operationId);
+      assert.equal(w.domain.hasOwnDeliveryClosure(taskId), true);
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        false,
+      );
+      const version = Number(w.domain.task(taskId).version);
+      w.sources.supersedeDeliveryClosure("I_1", operationId);
+      assert.ok(Number(w.domain.task(taskId).version) > version);
+      w.observe({});
+      w.observe({ state: "closed" });
+      assert.equal(w.domain.hasOwnDeliveryClosure(taskId), false);
+      assert.equal(w.hold()?.reason, "closed");
+      assert.equal(w.domain.providerClosure(taskId), "held");
+      assert.equal(
+        w.sources.completeFromProviderClosure(taskId, () => true),
+        mode === "done",
+      );
+      assert.equal(w.completion(taskId), mode === "done");
+      assert.equal(
+        w.domain.task(taskId).state,
+        mode === "done" ? "done" : "open",
+      );
+      // Supersession is audit history: the closure row and the supersession both remain.
+      assert.equal(w.sources.deliveryClosure("I_1")?.operationId, operationId);
+      assert.equal(
+        w.db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM github_delivery_closure_supersessions",
+          )
+          .get()?.n,
+        1,
+      );
+    } finally {
+      w.close();
+    }
+  });
+
+test("an own closure without supersession is never provider-completed", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    recordOwnClosure(w, confirmOwnClose(w, taskId));
+    w.observe({ state: "closed" });
+    assert.equal(w.hold()?.reason, "closed");
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    assert.equal(w.domain.providerClosure(taskId), null);
+    assert.equal(w.domain.task(taskId).state, "open");
+  } finally {
+    w.close();
+  }
+});
+
+test("a later Ensemble closure after supersession is own again", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const first = confirmOwnClose(w, taskId);
+    recordOwnClosure(w, first);
+    w.sources.supersedeDeliveryClosure("I_1", first);
+    assert.equal(
+      new DeliveryStore(w.db).ownsConfirmedClosure(taskId, "I_1"),
+      false,
+    );
+    const second = confirmOwnClose(w, taskId);
+    assert.equal(
+      new DeliveryStore(w.db).ownClosureOperation(taskId, "I_1")?.operationId,
+      second,
+    );
+    recordOwnClosure(w, second, "CE2");
+    assert.equal(w.domain.hasOwnDeliveryClosure(taskId), true);
+    assert.deepEqual(w.sources.deliveryClosure("I_1"), {
+      operationId: second,
+      closedEventId: "CE2",
+    });
+    assert.deepEqual(
+      w.db
+        .prepare(
+          "SELECT operationId FROM github_delivery_closure_supersessions",
+        )
+        .all()
+        .map((row) => row.operationId),
+      [first],
+    );
+  } finally {
+    w.close();
+  }
+});
+
+test("attribution-unproved is an explained hold, not a pending read", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const operationId = confirmOwnClose(w, taskId);
+    w.sources.recordDeliveryClosureUnavailable("I_1");
+    w.sources.recordDeliveryClosureAttributionUnproved("I_1");
+    assert.equal(w.hold()?.reason, "closure-attribution-unproved");
+    w.observe({ state: "closed" });
+    assert.equal(w.hold()?.reason, "closure-attribution-unproved");
+    assert.equal(w.domain.providerClosure(taskId), "unattributed");
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    // A later read failure keeps the explained state.
+    w.sources.recordDeliveryClosureUnavailable("I_1");
+    assert.equal(w.hold()?.reason, "closure-attribution-unproved");
+    w.sources.supersedeDeliveryClosure("I_1", operationId);
+    assert.equal(w.hold()?.reason, "closed");
+    assert.equal(w.domain.providerClosure(taskId), "held");
+  } finally {
+    w.close();
+  }
+});
+
+test("supersession keeps unrelated holds", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    const operationId = confirmOwnClose(w, taskId);
+    w.observe({ labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+    w.sources.supersedeDeliveryClosure("I_1", operationId);
+    assert.equal(w.hold()?.reason, "readiness-lost");
+  } finally {
+    w.close();
+  }
+});
+
+test("migration adds supersession storage and keeps delivery closures", () => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-closure-migration-"));
+  const db = new DatabaseSync(join(root, "db.sqlite"));
+  try {
+    new Store(db).ensureHost("test");
+    new DomainStore(db).migrate();
+    db.exec(
+      "CREATE TABLE github_delivery_closures (nodeId TEXT PRIMARY KEY, operationId TEXT NOT NULL, closerPrNodeId TEXT, snapshotJson TEXT NOT NULL)",
+    );
+    db.prepare(
+      "INSERT INTO github_delivery_closures VALUES ('I_1', 'op', 'P_7', '{}')",
+    ).run();
+    const sources = new GitHubSourceStore(db);
+    sources.migrate();
+    sources.migrate();
+    assert.deepEqual(
+      { ...db.prepare("SELECT * FROM github_delivery_closures").get() },
+      {
+        nodeId: "I_1",
+        operationId: "op",
+        closerPrNodeId: "P_7",
+        snapshotJson: "{}",
+        closedEventId: null,
+      },
+    );
+    assert.deepEqual(sources.deliveryClosure("I_1"), {
+      operationId: "op",
+      closedEventId: null,
+    });
+    assert.equal(
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM github_delivery_closure_supersessions",
+        )
+        .get()?.n,
+      0,
+    );
+  } finally {
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an unproved own closure over lost readiness is never provider-completed", () => {
+  const w = closedIssueWorld("done");
+  try {
+    const taskId = String(w.observe({})?.id);
+    confirmOwnClose(w, taskId);
+    w.observe({ labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+    w.sources.recordDeliveryClosureAttributionUnproved("I_1");
+    w.observe({ state: "closed", labels: [] });
+    assert.equal(w.hold()?.reason, "readiness-lost");
+    assert.equal(w.domain.providerClosure(taskId), null);
+    assert.equal(
+      w.sources.completeFromProviderClosure(taskId, () => true),
+      false,
+    );
+    assert.equal(w.completion(taskId), false);
+  } finally {
+    w.close();
   }
 });

@@ -27,13 +27,25 @@ export interface PrIdentity {
   expectedPrNodeId: string;
   expectedHeadSha: string;
 }
+/** Fresh provider facts about an issue Ensemble's delivery closed; classification is the caller's. */
+export type ClosedIssueInspection =
+  | { state: "open" }
+  | {
+      state: "closed";
+      snapshot: import("../core/github-source.js").IssueSnapshot;
+      /** GitHub's latest ClosedEvent, or null when it has none. */
+      closedEvent: {
+        id: string;
+        closerKind: "none" | "pull-request" | "other";
+        closerPrNodeId: string | null;
+      } | null;
+    };
 export interface GitHubDeliveryProvider {
   inspectClosedIssue?(target: {
     repositoryId: string;
     nodeId: string;
     number: number;
-    expectedCloserPrNodeId?: string;
-  }): Promise<import("../core/github-source.js").IssueSnapshot>;
+  }): Promise<ClosedIssueInspection>;
   inspectAction(
     record: DeliveryActionRecord,
   ): Promise<ProviderActionObservation>;
@@ -52,7 +64,7 @@ export interface GitHubDeliveryProvider {
 export const deliveryDocuments = {
   EnsembleDeliveryPr: `query EnsembleDeliveryPr($id:ID!,$after:String){node(id:$id){... on PullRequest{id number repository{id nameWithOwner} baseRefName headRefName headRefOid baseRefOid state isDraft merged mergeable mergeStateStatus reviewDecision isMergeQueueEnabled closingIssuesReferences(first:100){nodes{id state repository{id}} pageInfo{hasNextPage endCursor}} baseRef{target{oid} branchProtectionRule{requiresDeployments requiredDeploymentEnvironments requiresStrictStatusChecks}} reviewThreads(first:100,after:$after){nodes{isResolved} pageInfo{hasNextPage endCursor}}}}}`,
   EnsembleDeliveryRepository: `query EnsembleDeliveryRepository($id:ID!){node(id:$id){... on Repository{id nameWithOwner}}}`,
-  EnsembleDeliveryClosure: `query EnsembleDeliveryClosure($id:ID!){node(id:$id){... on Issue{id repository{id} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{closer{__typename ... on PullRequest{id}}}}}}}}`,
+  EnsembleDeliveryClosure: `query EnsembleDeliveryClosure($id:ID!){node(id:$id){... on Issue{id repository{id} timelineItems(last:1,itemTypes:[CLOSED_EVENT]){nodes{... on ClosedEvent{id closer{__typename ... on PullRequest{id}}}}}}}}`,
   EnsembleDeliveryField: `query EnsembleDeliveryField($item:ID!,$field:ID!,$after:String){node(id:$item){... on ProjectV2Item{id project{id} content{... on Issue{id repository{id}}} fieldValues(first:100,after:$after){nodes{__typename ... on ProjectV2ItemFieldSingleSelectValue{optionId field{... on ProjectV2SingleSelectField{id}}}} pageInfo{hasNextPage endCursor}}}} field:node(id:$field){... on ProjectV2SingleSelectField{id options{id} project{id}}}}`,
   EnsembleDeliveryProject: `mutation EnsembleDeliveryProject($project:ID!,$item:ID!,$field:ID!,$option:String!){updateProjectV2ItemFieldValue(input:{projectId:$project,itemId:$item,fieldId:$field,value:{singleSelectOptionId:$option}}){projectV2Item{id}}}`,
   EnsembleDeliveryReady: `mutation EnsembleDeliveryReady($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}`,
@@ -269,55 +281,68 @@ export class GitHubHttpDeliveryProvider implements GitHubDeliveryProvider {
     repositoryId: string;
     nodeId: string;
     number: number;
-    expectedCloserPrNodeId?: string;
-  }): Promise<import("../core/github-source.js").IssueSnapshot> {
+  }): Promise<ClosedIssueInspection> {
     const repo = await this.repository(target.repositoryId),
       issue = await this.issue(repo.path, target);
-    if (issue.state !== "closed")
-      throw new Error("provider-own-closure-unproved");
-    if (target.expectedCloserPrNodeId) {
-      const data = z
-        .object({
-          node: z.object({
-            id: name,
-            repository: z.object({ id: name }),
-            timelineItems: z.object({
-              nodes: z.array(
+    if (issue.state !== "closed") return { state: "open" };
+    const data = z
+      .object({
+        node: z.object({
+          id: name,
+          repository: z.object({ id: name }),
+          timelineItems: z.object({
+            nodes: z
+              .array(
                 z.object({
+                  id: name,
                   closer: z
-                    .object({ __typename: z.literal("PullRequest"), id: name })
+                    .object({ __typename: name, id: name.optional() })
                     .nullable(),
                 }),
-              ),
-            }),
+              )
+              .max(1),
           }),
-        })
-        .parse(
-          await this.graph(deliveryDocuments.EnsembleDeliveryClosure, {
-            id: target.nodeId,
-          }),
-        );
-      if (
-        data.node.id !== target.nodeId ||
-        data.node.repository.id !== target.repositoryId ||
-        data.node.timelineItems.nodes.length !== 1 ||
-        data.node.timelineItems.nodes[0]?.closer?.id !==
-          target.expectedCloserPrNodeId
-      )
-        throw new Error("provider-closure-attribution-unproved");
-    }
-
+        }),
+      })
+      .parse(
+        await this.graph(deliveryDocuments.EnsembleDeliveryClosure, {
+          id: target.nodeId,
+        }),
+      );
+    if (
+      data.node.id !== target.nodeId ||
+      data.node.repository.id !== target.repositoryId
+    )
+      throw new Error("provider-closure-identity-mismatch");
+    const event = data.node.timelineItems.nodes[0];
+    const closer = event?.closer ?? null;
     return {
-      providerInstance: "github.com",
-      nodeId: issue.node_id,
-      repositoryId: target.repositoryId,
-      repositoryName: repo.path.slice("/repos/".length),
-      number: issue.number,
-      title: issue.title,
-      body: issue.body ?? "",
       state: "closed",
-      labels: issue.labels.map((v) => v.name),
-      projectFields: [],
+      snapshot: {
+        providerInstance: "github.com",
+        nodeId: issue.node_id,
+        repositoryId: target.repositoryId,
+        repositoryName: repo.path.slice("/repos/".length),
+        number: issue.number,
+        title: issue.title,
+        body: issue.body ?? "",
+        state: "closed",
+        labels: issue.labels.map((v) => v.name),
+        projectFields: [],
+      },
+      closedEvent: event
+        ? {
+            id: event.id,
+            closerKind:
+              closer === null
+                ? "none"
+                : closer.__typename === "PullRequest"
+                  ? "pull-request"
+                  : "other",
+            closerPrNodeId:
+              closer?.__typename === "PullRequest" ? (closer.id ?? null) : null,
+          }
+        : null,
     };
   }
   private async projectField(

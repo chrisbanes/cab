@@ -52,6 +52,7 @@ test("taskColumnOf follows the Board's precedence from the task read", () => {
     [{ task: { state: "done", ready: true } }, "Done"],
     [{ task: { state: "cancelled", ready: true } }, "Cancelled"],
     [{ source: { closure: "held" } }, "Paused"],
+    [{ source: { closure: "unattributed" } }, "Paused"],
     [{ admission: { eligible: false, reasons: ["project-paused"] } }, "Paused"],
     [{ execution: { state: "paused", holds } }, "Paused"],
     [{ task: { state: "open", ready: false } }, "Draft"],

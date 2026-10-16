@@ -25,6 +25,7 @@ import {
   profileRuntimeSchema,
 } from "./execution-runtime.js";
 import {
+  effectiveOwnClosure,
   GitHubSourceStore,
   githubConfigurationCommandSchema,
   githubConfigurationSchema,
@@ -1560,10 +1561,12 @@ export class DomainStore {
     );
     return (
       external?.observedState === "closed" &&
-      !!this.one(
-        "SELECT 1 AS present FROM github_delivery_closures WHERE nodeId=?",
-        String(external.nodeId),
-      ) &&
+      Number(
+        this.one(
+          `SELECT ${effectiveOwnClosure("?")} AS present`,
+          String(external.nodeId),
+        )?.present,
+      ) === 1 &&
       new DeliveryStore(this.db).ownsConfirmedClosure(
         taskId,
         String(external.nodeId),
@@ -1571,7 +1574,9 @@ export class DomainStore {
     );
   }
   /** Provider-closure provenance shared by every task view. */
-  providerClosure(taskId: string): "held" | "completed" | null {
+  providerClosure(
+    taskId: string,
+  ): "held" | "completed" | "unattributed" | null {
     if (
       !this.one(
         "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'github_provider_completions'",
@@ -1579,20 +1584,27 @@ export class DomainStore {
     )
       return null;
     const row = this.one(
-      `SELECT t.state, e.observedState,
+      `SELECT t.state, e.nodeId, e.observedState,
         EXISTS (SELECT 1 FROM github_provider_completions p WHERE p.taskId = t.id) AS completed,
         EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
-          AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending
+          AND h.active = 1 AND h.reason = 'closure-read-unavailable') AS ownProofPending,
+        EXISTS (SELECT 1 FROM github_source_holds h WHERE h.nodeId = e.nodeId
+          AND h.active = 1 AND h.reason = 'closure-attribution-unproved') AS unattributed
       FROM domain_tasks t JOIN github_external_issues e ON e.taskId = t.id WHERE t.id = ?`,
       taskId,
     );
     if (row?.state === "done" && Number(row.completed) === 1)
       return "completed";
-    // Ensemble's own closure awaits proof; it is not provider closure.
+    if (row?.state === "open" && Number(row.unattributed) === 1)
+      return "unattributed";
+    // Ensemble's own closure, proved or awaiting proof, is not provider closure.
     return row?.state === "open" &&
       row.observedState === "closed" &&
       Number(row.ownProofPending) === 0 &&
-      !this.hasOwnDeliveryClosure(taskId)
+      !new DeliveryStore(this.db).ownsConfirmedClosure(
+        taskId,
+        String(row.nodeId),
+      )
       ? "held"
       : null;
   }
