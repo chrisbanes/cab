@@ -1018,11 +1018,27 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   await dialog.waitFor({ state: "hidden" });
   assert.deepEqual(commands, []);
 
-  // Confirm sends exactly one project.configure and nothing else.
+  // Confirm sends exactly one project.configure and nothing else. The task read that clears
+  // the wait is held, so the stale wait must not offer the Fix again beside the outcome.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const taskRead = new RegExp(`/api/operator/tasks/${taskId}(\\?.*)?$`);
+  await page.route(taskRead, async (route) => {
+    await held;
+    await route.continue();
+  });
   await fix.click();
   await dialog.getByRole("button", { name: "Resume", exact: true }).click();
   await waits.getByText("Project resumed.", { exact: true }).waitFor();
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  assert.equal(
+    await waits.getByRole("button", { name: "Fix: Resume project" }).count(),
+    0,
+  );
   assert.equal(commands.length, 1);
+  release();
   const sent = commands[0] as unknown as Record<string, unknown>;
   assert.deepEqual(
     { type: sent.type, projectId: sent.projectId, paused: sent.paused },

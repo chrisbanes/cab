@@ -18,7 +18,8 @@ import type {
   Workspace,
   TaskListSummary,
 } from "../../src/operator/contracts.js";
-import { ResourceStatus, StatusBadge } from "./components.js";
+import { ResourceStatus } from "./components.js";
+import { ProjectPausedBanner, type WaitProps } from "./wait-reasons.js";
 import { Button } from "./ui/button.js";
 import { Card } from "./ui/card.js";
 import type { ResourceState } from "./resource.js";
@@ -381,6 +382,7 @@ export function TaskViews({
   projectId,
   overview = false,
   operator,
+  resume,
 }: {
   state: ResourceState<TaskAggregate>;
   requests: Requests;
@@ -392,6 +394,8 @@ export function TaskViews({
   overview?: boolean;
   /** Overview only: what its request cards read and answer with. */
   operator?: OverviewOperator | undefined;
+  /** Project page only: what the paused banner's Resume project reads and sends with. */
+  resume?: WaitProps | undefined;
 }) {
   const base = path.split("?")[0] ?? "/app/tasks",
     filters = parseTaskFilters(
@@ -478,11 +482,12 @@ export function TaskViews({
       {overview && (
         <OverviewStats tasks={state.data?.tasks} requests={requests} />
       )}
-      {project?.paused && (
-        <p className="body">
-          <StatusBadge tone="warning">Project paused</StatusBadge> New turns are
-          held.
-        </p>
+      {projectId && resume && (
+        <ProjectPausedBanner
+          p={resume}
+          projectId={projectId}
+          paused={Boolean(project?.paused)}
+        />
       )}
       {projectId && (
         <p className="metadata muted work-project-links">

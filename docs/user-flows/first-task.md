@@ -61,3 +61,7 @@ waits, led by the reason to clear first and a link that fixes it.
 
 Inbox items and the operator CLI's task reads show the same wait reasons; the CLI
 prints the matching command or Settings path instead of a link.
+
+The project page's paused banner offers the same Resume project as the task's wait
+Fix: it confirms, sends only the existing project resume, and shows the outcome as
+other configuration saves do. Pause project stays in project configuration.

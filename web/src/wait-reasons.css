@@ -47,3 +47,21 @@
 .wait-numbered .wait-detail {
   padding-left: calc(1.25rem + var(--space-8));
 }
+
+.project-paused-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8) var(--space-16);
+  padding: var(--space-12) var(--space-16);
+  border: 1px solid var(--idle-border);
+  border-radius: var(--radius-sm);
+  background: var(--idle-soft);
+}
+.project-paused-text {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+.project-paused-text p {
+  margin: 0;
+}

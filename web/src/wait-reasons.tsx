@@ -12,7 +12,7 @@ import {
   waitLabels,
 } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button } from "./components.js";
+import { ActionLink, Button, StatusBadge } from "./components.js";
 import { DraftMessage, key, useDraft } from "./settings.js";
 import type {
   ConfigurationDraft,
@@ -213,10 +213,42 @@ export function WaitReasons({
  */
 export function useResumeDraft(p: WaitProps, projectId: string) {
   const draft = useDraft(p.drafts, `project.resume-fix:${projectId}`);
+  const { recorded, read } = resumeVersions(p, projectId);
   useEffect(() => {
     if (draft.phase === "recorded") draft.purge();
   }, [draft]);
+  // A read newer than the Resume shows the project as it is now, so the confirmation is stale.
+  useEffect(() => {
+    if (
+      draft.phase === "recorded" &&
+      recorded !== undefined &&
+      read !== undefined &&
+      read > recorded
+    )
+      draft.purge();
+  }, [draft, recorded, read]);
   return draft;
+}
+
+function resumeVersions(p: WaitProps, projectId: string) {
+  const receipt = p.drafts.saved(`project.resume-fix:${projectId}`)?.receipt;
+  return {
+    recorded:
+      receipt?.kind === "configuration" && "version" in receipt.result
+        ? receipt.result.version
+        : undefined,
+    read: p.workspace?.data.projects.find((x) => x.id === projectId)?.version,
+  };
+}
+
+/**
+ * A Resume this session recorded that the workspace read has not moved past. That read
+ * still says paused at an older version: offering Resume again would send a stale version
+ * and clear the confirmation. It survives a remount because the saved receipt does.
+ */
+export function resumeRecordedSinceRead(p: WaitProps, projectId: string) {
+  const { recorded, read } = resumeVersions(p, projectId);
+  return recorded !== undefined && read !== undefined && read <= recorded;
 }
 
 /** Confirms, then sends exactly one `project.configure {paused:false}` and nothing else. */
@@ -238,7 +270,8 @@ export function ResumeProjectFix({
   const project = p.workspace?.data.projects.find((x) => x.id === projectId);
   const name = project?.name ?? "this project";
   // An unknown outcome keeps the original request; only Check whether it saved resends it.
-  if (draft.phase === "unknown") return null;
+  if (draft.phase === "unknown" || resumeRecordedSinceRead(p, projectId))
+    return null;
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -247,12 +280,18 @@ export function ResumeProjectFix({
           variant={variant}
           disabled={!project || draft.phase === "pending"}
           onClick={() => {
-            // A new operation from the shown version; a newer one comes back as a conflict.
-            if (draft.phase !== "editing" || !draft.values.key)
-              draft.startOperation({
-                key: key(),
-                expectedVersion: String(project?.version ?? 1),
-              });
+            // Each open starts a fresh operation, so a cancelled one never keeps an old version.
+            // Review changes may already have adopted a version newer than the shown one.
+            // An operation in flight or unknown is kept: starting is a no-op for it.
+            draft.startOperation({
+              key: key(),
+              expectedVersion: String(
+                Math.max(
+                  project?.version ?? 1,
+                  Number(draft.values.expectedVersion) || 0,
+                ),
+              ),
+            });
           }}
         >
           {draft.phase === "pending" ? "Resuming…" : label}
@@ -302,6 +341,47 @@ export function ResumeProjectFix({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The project page's paused banner (23b): Resume project while the project is paused. The
+ * outcome stays after the pause clears, so a recorded save still reads "Project resumed.".
+ */
+export function ProjectPausedBanner({
+  p,
+  projectId,
+  paused,
+}: {
+  p: WaitProps;
+  projectId: string;
+  paused: boolean;
+}) {
+  const resume = useResumeDraft(p, projectId);
+  return (
+    <>
+      {paused && !resumeRecordedSinceRead(p, projectId) && (
+        <div role="status" className="project-paused-banner">
+          <div className="project-paused-text">
+            <p className="body">
+              <StatusBadge tone="warning">Project paused</StatusBadge> · New
+              turns are held.
+            </p>
+            <p className="metadata muted">
+              Running turns finish. Messages queue for the lead. Resume doesn't
+              clear stop, task or writer holds.
+            </p>
+          </div>
+          <ResumeProjectFix
+            p={p}
+            draft={resume}
+            projectId={projectId}
+            label="Resume project"
+          />
+        </div>
+      )}
+      <ResumeOutcome p={p} draft={resume} projectId={projectId} />
+    </>
   );
 }
 
