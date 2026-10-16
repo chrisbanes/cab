@@ -561,6 +561,67 @@ test("an invalidated recovery continuation keeps the successor waiting without s
   }
 });
 
+test("lead recovery candidates prove only receipt-backed reconciled turns, not ordinary held history", async () => {
+  const f = await heldFixture();
+  try {
+    await f.service.resolveHeldExecution(f.receipt);
+    const { db, coordination, state } = internals(f.service);
+    const assignmentId = String(f.old.assignmentId);
+    const copies = (reason: string | null, prefix: string) =>
+      db
+        .prepare(
+          `INSERT INTO turn_requests (requestKey, workId, kind, taskId, projectId, assignmentId,
+            taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, state, reason)
+            SELECT ? || value, ? || value, kind, taskId, projectId, assignmentId,
+              taskVersion, assignmentVersion, instructionsRevision, profileRevision, prompt, 'held', ?
+            FROM turn_requests, (WITH RECURSIVE n(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM n WHERE value < ?) SELECT value FROM n)
+            WHERE workId = ?`,
+        )
+        .run(
+          prefix,
+          prefix,
+          reason,
+          prefix === "history-" ? 200 : 20,
+          f.old.workId,
+        );
+    copies(null, "history-");
+    copies("Execution reconciled; no automatic successor", "reconciled-");
+    const proved: string[] = [];
+    const prove = state.reconciledAssignmentProof.bind(state);
+    state.reconciledAssignmentProof = (workId) => {
+      proved.push(workId);
+      return prove(workId);
+    };
+    assert.equal(
+      coordination.awaitsRecoveryContinuation(f.taskId, assignmentId),
+      true,
+    );
+    assert.deepEqual(proved, [f.old.workId]);
+    proved.length = 0;
+    f.pause(true);
+    await f.service.coordinationView().postOperatorMessage(f.message);
+    assert.ok(audit(f.service, f.old.workId));
+    assert.equal(
+      db
+        .prepare(
+          "SELECT count(*) AS n FROM coordination_recovery_continuations WHERE workId != ?",
+        )
+        .get(f.old.workId)?.n,
+      0,
+    );
+    assert.ok(proved.length > 0);
+    assert.ok(proved.every((workId) => workId === f.old.workId));
+    proved.length = 0;
+    assert.equal(
+      f.service.recoveryContinuationUnresolved(assignmentId, "other-work"),
+      false,
+    );
+    assert.ok(proved.every((workId) => workId === f.old.workId));
+  } finally {
+    await close(f);
+  }
+});
+
 test("wrong or unproved recovery never upgrades a pre-recovery message on replay", async () => {
   const f = await heldFixture();
   try {

@@ -3429,8 +3429,9 @@ export class CoordinationStore {
 
   /**
    * True while the next ordinary operator message to this assignment would
-   * record a recovery continuation: a held request has a valid reconciled
-   * proof and no continuation yet. Follow-ups and reviews never record one.
+   * record a recovery continuation: a held request with an operator recovery
+   * receipt has a valid reconciled proof and no continuation yet. Follow-ups
+   * and reviews never record one.
    */
   awaitsRecoveryContinuation(taskId: string, assignmentId: string): boolean {
     return this.recoveryContinuationCandidates(taskId, assignmentId).length > 0;
@@ -3445,21 +3446,22 @@ export class CoordinationStore {
     batch: InboxDelivery | undefined;
   }> {
     if (!this.reconciledAssignmentProof) return [];
+    // Pre-filter on the conjuncts reconciledAssignmentProof requires (the reason literal
+    // is its own) so ordinary held history is never proved; the proof still runs per row.
     const requests = this.db
-      .prepare(`SELECT workId FROM turn_requests
-      WHERE taskId = ? AND assignmentId = ? AND state = 'held' ORDER BY sequence`)
+      .prepare(`SELECT request.workId FROM turn_requests request
+      WHERE request.taskId = ? AND request.assignmentId = ? AND request.state = 'held'
+        AND request.kind = 'assignment'
+        AND request.reason = 'Execution reconciled; no automatic successor'
+        AND EXISTS (SELECT 1 FROM execution_recovery_receipts receipt WHERE receipt.workId = request.workId)
+        AND EXISTS (SELECT 1 FROM execution_intents intent WHERE intent.workId = request.workId AND intent.state = 'reconciled')
+        AND NOT EXISTS (SELECT 1 FROM coordination_recovery_continuations recorded WHERE recorded.workId = request.workId)
+      ORDER BY request.sequence`)
       .all(taskId, assignmentId) as Array<{
       workId: string;
     }>;
     const candidates = [];
     for (const { workId } of requests) {
-      if (
-        this.one(
-          "SELECT 1 AS recorded FROM coordination_recovery_continuations WHERE workId = ?",
-          workId,
-        )
-      )
-        continue;
       const proof = this.reconciledAssignmentProof(workId);
       if (
         !proof ||
