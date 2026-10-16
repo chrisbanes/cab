@@ -138,7 +138,12 @@ export function scriptedDeliveryProvider() {
               id: "I1",
               repository: { id: "R1" },
               timelineItems: {
-                nodes: [{ closer: { __typename: "PullRequest", id: "P7" } }],
+                nodes: [
+                  {
+                    id: "CE1",
+                    closer: { __typename: "PullRequest", id: "P7" },
+                  },
+                ],
               },
             },
           },

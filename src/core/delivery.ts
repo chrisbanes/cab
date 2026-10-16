@@ -1230,21 +1230,44 @@ export class DeliveryStore {
     };
   }
   ownsConfirmedClosure(taskId: string, nodeId: string): boolean {
-    return this.actions(taskId).some(
-      (a) =>
-        a.state === "confirmed-success" &&
-        ((a.request.action.kind === "issue.close" &&
-          a.request.action.target.nodeId === nodeId &&
-          a.observation?.receipt?.issueClosed === true &&
-          a.beforeState?.state === "open") ||
-          (a.request.action.kind === "pr.merge" &&
-            a.observation?.receipt?.merged === true &&
-            this.delivery(taskId)?.observation.nodeId ===
-              a.request.action.target.nodeId &&
-            this.delivery(taskId)?.observation.closedIssueNodeIds.includes(
-              nodeId,
-            ))),
+    return !!this.ownClosureOperation(taskId, nodeId);
+  }
+  /** The latest confirmed operation that closed the issue, unless a reopen superseded it. */
+  ownClosureOperation(
+    taskId: string,
+    nodeId: string,
+  ): DeliveryActionRecord | undefined {
+    const superseded = new Set(
+      this.db
+        .prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='github_delivery_closure_supersessions'",
+        )
+        .get()
+        ? (
+            this.db
+              .prepare(
+                "SELECT operationId FROM github_delivery_closure_supersessions WHERE nodeId=?",
+              )
+              .all(nodeId) as { operationId: string }[]
+          ).map((row) => row.operationId)
+        : [],
     );
+    const binding = this.delivery(taskId);
+    return this.actions(taskId)
+      .filter(
+        (a) =>
+          a.state === "confirmed-success" &&
+          !superseded.has(a.operationId) &&
+          ((a.request.action.kind === "issue.close" &&
+            a.request.action.target.nodeId === nodeId &&
+            a.observation?.receipt?.issueClosed === true &&
+            a.beforeState?.state === "open") ||
+            (a.request.action.kind === "pr.merge" &&
+              a.observation?.receipt?.merged === true &&
+              binding?.observation.nodeId === a.request.action.target.nodeId &&
+              binding.observation.closedIssueNodeIds.includes(nodeId))),
+      )
+      .at(-1);
   }
   hasWaitingPr(workId: string): boolean {
     return Boolean(

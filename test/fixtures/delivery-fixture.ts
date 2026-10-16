@@ -12,7 +12,10 @@ import type {
   RuntimeToolCall,
   RuntimeToolResult,
 } from "../../src/standalone/codex.js";
-import type { GitHubDeliveryProvider } from "../../src/standalone/github-delivery.js";
+import type {
+  ClosedIssueInspection,
+  GitHubDeliveryProvider,
+} from "../../src/standalone/github-delivery.js";
 import type {
   ExternalAction,
   PrDeliveryObservation,
@@ -99,19 +102,42 @@ export async function deliveryFixture(
   let readFailure = false;
   let otherPr: PrDeliveryObservation | undefined;
   let inspectionHook: (() => Promise<void> | void) | undefined;
+  // Unset: GitHub shows the issue closed by the merged PR or, without one, an explicit close.
+  let closedIssue:
+    | { state: "open" }
+    | {
+        state: "closed";
+        closedEvent: Extract<
+          ClosedIssueInspection,
+          { state: "closed" }
+        >["closedEvent"];
+      }
+    | Error
+    | undefined;
+  let issueOpen: boolean | undefined;
   const provider: GitHubDeliveryProvider = {
     async inspectClosedIssue() {
+      if (closedIssue instanceof Error) throw closedIssue;
+      if (closedIssue?.state === "open") return closedIssue;
       return {
-        providerInstance: "github.com",
-        nodeId: "I1",
-        repositoryId: "R1",
-        repositoryName: "org/repo",
-        number: 1,
-        title: "T",
-        body: sourceBody,
         state: "closed",
-        labels: sourceLabels,
-        projectFields: [],
+        snapshot: {
+          providerInstance: "github.com",
+          nodeId: "I1",
+          repositoryId: "R1",
+          repositoryName: "org/repo",
+          number: 1,
+          title: "T",
+          body: sourceBody,
+          state: "closed",
+          labels: sourceLabels,
+          projectFields: [],
+        },
+        closedEvent: closedIssue
+          ? closedIssue.closedEvent
+          : pr.merged
+            ? { id: "CE1", closerKind: "pull-request", closerPrNodeId: "P7" }
+            : { id: "CE1", closerKind: "none", closerPrNodeId: null },
       };
     },
     async preflight(action) {
@@ -119,7 +145,12 @@ export async function deliveryFixture(
       if (preflightWait) await preflightWait;
       if (action.kind === "pr.merge" && pr.mergeBlockers.length)
         throw new Error("held");
-      return { nodeId: "target" };
+      return action.kind === "issue.close"
+        ? {
+            nodeId: "target",
+            state: (issueOpen ?? !pr.merged) ? "open" : "closed",
+          }
+        : { nodeId: "target" };
     },
     async performAction(record) {
       effects.push(record.request.action);
@@ -172,22 +203,24 @@ export async function deliveryFixture(
           async readSelection() {
             return {
               complete: true,
-              issues: pr.merged
-                ? []
-                : [
-                    {
-                      providerInstance: "github.com",
-                      nodeId: "I1",
-                      repositoryId: "R1",
-                      repositoryName: "org/repo",
-                      number: 1,
-                      title: "T",
-                      body: sourceBody,
-                      state: "open",
-                      labels: sourceLabels,
-                      projectFields: [],
-                    },
-                  ],
+              // Open-only discovery unless a test sets the issue state explicitly.
+              issues:
+                issueOpen === undefined && pr.merged
+                  ? []
+                  : [
+                      {
+                        providerInstance: "github.com",
+                        nodeId: "I1",
+                        repositoryId: "R1",
+                        repositoryName: "org/repo",
+                        number: 1,
+                        title: "T",
+                        body: sourceBody,
+                        state: issueOpen === false ? "closed" : "open",
+                        labels: sourceLabels,
+                        projectFields: [],
+                      },
+                    ],
               reason: null,
             };
           },
@@ -195,7 +228,9 @@ export async function deliveryFixture(
             return { complete: true, blockers: [], reason: null };
           },
           async readIssueStatus() {
-            return { status: pr.merged ? "closed" : "open" };
+            return {
+              status: (issueOpen ?? !pr.merged) ? "open" : "closed",
+            };
           },
         }),
       },
@@ -368,6 +403,14 @@ export async function deliveryFixture(
     },
     failReads: (value: boolean) => {
       readFailure = value;
+    },
+    /** The fresh closure read's answer; `undefined` restores the default. */
+    setClosedIssue: (value: typeof closedIssue) => {
+      closedIssue = value;
+    },
+    /** The source reader's issue state, read in full; `undefined` lists only an unmerged issue as open. */
+    setIssueOpen: (value: boolean | undefined) => {
+      issueOpen = value;
     },
     onInspection: (hook: (() => Promise<void> | void) | undefined) => {
       inspectionHook = hook;

@@ -239,23 +239,29 @@ export class DeliveryCoordinator {
       });
     });
   }
+  /**
+   * Classifies a fresh read of an issue the task's confirmed delivery closed: `reopened`
+   * supersedes that own closure, `proved` pins its ClosedEvent, and `attribution-unproved`
+   * is a deterministic mismatch. A read failure throws.
+   */
   async inspectOwnClosure(
     taskId: string,
     target: { repositoryId: string; nodeId: string; number: number },
-  ) {
-    if (!this.store.ownsConfirmedClosure(taskId, target.nodeId))
-      throw new Error("Closure is not attributed to this task");
-    const record = this.store
-      .actions(taskId)
-      .find(
-        (a) =>
-          a.state === "confirmed-success" &&
-          ((a.request.action.kind === "issue.close" &&
-            a.request.action.target.nodeId === target.nodeId &&
-            a.beforeState?.state === "open") ||
-            a.request.action.kind === "pr.merge"),
-      );
-    if (!record) throw new Error("Confirmed closure receipt unavailable");
+    stored?: { operationId: string; closedEventId: string | null },
+  ): Promise<
+    | { kind: "reopened"; operationId: string }
+    | { kind: "attribution-unproved"; operationId: string }
+    | {
+        kind: "proved";
+        operationId: string;
+        snapshot: import("../core/github-source.js").IssueSnapshot;
+        closerPrNodeId: string | null;
+        closedEventId: string;
+      }
+  > {
+    const record = this.store.ownClosureOperation(taskId, target.nodeId);
+    if (!record) throw new Error("Closure is not attributed to this task");
+    const { operationId } = record;
     return this.serialize(
       [`task:${taskId}`, `target:${target.repositoryId}:${target.number}`],
       async () => {
@@ -266,11 +272,30 @@ export class DeliveryCoordinator {
           record.request.action.kind === "pr.merge"
             ? record.request.action.target.nodeId
             : null;
-        const snapshot = await provider.inspectClosedIssue({
-          ...target,
-          ...(closerPrNodeId ? { expectedCloserPrNodeId: closerPrNodeId } : {}),
-        });
-        return { snapshot, operationId: record.operationId, closerPrNodeId };
+        const inspection = await provider.inspectClosedIssue(target);
+        if (inspection.state === "open")
+          return { kind: "reopened", operationId };
+        const event = inspection.closedEvent;
+        const pinned =
+          stored?.operationId === operationId ? stored.closedEventId : null;
+        // A different later ClosedEvent exists only after a reopen.
+        if (pinned !== null && event !== null && event.id !== pinned)
+          return { kind: "reopened", operationId };
+        const attributed =
+          event !== null &&
+          (pinned !== null ||
+            (closerPrNodeId
+              ? event.closerPrNodeId === closerPrNodeId
+              : event.closerKind === "none"));
+        return attributed
+          ? {
+              kind: "proved",
+              operationId,
+              snapshot: inspection.snapshot,
+              closerPrNodeId,
+              closedEventId: event.id,
+            }
+          : { kind: "attribution-unproved", operationId };
       },
     );
   }

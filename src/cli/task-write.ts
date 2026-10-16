@@ -69,13 +69,15 @@ export function requiredVersion(ctx: WriteContext) {
 
 /** ` (closed on GitHub…)` for a task closed on its provider, shared by every task view. */
 export function closureSuffix(
-  closure: "held" | "completed" | null | undefined,
+  closure: "held" | "completed" | "unattributed" | null | undefined,
 ) {
   return closure === "held"
     ? " (closed on GitHub; held)"
     : closure === "completed"
       ? " (closed on GitHub)"
-      : "";
+      : closure === "unattributed"
+        ? " (closed on GitHub; closure not attributed to Ensemble; held)"
+        : "";
 }
 
 /** Task state, admission and the holds that still decide whether work runs. */

@@ -178,7 +178,9 @@ dimensions.
   when it is you) and the lead. Phone shows one column with named tabs and
   previous/next. Ready-but-blocked work keeps its Ready label in the Waiting column;
   Stopping and Uncertain stay reachable with counts. A closure-held task reads
-  "Held · closed on GitHub" and groups in the Paused column. List/Board is a presentation
+  "Held · closed on GitHub" and groups in the Paused column; when GitHub's closure
+  cannot be attributed to Ensemble's delivery it reads "Held · closure not attributed
+  to Ensemble" in the same place (text variant of `42-phone-provider-closed`). List/Board is a presentation
   switch, not a status mutation; no drag-and-drop is depicted.
 - **Settings (`114-settings-index`):** in-page section navigation (Projects, Runtime
   & recovery, Profiles, Routing, GitHub discovery, CLI credentials, Readiness)

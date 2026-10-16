@@ -621,6 +621,7 @@ for (const readiness of [
         { ...issue, state: "closed" },
         operationId,
         null,
+        null,
       );
       assert.equal(domain.admission(taskId, true).eligible, true);
       assert.ok(domain.admission(taskId).reasons.includes("task-unready"));
@@ -630,6 +631,7 @@ for (const readiness of [
         2,
         { ...issue, state: "closed", labels: [] },
         operationId,
+        null,
         null,
       );
       // Lost labels only lose readiness under a label rule; with no rule the closure stands.
@@ -769,6 +771,248 @@ test("own merge cannot hide simultaneous independent readiness label loss", asyn
       f.domain.admission(f.taskId, true).reasons.includes("source-hold"),
     );
     assert.equal(f.domain.task(f.taskId).state, "open");
+  } finally {
+    await f.close();
+  }
+});
+
+type Fixture = Awaited<ReturnType<typeof deliveryFixture>>;
+async function treatClosureAs(f: Fixture, closedIssues: "done" | "skip") {
+  const { version } = f.domain.githubConfiguration(f.projectId);
+  f.domain.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    expectedVersion: version,
+    credentialRef: "env:FIXTURE_SOURCE",
+    selections: [{ id: "repo", keep: true }],
+    readiness: { mode: "any", conditions: [{ kind: "label", name: "ready" }] },
+    closedIssues,
+    repositories: [],
+  });
+  f.domain.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: f.projectId,
+    selectionId: "repo",
+    expectedVersion: version + 1,
+  });
+  await f.service.refreshGitHub();
+}
+async function mergeFixturePr(f: Fixture) {
+  await registerFixturePr(f);
+  const merged = await f.call("ensemble_external_action", {
+    operationId: randomUUID(),
+    action: {
+      kind: "pr.merge",
+      target: {
+        repositoryId: "R1",
+        nodeId: "P7",
+        number: 7,
+        headRef: "cb/change",
+        baseRef: "main",
+        expectedHeadSha: f.getPr().headSha,
+      },
+      method: "squash",
+      reviewedResultIds: [],
+    },
+  });
+  assert.equal(merged.success, true, merged.text);
+  f.setIssueOpen(false);
+  await f.service.refreshGitHub();
+}
+async function closeOwnFixtureIssue(f: Fixture) {
+  f.setActionOutcome({
+    state: "confirmed-success",
+    reason: null,
+    receipt: { nodeId: "I1", issueClosed: true },
+  });
+  const closed = await closeFixtureIssue(f);
+  assert.equal(closed.success, true, closed.text);
+  f.setIssueOpen(false);
+  await f.service.refreshGitHub();
+}
+function supersessions(f: Fixture) {
+  const db = (f.service as unknown as { db: DatabaseSync }).db;
+  return db
+    .prepare("SELECT operationId FROM github_delivery_closure_supersessions")
+    .all()
+    .map((row) => String(row.operationId));
+}
+/** Releases the running lead turn and refreshes until the task settles into `state`. */
+async function settleInto(f: Fixture, state: "done" | "open") {
+  f.turns.at(-1)?.release();
+  const deadline = Date.now() + 5000;
+  for (;;) {
+    await f.service.refreshGitHub();
+    if (
+      f.domain.task(f.taskId).state === state &&
+      !f.service.list().some((i) => i.state === "running")
+    )
+      return;
+    if (Date.now() > deadline) throw new Error(`Task did not settle ${state}`);
+    await new Promise<void>((r) => setTimeout(r, 5));
+  }
+}
+const independentClose = {
+  state: "closed" as const,
+  closedEvent: {
+    id: "CE2",
+    closerKind: "none" as const,
+    closerPrNodeId: null,
+  },
+};
+
+for (const mode of ["done", "skip"] as const)
+  test(`own merge, reopen, then independent closure is provider closure (${mode})`, async () => {
+    const f = await deliveryFixture("through-merge", true);
+    try {
+      await treatClosureAs(f, mode);
+      await mergeFixturePr(f);
+      const sources = f.service.githubSources();
+      assert.equal(sources.deliveryClosure("I1")?.closedEventId, "CE1");
+      assert.equal(f.domain.hasOwnDeliveryClosure(f.taskId), true);
+      f.setClosedIssue({ state: "open" });
+      f.setIssueOpen(true);
+      await f.service.refreshGitHub();
+      assert.equal(supersessions(f).length, 1);
+      assert.equal(sources.hold("I1")?.reason, "closed");
+      assert.equal(sources.issue("I1")?.observedState, "open");
+      f.setClosedIssue(independentClose);
+      f.setIssueOpen(false);
+      await f.service.refreshGitHub();
+      assert.equal(f.domain.providerClosure(f.taskId), "held");
+      await settleInto(f, mode === "done" ? "done" : "open");
+      assert.equal(
+        sources.providerCompletion(f.taskId) !== undefined,
+        mode === "done",
+      );
+      if (mode === "skip") assert.equal(sources.hold("I1")?.reason, "closed");
+    } finally {
+      await f.close();
+    }
+  });
+
+test("an own closure that is never reopened is not provider-completed", async () => {
+  const f = await deliveryFixture("through-merge", true);
+  try {
+    await treatClosureAs(f, "done");
+    await mergeFixturePr(f);
+    await f.service.refreshGitHub();
+    const sources = f.service.githubSources();
+    assert.equal(
+      sources.completeFromProviderClosure(f.taskId, () => true),
+      false,
+    );
+    assert.equal(f.domain.providerClosure(f.taskId), null);
+    assert.deepEqual(supersessions(f), []);
+    f.turns[0]?.release();
+    await f.waitTurn(1);
+    assert.equal(
+      (
+        await f.call(
+          "ensemble_request_completion",
+          { reviewedResultIds: [] },
+          1,
+        )
+      ).success,
+      true,
+    );
+    await settleInto(f, "done");
+    assert.equal(sources.providerCompletion(f.taskId), undefined);
+  } finally {
+    await f.close();
+  }
+});
+
+for (const kind of ["pr.merge", "issue.close"] as const)
+  test(`a reopen and independent re-close between passes is not re-attributed (${kind})`, async () => {
+    const f = await deliveryFixture(
+      kind === "pr.merge" ? "through-merge" : "reviewable-pr",
+      true,
+    );
+    try {
+      await treatClosureAs(f, "done");
+      if (kind === "pr.merge") await mergeFixturePr(f);
+      else await closeOwnFixtureIssue(f);
+      const sources = f.service.githubSources();
+      assert.equal(sources.deliveryClosure("I1")?.closedEventId, "CE1");
+      assert.equal(f.domain.hasOwnDeliveryClosure(f.taskId), true);
+      f.setClosedIssue(independentClose);
+      await f.service.refreshGitHub();
+      assert.equal(supersessions(f).length, 1);
+      // The pin is kept as audit history; it is not re-recorded for the new closure.
+      assert.equal(sources.deliveryClosure("I1")?.closedEventId, "CE1");
+      assert.equal(f.domain.hasOwnDeliveryClosure(f.taskId), false);
+      assert.equal(f.domain.providerClosure(f.taskId), "held");
+      await settleInto(f, "done");
+      assert.notEqual(sources.providerCompletion(f.taskId), undefined);
+    } finally {
+      await f.close();
+    }
+  });
+
+test("unproved merge attribution gets an explained hold, distinct from a failed read", async () => {
+  const f = await deliveryFixture("through-merge", true);
+  try {
+    await treatClosureAs(f, "done");
+    f.setClosedIssue({
+      state: "closed",
+      closedEvent: {
+        id: "CE9",
+        closerKind: "pull-request",
+        closerPrNodeId: "P9",
+      },
+    });
+    await mergeFixturePr(f);
+    const sources = f.service.githubSources();
+    assert.equal(sources.hold("I1")?.reason, "closure-attribution-unproved");
+    assert.equal(sources.deliveryClosure("I1"), undefined);
+    assert.equal(f.domain.providerClosure(f.taskId), "unattributed");
+    assert.equal(
+      sources.completeFromProviderClosure(f.taskId, () => true),
+      false,
+    );
+    // Reopening, the recovery, supersedes the own closure.
+    f.setClosedIssue({ state: "open" });
+    await f.service.refreshGitHub();
+    assert.equal(sources.hold("I1")?.reason, "closed");
+    assert.equal(supersessions(f).length, 1);
+  } finally {
+    await f.close();
+  }
+  const failed = await deliveryFixture("through-merge", true);
+  try {
+    failed.setClosedIssue(new Error("unavailable"));
+    await mergeFixturePr(failed);
+    assert.equal(
+      failed.service.githubSources().hold("I1")?.reason,
+      "closure-read-unavailable",
+    );
+    assert.equal(failed.domain.providerClosure(failed.taskId), null);
+  } finally {
+    await failed.close();
+  }
+});
+
+test("issue.close attribution without a pin requires a null closer", async () => {
+  const f = await deliveryFixture("reviewable-pr", true);
+  try {
+    f.setClosedIssue({
+      state: "closed",
+      closedEvent: {
+        id: "CE1",
+        closerKind: "pull-request",
+        closerPrNodeId: "P7",
+      },
+    });
+    await closeOwnFixtureIssue(f);
+    const sources = f.service.githubSources();
+    assert.equal(sources.hold("I1")?.reason, "closure-attribution-unproved");
+    assert.equal(f.domain.providerClosure(f.taskId), "unattributed");
+    assert.equal(f.domain.hasOwnDeliveryClosure(f.taskId), false);
   } finally {
     await f.close();
   }

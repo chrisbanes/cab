@@ -1026,6 +1026,65 @@ test("a pending own-delivery closure proof is not shown as GitHub closure on any
   }
 });
 
+test("an unproved own-delivery closure attribution is explained on every task view", async (t) => {
+  const o = await startCliOperator(t);
+  const { d, s } = o;
+  const taskId = seedImported(o);
+  const sources = s.f.service.githubSources();
+  sources.recordDeliveryClosureAttributionUnproved("I1");
+  sources.reconcileSelection(s.projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I1",
+        repositoryId: "R1",
+        repositoryName: "owner/repo",
+        number: 42,
+        title: "Imported task",
+        body: "Imported body",
+        state: "closed",
+        labels: ["ready"],
+        projectFields: [],
+      },
+    ],
+  });
+  assert.equal(sources.hold("I1")?.reason, "closure-attribution-unproved");
+  const api = new OperatorApi(s.f.service, [s.f.directory]);
+  assert.equal(
+    (await api.readTask(taskId)).data.source?.closure,
+    "unattributed",
+  );
+  assert.equal(
+    (await api.readTaskListPage()).data.tasks.find((task) => task.id === taskId)
+      ?.source?.closure,
+    "unattributed",
+  );
+  for (const args of [
+    ["task", "get", taskId],
+    ["task", "list"],
+  ]) {
+    const human = await o.h.run([...args, "--connection", "ro"]);
+    assert.equal(human.code, 0, human.err);
+    assert.ok(
+      human.out.includes("closure not attributed to Ensemble"),
+      human.out,
+    );
+  }
+  const ui = new LocalOperatorUi(d, undefined, sources);
+  const page = ui.task(taskId);
+  for (const marker of [
+    "could not prove",
+    "Reopen the issue on GitHub",
+    "Source hold: closure-attribution-unproved",
+  ])
+    assert.ok(page.includes(marker), marker);
+  assert.ok(
+    ui.project(s.projectId).includes("closure not attributed to Ensemble"),
+  );
+});
+
 test("task get names an imported Draft task's unmet readiness condition", async (t) => {
   const o = await startCliOperator(t);
   const taskId = seedImported(o);

@@ -86,6 +86,17 @@ test("closure provenance places held tasks in Paused and names provider completi
     assert.equal(taskColumn(held), "Paused");
     assert.ok(taskReasons(held).includes("Held · closed on GitHub"));
     assert.equal(taskReasons(held).includes("Draft: not Ready"), false);
+    const unattributed = summary({
+      ready,
+      closure: "unattributed",
+      reasons: ["task-unready", "source-held"],
+    });
+    assert.equal(taskColumn(unattributed), "Paused");
+    assert.equal(
+      taskReasons(unattributed)[0],
+      "Held · closure not attributed to Ensemble",
+    );
+    assert.equal(taskReasons(unattributed).includes("Draft: not Ready"), false);
   }
   const completed = summary({ state: "done", closure: "completed" });
   assert.equal(taskColumn(completed), "Done");

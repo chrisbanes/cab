@@ -156,6 +156,13 @@ export type RepositoryVerifier = (
 
 type Row = Record<string, string | number | null>;
 
+/** SQL testing for a recorded own-delivery closure of `nodeSql` that no reopen superseded. */
+export function effectiveOwnClosure(nodeSql: string): string {
+  return `EXISTS (SELECT 1 FROM github_delivery_closures d WHERE d.nodeId = ${nodeSql}
+    AND NOT EXISTS (SELECT 1 FROM github_delivery_closure_supersessions s
+      WHERE s.nodeId = d.nodeId AND s.operationId = d.operationId))`;
+}
+
 export function sourceTextDigest(title: string, body: string): string {
   return createHash("sha256")
     .update(JSON.stringify([title, body]))
@@ -233,6 +240,10 @@ export class GitHubSourceStore {
       decision TEXT, decidedAt TEXT
     );
     CREATE TABLE IF NOT EXISTS github_delivery_closures (nodeId TEXT PRIMARY KEY, operationId TEXT NOT NULL, closerPrNodeId TEXT, snapshotJson TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS github_delivery_closure_supersessions (
+      nodeId TEXT NOT NULL, operationId TEXT NOT NULL, supersededAt TEXT NOT NULL,
+      PRIMARY KEY(nodeId, operationId)
+    );
     CREATE TABLE IF NOT EXISTS github_source_holds (
       nodeId TEXT PRIMARY KEY REFERENCES github_external_issues(nodeId),
       active INTEGER NOT NULL CHECK(active IN (0,1)), reason TEXT NOT NULL,
@@ -248,6 +259,13 @@ export class GitHubSourceStore {
     if (!syncColumns.some((c) => c.name === "skippedClosedNodeIds"))
       this.db.exec(
         "ALTER TABLE github_sync_state ADD COLUMN skippedClosedNodeIds TEXT NOT NULL DEFAULT '[]'",
+      );
+    const closureColumns = this.db
+      .prepare("PRAGMA table_info(github_delivery_closures)")
+      .all() as Row[];
+    if (!closureColumns.some((c) => c.name === "closedEventId"))
+      this.db.exec(
+        "ALTER TABLE github_delivery_closures ADD COLUMN closedEventId TEXT",
       );
   }
 
@@ -306,7 +324,7 @@ export class GitHubSourceStore {
           AND c.closedIssues = 'done'
           AND EXISTS (SELECT 1 FROM github_source_holds h
             WHERE h.nodeId = e.nodeId AND h.active = 1 AND h.reason = 'closed')
-          AND NOT EXISTS (SELECT 1 FROM github_delivery_closures d WHERE d.nodeId = e.nodeId)`)
+          AND NOT ${effectiveOwnClosure("e.nodeId")}`)
         .get(taskId) as Row | undefined;
       if (!task) return false;
       const memberships = this.db
@@ -889,6 +907,7 @@ export class GitHubSourceStore {
     input: IssueSnapshot,
     operationId: string,
     closerPrNodeId: string | null,
+    closedEventId: string | null,
   ): boolean {
     const snapshot = z
       .object({
@@ -973,9 +992,12 @@ export class GitHubSourceStore {
       if (
         labelProof &&
         (!hold?.active ||
-          ["closed", "withdrawn", "closure-read-unavailable"].includes(
-            String(hold.reason),
-          ))
+          [
+            "closed",
+            "withdrawn",
+            "closure-read-unavailable",
+            "closure-attribution-unproved",
+          ].includes(String(hold.reason)))
       )
         this.setSourceHold(snapshot.nodeId, "closed");
       else if (!labelProof && (!hold?.active || hold.reason === "closed"))
@@ -984,13 +1006,14 @@ export class GitHubSourceStore {
         this.setSourceHold(snapshot.nodeId, String(hold.reason));
       this.db
         .prepare(
-          "INSERT INTO github_delivery_closures VALUES (?,?,?,?) ON CONFLICT(nodeId) DO UPDATE SET operationId=excluded.operationId,closerPrNodeId=excluded.closerPrNodeId,snapshotJson=excluded.snapshotJson",
+          "INSERT INTO github_delivery_closures (nodeId,operationId,closerPrNodeId,snapshotJson,closedEventId) VALUES (?,?,?,?,?) ON CONFLICT(nodeId) DO UPDATE SET operationId=excluded.operationId,closerPrNodeId=excluded.closerPrNodeId,snapshotJson=excluded.snapshotJson,closedEventId=excluded.closedEventId",
         )
         .run(
           snapshot.nodeId,
           operationId,
           closerPrNodeId,
           JSON.stringify(snapshot),
+          closedEventId,
         );
       return true;
     });
@@ -1001,6 +1024,74 @@ export class GitHubSourceStore {
       .get(nodeId) as Row | undefined;
     if (!hold?.active || hold.reason === "closed")
       this.setSourceHold(nodeId, "closure-read-unavailable");
+  }
+  /**
+   * A fresh read shows the issue closed, but not provably by the confirmed own-delivery
+   * operation. The closure is observed; the explained hold replaces a pending proof.
+   */
+  recordDeliveryClosureAttributionUnproved(nodeId: string): void {
+    transaction(this.db, () => {
+      const issue = this.issue(nodeId);
+      if (!issue) return;
+      const hold = this.hold(nodeId);
+      if (
+        !hold?.active ||
+        ["closed", "withdrawn", "closure-read-unavailable"].includes(
+          String(hold.reason),
+        )
+      )
+        this.setSourceHold(nodeId, "closure-attribution-unproved");
+      this.db
+        .prepare(
+          "UPDATE github_external_issues SET observedState = 'closed' WHERE nodeId = ?",
+        )
+        .run(nodeId);
+      this.updateReadiness(String(issue.taskId));
+    });
+  }
+  /** The stored own-delivery closure for an issue, superseded or not. */
+  deliveryClosure(
+    nodeId: string,
+  ): { operationId: string; closedEventId: string | null } | undefined {
+    const row = this.db
+      .prepare(
+        "SELECT operationId, closedEventId FROM github_delivery_closures WHERE nodeId = ?",
+      )
+      .get(nodeId) as Row | undefined;
+    return row
+      ? {
+          operationId: String(row.operationId),
+          closedEventId:
+            row.closedEventId === null ? null : String(row.closedEventId),
+        }
+      : undefined;
+  }
+  /**
+   * The issue was reopened after the operation closed it: that own closure no longer
+   * counts, so a later closure is provider closure. Append-only; a pending-proof hold
+   * becomes the ordinary closure hold and every other hold is kept.
+   */
+  supersedeDeliveryClosure(nodeId: string, operationId: string): void {
+    transaction(this.db, () => {
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO github_delivery_closure_supersessions (nodeId, operationId, supersededAt) VALUES (?, ?, ?)",
+        )
+        .run(nodeId, operationId, new Date().toISOString());
+      const hold = this.hold(nodeId);
+      if (
+        hold?.active &&
+        ["closure-read-unavailable", "closure-attribution-unproved"].includes(
+          String(hold.reason),
+        )
+      )
+        this.setSourceHold(nodeId, "closed");
+      this.db
+        .prepare(
+          "UPDATE domain_tasks SET version = version + 1 WHERE id = (SELECT taskId FROM github_external_issues WHERE nodeId = ?)",
+        )
+        .run(nodeId);
+    });
   }
 
   /** `deliveryClosure` marks the own-delivery closure flow, which sets its own hold. */
@@ -1047,9 +1138,11 @@ export class GitHubSourceStore {
       closed &&
       row.state === "open" &&
       !deliveryClosure &&
-      !this.db
-        .prepare("SELECT 1 FROM github_delivery_closures WHERE nodeId = ?")
-        .get(nodeId)
+      !(
+        this.db
+          .prepare(`SELECT ${effectiveOwnClosure("?")} AS present`)
+          .get(nodeId) as Row
+      ).present
     ) {
       // Closure after import holds the task whatever its readiness. Stricter text review
       // and a pending own-delivery closure proof (closure-read-unavailable) keep their hold.
@@ -1065,7 +1158,17 @@ export class GitHubSourceStore {
             )
             .run(taskId);
       }
-    } else if (Number(row.ready) === 1 && !ready)
+    } else if (
+      Number(row.ready) === 1 &&
+      !ready &&
+      // A pending or unattributed own-delivery closure proof keeps its explained hold.
+      !(
+        hold?.active &&
+        ["closure-read-unavailable", "closure-attribution-unproved"].includes(
+          String(hold.reason),
+        )
+      )
+    )
       this.setSourceHold(
         String(external.nodeId),
         external.observedState === "closed"

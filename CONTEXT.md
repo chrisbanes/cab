@@ -45,7 +45,8 @@ _Avoid_: Cancel or abort when referring to a stop
 
 **Closure hold**:
 The hold on an imported open task whose external item was closed without
-Ensemble delivering it. It is distinct from a project pause.
+Ensemble delivering it. It is distinct from a project pause. An own closure that a
+reopen superseded no longer exempts the task.
 _Avoid_: Paused when referring to an externally closed task
 
 **Task source**:

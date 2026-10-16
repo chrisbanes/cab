@@ -244,7 +244,13 @@ rule; reopening grants no readiness and keeps any closure hold. Switching a sour
 Skip reopens its provider-completed tasks under a closure hold. Under Treat closure
 as Done, a task the operator reopens while its issue stays closed is completed again
 once settled; switching the source to Skip keeps it open; no mode or switch
-deletes tasks or history. Harmless edits
+deletes tasks or history. Once an issue this task's delivery closed is reopened, that
+own closure is superseded: a later closure, by anyone but a new confirmed Ensemble
+closure, is provider closure in both modes. Supersession keeps the delivery history
+and any closure hold. When GitHub shows the issue closed but not provably by the
+task's own delivery, the task keeps the explained `closure-attribution-unproved`
+hold, never a pending read, and is never completed by that closure; reopening the
+issue supersedes the own closure, then the operator resolves the source hold. Harmless edits
 can be incorporated; materially changed scope holds work for clarification.
 
 ## Execution and recovery
@@ -1406,12 +1412,17 @@ comment/review/check identities also wake it; unchanged polls are deduplicated.
 
 Only proven own closure permits the retained lead's completion continuation. The
 service obtains a fresh closed-issue snapshot before open-only source reconciliation;
-merge attribution requires the exact PR in GitHub's latest ClosedEvent. When a
+merge attribution requires the exact PR in GitHub's latest ClosedEvent, and explicit
+issue closure requires a latest ClosedEvent with no closer. The proved ClosedEvent is
+pinned to the closing operation; a fresh read showing the issue open, or closed by a
+different ClosedEvent, proves a reopen and supersedes that own closure. When a
 readiness rule exists, current label readiness must still hold, and
 repository-selection proof must hold in every case. Field/search cases
 without that proof, independent holds and changed source text remain held. Explicit
 issue closure requires observed open before the effect; a concurrent independent
-closure between that read and write remains an attribution limit.
+closure between that read and write remains an attribution limit, as does a reopen
+and manual re-close with no closer that both happen before an explicit closure's
+first proof.
 
 On startup, after complete provider/source reconciliation and before scheduler
 admission, a queued inbox request may receive one durable fresh generation when

@@ -2707,26 +2707,32 @@ export class StandaloneService {
         const source = githubSources.issue(String(imported.nodeId));
         if (!source) continue;
         const config = domain.githubConfiguration(String(project.id));
+        const nodeId = String(imported.nodeId);
         try {
-          const proof = await deliveryCoordinator.inspectOwnClosure(
+          const result = await deliveryCoordinator.inspectOwnClosure(
             String(task.id),
             {
               repositoryId: String(source.repositoryId),
               nodeId: String(source.nodeId),
               number: Number(source.issueNumber),
             },
+            githubSources.deliveryClosure(nodeId),
           );
-          githubSources.recordDeliveryClosure(
-            String(project.id),
-            config.version,
-            proof.snapshot,
-            proof.operationId,
-            proof.closerPrNodeId,
-          );
+          if (result.kind === "reopened")
+            githubSources.supersedeDeliveryClosure(nodeId, result.operationId);
+          else if (result.kind === "attribution-unproved")
+            githubSources.recordDeliveryClosureAttributionUnproved(nodeId);
+          else
+            githubSources.recordDeliveryClosure(
+              String(project.id),
+              config.version,
+              result.snapshot,
+              result.operationId,
+              result.closerPrNodeId,
+              result.closedEventId,
+            );
         } catch {
-          githubSources.recordDeliveryClosureUnavailable(
-            String(imported.nodeId),
-          );
+          githubSources.recordDeliveryClosureUnavailable(nodeId);
         }
       }
   }

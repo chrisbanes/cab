@@ -12,7 +12,7 @@ export type Overrides = {
   execution?: string;
   codes?: string[];
   paused?: boolean;
-  closure?: "held" | "completed" | null;
+  closure?: "held" | "completed" | "unattributed" | null;
   reasons?: string[];
   readiness?: object | undefined;
   lead?: string | null;

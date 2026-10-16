@@ -164,6 +164,13 @@ test("taskStatusLine states recorded state, wait and lead", () => {
   );
   assert.equal(
     line({
+      task: { state: "open", ready: false },
+      source: { closure: "unattributed" },
+    }),
+    "Held · closure not attributed to Ensemble / Accountable project lead: Mira",
+  );
+  assert.equal(
+    line({
       task: { state: "done", ready: false },
       source: { closure: "completed" },
     }),
