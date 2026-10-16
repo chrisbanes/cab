@@ -655,7 +655,8 @@ Sidebar, TopBar, settings section navigation and the action-feedback rules above
   "Routing off". A TypeSafe failure during a task wakes the lead and is not shown
   in Settings. When a reference is configured but the service can’t use it, the
   notice reads "Routing can’t use its credential reference, so it can’t choose
-  assignees."
+  assignees." With no project lead, it says new tasks without an assignee wait
+  until you set a project lead.
 - **Recovery variants:** all four reuse the `127-assignment-recovery-relay` layout
   and stay read-only with Inspect execution as the only action. Evidence
   unavailable reads "We can’t show recovery details for this assignment." and says

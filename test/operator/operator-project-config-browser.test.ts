@@ -443,6 +443,22 @@ test("Routing names TypeSafe availability in words and who allocates when it can
       { exact: true },
     )
     .waitFor();
+  // Without a lead, unassigned tasks wait rather than being allocated.
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    leadProfileId: null,
+  });
+  await page.reload();
+  await page
+    .getByText(
+      "Routing is off. Every new task needs an assignee or waits until you set a project lead.",
+      { exact: true },
+    )
+    .waitFor();
 });
 
 test("Routing conflict keeps the checked candidates until the newer version is reviewed", async (_t, journey) => {
