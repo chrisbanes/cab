@@ -354,16 +354,21 @@ function capture() {
 async function setup(
   t: { after(fn: () => void): void },
   data = false,
-  { unpacked = true, auth = true } = {},
+  { unpacked = true, auth = true, bare = false } = {},
 ) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-service-"));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
   const stateDir = join(home, "Library", "Application Support", "Ensemble");
-  mkdirSync(join(stateDir, "auth"), { recursive: true, mode: 0o755 });
-  chmodSync(join(stateDir, "auth"), 0o700);
-  writeFileSync(join(stateDir, "config.yaml"), "legacy: pipeline\n");
+  // `bare` leaves only what a user has before a first install: their home, the release
+  // they unpacked and the auth file they made, and nothing the install itself creates.
+  mkdirSync(home, { recursive: true });
+  if (!bare || auth) {
+    mkdirSync(join(stateDir, "auth"), { recursive: true, mode: 0o755 });
+    chmodSync(join(stateDir, "auth"), 0o700);
+  }
+  if (!bare) writeFileSync(join(stateDir, "config.yaml"), "legacy: pipeline\n");
   const authFile = join(stateDir, "auth", "operator-auth.json");
   if (auth) writeFileSync(authFile, "{}\n", { mode: 0o600 });
   const releaseA = unpacked
@@ -380,7 +385,7 @@ async function setup(
     port: await freePort(),
   };
   const snapshots = join(stateDir, "snapshots");
-  mkdirSync(snapshots, { mode: 0o700 });
+  if (!bare) mkdirSync(snapshots, { mode: 0o700 });
   const launchd = new FakeLaunchd(snapshots, options.daemonsDir);
   launchd.home = home;
   mkdirSync(options.daemonsDir, { mode: 0o755 });
@@ -3431,7 +3436,9 @@ function changes(before: Map<string, string>, after: Map<string, string>) {
 }
 
 test("daemon mode commands write exactly the documented set of files and directories", async (t) => {
-  const f = await setup(t);
+  // Nothing the first install creates exists beforehand: no snapshots, data, launchd or log
+  // directory, no Library/Logs, and no config file beside the release.
+  const f = await setup(t, false, { bare: true });
   const root = dirname(f.home);
   const rel = (path: string) => relative(root, path);
   const launchd = join(f.stateDir, "launchd");
@@ -3439,6 +3446,8 @@ test("daemon mode commands write exactly the documented set of files and directo
   const staged = rel(f.staged);
   const nothing = { created: [], removed: [], changed: [] };
   let before = treeMap(root);
+  assert.equal(before.has(rel(join(f.stateDir, "snapshots"))), false);
+  assert.equal(before.has(rel(f.options.logDir)), false);
   const step = () => {
     const after = treeMap(root);
     const result = changes(before, after);
@@ -3447,8 +3456,10 @@ test("daemon mode commands write exactly the documented set of files and directo
   };
 
   // First run: the log directory (outside STATE, with its missing parents), the data and
-  // launchd directories, the install record and the staged plist, and nothing else; the
-  // lock, the staging directory and the record's temporary file are gone again.
+  // launchd directories, the install record and the staged plist, and nothing else. In
+  // particular no snapshots directory (daemon mode takes no snapshot), nothing in the
+  // LaunchAgents or daemons directory; the lock, the staging directory and the record's
+  // temporary file are gone again.
   assert.equal((await f.installDaemon()).code, 0);
   assert.deepEqual(step(), {
     created: [
@@ -3503,6 +3514,58 @@ test("daemon mode commands write exactly the documented set of files and directo
     removed: [record, staged].sort(),
     changed: [],
   });
+});
+
+test("daemon mode first install from a tarball into an empty home creates exactly its documented set", async (t) => {
+  // The user has a home and a tarball: no state directory, no auth file, no Library/Logs.
+  const f = await tarballSetup(t, { bare: true, auth: false });
+  const root = dirname(f.home);
+  const rel = (path: string) => relative(root, path);
+  assert.equal(existsSync(f.stateDir), false);
+  const before = treeMap(root);
+  const cli = new FakeCli();
+  cli.password = "new-password";
+  const result = await f.run({ mode: "daemon", open: false }, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(cli.prompts, ["New Ensemble operator password: "]);
+  const { created, removed, changed } = changes(before, treeMap(root));
+  assert.deepEqual([removed, changed], [[], []]);
+  const versions = rel(join(f.stateDir, "versions", "0.1.0"));
+  assert.deepEqual(
+    created.filter((path) => !path.startsWith(`${versions}/`)),
+    [
+      rel(join(f.home, "Library")),
+      rel(join(f.home, "Library", "Application Support")),
+      rel(join(f.home, "Library", "Logs")),
+      rel(f.options.logDir),
+      rel(f.stateDir),
+      rel(join(f.stateDir, "auth")),
+      rel(f.authFile),
+      rel(join(f.stateDir, "data")),
+      rel(join(f.stateDir, "launchd")),
+      rel(f.recordPath),
+      rel(f.staged),
+      rel(join(f.stateDir, "versions")),
+      versions,
+    ].sort(),
+  );
+  // The unpacked release is the tarball's own files and nothing else.
+  assert.deepEqual(
+    created
+      .filter((path) => path.startsWith(`${versions}/`))
+      .map((path) => path.slice(versions.length + 1))
+      .sort(),
+    [
+      "dist",
+      "dist/src",
+      "dist/src/standalone",
+      "dist/src/standalone/cli.js",
+      "manifest.json",
+      "node",
+      "node/bin",
+      "node/bin/node",
+    ],
+  );
 });
 
 /** Sets variables for the duration of `run`, as an installing shell would have them. */

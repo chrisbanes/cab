@@ -230,13 +230,16 @@ The printed commands quote paths that need it. Install exits 0 with `"mode":"dae
 `STATE/data`, `STATE/launchd` and the log directory (default `~/Library/Logs/Ensemble`,
 outside `STATE`, with any missing parents), and writes the staged plist and the install
 record in `STATE/launchd`; it also creates `STATE/auth/operator-auth.json` when that file
-is missing (after the password prompt) and, with a TARBALL, unpacks into
-`STATE/versions/<version>`. Transient files (`STATE/.<label>.lock`, a staging directory in
+is missing (after the password prompt) and, with a TARBALL, `STATE` itself (mode `0700`,
+with any missing parents) and the unpacked `STATE/versions/<version>`. It creates no
+`STATE/snapshots` (a daemon takes no snapshot, and the LaunchAgent flow creates that
+directory when it needs it). Transient files (`STATE/.<label>.lock`, a staging directory in
 `STATE/launchd`, the record's temporary file) are removed again. It creates no
 LaunchAgents directory and writes nothing under `/Library` or `/Library/LaunchDaemons`.
 launchd, not Ensemble, creates the log files, as the daemon account; that ownership is
 untested here and left to [#1149](https://github.com/chrisbanes/ensemble/issues/1149). A
-test asserts this set. The first
+test asserts this set, from a home that has only the release and the auth file, and from
+one that has only a tarball. The first
 command copies the staged file as it is at that moment (and follows a symbolic
 link at that path), and launchd then runs what the copied plist says, so run it
 soon after install and first check that `shasum -a 256` of the staged file equals

@@ -646,13 +646,16 @@ class Service {
   prepareDirectories(daemon = false) {
     const { stateDir, logDir, agentsDir } = this.options;
     for (const [path, name, exclusive] of [
-      // A daemon is staged in the launchd directory; nothing is written to the LaunchAgents one.
+      // A daemon is staged in the launchd directory, and takes no snapshot (upgrade, the
+      // only command that does, refuses it): neither directory is created for one.
       ...(daemon
         ? []
-        : ([[agentsDir, "LaunchAgents directory", false]] as const)),
+        : ([
+            [agentsDir, "LaunchAgents directory", false],
+            [join(stateDir, "snapshots"), "Snapshot directory", true],
+          ] as const)),
       [logDir, "Log directory", true],
       [this.dataDir, "Data directory", true],
-      [join(stateDir, "snapshots"), "Snapshot directory", true],
       [this.launchdDir, "launchd directory", true],
     ] as const) {
       if (!existsSync(path)) mkdirSync(path, { recursive: true, mode: 0o700 });
