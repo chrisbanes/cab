@@ -12,7 +12,7 @@ import {
 const test = browserSuite("operator-web-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { reenterHome } from "../fixtures/operator-first-run.js";
+import { expireWithRead, reenterHome } from "../fixtures/operator-first-run.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 async function screenshot(page: Page, name: string) {
   return captureBrowserEvidence(page, name);
@@ -403,7 +403,8 @@ for (const viewport of [
     // Reads the shell restarted after the failed sign-out settle before the session expires.
     await page.waitForLoadState("networkidle");
     f.advanceClock(60001);
-    await reenterHome(page);
+    // Any read after the expiry returns to sign-in, and the shell may already have made one.
+    await expireWithRead(page);
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     assert.equal(await page.getByRole("link", { name }).count(), 0);
     assert.deepEqual(external, []);
@@ -468,9 +469,12 @@ test("browser API guards, absolute expiry, successful logout and restart reject 
     await reenterHome(page);
     assert.equal((await response).status(), 200);
     await page.getByRole("region", { name: "Get Ensemble running" }).waitFor();
+    // Readiness and discovery reads that re-entering Home starts settle before the clock moves again.
+    await page.waitForLoadState("networkidle");
   }
   f.advanceClock(50001);
-  await reenterHome(page);
+  // Any read after the expiry returns to sign-in, and the shell may already have made one.
+  await expireWithRead(page);
   await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
   assert.equal(
     (

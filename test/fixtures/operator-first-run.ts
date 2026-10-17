@@ -101,3 +101,11 @@ export async function reenterHome(page: Page) {
   await page.getByRole("link", { name: "Overview", exact: true }).click();
   await page.waitForURL(/\/app$/);
 }
+
+/**
+ * Re-enters Home after the session expired. The re-read it starts returns the shell to sign-in,
+ * and the shell may get there first, so a step that no longer has its link is not a failure.
+ */
+export async function expireWithRead(page: Page) {
+  await reenterHome(page).catch(() => undefined);
+}
