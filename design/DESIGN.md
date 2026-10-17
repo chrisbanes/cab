@@ -2052,7 +2052,9 @@ as follows:
   for the selected destination: the lead's resume, receive or unavailable line, "This
   project has no lead to message yet.", or the comment policy (a reason from the
   server, or what posting does). The "Immutable reference" line sits below the box.
-  A task without a GitHub source always sends a lead message.
+  A task without a GitHub source always sends a lead message: its reply moves to the
+  lead with the lead's own draft and reference, and the GitHub draft and its approval are
+  kept apart (editing that draft withdraws the approval) for when the source returns.
 - Stop task submits the retained `/runtime/control/stop` form and lands on the
   Execution page, where the Stop observation and Resume live. Unsent reply text on
   the task page is not carried across that navigation; Keep running, Escape and

@@ -1266,8 +1266,12 @@ export function TaskWorkspace({
       changed();
     }
   }
-  // A task without a GitHub source can never post a comment, whatever was selected earlier.
-  const destination = data?.source ? state.destination : "lead";
+  // A task without a GitHub source has no GitHub destination: the stored pointer moves to the
+  // lead, so draft, notice, reference and approval all follow one destination. A reply that is
+  // in flight or unresolved keeps its own until it is checked. The GitHub draft is kept.
+  if (data && !data.source && state.destination === "github" && !state.frozen)
+    state.destination = "lead";
+  const destination = state.destination;
   async function send() {
     if (!state.draft.trim() || pending) return;
     if (state.frozen) {
@@ -1288,6 +1292,7 @@ export function TaskWorkspace({
         ...(state.reference ? { reference: state.reference } : {}),
       };
     } else {
+      if (!data?.source) return;
       input = {
         type: "comment.send",
         key: state.commentReview?.operationId ?? key,

@@ -2867,43 +2867,86 @@ test("An unconfirmed delivery refresh stays checkable after delivery stops apply
   assert.equal(bodies[0]!.key, bodies[1]!.key);
 });
 
-test("A task that loses its GitHub source mid-edit sends the draft to the lead, visibly", async (_t, j) => {
+test("A task that loses its GitHub source mid-edit moves to the lead with the lead's own draft and keeps its GitHub approval apart", async (_t, j) => {
   const fixture = await openFixture(j);
-  const a = await seedImportedCommentTask(fixture.f, "allow");
+  const a = await seedImportedCommentTask(fixture.f, "approval");
+  const sourceId = fixture.f.service
+    .taskReview()
+    .sources(a.taskId)
+    .at(-1)!.sourceId;
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const box = page.getByLabel("Editable reply");
+  const post = page.getByRole("button", { name: "Post comment", exact: true });
+  // A contextual lead draft with its immutable reference, then an approved GitHub comment.
+  await page.getByRole("button", { name: "Ask lead about brief" }).click();
+  const leadText = await box.inputValue();
+  assert.notEqual(leadText, "");
   await page.getByRole("button", { name: "Post GitHub comment" }).click();
-  await page.getByLabel("Editable reply").fill("Exact comment body");
+  await box.fill("Original body");
   await page
-    .getByRole("button", { name: "Post comment", exact: true })
-    .waitFor();
+    .getByRole("button", { name: "Review exact GitHub comment" })
+    .click();
+  await page.getByRole("button", { name: "Confirm exact comment" }).click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("button")].some(
+      (b) => b.textContent === "Post comment" && !b.disabled,
+    ),
+  );
+
+  // The source disappears from the read: one destination, the lead, with the lead's draft.
+  let hasSource = false;
   await page.route(
     (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
     async (route) => {
       const response = await route.fetch();
       const json = await response.json();
-      json.data.source = null;
+      if (!hasSource) json.data.source = null;
       await route.fulfill({ response, json });
     },
   );
   await refreshTask(page, a.taskId);
-  // The destination, its sentence and the send label all say lead; nothing is posted.
   await page.getByRole("button", { name: "Send to task lead" }).waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: "Post comment" }).count(),
-    0,
-  );
   assert.equal(
     await page.getByRole("button", { name: "Post GitHub comment" }).count(),
     0,
   );
-  assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
-    "Exact comment body",
-  );
+  assert.equal(await box.inputValue(), leadText);
   assert.deepEqual(await sentencesAboveReply(page), [
     `P:${leadReceivesNotice("Task lead")}`,
   ]);
-  assert.deepEqual(commands, []);
+  // Choosing the destination that is already selected changes nothing.
+  await page.getByRole("button", { name: "Message task lead" }).click();
+  assert.equal(await box.inputValue(), leadText);
+
+  // The source returns: the GitHub draft is as it was, and editing it withdraws its approval.
+  hasSource = true;
+  await refreshTask(page, a.taskId);
+  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  assert.equal(await box.inputValue(), "Original body");
+  assert.equal(await post.isEnabled(), true);
+  await box.fill("Original body, edited");
+  assert.equal(await post.isDisabled(), true);
+  assert.equal(
+    await page.getByRole("button", { name: "Confirm exact comment" }).count(),
+    0,
+  );
+
+  // Lost again: Send posts the lead message with the lead text and its own reference.
+  hasSource = false;
+  await refreshTask(page, a.taskId);
+  await page.getByRole("button", { name: "Send to task lead" }).click();
+  await page.getByText(/^Sent/).first().waitFor();
+  const sent = commands as {
+    type: string;
+    message?: string;
+    reference?: unknown;
+  }[];
+  assert.deepEqual(
+    sent
+      .filter((c) => c.type === "message" || c.type === "comment.send")
+      .map((c) => [c.type, c.message, c.reference]),
+    [["message", leadText, { sourceId }]],
+  );
   await page.unrouteAll({ behavior: "wait" });
 });
