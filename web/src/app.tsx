@@ -465,7 +465,7 @@ function knownRoute(pathname: string) {
  * URL it was recorded for is a traversal to the same entry.
  */
 const entryUrls = new Map<string, string>();
-const currentUrl = () => location.pathname + location.search + location.hash;
+const currentUrl = () => location.href;
 const ownsState = () => {
   const key = (history.state as { navKey?: string } | null)?.navKey;
   return key !== undefined && entryUrls.get(key) === currentUrl();
@@ -751,7 +751,8 @@ export function App() {
   useEffect(() => {
     if (pathname !== addressPath) {
       history.replaceState({ ...history.state }, "", "/app");
-      if (history.state?.navKey) entryUrls.set(history.state.navKey, "/app");
+      if (history.state?.navKey)
+        entryUrls.set(history.state.navKey, currentUrl());
       setPath("/app");
     }
   }, [pathname, addressPath]);

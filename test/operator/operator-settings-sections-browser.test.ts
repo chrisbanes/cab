@@ -713,6 +713,55 @@ test("an entry that copies a saved position is a new entry, and its source still
   assert.deepEqual(await focusLog(page), ["CLI credentials"]);
 });
 
+test("Forward to an entry the page landed on lands again after passing an entry with no target", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  await setHash(page, "profiles");
+  onScreen(await landed(page, "H2", "Profiles"));
+  await page.goBack();
+  await page.waitForURL(/\/app\/settings$/);
+  await nextFrames(page);
+  // The reader moves on before coming forward again.
+  await page.getByRole("link", { name: "Create project" }).focus();
+  await trackFocus(page);
+  await page.goForward();
+  onScreen(await landed(page, "H2", "Profiles"));
+  assert.deepEqual(await focusLog(page), ["Profiles"]);
+});
+
+test("the first entry and a natively made entry restore their own saved positions", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  const click = (name: string) =>
+    nav(page)
+      .getByRole("link", { name, exact: true })
+      .evaluate((a) => (a as HTMLElement).click());
+  // The entry the page was opened on: leave it through a link from 300px down.
+  await page.evaluate(() => scrollTo(0, 300));
+  await click("Profiles");
+  await landed(page, "H2", "Profiles");
+  await page.goBack();
+  await page.waitForURL(/\/app\/settings$/);
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(await page.evaluate(() => scrollY), 300);
+  // An entry made by a native fragment change, left through a link from 200px down.
+  await setHash(page, "routing");
+  await landed(page, "H2", "Routing");
+  await page.evaluate(() => scrollTo(0, 200));
+  await click("CLI credentials");
+  await landed(page, "H2", "CLI credentials");
+  await trackFocus(page);
+  await page.goBack();
+  await page.waitForURL(/#routing$/);
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(await page.evaluate(() => scrollY), 200);
+  assert.deepEqual(await focusLog(page), []);
+});
+
 for (const fragment of ["bogus", "readiness-unknown"])
   test(`an unknown Settings fragment #${fragment} leaves the page at the top`, async (_t, journey) => {
     const { page, web } = await startSettings(journey, "/app/settings");

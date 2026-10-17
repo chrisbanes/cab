@@ -181,7 +181,12 @@ export function useFragmentLanding(ready: boolean) {
       location.pathname,
       location.hash,
     );
-    if (decision.action === "top") return;
+    // Nothing to land on here: forget an earlier landing, so coming back to its entry
+    // (Forward after Back through this one) lands again.
+    if (decision.action === "top") {
+      landedIdentity = null;
+      return;
+    }
     landedIdentity = identity;
     landedHere.current = true;
     if (decision.action === "land") return land(decision.target);
