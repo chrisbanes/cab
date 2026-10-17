@@ -504,6 +504,19 @@ function rejectManaged(env: NodeJS.ProcessEnv) {
     );
 }
 
+/**
+ * The options a command takes, besides the always-allowed ones: a write command's `flags`, and for
+ * every other command the options its usage line names. Undefined for a key that is no command.
+ */
+export function declaredOptions(key: string): readonly string[] | undefined {
+  const write = writeCommands.get(key);
+  if (write) return write.flags;
+  const usage = browseCommands.get(key)?.usage ?? BUILTIN_USAGE.get(key);
+  return usage === undefined ? undefined : usageOptions(usage);
+}
+const usageOptions = (usage: string) =>
+  [...usage.matchAll(/(?<![\w-])--([a-z][a-z-]*)/g)].map((m) => m[1] ?? "");
+
 async function run(
   positionals: string[],
   values: Values,
@@ -515,6 +528,9 @@ async function run(
   // `logs` and `doctor` are the only single-word commands.
   const singleWord = area === "logs" || area === "doctor";
   const key = singleWord ? area : `${area} ${action}`;
+  // Before any handler runs, so no command acts on an option it does not take.
+  const declared = declaredOptions(key);
+  if (declared) rejectUnusedFlags(values, declared);
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
@@ -654,7 +670,6 @@ async function run(
   const write = writeCommands.get(key);
   if (write) {
     expectArgs(positionals, 2 + write.positionals);
-    rejectUnusedFlags(values, write.flags);
     rejectManaged(deps.env);
     let session: Awaited<ReturnType<typeof connect>> | undefined;
     const output = await write.run({

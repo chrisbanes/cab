@@ -275,7 +275,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    `operation get` and the exact retry. Exit codes: 2 invalid input, 3
    authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
-   outcome, 7 unsupported service. Write commands reject flags they do not use. Every
+   outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted. Every
    human error of the operator commands ends with one `Fix:` line on stderr
    (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors (the
    message, their own command lines and the same line) but keep their own lifecycle
@@ -322,7 +322,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    `execution list`, `execution get` and `logs` print their two capture notes (tool
    observation is incomplete; reasoning is not collected) only with `--verbose`, once
    each, and a `More:` or `Resume:` line keeps the flag. `coverage.notes` in JSON
-   carries them either way. Write commands refuse `--verbose` (`usage`, exit 2).
+   carries them either way. Only those three commands take `--verbose`; any other refuses it.
 
    Capture is on by default (`enhanced`) for task-bound executions; `project.configure`
    with `diagnosticCapture: "baseline"` (shown by `project get`) reduces later
