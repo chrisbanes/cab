@@ -2624,7 +2624,7 @@ export const questionReadSchema = z
   })
   .strict();
 export type QuestionRead = z.infer<typeof questionReadSchema>;
-export const inboxItemSchema = z
+export const taskInboxItemSchema = z
   .object({
     id: z.string().min(1).max(128),
     kind: z.enum(["question", "approval", "intervention"]),
@@ -2647,6 +2647,30 @@ export const inboxItemSchema = z
     conversation: z.string().max(512).nullable(),
   })
   .strict();
+/**
+ * A runtime whose automatic restarts are exhausted. Derived on every read from in-memory
+ * restart state, never stored, and carries no task or project field.
+ */
+export const runtimeInboxItemSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    kind: z.literal("runtime"),
+    urgency: z.literal(0),
+    /** The wall time of exhaustion, equal to `since`. */
+    createdAt: time,
+    harness: executionHarnessSchema,
+    since: time,
+    headline: z.string().max(200),
+    reason: z.string().max(200),
+    lastFailure: runtimeRestartFailureSchema,
+    attempts: z.array(runtimeRestartAttemptSchema).max(3),
+    destination: z.string().max(512),
+  })
+  .strict();
+export const inboxItemSchema = z.union([
+  taskInboxItemSchema,
+  runtimeInboxItemSchema,
+]);
 export const inboxReadSchema = z
   .object({
     data: z
@@ -2660,6 +2684,8 @@ export const inboxReadSchema = z
     observedAt: time,
   })
   .strict();
+export type TaskInboxItem = z.infer<typeof taskInboxItemSchema>;
+export type RuntimeInboxItem = z.infer<typeof runtimeInboxItemSchema>;
 export type InboxItem = z.infer<typeof inboxItemSchema>;
 // Fixed strict command envelope maxima; question JSON independently remains <=256 KiB.
 export const questionCommandRawLimit =

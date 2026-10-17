@@ -5,6 +5,15 @@ import {
   waitCodes,
   waitLabels,
 } from "../../src/operator/wait-reasons.js";
+import type { RuntimeRestart } from "../../src/operator/contracts.js";
+import {
+  failureText,
+  readinessFix,
+  restartLine,
+  settingsFix,
+  unavailableAlert,
+} from "../../src/operator/runtime-restart-copy.js";
+import { harnessReason } from "../../web/src/execution-runtime.js";
 import {
   clockLabel,
   codeSentence,
@@ -125,4 +134,83 @@ test("every wait label reads right mid-sentence, keeping proper nouns", () => {
   assert.equal(midSentence("Claude"), "Claude");
   assert.equal(midSentence("Ensemble is paused"), "Ensemble is paused");
   assert.equal(midSentence(""), "");
+});
+
+test("restart copy is one wording for pending, exhausted and no schedule", () => {
+  const nextAt = new Date(2026, 9, 17, 14, 32).getTime();
+  const pending = (attempt: number): RuntimeRestart => ({
+    state: "pending",
+    attempt,
+    nextAt,
+    lastFailure: "exited",
+    attempts: [],
+  });
+  const exhausted: RuntimeRestart = {
+    state: "exhausted",
+    since: nextAt,
+    lastFailure: "exited",
+    attempts: [],
+  };
+  for (const attempt of [1, 2, 3] as const) {
+    const line = `Restarting · attempt ${attempt} of 3 · next at 14:32`;
+    assert.equal(restartLine(pending(attempt)), line);
+    assert.equal(
+      unavailableAlert({ harness: "codex", restart: pending(attempt) }),
+      `Codex runtime unavailable — ${line}`,
+    );
+    assert.equal(
+      harnessReason({
+        harness: "codex",
+        enabled: true,
+        policy: null,
+        settings: null,
+        state: "unavailable",
+        since: 1,
+        restart: pending(attempt),
+      }),
+      line,
+    );
+    assert.equal(
+      readinessFix("codex", pending(attempt)),
+      `${line}; if it stays unavailable, turn Codex off and on in Settings → Runtime, or restart the service`,
+    );
+    assert.equal(settingsFix(pending(attempt)), line);
+  }
+  assert.equal(restartLine(exhausted), "Retries exhausted");
+  assert.equal(
+    unavailableAlert({ harness: "claude", restart: exhausted }),
+    "Claude runtime unavailable — Retries exhausted; turn it off and on in Settings → Runtime, or restart the service",
+  );
+  assert.equal(
+    settingsFix(exhausted),
+    "Retries exhausted · turn it off and on, or restart the service",
+  );
+  assert.equal(
+    readinessFix("claude", exhausted),
+    "Retries exhausted; turn Claude off and on in Settings → Runtime, or restart the service",
+  );
+  // No schedule: today's text.
+  assert.equal(
+    unavailableAlert({ harness: "codex" }),
+    "Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+  );
+  assert.equal(
+    settingsFix(undefined),
+    "Turn it off and on, or restart the service",
+  );
+  assert.equal(
+    readinessFix("codex", undefined),
+    "Turn Codex off and on in Settings → Runtime, or restart the service",
+  );
+  assert.deepEqual(
+    (
+      ["exited", "start-failed", "start-timed-out", "spawn-failed"] as const
+    ).map(failureText),
+    [
+      "The runtime process exited",
+      "The runtime failed to start",
+      "The runtime did not start in time",
+      "The runtime could not be launched",
+    ],
+  );
 });

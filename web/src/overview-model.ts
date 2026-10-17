@@ -1,5 +1,6 @@
-import type {
-  InboxItem,
+import {
+  executionHarnessLabels,
+  type InboxItem,
   QuestionRead,
   TaskListSummary,
   Workspace,
@@ -49,7 +50,13 @@ export function orderAttention(
 ) {
   const uncertain = new Set(tasks?.filter(isUncertain).map((t) => t.id));
   const rank = (item: InboxItem) =>
-    item.kind !== "intervention" ? 2 : uncertain.has(item.taskId) ? 0 : 1;
+    item.kind === "runtime"
+      ? -1
+      : item.kind !== "intervention"
+        ? 2
+        : uncertain.has(item.taskId)
+          ? 0
+          : 1;
   return [...items].sort(
     (a, b) =>
       rank(a) - rank(b) ||
@@ -59,7 +66,9 @@ export function orderAttention(
 }
 
 export const requestPlace = (item: InboxItem) =>
-  `${item.projectName ?? "Unavailable project"} / ${item.taskTitle ?? "Unavailable task"}`;
+  item.kind === "runtime"
+    ? `${executionHarnessLabels[item.harness]} runtime`
+    : `${item.projectName ?? "Unavailable project"} / ${item.taskTitle ?? "Unavailable task"}`;
 
 /** The dashed row after the cards: how many requests remain and the first two by name. */
 export function furtherRequests(items: readonly InboxItem[], shown: number) {

@@ -238,7 +238,8 @@ export function TaskBoard({
   const counts = columnCounts(tasks);
   const firstRequest = new Map<string, InboxItem>();
   for (const item of requests.data?.items ?? [])
-    if (!firstRequest.has(item.taskId)) firstRequest.set(item.taskId, item);
+    if (item.kind !== "runtime" && !firstRequest.has(item.taskId))
+      firstRequest.set(item.taskId, item);
   const setSelected = (next: number) => {
     updateSelected(next);
     history.replaceState(

@@ -416,8 +416,10 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      assignment version), which resumes the lead of an open task subject to
      admission, pause, Stop, dependency and capacity holds. A done task is never
      reopened.
-   - `inbox list [--kind question|approval|intervention] [--project ID] [--limit N]
-     [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`.
+   - `inbox list [--kind question|approval|intervention|runtime] [--project ID] [--limit N]
+     [--cursor TOKEN]` pages server-side (at most 100). Interventions name `task get`. A
+     `runtime` row (an execution runtime whose automatic restarts are exhausted) names the
+     runtime and `runtime list`; it has no task, so `--project` excludes it.
    - `question get TASK_ID INTERACTION_ID` prints the form, marks recommended and
      preselected options as information only and shows the answers-file shape:
      `{"QUESTION_ID": {"optionIds": [...], "text": "..."}}`. `question answer TASK_ID

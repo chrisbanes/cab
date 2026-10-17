@@ -3,6 +3,8 @@ import { useCallback, useState, type ReactNode } from "react";
 import {
   questionReadSchema,
   type InboxItem,
+  type RuntimeInboxItem,
+  type TaskInboxItem,
   type Session,
   type TaskListSummary,
   type Workspace,
@@ -135,7 +137,7 @@ export function NeedsYou({
             <RequestCard
               key={item.id}
               item={item}
-              task={byId.get(item.taskId)}
+              task={item.kind === "runtime" ? undefined : byId.get(item.taskId)}
               operator={operator}
               observedAt={requests.fetchedAt}
               onRecorded={() => {
@@ -166,6 +168,42 @@ export function NeedsYou({
   );
 }
 
+/** A runtime whose restarts ran out: the one card with no task, linking to runtime settings. */
+function RuntimeCard({ item }: { item: RuntimeInboxItem }) {
+  const Icon = requestKindIcons.runtime,
+    headline = `overview-${item.id}-headline`;
+  return (
+    <li
+      className="overview-card"
+      data-request-id={item.id}
+      data-kind="runtime"
+      data-tone="risk"
+    >
+      <div className="overview-card-top">
+        <span className="overview-badge" data-tone="risk">
+          <Icon aria-hidden="true" />
+          Runtime
+        </span>
+        <span className="metadata muted identifier">
+          {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, Date.now())}
+        </span>
+      </div>
+      <h3 className="small-heading" id={headline}>
+        {item.headline}
+      </h3>
+      <p className="metadata muted">{item.reason}</p>
+      <ActionLink
+        variant="secondary"
+        href={requestHref(item)}
+        aria-describedby={headline}
+        className="overview-respond"
+      >
+        {requestActionLabel(item)}
+      </ActionLink>
+    </li>
+  );
+}
+
 function RequestCard({
   item,
   task,
@@ -179,6 +217,7 @@ function RequestCard({
   observedAt: number | null;
   onRecorded: () => void;
 }) {
+  if (item.kind === "runtime") return <RuntimeCard item={item} />;
   const evidence = task && interventionEvidence(task),
     uncertain =
       item.kind === "intervention" && Boolean(evidence?.ownershipHeld),
@@ -284,7 +323,7 @@ function RequestCard({
 }
 
 type CardParts = {
-  item: InboxItem;
+  item: TaskInboxItem;
   operator: OverviewOperator;
   observedAt: number | null;
   head: (title: string | null) => ReactNode;

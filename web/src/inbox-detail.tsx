@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, type ComponentProps } from "react";
 import {
   taskSchema,
-  type InboxItem,
+  type RuntimeInboxItem,
   type Session,
+  type TaskInboxItem,
   type TaskRead,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { failureText } from "../../src/operator/runtime-restart-copy.js";
 import { ActionLink, Button } from "./components.js";
+import { clockLabel } from "./presentation.js";
 import { holdNotices, requestActionLabel } from "./inbox-presentation.js";
 import { QuestionResponse } from "./question-response.js";
 import { useOperatorResource } from "./resource.js";
@@ -86,7 +89,7 @@ export function ApprovalFacts({
   item,
 }: {
   task: TaskRead["data"];
-  item: InboxItem;
+  item: TaskInboxItem;
 }) {
   const approval = task.approvals.find(
     (a) => a.interactionId === (item.interactionId ?? item.id),
@@ -119,7 +122,7 @@ export function ApprovalDetail({
   item,
   resource,
 }: {
-  item: InboxItem;
+  item: TaskInboxItem;
   /** The Inbox's one read of this task; each poll or Refresh rereads the holds. */
   resource: TaskResource;
 }) {
@@ -172,11 +175,45 @@ export function ApprovalDetail({
 }
 
 /** An intervention in the Inbox: the recorded reason and its attention code's action. */
-export function InterventionDetail({ item }: { item: InboxItem }) {
+export function InterventionDetail({ item }: { item: TaskInboxItem }) {
   return (
     <div className="inbox-approval">
       <div className="inbox-approval-body">
         <p>Review the exact execution state before acting.</p>
+      </div>
+      <div className="inbox-decision">
+        <ActionLink href={item.destination}>
+          {requestActionLabel(item)}
+        </ActionLink>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A runtime whose automatic restarts ran out: why, each attempt and its outcome, and the only
+ * action, which opens the runtime's settings. It has no task, so no task read or context.
+ */
+export function RuntimeDetail({ item }: { item: RuntimeInboxItem }) {
+  return (
+    <div className="inbox-approval">
+      <div className="inbox-approval-body">
+        <p>{item.reason}</p>
+        <p>{failureText(item.lastFailure)}</p>
+        {item.attempts.length > 0 && (
+          <>
+            <h3 className="small-heading">Restart attempts</h3>
+            <ol className="inbox-attempts">
+              {item.attempts.map((attempt) => (
+                <li key={attempt.attempt}>
+                  Attempt {attempt.attempt} · {clockLabel(attempt.at)} ·{" "}
+                  {attempt.outcome === "started" ? "Started" : "Failed"}
+                  {attempt.failure && ` — ${failureText(attempt.failure)}`}
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
       </div>
       <div className="inbox-decision">
         <ActionLink href={item.destination}>

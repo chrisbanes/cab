@@ -19,11 +19,13 @@ const toggleRemedy =
 
 type Harness = HarnessStatus["harness"];
 
+export const retriesExhausted = "Retries exhausted";
+
 /** "Restarting · attempt 2 of 3 · next at 14:32", or "Retries exhausted". */
 export const restartLine = (restart: RuntimeRestart) =>
   restart.state === "pending"
     ? `Restarting · attempt ${restart.attempt} of 3 · next at ${clockLabel(restart.nextAt)}`
-    : "Retries exhausted";
+    : retriesExhausted;
 
 const failureTexts: Record<RuntimeRestartFailure, string> = {
   exited: "The runtime process exited",
@@ -74,3 +76,10 @@ export function readinessFix(
  */
 export const unavailableNote = (harness: Harness) =>
   `The ${executionHarnessLabels[harness]} runtime is unavailable. Ensemble restarts it automatically after ${restartScheduleText}; if those retries run out, ${toggleRemedy}.`;
+
+/** The Inbox item for a runtime whose retries ran out (SPEC attention inbox). */
+export const runtimeInboxHeadline = (harness: Harness) =>
+  `${executionHarnessLabels[harness]} runtime unavailable`;
+export const runtimeInboxReason = "Restart retries exhausted";
+export const runtimeSettingsPath = "/app/settings/runtime";
+export const runtimeSettingsAction = "Open runtime settings";
