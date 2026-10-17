@@ -39,13 +39,14 @@ import {
   columnCounts,
   filterTasks,
   parseTaskFilters,
+  capacityNotice,
   taskColumn,
   taskDetailHref,
   taskFiltersUrl,
   isUncertain,
   operatorNext,
   readyButBlocked,
-  taskNext,
+  nextActor,
   taskReasons,
   visibleColumns,
   type TaskAggregate,
@@ -91,6 +92,8 @@ const identity = (task: TaskListSummary) =>
 const leadName = (task: TaskListSummary) =>
   task.lead?.name ?? (task.lead ? "Name unavailable" : null);
 function TaskFacts({ task }: { task: TaskListSummary }) {
+  // The Next line names who acts; a task nobody must act on shows none (the task strip still says so).
+  const next = nextActor(task.attention.codes, taskColumn(task));
   return (
     <>
       {taskReasons(task).map((reason) => (
@@ -98,12 +101,14 @@ function TaskFacts({ task }: { task: TaskListSummary }) {
           {reason}
         </p>
       ))}
-      <p
-        className="body task-next"
-        data-operator={operatorNext(task) ? "true" : undefined}
-      >
-        {taskNext(task)}
-      </p>
+      {next.code && (
+        <p
+          className="body task-next"
+          data-operator={next.operator ? "true" : undefined}
+        >
+          {next.text}
+        </p>
+      )}
     </>
   );
 }
@@ -405,7 +410,8 @@ export function TaskViews({
   const update = (patch: Partial<TaskFilters>) =>
     navigate(taskFiltersUrl(base, { ...filters, ...patch }));
   const all = state.data?.tasks ?? [],
-    tasks = filterTasks(all, filters, projectId);
+    tasks = filterTasks(all, filters, projectId),
+    notice = capacityNotice(tasks);
   const project = workspace?.data.projects.find((p) => p.id === projectId),
     scope = projectId || filters.project;
   const work = (
@@ -423,6 +429,7 @@ export function TaskViews({
         refresh={refresh}
         pending={state.pending}
       />
+      {notice && <p className="metadata muted work-capacity">{notice}</p>}
       {/* Home with no project shows the getting-started checklist instead. */}
       {state.data &&
         !tasks.length &&

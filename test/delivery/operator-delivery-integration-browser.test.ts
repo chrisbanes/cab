@@ -266,16 +266,16 @@ async function sharedDestinations(
     if (done) assert.match(await task.innerText(), /Done/);
     if (route !== "/app") {
       await page.getByRole("button", { name: "Board", exact: true }).click();
-      const status = await page
-        .getByRole("toolbar", { name: "Board columns" })
-        .getByRole("button")
-        .filter({ hasText: /· 1$/ })
-        .first()
-        .innerText();
-      await page
-        .getByRole("toolbar", { name: "Board columns" })
-        .getByRole("button", { name: status, exact: true })
-        .click();
+      // The column chips exist only below the shell breakpoint; wider boards show every column.
+      if ((page.viewportSize()?.width ?? 0) < 1121) {
+        const bar = page.getByRole("toolbar", { name: "Board columns" });
+        const status = await bar
+          .getByRole("button")
+          .filter({ hasText: /· 1$/ })
+          .first()
+          .innerText();
+        await bar.getByRole("button", { name: status, exact: true }).click();
+      }
       try {
         await task
           .getByRole("link", { name: "Release delivery", exact: true })

@@ -9,6 +9,7 @@ import {
 import {
   activeColumns,
   attentionCandidate,
+  capacityNotice,
   columnCounts,
   columns,
   filterTasks,
@@ -178,6 +179,50 @@ test("the next actor is derived from recorded attention and state only", () => {
   const columnOnly = summary({ execution: "uncertain" });
   assert.equal(taskNext(columnOnly), "Next: you · inspect execution");
   assert.equal(attentionCandidate([summary(), columnOnly]), columnOnly);
+});
+
+test("capacity is stated once for the visible work, never per task", () => {
+  const rechecks = "it rechecks as turns finish.";
+  assert.equal(capacityNotice([summary(), summary({ globalUsage: 9 })]), null);
+  assert.equal(capacityNotice([]), null);
+  const globalFull = summary({ globalUsage: 10 });
+  assert.equal(
+    capacityNotice([summary(), globalFull]),
+    `Capacity is full; ${rechecks}`,
+  );
+  // Only a project limit is full: the notice names each such project once, in first-seen order.
+  const a = summary({ projectUsage: 10, projectName: "Alpha" });
+  assert.equal(
+    capacityNotice([summary({ projectName: "Beta" }), a]),
+    `Capacity is full for Alpha; ${rechecks}`,
+  );
+  const b = summary({ projectUsage: 10, projectName: "Beta" });
+  assert.equal(
+    capacityNotice([b, summary({ projectUsage: 10, projectName: "Beta" }), a]),
+    `Capacity is full for Beta, Alpha; ${rechecks}`,
+  );
+  assert.equal(
+    capacityNotice([summary({ projectUsage: 10, projectName: null })]),
+    `Capacity is full for Project name unavailable; ${rechecks}`,
+  );
+  // The global limit wins over a project limit.
+  assert.equal(
+    capacityNotice([a, globalFull]),
+    `Capacity is full; ${rechecks}`,
+  );
+  // Finished work no longer waits on capacity.
+  assert.equal(
+    capacityNotice([
+      summary({ state: "done", globalUsage: 10 }),
+      summary({ state: "cancelled", projectUsage: 10 }),
+    ]),
+    null,
+  );
+  for (const full of [globalFull, a])
+    assert.equal(
+      taskReasons(full).some((r) => /Capacity is full/.test(r)),
+      false,
+    );
 });
 
 test("only Ready work that admission holds keeps its Ready label in Waiting", () => {
