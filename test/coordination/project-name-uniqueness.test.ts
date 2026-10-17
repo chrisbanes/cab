@@ -240,3 +240,37 @@ test("replaying a guided create after a same-named project exists returns its re
   assert.deepEqual(await f.domain.createProject(command), first);
   assert.equal(f.count(), 2);
 });
+
+test("names that differ only by Unicode case folding are the same name", () => {
+  const f = fixture();
+  f.create("\u039f\u03a3");
+  assert.throws(() => f.create("\u03bf\u03c3"), taken("\u039f\u03a3"));
+  assert.throws(() => f.create("\u03bf\u03c2"), taken("\u039f\u03a3"));
+  f.create("Stra\u00dfe");
+  assert.throws(() => f.create("STRASSE"), taken("Stra\u00dfe"));
+  assert.throws(() => f.create("STRA\u1e9eE"), taken("Stra\u00dfe"));
+  f.create("\u0130");
+  f.create("I");
+  assert.equal(f.count(), 4);
+});
+
+test("rows stored before the fold still save, and a rename into a folded collision is refused", () => {
+  const f = fixture();
+  const a = f.create("First");
+  const b = f.create("Second");
+  // Distinct under the old lower-case key, the same name under the fold.
+  f.db
+    .prepare("UPDATE domain_projects SET name = ? WHERE id = ?")
+    .run("\u039f\u03a3", a);
+  f.db
+    .prepare("UPDATE domain_projects SET name = ? WHERE id = ?")
+    .run("\u03bf\u03c3", b);
+  f.configure(b, { instructions: "Still editable" });
+  f.configure(b, { name: "\u03bf\u03c2" });
+  assert.equal(f.domain.project(b).name, "\u03bf\u03c2");
+  const c = f.create("Third");
+  assert.throws(
+    () => f.configure(c, { name: "\u039f\u03c3" }),
+    taken("\u039f\u03a3"),
+  );
+});

@@ -19,8 +19,7 @@ const idRungs = [8, 12, 16, 20, 24, 28, 32] as const;
  * call; nothing is stored. Compute it over all projects, never a filtered subset, so a
  * project reads the same on every surface.
  *
- * Invariant: within a group of projects whose names match (ignoring case, spacing and Unicode
- * composition) every label is distinct under that same comparison, and a unique name has no
+ * Invariant: within a group of projects whose names match (`projectNameKey`) every label is distinct under that same comparison, and a unique name has no
  * suffix. A lead's name is the suffix when it is unique in the group; every other project
  * gets an ID prefix, and the prefix grows by rungs until the whole group is distinct (a lead
  * named like another project's ID prefix included), ending at the full ID.

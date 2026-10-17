@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { projectNameKey } from "../../src/core/project-names.js";
 import { projectLabels } from "../../src/operator/project-labels.js";
 
 const id = (n: number, tail = "0000-4000-8000-000000000000") =>
@@ -228,7 +229,23 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
     seed = (seed * 1103515245 + 12345) & 0x7fffffff;
     return seed % n;
   };
-  const names = ["Atlas", "atlas", " ATLAS ", "Café", "Café", "Relay", "Solo"];
+  const names = [
+    "Atlas",
+    "atlas",
+    " ATLAS ",
+    "Caf\u00e9",
+    "Cafe\u0301",
+    "Relay",
+    "Solo",
+    "\u039f\u03a3",
+    "\u03bf\u03c3",
+    "\u03bf\u03c2",
+    "Stra\u00dfe",
+    "STRASSE",
+    "\u0130",
+    "I",
+    "\u0131",
+  ];
   const leadNames = ["Mira", "mira", "Jonas", "22222222", "aaaaaaaa", null];
   const prefixes = [
     "aaaaaaaa",
@@ -256,12 +273,12 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
     const labels = projectLabels(projects, profiles);
     const byKey = new Map<string, typeof projects>();
     for (const p of projects) {
-      const key = p.name.trim().normalize("NFC").toLowerCase();
+      const key = projectNameKey(p.name);
       byKey.set(key, [...(byKey.get(key) ?? []), p]);
     }
     for (const [, group] of byKey) {
       const texts = group.map((p) =>
-        (labels.get(p.id)?.text ?? "").trim().normalize("NFC").toLowerCase(),
+        projectNameKey(labels.get(p.id)?.text ?? ""),
       );
       assert.equal(
         new Set(texts).size,
@@ -272,4 +289,23 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
         assert.equal(labels.get(group[0]!.id)?.suffix, null);
     }
   }
+});
+
+test("names that differ only by Unicode case folding share a group, and a unique fold has no suffix", () => {
+  const projects = [
+    { id: id(1), name: "\u039f\u03a3", leadProfileId: mira.id },
+    { id: id(2), name: "\u03bf\u03c3", leadProfileId: jonas.id },
+    { id: id(3), name: "Stra\u00dfe", leadProfileId: mira.id },
+    { id: id(4), name: "STRASSE", leadProfileId: jonas.id },
+    { id: id(5), name: "\u0130", leadProfileId: mira.id },
+    { id: id(6), name: "I", leadProfileId: mira.id },
+  ];
+  assert.deepEqual(texts(projects), [
+    "\u039f\u03a3 \u00b7 Mira",
+    "\u03bf\u03c3 \u00b7 Jonas",
+    "Stra\u00dfe \u00b7 Mira",
+    "STRASSE \u00b7 Jonas",
+    "\u0130",
+    "I",
+  ]);
 });
