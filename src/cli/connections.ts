@@ -23,6 +23,10 @@ export class CliError extends Error {
       credentialReason?: z.infer<typeof sourceCredentialReasonSchema>;
       /** Set on write failures so the envelope carries the receipt identity. */
       request?: RequestIdentity;
+      /** One-line human remedy for this site; printed as `Fix:` and never put in JSON. */
+      fix?: string;
+      /** True only when the failure proves the request never reached the service. */
+      notSent?: boolean;
     } = {},
   ) {
     super(message);

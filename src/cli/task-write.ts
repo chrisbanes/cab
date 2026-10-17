@@ -12,6 +12,7 @@ import {
   readTextFile,
 } from "./configure.js";
 import { CliError } from "./connections.js";
+import { fixLine, nextLine } from "./remedy.js";
 import { keyValues } from "./render.js";
 import type { RequestIdentity } from "./types.js";
 import {
@@ -109,7 +110,7 @@ export function waitLines(waits: readonly Wait[], taskId: string): string[] {
   return waits.flatMap((w) => [
     `Waiting: ${waitLabels[w.code]}`,
     ...(w.detail ? [`  ${w.detail}`] : []),
-    ...(w.fix ? cliFix(w.fix).map((line) => `  Fix: ${line}`) : []),
+    ...(w.fix ? cliFix(w.fix).map((line) => `  ${fixLine(line)}`) : []),
     ...w.links.map((link) =>
       link.kind === "task"
         ? `  Blocked by task ${link.id} (${link.label})`

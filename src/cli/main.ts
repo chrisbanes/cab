@@ -30,6 +30,7 @@ import {
   snapshotCommand,
 } from "./service.js";
 import { jsonLine, terminalSafe } from "./render.js";
+import { fixLine, remedyFor } from "./remedy.js";
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
@@ -305,7 +306,7 @@ export async function main(
       );
     else
       deps.stderr.write(
-        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId ? `, request ${error.extra.requestId}` : ""})\n`,
+        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId && !error.extra.notSent ? `, request ${error.extra.requestId}` : ""})\n${terminalSafe(fixLine(remedyFor(error, category)))}\n`,
       );
     return exit;
   }

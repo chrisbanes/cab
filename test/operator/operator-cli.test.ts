@@ -7,20 +7,26 @@ import {
   readFileSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import type { BrowseContext } from "../../src/cli/browse.js";
-import { KeychainCredentialStore } from "../../src/cli/connections.js";
+import {
+  CliError,
+  KeychainCredentialStore,
+} from "../../src/cli/connections.js";
+import { type CliDeps, EXIT } from "../../src/cli/main.js";
+import { CATEGORY_FIX, DEFAULT_FIX, remedyFor } from "../../src/cli/remedy.js";
 import { logsCommand } from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
   harness,
   MemoryKeychain,
 } from "../fixtures/cli-harness.js";
-import { startCliService } from "../fixtures/operator-cli.js";
+import { startCliOperator, startCliService } from "../fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
@@ -543,4 +549,238 @@ test("streamed logs cannot drive the terminal in human or JSON Lines output", as
   assert.ok(!lines.includes("\u009b"));
   const item = JSON.parse(lines.split("\n")[0] as string);
   assert.equal(item.item.name, hostile);
+});
+
+const syntheticToken = () => `ens_${randomUUID()}_${"A".repeat(43)}`;
+const refused =
+  (code: string): typeof fetch =>
+  async () => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: { code } });
+  };
+const fixLines = (text: string) =>
+  text.split("\n").filter((line) => /^Fix: /.test(line));
+
+test("every CLI error code has a one-line Fix remedy", () => {
+  for (const code of Object.keys(EXIT)) {
+    const fix = DEFAULT_FIX[code];
+    assert.ok(fix && !fix.includes("\n"), `${code} has a one-line default`);
+    assert.equal(remedyFor(new CliError(code, "x"), "usage"), fix);
+  }
+  for (const code of Object.keys(DEFAULT_FIX))
+    assert.ok(code in EXIT, `${code} is an error code of the CLI`);
+  for (const category of [
+    "usage",
+    "authentication",
+    "conflict",
+    "unavailable",
+    "uncertain",
+    "unsupported",
+  ]) {
+    const fix = remedyFor(new CliError("service-only-code", "x"), category);
+    assert.ok(fix && !fix.includes("\n"), `${category} has a one-line default`);
+  }
+  assert.equal(
+    remedyFor(
+      new CliError("conflict", "x", { fix: "site remedy." }),
+      "conflict",
+    ),
+    "site remedy.",
+  );
+  for (const fix of [
+    ...Object.values(DEFAULT_FIX),
+    ...Object.values(CATEGORY_FIX),
+  ])
+    assert.ok(!/chmod (?!600\b)|sudo|\brm -/.test(fix), fix);
+});
+
+test("human errors end with exactly one Fix line and JSON errors are unchanged", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t);
+  assert.equal(
+    (
+      await h.run([
+        "auth",
+        "login",
+        "--connection",
+        "home",
+        "--url",
+        s.origin,
+        "--token-file",
+        h.tokenFile((await s.issue("read")).token),
+      ])
+    ).code,
+    0,
+  );
+  const tooLarge: typeof fetch = async (input, init) =>
+    String(input).includes("/api/operator/tasks/")
+      ? Response.json(
+          { error: { code: "body-too-large", message: "Too big." } },
+          { status: 413 },
+        )
+      : fetch(input, init);
+  const notADirectory = join(h.dir, "not-a-directory");
+  writeFileSync(notADirectory, "x");
+  const sites: [string, string[], Partial<CliDeps>, number, string][] = [
+    ["usage", ["task", "get"], {}, 2, "usage"],
+    [
+      "unexpected failure",
+      ["connection", "list"],
+      { env: { ENSEMBLE_CLI_CONFIG_DIR: notADirectory } },
+      5,
+      "unavailable",
+    ],
+    [
+      "unknown service code",
+      ["task", "get", s.taskId],
+      { fetch: tooLarge },
+      2,
+      "body-too-large",
+    ],
+  ];
+  for (const [name, args, extra, exit, code] of sites) {
+    const human = await h.run(args, extra);
+    assert.equal(human.code, exit, name);
+    assert.equal(human.out, "", name);
+    assert.equal(fixLines(human.err).length, 1, name);
+    const last = human.err.trimEnd().split("\n").at(-1) ?? "";
+    assert.match(last, /^Fix: \S.*\S$/, name);
+    assert.match(human.err, new RegExp(`\\(${code}[,)]`), name);
+
+    const json = await h.run([...args, "--output", "json"], extra);
+    assert.equal(json.code, exit, name);
+    assert.equal(json.err, "", name);
+    assert.deepEqual(
+      Object.keys(json.json().error).sort(),
+      ["category", "code", "message", "outcome", "requestId", "retryable"],
+      name,
+    );
+    assert.equal(json.json().error.code, code, name);
+    assert.ok(!json.out.includes("Fix:"), name);
+  }
+});
+
+test("a refused or unresolved connection names the origin and no request id", async (t) => {
+  const o = await startCliOperator(t);
+  const origin = o.s.origin;
+  const login = (code: string, h = harness(t)) =>
+    h.run(
+      [
+        "auth",
+        "login",
+        "--connection",
+        "a",
+        "--url",
+        "http://127.0.0.1:9",
+        "--token-file",
+        h.tokenFile(syntheticToken()),
+      ],
+      { fetch: refused(code) },
+    );
+  for (const code of ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]) {
+    // A read: the request never left, so the human line has no request id.
+    const r = await login(code);
+    assert.equal(r.code, 5, code);
+    assert.match(
+      r.err,
+      /^ensemble: The service is unavailable\. \(unavailable\)\n/,
+    );
+    assert.ok(!r.err.includes("request"), code);
+    assert.deepEqual(fixLines(r.err), [
+      "Fix: Check that the service at http://127.0.0.1:9 is running, or check the URL with 'ensemble connection list'.",
+    ]);
+  }
+  // The machine-readable id stays.
+  const h = harness(t);
+  const json = await h.run(
+    [
+      "auth",
+      "login",
+      "--connection",
+      "a",
+      "--url",
+      "http://127.0.0.1:9",
+      "--token-file",
+      h.tokenFile(syntheticToken()),
+      "--output",
+      "json",
+    ],
+    { fetch: refused("ECONNREFUSED") },
+  );
+  assert.equal(json.code, 5);
+  assert.equal(json.json().error.code, "unavailable");
+  assert.match(json.json().error.requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(json.json().error.outcome, "not-applied");
+  assert.equal(json.json().error.retryable, true);
+
+  // A write refused before sending: definitely not applied, with its receipt identity.
+  const post: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/api/operator/commands"))
+      return refused("ECONNREFUSED")(input, init);
+    return fetch(input, init);
+  };
+  const human = await o.h.run(
+    ["task", "stop", o.s.taskId, "--connection", "rw"],
+    { fetch: post },
+  );
+  assert.equal(human.code, 5);
+  assert.ok(!human.err.includes("request"), human.err);
+  assert.deepEqual(fixLines(human.err), [
+    `Fix: Check that the service at ${origin} is running, or check the URL with 'ensemble connection list'.`,
+  ]);
+  const stop = await o.cli("rw", ["task", "stop", o.s.taskId], { fetch: post });
+  assert.equal(stop.code, 5);
+  const error = stop.json().error;
+  assert.equal(error.code, "unavailable");
+  assert.equal(error.outcome, "not-applied");
+  assert.match(error.requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(error.request.type, "task.stop");
+  const journal = readFileSync(join(o.h.configDir, "requests.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((line) => line.key === error.request.key);
+  assert.deepEqual(
+    journal.map((line) => line.state),
+    ["sending", "rejected"],
+  );
+  assert.equal(o.s.f.service.isTaskStopped(o.s.taskId), false);
+
+  // A reset after the request may have been sent keeps its id.
+  const reset = await o.h.run(
+    ["task", "get", o.s.taskId, "--connection", "ro"],
+    {
+      fetch: async (input, init) =>
+        String(input).includes("/api/operator/tasks/")
+          ? refused("ECONNRESET")(input, init)
+          : fetch(input, init),
+    },
+  );
+  assert.equal(reset.code, 5);
+  assert.match(reset.err, /\(unavailable, request [0-9a-f-]{36}\)/);
+  assert.equal(fixLines(reset.err).length, 1);
+});
+
+test("a TLS verification failure has no request id in human output", async (t) => {
+  const h = harness(t);
+  const args = [
+    "auth",
+    "login",
+    "--connection",
+    "a",
+    "--url",
+    "https://ensemble.example",
+    "--token-file",
+    h.tokenFile(syntheticToken()),
+  ];
+  const r = await h.run(args, { fetch: refused("SELF_SIGNED_CERT_IN_CHAIN") });
+  assert.equal(r.code, 5);
+  assert.match(r.err, /\(tls-verification-failed\)\n/);
+  assert.ok(!r.err.includes("request"), r.err);
+  assert.equal(fixLines(r.err).length, 1);
+  assert.match(r.err, /Fix: .*NODE_EXTRA_CA_CERTS/);
+  const json = await h.run([...args, "--output", "json"], {
+    fetch: refused("SELF_SIGNED_CERT_IN_CHAIN"),
+  });
+  assert.equal(json.json().error.code, "tls-verification-failed");
+  assert.match(json.json().error.requestId, /^[0-9a-f-]{36}$/);
 });
