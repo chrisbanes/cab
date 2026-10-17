@@ -1504,11 +1504,12 @@ test("an edit says so when it cannot check whether the text changed elsewhere", 
   await alert.waitFor();
   assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
   assert.equal(await showsText(page, "THEIR TEXT"), false);
-  // One read after the conflict, and one retry when it settled: no loop.
+  // One read after the conflict; a failure at the same version is the operator's to retry.
   await page.waitForFunction(() =>
     document.body.innerText.includes("Try again"),
   );
-  assert.equal(reads, 2);
+  await settled(page);
+  assert.equal(reads, 1);
   await page.unroute("**/private-values");
   await alert.getByRole("button", { name: "Try again" }).click();
   await page
