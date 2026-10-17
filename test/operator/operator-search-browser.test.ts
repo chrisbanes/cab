@@ -8,7 +8,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import {
   openSearchFromSidebar,
   searchDayEnd,
@@ -428,6 +428,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByText("Entry ancient result", { exact: true }).waitFor();
   await page.getByLabel("Result revision").selectOption(manual.resultId);
+  await openOverviewCard(page, "brief");
   await page
     .getByLabel("Retained source revision")
     .selectOption(source.sourceId);

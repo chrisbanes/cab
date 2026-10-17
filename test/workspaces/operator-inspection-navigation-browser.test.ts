@@ -57,7 +57,7 @@ test("inspection sections are reached from task origins and exact direct links w
     .getByRole("link", { name: /Navigable inspection/ })
     .first()
     .click();
-  await page.getByRole("link", { name: "Files", exact: true }).click();
+  await openTaskTab(page, "Files");
   await files.getByRole("button", { name: /notes\.md/ }).click();
   await files.getByText("navigation notes", { exact: true }).waitFor();
   await page
@@ -78,7 +78,7 @@ test("inspection sections are reached from task origins and exact direct links w
     .getByText("Navigable inspection result", { exact: true })
     .waitFor();
   assert.ok(page.url().includes(`result=${result.resultId}`));
-  await page.getByRole("link", { name: "Files", exact: true }).click();
+  await openTaskTab(page, "Files");
   await files.getByRole("button", { name: /notes\.md/ }).click();
   await files.getByText("navigation notes", { exact: true }).waitFor();
   await page

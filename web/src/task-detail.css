@@ -460,11 +460,57 @@ a.task-source-chip:hover {
   margin: var(--space-4) 0;
 }
 
-.entry-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-8);
-  margin-block: var(--space-12);
+/* Collapsed Overview cards (frames 46a, 03): a native disclosure whose summary is the card's
+   label and a one-line count. The heading stays a heading inside the summary. */
+.task-workspace details.overview-disclosure {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.overview-disclosure > summary {
+  position: relative;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: var(--space-4);
+  padding-right: var(--space-24);
+}
+
+.overview-disclosure > summary::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: var(--space-4);
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--fg-3);
+  border-bottom: 2px solid var(--fg-3);
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.overview-disclosure[open] > summary::after {
+  transform: translateY(-30%) rotate(-135deg);
+}
+
+.overview-disclosure[open] > summary {
+  margin-bottom: var(--space-8);
+}
+
+.task-workspace .overview-disclosure > summary .section-heading {
+  margin: 0;
+}
+
+.overview-disclosure > summary > .metadata {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-pointer {
+  margin: 0;
 }
 
 .assignment-row button {
@@ -481,7 +527,7 @@ a.task-source-chip:hover {
 }
 
 @media (max-width: 1120px) {
-  .entry-links [data-slot="button"],
+  .overview-disclosure > summary,
   .task-strip [data-slot="button"],
   .task-strip button.task-next,
   .task-strip a.task-source-chip,

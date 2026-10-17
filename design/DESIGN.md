@@ -157,9 +157,11 @@ dimensions.
   imported tasks, title, desired outcome, actions (Execution, and Stop… while the
   task is open; there is no task pause), a status strip (state badge, readiness and holds, next actor, lead,
   updated) and tabs (Overview, Files, Changes, Review, History). Overview leads with
-  any decision card, then the shared brief (requirements with provenance, approach
-  and decisions, the supplied-criteria table with evidence outcomes), the latest
-  result, the assignments table and Message lead. The inspector holds source sync,
+  any decision card, then the latest result (its criterion rows with evidence
+  outcomes), the reply to the lead, and the shared brief (requirements with
+  provenance, approach and decisions, the supplied-criteria table), evidence and the
+  assignments table as collapsed disclosures (`46a-task-overview-laptop`;
+  `03-task-detail` shows them open). The inspector holds source sync,
   holds, dependencies, execution facts and results and artifacts; the holds a
   decision does not clear also appear as lines in the decision card; with no
   approval selected, the open approvals are not repeated as a hold. Requests remain
@@ -1522,10 +1524,12 @@ Presentation and interaction rules that the canvas does not show on its own.
   conversations open through disclosure (`03-task-detail`).
 - The Overview tab reads in this order: pending decisions, holds and wait reasons;
   the latest result with its criterion evidence; the reply to the lead; then the
-  shared brief and assignments as collapsed disclosures with a one-line summary
-  (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
+  shared brief, evidence and assignments as collapsed disclosures with a one-line
+  summary (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
   conversations, earlier results and delivery evidence live in History, Changes and
   Review, and the Overview tab does not repeat those tabs as sections.
+- A link to a section or record inside a closed disclosure opens it; polls,
+  refreshes and a returning Back never open or close one.
 - The task header keeps Execution and Stop… only. On a phone (`47-phone-task-overview`)
   the detail header has Back, the task title, a mono subtitle (the source, such as
   `acme/atlas#142`, or Local task) and one outline overflow action holding
@@ -2059,7 +2063,9 @@ as follows:
   `review` (Review), `result`/`source` (Overview) and `assignment` (History); a
   `record` or `request` target opens the tab that holds it unless the link names a
   section or fragment (`?request=…#history` opens History). A link followed in
-  place maps the same way. The full header shows
+  place maps the same way. A link to a section or record inside a closed Overview
+  disclosure opens it first (`?section=brief`, `?source=`, `?evidence=` and a Search
+  hit for the brief or a recorded decision). The full header shows
   on every tab, not `06-workspace-changes-review`'s compact header. The tabs scroll
   with the page.
 - A request is never hidden by a tab: the strip's "Next: you · …" is a button that
@@ -2070,8 +2076,19 @@ as follows:
   shows on Changes beside its control. "New updates — jump to latest" opens
   History at its end.
 - Overview is one column of cards beside the inspector (280–320px, from 1024px;
-  below the reply on narrower screens): the decision card, the shared brief, the
-  latest result, the assignments table and the reply. The decision card leads
+  below the last card on narrower screens): the decision card, the latest result,
+  the reply, then Shared brief, Evidence and Assignments · N as closed native
+  disclosures (`46a-task-overview-laptop` draws the brief and assignments so; the
+  Evidence card replaces frame 47's drill-in row and the unbuilt "Earlier results"
+  and "Changes since viewed" links). Each summary is one clamped line of recorded
+  facts: "Requirements · GitHub · 2 supplied criteria", "R2 · 1 validation record ·
+  2 artifacts", and each assignment's short id and known state. A pointer line
+  closes the tab: "Captured conversations, earlier results and delivery evidence
+  are in History, Changes and Review." The latest-result card keeps its summary,
+  criterion rows, the viewing reference and the Result revision select visible; the
+  disclosures hold their content mounted, so closing one loses no read, selection or
+  focus target. Open cards belong to the history entry, are written only by their
+  own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
   with any request ("Your decision · approval pending", exact action, target,
   revision and material hash, and "Review material & decide" to the coordination
   view; the page never approves), then pending completion and unresolved result
@@ -2169,9 +2186,10 @@ as follows:
   (recorded pairs render under the latest result), no clock times, and no
   "Earlier results (2)" button (the Result revision select and the inspector keep
   earlier results).
-- Frame 57's entries under the latest result stay: Files, Changes, Review,
-  "Assignment context & identifiers", "Assignment history" and "Message lead"
-  open their tab in place and move to the section, without a history entry.
+- Overview has no in-page entries to other tabs: the tab list, the inspector's
+  result links and the assignment buttons ("Assignment history" in place, without a
+  history entry) are the ways in; frame 57's Files, Changes, Review and context
+  entries are not built.
 - The viewing-reference block under the latest result (the "No viewing baseline …"
   or changes line, "Set viewing reference" and its disclaimer) shows only once the
   task has a result. A check for a viewing write whose response was lost stays
