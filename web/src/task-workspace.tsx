@@ -2692,7 +2692,7 @@ function Changes({
           ))}
         </>
       )}
-      {delivers && d?.binding && (
+      {d?.binding && (
         <>
           <p>
             PR #{d.binding.number} · {d.binding.repositoryName} ·{" "}
