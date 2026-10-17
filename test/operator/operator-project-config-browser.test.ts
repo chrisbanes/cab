@@ -564,6 +564,110 @@ test("a form whose edits were all reverted is clean and picks up a later read", 
   assert.equal(await name.inputValue(), "Atlas external four");
 });
 
+test("a read that arrived during an edit is applied when the edit is undone, and a stale outcome goes with it", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const name = page.getByLabel("Project name", { exact: true });
+  await name.waitFor();
+  // The read is ignored while the form has an edit, and taken as soon as the edit is undone.
+  await name.fill("Typed");
+  bumpProject(f, ids.atlas, "Ext");
+  await refresh(page);
+  assert.equal(await name.inputValue(), "Typed");
+  await name.fill("Atlas");
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Project name"]',
+        ) as HTMLInputElement | null
+      )?.value === "Ext",
+  );
+  await assertClean(page, "Save project");
+
+  // A refused save: undoing the edit takes the latest read and drops the refusal.
+  await name.fill("x".repeat(600));
+  await saveProject(page).click();
+  await page
+    .getByText("Keep the name to 512 characters or fewer. It has 600.")
+    .waitFor();
+  await name.fill("Ext");
+  bumpProject(f, ids.atlas, "Ext two");
+  await refresh(page);
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Project name"]',
+        ) as HTMLInputElement | null
+      )?.value === "Ext two",
+  );
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.equal(await name.getAttribute("aria-invalid"), "false");
+  await assertClean(page, "Save project");
+
+  // A conflict: undoing the edit takes the latest read and drops the conflict.
+  await name.fill("Typed two");
+  bumpProject(f, ids.atlas, "Ext three");
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await name.fill("Ext two");
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Project name"]',
+        ) as HTMLInputElement | null
+      )?.value === "Ext three",
+  );
+  assert.equal(await outcomeMessages(page).count(), 0);
+  await assertClean(page, "Save project");
+});
+
+test("an edit that parses to the same JSON as the saved text is still an edit and survives a read", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/profiles/:reviewer/settings",
+  );
+  const reviewer = ids.profiles.Reviewer as string;
+  const d = f.service.domain();
+  const saved = '{"languages":["kotlin"],"review":true}';
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewer,
+    expectedVersion: Number(d.profile(reviewer).version),
+    capabilities: saved,
+  });
+  await page.reload();
+  const capabilities = page.getByLabel("Capabilities", { exact: true });
+  await capabilities.waitFor();
+  const reformatted = '{"review": true, "languages": ["kotlin"]}';
+  await capabilities.fill(reformatted);
+  await page
+    .getByRole("region", { name: "Changes to save" })
+    .getByText("Capabilities edited")
+    .waitFor();
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewer,
+    expectedVersion: Number(d.profile(reviewer).version),
+    summary: "Changed elsewhere",
+  });
+  const read = page.waitForResponse(
+    (r) => r.request().method() === "GET" && /configuration$/.test(r.url()),
+  );
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await read;
+  assert.equal(await capabilities.inputValue(), reformatted);
+  await page.getByRole("button", { name: "Discard changes" }).waitFor();
+});
+
 test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
@@ -575,6 +679,29 @@ test("a reverted routing edit leaves the form clean and picks up a later read", 
   await candidate("Eli").waitFor();
   await candidate("Mira").check();
   await candidate("Mira").uncheck();
+  // Unchecking and checking the saved candidates in another order changes the list order, not
+  // its contents; one of these two orders differs from the saved one.
+  for (const order of [
+    ["Worker", "Builder", "Eli"],
+    ["Eli", "Builder", "Worker"],
+  ]) {
+    for (const n of order) await candidate(n).uncheck();
+    for (const n of order) await candidate(n).check();
+    await changes(page)
+      .getByText("No changes yet.", { exact: false })
+      .waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: "Discard changes" }).count(),
+      0,
+    );
+  }
+  // Hidden input behind a choice that is switched off is not an edit either.
+  const mode = page.getByLabel("Credential reference change", { exact: true });
+  await mode.selectOption({ label: "Set new environment reference" });
+  await page
+    .getByLabel("New environment reference", { exact: true })
+    .fill("env:HIDDEN_REFERENCE");
+  await mode.selectOption({ label: "Preserve current reference" });
   await revealButton(page, "routing guidance").click();
   const field = page.getByRole("textbox", {
     name: "Routing guidance",
@@ -772,9 +899,16 @@ test("an edit made against older text says it was changed elsewhere before it re
     .waitFor();
   assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
   assert.equal(await showsText(page, "THEIR TEXT"), false);
-  // Typing the text it started from is still no edit.
+  // Typing the older text back is a deliberate replacement and stays an edit, with the note.
   await instructionsField(page).fill(SENTINEL);
+  assert.equal(await instructionsField(page).inputValue(), SENTINEL);
+  await changes(page)
+    .getByText("Instructions edited", { exact: true })
+    .waitFor();
+  // Typing the text that is saved now is no edit.
+  await instructionsField(page).fill("THEIR TEXT");
   await noChanges(page);
+  await assertClean(page, "Save project");
   assert.equal(d.project(ids.atlas).instructions, "THEIR TEXT");
 });
 
@@ -2237,8 +2371,10 @@ test("a reverted query or local path is kept again, and an edit survives leaving
     )
     .waitFor();
   assert.equal(await query.inputValue(), "MY REAL EDIT");
-  // Typing the text the edit started from is no edit, and the other writer's text is kept.
+  // Typing the older text back stays an edit; typing what is saved now is none.
   await query.fill("THEIR QUERY");
+  await changes(page).getByText("Search query edited for S-2").waitFor();
+  await query.fill("THEIR SECOND QUERY");
   await noChanges(page);
   assert.equal(await save.isDisabled(), true);
   await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
@@ -2290,7 +2426,10 @@ test("a reverted query or local path is kept again, and an edit survives leaving
     )
     .waitFor();
   assert.equal(await path.inputValue(), mine);
+  // The older path typed back is a deliberate replacement; the path saved now is no edit.
   await path.fill(current);
+  await changes(page).getByText("Local path changed for acme/atlas").waitFor();
+  await path.fill(d.githubConfiguration(ids.atlas).repositories[0]?.path ?? "");
   await noChanges(page);
   assert.equal(await save.isDisabled(), true);
   assert.equal(

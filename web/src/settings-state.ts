@@ -127,15 +127,34 @@ function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
   return "Check this field.";
 }
 
-/** Fields that change with every operation and are not input. */
-const housekeeping = new Set(["key", "expectedVersion"]);
+/** Fields that change with every operation, or are bookkeeping, and are not input. */
+const housekeeping = (field: string) =>
+  field === "key" ||
+  field === "expectedVersion" ||
+  field.startsWith("placement");
+/** Draft fields that hold JSON rows; their per-render `rowKey` and property order are not input. */
+const jsonFields = new Set([
+  "selections",
+  "repositories",
+  "conditions",
+  "rows",
+]);
+/** A field only counts while the field that controls it is on (hidden residue is not input). */
+const inactive = (
+  field: string,
+  values: Record<string, string | boolean | string[]>,
+) =>
+  (field === "credentialRef" && values.referenceMode !== "set") ||
+  ((field === "runtimeModel" || field === "runtimeEffort") &&
+    values.runtimeHarness !== "claude");
 /**
- * A comparable form of a draft value: lists of ids are sets, and JSON rows ignore their
- * per-render `rowKey` and the order of their properties.
+ * A comparable form of a draft value: lists of ids are sets, whole-number limits compare as
+ * numbers, JSON rows ignore `rowKey` and property order, and all other text is exact.
  */
-function canonical(value: unknown): string {
+function canonical(field: string, value: unknown): string {
   if (Array.isArray(value)) return JSON.stringify([...value].sort());
-  if (typeof value === "string" && /^[[{]/.test(value))
+  if (typeof value !== "string") return JSON.stringify(value ?? null);
+  if (jsonFields.has(field))
     try {
       return JSON.stringify(
         JSON.parse(value, (k, v: unknown) =>
@@ -143,8 +162,8 @@ function canonical(value: unknown): string {
             ? undefined
             : v && typeof v === "object" && !Array.isArray(v)
               ? Object.fromEntries(
-                  Object.entries(v as object).sort(([a], [b]) =>
-                    a < b ? -1 : 1,
+                  Object.entries(v as object).sort(([x], [y]) =>
+                    x < y ? -1 : 1,
                   ),
                 )
               : v,
@@ -153,9 +172,12 @@ function canonical(value: unknown): string {
     } catch {
       return `s:${value}`;
     }
-  return typeof value === "string"
-    ? `s:${value}`
-    : JSON.stringify(value ?? null);
+  if (
+    (field === "globalLimit" || field.startsWith("limit-")) &&
+    /^\d+$/.test(value)
+  )
+    return `n:${Number(value)}`;
+  return `s:${value}`;
 }
 
 export class ConfigurationDraft {
@@ -236,7 +258,13 @@ export class ConfigurationDraft {
    * (`<field>Base`). Typing the baseline back removes the edit, so a field holds a string
    * only while it really differs, and that survives leaving and returning to the page.
    */
-  setPrivate(field: string, value: string, baseline: string) {
+  setPrivate(
+    field: string,
+    value: string,
+    baseline: string,
+    /** The saved text now, when it was read again and may differ from the baseline. */
+    current?: string,
+  ) {
     if (
       this.phase === "pending" ||
       this.phase === "recorded" ||
@@ -244,7 +272,7 @@ export class ConfigurationDraft {
     )
       return false;
     const { [field]: _value, [`${field}Base`]: _base, ...rest } = this.values;
-    this.values = sameText(value, baseline)
+    this.values = sameText(value, current ?? baseline)
       ? rest
       : { ...rest, [field]: value, [`${field}Base`]: baseline };
     this.savedAt = null;
@@ -264,8 +292,15 @@ export class ConfigurationDraft {
       ...Object.keys(this.base),
     ]))
       if (
-        !housekeeping.has(field) &&
-        canonical(this.values[field]) !== canonical(this.base[field])
+        !housekeeping(field) &&
+        canonical(
+          field,
+          inactive(field, this.values) ? undefined : this.values[field],
+        ) !==
+          canonical(
+            field,
+            inactive(field, this.base) ? undefined : this.base[field],
+          )
       )
         return true;
     return false;
@@ -280,6 +315,16 @@ export class ConfigurationDraft {
       ) {
         this.savedAt = null;
         this.details = {};
+      }
+      // A refused or conflicting save belongs to input that is gone now.
+      if (this.phase === "rejected" || this.phase === "conflict") {
+        this.generation++;
+        this.lifecycle.reset();
+        this.phase = "editing";
+        this.errors = {};
+        this.notice = "";
+        this.details = {};
+        this.credentialRefusal = false;
       }
       this.values = { ...values };
       this.base = { ...values };
@@ -297,11 +342,9 @@ export class ConfigurationDraft {
     groups: string[][] = [],
   ) {
     if (this.phase === "pending" || this.lifecycle.uncertain) return;
-    // Lists are sets here (candidate ids), so order alone is not an edit.
-    const norm = (x: unknown) =>
-      JSON.stringify(Array.isArray(x) ? [...x].sort() : x);
     const untouched = (field: string) =>
-      norm(this.values[field]) === norm(this.base[field]);
+      canonical(field, this.values[field]) ===
+      canonical(field, this.base[field]);
     const values = { ...this.values };
     for (const [field, value] of Object.entries(latest)) {
       const unit = groups.find((g) => g.includes(field)) ?? [field];

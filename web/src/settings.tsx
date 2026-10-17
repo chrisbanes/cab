@@ -60,6 +60,13 @@ export function useLoadedDraft(
     if (d.phase === "recorded") d.startOperation(fresh(values), true);
     else d.initialize(fresh(values));
   }, [d, serialized, loadedAt]);
+  // A read that arrived while the form had edits was left alone. When every edit is undone
+  // the form is clean again, so it takes the latest read at once.
+  const clean = !d.dirty;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the form turning clean matters.
+  useEffect(() => {
+    if (values && clean && d.phase !== "recorded") d.initialize(fresh(values));
+  }, [d, clean]);
 }
 const fresh = (values: Values) => ({ ...values, key: crypto.randomUUID() });
 /** Discard unsaved input: start a new operation from the loaded values. */
@@ -264,7 +271,7 @@ export function PrivateTextField({
             className="control"
             value={edited ? String(draft.values[field]) : (revealed ?? "")}
             onChange={(e) =>
-              draft.setPrivate(field, e.target.value, base ?? "")
+              draft.setPrivate(field, e.target.value, base ?? "", revealed)
             }
           />
           {error && (

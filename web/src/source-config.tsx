@@ -240,7 +240,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
             update(
               field,
               index,
-              value === (base ?? "")
+              value === (baseline ?? base ?? "")
                 ? undefined
                 : { [name]: value, [`${name}Base`]: base ?? "" },
               rest,
