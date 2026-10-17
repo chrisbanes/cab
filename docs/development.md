@@ -305,6 +305,14 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    A refused or unresolved connection (nothing sent) omits the request ID from the
    human line only.
 
+   The `--expected-*` flags check different records, so each command's help prints one
+   line under its usage naming the record its flag refers to and the command that shows
+   it (the task, an assignment, a profile, a project or its routing, the source
+   configuration, a question, an approval or a comment review). No flag is renamed:
+   `--expected-version`, `--expected-revision`, `--expected-task-version` and
+   `--expected-conversation-revision` keep their meaning, and `task configure` keeps
+   reading the version itself when `--expected-version` is omitted.
+
 
 6. Execution diagnostics, with either credential scope:
    - `execution list (--task ID | --assignment ID | --project ID)` lists task-bound

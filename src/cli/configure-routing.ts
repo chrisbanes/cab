@@ -22,6 +22,8 @@ export const routingWriteCommands = new Map<string, WriteCommand>([
       usage:
         "project prepare-routing PROJECT_ID [--out FILE] [--expected-version N] [--enabled true|false] [--candidates ID,ID|none] [--guidance-file PATH] [--credential-ref env:NAME|none]",
       positionals: 1,
+      expects:
+        "--expected-version: the routing configuration's version (routing.version in 'ensemble project get PROJECT_ID --output json'); omitted, the version this command reads.",
       flags: [
         "out",
         "expected-version",

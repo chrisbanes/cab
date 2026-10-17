@@ -125,6 +125,17 @@ const COMMAND_USAGE = new Map<string, string>([
     ([key, c]) => [key, c.usage] as const,
   ),
 ]);
+/** The `expects` help line of each write command that has expected-version flags, by key. */
+const COMMAND_EXPECTS = new Map(
+  [...writeCommands].flatMap(([key, c]) =>
+    c.expects === undefined ? [] : [[key, c.expects] as const],
+  ),
+);
+/** A usage line, and under it, when the command has one, the line saying what its expected-* flags check. */
+const helpEntry = (key: string, usage: string) => {
+  const expects = COMMAND_EXPECTS.get(key);
+  return expects === undefined ? [usage] : [usage, `  ${expects}`];
+};
 const areaOf = (key: string) => key.split(" ")[0] ?? key;
 const LOCAL_AREAS = ["service", "snapshot"];
 const operatorAreas = () => [...new Set([...COMMAND_USAGE.keys()].map(areaOf))];
@@ -211,7 +222,7 @@ function areaHelp(area: string | undefined) {
   if (area === "service" || area === "snapshot") return serviceHelp(area);
   const lines = [...COMMAND_USAGE]
     .filter(([key]) => areaOf(key) === area)
-    .map(([, usage]) => usage);
+    .flatMap(([key, usage]) => helpEntry(key, usage));
   if (!area || !lines.length) return undefined;
   const single = COMMAND_USAGE.has(area);
   return `Usage: ensemble ${area}${single ? "" : " <action>"} [options]
@@ -224,7 +235,7 @@ ${OPTIONS_HELP}${(AREA_NOTES[area] ?? []).map((note) => `\n${note}\n`).join("")}
 const fullHelp = () => `Usage: ensemble <command> [options]
 
 Commands:
-${[...COMMAND_USAGE.values()].map((usage) => `  ${usage}`).join("\n")}
+${indented([...COMMAND_USAGE].flatMap(([key, usage]) => helpEntry(key, usage))).trimEnd()}
 
 ${SERVICE_USAGE}
 ${OPTIONS_HELP}

@@ -142,6 +142,8 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
       usage:
         "profile prepare PROFILE_ID [--out FILE] [--expected-version N] [--name S] [--summary S] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false]",
       positionals: 1,
+      expects:
+        "--expected-version: the profile's version ('ensemble profile get PROFILE_ID'); omitted, the version this command reads.",
       flags: [
         "out",
         "expected-version",

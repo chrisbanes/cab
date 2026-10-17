@@ -192,7 +192,11 @@ the current instructions for the next turn. An active turn is not rewritten.
 A change document (`ensemble.cli.change/v1`) holds exactly one typed command
 without its request key: `profile.create`, `profile.configure`, `project.create`,
 `project.configure`, `routing.configure` or `capacity.configure`. The design's
-`create` verbs are `prepare-create` followed by `apply`. Its SHA-256 digest covers
+`create` verbs are `prepare-create` followed by `apply`. A prepare writes the
+document to `--out FILE`, or by default to a new `./ensemble-<kind>-<id8>.json` that
+never overwrites a file; `apply --file FILE --dry-run` prints the stored change
+without connecting, and `apply` says when it replays a request this machine
+recorded. The document's SHA-256 digest covers
 every other field and detects accidental or in-transit modification; it is not a
 MAC against a same-user writer, so the service's revision checks and the
 installation check still decide. Restore takes only instruction text, and only when

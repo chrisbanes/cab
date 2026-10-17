@@ -480,6 +480,8 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
       usage:
         "task configure TASK_ID [--expected-version N] [--title T] [--outcome TEXT|- | --outcome-file FILE] [--ready true|false] [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-version: the task's version ('ensemble task get TASK_ID'); omitted, the version this command reads first.",
       flags: [
         "expected-version",
         "title",
@@ -533,6 +535,8 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
     {
       usage: `task ${verb}-dependency TASK_ID --blocker ID --expected-version N [--request-id UUID]`,
       positionals: 1,
+      expects:
+        "--expected-version: the task's version ('ensemble task get TASK_ID'); required.",
       flags: ["blocker", "expected-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -561,6 +565,8 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
       usage:
         "task message TASK_ID --to ASSIGNMENT_ID --expected-version N --message-file FILE [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-version: the version of the assignment named by --to ('ensemble assignment get ASSIGNMENT_ID'); required.",
       flags: ["to", "expected-version", "message-file", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -604,6 +610,8 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
       usage:
         "task follow-up TASK_ID --expected-version N --message-file FILE [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-version: the project lead's assignment version ('ensemble assignment get ASSIGNMENT_ID', the lead's ID is on 'ensemble task get TASK_ID'); required.",
       flags: ["expected-version", "message-file", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
