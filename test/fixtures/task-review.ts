@@ -4,6 +4,7 @@ import { ConversationHistoryStore } from "../../src/standalone/conversation-hist
 import { ExecutionState } from "../../src/standalone/state.js";
 import type { ReviewMetadata } from "../../src/core/task-review.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
+import { uniqueProjectName } from "./project-names.js";
 import type { createOperatorFixture } from "./operator-web.js";
 /** Links (or unlinks) one GitHub repository on the project without running repository verification. */
 export function setLinkedRepository(
@@ -218,6 +219,7 @@ export async function seedReviewTask(
     projectId = randomUUID(),
     taskId = randomUUID(),
     d = f.service.domain();
+  const projectName = uniqueProjectName(d, name);
   d.execute({
     type: "profile.create",
     actor: "operator",
@@ -232,7 +234,7 @@ export async function seedReviewTask(
     actor: "operator",
     key: randomUUID(),
     projectId,
-    name,
+    name: projectName,
     leadProfileId: profileId,
   });
   d.execute({

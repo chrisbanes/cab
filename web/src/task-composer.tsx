@@ -8,6 +8,7 @@ import {
   type Session,
   type Workspace,
 } from "../../src/operator/contracts.js";
+import { workspaceLabels } from "../../src/operator/project-labels.js";
 import type { OperatorClient } from "./api.js";
 import {
   ActionLink,
@@ -54,6 +55,7 @@ export function TaskComposer({
   /** Re-reads the workspace after a Fix changes a project. */
   refresh: () => void;
 }) {
+  const labels = workspaceLabels(workspace);
   const [, render] = useState(0);
   const [state] = useState(() => {
     const s = new ComposerState(
@@ -335,7 +337,7 @@ export function TaskComposer({
                   <option value="">Choose a project</option>
                   {workspace?.data.projects.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name ?? "Name unavailable"}
+                      {labels.get(p.id)?.text}
                     </option>
                   ))}
                 </NativeSelect>

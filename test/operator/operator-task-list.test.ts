@@ -5,6 +5,7 @@ import { ExecutionState } from "../../src/standalone/state.js";
 import type { TaskListSummary } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { uniqueProjectName } from "../fixtures/project-names.js";
 
 test("task catalog pages exclude private retained revisions and classify dependency waits separately from attention", async (t) => {
   const f = await createOperatorFixture();
@@ -109,7 +110,7 @@ async function projectFixture(
     key: randomUUID(),
     actor: "operator",
     projectId,
-    name: "Project",
+    name: uniqueProjectName(d, "Project"),
     leadProfileId: profileId,
   });
   if (!paused)

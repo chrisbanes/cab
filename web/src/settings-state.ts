@@ -527,10 +527,19 @@ export class ConfigurationDraft {
       this.notice = outcomeCopy.unknown;
     } else {
       this.phase = disposition;
+      const fieldPaths =
+        result.state === "recorded" ? [] : (result.fieldPaths ?? []);
+      // The service names the project that already has this name; the form shows it as is.
+      const nameTaken =
+        result.state !== "recorded" &&
+        (c.type === "project.create" || c.type === "project.configure") &&
+        result.code === "invalid-input" &&
+        fieldPaths.length === 1 &&
+        fieldPaths[0] === "name"
+          ? result.message
+          : undefined;
       this.errors = Object.fromEntries(
-        (result.state === "recorded" ? [] : (result.fieldPaths ?? [])).map(
-          (p) => [p, "Check this field."],
-        ),
+        fieldPaths.map((p) => [p, nameTaken ?? "Check this field."]),
       );
       this.credentialRefusal =
         result.state !== "recorded" &&

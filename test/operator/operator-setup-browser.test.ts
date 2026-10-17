@@ -302,6 +302,42 @@ test("Setup moves focus to the rejected path field even when frame callbacks run
   }
 });
 
+test("Setup refuses a name another project has under Project name and keeps every value", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, { projects: true });
+  const name = page.getByLabel("Project name", { exact: true });
+  await name.fill("relay ");
+  await page
+    .getByLabel("Instructions", { exact: true })
+    .fill("Keep these instructions");
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  await create.click();
+  await page.getByText(fixFields).waitFor();
+  // The message is the service's, tied to the field, and the field has the focus.
+  const message = "Another project is named Relay. Choose a different name.";
+  await name.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+  assert.equal(
+    await name.evaluate((input) => {
+      const id = input.getAttribute("aria-describedby");
+      return id ? document.getElementById(id)?.textContent : null;
+    }),
+    message,
+  );
+  assert.equal(await name.inputValue(), "relay ");
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).inputValue(),
+    "Keep these instructions",
+  );
+  assert.equal(f.service.domain().projects().length, 1);
+  // The refusal is not an unknown outcome: the operator renames and creates.
+  await name.fill("Relay 2");
+  await create.click();
+  await savedOutcome(page, /^Created Relay 2\./);
+  assert.equal(f.service.domain().projects().length, 2);
+});
+
 test("Setup falls back to typed entry without discovery and on first run", async (_t, journey) => {
   const { f, page, discoveryState } = await setupJourney(journey, {
     profiles: false,

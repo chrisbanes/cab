@@ -20,6 +20,8 @@ export class ClientError extends Error {
     readonly status: number,
     readonly fieldPaths: readonly string[] = [],
     readonly credentialReason?: z.infer<typeof sourceCredentialReasonSchema>,
+    /** The service's public message; only a few refusals show it verbatim. */
+    readonly publicMessage?: string,
   ) {
     super(code);
   }
@@ -32,6 +34,7 @@ export type CommandState =
       code: string;
       fieldPaths?: readonly string[];
       credentialReason?: z.infer<typeof sourceCredentialReasonSchema>;
+      message?: string;
     };
 export class OperatorClient {
   private authenticationGeneration = 0;
@@ -93,6 +96,7 @@ export class OperatorClient {
         response.status,
         error.success ? (error.data.error.fieldPaths ?? []) : [],
         error.success ? error.data.error.credentialReason : undefined,
+        error.success ? error.data.error.message : undefined,
       );
     }
     const value = schema.safeParse(body);
@@ -259,6 +263,7 @@ export class OperatorClient {
         code: e.code,
         fieldPaths: e.fieldPaths,
         ...(e.credentialReason ? { credentialReason: e.credentialReason } : {}),
+        ...(e.publicMessage ? { message: e.publicMessage } : {}),
       };
     }
   }

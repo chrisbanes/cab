@@ -8,7 +8,7 @@ import {
   type Workspace,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, ResourceStatus } from "./components.js";
+import { ActionLink, ProjectName, ResourceStatus } from "./components.js";
 import { ApprovalFacts, InboxQuestion, useInboxTask } from "./inbox-detail.js";
 import { ageLabel, holdNotices } from "./inbox-presentation.js";
 import { clockLabel } from "./presentation.js";
@@ -426,7 +426,7 @@ export function ProjectsPanel({
                 aria-hidden="true"
               />
               <span className="body overview-project-name">
-                {row.name ?? "Name unavailable"}
+                <ProjectName label={row.label} id={row.id} />
               </span>
               <span className="metadata muted">
                 {row.lead ? `Lead · ${row.lead}` : "No lead configured"}

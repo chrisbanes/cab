@@ -13,6 +13,7 @@ import {
 import type { StandaloneService } from "../../src/standalone/service.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { uniqueProjectName } from "../fixtures/project-names.js";
 import { forbid } from "../fixtures/read-guards.js";
 
 type Fixture = Awaited<ReturnType<typeof createOperatorFixture>>;
@@ -39,7 +40,7 @@ function world(f: Fixture) {
     key: randomUUID(),
     actor: "operator",
     projectId,
-    name: "Project",
+    name: uniqueProjectName(d, "Project"),
     leadProfileId: profileId,
   });
   const task = (taskId = randomUUID()) => {

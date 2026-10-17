@@ -19,6 +19,7 @@ import {
   Menu,
   type LucideIcon,
 } from "lucide-react";
+import type { ProjectLabel } from "../../src/operator/project-labels.js";
 import { cn } from "./lib/utils.js";
 import { shortId } from "./presentation.js";
 import { Alert, AlertDescription } from "./ui/alert.js";
@@ -129,6 +130,33 @@ export function ShortId({
     >
       {shortId(value)}
     </abbr>
+  );
+}
+/**
+ * A project's name, then the suffix that tells it from same-named projects: the lead's name or
+ * the ID in mono. Text order is DOM order, so the link's accessible name reads "Atlas · Mira".
+ */
+export function ProjectName({
+  label,
+  id,
+}: {
+  label: ProjectLabel;
+  id: string;
+}) {
+  return (
+    <>
+      {label.name ?? "Name unavailable"}
+      {label.suffix && (
+        <span className="muted">
+          {" · "}
+          {label.suffix.kind === "id" ? (
+            <ShortId value={id} focusable={false} />
+          ) : (
+            label.suffix.text
+          )}
+        </span>
+      )}
+    </>
   );
 }
 export function StatusBadge({

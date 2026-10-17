@@ -695,6 +695,8 @@ async function listedAttention(api: OperatorApi, taskId: string) {
   assert.deepEqual({ codes, count }, row.attention);
   return row.attention.codes;
 }
+/** Project names are unique, so a fixture's second seeded project is "Project 2". */
+const seededProjects = new WeakMap<object, number>();
 async function seed(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
   active = false,
@@ -703,6 +705,9 @@ async function seed(
   const profileId = randomUUID(),
     projectId = randomUUID(),
     taskId = randomUUID();
+  const ordinal = (seededProjects.get(f) ?? 0) + 1;
+  seededProjects.set(f, ordinal);
+  const seededName = ordinal === 1 ? "Project" : `Project ${ordinal}`;
   const d = f.service.domain();
   d.execute({
     type: "profile.create",
@@ -718,7 +723,7 @@ async function seed(
     actor: "operator",
     key: randomUUID(),
     projectId,
-    name: "Project",
+    name: seededName,
     leadProfileId: profileId,
   });
   if (snapshots)
@@ -2364,7 +2369,7 @@ test("a routing fallback on a task with no project lead clears without operator 
       actor: "operator",
       key: randomUUID(),
       projectId,
-      name: "Leadless",
+      name: `Leadless ${projectId.slice(0, 8)}`,
       leadProfileId: null,
     });
     d.execute({

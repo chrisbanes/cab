@@ -378,7 +378,11 @@ test("Resume clears an existing Stop on a finished task", async (t) => {
 test("operator Stop coexists with an independent writer hold across restart and Resume", async (t) => {
   const f = await fixture(t);
   const receipted = await seedReviewTask(f, "Writer hold project", "Receipted");
-  const keyless = await seedReviewTask(f, "Writer hold project", "Keyless");
+  const keyless = await seedReviewTask(
+    f,
+    "Keyless writer hold project",
+    "Keyless",
+  );
   const heldTasks = [receipted, keyless];
   f.seedPersistedState((db) => {
     for (const task of heldTasks)

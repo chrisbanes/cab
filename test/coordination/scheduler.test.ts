@@ -99,7 +99,7 @@ async function addProject(service: StandaloneService, profileId: string) {
     type: "project.create",
     actor: "operator",
     projectId,
-    name: "Project",
+    name: `Project ${projectId.slice(0, 8)}`,
     leadProfileId: profileId,
   });
   execute(service, {

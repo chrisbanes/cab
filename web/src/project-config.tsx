@@ -6,6 +6,10 @@ import {
   projectPrivateValuesSchema,
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
@@ -88,6 +92,7 @@ export function ProjectConfiguration(
     resource.refresh();
     observations.refresh();
   });
+  const labels = workspaceLabels(p.workspace);
   const refreshConfiguration = () => {
     p.refresh();
     resource.refresh();
@@ -119,6 +124,7 @@ export function ProjectConfiguration(
               data,
               observations.state.data?.data ?? null,
               unsettled,
+              (r) => projectLabel(labels, r.id, r.name).text,
             )}
           />
           <nav
