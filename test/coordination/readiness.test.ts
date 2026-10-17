@@ -361,10 +361,16 @@ test("a claude that ignores SIGTERM is killed, and the check settles only after 
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const probe = claudeExecutable(f, { versionTimeoutMs: 1000 });
   let pid = 0;
-  while (!pid) {
+  let settled = false;
+  void probe.then(() => (settled = true));
+  // A probe that settles without the script ever writing its pid, or a script that never
+  // starts, is a failure to report rather than a wait: the mocked clock cannot end this one.
+  const deadline = Date.now() + 30000;
+  while (!pid && !settled && Date.now() < deadline) {
     pid = Number(readIfPresent(pidFile).trim());
     if (!pid) await new Promise((resolve) => setImmediate(resolve));
   }
+  assert.ok(pid, `the script never wrote its pid (probe settled: ${settled})`);
   t.mock.timers.tick(1000); // The timeout: SIGTERM, which the script ignores.
   t.mock.timers.tick(1000); // The grace period: SIGKILL.
   const result = await probe;

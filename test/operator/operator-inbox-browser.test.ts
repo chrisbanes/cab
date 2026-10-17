@@ -1430,10 +1430,11 @@ test("the request pane shows kind, position, identities and a sticky response ba
   // The first workspace read can land after the first Inbox read and make the Inbox reread once
   // more, so which side of the click that reread falls on depends on load. Each Inbox read that
   // completes from the click on may bring one task reread, and nothing else may.
+  // Counted when the body has finished, since a read whose headers came earlier can still
+  // update the page after the click.
   let inboxReads = 0;
-  page.on("response", (r) => {
-    if (new URL(r.url()).pathname === "/api/operator/inbox" && r.ok())
-      inboxReads++;
+  page.on("requestfinished", (r) => {
+    if (new URL(r.url()).pathname === "/api/operator/inbox") inboxReads++;
   });
   const rows = page.locator(".inbox-row"),
     detail = page.getByRole("region", { name: "Selected request" });
