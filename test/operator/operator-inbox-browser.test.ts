@@ -918,15 +918,36 @@ test("an intervention shows its recorded reason and links to the execution", asy
     await aside.getByText("Execution ownership is uncertain").count(),
     0,
   );
+  const inspect = detail.getByRole("link", {
+    name: "Inspect execution",
+    exact: true,
+  });
   assert.equal(
-    await detail
-      .getByRole("link", { name: "Inspect execution", exact: true })
-      .getAttribute("href"),
-    `/app/tasks/${held.taskId}`,
+    await inspect.getAttribute("href"),
+    `/app/tasks/${held.taskId}?section=decisions`,
   );
   await captureBrowserEvidence(page, "1366-inbox-intervention", {
     fullPage: false,
   });
+  // It lands on the task's Overview with the decision card, and its hold lines, in view.
+  await inspect.click();
+  const card = page.locator("section#decisions");
+  await card.getByRole("list", { name: "Also held", exact: true }).waitFor();
+  assert.equal(
+    await page
+      .locator('[role="tablist"] [aria-selected="true"]')
+      .evaluate((e) => e.textContent),
+    "Overview",
+  );
+  const box = await card.boundingBox();
+  const viewport = page.viewportSize();
+  assert.ok(box && viewport && box.y >= 0 && box.y < viewport.height);
+  assert.deepEqual(
+    await card
+      .getByRole("link", { name: "Execution details", exact: true })
+      .evaluateAll((a) => a.map((x) => x.getAttribute("href"))),
+    Array(3).fill(`/runtime/task/${held.taskId}`),
+  );
 });
 
 test("returning to the Inbox restores the request the operator chose, not the one it opened by itself", async (_t, j) => {

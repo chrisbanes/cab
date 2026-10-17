@@ -2956,7 +2956,7 @@ export class OperatorApi {
             revision: null,
             reason: attentionNext[attentionCode].reason,
             attentionCode,
-            destination: `/app/tasks/${taskId}`,
+            destination: `/app/tasks/${taskId}?section=decisions`,
             conversation: null,
             headline: null,
           });
