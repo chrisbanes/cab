@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import type { Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -309,4 +311,203 @@ test("The discovery credential row fits a phone", async (_t, journey) => {
         .filter((h) => h > 0 && h < 44),
     );
   assert.deepEqual(small, []);
+});
+
+const fixLine = "Run `gh auth login`, or Settings → discovery credential";
+const readinessRow = (page: Page) =>
+  page.getByRole("article", { name: "GitHub discovery" });
+const offerButton = (page: Page, login = "octo") =>
+  readinessRow(page).getByRole("button", {
+    name: `Use GitHub CLI login (@${login})`,
+  });
+const credentialRow = (page: Page) =>
+  page.getByRole("region", { name: "GitHub discovery credential" });
+/** Command requests the page sends, oldest first. */
+function commandPosts(page: Page) {
+  const posts: { type: string; key: string; credentialRef: unknown }[] = [];
+  page.on("request", (r) => {
+    if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
+      posts.push(r.postDataJSON());
+  });
+  return posts;
+}
+
+test("Readiness offers the detected GitHub CLI login and Run again changes nothing", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = readinessRow(page);
+  const posts = commandPosts(page);
+  await row.getByText("Not configured", { exact: true }).waitFor();
+  await row.getByText("No GitHub discovery credential is configured").waitFor();
+  await offerButton(page).waitFor();
+  assert.equal(await row.locator(".identifier").count(), 0);
+
+  // Run again only reads: no command, and the offer is still there afterwards.
+  const reads: string[] = [];
+  page.on("request", (r) => {
+    const { pathname } = new URL(r.url());
+    if (pathname === "/api/operator/readiness")
+      reads.push(`${r.method()} ${pathname}`);
+  });
+  await page.getByRole("button", { name: "Run again" }).click();
+  await page.waitForFunction(
+    () => !document.body.innerText.includes("Refreshing"),
+  );
+  assert.deepEqual(reads, ["GET /api/operator/readiness"]);
+  assert.equal(posts.length, 0);
+  await offerButton(page).waitFor();
+
+  // Activating twice sends one command; the offer is exactly the existing configure.
+  await offerButton(page).dblclick();
+  await row.getByText("Pass", { exact: true }).waitFor();
+  assert.equal(posts.length, 1);
+  assert.deepEqual(
+    { type: posts[0]?.type, credentialRef: posts[0]?.credentialRef },
+    { type: "discovery.configure", credentialRef: "gh:github.com" },
+  );
+  assert.equal(await row.locator(".identifier").count(), 0);
+  assert.equal(await row.getByRole("button").count(), 0);
+  // Without a reload the credential row in its own section agrees.
+  await credentialRow(page)
+    .getByText(
+      "GitHub discovery credential · GitHub CLI · @octo · read-only use",
+    )
+    .waitFor();
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  assert.equal(
+    (await page.locator("body").innerText()).includes(fakeGhToken),
+    false,
+  );
+
+  // Clear is the counterpart: Readiness goes back to Not configured with the offer, and
+  // the returned offer works from the keyboard and leaves focus on the row.
+  await credentialRow(page)
+    .getByRole("button", { name: "Clear", exact: true })
+    .click();
+  await row.getByText("Not configured", { exact: true }).waitFor();
+  await offerButton(page).focus();
+  await page.keyboard.press("Enter");
+  await row.getByText("Pass", { exact: true }).waitFor();
+  assert.equal(posts.length, 3);
+  assert.equal(
+    new Set(posts.map((p) => p.key)).size,
+    3,
+    "each offer is its own request",
+  );
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "GitHub discovery",
+  );
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  await captureBrowserEvidence(page, "1366-readiness-gh-offer");
+});
+
+test("Readiness keeps the existing fix line unless a gh login is signed in", async (_t, journey) => {
+  const gh = createFakeGh("not-signed-in");
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = readinessRow(page);
+  const posts = commandPosts(page);
+  for (const state of ["not-signed-in", "unreadable"] as const) {
+    gh.set(state);
+    await page.reload();
+    await row.getByText("Not configured", { exact: true }).waitFor();
+    assert.equal(await row.locator(".identifier").innerText(), fixLine);
+    assert.equal(await row.getByRole("button").count(), 0, state);
+  }
+  // Signing in elsewhere shows up on Run again, which re-reads the detected login.
+  gh.set("signed-in");
+  await page.getByRole("button", { name: "Run again" }).click();
+  await offerButton(page).waitFor();
+  assert.equal(await row.locator(".identifier").count(), 0);
+  assert.equal(posts.length, 0);
+});
+
+test("Readiness keeps the fix line when gh is not installed", async (_t, journey) => {
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+  });
+  const row = readinessRow(page);
+  await row.getByText("Not configured", { exact: true }).waitFor();
+  assert.equal(await row.locator(".identifier").innerText(), fixLine);
+  assert.equal(await row.getByRole("button").count(), 0);
+});
+
+test("Readiness keeps the fix line for a configured but unreadable credential", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  f.service.domain().execute({
+    type: "discovery.configure",
+    actor: "operator",
+    key: randomUUID(),
+    credentialRef: "env:ENSEMBLE_MISSING_DISCOVERY_VARIABLE",
+  });
+  await page.reload();
+  const row = readinessRow(page);
+  await row.getByText("Fail", { exact: true }).waitFor();
+  assert.equal(await row.locator(".identifier").innerText(), fixLine);
+  assert.equal(await row.getByRole("button").count(), 0);
+  // The credential row keeps Change; the login is never offered over a configured reference.
+  await credentialRow(page).getByRole("button", { name: "Change" }).waitFor();
+});
+
+test("Readiness reconciles an unknown GitHub CLI login outcome", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = readinessRow(page);
+  const posts = commandPosts(page);
+  await offerButton(page).waitFor();
+  // The service records the command but its response is lost.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
+  try {
+    await offerButton(page).click();
+    await row.getByRole("button", { name: "Check whether it saved" }).waitFor();
+    assert.equal(await offerButton(page).count(), 0);
+    // Leaving and returning keeps the unknown outcome and offers nothing to resend.
+    await page.getByRole("link", { name: "Tasks", exact: true }).click();
+    await page.waitForURL("**/app/tasks");
+    await page.goBack();
+    await row.getByRole("button", { name: "Check whether it saved" }).waitFor();
+    assert.equal(await offerButton(page).count(), 0);
+  } finally {
+    await page.unroute("**/api/operator/commands");
+  }
+  await row.getByRole("button", { name: "Check whether it saved" }).click();
+  await row.getByText("Pass", { exact: true }).waitFor();
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+  // Checking resends the original request, never a new one.
+  assert.equal(new Set(posts.map((p) => p.key)).size, 1);
+  assert.equal(await row.getByRole("button").count(), 0);
 });
