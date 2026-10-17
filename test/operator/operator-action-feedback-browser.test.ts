@@ -48,7 +48,7 @@ const reader: GitHubReaderFactory = () => ({
   },
 });
 
-const activated = /^Activated S-1\./;
+const activated = /^Activated acme\/atlas\./;
 
 type Fixture = Awaited<ReturnType<typeof startSettings>>;
 
@@ -534,14 +534,21 @@ test("a source preview that conflicts re-reads, and the next preview records wit
 
 const previewButton = (page: Page) =>
   page.getByRole("button", { name: "Preview and activate selection" });
+/** Sources are named by what they read; S-1 is acme/atlas and S-2 is a saved search. */
+const names: Record<string, string> = {
+  "S-1": "acme/atlas",
+  "S-2": "Saved search",
+};
 const optionText = (page: Page, id: string) =>
   page
     .getByLabel("Selection to preview")
-    .locator("option", { hasText: `${id} (` })
+    .locator("option", { hasText: names[id] ?? id })
     .textContent();
 const observationRow = (page: Page, id: string) =>
   page.locator("article.settings-row", {
-    has: page.getByRole("heading", { name: new RegExp(`^${id}\\b`) }),
+    has: page.getByRole("heading", {
+      name: new RegExp(`^${names[id] ?? id}\\b`),
+    }),
   });
 /** Saves the source again elsewhere, which moves its version and drops old active markers. */
 const saveSourceElsewhere = async (d: Fixture) => {
@@ -593,9 +600,9 @@ test("Sync & placement marks active selections and drops the marker when the sou
 });
 
 const firstActivation =
-  /^Activated S-1\. Tasks aren't imported until you refresh sources\./;
+  /^Activated acme\/atlas\. Tasks aren't imported until you refresh sources\./;
 const repeatActivation =
-  /^S-1 was already active\. Tasks aren't imported until you refresh sources\./;
+  /^acme\/atlas was already active\. Tasks aren't imported until you refresh sources\./;
 /** The sentence itself, apart from the Refresh action and its status. */
 const message = async (page: Page) =>
   (
@@ -618,10 +625,10 @@ test("first source activation names the selection, says nothing was imported and
   const outcome = await savedOutcome(page, firstActivation);
   assert.equal(
     await message(page),
-    "Activated S-1. Tasks aren't imported until you refresh sources.",
+    "Activated acme/atlas. Tasks aren't imported until you refresh sources.",
   );
   await refreshButton(page).waitFor();
-  await observationRow(page, "S-1").getByText("Not synced").waitFor();
+  await observationRow(page, "S-1").getByText("Not synced yet").waitFor();
   await refreshButton(page).click();
   await observationRow(page, "S-1")
     .getByText(/^Synced/)
@@ -648,9 +655,9 @@ test("repeat activation says it was already active without claiming a refresh", 
   await savedOutcome(page, repeatActivation);
   assert.equal(
     await message(page),
-    "S-1 was already active. Tasks aren't imported until you refresh sources.",
+    "acme/atlas was already active. Tasks aren't imported until you refresh sources.",
   );
-  await observationRow(page, "S-1").getByText("Not synced").waitFor();
+  await observationRow(page, "S-1").getByText("Not synced yet").waitFor();
 });
 
 test("activation by another client after the page loaded reads as already active", async (_t, journey) => {
@@ -676,7 +683,7 @@ test("activation by another client after the page loaded reads as already active
   await savedOutcome(page, repeatActivation);
   assert.equal(
     await message(page),
-    "S-1 was already active. Tasks aren't imported until you refresh sources.",
+    "acme/atlas was already active. Tasks aren't imported until you refresh sources.",
   );
 });
 

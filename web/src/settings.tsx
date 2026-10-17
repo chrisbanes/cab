@@ -556,6 +556,7 @@ export function DraftOutcome({
   refresh,
   review,
   success,
+  caveat,
   children,
 }: {
   draft: ConfigurationDraft;
@@ -582,6 +583,8 @@ export function DraftOutcome({
   review?: (() => void) | undefined;
   /** A plain sentence for the success line, or `null` when the caller shows its own. */
   success?: string | null | undefined;
+  /** The one muted line directly under the action. */
+  caveat?: string;
   /** More under the success line, passed to `DraftMessage`. */
   children?: ReactNode;
 }) {
@@ -617,6 +620,7 @@ export function DraftOutcome({
             )}
         </div>
       )}
+      {idle && caveat && <p className="metadata muted">{caveat}</p>}
       {held && (
         <p id={holdId} className="metadata muted" role="status">
           {hold}

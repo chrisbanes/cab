@@ -31,9 +31,16 @@ import {
   readinessNextStep,
   joinNames,
   activationLine,
+  draftSourceName,
+  observationLabel,
   savedLine,
+  selectionLine,
   settingsHeader,
+  sourceHeading,
+  sourceName,
+  sourceStatusLine,
 } from "../../web/src/settings-view.js";
+import { clockLabel } from "../../web/src/presentation.js";
 
 const id = () => randomUUID();
 const mira = id(),
@@ -914,19 +921,20 @@ test("the activation line claims only a confirmed preview at the loaded source v
       sourceVersion: 3,
       selections: [],
       recorded: true,
+      name: (id) => (id === "S-1" ? "acme/atlas" : id),
       ...over,
     });
   const line = (...args: Parameters<typeof activation>) =>
     activation(...args)?.line ?? null;
   const next = "Tasks aren't imported until you refresh sources.";
-  assert.equal(line(false), `Activated S-1. ${next}`);
-  assert.equal(line(true), `S-1 was already active. ${next}`);
+  assert.equal(line(false), `Activated acme/atlas. ${next}`);
+  assert.equal(line(true), `acme/atlas was already active. ${next}`);
   // A receipt recorded before the prior state existed claims neither.
-  assert.equal(line(undefined), `S-1 is active. ${next}`);
+  assert.equal(line(undefined), `acme/atlas is active. ${next}`);
   // The page's own snapshot no longer matters: the receipt says it was already active.
   assert.equal(
     line(true, { recorded: true, selections: [{ id: "S-1", active: false }] }),
-    `S-1 was already active. ${next}`,
+    `acme/atlas was already active. ${next}`,
   );
   // A receipt for another source version never reads as current activation.
   assert.equal(line(false, { sourceVersion: 4 }), null);
@@ -946,7 +954,7 @@ test("the activation line claims only a confirmed preview at the loaded source v
       recorded: false,
       selections: [{ id: "S-1", active: false }],
     }),
-    "Couldn't confirm that S-1 is active. Preview it again.",
+    "Couldn't confirm that acme/atlas is active. Preview it again.",
   );
   assert.equal(
     activation(false, {
@@ -957,7 +965,7 @@ test("the activation line claims only a confirmed preview at the loaded source v
   );
   assert.equal(
     line(false, { recorded: false, selections: [{ id: "S-1", active: true }] }),
-    `Activated S-1. ${next}`,
+    `Activated acme/atlas. ${next}`,
   );
   assert.equal(activation(false)?.refresh, true);
 });
@@ -1084,4 +1092,145 @@ test("recovery records collapse only consecutive records that display the same s
     [r1, n1, n2, r2],
   );
   assert.deepEqual(recoveryRecordRuns([]), []);
+});
+
+test("source names read content and never private text in index lines", () => {
+  const repository = { kind: "repository", descriptor: "acme/atlas" };
+  assert.deepEqual(sourceName(repository), {
+    name: "acme/atlas",
+    kind: "repository issues",
+    private: false,
+  });
+  const search = { kind: "search", descriptor: null };
+  assert.deepEqual(sourceName(search, { query: "label:ready" }), {
+    name: "label:ready",
+    kind: "search",
+    private: true,
+  });
+  // Until the private read arrives (or when it fails or is stale) a search has a neutral name.
+  for (const query of [undefined, "", "   "])
+    assert.deepEqual(sourceName(search, { query }), {
+      name: "Saved search",
+      kind: "search",
+      private: false,
+    });
+  const project = { kind: "project", descriptor: "PVT_atlas" };
+  assert.equal(sourceName(project).name, "GitHub Project");
+  assert.equal(
+    sourceName(project, { projectTitle: "Atlas roadmap" }).name,
+    "Atlas roadmap",
+  );
+  // The Project node id and its filter are never part of a name.
+  assert.doesNotMatch(JSON.stringify(sourceName(project)), /PVT_atlas|filter/i);
+  assert.equal(
+    sourceHeading(sourceName(repository)),
+    "acme/atlas \u00b7 repository issues",
+  );
+  assert.equal(sourceHeading(sourceName(search)), "Saved search \u00b7 search");
+  assert.equal(sourceHeading(sourceName(project)), "GitHub Project");
+  assert.equal(
+    sourceHeading(sourceName(project, { projectTitle: "Atlas roadmap" })),
+    "Atlas roadmap \u00b7 GitHub Project",
+  );
+  assert.equal(draftSourceName({ kind: "repository" }).name, "New source");
+  assert.equal(
+    draftSourceName({ kind: "repository", owner: "acme", name: "atlas" }).name,
+    "acme/atlas",
+  );
+  assert.equal(
+    draftSourceName({ kind: "search", query: " " }).name,
+    "New source",
+  );
+  const line = (s: Parameters<typeof selectionLine>[0]) => selectionLine(s);
+  const saved = [
+    { id: "S-1", kind: "repository", descriptor: "acme/atlas" },
+    { id: "S-2", kind: "search", descriptor: null },
+    { id: "S-3", kind: "project", descriptor: "PVT_atlas" },
+  ] as const;
+  assert.deepEqual(
+    saved.map((s) => line({ ...s, active: false })),
+    [
+      "S-1 acme/atlas issues \u00b7 inactive",
+      "S-2 search \u00b7 inactive",
+      "S-3 GitHub Project \u00b7 inactive",
+    ],
+  );
+  assert.equal(line({ ...saved[0], active: true }), "S-1 acme/atlas issues");
+  for (const s of saved)
+    assert.doesNotMatch(line({ ...s, active: false }), /PRIVATE|PVT_|filter/);
+});
+
+test("source status lines are sentences with the clock label", () => {
+  const at = "2026-10-16T18:45:00.000Z",
+    time = clockLabel(Date.parse(at));
+  const rule = {
+    kind: "rule" as const,
+    mode: "all" as const,
+    conditions: [{ kind: "label" as const, name: "ready" }],
+  };
+  const counts = (observed: number, matching: number | null) => ({
+    observed,
+    open: observed,
+    closedSkipped: 0,
+    matching,
+    complete: true,
+  });
+  const row = (
+    state: "complete" | "partial" | "never" | "unavailable",
+    over: Record<string, unknown> = {},
+  ) =>
+    ({
+      selectionId: "S-1",
+      state,
+      lastAttemptAt: at,
+      lastSuccessfulAt: state === "complete" ? at : null,
+      counts: counts(4, 2),
+      ...over,
+    }) as Parameters<typeof sourceStatusLine>[0];
+  assert.equal(
+    sourceStatusLine(row("complete"), rule),
+    `Synced ${time} \u00b7 4 issues observed, 2 match the readiness rule`,
+  );
+  assert.equal(
+    sourceStatusLine(row("complete", { counts: counts(1, 1) }), rule),
+    `Synced ${time} \u00b7 1 issue observed, 1 match the readiness rule`,
+  );
+  assert.equal(
+    sourceStatusLine(row("complete"), { kind: "none" }),
+    `Synced ${time} \u00b7 4 issues observed, no readiness rule`,
+  );
+  assert.equal(
+    sourceStatusLine(row("complete", { counts: counts(4, null) }), rule),
+    `Synced ${time} \u00b7 4 issues observed`,
+  );
+  assert.equal(
+    sourceStatusLine(row("complete", { counts: null }), rule),
+    `Synced ${time}`,
+  );
+  assert.equal(
+    sourceStatusLine(row("complete", { lastSuccessfulAt: null }), rule),
+    "Synced \u00b7 4 issues observed, 2 match the readiness rule",
+  );
+  assert.equal(
+    sourceStatusLine(row("partial"), rule),
+    `Partly synced ${time} \u00b7 4 issues observed so far`,
+  );
+  assert.equal(sourceStatusLine(row("never"), rule), "Not synced yet");
+  assert.equal(sourceStatusLine(undefined, rule), "Not synced yet");
+  assert.equal(
+    sourceStatusLine(row("unavailable"), rule),
+    "Sync state can't be read right now",
+  );
+  // A state this build does not know reads as the unreadable sentence, never the raw word.
+  assert.equal(
+    sourceStatusLine(row("later-state" as never), rule),
+    "Sync state can't be read right now",
+  );
+  for (const state of ["complete", "partial", "never", "unavailable"] as const)
+    assert.doesNotMatch(
+      sourceStatusLine(row(state), rule),
+      /unavailable|null|\d{4}-\d{2}-\d{2}T/,
+    );
+  assert.equal(observationLabel(row("unavailable")), "Sync unknown");
+  assert.equal(observationLabel(row("complete")), `Synced ${time}`);
 });
