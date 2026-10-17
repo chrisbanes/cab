@@ -24,6 +24,7 @@ import { Button } from "./ui/button.js";
 import { Card } from "./ui/card.js";
 import type { ResourceState } from "./resource.js";
 import { requestActionLabel, requestHref } from "./request-presentation.js";
+import { updatedLabel } from "./presentation.js";
 import {
   CompletedPanel,
   NeedsYou,
@@ -470,9 +471,7 @@ export function TaskViews({
       )}
       {state.data && (
         <p className="metadata muted">
-          Task states read{" "}
-          {new Date(state.data.firstObservedAt).toLocaleTimeString()}–
-          {new Date(state.data.lastObservedAt).toLocaleTimeString()}.
+          {updatedLabel(state.data.firstObservedAt, state.data.lastObservedAt)}
         </p>
       )}
     </section>

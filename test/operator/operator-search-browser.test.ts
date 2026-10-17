@@ -8,6 +8,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 const test = browserSuite("operator-search-browser");
 test("shared Search preserves exact historical target, dates, selected focus and both navigation origins across Back/Forward, failures and phone entry", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -38,7 +39,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
-  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await openSearchFromSidebar(page);
   await page
     .getByLabel("Search retained task, decision and result records")
     .fill("Shared command");
@@ -179,7 +180,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
     .click();
   assert.ok(page.url().endsWith(`/app/projects/${b.projectId}`));
   await page.setViewportSize({ width: 1366, height: 900 });
-  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await openSearchFromSidebar(page);
   await page
     .getByLabel("Search retained task, decision and result records")
     .fill("Shared command");
@@ -297,9 +298,7 @@ test("shared Search preserves exact historical target, dates, selected focus and
     `private-history traversals=4 documentReplacements=${documentReplacements} lostEvaluationResponses=${lostEvaluationResponses}`,
   );
   for (const unknown of [false, true]) {
-    await page
-      .getByRole("link", { name: "Search", exact: true })
-      .evaluate((el) => (el as HTMLElement).click());
+    await openSearchFromSidebar(page, { keepFocus: true });
     await page
       .getByLabel("Search retained task, decision and result records")
       .fill("Shared command");
@@ -434,9 +433,7 @@ test("same-task historical Search entries preserve manual origin selections and 
   await brief.evaluate((el) => el.scrollIntoView());
   await brief.locator("summary").focus();
   const y = await brief.evaluate((el) => el.getBoundingClientRect().top);
-  await page
-    .getByRole("link", { name: "Search", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await openSearchFromSidebar(page, { keepFocus: true });
   await page
     .getByLabel("Search retained task, decision and result records")
     .fill("Entry ancient result");
@@ -513,7 +510,7 @@ test("same-task historical Search entries preserve manual origin selections and 
     latest.resultId,
     f.service.taskReview().read(a.taskId).results.at(-1)?.resultId,
   );
-  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await openSearchFromSidebar(page);
   await page
     .getByLabel("Search retained task, decision and result records")
     .fill("Entry ancient result");

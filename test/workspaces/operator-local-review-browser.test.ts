@@ -16,6 +16,7 @@ import {
 } from "../../web/src/lead-feedback.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-local-review-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
@@ -1360,9 +1361,7 @@ test("a review send in flight when its page goes away is left for the next page 
     .getByRole("button", { name: /^Send review \(1 comment\)/ })
     .click();
   await sendEntered;
-  await page
-    .getByRole("link", { name: "Search", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await openSearchFromSidebar(page, { keepFocus: true });
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
@@ -1380,9 +1379,7 @@ test("a review send in flight when its page goes away is left for the next page 
 test("an unconfirmed anchor is settled by the page that checks it after a remount", async (_t, j) => {
   const { web, task, page } = await startReview(j);
   const { stages, saves, review } = await loseStageAnswer(page, task, web);
-  await page
-    .getByRole("link", { name: "Search", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await openSearchFromSidebar(page, { keepFocus: true });
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();

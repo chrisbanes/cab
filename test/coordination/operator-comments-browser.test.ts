@@ -14,6 +14,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-comments-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
@@ -996,9 +997,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     .getByText("Supplied GitHub brief", { exact: true })
     .first()
     .waitFor({ state: "attached" });
-  await page
-    .getByRole("link", { name: "Search", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await openSearchFromSidebar(page, { keepFocus: true });
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();

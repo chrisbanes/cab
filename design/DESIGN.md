@@ -117,8 +117,8 @@ dimensions.
   with ⌘K, Overview, Inbox with an amber count, Tasks, the projects list with
   activity meta, a capacity meter and the account menu), a 48px top bar
   (breadcrumb, connection status — Connected, Updates delayed or Disconnected — and
-  New task with its key), then the page. Settings, Runtime and Sign out live in the
-  account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
+  New task with its key), then the page. Settings, Getting started, Approval and
+  delivery forms and Sign out live in the account menu. Main content uses 20px padding and 12–16px gaps; multi-pane screens
   run panes edge to edge with hairline dividers.
 - **Breakpoints:** the production shell uses the navigation drawer through 1120 CSS
   pixels; the browser test checks 1119, 1120 and 1121px as well as 759, 760 and
@@ -935,11 +935,10 @@ attribution and offer retry or return; absence of matches does not establish
 absence from omitted records. Return to search restores the query, every filter,
 selected match and position.
 
-- **Discoverable entry:** Search sits beside Overview and Inbox in the desktop
-  navigation component and the representative Overview, List, Board, Inbox,
-  task, context and delivery screens. Phone Inbox exposes a labelled 44px Search
+- **Discoverable entry:** on desktop the sidebar's Search work field above Overview,
+  Inbox and Tasks is the one entry and shows the active treatment on Search; the
+  navigation drawer keeps a Search row. Phone Inbox exposes a labelled 44px Search
   action in its reusable header; the phone Board uses the same labelled action.
-  Search has the active desktop navigation treatment; Overview is inactive there.
   The phone search header identifies the current Search view and offers Workspace
   return. No keyboard shortcut is required to discover it.
 - **Connected journey:** desktop `01-attention-overview` → Search `73-search` → selected AT-142
@@ -1490,7 +1489,7 @@ Presentation and interaction rules that the canvas does not show on its own.
   re-reads; create forms and sub-panels have none. Asking a provider for a new
   observation is not a re-read: an imported task keeps its source refresh (Refresh
   source) as a separate action beside the source.
-- Times use the app's clock label ("synced 17:50", "Updated 4:48 PM"). A range
+- Times use the app's clock label ("synced 17:50", "Updated 16:48"). A range
   appears only when two reads differ.
 
 ### Composer
@@ -1727,8 +1726,9 @@ The web app is the ground truth for these items.
   and the account menu; and the 48px desktop top bar with the breadcrumb, connection
   status (Connected, Updates delayed or Disconnected from the shell's workspace
   read; nothing before the first read completes) and New task. On desktop the top bar owns New task and the breadcrumb; the
-  drawer shell keeps New task in the page header. The Search link stays in the
-  navigation beside the field. The capacity meter reads global turn usage from the
+  drawer shell keeps New task in the page header. The field is the one desktop Search
+  entry (it takes the current-page treatment on Search); the drawer hides it and keeps
+  a Search row. The capacity meter reads global turn usage from the
   task list, so it is absent while there are no tasks. Not found shows no
   breadcrumb or New task.
 - **Implemented Inbox (`02-inbox-approval`):** from 1280px three panes edge to
@@ -1902,7 +1902,7 @@ Production Overview, List and Board
   and no drag and drop. Search results, task Back and Inbox "Open task" return to it
   with filters, column and scroll restored. It has no notification, deep-link or
   context-menu surface.
-- "Refresh tasks" and "More filters" (Search, Source, Readiness) are existing
+- "Refresh tasks" and "More filters" (Filter tasks, Source, Readiness) are existing
   capabilities the frames do not draw.
 - There is no phone Overview or phone List frame; both phone layouts are
   composed from the shell and desktop frames (Overview: one column, stat strip
@@ -2170,8 +2170,8 @@ frames 114 and 118–128 as follows:
 - No short identifiers (RL-31, A-203, AT-151) are shown, and recovery omits "last
   observed" and "requested by", which the recovery read does not carry. Its
   breadcrumb is the static "Settings / Runtime / Assignment recovery".
-- The header keeps Refresh on every settings route, including Create profile, and it
-  re-reads the open page's own resources.
+- The header keeps Refresh on settings read views and re-reads the open page's own
+  resources; the create forms (New project, Create profile) have none.
 - Switches are native checkboxes drawn as switches.
 - Execution runtimes ([#826](https://github.com/chrisbanes/ensemble/issues/826)),
   which frames 114, 118–125, 127 and 128 do not draw, use existing fields, rows and asides:

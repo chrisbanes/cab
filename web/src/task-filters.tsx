@@ -107,7 +107,7 @@ export function TaskToolbar({
         <summary className="metadata muted">More filters</summary>
         <div className="work-more-fields">
           <label className="field body" htmlFor="task-search">
-            Search tasks
+            Filter tasks
             <Input
               id="task-search"
               value={filters.q}

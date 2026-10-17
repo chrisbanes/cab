@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   browserSuite,
   captureBrowserEvidence,
+  type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 const test = browserSuite("operator-shell-browser");
 import { chromium, type Browser, type Page } from "playwright";
@@ -383,19 +384,25 @@ test("desktop shell lists the designed destinations, an honest Inbox count and a
         href: link.getAttribute("href"),
       })),
     );
-  assert.deepEqual(labels.slice(0, 4), [
+  assert.deepEqual(labels.slice(0, 3), [
     { label: "Overview", href: "/app" },
     { label: "Inbox", href: "/app/inbox" },
     { label: "Tasks", href: "/app/tasks" },
-    { label: "Search", href: "/app/search" },
   ]);
+  // The Search work field is the desktop shell's only Search entry.
+  assert.equal(
+    await sidebar.getByRole("link", { name: "Search", exact: true }).count(),
+    0,
+  );
+  assert.equal(await sidebar.getByRole("search").count(), 1);
+  assert.equal(await sidebar.getByLabel("Search work").count(), 1);
   assert.deepEqual(labels.at(-1), {
     label: "New project",
     href: "/app/settings/projects/new",
   });
   assert.ok(
     labels
-      .slice(4, -1)
+      .slice(3, -1)
       .every((entry) => entry.href?.startsWith("/app/projects/")),
   );
   assert.equal(
@@ -800,3 +807,173 @@ test("every route renders in the shell on desktop and phone without horizontal s
     }
   }
 });
+
+/** A signed-in shell over one project, for the header and navigation journeys below. */
+async function startShell(
+  journey: BrowserJourney,
+  viewport: { width: number; height: number },
+) {
+  const f = await journey.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  journey.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const projectId = randomUUID();
+  f.service.domain().execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Shell project",
+    leadProfileId: null,
+  });
+  const web = await journey.start("fixture.web", () => f.startWeb());
+  browser = await journey.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport });
+  journey.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, "/app");
+  return { web, page, projectId };
+}
+
+const shellRefresh = (page: Page) =>
+  page.getByRole("button", { name: "Refresh", exact: true });
+
+test("create forms have no shell Refresh while read views keep one, across navigation and Back", async (_t, journey) => {
+  const { web, page, projectId } = await startShell(journey, {
+    width: 1366,
+    height: 900,
+  });
+  const expectRefresh = async (route: string, count: number) => {
+    await page.goto(web.origin + route);
+    await page.locator("main.page h1").waitFor();
+    assert.equal(await shellRefresh(page).count(), count, route);
+  };
+  for (const route of [
+    "/app/tasks/new",
+    `/app/tasks/new?project=${projectId}`,
+    "/app/settings/projects/new",
+    "/app/settings/profiles/new",
+  ])
+    await expectRefresh(route, 0);
+  for (const route of [
+    "/app/settings",
+    "/app/getting-started",
+    "/app/settings/runtime",
+    "/app/inbox",
+  ])
+    await expectRefresh(route, 1);
+
+  // Client navigation re-evaluates the header: leaving a read view for a form drops Refresh,
+  // Back brings it back, and the account menu's Settings returns to a read view.
+  await page.goto(`${web.origin}/app/settings`);
+  await page.locator("main.page h1").waitFor();
+  assert.equal(await shellRefresh(page).count(), 1);
+  await page
+    .locator(".sidebar")
+    .getByRole("link", { name: "New project", exact: true })
+    .click();
+  await page.waitForURL("**/app/settings/projects/new");
+  assert.equal(await shellRefresh(page).count(), 0);
+  await page.goBack();
+  await page.waitForURL("**/app/settings");
+  await shellRefresh(page).waitFor();
+  assert.equal(await shellRefresh(page).count(), 1);
+
+  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.locator("main.page h1").waitFor();
+  assert.equal(await shellRefresh(page).count(), 0);
+  await page
+    .getByRole("button", { name: "Operator account", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  await page.waitForURL("**/app/settings");
+  await shellRefresh(page).waitFor();
+  assert.equal(await shellRefresh(page).count(), 1);
+});
+
+test("create forms have no Refresh in the phone header", async (_t, journey) => {
+  const { web, page } = await startShell(journey, { width: 390, height: 844 });
+  for (const route of ["/app/tasks/new", "/app/settings/projects/new"]) {
+    await page.goto(web.origin + route);
+    await page.locator("main.page h1").waitFor();
+    assert.equal(await shellRefresh(page).count(), 0, route);
+  }
+  await page.goto(`${web.origin}/app/settings`);
+  await page.locator("main.page h1").waitFor();
+  assert.equal(await shellRefresh(page).count(), 1);
+});
+
+test("the sidebar Search work field is the one desktop Search entry", async (_t, journey) => {
+  const { web, page } = await startShell(journey, { width: 1366, height: 900 });
+  const field = page.getByRole("search").getByLabel("Search work");
+  const form = page.locator(".sidebar form.search-work");
+  assert.equal(await form.getAttribute("data-current"), null);
+
+  // An empty submit opens Search; a query is carried in the URL.
+  await field.press("Enter");
+  await page.waitForURL((u) => u.pathname === "/app/search" && !u.search);
+  assert.notEqual(await form.getAttribute("data-current"), null);
+  assert.equal(await form.getAttribute("aria-current"), "page");
+  await page.goBack();
+  await page.waitForURL((u) => u.pathname === "/app");
+  assert.equal(await form.getAttribute("data-current"), null);
+  assert.equal(await form.getAttribute("aria-current"), null);
+  await field.fill("Shared");
+  await field.press("Enter");
+  await page.waitForURL(
+    (u) => u.pathname === "/app/search" && u.search === "?query=Shared",
+  );
+  assert.notEqual(await form.getAttribute("data-current"), null);
+
+  // Keyboard access: Tab reaches the field from the top of the page, and both shortcuts focus it.
+  await page.goto(`${web.origin}/app`);
+  await page.locator("main.page h1").waitFor();
+  await focusByTab(page, field);
+  await page.locator("main.page h1").click();
+  for (const shortcut of ["Meta+K", "Control+K"]) {
+    await page.locator("main.page h1").click();
+    await page.keyboard.press(shortcut);
+    assert.equal(
+      await field.evaluate((el) => el === document.activeElement),
+      true,
+      shortcut,
+    );
+  }
+});
+
+for (const width of [1024, 390])
+  test(`at ${width}px the drawer keeps one Search row and the shortcut opens Search's own field`, async (_t, journey) => {
+    const { web, page } = await startShell(journey, { width, height: 844 });
+    await page
+      .getByRole("button", { name: "Projects and navigation", exact: true })
+      .click();
+    const dialog = page.getByRole("dialog", {
+      name: "Projects and navigation",
+      exact: true,
+    });
+    await dialog.waitFor();
+    assert.equal(
+      await dialog.getByRole("link", { name: "Search", exact: true }).count(),
+      1,
+    );
+    assert.equal(await dialog.getByLabel("Search work").count(), 0);
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    // Closing the drawer returns focus to its trigger; the shortcut comes after that settles.
+    await page.waitForFunction(
+      () =>
+        document.activeElement?.closest(".phone-nav") !== null &&
+        document.activeElement?.tagName === "BUTTON",
+    );
+    await page.keyboard.press("Control+K");
+    await page.waitForURL("**/app/search");
+    await page.waitForFunction(
+      () => document.activeElement?.id === "retained-query",
+    );
+    assert.equal(new URL(page.url()).origin, web.origin);
+  });

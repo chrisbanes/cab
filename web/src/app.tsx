@@ -16,7 +16,6 @@ import {
   CirclePause,
   ExternalLink,
   Folder,
-  Gauge,
   InboxIcon,
   LayoutDashboard,
   ListChecks,
@@ -203,12 +202,14 @@ function ProjectNavigation({
         <ListChecks {...navIcon} />,
         "Tasks",
       )}
-      {link(
-        "/app/search",
-        pathname === "/app/search",
-        <SearchIcon {...navIcon} />,
-        "Search",
-      )}
+      {/* The sidebar's Search work field is the desktop entry; the drawer hides it, so it keeps this row. */}
+      {row &&
+        link(
+          "/app/search",
+          pathname === "/app/search",
+          <SearchIcon {...navIcon} />,
+          "Search",
+        )}
       <h2 className="nav-heading">Projects</h2>
       {workspace?.data.projects.length === 0 && (
         <p className="body muted">No projects yet.</p>
@@ -249,7 +250,13 @@ function ProjectNavigation({
   );
 }
 /** Sidebar Search work field: opens the retained-record search; ⌘K / Ctrl+K focuses it (or Search's field). */
-function SearchWorkField({ navigate }: { navigate: (path: string) => void }) {
+function SearchWorkField({
+  navigate,
+  current,
+}: {
+  navigate: (path: string) => void;
+  current: boolean;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const go = useRef(navigate);
   go.current = navigate;
@@ -271,6 +278,8 @@ function SearchWorkField({ navigate }: { navigate: (path: string) => void }) {
     <search>
       <form
         className="search-work"
+        data-current={current || undefined}
+        aria-current={current ? "page" : undefined}
         onSubmit={(e) => {
           e.preventDefault();
           const query = input.current?.value.trim();
@@ -362,15 +371,6 @@ function AccountRows({
         row
       >
         Settings
-      </RouteLink>
-      <RouteLink
-        href="/app/settings/runtime"
-        current={pathname === "/app/settings/runtime"}
-        navigate={navigate}
-        icon={<Gauge {...navIcon} />}
-        row
-      >
-        Runtime
       </RouteLink>
       {gettingStartedDismissed === false && (
         <RouteLink
@@ -808,13 +808,16 @@ export function App() {
     if (!onInboxRoute) inboxSummary.refresh();
     if (settingsPage) setRefreshNonce((n) => n + 1);
   };
-  // These pages own a refresh that already re-reads their data.
+  // These pages own a refresh that already re-reads their data, or are create forms with nothing to refresh.
   const ownsRefresh =
     unknownRoute ||
+    pathname === "/app/tasks/new" ||
+    pathname === "/app/settings/projects/new" ||
+    pathname === "/app/settings/profiles/new" ||
     pathname === "/app" ||
     pathname === "/app/tasks" ||
     Boolean(projectId) ||
-    (/^\/app\/tasks\/[^/]+$/.test(pathname) && pathname !== "/app/tasks/new") ||
+    /^\/app\/tasks\/[^/]+$/.test(pathname) ||
     (pathname === "/app/search" &&
       Boolean(new URLSearchParams(query).get("query")));
   const parent = unknownRoute
@@ -947,7 +950,10 @@ export function App() {
             <p className="metadata muted">Personal workspace</p>
           </div>
         </div>
-        <SearchWorkField navigate={navigate} />
+        <SearchWorkField
+          navigate={navigate}
+          current={pathname === "/app/search"}
+        />
         {navigation(false)}
       </aside>
       <div className="workspace">

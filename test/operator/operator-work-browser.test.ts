@@ -166,18 +166,19 @@ test("toolbar puts the filters, switch and count on one row with Active tasks as
   await page.goForward();
   await page.waitForURL((u) => u.searchParams.get("state") === "Stopping");
 
-  // Search, Source and Readiness live in the disclosure, which opens for a URL filter.
+  // Filter tasks, Source and Readiness live in the disclosure, which opens for a URL filter.
   await page.goto(`${web.origin}/app/tasks?q=Question`);
   assert.equal(await page.locator(".work-more").getAttribute("open"), "");
-  assert.equal(await page.getByLabel("Search tasks").inputValue(), "Question");
+  assert.equal(await page.getByLabel("Filter tasks").inputValue(), "Question");
+  assert.equal(await page.getByLabel("Search tasks").count(), 0);
   await page.goto(`${web.origin}/app/tasks`);
   await page.locator(".task-list [data-task-id]").first().waitFor();
   assert.equal(await page.locator(".work-more").getAttribute("open"), null);
   await openMoreFilters(page);
-  await page.getByLabel("Search tasks").fill("Normal Stop");
+  await page.getByLabel("Filter tasks").fill("Normal Stop");
   await page.waitForURL((u) => u.searchParams.get("q") === "Normal Stop");
   assert.deepEqual(await taskIds(page), [ids.normal.id]);
-  await page.getByLabel("Search tasks").fill("");
+  await page.getByLabel("Filter tasks").fill("");
   await page.getByLabel("Source").selectOption("github");
   await page.waitForURL((u) => u.searchParams.get("source") === "github");
   assert.deepEqual(await taskIds(page), [ids.importedId]);
@@ -241,7 +242,8 @@ test("headers carry the new subtitles, one New task action and the page-owned re
     0,
   );
   assert.equal(await page.locator(".task-actions").count(), 0);
-  await page.getByText(/^Task states read /).waitFor();
+  await page.getByText(/^Updated \d{2}:\d{2}$/).waitFor();
+  assert.equal(await page.getByText(/Task states read/).count(), 0);
   const reads = [
     page.waitForRequest(
       (r) => new URL(r.url()).pathname === "/api/operator/workspace",
@@ -2204,4 +2206,63 @@ test("attention summary names the uncertain or stopping task and links to the In
   await summary.waitFor();
   assert.ok(await noPageOverflow(page));
   await shot(page, "390-board-attention-bar");
+});
+
+test("the Updated line shows the last successful read and keeps it through a failed refresh", async (_t, journey) => {
+  const { web, page } = await start(journey, "/app/tasks");
+  const label = (at: number) =>
+    page.evaluate((t) => {
+      const d = new Date(t);
+      return `Updated ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }, at);
+  // Reads are reported at a fixed instant, so the line is predictable whatever the local clock.
+  const first = Date.UTC(2026, 9, 17, 15, 47, 10);
+  const second = first + 60_000;
+  let observedAt = first;
+  const answerWith = async (route: import("playwright").Route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: { ...(await response.json()), observedAt },
+    });
+  };
+  await page.route("**/api/operator/task-list", answerWith);
+  await page.goto(`${web.origin}/app/tasks`);
+  const line = page.locator("main p.metadata", { hasText: /^Updated / });
+  const refresh = page.getByRole("button", {
+    name: "Refresh tasks",
+    exact: true,
+  });
+  await page.getByText(await label(first), { exact: true }).waitFor();
+  assert.equal(await line.count(), 1);
+
+  await page.unroute("**/api/operator/task-list");
+  await page.route("**/api/operator/task-list", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unavailable", message: "Tasks unavailable" },
+      }),
+    }),
+  );
+  await refresh.click();
+  await page
+    .getByText("Refresh failed. Showing the last fetched data.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(await line.innerText(), await label(first));
+
+  await page.unroute("**/api/operator/task-list");
+  observedAt = second;
+  await page.route("**/api/operator/task-list", answerWith);
+  await refresh.click();
+  await page.getByText(await label(second), { exact: true }).waitFor();
+  assert.equal(
+    await page
+      .getByText("Refresh failed. Showing the last fetched data.")
+      .count(),
+    0,
+  );
 });

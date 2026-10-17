@@ -77,7 +77,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
     if (r.method() === "POST") posts++;
   });
   await openMoreFilters(page);
-  await page.getByLabel("Search tasks").fill("Literal");
+  await page.getByLabel("Filter tasks").fill("Literal");
   const links = () =>
     page.locator("[data-task-id]").evaluateAll((els) =>
       els.map((e) => ({
@@ -129,7 +129,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
   assert.ok(page.url().includes("q=Literal"));
   await page.reload();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
-  assert.equal(await page.getByLabel("Search tasks").inputValue(), "Literal");
+  assert.equal(await page.getByLabel("Filter tasks").inputValue(), "Literal");
   assert.deepEqual(await links(), list);
   await page.getByRole("button", { name: "Paused · 1", exact: true }).click();
   const boardScroll = await page
@@ -1543,7 +1543,7 @@ for (const viewport of [
       .waitFor();
     await openMoreFilters(page);
     await page
-      .getByLabel("Search tasks", { exact: true })
+      .getByLabel("Filter tasks", { exact: true })
       .fill("No matching outcome");
     await page
       .getByText("No tasks match these filters.", { exact: true })
@@ -1609,7 +1609,11 @@ for (const viewport of [
       );
     }
     f.advanceClock(70000);
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    // Choosing the project again reads its composer options, which finds the expired session.
+    await page.getByLabel("Project", { exact: true }).selectOption("");
+    await page
+      .getByLabel("Project", { exact: true })
+      .selectOption(ids.projectId);
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     assert.equal(
       await page.getByLabel("Task title", { exact: true }).count(),
@@ -1883,9 +1887,14 @@ test("replacement composer owns recovery before a detached committed receipt or 
       await page.getByRole("link", { name: "New task", exact: true }).click();
     } else {
       f.advanceClock(61_000);
-      await page.getByRole("button", { name: "Refresh", exact: true }).click();
+      // The composer is locked while it saves, so leaving it finds the expired session.
+      await page.getByRole("link", { name: /^Back to /, exact: false }).click();
+      await page
+        .getByRole("button", { name: "Refresh tasks", exact: true })
+        .click();
       await page.getByLabel("Password", { exact: true }).fill(web.password);
       await page.getByRole("button", { name: "Sign in", exact: true }).click();
+      await page.getByRole("link", { name: "New task", exact: true }).click();
     }
     await page
       .getByRole("button", { name: "Check whether it saved", exact: true })
