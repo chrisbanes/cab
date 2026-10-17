@@ -485,18 +485,25 @@ Frames 143–152b draw the flows in [docs/user-flows](../docs/user-flows/); each
 document states what is implemented. Fixtures are fixture-app, `fixture-org/fixture-app`,
 @fixture-user, lead Ada and task FA-1.
 
-- **Getting started (143, 143b, 144):** Home replaces the board of 18 with a
-  "Get Ensemble running" card of six rows (Runtime, GitHub, Lead profile, Project,
-  First task, Claude optional). Each row has a status icon, title, explanation,
-  badge (✓ Done emerald, → Next amber, Needs attention rose, ○ Not started and
-  Optional neutral) and one action. Only the first incomplete required row has the
-  primary button; Done and optional rows use a ghost button, the rest secondary. On phone the action moves below the explanation. The summary counts the
-  four required rows ("1 of 4 required steps done"); GitHub and Claude are optional.
-  In 143b the paused fixture-app is not Done: the Project row reads Not started with
-  Resume, which confirms as in 149b. After the first turn Home keeps only rows that
-  need attention. The account menu's Getting started (`113-account-menu`) opens
-  `/app/getting-started`, the same card with a secondary Dismiss; once dismissed the
-  menu item reads Show getting started, which undoes it.
+- **Getting started (143, 143b, 144):** Home shows only the "Get Ensemble running"
+  card below the page heading until a task starts a turn (no board, stat strip or
+  filters), then returns to the board of 18. The card has five rows (Runtime, GitHub,
+  Project, First task, Claude optional). Each row has a status icon, title,
+  explanation, badge (✓ Done emerald, → Next amber, Needs attention rose, ○ Not
+  started and Optional neutral) and one action. Only the first incomplete required row
+  has the primary button; Done and optional rows use a ghost button, the rest
+  secondary. On phone the action moves below the explanation. The summary counts the
+  three required rows ("1 of 3 required steps done") over a three-segment progress
+  strip; GitHub and Claude are optional. The Project row covers the lead: it is Done
+  only when an enabled project has a lead profile, and otherwise offers Create
+  project, Choose a lead or Resume. First task is unavailable with "Needs a project
+  first." until a project exists. The GitHub row is informational (no one-click
+  login; that offer is in project setup). In 143b the paused fixture-app is not Done:
+  the Project row reads Not started with Resume, which confirms as in 149b. After the
+  first turn Home keeps only rows that need attention. The account menu's Getting
+  started (`113-account-menu`) opens `/app/getting-started`, the same card with a
+  secondary Dismiss; once dismissed the menu item reads Show getting started, which
+  undoes it.
 - **Project setup (145, 145b):** with no profiles, step 1 replaces the Lead profile
   select with an inline profile form: a help line ("No lead profiles yet. Create one
   here, or leave this blank and choose a lead later; tasks wait for a lead before
@@ -1704,7 +1711,8 @@ Presentation and interaction rules that the canvas does not show on its own.
 ### First run
 
 - Before any project exists, the getting-started First task row reads "Needs a
-  project first." Its Create task action opens the composer.
+  project first." Its Create task action is unavailable (aria-disabled, focusable,
+  reason announced) until a project exists.
 - The header New task button stays next to the getting-started card.
 - Before a project is created, the sidebar Projects group shows only New project.
 - The Fix confirmation (`149b-task-fix-resume-confirm`) states that holds and

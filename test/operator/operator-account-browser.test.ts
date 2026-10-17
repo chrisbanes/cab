@@ -9,6 +9,13 @@ const test = browserSuite("operator-account-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { unpairedBadges } from "../fixtures/operator-settings.js";
+import {
+  addProfile,
+  addProject,
+  addTask,
+  reenterHome,
+  startFirstTurn,
+} from "../fixtures/operator-first-run.js";
 
 const viewports = [
   { name: "desktop", width: 1366, height: 900 },
@@ -804,4 +811,307 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
     "/app/settings/runtime",
   );
   await f.service.stopTask(taskId);
+});
+
+/** Codex and claude are not on every test host's PATH; the rows read the checks as given. */
+async function routeReadiness(page: Page, codexLogin: { pass: boolean }) {
+  await page.route("**/api/operator/readiness", async (route) => {
+    const response = await route.fetch(),
+      body = await response.json();
+    for (const check of body.data.checks)
+      if (check.id === "codex-executable" || check.id === "claude-executable")
+        Object.assign(check, { status: "pass", reason: null, fix: null });
+      else if (check.id === "codex-login")
+        Object.assign(
+          check,
+          codexLogin.pass
+            ? { status: "pass", reason: null, fix: null }
+            : {
+                status: "fail",
+                reason: "Codex isn't signed in.",
+                fix: "Sign in.",
+              },
+        );
+    await route.fulfill({ response, json: body });
+  });
+}
+/** The page content below the heading: only the getting-started card on a first-run Home. */
+async function assertOnlyCard(page: Page) {
+  const card = page.getByRole("region", { name: "Get Ensemble running" });
+  await card.waitFor();
+  assert.deepEqual(
+    await page.evaluate(() =>
+      [...(document.querySelector("main.page")?.children ?? [])]
+        .filter((el) => !el.matches("header, .page-header"))
+        .map((el) => el.getAttribute("aria-label")),
+    ),
+    ["Get Ensemble running"],
+  );
+  for (const region of ["Needs you", "Across your projects"])
+    assert.equal(await page.getByRole("region", { name: region }).count(), 0);
+  assert.equal(
+    await page.getByRole("button", { name: "Refresh tasks" }).count(),
+    0,
+  );
+  assert.equal(await page.getByText("Nothing needs your attention").count(), 0);
+  return card;
+}
+const row = (card: import("playwright").Locator, name: string) =>
+  card.getByRole("listitem", { name, exact: true });
+
+for (const viewport of viewports)
+  test(`Home first run shows only the getting-started card at ${viewport.width}`, async (_t, journey) => {
+    const { web, page } = await launch(journey, viewport);
+    await routeReadiness(page, { pass: true });
+    await page.goto(`${web.origin}/app`);
+    await submitPassword(page, web.password);
+    const card = await assertOnlyCard(page);
+    await card.getByText("1 of 3 required steps done").waitFor();
+    assert.equal(
+      await row(card, "Project")
+        .getByRole("link", { name: "Create project" })
+        .getAttribute("href"),
+      "/app/settings/projects/new",
+    );
+    const first = row(card, "First task").getByRole("button", {
+      name: "Create task",
+    });
+    assert.equal(await first.getAttribute("aria-disabled"), "true");
+    assert.equal(
+      await first.getAttribute("disabled"),
+      null,
+      "not natively disabled",
+    );
+    assert.equal(
+      await first.evaluate(
+        (el) =>
+          document.getElementById(el.getAttribute("aria-describedby") ?? "")
+            ?.textContent,
+      ),
+      "Needs a project first.",
+    );
+    // Tab from the control before it reaches this one, in document order.
+    await row(card, "Project")
+      .getByRole("link", { name: "Create project" })
+      .focus();
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press("Tab");
+      if (await first.evaluate((el) => el === document.activeElement)) break;
+    }
+    assert.equal(
+      await first.evaluate((el) => el === document.activeElement),
+      true,
+      "the unavailable action is reachable by keyboard",
+    );
+    // Playwright treats aria-disabled as not actionable; force the click a pointer user makes.
+    await first.click({ force: true });
+    assert.equal(new URL(page.url()).pathname, "/app");
+    // The action sits below its explanation on a phone and nothing scrolls sideways.
+    const boxes = await page.evaluate(() => {
+      const li = document.querySelector<HTMLElement>(
+        '[aria-label="First task"]',
+      );
+      const rect = (selector: string) =>
+        li?.querySelector(selector)?.getBoundingClientRect();
+      return {
+        text: rect(".getting-started-text")?.bottom ?? 0,
+        action: rect(".getting-started-action")?.top ?? 0,
+        scroll: document.documentElement.scrollWidth,
+      };
+    });
+    assert.ok(boxes.scroll <= viewport.width, "no horizontal scroll");
+    if (viewport.width === 390)
+      assert.ok(boxes.action >= boxes.text, "the action sits below the detail");
+    await captureBrowserEvidence(page, `${viewport.width}-home-first-run`);
+  });
+
+test("Home keeps the card until a task starts a turn, then shows the board", async (_t, journey) => {
+  const { f, web, page } = await launch(journey, viewports[0]);
+  await routeReadiness(page, { pass: true });
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  await assertOnlyCard(page);
+
+  const leadId = addProfile(f),
+    firstProject = addProject(f, "fixture-app", leadId);
+  await page.reload();
+  let card = await assertOnlyCard(page);
+  await row(card, "Project").getByText("Done", { exact: true }).waitFor();
+  assert.equal(
+    await row(card, "First task")
+      .getByRole("link", { name: "Create task" })
+      .getAttribute("href"),
+    `/app/tasks/new?project=${firstProject}`,
+  );
+  // A second project without a lead does not undo Done, and still no board.
+  addProject(f, "second-app", null);
+  await page.reload();
+  card = await assertOnlyCard(page);
+  await row(card, "Project").getByText("Done", { exact: true }).waitFor();
+  // A task that never starts a turn keeps the card.
+  const taskId = addTask(f, firstProject, "Never started");
+  await page.reload();
+  await assertOnlyCard(page);
+
+  // A turn starts elsewhere; entering Home again swaps the card for the board without a reload.
+  await startFirstTurn(f, firstProject, taskId);
+  await reenterHome(page);
+  await page
+    .getByRole("region", { name: "Across your projects" })
+    .getByRole("link", { name: "Never started" })
+    .waitFor();
+  assert.equal(
+    await page.getByRole("region", { name: "Get Ensemble running" }).count(),
+    0,
+  );
+
+  // Another session and a reload both get the board.
+  const other = await (page.context().browser() as Browser).newPage({
+    viewport: viewports[0],
+  });
+  journey.observe(other);
+  other.setDefaultTimeout(5000);
+  await routeReadiness(other, { pass: true });
+  await other.goto(`${web.origin}/app`);
+  await submitPassword(other, web.password);
+  await other.getByRole("region", { name: "Across your projects" }).waitFor();
+  assert.equal(
+    await other.getByRole("region", { name: "Get Ensemble running" }).count(),
+    0,
+  );
+  await page.reload();
+  await page.getByRole("region", { name: "Across your projects" }).waitFor();
+  await f.service.stopTask(taskId);
+});
+
+for (const viewport of viewports)
+  test(`Home first run offers the GitHub CLI login only in project setup at ${viewport.width}`, async (_t, journey) => {
+    const { web, page } = await launch(journey, viewport);
+    await routeReadiness(page, { pass: true });
+    await page.route("**/api/operator/discovery", async (route) => {
+      const response = await route.fetch(),
+        body = await response.json();
+      Object.assign(body.data, {
+        configured: false,
+        available: false,
+        source: null,
+        gh: { state: "signed-in", login: "fixture-user" },
+        sourceGh: { state: "signed-in", login: "fixture-user" },
+      });
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto(`${web.origin}/app`);
+    await submitPassword(page, web.password);
+    const card = await assertOnlyCard(page);
+    const github = row(card, "GitHub");
+    await github.getByText(/@fixture-user/).waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      0,
+    );
+    assert.equal(
+      await github
+        .getByRole("link", { name: "Set discovery credential" })
+        .getAttribute("href"),
+      "/app/settings",
+    );
+    await page.goto(`${web.origin}/app/getting-started`);
+    await page
+      .getByRole("region", { name: "Get Ensemble running" })
+      .getByText(/@fixture-user/)
+      .waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      0,
+    );
+    await page.goto(`${web.origin}/app`);
+    await row(await assertOnlyCard(page), "Project")
+      .getByRole("link", { name: "Create project" })
+      .click();
+    await page.waitForURL("**/app/settings/projects/new");
+    await page
+      .getByRole("button", { name: "Use GitHub CLI login (@fixture-user)" })
+      .waitFor();
+    assert.equal(
+      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      1,
+    );
+  });
+
+test("Home first run when the checklist reads fail", async (_t, journey) => {
+  const { web, page } = await launch(journey, viewports[0]);
+  // The workspace read decides what Home shows: without it, neither the card nor the board.
+  await page.route("**/api/operator/workspace", (route) => route.abort());
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  await page.getByText("Projects are unavailable. Try again.").waitFor();
+  assert.equal(
+    await page.getByRole("region", { name: "Get Ensemble running" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByRole("region", { name: "Across your projects" }).count(),
+    0,
+  );
+  await page.unroute("**/api/operator/workspace");
+  await page.getByRole("button", { name: "Try again" }).click();
+  await assertOnlyCard(page);
+
+  // A failed readiness read stays inside the card and still counts three steps.
+  await page.route("**/api/operator/readiness", (route) =>
+    route.fulfill({ status: 503, json: { error: { code: "unavailable" } } }),
+  );
+  await page.route("**/api/operator/discovery", (route) => route.abort());
+  await page.reload();
+  const card = await assertOnlyCard(page);
+  await row(card, "Runtime")
+    .getByText("Couldn't check", { exact: true })
+    .waitFor();
+  await card.getByText(/of 3 required steps done/).waitFor();
+  assert.equal(
+    await row(card, "GitHub")
+      .getByRole("link", { name: "Set discovery credential" })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+    0,
+  );
+});
+
+test("Home first run follows readiness and project changes", async (_t, journey) => {
+  const { f, web, page } = await launch(journey, viewports[0]);
+  const codex = { pass: false };
+  await routeReadiness(page, codex);
+  await page.goto(`${web.origin}/app`);
+  await submitPassword(page, web.password);
+  let card = await assertOnlyCard(page);
+  await row(card, "Runtime").getByText("Next", { exact: true }).waitFor();
+  assert.equal(
+    await row(card, "Project")
+      .getByRole("link", { name: "Create project" })
+      .count(),
+    1,
+  );
+  assert.equal(
+    await row(card, "Project").getByText("Next", { exact: true }).count(),
+    0,
+    "Project is not the primary step while Runtime is",
+  );
+  const away = async () => {
+    await reenterHome(page);
+    card = await assertOnlyCard(page);
+  };
+  codex.pass = true;
+  addProject(f, "fixture-app", addProfile(f));
+  await away();
+  await row(card, "Runtime").getByText("Done", { exact: true }).waitFor();
+  await row(card, "Project").getByText("Done", { exact: true }).waitFor();
+  await row(card, "First task").getByText("Next", { exact: true }).waitFor();
+  codex.pass = false;
+  await away();
+  await row(card, "Runtime")
+    .getByText("Needs attention", { exact: true })
+    .waitFor();
 });
