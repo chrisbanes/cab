@@ -1009,3 +1009,58 @@ test("service and snapshot usage errors end with one Fix line", async (t) => {
     );
   }
 });
+
+test("every usage-error path ends with one Fix line and help and version stay clean", async (t) => {
+  const h = harness(t);
+  // [name, args, stream carrying the usage text]
+  const paths: [string, string[], "stdout" | "stderr"][] = [
+    ["bare invocation", [], "stdout"],
+    ["unknown top-level command", ["bogus"], "stderr"],
+    ["unknown subcommand", ["task", "bogus"], "stderr"],
+    ["the word help", ["help"], "stderr"],
+    ["missing positionals", ["task", "get"], "stderr"],
+    ["unknown flag", ["task", "list", "--bogus-flag"], "stderr"],
+    ["invalid --output", ["task", "list", "--output", "yaml"], "stderr"],
+    ["service usage", ["service", "bogus"], "stderr"],
+    ["snapshot usage", ["snapshot", "create"], "stderr"],
+  ];
+  for (const [name, args, stream] of paths) {
+    const r = await h.run(args);
+    assert.equal(r.code, 2, name);
+    const usage = stream === "stdout" ? r.out : r.err;
+    if (name !== "invalid --output") assert.match(usage, /Usage:/, name);
+    if (stream === "stderr") assert.equal(r.out, "", name);
+    assert.equal(fixLines(r.err).length, 1, name);
+    assert.equal(
+      r.err.trimEnd().split("\n").at(-1),
+      "Fix: Run 'ensemble --help'.",
+      name,
+    );
+    // JSON: the error envelope (or, for a bare invocation, today's usage text) is unchanged
+    // and nothing is written to stderr.
+    // These commands take no --output, so there is no JSON variant of them.
+    if (["invalid --output", "service usage", "snapshot usage"].includes(name))
+      continue;
+    const json = await h.run([...args, "--output", "json"]);
+    assert.equal(json.code, 2, name);
+    // A flag-parse failure is raised before --output is read, so it stays human-only.
+    if (name === "unknown flag") continue;
+    assert.equal(json.err, "", name);
+    assert.ok(!json.out.includes("Fix:"), name);
+    if (args.length)
+      assert.deepEqual(
+        Object.keys(json.json().error).sort(),
+        ["category", "code", "message", "outcome", "requestId", "retryable"],
+        name,
+      );
+  }
+  for (const [name, args] of [
+    ["--help", ["--help"]],
+    ["--version", ["--version"]],
+  ] as const) {
+    const r = await h.run([...args]);
+    assert.equal(r.code, 0, name);
+    assert.equal(r.err, "", name);
+    assert.ok(!r.out.includes("Fix:"), name);
+  }
+});

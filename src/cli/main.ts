@@ -30,7 +30,7 @@ import {
   snapshotCommand,
 } from "./service.js";
 import { jsonLine, terminalSafe } from "./render.js";
-import { fixLine, remedyFor } from "./remedy.js";
+import { DEFAULT_FIX, fixLine, remedyFor } from "./remedy.js";
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
@@ -250,7 +250,10 @@ export async function main(
     }
     if (values.help || positionals.length === 0) {
       deps.stdout.write(USAGE);
-      return values.help ? 0 : 2;
+      if (values.help) return 0;
+      // A bare invocation is a usage error: the help stays on stdout, the remedy goes to stderr.
+      if (!json) deps.stderr.write(`${fixLine(DEFAULT_FIX.usage ?? "")}\n`);
+      return 2;
     }
     const result = await run(positionals, values, deps);
     if (result.streamed) return 0;
