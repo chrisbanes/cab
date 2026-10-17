@@ -1,9 +1,10 @@
 import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { isPlainClick } from "./components.js";
+import { isPlainClick, ShortId } from "./components.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
+  deliveryApplies,
   executionFacts,
   sourceFacts,
   taskColumnOf,
@@ -166,8 +167,12 @@ export function TaskInspector({
           <dd>{facts.running ? `${facts.running} running` : "None running"}</dd>
           <dt>Lead runtime</dt>
           <dd>{facts.lead ?? "No lead assignment"}</dd>
-          <dt>Delivery</dt>
-          <dd>{facts.delivery}</dd>
+          {deliveryApplies(data) && (
+            <>
+              <dt>Delivery</dt>
+              <dd>{facts.delivery}</dd>
+            </>
+          )}
         </dl>
       </Group>
       <Group label="Results & artifacts">
@@ -182,7 +187,7 @@ export function TaskInspector({
                     href={`?result=${r.resultId}#review`}
                     onClick={show(r.resultId)}
                   >
-                    Result {i + 1} · {r.workId}
+                    R{i + 1} · <ShortId value={r.resultId} focusable={false} />
                   </a>
                 </li>
               ))}

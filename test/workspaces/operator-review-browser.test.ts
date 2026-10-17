@@ -10,7 +10,10 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { TaskReviewStore } from "../../src/core/task-review.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  seedReviewTask,
+  setLinkedRepository,
+} from "../fixtures/task-review.js";
 import { leadResumeNotice } from "../../web/src/lead-feedback.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-review-browser");
@@ -26,6 +29,8 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
   );
   const a = await seedReviewTask(f),
     workspace = await f.service.taskWorkspace(a.taskId);
+  // Delivery controls belong to a task whose project links a repository.
+  setLinkedRepository(f, a.projectId, true);
   assert.ok(workspace);
   const beforePng = await readFile(
       join(process.cwd(), "design/assets/command-menu-before.png"),
@@ -693,9 +698,10 @@ for (const [limitCase, sourceBody] of [
       .getByRole("button", { name: "Refresh task", exact: true })
       .click();
     await brief
-      .getByText(`github source revision ${next.revision} · ${next.sourceId}`, {
-        exact: true,
-      })
+      .getByText(
+        `GitHub source · revision ${next.revision} · ${next.sourceId.slice(0, 8)}`,
+        { exact: true },
+      )
       .waitFor();
     await brief.getByText(gap).waitFor();
     assert.equal(

@@ -13,7 +13,10 @@ import {
   createOperatorFixture,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  seedReviewTask,
+  setLinkedRepository,
+} from "../fixtures/task-review.js";
 
 const test = browserSuite("operator-changes-browser");
 
@@ -150,6 +153,8 @@ async function startChangesJourney(
       { repositoryId: "repo-beta", path: betaSource },
     ],
   );
+  // Delivery lines belong to a task whose project links a repository.
+  setLinkedRepository(fixture, task.projectId, true);
   // A recorded lead result settles the assignment, so admission starts no initial turn.
   const result = recordResult
     ? task.result("Recorded provider summary", {

@@ -1966,8 +1966,12 @@ as follows:
   `12-imported-task-source-execution` for the imported inspector and
   `47-phone-task-overview`, `53-phone-failed-refresh-uncertain` and
   `55-phone-parallel-delegation` for the phone composition. The shell page header
-  keeps Back, the title, the recorded desired outcome as its subtitle (plain text,
-  clamped to three lines; the brief keeps the full text) and Execution plus, while
+  keeps Back, the title, the first line of the recorded desired outcome as its
+  subtitle (plain text with heading, list and checklist markers removed, clamped to
+  three lines; when more follows, a closed "Full desired outcome" disclosure in the
+  status strip renders the whole outcome as Markdown and stays open across a
+  refresh; a redacted outcome shows neither; the brief keeps the full text) and
+  Execution plus, while
   the task is open, Stop…, at every width. A finished task offers no Stop…; an
   existing Stop stays as a disabled "Stop requested". Back is the only back
   control: with an in-session origin it reads the origin view ("Board",
@@ -2041,22 +2045,48 @@ as follows:
   execution"; then for every task Holds (each open request and each hold title,
   counted; the other open approvals when one is selected, none when no
   approval is selected), Dependencies (local dependencies as links, or "None"), Execution
-  (state, running assignments, the lead's runtime, delivery mode and bound pull
-  request) and Results & artifacts (each recorded result, newest first, opening
+  (state, running assignments, the lead's runtime and, only for a task with a
+  GitHub source, a linked repository or a bound pull request, the delivery mode
+  and bound pull request) and Results & artifacts (each recorded result, newest first, opening
   it in the latest-result card, and the bound pull request). The per-selection
   sync lines and dependency blocks have left the brief. There is no GitHub
   Project status (memberships carry node ids only), "Unblocks" list, "Last turn"
   time, workspace path or per-task artifact list; artifacts stay in the latest
   result's evidence. The inspector is Overview's alone.
+- The reply offers "Message task lead" for every task and "Post GitHub comment"
+  only for an imported task; the Changes tab's delivery block (heading "Changes and
+  delivery", bound pull request, checks, feedback, blockers, actions and "Refresh
+  delivery status") shows only for a task with a GitHub source, a linked project
+  repository (`repositoryLinked` on the task read) or a bound pull request, and the
+  heading is "Changes" otherwise. A settled refresh result leaves with the
+  controls; the "Check whether it saved" for a refresh whose response was lost
+  stays until it is resolved, then goes. Exactly one sentence sits above the reply box,
+  for the selected destination: the lead's resume, receive or unavailable line, "This
+  project has no lead to message yet.", or the comment policy (a reason from the
+  server, or what posting does). The "Immutable reference" line sits below the box.
+  A task without a GitHub source always sends a lead message: its reply moves to the
+  lead with the lead's own draft and reference, and the GitHub draft and its approval are
+  kept apart (editing that draft withdraws the approval) for when the source returns.
 - Stop task submits the retained `/runtime/control/stop` form and lands on the
   Execution page, where the Stop observation and Resume live. Unsent reply text on
   the task page is not carried across that navigation; Keep running, Escape and
   the overlay keep it. While Stop is recorded the header shows a disabled "Stop
   requested" and the status line "Stopping; effects may continue". There is no
   in-app Resume (a new write path).
-- No short identifiers (AT-142, A-104, R2, V-22, C-104): no read carries them.
-  Assignment rows show the profile name, a brief excerpt and the first eight
-  characters of the assignment id; results keep their recorded ids. There is no
+- No drawn short identifiers (AT-142, A-104, V-22, C-104): no read carries them.
+  Recorded ids show as the first eight characters in mono metadata (a shared
+  `ShortId`, never inside a sentence), with the full value as its title and
+  focusable; no full id is visible on Overview. Assignment rows show the profile
+  name, a brief excerpt and the short assignment id. Results are labelled `R<n>`,
+  oldest first (the number the Result revision select and the inspector use), with
+  the short result id beside it. Token wording: a criterion's metadata reads
+  "Source revision 1 · scope · provenance" and omits what was not supplied; a
+  validation row shows the checked head short and reads "Matches the current pull
+  request head", "Checked an earlier head than the current pull request head" or
+  "Head comparison unknown"; an unavailable retained-evidence result reads "Evidence
+  was not retained for this result.", "Evidence for this result is excluded from
+  view." or "Retained evidence for this result can't be shown right now." (anything
+  else: "…can't be shown."), with the code inside a closed Details. There is no
   "Approach" block (no recorded approach field), no "Compare screenshots" control
   (recorded pairs render under the latest result), no clock times, and no
   "Earlier results (2)" button (the Result revision select and the inspector keep
@@ -2064,6 +2094,10 @@ as follows:
 - Frame 57's entries under the latest result stay: Files, Changes, Review,
   "Assignment context & identifiers", "Assignment history" and "Message lead"
   open their tab in place and move to the section, without a history entry.
+- The viewing-reference block under the latest result (the "No viewing baseline …"
+  or changes line, "Set viewing reference" and its disclaimer) shows only once the
+  task has a result. A check for a viewing write whose response was lost stays
+  visible regardless.
 - Criteria read C1, C2… in the brief and in the result's rows with the recorded
   outcome ("Supported by recorded evidence", "Failed recorded check",
   "Unverified"); no overall pass is derived. The literal brief, checklist syntax

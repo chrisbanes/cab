@@ -1367,6 +1367,8 @@ export const taskSchema = envelope(
         })
         .strict()
         .optional(),
+      /** True when the task's project links at least one GitHub repository; no names or paths. */
+      repositoryLinked: z.boolean().optional(),
       contentUnavailable: z.boolean(),
     })
     .strict(),

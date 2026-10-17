@@ -40,6 +40,10 @@ import {
 } from "../fixtures/power-events.js";
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
+import {
+  seedReviewTask,
+  setLinkedRepository,
+} from "../fixtures/task-review.js";
 import { tmpdir } from "../fixtures/temp.js";
 import {
   createNativeWork,
@@ -131,6 +135,20 @@ test("a committed command whose result fails validation has an unknown outcome",
       error instanceof Error && error.message === "command-outcome-unknown",
   );
   assert.equal(domain.tasks(projectId).length, 1);
+});
+
+test("the task read reports whether the task's project links a repository", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const a = await seedReviewTask(f);
+  const api = new OperatorApi(f.service, [f.directory]);
+  const linked = async () =>
+    (await api.readTask(a.taskId)).data.repositoryLinked;
+  assert.equal(await linked(), false);
+  setLinkedRepository(f, a.projectId, true);
+  assert.equal(await linked(), true);
+  setLinkedRepository(f, a.projectId, false);
+  assert.equal(await linked(), false);
 });
 
 test("operator API maps the issue.comment-only policy by type, not its message", async (t) => {

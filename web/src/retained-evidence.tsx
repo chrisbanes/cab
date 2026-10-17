@@ -6,12 +6,13 @@ import {
   type Session,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { Button, StatusBadge } from "./components.js";
+import { Button, ShortId, StatusBadge } from "./components.js";
 import {
   DiffHunk,
   DiffLayoutControls,
   type DiffHunkData,
 } from "./diff-view.js";
+import { codeSentence } from "./presentation.js";
 import { useOperatorResource } from "./resource.js";
 import { resultEvidenceAnchor } from "./review-anchor.js";
 import { FilePreviewBody } from "./task-files.js";
@@ -22,6 +23,13 @@ import type {
 
 const time = (value: number | null) =>
   value === null ? "not read" : new Date(value).toLocaleString();
+
+/** What a result-level `unavailable` reason means for the reader; an unknown code gets the fallback. */
+const unavailableSentences = {
+  "not-retained": "Evidence was not retained for this result.",
+  excluded: "Evidence for this result is excluded from view.",
+  unavailable: "Retained evidence for this result can't be shown right now.",
+};
 
 const diffSideSchema = z.discriminatedUnion("state", [
   z.object({ state: z.literal("absent") }),
@@ -258,16 +266,27 @@ export function RetainedResultEvidence({
         <p role="alert">Retained evidence could not be read. Retry later.</p>
       )}
       {data?.state === "unavailable" && (
-        <p role="status">
-          Retained evidence is unavailable for this result. Current files are
-          not used instead. <span className="identifier">{data.reason}</span>
-        </p>
+        <>
+          <p role="status">
+            {codeSentence(
+              data.reason,
+              unavailableSentences,
+              "Retained evidence for this result can't be shown.",
+            )}{" "}
+            Current files are not used instead.
+          </p>
+          <details>
+            <summary>Details</summary>
+            <span className="identifier">{data.reason}</span>
+          </details>
+        </>
       )}
       {data && data.state !== "unavailable" && (
         <>
           <p className="file-observation">
-            Retained result evidence · result {data.resultId} · captured{" "}
-            {time(data.capturedAt)} · <StatusBadge>{data.state}</StatusBadge>
+            Retained result evidence · result <ShortId value={data.resultId} />{" "}
+            · captured {time(data.capturedAt)} ·{" "}
+            <StatusBadge>{data.state}</StatusBadge>
           </p>
           {data.state !== "available" && data.state !== "empty" && (
             <p role="status">

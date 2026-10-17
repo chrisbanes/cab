@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   clockLabel,
   codeSentence,
+  outcomeLine,
   shortId,
   updatedLabel,
 } from "../../web/src/presentation.js";
@@ -48,4 +49,31 @@ test("a reason code reads as its sentence and an unmapped code never leaks", () 
   );
   assert.equal(unmapped, "Not available.");
   assert.doesNotMatch(unmapped, /reviewable-pr/);
+});
+
+test("the outcome line is its first non-empty line without Markdown markers", () => {
+  assert.deepEqual(outcomeLine("## Context\n\n- [ ] Restore focus"), {
+    line: "Context",
+    more: true,
+  });
+  assert.deepEqual(outcomeLine("- [ ] Restore focus\n- [ ] Retain drafts"), {
+    line: "Restore focus",
+    more: true,
+  });
+  assert.deepEqual(outcomeLine("1. [x] Done first\n2. Then this"), {
+    line: "Done first",
+    more: true,
+  });
+  assert.deepEqual(outcomeLine("Write the guide."), {
+    line: "Write the guide.",
+    more: false,
+  });
+  // Trailing blank lines are not more text, and a link labelled x keeps its label.
+  assert.deepEqual(outcomeLine("[X](https://example.com) first\n\n  \n"), {
+    line: "[X](https://example.com) first",
+    more: false,
+  });
+  // Nothing meaningful, and a redacted outcome, give no line and no exception.
+  assert.deepEqual(outcomeLine("  \n- [ ]  \n"), { line: "", more: false });
+  assert.deepEqual(outcomeLine(null), { line: "", more: false });
 });
