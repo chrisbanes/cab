@@ -1146,6 +1146,18 @@ test("prepare writes a change document to a default path that never overwrites",
   );
   assert.equal(names(full).length, 99);
 
+  // 7b. The last suffix, -99, is used when every earlier name is taken.
+  const nearlyFull = cwdOf();
+  for (let i = 1; i <= 98; i++)
+    writeFileSync(
+      join(nearlyFull, `${stem}${i === 1 ? "" : `-${i}`}.json`),
+      "x",
+      { mode: 0o600 },
+    );
+  r = await prepare(nearlyFull);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.file, join(nearlyFull, `${stem}-99.json`));
+
   // 8. After `--`, `--out` is a positional, so the command is refused unread.
   const cwd8 = cwdOf();
   const before8 = fetched();

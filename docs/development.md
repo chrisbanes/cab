@@ -292,8 +292,8 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    changed.` and omits the effect notes), `null` when an earlier attempt may have
    lost its reply, or `--request-id` names a key the journal has not seen (the
    second line says so; the change is still applied once), and `false` for a first
-   apply. A replay of a key applied from another machine reads as `null`. Exit codes: 2 invalid input, 3
-   authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
+   apply. A replay of a key applied from another machine reads as `null`. Exit codes:
+   2 invalid input, 3 authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
    outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted, and `--version` and `--help` are answered before any command. Every
    human error of the operator commands ends with one `Fix:` line on stderr
@@ -308,7 +308,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    The `--expected-*` flags check different records, so each command's help prints one
    line under its usage naming the record its flag refers to and the command that shows
    it (the task, an assignment, a profile, a project or its routing, the source
-   configuration, a question, an approval or a comment review). No flag is renamed:
+   configuration, a placement conflict, a question, an approval or a comment review). No flag is renamed:
    `--expected-version`, `--expected-revision`, `--expected-task-version` and
    `--expected-conversation-revision` keep their meaning, and `task configure` keeps
    reading the version itself when `--expected-version` is omitted.

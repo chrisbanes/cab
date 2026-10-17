@@ -727,7 +727,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         "project place-task TASK_ID --to PROJECT_ID --expected-version N [--request-id UUID]",
       positionals: 1,
       expects:
-        "--expected-version: the placement conflict's version (the Version column of 'ensemble project sources PROJECT_ID'); required.",
+        "--expected-version: the placement conflict's version (the Version column of 'ensemble project sources PROJECT_ID' for the task's current project); required.",
       flags: ["to", "expected-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");

@@ -73,7 +73,7 @@ export const digestOf = (document: Omit<ChangeDocument, "digest">): string =>
   createHash("sha256").update(canonicalJson(document)).digest("hex");
 
 /** `ensemble-<kind>-<id8>`: the default document name, without its suffix or extension. */
-export function defaultStem(kind: ChangeKind, targetId: string) {
+function defaultStem(kind: ChangeKind, targetId: string) {
   const id8 = z.uuid().safeParse(targetId).success ? targetId.slice(0, 8) : "";
   return `ensemble-${kind.replace(".", "-")}${id8 && `-${id8}`}`;
 }

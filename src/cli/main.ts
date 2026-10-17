@@ -125,15 +125,9 @@ const COMMAND_USAGE = new Map<string, string>([
     ([key, c]) => [key, c.usage] as const,
   ),
 ]);
-/** The `expects` help line of each write command that has expected-version flags, by key. */
-const COMMAND_EXPECTS = new Map(
-  [...writeCommands].flatMap(([key, c]) =>
-    c.expects === undefined ? [] : [[key, c.expects] as const],
-  ),
-);
 /** A usage line, and under it, when the command has one, the line saying what its expected-* flags check. */
 const helpEntry = (key: string, usage: string) => {
-  const expects = COMMAND_EXPECTS.get(key);
+  const expects = writeCommands.get(key)?.expects;
   return expects === undefined ? [usage] : [usage, `  ${expects}`];
 };
 const areaOf = (key: string) => key.split(" ")[0] ?? key;
