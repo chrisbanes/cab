@@ -204,6 +204,15 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      `result evidence TASK_ID RESULT_ID ITEM_ID [--out PATH]` and
      `artifact get TASK_ID ARTIFACT_ID --out PATH`.
 
+   Tables lead with the title or name and end with the full id, which every command
+   takes: `task list` is `Title`, `Project` (the name, and omitted under `--project`),
+   `State` and `Next` (the web UI's column and who acts next), `Lead` and `Task id`;
+   `task search` is `Title`, `Project`, `Type`, `Created`, `Excerpt` and `Task id`;
+   `project list` is `Name`, `Lead` (the profile's name), `Paused`, `Version` and
+   `Project id`; `profile list` is `Name`, `Revoked`, `Version`, `Summary` and
+   `Profile id`. `project list` and `profile list` end with a `Runtime:` line only when
+   the runtime is unavailable.
+
    Lists take `--limit N` (default 50, at most 200; task list caps at 100 and search
    at 50, reported as `limit-capped`) and `--cursor TOKEN`. One invocation reads one
    page: human output ends with a `More:` line giving the next command, and

@@ -7,6 +7,7 @@ import {
   taskMessagePageSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
+import { taskColumn } from "../operator/task-presentation.js";
 import {
   anyNull,
   type BrowseCommand,
@@ -21,7 +22,7 @@ import {
   uuidArg,
 } from "./browse.js";
 import { CliError } from "./connections.js";
-import { nextLine } from "./remedy.js";
+import { nextLine, nextText } from "./remedy.js";
 import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
 
@@ -33,10 +34,19 @@ const query = (params: Record<string, string | number | undefined>) =>
     ),
   ).toString();
 
-const runtimeLine = (r: { state: string; since?: number }) =>
+/** The footer that says the runtime is down; an available runtime needs no line. */
+const runtimeNote = (r: { state: string; since?: number }) =>
   r.state === "available"
-    ? "available"
-    : `unavailable since ${isoTime(r.since ?? 0)}`;
+    ? []
+    : [`Runtime: unavailable since ${isoTime(r.since ?? 0)}`];
+/** The lead profile's name from the same read, `none` without a lead. */
+const leadName = (
+  profileId: string | null,
+  profiles: readonly { id: string; name: string | null }[],
+) =>
+  profileId === null
+    ? "none"
+    : oneLine(unavailable(profiles.find((p) => p.id === profileId)?.name), 30);
 const harnessLine = (r: {
   harness: string;
   model?: string | null;
@@ -53,7 +63,7 @@ const projectList: BrowseCommand = {
   async run(ctx) {
     const client = await ctx.connect();
     const read = await client.get(`${API}/workspace`, workspaceSchema);
-    const { projects, runtime } = read.data;
+    const { projects, profiles, runtime } = read.data;
     return browseOutput(ctx, {
       data: { projects, runtime },
       observedAt: read.observedAt,
@@ -63,17 +73,17 @@ const projectList: BrowseCommand = {
       human: [
         projects.length
           ? table(
-              ["Project", "Name", "Lead profile", "Paused", "Version"],
+              ["Name", "Lead", "Paused", "Version", "Project id"],
               projects.map((p) => [
-                p.id,
                 unavailable(p.name),
-                p.leadProfileId ?? "-",
+                leadName(p.leadProfileId, profiles),
                 p.paused ? "yes" : "no",
                 String(p.version),
+                p.id,
               ]),
             )
           : "No projects.",
-        `Runtime: ${runtimeLine(runtime)}`,
+        ...runtimeNote(runtime),
       ].join("\n"),
     });
   },
@@ -96,13 +106,13 @@ const profileList: BrowseCommand = {
       human: [
         profiles.length
           ? table(
-              ["Profile", "Name", "Revoked", "Version", "Summary"],
+              ["Name", "Revoked", "Version", "Summary", "Profile id"],
               profiles.map((p) => [
-                p.id,
                 unavailable(p.name),
                 p.revoked ? "yes" : "no",
                 String(p.version),
                 oneLine(p.summary),
+                p.id,
               ]),
             )
           : [
@@ -111,7 +121,7 @@ const profileList: BrowseCommand = {
                 "ensemble profile prepare-create --out profile.json --name NAME --instructions TEXT",
               ),
             ].join("\n"),
-        `Runtime: ${runtimeLine(runtime)}`,
+        ...runtimeNote(runtime),
       ].join("\n"),
     });
   },
@@ -145,7 +155,7 @@ const projectGet: BrowseCommand = {
           ["Name", unavailable(d.project.name)],
           ["Version", String(d.project.version)],
           ["Paused", d.project.paused ? "yes" : "no"],
-          ["Lead profile", d.project.leadProfileId ?? "-"],
+          ["Lead", leadName(d.project.leadProfileId, d.profiles)],
           [
             "Instructions",
             `revision ${d.instructionsRevision}, ${d.instructionPresent ? "present" : "empty"}`,
@@ -163,8 +173,8 @@ const projectGet: BrowseCommand = {
         "",
         d.profiles.length
           ? table(
-              ["Profile", "Name"],
-              d.profiles.map((p) => [p.id, unavailable(p.name)]),
+              ["Name", "Profile id"],
+              d.profiles.map((p) => [unavailable(p.name), p.id]),
             )
           : "No profiles.",
       ].join("\n"),
@@ -252,15 +262,25 @@ const taskListCommand: BrowseCommand = {
       },
       human: page.tasks.length
         ? table(
-            ["Task", "Project", "State", "Execution", "Attention", "Title"],
-            page.tasks.map((t) => [
-              t.id,
-              t.projectId,
-              `${t.state}${closureSuffix(t.source?.closure)}`,
-              t.execution.state,
-              t.attention.codes.join(",") || "-",
-              oneLine(t.title),
-            ]),
+            [
+              "Title",
+              ...(project ? [] : ["Project"]),
+              "State",
+              "Next",
+              "Lead",
+              "Task id",
+            ],
+            page.tasks.map((t) => {
+              const column = taskColumn(t);
+              return [
+                oneLine(t.title),
+                ...(project ? [] : [oneLine(t.project.name, 30)]),
+                `${column}${closureSuffix(t.source?.closure)}`,
+                nextText(t.attention.codes, column).text,
+                t.lead ? oneLine(t.lead.name, 30) : "none",
+                t.id,
+              ];
+            }),
           )
         : "No tasks.",
     });
@@ -333,14 +353,21 @@ const taskSearch: BrowseCommand = {
       },
       human: page.matches.length
         ? table(
-            ["Type", "Task", "Project", "Created", "Title", "Excerpt"],
+            [
+              "Title",
+              ...(project ? [] : ["Project"]),
+              "Type",
+              "Created",
+              "Excerpt",
+              "Task id",
+            ],
             page.matches.map((m) => [
-              m.type,
-              m.taskId,
-              m.projectId,
-              isoTime(m.createdAt),
               oneLine(m.taskTitle, 40),
+              ...(project ? [] : [oneLine(m.projectName, 30)]),
+              m.type,
+              isoTime(m.createdAt),
               oneLine(m.excerpt),
+              m.taskId,
             ]),
           )
         : "No matches.",

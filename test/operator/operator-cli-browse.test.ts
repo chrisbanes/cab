@@ -67,7 +67,7 @@ test("an empty profile list prints the create command next", async (t) => {
     lines[1],
     "Next: ensemble profile prepare-create --out profile.json --name NAME --instructions TEXT",
   );
-  assert.match(lines[2] ?? "", /^Runtime: /);
+  assert.equal(lines.length, 2);
   assert.equal(human.err, "");
   // JSON carries no Next line and no new keys.
   const json = await h.run(["profile", "list", "--output", "json"]);
@@ -87,7 +87,7 @@ test("project, profile and task identities stay distinct across projects", async
   for (const id of [seed.alphaId, seed.betaId, s.projectId])
     assert.ok(r.out.includes(id), id);
   assert.match(r.out, /Alpha/);
-  assert.match(r.out, /Runtime: available/);
+  assert.doesNotMatch(r.out, /Runtime:/);
   r = await h.run(["profile", "list"]);
   for (const id of [seed.alphaLeadId, seed.sharedProfileId])
     assert.ok(r.out.includes(id), id);
@@ -143,7 +143,8 @@ test("project, profile and task identities stay distinct across projects", async
   assert.ok(alpha.data.tasks.every((x: Json) => x.projectId === seed.alphaId));
   r = await h.run(["task", "list", "--project", seed.betaId]);
   assert.ok(r.out.includes(seed.betaSharedTaskId));
-  assert.ok(r.out.includes(seed.betaId));
+  // The project is named by the filter, so its id is not repeated per row.
+  assert.ok(!r.out.includes(seed.betaId));
   assert.ok(!r.out.includes(seed.alphaSharedTaskId));
   const found = await ok(["task", "search", "Shared title", "--historical"]);
   const hits = found.data.matches.filter(
@@ -637,6 +638,188 @@ test("task get names the lead assignment, execution and who acts next", async (t
   ]);
   // A task nobody needs to act on does not name the Inbox.
   assert.ok(!(line(bare, "Next") ?? "").includes("ensemble inbox"));
+});
+
+const COLUMN_WORDS =
+  /^(Ready|Running|Waiting|Paused|Stopping|Uncertain|Draft|Done|Cancelled)\b/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** The header and the `count` rows after it, as cells. */
+const tableCells = (out: string, count?: number) => {
+  const lines = out.split("\n");
+  const end = count === undefined ? lines.length : count + 1;
+  return lines.slice(0, end).map(cells);
+};
+
+test("task list leads with the title and ends with the task id", async (t) => {
+  const { s, seed, h, ok, api } = await setup(t);
+  const q = await seedOwnQuestion(s.f);
+  const json = await ok(["task", "list", "--limit", "100"]);
+  const human = await h.run(["task", "list", "--limit", "100"]);
+  assert.equal(human.code, 0, human.err);
+  const [header, ...rows] = tableCells(human.out, json.data.tasks.length);
+  assert.deepEqual(header, [
+    "Title",
+    "Project",
+    "State",
+    "Next",
+    "Lead",
+    "Task id",
+  ]);
+  assert.equal(rows.length, json.data.tasks.length);
+  json.data.tasks.forEach((task: Json, i: number) => {
+    const row = rows[i] ?? [];
+    assert.equal(row.length, 6, task.id);
+    assert.equal(row.at(-1), task.id);
+    assert.match(row.at(-1) ?? "", UUID);
+    assert.equal(row[1], task.project.name);
+    assert.equal(row[4], task.lead ? task.lead.name : "none");
+    assert.match(row[2] ?? "", COLUMN_WORDS);
+    // No project id anywhere: the project is named, and the id stays in JSON.
+    assert.ok(!human.out.includes(task.projectId), task.projectId);
+  });
+  assert.doesNotMatch(human.out, /Attention|Execution|Runtime:/);
+  assert.ok(rows.some((r) => r[4] === "Alpha lead"));
+  // A project without a lead reads `none`.
+  const bare = await h.run(["task", "list", "--project", s.projectId]);
+  assert.equal(
+    tableCells(bare.out).find((r) => r.at(-1) === s.taskId)?.[3],
+    "none",
+  );
+
+  // Filtering by project drops the column, and the id with it.
+  const beta = await h.run(["task", "list", "--project", seed.betaId]);
+  assert.equal(beta.code, 0, beta.err);
+  assert.deepEqual(cells(beta.out.split("\n")[0] ?? ""), [
+    "Title",
+    "State",
+    "Next",
+    "Lead",
+    "Task id",
+  ]);
+  assert.ok(beta.out.includes(seed.betaSharedTaskId));
+  assert.ok(!beta.out.includes(seed.betaId));
+
+  // An operator-owned question reads "you · answer question".
+  const projectId = (await api(`/api/operator/tasks/${q.taskId}`)).task
+    .projectId;
+  const asked = await h.run(["task", "list", "--project", projectId]);
+  const row = tableCells(asked.out).find((r) => r.at(-1) === q.taskId);
+  assert.equal(row?.[2], "you · answer question");
+  // The data is what the direct API returns (also covered by the list data test).
+  assert.deepEqual(
+    strip(json.data),
+    strip(await api("/api/operator/task-list?limit=100")),
+  );
+});
+
+test("task search puts the title first and drops the project under --project", async (t) => {
+  const { seed, h, ok } = await setup(t);
+  const query = ["task", "search", "Shared title", "--historical"];
+  const all = await h.run(query);
+  assert.equal(all.code, 0, all.err);
+  const json = await ok(query);
+  const [header, ...rows] = tableCells(all.out, json.data.matches.length);
+  assert.deepEqual(header, [
+    "Title",
+    "Project",
+    "Type",
+    "Created",
+    "Excerpt",
+    "Task id",
+  ]);
+  json.data.matches.forEach((m: Json, i: number) => {
+    assert.equal(rows[i]?.[0], m.taskTitle);
+    assert.equal(rows[i]?.[1], m.projectName);
+    assert.equal(rows[i]?.at(-1), m.taskId);
+    assert.ok(!all.out.includes(m.projectId), m.projectId);
+  });
+  const scoped = await h.run([...query, "--project", seed.alphaId]);
+  assert.equal(scoped.code, 0, scoped.err);
+  const scopedJson = await ok([...query, "--project", seed.alphaId]);
+  assert.deepEqual(tableCells(scoped.out, 1)[0], [
+    "Title",
+    "Type",
+    "Created",
+    "Excerpt",
+    "Task id",
+  ]);
+  assert.ok(!scoped.out.includes(seed.alphaId));
+  assert.ok(scoped.out.includes(seed.alphaSharedTaskId));
+  // Coverage is unchanged by the layout.
+  assert.deepEqual(
+    scopedJson.coverage.gaps,
+    json.coverage.gaps.filter((g: string) => g !== "more-pages"),
+  );
+  assert.match(all.out, /^Note: retained records only$/m);
+});
+
+test("project and profile lists show the lead by name and the runtime only when unavailable", async (t) => {
+  const { s, seed, h, ok, api } = await setup(t);
+  const projects = await h.run(["project", "list"]);
+  assert.equal(projects.code, 0, projects.err);
+  const rows = tableCells(projects.out, 3);
+  assert.deepEqual(rows[0], [
+    "Name",
+    "Lead",
+    "Paused",
+    "Version",
+    "Project id",
+  ]);
+  const alpha = rows.find((r) => r.at(-1) === seed.alphaId);
+  assert.equal(alpha?.[0], "Alpha");
+  assert.equal(alpha?.[1], "Alpha lead");
+  const bare = rows.find((r) => r.at(-1) === s.projectId);
+  assert.equal(bare?.[1], "none");
+  assert.doesNotMatch(projects.out, /Lead profile|Runtime:/);
+  assert.ok(!projects.out.includes(seed.alphaLeadId));
+
+  const profiles = await h.run(["profile", "list"]);
+  assert.equal(profiles.code, 0, profiles.err);
+  const profileRows = tableCells(profiles.out, 2);
+  assert.deepEqual(profileRows[0], [
+    "Name",
+    "Revoked",
+    "Version",
+    "Summary",
+    "Profile id",
+  ]);
+  assert.ok(profileRows.some((r) => r.at(-1) === seed.alphaLeadId));
+  assert.doesNotMatch(profiles.out, /Runtime:/);
+
+  const got = await h.run(["project", "get", seed.alphaId]);
+  assert.match(got.out, /^Lead: +Alpha lead$/m);
+  assert.doesNotMatch(got.out, /Lead profile/);
+  assert.ok(
+    got.out.split("\n").some((l) => /^Alpha lead +[0-9a-f-]{36}$/.test(l)),
+    got.out,
+  );
+
+  // An unavailable runtime is stated last; the JSON is what the service sent.
+  const since = 1_700_000_000_000;
+  const workspace = await api("/api/operator/workspace");
+  const down = { state: "unavailable", since };
+  const unavailable: typeof fetch = async (input, init) => {
+    const response = await fetch(input, init);
+    if (!String(input).endsWith("/api/operator/workspace")) return response;
+    const body = (await response.json()) as Json;
+    body.data.runtime = down;
+    return new Response(JSON.stringify(body), {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+  for (const area of ["project", "profile"]) {
+    const text = await h.run([area, "list"], { fetch: unavailable });
+    assert.equal(
+      text.out.trimEnd().split("\n").at(-1),
+      `Runtime: unavailable since ${new Date(since).toISOString()}`,
+    );
+    const asJson = await h.run([area, "list", "--output", "json"], {
+      fetch: unavailable,
+    });
+    assert.deepEqual(asJson.json().data.runtime, down);
+    assert.deepEqual(asJson.json().data[`${area}s`], workspace[`${area}s`]);
+  }
 });
 
 test("list data equals the direct API data without paging internals", async (t) => {

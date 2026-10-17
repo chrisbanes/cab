@@ -1852,6 +1852,9 @@ test("a task created not ready names the configure command", async (t) => {
   const taskId = createdId(created.out);
   const version = (await o.cli("ro", ["task", "get", taskId])).json().data.task
     .version;
+  // The status block reads the UI's column, not the raw state and readiness.
+  assert.match(created.out, /^State: +(Draft|Paused), version \d+$/m);
+  assert.doesNotMatch(created.out, /\(not ready\)|\bopen\b/);
   assert.equal(
     created.out.trimEnd().split("\n").at(-1),
     `Next: ensemble task configure ${taskId} --expected-version ${version} --ready true`,
