@@ -3273,3 +3273,29 @@ test("daemon mode verify holds when the job's process changes while it waits for
     /its process changed while verifying/,
   );
 });
+
+test("daemon mode verify fails when the job's own process listens but never serves /app", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  f.launchd.health = 503;
+  const result = await f.installDaemon();
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "", "never reported started");
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /did not serve \/app within 120 s/,
+  );
+  assert.equal(existsSync(f.recordPath), true);
+  assert.ok(f.launchd.fetched.length > 0, "its own process was asked");
+});
+
+test("the default host treats an effective uid of 0 as root even when the real uid is not", () => {
+  const original = process.geteuid;
+  process.geteuid = () => 0;
+  try {
+    assert.equal(defaultServiceHost().isRoot(), true);
+  } finally {
+    process.geteuid = original as () => number;
+  }
+});

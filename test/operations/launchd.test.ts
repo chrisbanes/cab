@@ -603,3 +603,24 @@ test("the service entry point refuses root before main runs", () => {
     "Ensemble does not run as root; run it as the account that owns the service",
   );
 });
+
+test("the service entry point refuses an effective uid of 0 before main runs", () => {
+  // A preload makes the process report uid 0. With the guard in place the entry exits at once;
+  // without it main() would only fail on its missing arguments, so the message tells them apart.
+  const entry = resolve("dist/src/standalone/cli.js");
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "data:text/javascript,process.getuid=()=>501;process.geteuid=()=>0",
+      entry,
+      "operator",
+    ],
+    { encoding: "utf8", timeout: 20_000 },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr.trim(),
+    "Ensemble does not run as root; run it as the account that owns the service",
+  );
+});

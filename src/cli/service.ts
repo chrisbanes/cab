@@ -157,7 +157,7 @@ export type ServiceHost = {
   isRoot(): boolean;
   /** Where a LaunchDaemon plist is installed. */
   daemonsDir(): string;
-  /** Pids listening on 127.0.0.1's TCP `port` (read-only); null when that cannot be established. */
+  /** Pids listening on TCP `port` on any address (read-only); null when that cannot be established. */
   portOwner(port: number): Promise<number[] | null>;
   launchctl(args: string[]): Promise<{ status: number; stdout: string }>;
   /** Whether `plutil -lint` accepts the file. */
