@@ -379,7 +379,8 @@
   .settings-discovery input,
   .settings-credentials-form input,
   .settings-credentials-form select,
-  .settings-tabs a {
+  .settings-tabs a,
+  .runtime-limits > summary {
     min-height: 44px;
   }
 }
@@ -423,4 +424,12 @@
   align-items: center;
   gap: var(--space-8);
   margin: 0;
+}
+
+.runtime-limits {
+  display: grid;
+  gap: var(--space-12);
+}
+.runtime-limits > summary {
+  cursor: pointer;
 }

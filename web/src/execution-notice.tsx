@@ -63,3 +63,53 @@ export function PolicyDisclosure({
     </div>
   );
 }
+
+const visiblePolicyLines = 2;
+
+/**
+ * The Runtime page's policy: the first two lines, then the rest behind a native
+ * disclosure. Uncontrolled, so its open state is per viewer and in memory only.
+ */
+export function RuntimePolicy({
+  harness,
+  workspace,
+}: {
+  harness: ExecutionHarness;
+  workspace: Workspace | null | undefined;
+}) {
+  const policy = workspace?.data.harnesses.find(
+    (h) => h.harness === harness,
+  )?.policy;
+  if (!policy)
+    return <PolicyDisclosure harness={harness} workspace={workspace} />;
+  const more = policy.lines.slice(visiblePolicyLines),
+    count = more.length + policy.limits.length;
+  return (
+    <div className="policy-disclosure">
+      {policy.lines.slice(0, visiblePolicyLines).map((line) => (
+        <p className="body" key={line}>
+          {line}
+        </p>
+      ))}
+      {count > 0 && (
+        <details className="runtime-limits">
+          <summary
+            aria-label={`${executionHarnessLabels[harness]} limits and untested surfaces · ${count}`}
+          >
+            Limits and untested surfaces · {count}
+          </summary>
+          {more.map((line) => (
+            <p className="body" key={line}>
+              {line}
+            </p>
+          ))}
+          <ul className="metadata muted" aria-label="Disclosed limits">
+            {policy.limits.map((limit) => (
+              <li key={limit}>{limit}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}

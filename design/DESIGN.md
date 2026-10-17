@@ -2321,9 +2321,11 @@ frames 114 and 118–128 as follows:
   conversations only) and an "Execution policy" aside for the selected runtime;
   each Settings profile row adds a "Runtime: …" line; the Runtime and recovery
   panel carries the Claude subscription token row (like the discovery row); Runtime
-  adds an "Execution runtimes" panel with each runtime's state and effective policy,
-  with the disclosed limits listed in full rather than behind frame 126's "Limits
-  and untested surfaces" disclosure.
+  adds an "Execution runtimes" panel above Capacity with each runtime's state and
+  effective policy: the first two policy lines, then frame 126's closed "Limits and
+  untested surfaces · N" disclosure (a native `<details>`; its open state is
+  per-viewer and not stored) holding the other lines and the disclosed limits. The
+  profile "Execution policy" aside and task history list them in full.
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
   execution policy" disclosure. The shell raises one alert per unavailable runtime.
