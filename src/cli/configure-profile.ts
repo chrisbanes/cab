@@ -88,7 +88,7 @@ export async function proposedInstructions(
 }
 
 /** `--instructions TEXT|-` or `--instructions-file`, read once; neither combines with a restore. */
-function givenInstructions(ctx: WriteContext) {
+export function givenInstructions(ctx: WriteContext) {
   const v = ctx.values;
   if (
     (v.instructions !== undefined || v["instructions-file"] !== undefined) &&
