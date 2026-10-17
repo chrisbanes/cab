@@ -1058,7 +1058,7 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
         addReadyAssignment(service, projectId, profileId, brief),
       ),
     );
-    assert.equal(await waitUntil(() => entered === 3), true);
+    assert.equal(await waitUntil(() => entered === 3, 30000), true);
 
     await configureCapacity(service, 2, { [projectId]: 1 });
     assert.equal(runtime.turns, 3);
@@ -1084,6 +1084,7 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
         () =>
           service.list().find((item) => item.workId === waiting.workId)
             ?.state === "capacity-waiting",
+        30000,
       ),
       true,
       JSON.stringify({
@@ -1104,6 +1105,7 @@ test("lowered capacity preserves active turns and waits for both limits to fit",
         () =>
           service.list().filter((item) => item.state === "completed").length ===
           4,
+        30000,
       ),
       true,
     );

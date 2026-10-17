@@ -493,7 +493,9 @@ for (const [name, engine] of engines) {
         name: "Question evidence",
         exact: true,
       });
-      await evidence.focus();
+      // A plain focus() scrolls the link into view; its scroll event lands before or after the
+      // Enter depending on load, which would make 60 not the position the Inbox recorded.
+      await evidence.evaluate((el) => el.focus({ preventScroll: true }));
       await page.keyboard.press("Enter");
       await page.waitForURL(/\/app\/tasks\//);
       await page.goBack();
