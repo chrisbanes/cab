@@ -21,12 +21,15 @@ import { Badge } from "./ui/badge.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
-import { ComposerState, type ComposerInput } from "./composer-state.js";
+import {
+  briefNearLimit,
+  ComposerState,
+  type ComposerInput,
+} from "./composer-state.js";
 import { useOperatorResource } from "./resource.js";
 import {
   orderWaits,
   runtimeWaitCodes,
-  waitLabels,
   type Wait,
 } from "../../src/operator/wait-reasons.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
@@ -364,10 +367,12 @@ export function TaskComposer({
                 onChange={(e) => edit({ outcome: e.target.value })}
                 aria-invalid={Boolean(state.errors.outcome)}
               />
-              <span className="metadata muted">
-                Outcome, optional context and reference links share a
-                16,000-character brief limit.
-              </span>
+              {briefNearLimit(input) && (
+                <span className="metadata muted">
+                  Outcome, optional context and reference links share a
+                  16,000-character brief limit.
+                </span>
+              )}
               {error("outcome")}
             </label>
             <div
@@ -575,11 +580,13 @@ export function TaskComposer({
                       refresh();
                     }}
                   />
-                  <p className="metadata muted">
-                    Created ≠ running. Execution may wait for project state,
-                    dependencies, capacity or holds. You'll see the reason on
-                    the task.
-                  </p>
+                  {prediction.length > 0 && (
+                    <p className="metadata muted">
+                      Created ≠ running. Execution may wait for project state,
+                      dependencies, capacity or holds. You'll see the reason on
+                      the task.
+                    </p>
+                  )}
                 </section>
               )}
               <section
@@ -670,9 +677,7 @@ export function TaskComposer({
                 <p className="metadata muted">
                   {optionalError
                     ? "Check the optional settings to continue. Your input is still here."
-                    : prediction
-                      ? `${prediction[0] ? `Will wait: ${waitLabels[prediction[0].code]}.` : "Starts now."} Save draft keeps it without starting.`
-                      : "Creates ready work; waits for dependencies and other holds. Saved drafts are not Ready."}
+                    : "Save draft keeps it without starting."}
                 </p>
                 <Button type="submit">Create and start</Button>
                 <Button

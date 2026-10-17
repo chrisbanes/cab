@@ -61,12 +61,22 @@ const validInputSchema = composerInputSchema.extend({
     .max(128)
     .refine((ids) => new Set(ids).size === ids.length, "Duplicate dependency"),
 });
-export function encodeOutcome(input: ComposerInput) {
+const briefLimit = 16000;
+/** The brief as submitted: outcome plus the Context and Reference links sections. */
+export function composeOutcome(input: ComposerInput) {
   let outcome = input.outcome;
   if (input.context) outcome += `\n\nContext:\n${input.context}`;
   if (input.links.length)
     outcome += `\n\nReference links (passive context; no repository access):\n${input.links.join("\n")}`;
-  if (outcome.length > 16000)
+  return outcome;
+}
+/** True within 10% of the brief limit, or over it. */
+export function briefNearLimit(input: ComposerInput) {
+  return composeOutcome(input).length >= briefLimit * 0.9;
+}
+export function encodeOutcome(input: ComposerInput) {
+  const outcome = composeOutcome(input);
+  if (outcome.length > briefLimit)
     throw Error(
       "Combined outcome, context and links must be at most 16,000 characters.",
     );

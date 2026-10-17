@@ -148,7 +148,8 @@ dimensions.
   context, references, permitted assignee and dependencies disclose below them;
   collapsed, they show chips of the supplied values and any error count. The right
   column shows "If you create it now" (Starts now or Will wait, with numbered
-  reasons and their Fix or link) and the facts inherited from the project. A sticky
+  reasons and their Fix or link; "Created ≠ running" appears only with Will wait)
+  and the facts inherited from the project. A sticky
   bar separates unfinished on-device input from a confirmed Ensemble draft and holds
   Save draft and Create and start. Confirmed creation is distinct from admission.
   There is no attachment hint.
@@ -532,8 +533,9 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
     task will wait for capacity." While reads are pending the check shows
     "Checking readiness…" and keeps the primary disabled; with no item yet it shows
     no hint or Check again.
-- **First task (148–150):** above Create and start the composer says "Starts now."
-  or "It will wait: <reason>" for the project and the chosen dependencies (148).
+- **First task (148–150):** the composer's "If you create it now" panel says
+  "Starts now" or "Will wait" with its reasons for the project and the chosen
+  dependencies (148); the bar beside Create and start only explains Save draft.
   Task detail shows "Waiting · <reason>" with its Fix; any further reasons are listed
   beneath it in the flow's order, each with its own Fix or link. Fix: Resume project
   confirms first (149b). A dependency wait has no Fix, only a link to the blocking
@@ -2082,14 +2084,16 @@ as follows:
   both panels follow the fields and precede the bar; the phone frames draw only a
   status line, but production keeps the full prediction there.
 - The sticky bar reads "Unfinished input saved on this device · not yet an
-  Ensemble draft" only after a successful on-device write, then the verdict hint
-  ("Starts now." or "Will wait: <first reason>.", then "Save draft keeps it
-  without starting."), Create and start and Save draft. Create and start comes
-  before Save draft in DOM and visual order at every width, so focus order equals
-  visual order (the desktop artboard right-aligns Save draft, then Create and
-  start).
+  Ensemble draft" only after a successful on-device write, then the one hint "Save
+  draft keeps it without starting." (otherwise the optional-settings error hint; the
+  bar never states the verdict, with or without a prediction, which the panel
+  does), Create and start and Save draft. Create and start comes before Save draft
+  in DOM and visual order at every width, so focus order equals visual order (the
+  desktop artboard right-aligns Save draft, then Create and start).
   There is no ⌘↵ shortcut and no "Markdown supported" note; the 16,000-character
-  brief note stays. Refused and unconfirmed outcomes sit directly above the bar.
+  brief note appears only when the outcome, context and links together reach
+  14,400 characters (within 10% of the limit) or exceed it. Refused and
+  unconfirmed outcomes sit directly above the bar.
   After creation the receipt view (Task created or Draft saved, Open task, the
   execution state and "It will wait: …") replaces the form, rather than frames
   161/166c's locked form with an outcome line in the bar.

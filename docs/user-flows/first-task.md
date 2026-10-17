@@ -18,8 +18,9 @@ waits, led by the reason to clear first and a link that fixes it.
 1. Composer opens with the project selected. Before submission its "If you create
    it now" panel says "Starts now" or "Will wait" with numbered reasons, using the
    same reasons and order as step 3 for the project, the chosen dependencies and
-   the explicit assignee's runtime; the sticky bar repeats the verdict beside
-   **Create and start** and **Save draft**.
+   the explicit assignee's runtime; "Created ≠ running" appears only with Will
+   wait, and the sticky bar beside **Create and start** and **Save draft** only
+   explains that Save draft keeps the task without starting it.
 2. **Create and start** shows "Task created." with **Open task**, the execution state
    and the same wait reasons, the first with its Fix.
 3. Task detail shows the current state. A waiting task shows its reasons in the

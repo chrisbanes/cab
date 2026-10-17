@@ -20,8 +20,9 @@ it in one submission.
 1. The composer opens with the project selected when the entry point names one.
 2. Project, title and desired outcome are the form; optional context, references,
    assignee and dependencies disclose beneath them.
-3. "If you create it now" states Starts now or Will wait with the reasons; the bar
-   repeats the verdict beside Create and start and Save draft.
+3. "If you create it now" states Starts now or Will wait with the reasons, and the
+   caveat that created is not running only with Will wait; the bar beside Create
+   and start and Save draft only explains that Save draft keeps it without starting.
 4. Create and start shows "Task created" with Open task and any wait, with its
    Fix where the specification gives one and otherwise the link to what blocks it.
 
