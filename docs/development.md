@@ -329,8 +329,8 @@ or run `node dist/src/cli/main.js` directly.
      4). A lost reply is an unknown outcome (exit 6): repeat the command with the printed
      `--request-id` and `--expected-version` to settle it. The same command without
      them reads the current version, which is a new request if the lost one applied
-     and the same request if it did not; the old `--request-id` alone is refused as
-     `conflict` rather than applied twice. Imported tasks keep provider-owned title and outcome
+     and the same request if it did not; if it applied, the old `--request-id` alone is
+     refused as `conflict` rather than applied twice. Imported tasks keep provider-owned title and outcome
      (`policy-denied`) and readiness. The task and initial-assignment ids are derived
      from the request key, so a retry rebuilds the same command. `task create` and
      `task resume` end with the task's `Waiting:`/`Fix:` lines, as `task get` prints

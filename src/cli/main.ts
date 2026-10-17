@@ -739,24 +739,26 @@ async function login(
   if (requested === undefined) {
     const { connections } = await config.read();
     const existing = connections[name];
+    const same = Object.keys(connections)
+      .filter((other) => connections[other]?.url === origin)
+      .sort();
+    // Another connection already has this origin: replace it, or add a second on purpose.
+    const sameFix = `Run ${same.map((other) => `'ensemble auth login --url ${origin} --connection ${other}'`).join(" or ")} to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`;
     if (existing && existing.url !== origin)
       throw new CliError(
         "usage",
         `Connection ${name} already points at ${existing.url}.`,
         {
-          fix: `Pass --connection NAME to log in to ${origin}, or --connection ${name} to replace it.`,
+          fix: same.length
+            ? `${same.join(", ")} already ${same.length === 1 ? "has" : "have"} ${origin}. ${sameFix}`
+            : `Pass --connection NAME to log in to ${origin}, or --connection ${name} to replace it.`,
         },
       );
-    const same = Object.keys(connections)
-      .filter((other) => connections[other]?.url === origin)
-      .sort();
     if (!existing && same.length)
       throw new CliError(
         "usage",
         `${same.length === 1 ? "Connection" : "Connections"} ${same.join(", ")} already ${same.length === 1 ? "points" : "point"} at ${origin}.`,
-        {
-          fix: `Run ${same.map((other) => `'ensemble auth login --url ${origin} --connection ${other}'`).join(" or ")} to replace the token, or pass --connection ${DEFAULT_CONNECTION} (or another name) to add a second connection.`,
-        },
+        { fix: sameFix },
       );
   }
   const tokenFile = values["token-file"] && resolve(values["token-file"]);

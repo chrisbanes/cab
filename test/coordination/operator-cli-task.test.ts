@@ -1275,12 +1275,19 @@ test("task create takes inline or stdin outcome and defaults to ready", async (t
   assert.equal(databaseDigest(s.f), digest);
 
   // Standard input that was already read cannot be read again.
+  // These two stdin cases never end on their own, so a regression must fail, not hang.
+  const interrupted = () => {
+    const stop = new AbortController();
+    setImmediate(() => stop.abort());
+    return stop.signal;
+  };
   const spent = stdinOf("once");
   spent.resume();
   await once(spent, "end");
   assert.match(
     await refuse("spent stdin", create(["--outcome", "-"]), "invalid-input", {
       stdin: spent,
+      signal: interrupted(),
     }),
     /already read/,
   );
@@ -1291,7 +1298,7 @@ test("task create takes inline or stdin outcome and defaults to ready", async (t
       "bad blocker",
       [...create(["--outcome", "-"]), "--blocker", "nope"],
       "invalid-input",
-      { stdin: unread },
+      { stdin: unread, signal: interrupted() },
     ),
     /--blocker/,
   );

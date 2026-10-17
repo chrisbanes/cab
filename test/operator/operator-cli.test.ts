@@ -346,7 +346,7 @@ test("auth login defaults to the local connection and says where the token comes
     assert.match(r.err, /Connection home already points at /);
     assert.match(r.err, /\(usage\)/);
     assert.deepEqual(fixLines(r.err), [
-      `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' to replace the token, or pass --connection local (or another name) to add a second connection.`,
+      `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`,
     ]);
   }
   assert.doesNotMatch(promptedG, /Ensemble CLI token|Create a token/);
@@ -361,7 +361,7 @@ test("auth login defaults to the local connection and says where the token comes
   assert.equal(r.code, 2);
   assert.match(r.err, /Connections home, work already point at /);
   assert.deepEqual(fixLines(r.err), [
-    `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' or 'ensemble auth login --url ${first.origin} --connection work' to replace the token, or pass --connection local (or another name) to add a second connection.`,
+    `Fix: Run 'ensemble auth login --url ${first.origin} --connection home' or 'ensemble auth login --url ${first.origin} --connection work' to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`,
   ]);
   assert.deepEqual(names(), ["home", "work"]);
   r = await loginG(second);
@@ -376,6 +376,19 @@ test("auth login defaults to the local connection and says where the token comes
   r = await loginG(first);
   assert.equal(r.code, 0, "local is at this origin, so it is replaced");
   assert.deepEqual(names(), ["home", "local", "work"]);
+  // When local is elsewhere, the refusal also names the connection that has this origin.
+  r = await loginG(second, "--connection", "away");
+  assert.equal(r.code, 0, r.err);
+  r = await loginG(second);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Connection local already points at /);
+  assert.match(
+    fixLines(r.err)[0] ?? "",
+    new RegExp(
+      `^Fix: away already has ${second.origin}\\. Run 'ensemble auth login --url ${second.origin} --connection away'`,
+    ),
+  );
+  assert.deepEqual(names(), ["away", "home", "local", "work"]);
 
   // 6. ENSEMBLE_CONNECTION names the connection; an empty value is a bad name, as it is
   // for every other command; a bad name is a usage error that changes nothing.
