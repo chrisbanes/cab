@@ -569,6 +569,9 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "unavailable",
               `Review ${reviewId} could not be read back. Nothing was sent.`,
+              {
+                fix: `Run 'ensemble delivery get ${taskId}' to check the review, then send again.`,
+              },
             );
           if ((review.data as ReviewReceipt).decision !== "approved")
             throw new CliError(

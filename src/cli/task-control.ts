@@ -3,6 +3,7 @@ import { exactCommand, positiveIntFlag } from "./configure.js";
 import {
   connectWrite,
   type Effect,
+  followLines,
   readAfter,
   TASK_WRITE,
   taskStatusLines,
@@ -96,6 +97,7 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
         notes.push(
           `This receipt does not match the current state: Stop is ${stopInEffect ? "" : "not "}in effect. It may replay an earlier request; run again with a new --request-id to ${verb} the task now.`,
         );
+      if (verb === "resume") notes.push(...followLines(after, taskId));
       return writeOutput({
         request,
         receipt,

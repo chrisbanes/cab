@@ -6,9 +6,12 @@ import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { completedLead, until } from "../fixtures/completed-lead.js";
+import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { startCliOperator } from "../fixtures/operator-cli.js";
+import {
+  failReadAfterPost,
+  startCliOperator,
+} from "../fixtures/operator-cli.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
@@ -1157,19 +1160,6 @@ const journalLines = (o: Operator) =>
     .map((line) => JSON.parse(line));
 const jsonOf = (r: { out: string }) => JSON.parse(r.out);
 const fixOf = (err: string) => err.match(/^Fix: (.*)$/m)?.[1] ?? "";
-/** Fails the task read that follows the command POST, as a service going away would. */
-const failReadAfterPost = (): typeof fetch => {
-  let posted = false;
-  return async (input, init) => {
-    const url = String(input);
-    if (posted && url.includes("/api/operator/tasks/"))
-      throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
-    const response = await fetch(input, init);
-    if (url.endsWith("/api/operator/commands")) posted = true;
-    return response;
-  };
-};
-
 test("a stale expected version names the current version and the read command", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s } = o;
@@ -1430,4 +1420,131 @@ test("follow-up on a task without a lead names the fix", async (t) => {
   assert.match(r.err, /This task has no project lead\. \(conflict\)/);
   assert.match(fixOf(r.err), new RegExp(`ensemble task get ${s.taskId}`));
   assert.equal(posts(o), sent);
+});
+
+/** The `Waiting:` blocks of a task view: each wait and its indented detail, Fix, blocker and recovery lines. */
+const waitBlock = (text: string) => {
+  const lines = text.split("\n");
+  const first = lines.findIndex((l) => /^Waiting: \S/.test(l));
+  if (first < 0) return [];
+  const block: string[] = [];
+  for (const line of lines.slice(first)) {
+    if (!/^Waiting: \S/.test(line) && !line.startsWith("  ")) break;
+    block.push(line);
+  }
+  return block;
+};
+const createArgs = (o: Operator, projectId: string, ready: string) => [
+  "task",
+  "create",
+  "--project",
+  projectId,
+  "--title",
+  "Follow-on",
+  "--outcome-file",
+  o.file("follow-on.md", "Show the next step"),
+  "--ready",
+  ready,
+  "--connection",
+  "rw",
+];
+const createdId = (out: string) =>
+  out.match(/^Created task ([0-9a-f-]{36})/m)?.[1] ?? "";
+
+test("task create on a paused project prints the same wait lines as task get", async (t) => {
+  const o = await startCliOperator(t);
+  const created = await o.h.run(createArgs(o, o.s.projectId, "true"));
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  const got = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
+  const expected = waitBlock(got.out);
+  assert.ok(expected.length >= 4, got.out);
+  assert.ok(expected.some((l) => l.startsWith("  Fix: ")));
+  assert.deepEqual(waitBlock(created.out), expected);
+  assert.doesNotMatch(created.out, /^Next:/m);
+  assert.equal(created.err, "");
+
+  // The JSON data keeps its shape.
+  const json = await o.cli(
+    "rw",
+    createArgs(o, o.s.projectId, "true").slice(0, -2),
+  );
+  assert.equal(json.code, 0, json.out);
+  assert.deepEqual(Object.keys(json.json().data).sort(), [
+    "admission",
+    "effect",
+    "receipt",
+    "reusedRequest",
+    "taskId",
+  ]);
+  assert.ok(!json.out.includes("Next:"));
+});
+
+test("a ready task with no waits ends with Next: task get", async (t) => {
+  const o = await startCliOperator(t);
+  const project = await seedReviewTask(o.s.f, "Open project", "Open task");
+  configure(o.s.f, project.projectId, false);
+  const created = await o.h.run(createArgs(o, project.projectId, "true"));
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  assert.deepEqual(waitBlock(created.out), []);
+  assert.equal(
+    created.out.trimEnd().split("\n").at(-1),
+    `Next: ensemble task get ${taskId}`,
+  );
+  await o.s.f.service.stopTask(taskId);
+  await o.s.f.service.stopTask(project.taskId);
+});
+
+test("a task created not ready names the configure command", async (t) => {
+  const o = await startCliOperator(t);
+  const project = await seedReviewTask(o.s.f, "Open project", "Open task");
+  configure(o.s.f, project.projectId, false);
+  const created = await o.h.run(createArgs(o, project.projectId, "false"));
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  const version = (await o.cli("ro", ["task", "get", taskId])).json().data.task
+    .version;
+  assert.equal(
+    created.out.trimEnd().split("\n").at(-1),
+    `Next: ensemble task configure ${taskId} --expected-version ${version} --ready true`,
+  );
+  // The command it names works as printed.
+  const next = await o.h.run([
+    "task",
+    "configure",
+    taskId,
+    "--expected-version",
+    String(version),
+    "--ready",
+    "true",
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(next.code, 0, next.err);
+  await o.s.f.service.stopTask(taskId);
+  await o.s.f.service.stopTask(project.taskId);
+});
+
+test("a create whose post-read fails still names the next command", async (t) => {
+  const o = await startCliOperator(t);
+  const created = await o.h.run(createArgs(o, o.s.projectId, "false"), {
+    fetch: failReadAfterPost(),
+  });
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  assert.match(created.out, /\(request [0-9a-f-]{36}\)\./);
+  assert.equal(
+    created.out.trimEnd().split("\n").at(-1),
+    `Next: ensemble task get ${taskId}`,
+  );
+  const key = created.out.match(/\(request ([0-9a-f-]{36})\)/)?.[1];
+  assert.equal(
+    journalLines(o).findLast((l) => l.key === key).state,
+    "recorded",
+  );
+  assert.equal(
+    (await o.cli("ro", ["task", "get", taskId])).json().data.task.id,
+    taskId,
+  );
 });

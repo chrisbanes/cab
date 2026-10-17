@@ -245,6 +245,9 @@ const resultEvidence: BrowseCommand = {
         throw new CliError(
           "unavailable",
           `Evidence item is ${d.state} (${d.reason}); nothing was written.`,
+          {
+            fix: `Run 'ensemble result evidence ${taskId} ${resultId} ${itemId}' without --out to see why it is ${d.state}.`,
+          },
         );
       return browseOutput(ctx, {
         data: d,

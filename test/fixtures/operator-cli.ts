@@ -354,3 +354,16 @@ export async function deliveryWorld(
     ).data;
   return { ...o, f, scripted: f.scripted.state, grant, ok, task };
 }
+
+/** Fails the task read that follows the command POST, as a service going away would. */
+export const failReadAfterPost = (): typeof fetch => {
+  let posted = false;
+  return async (input, init) => {
+    const url = String(input);
+    if (posted && url.includes("/api/operator/tasks/"))
+      throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+    const response = await fetch(input, init);
+    if (url.endsWith("/api/operator/commands")) posted = true;
+    return response;
+  };
+};

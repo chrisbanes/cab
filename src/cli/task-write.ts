@@ -126,6 +126,26 @@ export function waitLines(waits: readonly Wait[], taskId: string): string[] {
   ]);
 }
 
+/**
+ * What a write prints last about the task it touched: the task's own wait lines (as in
+ * `task get`), else the command to run next. `suggestReady` names the configure command
+ * for a task that is not ready yet. A failed post-read still names `task get`.
+ */
+export function followLines(
+  after: TaskData | undefined,
+  taskId: string,
+  suggestReady = false,
+): string[] {
+  if (after?.waits.length) return waitLines(after.waits, taskId);
+  if (after && suggestReady && !after.task.ready)
+    return [
+      nextLine(
+        `ensemble task configure ${taskId} --expected-version ${after.task.version} --ready true`,
+      ),
+    ];
+  return [nextLine(`ensemble task get ${taskId}`)];
+}
+
 /** `queued` only when the task is ready and admissible now; holds still decide. */
 const admissionEffect = (task: TaskData | undefined): Effect =>
   task?.task.state === "open" && task.task.ready && task.admission.eligible
@@ -421,6 +441,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           lines: after ? taskStatusLines(after) : [["Task", taskId]],
           notes: [
             "Task creation cannot be undone: use 'task configure --ready false' or 'task stop' to hold it.",
+            ...followLines(after, taskId, true),
           ],
           data: { taskId, ...(after ? { admission: after.admission } : {}) },
         });

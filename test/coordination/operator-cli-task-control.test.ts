@@ -2,8 +2,13 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { startCliOperator } from "../fixtures/operator-cli.js";
+import { configure } from "../fixtures/completed-lead.js";
+import {
+  failReadAfterPost,
+  startCliOperator,
+} from "../fixtures/operator-cli.js";
 import { startOwnWork } from "../fixtures/questions.js";
+import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
 const stopped = (o: Operator, taskId: string) =>
@@ -277,4 +282,97 @@ test("stop and resume with a stale expected version name the current version", a
     assert.equal(json.json().error.request.type, `task.${verb}`);
   }
   assert.equal(stopped(o, s.taskId), false);
+});
+
+const waitBlock = (text: string) => {
+  const lines = text.split("\n");
+  const first = lines.findIndex((l) => /^Waiting: \S/.test(l));
+  if (first < 0) return [];
+  const block: string[] = [];
+  for (const line of lines.slice(first)) {
+    if (!/^Waiting: \S/.test(line) && !line.startsWith("  ")) break;
+    block.push(line);
+  }
+  return block;
+};
+const lastLine = (text: string) => text.trimEnd().split("\n").at(-1);
+
+test("task resume with remaining holds prints the task's wait lines or Next", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  await s.f.service.stopTask(s.taskId);
+  s.f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "INSERT INTO task_writer_ambiguity_holds (taskId, reason) VALUES (?, 'Fixture ambiguity')",
+      )
+      .run(s.taskId),
+  );
+  const resumed = await o.h.run([
+    "task",
+    "resume",
+    s.taskId,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(resumed.code, 0, resumed.err);
+  assert.match(resumed.out, /No work started: still held by/);
+  const got = await o.h.run(["task", "get", s.taskId, "--connection", "ro"]);
+  const expected = waitBlock(got.out);
+  assert.ok(expected.length >= 4, got.out);
+  assert.deepEqual(waitBlock(resumed.out), expected);
+  assert.equal(
+    lastLine(resumed.out),
+    expected.at(-1),
+    "the task's wait lines come last",
+  );
+  assert.doesNotMatch(resumed.out, /^Next:/m);
+  // The JSON data keeps its shape.
+  await s.f.service.stopTask(s.taskId);
+  const json = await o.cli("rw", ["task", "resume", s.taskId]);
+  assert.deepEqual(Object.keys(json.json().data).sort(), [
+    "effect",
+    "receipt",
+    "reusedRequest",
+    "stopInEffect",
+  ]);
+});
+
+test("task resume whose post-read fails names task get", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  await s.f.service.stopTask(s.taskId);
+  const resumed = await o.h.run(
+    ["task", "resume", s.taskId, "--connection", "rw"],
+    { fetch: failReadAfterPost() },
+  );
+  assert.equal(resumed.code, 0, resumed.err);
+  assert.match(resumed.out, /Requeued:/);
+  assert.equal(lastLine(resumed.out), `Next: ensemble task get ${s.taskId}`);
+  assert.equal(stopped(o, s.taskId), false, "the Stop was cleared");
+});
+
+test("task resume with no Stop in effect prints no contradicting Next", async (t) => {
+  const o = await startCliOperator(t);
+  const project = await seedReviewTask(o.s.f, "Open project", "Open task");
+  configure(o.s.f, project.projectId, false);
+  const resumed = await o.h.run([
+    "task",
+    "resume",
+    project.taskId,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(resumed.code, 0, resumed.err);
+  assert.match(resumed.out, /Effect:\s+none/);
+  assert.match(
+    resumed.out,
+    /No operator Stop was in effect; nothing changed\./,
+  );
+  assert.doesNotMatch(resumed.out, /Resume cleared|No work started/);
+  assert.equal(
+    lastLine(resumed.out),
+    `Next: ensemble task get ${project.taskId}`,
+  );
+  assert.doesNotMatch(resumed.out, /^Next: .*resume/m);
 });

@@ -309,7 +309,12 @@ or run `node dist/src/cli/main.js` directly.
      and `task add-dependency|remove-dependency TASK_ID --blocker ID
      --expected-version N`. Imported tasks keep provider-owned title and outcome
      (`policy-denied`) and readiness. The task and initial-assignment ids are derived
-     from the request key, so a retry rebuilds the same command.
+     from the request key, so a retry rebuilds the same command. `task create` and
+     `task resume` end with the task's `Waiting:`/`Fix:` lines, as `task get` prints
+     them, or with a `Next:` command (`task get`, or `task configure ... --ready
+     true` for a task created not ready). A stale `--expected-version` on a task or
+     assignment write is `conflict` (exit 4) naming the current version and the
+     read command to run.
    - `task message TASK_ID --to ASSIGNMENT_ID --expected-version N --message-file
      FILE` addresses a pending or running assignment for its next eligible turn; it
      admits no work. A completed project lead is refused with a pointer to `task

@@ -17,6 +17,7 @@ import {
 import { CliError } from "./connections.js";
 import { boundLines } from "./diff.js";
 import { receiptLines } from "./operation.js";
+import { shellWord } from "./remedy.js";
 import { isoTime, keyValues } from "./render.js";
 import type { ServiceClient } from "./transport.js";
 import {
@@ -308,6 +309,9 @@ export async function applyFile(
     throw new CliError(
       "change-document-invalid",
       `This is a ${document.kind} change; apply it with 'ensemble ${AREA[document.kind]} apply'.`,
+      {
+        fix: `Run 'ensemble ${AREA[document.kind]} apply --file ${shellWord(ctx.values.file)}'.`,
+      },
     );
   let exact: Record<string, unknown>;
   try {
