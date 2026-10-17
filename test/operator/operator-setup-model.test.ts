@@ -17,6 +17,7 @@ import { settingsHeader } from "../../web/src/settings-view.js";
 import {
   blankRow,
   buildProjectCreate,
+  createHold,
   duplicateRows,
   emptyRow,
   folderCaption,
@@ -25,6 +26,7 @@ import {
   pickerStart,
   type ReadinessRead,
   readyCheckItems,
+  type SetupDraftPhase,
   rowsFromDraft,
   rowsToDraft,
   setupSourceCredentialCopy,
@@ -713,4 +715,70 @@ test("the ready check states the recorded source credential with a settings link
     assert.deepEqual(sourceCredentialLine(id, unavailable), {
       text: "GitHub source credential: status unavailable.",
     });
+});
+
+test("Create is held or actionable by one function of the project and the lead profile", () => {
+  const phases: SetupDraftPhase[] = [
+    "editing",
+    "pending",
+    "rejected",
+    "conflict",
+    "unknown",
+    "recorded",
+  ];
+  const projectHold: Record<SetupDraftPhase, string | null> = {
+    editing: null,
+    rejected: null,
+    conflict: null,
+    pending: "Creating the project…",
+    unknown: "Check whether the project was created first.",
+    recorded: "The project is already created.",
+  };
+  const profileHold = (phase: SetupDraftPhase, name: string) =>
+    phase === "pending"
+      ? "Wait for the lead profile to be created."
+      : phase === "unknown"
+        ? "Check whether the lead profile was saved first."
+        : phase !== "recorded" && name.trim()
+          ? "Create the lead profile first, or clear its name."
+          : null;
+  for (const project of phases)
+    for (const profile of phases)
+      for (const profileName of ["", "  ", "Ada"])
+        for (const profileForm of [false, true]) {
+          const expected =
+            projectHold[project] ??
+            (profileForm ? profileHold(profile, profileName) : null);
+          assert.equal(
+            createHold({ project, profileForm, profile, profileName }),
+            expected,
+            `${project} / form ${profileForm} / ${profile} / "${profileName}"`,
+          );
+        }
+  // Spot checks of the cells that matter, stated outright rather than derived.
+  const held = (
+    project: SetupDraftPhase,
+    profile: SetupDraftPhase,
+    profileName: string,
+  ) => createHold({ project, profileForm: true, profile, profileName });
+  // A refused profile stays a hold when it is unedited and once it is edited: the phase is
+  // `rejected` in both, so only the typed content can decide.
+  assert.match(
+    held("editing", "rejected", "x".repeat(513)) ?? "",
+    /Create the lead profile first/,
+  );
+  assert.match(
+    held("editing", "rejected", "Ada") ?? "",
+    /Create the lead profile first/,
+  );
+  assert.equal(held("editing", "rejected", ""), null);
+  assert.equal(held("editing", "recorded", "Ada"), null);
+  // A refused project can be edited and sent again.
+  assert.equal(held("rejected", "editing", ""), null);
+  assert.equal(held("conflict", "editing", ""), null);
+  // The project outcome outranks the profile.
+  assert.equal(
+    held("unknown", "pending", "Ada"),
+    "Check whether the project was created first.",
+  );
 });

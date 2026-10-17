@@ -40,6 +40,7 @@ import {
 import {
   blankRow,
   buildProjectCreate,
+  createHold,
   discoveryReasonCopy,
   duplicateRows,
   emptyRow,
@@ -427,27 +428,19 @@ export function ProjectSetup(
       runtimeErrors(inline.values, claudeSettings(p.workspace)),
     );
 
-  // Create stays focusable while it cannot be used, with its reason; submitting is guarded
-  // on the live draft state, so a repeated click or Enter sends nothing more.
-  const createReason = () =>
-    d.phase === "pending"
-      ? "Creating the project…"
-      : inline.phase === "pending"
-        ? "Wait for the lead profile to be created."
-        : inline.phase === "unknown"
-          ? "Check whether the lead profile was saved first."
-          : // A profile name typed but never submitted would vanish with the form. One the
-            // service refused stays visible with its error, so the project may go on without it.
-            inlineProfile &&
-              inline.phase === "editing" &&
-              String(inline.values.name ?? "").trim()
-            ? "Create the lead profile first, or clear its name."
-            : null;
-  const reason = createReason();
+  // Create is always drawn: held, it stays focusable with its reason, and submitting is
+  // guarded on the live draft state, so a repeated click or Enter sends nothing more.
+  const currentHold = () =>
+    createHold({
+      project: d.phase,
+      profileForm: inlineProfile,
+      profile: inline.phase,
+      profileName: String(inline.values.name ?? ""),
+    });
+  const reason = currentHold();
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (createReason() || d.phase === "unknown" || d.phase === "recorded")
-      return;
+    if (currentHold()) return;
     void sendDraft(e.currentTarget, d, p.client, p.session, command, p.refresh);
   };
   const noteId = useId();
@@ -1135,15 +1128,13 @@ export function ProjectSetup(
           >
             Cancel
           </ActionLink>
-          {d.phase !== "unknown" && (
-            <Button
-              type="submit"
-              aria-disabled={reason ? true : undefined}
-              aria-describedby={noteId}
-            >
-              {d.phase === "pending" ? "Creating…" : "Create paused project"}
-            </Button>
-          )}
+          <Button
+            type="submit"
+            aria-disabled={reason ? true : undefined}
+            aria-describedby={noteId}
+          >
+            {d.phase === "pending" ? "Creating…" : "Create paused project"}
+          </Button>
         </div>
       </form>
     </section>

@@ -426,6 +426,31 @@ test("Setup checks an unknown create outcome by replaying the exact request", as
       await page.getByLabel("Project name", { exact: true }).isDisabled(),
       true,
     );
+    // Create stays drawn, focusable and held with its reason; no second create is sent.
+    const create = page.getByRole("button", {
+      name: "Create paused project",
+      exact: true,
+    });
+    assert.equal(await create.getAttribute("aria-disabled"), "true");
+    assert.equal(
+      await create.evaluate(
+        (el) =>
+          document.getElementById(el.getAttribute("aria-describedby") ?? "")
+            ?.textContent,
+      ),
+      "Check whether the project was created first.",
+    );
+    await create.focus();
+    assert.equal(
+      await create.evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await page.keyboard.press("Enter");
+    await create.click({ force: true });
+    await page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => done(null))),
+    );
+    assert.equal(aborted, 1);
     await page.unroute("**/api/operator/commands");
     const replay = commandRequest(page);
     await page.getByRole("button", { name: "Check whether it saved" }).click();
@@ -847,10 +872,16 @@ test("Setup keeps its input when the inline profile is rejected", async (_t, jou
     "Atlas",
   );
   assert.equal(sent.length, 0);
+  // The refused name is not recorded, so it holds Create until it is created or cleared.
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  await name.fill("");
+  assert.equal(await create.getAttribute("aria-disabled"), null);
   // The project can still be created without a lead.
-  await page
-    .getByRole("button", { name: "Create paused project", exact: true })
-    .click();
+  await create.click();
   // The inline error does not linger beside the project's own outcome.
   await savedOutcome(page, /^Created Atlas\./);
   assert.equal(sent.at(-1)?.leadProfileId, null);
@@ -2187,6 +2218,84 @@ test("Setup keeps Create focusable with its reason while the lead profile is bei
   await create.waitFor();
   assert.equal(await create.getAttribute("aria-disabled"), null);
   assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
+});
+
+test("Setup keeps Create held after a refused lead profile is edited, until the profile is recorded", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  const name = inline.getByLabel("Profile name", { exact: true });
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  const reason = () =>
+    create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    );
+  const sent = sentCommands(page);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await name.fill("x".repeat(513));
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByText(fixFields).waitFor();
+  // Refused, then corrected without sending it again: the phase stays rejected, the content decides.
+  await name.fill("Ada");
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await reason(),
+    "Create the lead profile first, or clear its name.",
+  );
+  await create.focus();
+  await page.keyboard.press("Enter");
+  await create.click({ force: true });
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(null))),
+  );
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
+  assert.equal(await name.inputValue(), "Ada");
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Atlas",
+  );
+  // Recording the profile releases Create, and the project then has that lead.
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  assert.equal(await create.getAttribute("aria-disabled"), null);
+  await create.click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const profile = sent.find((c) => c.type === "profile.create");
+  assert.equal(
+    sent.find((c) => c.type === "project.create")?.leadProfileId,
+    profile?.profileId,
+  );
+  assert.equal(f.service.domain().projects().length, 1);
+});
+
+test("Setup holds Create with the profile reason while the lead profile outcome is unknown", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    ),
+    "Check whether the lead profile was saved first.",
+  );
+  await page.unroute("**/api/operator/commands");
 });
 
 test("Setup keeps Create inactive with its reason while a typed lead profile has not been created", async (_t, journey) => {

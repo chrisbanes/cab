@@ -40,9 +40,11 @@ note, **Cancel** and then **Create paused project** at every width.
    once a repository row is filled.
 4. **Create.** Creates the project paused, as today. A rejection or an unknown
    outcome appears at the top of the form (116, 116b) and keeps every value. Create
-   stays focusable but inactive, with its reason, while the project or the inline
-   profile is being saved or while a profile name has been typed and not created,
-   and a repeated click or Enter sends nothing more.
+   is always drawn. It is focusable but inactive, with its reason, while the project
+   or the inline profile is being saved or its outcome is unknown, and while a profile
+   name is typed that has not been recorded, whether or not the service refused it.
+   Clearing the name or recording the profile releases it. A repeated click or Enter
+   sends nothing more.
 5. **Ready check.** Replaces the form and takes focus; the heading "Set up your
    first project" stays for the visit. It replaces the "Recorded … as a paused
    project" alert:

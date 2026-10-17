@@ -2390,7 +2390,8 @@ frames 114 and 118–128 as follows:
   The sticky bar holds a note, Cancel and then Create paused project at every width
   (179b draws Cancel then Create in one row). The rejection or unknown-outcome alert
   sits above step 1 (116, 116b). Create is `aria-disabled` and stays focusable with
-  its reason while the project or the inline profile is being saved. After Create the
+  its reason while the project or the inline profile is being saved or its outcome is
+  unknown, and while a typed profile name is not recorded. After Create the
   ready check replaces the form and takes focus, and reloading shows a blank form.
 - Paused project badges are idle (slate) with a pause symbol in the sidebar, phone
   drawer and Settings; Enabled, Available and Configured stay slate with a check,
