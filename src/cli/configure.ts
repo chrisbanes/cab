@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   configurationImpactSchema,
   operatorCommandSchema,
+  fitsTextField,
   textMaxLength,
 } from "../operator/contracts.js";
 import { type CoverageGap, coverage, uuidArg } from "./browse.js";
@@ -162,8 +163,8 @@ export async function readTextFile(path: string | undefined, flag: string) {
   }
 }
 
-/** No UTF-16 unit takes more than 3 UTF-8 bytes, so more is certainly over the field limit. */
-const STDIN_LIMIT = textMaxLength * 3;
+/** A character takes at most 4 UTF-8 bytes, so more input is certainly over the field limit. */
+const STDIN_LIMIT = textMaxLength * 4;
 const tooLong = `longer than the ${textMaxLength} characters a field takes`;
 const shorten = `Shorten the text to ${textMaxLength} characters or fewer.`;
 
@@ -240,10 +241,10 @@ export async function inlineText(
       { fix: `Pipe the text in, or pass it as --${name} TEXT.` },
     );
   // The service refuses longer text however it was given; say so before connecting.
-  if (text !== undefined && text.length > textMaxLength)
+  if (text !== undefined && !fitsTextField(text))
     throw new CliError(
       "invalid-input",
-      `--${inline === undefined ? `${name}-file` : name} is ${text.length} characters, ${tooLong}.`,
+      `--${inline === undefined ? `${name}-file` : name} is ${[...text].length} characters, ${tooLong}.`,
       { fix: shorten },
     );
   return text;

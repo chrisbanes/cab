@@ -312,6 +312,11 @@ test("profile and project instructions can be given inline or on stdin", async (
       stdin: stdinOf("From stdin\n"),
     });
     assert.equal(k.stored(piped), "From stdin\n", k.area);
+    // The field limit counts characters, so 16,000 four-byte ones are accepted.
+    const astral = await created(create("Astral", "--instructions", "-"), {
+      stdin: stdinOf("😀".repeat(16000)),
+    });
+    assert.equal(k.stored(astral), "😀".repeat(16000), k.area);
     // The file form still works.
     const filed = await created(
       create("Filed", "--instructions-file", file("i.md", "From a file")),
@@ -371,13 +376,43 @@ test("profile and project instructions can be given inline or on stdin", async (
       create("Big", "--instructions", "-"),
       "invalid-input",
       /longer than the 16000 characters a field takes/,
-      { stdin: stdinOf("x".repeat(16000 * 3 + 1)) },
+      { stdin: stdinOf("x".repeat(16000 * 4 + 1)) },
     );
+    // Over the field limit by whichever way the text arrives: inline, file and stdin.
+    const over =
+      /is 16001 characters, longer than the 16000 characters a field takes/;
     await refuse(
-      "too long for the field",
+      "inline over the limit",
       create("Long", "--instructions", "x".repeat(16001)),
       "invalid-input",
-      /is 16001 characters, longer than the 16000 characters a field takes/,
+      over,
+    );
+    await refuse(
+      "file over the limit",
+      create("Long", "--instructions-file", file("long.md", "x".repeat(16001))),
+      "invalid-input",
+      over,
+    );
+    await refuse(
+      "stdin over the limit",
+      create("Long", "--instructions", "-"),
+      "invalid-input",
+      over,
+      { stdin: stdinOf("x".repeat(16001)) },
+    );
+    await refuse(
+      "stdin astral over the limit",
+      create("Long", "--instructions", "-"),
+      "invalid-input",
+      /longer than the 16000 characters a field takes/,
+      { stdin: stdinOf("😀".repeat(16001)) },
+    );
+    await refuse(
+      "prepare stdin over the limit",
+      [k.area, "prepare", k.target, "--instructions", "-"],
+      "invalid-input",
+      over,
+      { stdin: stdinOf("x".repeat(16001)) },
     );
     const interrupt = new AbortController();
     setImmediate(() => interrupt.abort());

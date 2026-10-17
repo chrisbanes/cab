@@ -215,9 +215,10 @@ or run `node dist/src/cli/main.js` directly.
    - Profile and project instructions are `--instructions TEXT|-` (`-` reads standard
      input, text only, as for `task create --outcome -`) or `--instructions-file PATH`
      on `profile|project prepare-create` and `profile|project prepare`; give one, and
-     neither with `--restore-revision`. Instruction text is at most 16,000 characters
-     however it is given. Other text-file flags (`--capabilities-file`,
-     `--guidance-file`, `--edit-file`, `--message-file` and the like) take files only.
+     neither with `--restore-revision`. Instruction text is at most 16,000 Unicode
+     characters (code points) however it is given. Other text-file flags
+     (`--capabilities-file`, `--guidance-file`, `--edit-file`, `--message-file` and the
+     like) take files only.
      An empty `profile list` ends with a `Next:` line naming `profile prepare-create`.
    - `--restore-revision N` proposes revision N's exact instructions as a new
      revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
@@ -326,9 +327,9 @@ or run `node dist/src/cli/main.js` directly.
      FILE] [--ready true|false]` and `task add-dependency|remove-dependency TASK_ID
      --blocker ID --expected-version N`. `--outcome -` reads standard input (text
      only, until it closes; Ctrl-C cancels), and the inline and file forms are
-     mutually exclusive. Outcome and instruction text, however given, is at most 16,000
-     characters (the service's text-field limit); longer text is refused before anything
-     is sent. `task create` is ready unless `--ready false`.
+     mutually exclusive. Outcome and instruction text, however given, is at most
+     16,000 Unicode characters (the service's text-field limit); longer text is refused
+     before anything is sent. `task create` is ready unless `--ready false`.
      `task configure` without `--expected-version` sends the version of the task read
      it already makes; an edit between that read and the send is a `conflict` (exit
      4). A lost reply is an unknown outcome (exit 6): repeat the command with the printed
