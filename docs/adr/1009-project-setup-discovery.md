@@ -97,10 +97,13 @@ every other value.
 Linking a discovered GitHub Project adds an inactive discovery source. Preview,
 readiness and activation stay in project configuration, unchanged.
 
-Guided setup states the source credential before Create. When the candidate source
-detection is signed in, setup shows the account and `project.create` records
-`gh:github.com` as the new project's source credential at source version 1; the
-explicit field keeps keyed replays deterministic. Otherwise setup says no source
+Guided setup states the source credential before Create, in the repository step once
+a repository is added. When the candidate source detection is signed in and the
+create carries at least one repository, setup shows the account and `project.create`
+records `gh:github.com` as the new project's source credential at source version 1;
+the explicit field keeps keyed replays deterministic. A repository-free project has
+no source to use it: setup shows no credential line, records none, and its ready
+check shows none. With a repository and no signed-in login, setup says no source
 credential will be set, records none, and the ready check shows that the source
 cannot sync until one is set. The ready check reports the recorded credential and
 its usability without blocking Resume. Nothing resolves a missing source credential

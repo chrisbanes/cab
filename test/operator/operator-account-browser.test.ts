@@ -1029,6 +1029,12 @@ for (const viewport of viewports)
       .getByRole("link", { name: "Create project" })
       .click();
     await page.waitForURL("**/app/settings/projects/new");
+    // Step 3 starts collapsed; the one offer is behind "Add a repository".
+    assert.equal(
+      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      0,
+    );
+    await page.getByRole("button", { name: "Add a repository" }).click();
     await page
       .getByRole("button", { name: "Use GitHub CLI login (@fixture-user)" })
       .waitFor();

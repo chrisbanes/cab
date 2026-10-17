@@ -614,10 +614,12 @@ configuration. When discovery is unavailable or a list is truncated, setup accep
 typed values and says so. The service lists folders only under the operator's home folder, and a typed
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
-When no profile exists, setup creates the lead profile inline without losing other
-setup values. The project is created paused; setup then ends with a ready check
-whose primary action resumes the project and opens the composer, and whose
-secondary action keeps it paused.
+When no profile exists, setup creates the lead profile inline, asking only for a name
+and runtime (summary and instructions are added later in Settings → Profiles),
+without losing other setup values. While discovery is unconfigured the repository step
+starts collapsed behind "Add a repository". The project is created paused; the ready
+check then replaces the setup form, and its primary action resumes the project and
+opens the composer, and its secondary action keeps it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
 CLI login (`gh:github.com`), which Settings recommends and setup offers in one step
 when the service detects it. Discovery never reads with a login the operator did
@@ -627,10 +629,12 @@ access; access is exactly the repositories the operator adds. See
 [ADR-1009](adr/1009-project-setup-discovery.md).
 
 Project GitHub sources independently choose `env:NAME` or exactly `gh:github.com`.
-Guided setup shows the GitHub CLI login a new project's source would use and, when
-it is signed in, records `gh:github.com` as that source's credential at creation;
-otherwise the source starts without one and the ready check says it cannot sync
-until one is set. Creates from the HTML fallback or CLI record no default. Existing,
+Guided setup shows the GitHub CLI login a new project's source would use once a
+repository is added and, when it is signed in and the project has at least one
+repository, records `gh:github.com` as that source's credential at creation.
+Otherwise the source starts without one: with a repository the ready check says it
+cannot sync until one is set, and a repository-free project shows no credential line
+and records none. Creates from the HTML fallback or CLI record no default. Existing,
 environment-selected and cleared sources are never re-defaulted.
 The discovery credential never supplies a missing source credential. Source settings
 offer the detected GitHub CLI account or an environment variable, with Change,

@@ -1,4 +1,5 @@
 import {
+  type FormEvent,
   useEffect,
   useId,
   useLayoutEffect,
@@ -6,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   type CheckoutVerification,
   type DiscoveryUnavailableReason,
@@ -28,12 +30,10 @@ import {
 import {
   DraftField,
   DraftMessage,
-  DraftOutcome,
   key,
   locked,
   sendDraft,
   type SettingsProps,
-  submitDraft,
   useDraft,
 } from "./settings.js";
 import {
@@ -83,9 +83,15 @@ const repoOf = (r: SetupRow) =>
 /** What a verification result was computed for; stale results are not shown. */
 const verificationKey = (r: SetupRow) => `${r.path}\n${repoOf(r)}\n${r.ref}`;
 
-/** Frames 115–117b: guided setup recorded by one `project.create`. */
+/** What the page header needs from setup: the heading is latched for the visit. */
+export type SetupHeader = { firstRun: boolean; created: boolean };
+
+/** Frames 115–117c: guided setup recorded by one `project.create`. */
 export function ProjectSetup(
-  p: SettingsProps & { navigate: (href: string) => void },
+  p: SettingsProps & {
+    navigate: (href: string) => void;
+    onHeader?: (header: SetupHeader | null) => void;
+  },
 ) {
   const d = useDraft(p.drafts, "project.create");
   // The lead profile created inline when none exists; its own draft never meets Settings'.
@@ -384,7 +390,18 @@ export function ProjectSetup(
   };
   const recorded = d.phase === "recorded" && !earlier.current ? d.frozen : null;
   const profiles = p.workspace?.data.profiles.filter((r) => !r.revoked) ?? [];
-  const firstRun = p.workspace?.data.projects.length === 0;
+  // Latched from the first workspace read this visit sees, so creating the first project
+  // keeps its heading and Cancel target for the rest of the visit.
+  const firstRunRead = useRef<boolean | null>(null);
+  if (firstRunRead.current === null && p.workspace)
+    firstRunRead.current = p.workspace.data.projects.length === 0;
+  const firstRun = firstRunRead.current;
+  const created = Boolean(recorded);
+  const { onHeader } = p;
+  useEffect(() => {
+    if (firstRun !== null) onHeader?.({ firstRun, created });
+  }, [onHeader, firstRun, created]);
+  useEffect(() => () => onHeader?.(null), [onHeader]);
   // A stale lead (revoked since) keeps the select, which names it; an inline profile
   // stays until the re-read lists it.
   const inlineProfile =
@@ -409,14 +426,84 @@ export function ProjectSetup(
       runtimeErrors(inline.values, claudeSettings(p.workspace)),
     );
 
+  // Create stays focusable while it cannot be used, with its reason; submitting is guarded
+  // on the live draft state, so a repeated click or Enter sends nothing more.
+  const createReason = () =>
+    d.phase === "pending"
+      ? "Creating the project…"
+      : inline.phase === "pending"
+        ? "Wait for the lead profile to be created."
+        : inline.phase === "unknown"
+          ? "Check whether the lead profile was saved first."
+          : null;
+  const reason = createReason();
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (createReason() || d.phase === "unknown" || d.phase === "recorded")
+      return;
+    void sendDraft(e.currentTarget, d, p.client, p.session, command, p.refresh);
+  };
+  const noteId = useId();
+
+  // Step 3 sits behind "Add a repository" while discovery is unconfigured. Anything that
+  // needs it (a value in a row, a rejected repository or Project, a login being saved) opens
+  // it, and once open it stays open for the visit so no input is ever removed under focus.
+  const rowIssue = Object.keys(d.errors).some(
+    (k) => k.startsWith("repositories.") || k.startsWith("githubProject"),
+  );
+  const forced =
+    rows.some((r) => !blankRow(r)) ||
+    rowIssue ||
+    ghDraft.phase === "pending" ||
+    ghDraft.phase === "unknown";
+  const [repoOpen, setRepoOpen] = useState(false);
+  if (forced && !repoOpen) setRepoOpen(true);
+  const collapsed = unconfigured && !repoOpen && !forced;
+  const repoContent = useRef<HTMLDivElement>(null);
+  const repoContentId = useId();
+  const openRepositories = () => {
+    flushSync(() => setRepoOpen(true));
+    repoContent.current
+      ?.querySelector<HTMLElement>(
+        ".setup-inline-actions button, .setup-row :is(input, select)",
+      )
+      ?.focus();
+  };
+  // A rejection with no field to focus still has to be seen above the sticky bar.
+  const outcome = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (
+      (d.phase === "rejected" || d.phase === "conflict") &&
+      !document.activeElement?.matches('[aria-invalid="true"]')
+    )
+      outcome.current?.scrollIntoView({ block: "nearest" });
+  }, [d.phase]);
+
+  if (recorded?.type === "project.create")
+    return (
+      <section className="settings-page setup-page">
+        <ReadyCheck
+          settings={p}
+          draft={d}
+          created={recorded}
+          navigate={p.navigate}
+        />
+      </section>
+    );
+
   return (
     <section className="settings-page setup-page">
-      <form
-        className="setup-grid"
-        onSubmit={(e) =>
-          void submitDraft(e, d, p.client, p.session, command, p.refresh)
-        }
-      >
+      <form className="setup-grid" onSubmit={submit}>
+        <div ref={outcome} className="setup-outcome">
+          <DraftMessage
+            draft={d}
+            success={null}
+            check={async () => {
+              await d.reconcile(p.client, csrf);
+              if (d.phase === "recorded" || d.phase === "conflict") p.refresh();
+            }}
+          />
+        </div>
         <div className="settings-column">
           <section className="settings-panel">
             <h2 className="settings-panel-title">1 · Project and lead</h2>
@@ -473,15 +560,11 @@ export function ProjectSetup(
                     field="name"
                     label="Profile name"
                   />
-                  <DraftField draft={inline} field="summary" label="Summary" />
                 </div>
-                <DraftField
-                  draft={inline}
-                  field="instructions"
-                  label="Profile instructions"
-                  multiline
-                />
                 <RuntimeFields draft={inline} workspace={p.workspace} />
+                <p className="metadata muted">
+                  Add a summary and instructions later in Settings → Profiles.
+                </p>
                 {inline.phase !== "unknown" && (
                   <div>
                     <Button
@@ -533,455 +616,486 @@ export function ProjectSetup(
               multiline
             />
           </section>
-          <section className="setup-explainer" aria-label="What creation does">
-            <h2 className="body">What creation does</h2>
-            <ul className="body">
-              <li>
-                The project starts Paused. Creating it starts no execution.
-              </li>
-              <li>
-                Resume is a separate step after creation; nothing runs until you
-                choose it.
-              </li>
-              <li>{setupSourceCredentialCopy(sourceGh)}</li>
-              <li>
-                Routing, GitHub discovery, other credential references and
-                capacity overrides are configured after creation.
-              </li>
-              <li>Repository access is exactly the list in step 3.</li>
-              <li>
-                Discovery reads GitHub only. Nothing is imported until a source
-                is previewed and activated.
-              </li>
-            </ul>
-          </section>
-          <div className="settings-actions setup-submit">
-            <DraftOutcome
-              draft={d}
-              client={p.client}
-              session={p.session}
-              label="Create paused project"
-              refresh={p.refresh}
-              success={null}
-              saveDisabled={
-                inline.phase === "pending" || inline.phase === "unknown"
-              }
-            />
-            {!recorded && (
-              <ActionLink
-                variant="secondary"
-                href={firstRun ? "/app" : "/app/settings"}
-              >
-                Cancel
-              </ActionLink>
+          <section className="settings-panel setup-repositories">
+            <div>
+              <h2 className="settings-panel-title">
+                3 · Repository and GitHub · optional
+              </h2>
+              <p className="metadata muted">
+                {collapsed
+                  ? "Optional. Without a repository the project is repository-free; adding one also offers GitHub discovery."
+                  : discovery.state === "unavailable"
+                    ? discoveryReasonCopy(discovery.reason)
+                    : "Repositories and GitHub Projects are discovered from GitHub with the read-only discovery credential. Repository access is exactly what you add here; a linked GitHub Project grants none."}
+              </p>
+            </div>
+            {collapsed && (
+              <div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-expanded="false"
+                  aria-controls={repoContentId}
+                  onClick={openRepositories}
+                >
+                  Add a repository
+                </Button>
+              </div>
             )}
-          </div>
-        </div>
-        <section className="settings-panel setup-repositories">
-          <div>
-            <h2 className="settings-panel-title">
-              3 · Repository and GitHub · optional
-            </h2>
-            <p className="metadata muted">
-              {discovery.state === "unavailable"
-                ? discoveryReasonCopy(discovery.reason)
-                : "Repositories and GitHub Projects are discovered from GitHub with the read-only discovery credential. Repository access is exactly what you add here; a linked GitHub Project grants none."}
-            </p>
-          </div>
-          {(discovery.state === "unavailable" ||
-            discoveredRepos.some(
-              (repo) => branches[repo]?.state === "unavailable",
-            ) ||
-            projectRepos.some(
-              (repo) => projectReads[repo]?.state === "unavailable",
-            )) && (
-            <div className="setup-inline-actions">
-              {discovery.state === "unavailable" &&
-              [
-                "unconfigured",
-                "missing-credential",
-                "gh-not-installed",
-                "gh-not-signed-in",
-              ].includes(discovery.reason) ? (
+            <div
+              ref={repoContent}
+              id={repoContentId}
+              className="setup-repositories-content"
+            >
+              {!collapsed && (
                 <>
+                  {(discovery.state === "unavailable" ||
+                    discoveredRepos.some(
+                      (repo) => branches[repo]?.state === "unavailable",
+                    ) ||
+                    projectRepos.some(
+                      (repo) => projectReads[repo]?.state === "unavailable",
+                    )) && (
+                    <div className="setup-inline-actions">
+                      {discovery.state === "unavailable" &&
+                      [
+                        "unconfigured",
+                        "missing-credential",
+                        "gh-not-installed",
+                        "gh-not-signed-in",
+                      ].includes(discovery.reason) ? (
+                        <>
+                          {ghLogin?.state === "signed-in" &&
+                            discovery.reason === "unconfigured" &&
+                            ghDraft.phase !== "unknown" && (
+                              <Button
+                                type="button"
+                                disabled={ghDraft.phase === "pending"}
+                                onClick={async () => {
+                                  await ghDraft.submit(
+                                    p.client,
+                                    {
+                                      type: "discovery.configure",
+                                      key: ghDraft.values.key,
+                                      credentialRef: "gh:github.com",
+                                    },
+                                    csrf,
+                                  );
+                                  if (ghDraft.phase === "recorded") {
+                                    ghDraft.startOperation(
+                                      { key: key() },
+                                      true,
+                                    );
+                                    retry();
+                                  }
+                                }}
+                              >
+                                {`Use GitHub CLI login (@${ghLogin.login})`}
+                              </Button>
+                            )}
+                          <ActionLink variant="secondary" href="/app/settings">
+                            Set discovery credential
+                          </ActionLink>
+                        </>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={retry}
+                        >
+                          Retry
+                        </Button>
+                      )}
+                    </div>
+                  )}
                   {ghLogin?.state === "signed-in" &&
-                    discovery.reason === "unconfigured" &&
-                    ghDraft.phase !== "unknown" && (
+                    discovery.state === "unavailable" &&
+                    discovery.reason === "unconfigured" && (
+                      <p className="metadata muted">
+                        Signed in to github.com as @{ghLogin.login} with the
+                        GitHub CLI on this Mac. Choosing it here lets Ensemble
+                        read GitHub with it for discovery; it is never passed to
+                        agents.
+                      </p>
+                    )}
+                  <DraftMessage
+                    draft={ghDraft}
+                    check={async () => {
+                      await ghDraft.reconcile(p.client, csrf);
+                      if (ghDraft.phase === "recorded") {
+                        ghDraft.startOperation({ key: key() }, true);
+                        retry();
+                      }
+                    }}
+                  />
+                  {rows.map((row, i) => {
+                    const source = sourceOf(row);
+                    const expected = row.owner && row.name ? row : null;
+                    const v =
+                      verifications[row.id]?.key === verificationKey(row)
+                        ? verifications[row.id]?.result
+                        : undefined;
+                    const pathRejected = fieldError(i, "path");
+                    const pathCopy = pathRejected
+                      ? v && v.state === "rejected" && expected
+                        ? verificationCopy(v, expected)
+                        : v?.state === "verified"
+                          ? "This folder no longer matches. Choose it again."
+                          : "Check this field."
+                      : v?.state === "rejected" && expected
+                        ? verificationCopy(v, expected)
+                        : null;
+                    const pathInvalid =
+                      pathRejected ||
+                      (v?.state === "rejected" && Boolean(expected));
+                    const repoError = duplicates.has(row.id)
+                      ? "This repository is already in the list."
+                      : fieldError(i, "owner", "name", "repositoryId")
+                        ? source === "typed"
+                          ? "Enter the repository as owner/name."
+                          : "Choose a repository."
+                        : null;
+                    const b = branches[repoOf(row)];
+                    const branchList = b?.state === "ready" ? b : null;
+                    const chosen =
+                      ready?.repositories.find(
+                        (r) => r.repositoryId === row.repositoryId,
+                      ) ?? null;
+                    return (
+                      <fieldset
+                        key={row.id}
+                        className="setup-row"
+                        aria-label={`Repository row ${i + 1}`}
+                      >
+                        <div className="settings-fields">
+                          {source === "discovered" ? (
+                            <SetupField
+                              label="Repository"
+                              error={repoError}
+                              caption={
+                                ready && row.repositoryId && !chosen
+                                  ? "Chosen earlier · not in the current list from GitHub"
+                                  : ready
+                                    ? ready.truncated
+                                      ? `Discovered from GitHub · the first ${ready.repositories.length} repositories visible to the credential. Choose "Type a repository" for one not listed.`
+                                      : `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential`
+                                    : discovery.state === "unavailable"
+                                      ? "Chosen from GitHub earlier · discovery is unavailable now"
+                                      : "Loading repositories from GitHub…"
+                              }
+                            >
+                              {(props) => (
+                                <NativeSelect
+                                  {...props}
+                                  disabled={
+                                    disabled || discovery.state === "loading"
+                                  }
+                                  value={row.repositoryId}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    if (value && value === row.repositoryId)
+                                      return;
+                                    // Typed entry keeps the chosen folder; the ref belonged to the old repository.
+                                    if (value === typeOption) {
+                                      update(i, {
+                                        ...emptyRow("typed"),
+                                        id: row.id,
+                                        path: row.path,
+                                      });
+                                      return;
+                                    }
+                                    const r = ready?.repositories.find(
+                                      (x) => x.repositoryId === value,
+                                    );
+                                    // No repository clears the whole row, so no hidden path or ref remains.
+                                    if (!r) {
+                                      update(i, {
+                                        ...emptyRow("discovered"),
+                                        id: row.id,
+                                      });
+                                      return;
+                                    }
+                                    // Another repository keeps the folder (frame 116: "change the repository")
+                                    // and checks it again against the new repository.
+                                    const next: SetupRow = {
+                                      ...row,
+                                      source: "discovered",
+                                      text: "",
+                                      repositoryId: r.repositoryId,
+                                      owner: r.owner,
+                                      name: r.name,
+                                      ref: r.defaultBranch,
+                                    };
+                                    update(i, next);
+                                    verify(next);
+                                  }}
+                                >
+                                  <option value="">
+                                    {i === 0
+                                      ? "No repository · repository-free"
+                                      : "Choose a repository"}
+                                  </option>
+                                  {ready?.repositories.map((r) => (
+                                    <option
+                                      key={r.repositoryId}
+                                      value={r.repositoryId}
+                                    >
+                                      {r.owner}/{r.name}
+                                    </option>
+                                  ))}
+                                  {!chosen && row.repositoryId && (
+                                    <option value={row.repositoryId}>
+                                      {repoOf(row)}
+                                    </option>
+                                  )}
+                                  {(!ready || ready.truncated) && (
+                                    <option value={typeOption}>
+                                      Type a repository not listed…
+                                    </option>
+                                  )}
+                                </NativeSelect>
+                              )}
+                            </SetupField>
+                          ) : (
+                            <SetupField
+                              label="Repository (owner/name)"
+                              error={repoError}
+                              caption="Typed · not listed from GitHub"
+                            >
+                              {(props) => (
+                                <Input
+                                  {...props}
+                                  disabled={disabled}
+                                  value={row.text}
+                                  onChange={(e) =>
+                                    update(i, {
+                                      ...typeRepository(row, e.target.value),
+                                      source: "typed",
+                                    })
+                                  }
+                                  // On leaving the field, a listed repository is recorded with its node ID.
+                                  onBlur={() => {
+                                    const listed = adoptListed(row);
+                                    if (listed !== row && listed.repositoryId) {
+                                      update(i, listed);
+                                      verify(listed);
+                                    }
+                                  }}
+                                />
+                              )}
+                            </SetupField>
+                          )}
+                          {(source === "typed" || expected) && (
+                            <SetupField
+                              label="Ref"
+                              error={
+                                fieldError(i, "ref")
+                                  ? v?.state === "rejected" && expected
+                                    ? verificationCopy(v, expected)
+                                    : "Check this field."
+                                  : null
+                              }
+                              caption={
+                                source === "discovered" &&
+                                b?.state === "unavailable"
+                                  ? `${discoveryReasonCopy(b.reason)} Type the ref; it is checked in the local checkout.`
+                                  : source === "typed" || !branchList
+                                    ? "Typed · checked in the local checkout"
+                                    : branchList.truncated
+                                      ? "More branches than listed · type the ref; it is checked in the local checkout"
+                                      : "Discovered refs · default branch preselected"
+                              }
+                            >
+                              {(props) =>
+                                // Past the listing cap a ref is typed, starting from the default branch.
+                                source === "discovered" &&
+                                branchList &&
+                                !branchList.truncated ? (
+                                  <NativeSelect
+                                    {...props}
+                                    disabled={disabled}
+                                    value={row.ref}
+                                    onChange={(e) =>
+                                      update(i, { ...row, ref: e.target.value })
+                                    }
+                                  >
+                                    {!row.ref && (
+                                      <option value="">Choose a ref</option>
+                                    )}
+                                    {[
+                                      ...new Set([
+                                        chosen?.defaultBranch ?? row.ref,
+                                        // A typed or adopted ref outside the listed branches stays visible.
+                                        row.ref,
+                                        ...branchList.branches,
+                                      ]),
+                                    ]
+                                      .filter(Boolean)
+                                      .map((n) => (
+                                        <option key={n} value={n}>
+                                          {n === chosen?.defaultBranch
+                                            ? `${n} · default branch`
+                                            : n}
+                                        </option>
+                                      ))}
+                                  </NativeSelect>
+                                ) : (
+                                  <Input
+                                    {...props}
+                                    disabled={disabled}
+                                    value={row.ref}
+                                    onChange={(e) =>
+                                      update(i, { ...row, ref: e.target.value })
+                                    }
+                                  />
+                                )
+                              }
+                            </SetupField>
+                          )}
+                        </div>
+                        {(source === "typed" || expected) && (
+                          <div className="setup-path">
+                            <SetupField
+                              label="Local repository path"
+                              error={pathInvalid ? pathCopy : null}
+                              caption={
+                                v?.state === "verified" &&
+                                expected &&
+                                !pathRejected
+                                  ? verificationCopy(v, expected)
+                                  : v?.state === "checking"
+                                    ? "Checking on this Mac…"
+                                    : v?.state === "failed"
+                                      ? "This folder couldn't be checked now. The service checks again on create."
+                                      : "The service checks the checkout's origin and ref on this Mac."
+                              }
+                            >
+                              {(props) => (
+                                <Input
+                                  {...props}
+                                  disabled={disabled}
+                                  value={row.path}
+                                  placeholder="~/src/repository"
+                                  onChange={(e) =>
+                                    update(i, { ...row, path: e.target.value })
+                                  }
+                                  onBlur={() => verify(row)}
+                                />
+                              )}
+                            </SetupField>
+                            <FolderPicker
+                              client={p.client}
+                              csrfToken={csrf}
+                              path={row.path}
+                              disabled={disabled}
+                              expected={
+                                expected
+                                  ? {
+                                      owner: row.owner,
+                                      name: row.name,
+                                      ref: row.ref,
+                                    }
+                                  : null
+                              }
+                              onUse={(path) => {
+                                const next = { ...row, path };
+                                update(i, next);
+                                verify(next);
+                              }}
+                              trigger={
+                                <Button type="button" variant="secondary">
+                                  Choose folder…
+                                </Button>
+                              }
+                            />
+                          </div>
+                        )}
+                        {i > 0 && (
+                          <div>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              disabled={disabled}
+                              onClick={() => {
+                                // Row indices shift, so the service's row errors no longer apply.
+                                d.clearErrors("repositories.");
+                                setRows(rows.filter((_, j) => j !== i));
+                              }}
+                            >
+                              Remove repository {i + 1}
+                            </Button>
+                          </div>
+                        )}
+                      </fieldset>
+                    );
+                  })}
+                  <ProjectChoice
+                    disabled={disabled}
+                    discoveryReady={Boolean(ready)}
+                    repo={projectKey}
+                    data={projects}
+                    value={chosenProject}
+                    onChange={(id) => {
+                      projectChoiceTouched.current = projectKey;
+                      d.set("githubProject", id);
+                    }}
+                  />
+                  {rowIndex.length > 0 && (
+                    <p className="metadata muted">
+                      {setupSourceCredentialCopy(sourceGh)}
+                    </p>
+                  )}
+                  {rows.length >= 20 && (
+                    <p className="metadata muted">
+                      A project can have up to 20 repositories.
+                    </p>
+                  )}
+                  {rows.some((r) => !blankRow(r)) && rows.length < 20 && (
+                    <div>
                       <Button
                         type="button"
-                        disabled={ghDraft.phase === "pending"}
-                        onClick={async () => {
-                          await ghDraft.submit(
-                            p.client,
-                            {
-                              type: "discovery.configure",
-                              key: ghDraft.values.key,
-                              credentialRef: "gh:github.com",
-                            },
-                            csrf,
-                          );
-                          if (ghDraft.phase === "recorded") {
-                            ghDraft.startOperation({ key: key() }, true);
-                            retry();
-                          }
-                        }}
+                        variant="secondary"
+                        disabled={disabled}
+                        onClick={() => setRows([...rows, emptyRow(mode)])}
                       >
-                        {`Use GitHub CLI login (@${ghLogin.login})`}
+                        Add another repository
                       </Button>
-                    )}
-                  <ActionLink variant="secondary" href="/app/settings">
-                    Set discovery credential
-                  </ActionLink>
+                    </div>
+                  )}
                 </>
-              ) : (
-                <Button type="button" variant="secondary" onClick={retry}>
-                  Retry
-                </Button>
               )}
             </div>
+          </section>
+        </div>
+        <aside className="setup-explainer" aria-label="What creation does">
+          <h2 className="body">What creation does</h2>
+          <ul className="body">
+            <li>The project starts Paused. Creating it starts no execution.</li>
+            <li>Repository access is exactly the list in step 3.</li>
+          </ul>
+        </aside>
+        <div className="setup-submit">
+          <p id={noteId} className="metadata muted">
+            {reason ??
+              "Saving creates a paused project; nothing runs until you resume it."}
+          </p>
+          <ActionLink
+            variant="secondary"
+            href={firstRun ? "/app" : "/app/settings"}
+          >
+            Cancel
+          </ActionLink>
+          {d.phase !== "unknown" && (
+            <Button
+              type="submit"
+              aria-disabled={reason ? true : undefined}
+              aria-describedby={noteId}
+            >
+              {d.phase === "pending" ? "Creating…" : "Create paused project"}
+            </Button>
           )}
-          {ghLogin?.state === "signed-in" &&
-            discovery.state === "unavailable" &&
-            discovery.reason === "unconfigured" && (
-              <p className="metadata muted">
-                Signed in to github.com as @{ghLogin.login} with the GitHub CLI
-                on this Mac. Choosing it here lets Ensemble read GitHub with it
-                for discovery; it is never passed to agents.
-              </p>
-            )}
-          <DraftMessage
-            draft={ghDraft}
-            check={async () => {
-              await ghDraft.reconcile(p.client, csrf);
-              if (ghDraft.phase === "recorded") {
-                ghDraft.startOperation({ key: key() }, true);
-                retry();
-              }
-            }}
-          />
-          {rows.map((row, i) => {
-            const source = sourceOf(row);
-            const expected = row.owner && row.name ? row : null;
-            const v =
-              verifications[row.id]?.key === verificationKey(row)
-                ? verifications[row.id]?.result
-                : undefined;
-            const pathRejected = fieldError(i, "path");
-            const pathCopy = pathRejected
-              ? v && v.state === "rejected" && expected
-                ? verificationCopy(v, expected)
-                : v?.state === "verified"
-                  ? "This folder no longer matches. Choose it again."
-                  : "Check this field."
-              : v?.state === "rejected" && expected
-                ? verificationCopy(v, expected)
-                : null;
-            const pathInvalid =
-              pathRejected || (v?.state === "rejected" && Boolean(expected));
-            const repoError = duplicates.has(row.id)
-              ? "This repository is already in the list."
-              : fieldError(i, "owner", "name", "repositoryId")
-                ? source === "typed"
-                  ? "Enter the repository as owner/name."
-                  : "Choose a repository."
-                : null;
-            const b = branches[repoOf(row)];
-            const branchList = b?.state === "ready" ? b : null;
-            const chosen =
-              ready?.repositories.find(
-                (r) => r.repositoryId === row.repositoryId,
-              ) ?? null;
-            return (
-              <fieldset
-                key={row.id}
-                className="setup-row"
-                aria-label={`Repository row ${i + 1}`}
-              >
-                <div className="settings-fields">
-                  {source === "discovered" ? (
-                    <SetupField
-                      label="Repository"
-                      error={repoError}
-                      caption={
-                        ready && row.repositoryId && !chosen
-                          ? "Chosen earlier · not in the current list from GitHub"
-                          : ready
-                            ? ready.truncated
-                              ? `Discovered from GitHub · the first ${ready.repositories.length} repositories visible to the credential. Choose "Type a repository" for one not listed.`
-                              : `Discovered from GitHub · ${ready.repositories.length} repositories visible to the credential`
-                            : discovery.state === "unavailable"
-                              ? "Chosen from GitHub earlier · discovery is unavailable now"
-                              : "Loading repositories from GitHub…"
-                      }
-                    >
-                      {(props) => (
-                        <NativeSelect
-                          {...props}
-                          disabled={disabled || discovery.state === "loading"}
-                          value={row.repositoryId}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            if (value && value === row.repositoryId) return;
-                            // Typed entry keeps the chosen folder; the ref belonged to the old repository.
-                            if (value === typeOption) {
-                              update(i, {
-                                ...emptyRow("typed"),
-                                id: row.id,
-                                path: row.path,
-                              });
-                              return;
-                            }
-                            const r = ready?.repositories.find(
-                              (x) => x.repositoryId === value,
-                            );
-                            // No repository clears the whole row, so no hidden path or ref remains.
-                            if (!r) {
-                              update(i, {
-                                ...emptyRow("discovered"),
-                                id: row.id,
-                              });
-                              return;
-                            }
-                            // Another repository keeps the folder (frame 116: "change the repository")
-                            // and checks it again against the new repository.
-                            const next: SetupRow = {
-                              ...row,
-                              source: "discovered",
-                              text: "",
-                              repositoryId: r.repositoryId,
-                              owner: r.owner,
-                              name: r.name,
-                              ref: r.defaultBranch,
-                            };
-                            update(i, next);
-                            verify(next);
-                          }}
-                        >
-                          <option value="">
-                            {i === 0
-                              ? "No repository · repository-free"
-                              : "Choose a repository"}
-                          </option>
-                          {ready?.repositories.map((r) => (
-                            <option key={r.repositoryId} value={r.repositoryId}>
-                              {r.owner}/{r.name}
-                            </option>
-                          ))}
-                          {!chosen && row.repositoryId && (
-                            <option value={row.repositoryId}>
-                              {repoOf(row)}
-                            </option>
-                          )}
-                          {(!ready || ready.truncated) && (
-                            <option value={typeOption}>
-                              Type a repository not listed…
-                            </option>
-                          )}
-                        </NativeSelect>
-                      )}
-                    </SetupField>
-                  ) : (
-                    <SetupField
-                      label="Repository (owner/name)"
-                      error={repoError}
-                      caption="Typed · not listed from GitHub"
-                    >
-                      {(props) => (
-                        <Input
-                          {...props}
-                          disabled={disabled}
-                          value={row.text}
-                          onChange={(e) =>
-                            update(i, {
-                              ...typeRepository(row, e.target.value),
-                              source: "typed",
-                            })
-                          }
-                          // On leaving the field, a listed repository is recorded with its node ID.
-                          onBlur={() => {
-                            const listed = adoptListed(row);
-                            if (listed !== row && listed.repositoryId) {
-                              update(i, listed);
-                              verify(listed);
-                            }
-                          }}
-                        />
-                      )}
-                    </SetupField>
-                  )}
-                  {(source === "typed" || expected) && (
-                    <SetupField
-                      label="Ref"
-                      error={
-                        fieldError(i, "ref")
-                          ? v?.state === "rejected" && expected
-                            ? verificationCopy(v, expected)
-                            : "Check this field."
-                          : null
-                      }
-                      caption={
-                        source === "discovered" && b?.state === "unavailable"
-                          ? `${discoveryReasonCopy(b.reason)} Type the ref; it is checked in the local checkout.`
-                          : source === "typed" || !branchList
-                            ? "Typed · checked in the local checkout"
-                            : branchList.truncated
-                              ? "More branches than listed · type the ref; it is checked in the local checkout"
-                              : "Discovered refs · default branch preselected"
-                      }
-                    >
-                      {(props) =>
-                        // Past the listing cap a ref is typed, starting from the default branch.
-                        source === "discovered" &&
-                        branchList &&
-                        !branchList.truncated ? (
-                          <NativeSelect
-                            {...props}
-                            disabled={disabled}
-                            value={row.ref}
-                            onChange={(e) =>
-                              update(i, { ...row, ref: e.target.value })
-                            }
-                          >
-                            {!row.ref && <option value="">Choose a ref</option>}
-                            {[
-                              ...new Set([
-                                chosen?.defaultBranch ?? row.ref,
-                                // A typed or adopted ref outside the listed branches stays visible.
-                                row.ref,
-                                ...branchList.branches,
-                              ]),
-                            ]
-                              .filter(Boolean)
-                              .map((n) => (
-                                <option key={n} value={n}>
-                                  {n === chosen?.defaultBranch
-                                    ? `${n} · default branch`
-                                    : n}
-                                </option>
-                              ))}
-                          </NativeSelect>
-                        ) : (
-                          <Input
-                            {...props}
-                            disabled={disabled}
-                            value={row.ref}
-                            onChange={(e) =>
-                              update(i, { ...row, ref: e.target.value })
-                            }
-                          />
-                        )
-                      }
-                    </SetupField>
-                  )}
-                </div>
-                {(source === "typed" || expected) && (
-                  <div className="setup-path">
-                    <SetupField
-                      label="Local repository path"
-                      error={pathInvalid ? pathCopy : null}
-                      caption={
-                        v?.state === "verified" && expected && !pathRejected
-                          ? verificationCopy(v, expected)
-                          : v?.state === "checking"
-                            ? "Checking on this Mac…"
-                            : v?.state === "failed"
-                              ? "This folder couldn't be checked now. The service checks again on create."
-                              : "The service checks the checkout's origin and ref on this Mac."
-                      }
-                    >
-                      {(props) => (
-                        <Input
-                          {...props}
-                          disabled={disabled}
-                          value={row.path}
-                          placeholder="~/src/repository"
-                          onChange={(e) =>
-                            update(i, { ...row, path: e.target.value })
-                          }
-                          onBlur={() => verify(row)}
-                        />
-                      )}
-                    </SetupField>
-                    <FolderPicker
-                      client={p.client}
-                      csrfToken={csrf}
-                      path={row.path}
-                      disabled={disabled}
-                      expected={
-                        expected
-                          ? { owner: row.owner, name: row.name, ref: row.ref }
-                          : null
-                      }
-                      onUse={(path) => {
-                        const next = { ...row, path };
-                        update(i, next);
-                        verify(next);
-                      }}
-                      trigger={
-                        <Button type="button" variant="secondary">
-                          Choose folder…
-                        </Button>
-                      }
-                    />
-                  </div>
-                )}
-                {i > 0 && (
-                  <div>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={disabled}
-                      onClick={() => {
-                        // Row indices shift, so the service's row errors no longer apply.
-                        d.clearErrors("repositories.");
-                        setRows(rows.filter((_, j) => j !== i));
-                      }}
-                    >
-                      Remove repository {i + 1}
-                    </Button>
-                  </div>
-                )}
-              </fieldset>
-            );
-          })}
-          <ProjectChoice
-            disabled={disabled}
-            discoveryReady={Boolean(ready)}
-            repo={projectKey}
-            data={projects}
-            value={chosenProject}
-            onChange={(id) => {
-              projectChoiceTouched.current = projectKey;
-              d.set("githubProject", id);
-            }}
-          />
-          {rows.length >= 20 && (
-            <p className="metadata muted">
-              A project can have up to 20 repositories.
-            </p>
-          )}
-          {rows.some((r) => !blankRow(r)) && rows.length < 20 && (
-            <div>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={disabled}
-                onClick={() => setRows([...rows, emptyRow(mode)])}
-              >
-                Add another repository
-              </Button>
-            </div>
-          )}
-        </section>
+        </div>
       </form>
-      {recorded?.type === "project.create" && (
-        <ReadyCheck
-          settings={p}
-          draft={d}
-          created={recorded}
-          navigate={p.navigate}
-        />
-      )}
     </section>
   );
 }
