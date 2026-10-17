@@ -40,7 +40,7 @@ export type WriteCommand = {
   run(ctx: WriteContext): Promise<WriteOutput>;
 };
 
-const ALWAYS_ALLOWED = ["connection", "output", "help"];
+export const ALWAYS_ALLOWED = ["connection", "output", "help"];
 export function rejectUnusedFlags(values: Values, flags: readonly string[]) {
   for (const [name, value] of Object.entries(values))
     if (

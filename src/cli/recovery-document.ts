@@ -82,7 +82,7 @@ const invalid = (why: string, fix?: string) =>
     { ...(fix ? { fix } : {}) },
   );
 const PREPARE_FIX =
-  "Prepare it first with 'ensemble recovery prepare' (see 'ensemble --help'), then submit the file it writes.";
+  "Prepare it first with 'ensemble recovery prepare' (see 'ensemble help recovery'), then submit the file it writes.";
 
 /** Reads an owner-only recovery document and verifies its schema and digest. */
 export async function readRecoveryDocument(

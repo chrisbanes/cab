@@ -1371,6 +1371,9 @@ const knownCommand = (words: string[]) => {
     ...browseCommands.keys(),
     ...writeCommands.keys(),
   ];
+  // `ensemble help` alone, or naming an area.
+  if (first === "help")
+    return !second || keys.some((key) => key.split(" ")[0] === second);
   return keys.some(
     (key) =>
       key === `${first} ${second}` || (!key.includes(" ") && key === first),

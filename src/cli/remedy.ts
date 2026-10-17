@@ -17,7 +17,7 @@ const LIST = "'ensemble connection list' shows the saved connections";
 export const DEFAULT_FIX: Record<string, string> = {
   usage: "Run 'ensemble --help'.",
   "invalid-input":
-    "Correct the option named above; 'ensemble --help' lists each command's options.",
+    "Correct the option named above; 'ensemble --help --all' lists each command's options.",
   "invalid-url":
     "Use https://HOST[:PORT] or http://127.0.0.1:PORT with no path.",
   "invalid-token-file":
@@ -68,7 +68,7 @@ export const DEFAULT_FIX: Record<string, string> = {
 /** For codes outside `EXIT`, such as service-returned ones; keyed by the category main.ts derives. */
 export const CATEGORY_FIX: Record<string, string> = {
   usage:
-    "Correct the command and run it again; 'ensemble --help' lists the options.",
+    "Correct the command and run it again; 'ensemble --help --all' lists the options.",
   authentication: `Check the credential, or ${LOGIN}.`,
   conflict:
     "Read the current state with the matching 'get' command, then retry.",
