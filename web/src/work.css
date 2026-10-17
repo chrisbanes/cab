@@ -880,6 +880,53 @@
     order: 4;
   }
 
+  /* Phone Board: Project, State and the column chips share one row that scrolls sideways;
+     the switch and Refresh tasks sit on the line below. The wrapper dissolves in List. */
+  .work-filters {
+    display: contents;
+  }
+
+  .work-toolbar[data-view="board"] .work-filters {
+    display: flex;
+    flex: 1 0 100%;
+    align-items: center;
+    gap: var(--space-4);
+    min-width: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .work-toolbar[data-view="board"] .work-filters > * {
+    flex: none;
+  }
+
+  .work-columns {
+    display: flex;
+    margin-left: var(--space-4);
+  }
+
+  .work-columns .column-navigation {
+    display: flex;
+    flex-wrap: nowrap;
+    margin: 0;
+  }
+
+  .work-columns .column-tab {
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  /* The chips carry each column's count, so the total is read aloud only. */
+  .work-toolbar[data-view="board"] .work-count {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
   .overview-stats {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

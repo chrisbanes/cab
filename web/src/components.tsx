@@ -289,6 +289,7 @@ export function PageHeader({
   desktopBack,
   plain,
   shortTitle,
+  compactPhone,
 }: {
   title: string;
   subtitle?: string | undefined;
@@ -303,6 +304,8 @@ export function PageHeader({
   plain?: boolean;
   /** Phone title, rendered in the same h1 and shown below 760px instead of `title`. */
   shortTitle?: string | undefined;
+  /** Phone only: Back and a centred title, with no subtitle (a create form's Back names its parent). */
+  compactPhone?: boolean | undefined;
 }) {
   return (
     <header
@@ -310,6 +313,7 @@ export function PageHeader({
       data-variant={back ? "detail" : "top-level"}
       data-plain={plain || undefined}
       data-desktop-back={desktopBack || undefined}
+      data-compact-phone={compactPhone || undefined}
     >
       {menu && <div className="phone-nav">{menu}</div>}
       {back && (

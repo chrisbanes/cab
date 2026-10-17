@@ -104,6 +104,7 @@ export function Inbox({
   onSummary,
   onHeader,
   chrome,
+  queueRefresh,
 }: {
   client: OperatorClient;
   session: Session;
@@ -118,6 +119,8 @@ export function Inbox({
   onHeader?: (header: InboxHeader | null) => void;
   /** At the sidebar shell the queue header owns the page heading, summary and Refresh. */
   chrome?: { onRefresh: () => void; refreshing: boolean } | undefined;
+  /** On a phone the header has no Refresh, so the filter row ends with it. */
+  queueRefresh?: { onRefresh: () => void; refreshing: boolean } | undefined;
 }) {
   const loader = useCallback(
     (signal: AbortSignal) => loadInbox(client, signal),
@@ -424,6 +427,15 @@ export function Inbox({
                 Interventions · {counts.kind.intervention ?? 0}
               </option>
             </NativeSelect>
+            {queueRefresh && (
+              <Button
+                variant="secondary"
+                onClick={queueRefresh.onRefresh}
+                disabled={queueRefresh.refreshing}
+              >
+                Refresh
+              </Button>
+            )}
           </div>
         </div>
         <ResourceStatus state={resource.state} retry={resource.refresh} />

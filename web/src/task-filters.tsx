@@ -15,6 +15,8 @@ export function TaskToolbar({
   count,
   refresh,
   pending,
+  phone = false,
+  columnsSlot,
 }: {
   filters: TaskFilters;
   update: (patch: Partial<TaskFilters>) => void;
@@ -24,9 +26,82 @@ export function TaskToolbar({
   count: number;
   refresh: () => void;
   pending: boolean;
+  /** ≤759px: the selects group up front, in the order they appear, and the Board can lend a chip slot. */
+  phone?: boolean | undefined;
+  /** Phone Board: receives the element the column chips are portalled into. */
+  columnsSlot?: ((element: HTMLElement | null) => void) | undefined;
 }) {
   const hasMore = Boolean(filters.q || filters.source || filters.ready);
   const [open, setOpen] = useState(hasMore);
+  const switchView = (
+    <div className="work-switch" role="toolbar" aria-label="Task presentation">
+      {(["list", "board"] as const).map((view) => (
+        <Button
+          key={view}
+          variant="secondary"
+          aria-pressed={filters.view === view}
+          onClick={() => update({ view })}
+        >
+          {view === "list" ? "List" : "Board"}
+        </Button>
+      ))}
+    </div>
+  );
+  const selects = (
+    <>
+      {!projectId && (
+        <span className="work-select">
+          <NativeSelect
+            aria-label="Project"
+            value={filters.project}
+            onChange={(e) => update({ project: e.target.value })}
+          >
+            <option value="">All projects</option>
+            {workspace?.data.projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name ?? "Name unavailable"}
+              </option>
+            ))}
+          </NativeSelect>
+        </span>
+      )}
+      <span className="work-select">
+        <NativeSelect
+          aria-label="State"
+          value={filters.state}
+          onChange={(e) => update({ state: e.target.value })}
+        >
+          <option value="">Active tasks</option>
+          <option value="all">All tasks</option>
+          {columns.map((c) => (
+            <option key={c}>{c}</option>
+          ))}
+        </NativeSelect>
+      </span>
+    </>
+  );
+  const countLine = (
+    <>
+      {!overview && (
+        <p className="metadata muted work-count">
+          {count} task{count === 1 ? "" : "s"}
+        </p>
+      )}
+    </>
+  );
+  const refreshButton = (
+    <Button
+      variant="secondary"
+      className="work-refresh"
+      onClick={refresh}
+      disabled={pending}
+    >
+      Refresh tasks
+    </Button>
+  );
+  const slot = columnsSlot && filters.view === "board" && (
+    <div className="work-columns" ref={columnsSlot} />
+  );
   // A filter set from the URL opens the disclosure; the component never closes it.
   useEffect(() => {
     if (hasMore) setOpen(true);
@@ -36,68 +111,29 @@ export function TaskToolbar({
       <div
         className="work-toolbar"
         data-surface={overview ? "overview" : "tasks"}
+        data-view={filters.view}
       >
         <h2 className="section-heading work-heading">
           {projectId ? "Project tasks" : "Across your projects"}
         </h2>
-        <div
-          className="work-switch"
-          role="toolbar"
-          aria-label="Task presentation"
-        >
-          {(["list", "board"] as const).map((view) => (
-            <Button
-              key={view}
-              variant="secondary"
-              aria-pressed={filters.view === view}
-              onClick={() => update({ view })}
-            >
-              {view === "list" ? "List" : "Board"}
-            </Button>
-          ))}
-        </div>
-        {!projectId && (
-          <span className="work-select">
-            <NativeSelect
-              aria-label="Project"
-              value={filters.project}
-              onChange={(e) => update({ project: e.target.value })}
-            >
-              <option value="">All projects</option>
-              {workspace?.data.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name ?? "Name unavailable"}
-                </option>
-              ))}
-            </NativeSelect>
-          </span>
+        {phone ? (
+          <>
+            <div className="work-filters">
+              {selects}
+              {slot}
+            </div>
+            {countLine}
+            {switchView}
+            {refreshButton}
+          </>
+        ) : (
+          <>
+            {switchView}
+            {selects}
+            {countLine}
+            {refreshButton}
+          </>
         )}
-        <span className="work-select">
-          <NativeSelect
-            aria-label="State"
-            value={filters.state}
-            onChange={(e) => update({ state: e.target.value })}
-          >
-            <option value="">Active tasks</option>
-            <option value="all">All tasks</option>
-            {columns.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </NativeSelect>
-        </span>
-        {!overview && (
-          <p className="metadata muted work-count">
-            {count} task{count === 1 ? "" : "s"}
-          </p>
-        )}
-        <Button
-          variant="secondary"
-          className="work-refresh"
-          onClick={refresh}
-          disabled={pending}
-        >
-          Refresh tasks
-        </Button>
       </div>
       <details
         className="work-more"

@@ -633,6 +633,8 @@ export function App() {
   const onInboxRoute = path.split(/[?#]/)[0] === "/app/inbox";
   // At the sidebar shell the Inbox queue header owns the heading, summary and Refresh.
   const inboxOwnsHeader = useMediaQuery("(min-width: 1121px)") && onInboxRoute;
+  // On a phone the header keeps menu, title and count; Refresh moves into the queue's filter row.
+  const inboxPhone = useMediaQuery("(max-width: 760px)") && onInboxRoute;
   const [inboxRouteSummary, setInboxRouteSummary] =
     useState<ReturnType<typeof inboxSummaryOf>>(null);
   const [inboxHeader, setInboxHeader] = useState<InboxHeader | null>(null);
@@ -986,6 +988,9 @@ export function App() {
               subtitle={headerSubtitle}
               plain={unknownRoute || Boolean(settingsPage)}
               {...(settingsPage ? { shortTitle: settingsPage.shortTitle } : {})}
+              {...(pathname === "/app/tasks/new"
+                ? { shortTitle: "New task", compactPhone: true }
+                : {})}
               badge={
                 onInboxRoute && inboxCount !== null
                   ? `${inboxCount} unresolved`
@@ -1010,7 +1015,7 @@ export function App() {
                   >
                     New task
                   </ActionLink>
-                ) : ownsRefresh ? undefined : (
+                ) : ownsRefresh || inboxPhone ? undefined : (
                   <Button
                     variant="secondary"
                     onClick={() => {
@@ -1140,6 +1145,17 @@ export function App() {
               observation={workspace.state.data}
               onSummary={setInboxRouteSummary}
               onHeader={setInboxHeader}
+              queueRefresh={
+                inboxPhone
+                  ? {
+                      onRefresh: () => {
+                        refreshAll();
+                        tasks.refresh();
+                      },
+                      refreshing: workspace.state.pending,
+                    }
+                  : undefined
+              }
               chrome={
                 inboxOwnsHeader
                   ? {

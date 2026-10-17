@@ -240,6 +240,155 @@ test("queue rows are full-width touch targets without horizontal scroll (phone)"
   await captureBrowserEvidence(page, "390-inbox-queue", { fullPage: false });
 });
 
+test("phone: the Inbox header has the title and count only, and the filter row holds both filters and the one Refresh", async (_t, j) => {
+  const longName =
+    "Customer onboarding and billing reconciliation platform 2026";
+  assert.equal(longName.length, 60);
+  const { page } = await openInbox(
+    j,
+    3,
+    { width: 390, height: 844 },
+    "/app/inbox",
+    (f) => seedOwnQuestion(f, undefined, "Long project request", longName),
+  );
+  const header = page.locator("header.page-header"),
+    filters = page.locator(".inbox-filters"),
+    refresh = page.getByRole("button", { name: "Refresh", exact: true }),
+    rows = page.locator(".inbox-row"),
+    project = page.getByLabel("Project", { exact: true }),
+    kind = page.getByLabel("Request kind", { exact: true });
+  await rows.nth(3).waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  const rect = (l: ReturnType<Page["locator"]>) =>
+    l.evaluate((e) => e.getBoundingClientRect().toJSON());
+  const noOverflow = () =>
+    page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+
+  // (1) The header holds the menu, "Inbox" and the count, and no Refresh.
+  assert.equal(await header.locator("h1").textContent(), "Inbox");
+  assert.equal(
+    await header.locator(".page-header-count").textContent(),
+    "4 unresolved",
+  );
+  assert.equal(await header.getByRole("button").count(), 1, "menu only");
+  assert.equal(
+    await header.getByRole("button", { name: "Refresh" }).count(),
+    0,
+  );
+
+  // (2) The one Refresh sits in the filter row, and (3) the row is a single line.
+  assert.equal(await refresh.count(), 1);
+  assert.equal(
+    await filters.getByRole("button", { name: "Refresh" }).count(),
+    1,
+  );
+  const line = async () => {
+    const boxes = await Promise.all([project, kind, refresh].map(rect));
+    assert.ok(
+      Math.max(...boxes.map((b) => b.top)) -
+        Math.min(...boxes.map((b) => b.top)) <=
+        1,
+      JSON.stringify(boxes),
+    );
+    for (const b of boxes) assert.ok(b.right <= 390, JSON.stringify(boxes));
+    assert.ok(await noOverflow());
+  };
+  await line();
+  const longId = await project.evaluate(
+    (e, name) =>
+      [...(e as HTMLSelectElement).options].find((o) =>
+        o.textContent?.startsWith(name),
+      )!.value,
+    longName,
+  );
+  await project.selectOption(longId);
+  await rows.first().waitFor();
+  await line();
+  await project.selectOption("");
+  await rows.nth(3).waitFor();
+
+  // (4) The first request is on the first screen.
+  assert.ok((await rect(rows.first())).bottom <= 844);
+
+  // (5) Refresh is disabled while the workspace read is pending, then rereads.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/operator/workspace", async (route) => {
+    await gate;
+    await route.continue();
+  });
+  const inbox = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/operator/inbox" && r.ok(),
+  );
+  await refresh.click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".inbox-filters button")].every(
+      (b) => (b as HTMLButtonElement).disabled,
+    ),
+  );
+  release();
+  await inbox;
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll(".inbox-filters button")].every(
+      (b) => !(b as HTMLButtonElement).disabled,
+    ),
+  );
+  await page.unroute("**/api/operator/workspace");
+
+  // (6) A filter that matches nothing keeps the one Refresh.
+  await kind.selectOption("approval");
+  await page.getByText("No matching requests.", { exact: true }).waitFor();
+  assert.equal(await refresh.count(), 1);
+  assert.equal(
+    await filters.getByRole("button", { name: "Refresh" }).count(),
+    1,
+  );
+  await kind.selectOption("");
+  await rows.nth(3).waitFor();
+
+  // (7) A request's detail header has Back and Open task, and no Refresh.
+  await rows.first().click();
+  await page
+    .getByRole("link", { name: "Back to Inbox", exact: true })
+    .waitFor();
+  assert.equal(
+    await header.getByRole("link", { name: "Open task" }).count(),
+    1,
+  );
+  assert.equal(await refresh.count(), 0);
+
+  // (8) Back returns to the queue with its one Refresh.
+  await page.getByRole("link", { name: "Back to Inbox", exact: true }).click();
+  await rows.first().waitFor({ state: "visible" });
+  assert.equal(await refresh.count(), 1);
+  assert.equal(
+    await filters.getByRole("button", { name: "Refresh" }).count(),
+    1,
+  );
+
+  // (9) The boundary: 760 keeps it in the filter row, 761 moves it to the header.
+  await page.setViewportSize({ width: 761, height: 844 });
+  await header.getByRole("button", { name: "Refresh", exact: true }).waitFor();
+  assert.equal(await refresh.count(), 1);
+  assert.equal(
+    await filters.getByRole("button", { name: "Refresh" }).count(),
+    0,
+  );
+  await page.setViewportSize({ width: 760, height: 844 });
+  await filters.getByRole("button", { name: "Refresh", exact: true }).waitFor();
+  assert.equal(await refresh.count(), 1);
+  assert.equal(
+    await header.getByRole("button", { name: "Refresh" }).count(),
+    0,
+  );
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await page
+    .locator(".inbox-title")
+    .getByRole("button", { name: "Refresh", exact: true })
+    .waitFor();
+  assert.equal(await refresh.count(), 1);
+});
+
 test("queue rows lead with the question or the approval's exact action, not the generic reason", async (_t, j) => {
   const { page, more } = await openInbox(
     j,
