@@ -175,8 +175,9 @@ dimensions.
   panel; phone uses one scrolling form with a persistent submit area.
 - **Board (`04-tasks-board`):** columns by Ensemble work state, equal width, all on
   one screen at 1366 (an empty Ready column collapses to a narrow labelled rail).
-  Cards show title, project and source identity, the reason, the next actor (amber
-  when it is you) and the lead. Phone shows one column with named tabs and
+  Cards show title, project and source identity, the recorded reasons, the next actor
+  when an attention code names one (amber when it is you) and the lead. Capacity is
+  stated once above the work, never on a card. Phone shows one column with named tabs and
   previous/next. Ready-but-blocked work keeps its Ready label in the Waiting column;
   Stopping and Uncertain stay reachable with counts. A closure-held task reads
   "Held · closed on GitHub" and groups in the Paused column; when GitHub's closure
@@ -1606,9 +1607,12 @@ Presentation and interaction rules that the canvas does not show on its own.
 - Enter on a focused card opens the task detail. Returning restores the filters,
   the column and the scroll position.
 - The Board keeps the attention summary and the Inbox link. Stopping and Uncertain
-  remain named column tabs with counts.
-- Empty columns collapse to a narrow strip. The column link bar keeps every column
-  and its count, including empty ones (`04-tasks-board`).
+  remain named columns with counts (tabs below 1121px).
+- Empty columns collapse to a narrow strip. Below the shell breakpoint (1120px and
+  narrower) the column link bar is the reach path and keyboard route to a column and
+  keeps every column and its count, including empty ones. From 1121px it is not
+  rendered: the column headings carry each state and count, and Tab reaches every
+  card, scrolling only the board (`04-tasks-board` draws no bar).
 
 ### Settings and sign-in
 
@@ -1882,13 +1886,21 @@ Production Overview, List and Board
   state symbol and word with a mono count (Running indigo and Uncertain rose while
   populated; a populated Uncertain column has a rose border). Cards show the title,
   project and identity (`repository#number` in mono linking to GitHub, else "Local
-  task"), recorded reasons, the next actor, then the lead and the request response.
+  task"), recorded reasons, the next actor only when an attention code names one,
+  then the lead and the request response. A card nobody must act on, such as a
+  Running, Done or Cancelled one, has no Next line; the task strip keeps "No
+  operator decision". Capacity is stated once for the whole view, in a line under
+  the toolbar on Overview, List and Board ("Capacity is full; it rechecks as turns
+  finish." for the global limit, else "Capacity is full for <projects>; it rechecks
+  as turns finish."), and appears only while a visible open task waits on it.
   The card border is rose for uncertain ownership, amber when the next actor is
   you, otherwise the control hairline. The column names the state, so cards carry
   no state badge, except a "Ready" chip on Ready work that admission holds in
-  Waiting and an "Uncertain" chip on a phone, where one column shows. The segmented
-  link bar stays at every width as the reach path and keyboard route to a column;
-  Uncertain reads rose with its symbol while it has tasks. The phone keeps the
+  Waiting and an "Uncertain" chip on a phone, where one column shows. Through 1120px
+  the segmented link bar is the reach path and keyboard route to a column; from
+  1121px it is not rendered, because the headings carry each name and count and the
+  board scrolls to a focused card. Uncertain reads rose with its symbol while it has
+  tasks. The phone keeps the
   three-column tab grid (selected tab on the overlay with an indigo border) and
   in-flow Previous/Next under the column. The footer reads "Columns describe
   Ensemble work, not GitHub issue state. Cards open the task; nothing here changes

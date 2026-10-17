@@ -17,6 +17,8 @@ export type Overrides = {
   readiness?: object | undefined;
   lead?: string | null;
   globalUsage?: number;
+  projectUsage?: number;
+  projectName?: string | null;
 };
 /** A parsed task-list summary with only the facts a presentation test names. */
 export function summary(o: Overrides = {}): TaskListSummary {
@@ -30,7 +32,7 @@ export function summary(o: Overrides = {}): TaskListSummary {
     ready: o.ready ?? true,
     project: {
       id: projectId,
-      name: "Project",
+      name: o.projectName === undefined ? "Project" : o.projectName,
       version: 1,
       paused: o.paused ?? false,
       leadProfileId: null,
@@ -54,7 +56,7 @@ export function summary(o: Overrides = {}): TaskListSummary {
     capacity: {
       globalUsage: o.globalUsage ?? 0,
       globalLimit: 10,
-      projectUsage: 0,
+      projectUsage: o.projectUsage ?? 0,
       projectLimit: 10,
     },
     source:
