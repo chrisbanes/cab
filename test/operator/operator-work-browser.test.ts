@@ -8,6 +8,12 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import {
+  addProfile,
+  addProject,
+  addTask,
+  startFirstTurn,
+} from "../fixtures/operator-first-run.js";
 import { openMoreFilters, seedCatalog } from "../fixtures/operator-work.js";
 import { choiceForm, guideForm } from "../fixtures/question-data.js";
 import {
@@ -1464,25 +1470,10 @@ test("overview without requests or completed work says so and omits the complete
     "fixture.close",
     () => f.lifecycle.steps,
   );
-  const projectId = randomUUID();
-  f.service.domain().execute({
-    type: "project.create",
-    key: randomUUID(),
-    actor: "operator",
-    projectId,
-    name: "Quiet project",
-    leadProfileId: null,
-  });
-  f.service.domain().execute({
-    type: "task.create",
-    key: randomUUID(),
-    actor: "operator",
-    projectId,
-    taskId: randomUUID(),
-    title: "Quiet draft",
-    outcome: "Work",
-    ready: false,
-  });
+  // Home is only the getting-started card until a task has started a turn.
+  const projectId = addProject(f, "Quiet project", addProfile(f));
+  addTask(f, projectId, "Quiet draft");
+  await startFirstTurn(f, projectId, addTask(f, projectId, "Quiet runner"));
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({ viewport: desktop });

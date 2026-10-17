@@ -8,6 +8,12 @@ import {
 const test = browserSuite("operator-shell-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import {
+  addProfile,
+  addProject,
+  addTask,
+  startFirstTurn,
+} from "../fixtures/operator-first-run.js";
 import { mixedForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 
@@ -566,26 +572,10 @@ test("page-owned refresh replaces the shell Refresh and still re-reads the works
     "fixture.close",
     () => f.lifecycle.steps,
   );
-  const projectId = randomUUID(),
-    taskId = randomUUID();
-  f.service.domain().execute({
-    type: "project.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    name: "Refresh project",
-    leadProfileId: null,
-  });
-  f.service.domain().execute({
-    type: "task.create",
-    actor: "operator",
-    key: randomUUID(),
-    projectId,
-    taskId,
-    title: "Refresh task fixture",
-    outcome: "Inspect refresh ownership",
-    ready: false,
-  });
+  const projectId = addProject(f, "Refresh project", addProfile(f)),
+    taskId = addTask(f, projectId, "Refresh task fixture");
+  // Home shows Refresh tasks only after a task has started a turn.
+  await startFirstTurn(f, projectId, taskId);
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({
