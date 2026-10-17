@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chromium, type Browser } from "playwright";
 import type { UnexpectedRequest } from "../../src/standalone/codex.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -153,6 +154,7 @@ for (const [name, viewport] of [
     page.setDefaultTimeout(5000);
     await signIn(page, web, `/app/tasks/${taskId}`);
 
+    await openOverviewCard(page, "assignments");
     const row = page.locator(".assignment-row", { hasText: "Claude work" });
     await row.getByText(reason, { exact: false }).waitFor();
     await row.getByRole("button").first().click();

@@ -19,6 +19,8 @@ type FeedbackReference = z.infer<typeof feedbackReferenceSchema>;
 type WorkspaceDirectory = z.infer<typeof workspaceDirectoryReadSchema>["data"];
 type WorkspacePreview = z.infer<typeof workspacePreviewReadSchema>["data"];
 
+export type OverviewCard = "brief" | "evidence" | "assignments";
+
 export type RangePin = "start" | "end" | null;
 
 export type TaskChangeSelection = {
@@ -296,6 +298,8 @@ export class TaskWorkspaceState {
     return value;
   }
   expanded = new Set<string>();
+  /** Open Overview cards; written only by the cards' toggles and a deep link's first selection. */
+  overview = new Set<OverviewCard>();
   chronological = false;
   get sourceObservation() {
     return this.reply.sourceObservation;
@@ -367,6 +371,8 @@ export class TaskWorkspaceState {
   focusHref: string | null = null;
   historyAnchor: { id: string; y: number } | null = null;
   selectionInitialized = false;
+  /** A linked record's closed card was opened once; a Back or Forward remount never reopens it. */
+  recordRevealed = false;
   selectedResult: string | null = null;
   selectedSource: string | null = null;
 }

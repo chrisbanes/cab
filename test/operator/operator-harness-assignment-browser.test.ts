@@ -11,6 +11,7 @@ import {
   phone,
   signIn,
 } from "../fixtures/operator-settings.js";
+import { openOverviewCard } from "../fixtures/task-tabs.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 
 const test = browserSuite("operator-harness-assignment-browser");
@@ -135,6 +136,7 @@ for (const [name, viewport] of [
     page.setDefaultTimeout(5000);
     await signIn(page, web, `/app/tasks/${ids.taskId}`);
 
+    await openOverviewCard(page, "assignments");
     const worker = page.locator(".assignment-row", { hasText: "Claude work" });
     await worker
       .getByText("Claude · sonnet · high · Claude runtime is not configured", {

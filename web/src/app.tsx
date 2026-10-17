@@ -862,6 +862,7 @@ export function App() {
     ? {
         title: taskReport.title,
         subtitle: taskReport.subtitle,
+        shortSubtitle: taskReport.identity,
         back: taskReport.back,
         desktopBack: true,
         action: (

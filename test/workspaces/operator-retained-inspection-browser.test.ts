@@ -155,6 +155,12 @@ test("production retained result evidence keeps original bytes and opens current
   await retained
     .getByRole("heading", { name: "Retained result evidence", exact: true })
     .waitFor();
+  // The link names the item, so its Evidence card is open with that item selected.
+  await page.locator("#result-evidence > details[open]").waitFor();
+  assert.equal(
+    await retained.locator('.retained-items [aria-pressed="true"]').count(),
+    1,
+  );
   await retained.getByText("callback first", { exact: true }).waitFor();
   assert.equal(await retained.getByText("later workspace bytes").count(), 0);
   // The header carries the short result id; the full one is its title.
@@ -180,9 +186,13 @@ test("production retained result evidence keeps original bytes and opens current
   await captureBrowserEvidence(page, "1366-retained-original-text");
 
   // Opening current contents is a separate, explicit action.
-  await retained
-    .getByRole("button", { name: "Open current file in Files", exact: true })
-    .click();
+  const openCurrent = retained.getByRole("button", {
+    name: "Open current file in Files",
+    exact: true,
+  });
+  await openCurrent.scrollIntoViewIfNeeded();
+  const evidenceY = await page.evaluate(() => scrollY);
+  await openCurrent.click();
   const files = page.locator("#files");
   await files.getByText("later workspace bytes", { exact: true }).waitFor();
   assert.equal(
@@ -195,6 +205,9 @@ test("production retained result evidence keeps original bytes and opens current
   );
 
   await openTaskTab(page, "Overview");
+  // Returning from Files finds the Evidence card open and the reading position kept.
+  await page.locator("#result-evidence > details[open]").waitFor();
+  await page.waitForFunction((y) => Math.abs(scrollY - y) <= 1, evidenceY);
   await retained
     .getByRole("button", { name: /^file · retained-proof\.png/ })
     .click();
