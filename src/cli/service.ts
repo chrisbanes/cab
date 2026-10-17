@@ -822,11 +822,15 @@ export async function issueInstallCredential(
     return false;
   };
   let signedIn = false;
+  // A login the server may have accepted whose reply never arrived: its session cannot be closed.
+  let loginPending = false;
   let mintAccepted = false;
   let outcome: "stored" | "wrong-password" | "failed" = "failed";
   const attempt = async () => {
     await nextSession(await call("GET", "/api/operator/session"));
+    loginPending = true;
     const login = await call("POST", "/api/operator/login", { password });
+    loginPending = false;
     if (login.status === 401) {
       await login.body?.cancel();
       outcome = "wrong-password";
@@ -871,6 +875,7 @@ export async function issueInstallCredential(
   } catch {
     // A mint the server accepted but whose reply was unusable cannot be revoked by id.
     credentialActive ||= mintAccepted;
+    sessionOpen ||= loginPending;
   } finally {
     // The result is read after this runs, so a failed logout is reported.
     if (signedIn)

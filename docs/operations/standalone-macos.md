@@ -95,7 +95,7 @@ plus `"credentialActive"` and `"sessionOpen"`. `credentialActive` is true when t
 minted credential could not be confirmed revoked (the revoke is tried twice) or its
 creation was not confirmed; install then prints its name and tells you to revoke it in
 Settings → CLI credentials. `sessionOpen` is true when the sign-in logout was not
-confirmed. The exit status stays 0 because the service is installed.
+confirmed or the login reply was lost. The exit status stays 0 because the service is installed.
 The password and token are never printed or put on a command line.
 
 If the prompt is cancelled (the Ctrl-C keypress there skips sign-in; it does not

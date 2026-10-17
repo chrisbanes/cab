@@ -651,3 +651,65 @@ test("installCli doctor stops reading when its signal aborts", async (t) => {
   assert.equal(requests.length, 1, "the readiness read was in flight");
   assert.ok(Date.now() - started < 5000, "doctor returned on the abort");
 });
+
+test("every state-changing request reports what it may have left behind when its reply is lost or refused", async (t) => {
+  const on = (path: string, respond: () => Response) => (p: string) =>
+    p === path ? respond() : undefined;
+  const lost = () => {
+    throw new TypeError("fetch failed");
+  };
+  const status = (code: number) => () => new Response("{}", { status: code });
+  // [request, reply, outcome, credential may be active, session may be open]
+  const cases: [
+    string,
+    (p: string) => Response | undefined,
+    string,
+    boolean,
+    boolean,
+  ][] = [
+    ["login lost", on("/api/operator/login", lost), "failed", false, true],
+    [
+      "login 500",
+      on("/api/operator/login", status(500)),
+      "failed",
+      false,
+      false,
+    ],
+    [
+      "login 401",
+      on("/api/operator/login", status(401)),
+      "wrong-password",
+      false,
+      false,
+    ],
+    [
+      "login 403",
+      on("/api/operator/login", status(403)),
+      "failed",
+      false,
+      false,
+    ],
+    ["mint lost", on("/api/operator/credentials", lost), "failed", true, false],
+    [
+      "mint 400",
+      on("/api/operator/credentials", status(400)),
+      "failed",
+      false,
+      false,
+    ],
+    ["logout lost", on("/api/operator/logout", lost), "failed", false, true],
+    [
+      "logout 500",
+      on("/api/operator/logout", status(500)),
+      "failed",
+      false,
+      true,
+    ],
+  ];
+  for (const [name, intercept, outcome, active, open] of cases) {
+    const { result } = await failedStore(t, intercept);
+    assert.equal(result.outcome, outcome, name);
+    assert.equal(result.credentialActive, active, name);
+    assert.equal(result.sessionOpen, open, name);
+  }
+});
