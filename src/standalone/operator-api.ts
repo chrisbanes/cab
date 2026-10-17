@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 import { setImmediate as yieldTraversal } from "node:timers/promises";
 import { z } from "zod";
 import {
@@ -87,6 +87,7 @@ import {
   projectInstructionsSchema,
   projectSchema,
   questionReadSchema,
+  setupHomeSchema,
   recoveryObservationSchema,
   retainedEvidenceItemContentReadSchema,
   retainedResultEvidenceReadSchema,
@@ -5513,6 +5514,27 @@ export class OperatorApi {
   }
   private home() {
     return this.setup.home ?? homedir();
+  }
+  /**
+   * The home folder for Add Claude's suggested token path, for a signed-in session only: the
+   * absolute path is local-path data, so it is never recorded, logged or placed in a bearer read.
+   * Null when the suggested reference would not pass the `claude-token.configure` input.
+   */
+  readSetupHome(context?: OperatorReviewSessionContext) {
+    this.requireReviewSession(context);
+    const raw = this.home();
+    const home = isAbsolute(raw) ? resolve(raw) : "";
+    const usable =
+      home !== "" &&
+      operatorCommandSchema.safeParse({
+        type: "claude-token.configure",
+        key: randomUUID(),
+        credentialRef: `file:${home}/.ensemble/claude/claude-token`,
+      }).success;
+    return setupHomeSchema.parse({
+      data: { home: usable ? home : null },
+      observedAt: Date.now(),
+    });
   }
   readClaudeTokenStatus() {
     return claudeTokenStatusSchema.parse({

@@ -434,10 +434,12 @@ pbpaste > "$HOME/.ensemble/claude/claude-token"
 stat -f '%Su %Lp' "$HOME/.ensemble/claude/claude-token"
 ```
 
-`stat` must show the service user and `600`. In Add Claude (or the Claude token
-row in Settings), set the reference to `file:` followed by the absolute path, for
-example `file:/Users/you/.ensemble/claude/claude-token`, and save; the Token
-readable row then shows Pass, or the unsafe-file reason without the path or value.
+`stat` must show the service user and `600`. In Add Claude, click Set: the field
+starts with the reference for this path, for example
+`file:/Users/you/.ensemble/claude/claude-token`, so you can save it as it stands. In
+the Claude token row in Settings, or when the field opens empty, enter `file:`
+followed by the absolute path; `~` and `$HOME` are not expanded and are refused. The
+Token readable row then shows Pass, or the unsafe-file reason without the path or value.
 The file is checked
 whenever a Claude turn needs it: a symbolic link, a file owned by another user, any
 group or other permission bit, more than 4096 bytes, a missing or empty file, or

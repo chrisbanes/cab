@@ -2980,6 +2980,13 @@ export const discoveryProjectFieldsSchema = discoveryRead({
 export const folderListRequestSchema = z
   .object({ path: z.string().min(1).max(4096) })
   .strict();
+/**
+ * The service's home folder for Add Claude's suggested token path, or null when it is
+ * unusable. Session-only: local-path data that no bearer credential may read.
+ */
+export const setupHomeSchema = envelope(
+  z.object({ home: z.string().min(1).max(4096).nullable() }).strict(),
+);
 export const folderListingSchema = envelope(
   z
     .object({

@@ -414,6 +414,8 @@ export class OperatorWebBoundary {
       return this.api.readDiscoveryStatus();
     if (path === "/api/operator/claude-token")
       return this.api.readClaudeTokenStatus();
+    if (path === "/api/operator/setup/home")
+      return this.api.readSetupHome(reviewSession);
     if (path === "/api/operator/readiness") return this.readiness?.read();
     if (path === "/api/operator/readiness/claude-token")
       return this.readiness?.claudeToken();
