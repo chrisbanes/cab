@@ -12,7 +12,7 @@ import {
   consistentRead,
   inlineText,
   readImpact,
-  requireOut,
+  checkOut,
   uuidOrNone,
   positiveIntFlag,
   writePrepared,
@@ -44,8 +44,10 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare",
     {
       usage:
-        "project prepare PROJECT_ID --out FILE [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
+        "project prepare PROJECT_ID [--out FILE] [--expected-version N] [--name S] [--paused true|false] [--lead-profile ID|none] [--diagnostic-capture enhanced|baseline] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N]",
       positionals: 1,
+      expects:
+        "--expected-version: the project's version ('ensemble project get PROJECT_ID'); omitted, the version this command reads.",
       flags: [
         "out",
         "expected-version",
@@ -59,7 +61,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
       ],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
-        requireOut(ctx);
+        checkOut(ctx);
         const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
@@ -165,7 +167,6 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           changes,
           diff,
           impact: impact.impact,
-          impactLines: impact.lines,
           notes,
           gaps,
         });
@@ -176,7 +177,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
     "project prepare-create",
     {
       usage:
-        "project prepare-create --out FILE --name S [--lead-profile ID|none] [--instructions TEXT|- | --instructions-file PATH] [--id UUID]",
+        "project prepare-create [--out FILE] --name S [--lead-profile ID|none] [--instructions TEXT|- | --instructions-file PATH] [--id UUID]",
       positionals: 0,
       flags: [
         "out",
@@ -187,7 +188,7 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
         "id",
       ],
       async run(ctx) {
-        requireOut(ctx);
+        checkOut(ctx);
         if (ctx.values.name === undefined)
           throw new CliError("usage", "--name is required.");
         const id =
@@ -233,9 +234,9 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
   [
     "project apply",
     {
-      usage: "project apply --file FILE [--request-id UUID]",
+      usage: "project apply --file FILE [--dry-run | --request-id UUID]",
       positionals: 0,
-      flags: ["file", "request-id"],
+      flags: ["file", "request-id", "dry-run"],
       run: (ctx) => applyFile(ctx, "project"),
     },
   ],

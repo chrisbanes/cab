@@ -440,3 +440,79 @@ test("auth login ends with the doctor command that reaches the new login", async
   ]);
   assert.ok(!r.out.includes("Next:"));
 });
+
+test("every expected-* flag's help names the record it checks", async (t) => {
+  const h = harness(t);
+  const expected = (flags: readonly string[]) =>
+    flags.filter((f) => f.startsWith("expected-"));
+  // 1. Exactly the commands with an expected-* flag carry one line, and it names each flag.
+  let withLine = 0;
+  for (const [key, c] of writeCommands) {
+    const flags = expected(c.flags);
+    assert.equal(c.expects !== undefined, flags.length > 0, key);
+    if (c.expects === undefined) continue;
+    withLine++;
+    assert.ok(!c.expects.includes("\n"), key);
+    for (const flag of flags) assert.ok(c.expects.includes(`--${flag}`), key);
+  }
+  assert.ok(withLine >= 20, `${withLine} commands`);
+  // The line sits directly under the usage, in the area help and in the full help.
+  const expectsOf = (key: string) =>
+    writeCommands.get(key)?.expects ?? assert.fail(key);
+  const under = (out: string, key: string) => {
+    const l = out.split("\n");
+    return l[l.indexOf(`  ${usageOf(key)}`) + 1];
+  };
+
+  // 2. The task area: the task's version, and the recipient's assignment.
+  const task = (await h.run(["help", "task"])).out;
+  assert.equal(
+    under(task, "task configure"),
+    "    --expected-version: the task's version ('ensemble task get TASK_ID'); omitted, the version this command reads first.",
+  );
+  assert.match(under(task, "task message") ?? "", /ensemble assignment get/);
+  assert.match(under(task, "task follow-up") ?? "", /lead's assignment/);
+  assert.match(under(task, "task stop") ?? "", /omitted, no version check/);
+  // No line is added under a command that has none.
+  const taskBlock = task.split("\n").slice(2, task.split("\n").indexOf("", 2));
+  const taskKeys = [...commands.keys()].filter((k) => k.startsWith("task "));
+  assert.equal(
+    taskBlock.length,
+    taskKeys.length +
+      taskKeys.filter((k) => writeCommands.get(k)?.expects !== undefined)
+        .length,
+  );
+
+  // 3. Delivery names two records; recovery names its pair in one line.
+  const delivery = (await h.run(["help", "delivery"])).out;
+  assert.match(
+    under(delivery, "delivery send-comment") ?? "",
+    /--expected-task-version: the task's version/,
+  );
+  assert.match(
+    under(delivery, "delivery confirm-comment") ?? "",
+    /--expected-revision: the comment review's revision/,
+  );
+  const recovery = (await h.run(["help", "recovery"])).out;
+  const pair = under(recovery, "recovery prepare") ?? "";
+  assert.ok(pair.includes("--expected-version"), pair);
+  assert.ok(pair.includes("--expected-conversation-revision"), pair);
+
+  // 4. The full help shows every line once, under its own command and nowhere else.
+  const all = (await h.run(["--help", "--all"])).out;
+  for (const [key, c] of writeCommands)
+    if (c.expects !== undefined)
+      assert.equal(under(all, key), `    ${expectsOf(key)}`, key);
+  assert.equal(
+    all.split("\n").filter((l) => /^ {4}--expected-/.test(l)).length,
+    withLine,
+  );
+
+  // 5. A usage error still prints only the usage line and one Fix line.
+  const bare = await h.run(["task", "message"]);
+  assert.equal(bare.code, 2);
+  assert.equal(
+    bare.err,
+    `ensemble: Unexpected arguments. (usage)\nUsage:\n  ${usageOf("task message")}\n${FIX}\n`,
+  );
+});

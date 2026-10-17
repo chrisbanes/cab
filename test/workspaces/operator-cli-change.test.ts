@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   existsSync,
+  mkdtempSync,
+  readdirSync,
   readFileSync,
   statSync,
   symlinkSync,
@@ -11,6 +13,7 @@ import {
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import type { CliDeps } from "../../src/cli/types.js";
 import { harness, stdinOf } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
@@ -163,7 +166,7 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
     "rw",
   ]);
   assert.equal(applied.code, 0, applied.err);
-  assert.match(applied.out, /nothing was dispatched/);
+  assert.match(applied.out, /^Already applied \(replay\); nothing changed\./);
   assert.equal(Number(d.profile(seed.profileId).version), 5, "replayed once");
 
   // Restore revision 1 as a new revision.
@@ -922,8 +925,6 @@ test("stale revisions, tampering, wrong services and denials send nothing", asyn
     out(),
   ]);
   assert.equal(r.code, 2);
-  r = await cli("ro", ["profile", "prepare", seed.profileId]);
-  assert.equal(r.code, 2);
   r = await cli("rw", ["profile", "apply"]);
   assert.equal(r.code, 2);
   assert.equal(h.fetches.length, count);
@@ -983,4 +984,726 @@ test("a missing change document says it is missing and sends nothing", async (t)
   assert.match(mode.err, /its mode is 0644; it must be 0600 or stricter/);
   assert.match(mode.err, new RegExp(`^Fix: chmod 600 ${open}$`, "m"));
   assert.deepEqual(h.fetches, []);
+});
+
+test("prepare writes a change document to a default path that never overwrites", async (t) => {
+  const { seed, h, cli } = await setup(t);
+  const stem = `ensemble-project-configure-${seed.projectA.slice(0, 8)}`;
+  const cwdOf = (prefix = "cwd-") => mkdtempSync(join(h.dir, prefix));
+  const names = (cwd: string) => readdirSync(cwd).sort();
+  let n = 0;
+  const prepare = (cwd: string, extra: string[] = []) =>
+    cli(
+      "ro",
+      [
+        "project",
+        "prepare",
+        seed.projectA,
+        "--name",
+        `Renamed ${++n}`,
+        ...extra,
+      ],
+      { cwd },
+    );
+  const fetched = () => h.fetches.length;
+
+  // 1. No --out: the base name in the working directory, owner-only, and runnable.
+  const cwd1 = cwdOf();
+  let r = await prepare(cwd1);
+  assert.equal(r.code, 0, r.err + r.out);
+  const base = join(cwd1, `${stem}.json`);
+  assert.equal(r.json().data.file, base);
+  assert.equal(statSync(base).mode & 0o777, 0o600);
+  assert.equal(
+    JSON.parse(readFileSync(base, "utf8")).digest,
+    r.json().data.document.digest,
+  );
+  const humanCwd = cwdOf();
+  const human = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Human",
+      "--connection",
+      "ro",
+    ],
+    { cwd: humanCwd },
+  );
+  assert.equal(human.code, 0, human.err);
+  const humanFile = join(humanCwd, `${stem}.json`);
+  assert.equal(
+    human.out.trimEnd().split("\n").at(-1),
+    `Apply with: ensemble project apply --file ${humanFile}`,
+  );
+  r = await cli("rw", ["project", "apply", "--file", humanFile]);
+  assert.equal(r.code, 0, r.err + r.out);
+
+  // 2. A taken name gets the next free suffix; nothing existing is touched.
+  const cwd2 = cwdOf();
+  await prepare(cwd2);
+  const first = readFileSync(join(cwd2, `${stem}.json`), "utf8");
+  writeFileSync(join(cwd2, `${stem}-2.json`), "sentinel", { mode: 0o600 });
+  r = await prepare(cwd2);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.file, join(cwd2, `${stem}-3.json`));
+  assert.equal(readFileSync(join(cwd2, `${stem}.json`), "utf8"), first);
+  assert.equal(readFileSync(join(cwd2, `${stem}-2.json`), "utf8"), "sentinel");
+
+  // 3. Two prepares at once never share a file, whichever gets the base name.
+  const cwd3 = cwdOf();
+  const both = await Promise.all([prepare(cwd3), prepare(cwd3)]);
+  for (const result of both)
+    assert.equal(result.code, 0, result.err + result.out);
+  assert.deepEqual(both.map((x) => x.json().data.file).sort(), [
+    join(cwd3, `${stem}-2.json`),
+    join(cwd3, `${stem}.json`),
+  ]);
+  for (const result of both)
+    assert.equal(
+      JSON.parse(readFileSync(result.json().data.file, "utf8")).digest,
+      result.json().data.document.digest,
+    );
+
+  // 4. An explicit --out still refuses an existing file and never takes a suffix.
+  const explicit = join(cwd3, "explicit.json");
+  writeFileSync(explicit, "mine", { mode: 0o600 });
+  r = await prepare(cwd3, ["--out", explicit]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "output-exists");
+  assert.equal(readFileSync(explicit, "utf8"), "mine");
+  assert.deepEqual(
+    names(cwd3),
+    [`${stem}-2.json`, `${stem}.json`, "explicit.json"].sort(),
+  );
+
+  // 5. `-` and an empty --out are refused before anything connects.
+  const cwd5 = cwdOf();
+  const sent = fetched();
+  for (const out of ["-", ""]) {
+    r = await prepare(cwd5, ["--out", out]);
+    assert.equal(r.code, 2, out);
+    assert.equal(r.json().error.code, "usage", out);
+    assert.match(r.json().error.message, /ensemble-<kind>-<id8>\.json/);
+  }
+  assert.deepEqual(names(cwd5), []);
+  assert.equal(fetched(), sent);
+
+  // 6. A directory that cannot be written is output-failed with one Fix line.
+  if (process.getuid?.() !== 0) {
+    const locked = cwdOf();
+    chmodSync(locked, 0o500);
+    try {
+      const failed = await h.run(
+        [
+          "project",
+          "prepare",
+          seed.projectA,
+          "--name",
+          "Locked",
+          "--connection",
+          "ro",
+        ],
+        { cwd: locked },
+      );
+      assert.equal(failed.code, 2);
+      assert.deepEqual(
+        failed.err.split("\n").filter((l) => l.startsWith("Fix: ")),
+        ["Fix: Pass --out FILE in a directory you can write."],
+      );
+      assert.deepEqual(names(locked), []);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
+  }
+
+  // 7. All 99 names taken: output-exists, nothing created.
+  const full = cwdOf();
+  for (let i = 1; i <= 99; i++)
+    writeFileSync(join(full, `${stem}${i === 1 ? "" : `-${i}`}.json`), "x", {
+      mode: 0o600,
+    });
+  const refused = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Full",
+      "--connection",
+      "ro",
+    ],
+    { cwd: full },
+  );
+  assert.equal(refused.code, 2);
+  assert.match(refused.err, /\(output-exists\)/);
+  assert.deepEqual(
+    refused.err.split("\n").filter((l) => l.startsWith("Fix: ")),
+    [
+      `Fix: Remove or apply the older ${stem}*.json files here, or pass --out FILE.`,
+    ],
+  );
+  assert.equal(names(full).length, 99);
+
+  // 7b. The last suffix, -99, is used when every earlier name is taken.
+  const nearlyFull = cwdOf();
+  for (let i = 1; i <= 98; i++)
+    writeFileSync(
+      join(nearlyFull, `${stem}${i === 1 ? "" : `-${i}`}.json`),
+      "x",
+      { mode: 0o600 },
+    );
+  r = await prepare(nearlyFull);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.file, join(nearlyFull, `${stem}-99.json`));
+
+  // 8. After `--`, `--out` is a positional, so the command is refused unread.
+  const cwd8 = cwdOf();
+  const before8 = fetched();
+  const terminated = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Term",
+      "--connection",
+      "ro",
+      "--",
+      "--out",
+      "x.json",
+    ],
+    { cwd: cwd8 },
+  );
+  assert.equal(terminated.code, 2);
+  assert.deepEqual(names(cwd8), []);
+  assert.equal(fetched(), before8);
+
+  // 9. Capacity has no target id, so its name has none.
+  const cwd9 = cwdOf();
+  r = await cli("ro", ["capacity", "prepare", "--global-limit", "6"], {
+    cwd: cwd9,
+  });
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(
+    r.json().data.file,
+    join(cwd9, "ensemble-capacity-configure.json"),
+  );
+
+  // 10. A path with a space and a quote is printed as one runnable shell word.
+  const odd = cwdOf("it's a dir-");
+  const printed = await h.run(
+    [
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      "Odd",
+      "--connection",
+      "ro",
+    ],
+    { cwd: odd },
+  );
+  assert.equal(printed.code, 0, printed.err);
+  const line = printed.out.trimEnd().split("\n").at(-1) ?? "";
+  const word = line.slice("Apply with: ensemble project apply --file ".length);
+  assert.ok(word.startsWith("'") && word.endsWith("'"), word);
+  const unquoted = word.slice(1, -1).replaceAll("'\\''", "'");
+  assert.equal(unquoted, join(odd, `${stem}.json`));
+  r = await cli("rw", ["project", "apply", "--file", unquoted]);
+  assert.equal(r.code, 0, r.err + r.out);
+});
+
+test("apply --dry-run shows the stored change and sends nothing", async (t) => {
+  const { s, seed, h, d, file, out, cli, journal } = await setup(t);
+  const prepare = (args: string[], doc = out()) =>
+    h.run([
+      "project",
+      "prepare",
+      seed.projectA,
+      ...args,
+      "--out",
+      doc,
+      "--connection",
+      "ro",
+    ]);
+  const D = out();
+  const prepared = await prepare(
+    ["--instructions-file", file("dry.md", "Dry run guidance")],
+    D,
+  );
+  assert.equal(prepared.code, 0, prepared.err);
+  /** From `Changes:` to the line before the closing lines of prepare or of the dry run. */
+  const section = (text: string) => {
+    const l = text.trimEnd().split("\n");
+    const end = l.findIndex(
+      (x) => x.startsWith("Apply with:") || x.startsWith("Not checked"),
+    );
+    // `Gap:` lines are prepare-time coverage, which the document does not store.
+    return l
+      .slice(l.indexOf("Changes:"), end)
+      .filter((x) => !x.startsWith("Gap: "))
+      .join("\n")
+      .trimEnd();
+  };
+  assert.match(section(prepared.out), /\+ Dry run guidance/);
+  assert.match(section(prepared.out), /Affected assignments/);
+  const document = JSON.parse(readFileSync(D, "utf8")) as Json;
+  const state = () => ({
+    fetches: h.fetches.length,
+    journal: journal().length,
+    db: databaseDigest(s.f),
+    file: readFileSync(D, "utf8"),
+  });
+  const before = state();
+
+  // 1. Human output: the prepared change, the origin and installation, the apply command.
+  let r = await h.run([
+    "project",
+    "apply",
+    "--file",
+    D,
+    "--dry-run",
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(state(), before);
+  assert.equal(r.err, "");
+  assert.equal(section(r.out), section(prepared.out));
+  assert.ok(r.out.includes(document.service.origin), r.out);
+  assert.ok(r.out.includes(document.service.installationId), r.out);
+  assert.ok(
+    r.out.includes(
+      "Not checked against the service; apply re-checks the version and installation.",
+    ),
+  );
+  assert.equal(
+    r.out.trimEnd().split("\n").at(-1),
+    `Apply with: ensemble project apply --file ${D}`,
+  );
+
+  // 2. JSON: the stored document, and nothing the service said.
+  r = await cli("rw", ["project", "apply", "--file", D, "--dry-run"]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(state(), before);
+  assert.deepEqual(r.json().data, { file: D, document });
+  for (const key of ["request", "connection", "service"])
+    assert.ok(!(key in r.json()), key);
+
+  // 3. The dry run left no journal key behind: the real apply happens once.
+  const version = Number(d.project(seed.projectA).version);
+  r = await cli("rw", ["project", "apply", "--file", D]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(Number(d.project(seed.projectA).version), version + 1);
+
+  // 4. A document edited after prepare is refused locally.
+  const edited = out();
+  writeFileSync(
+    edited,
+    JSON.stringify({
+      ...document,
+      command: { ...document.command, name: "Edited" },
+    }),
+    { mode: 0o600 },
+  );
+  const sent = h.fetches.length;
+  r = await cli("rw", ["project", "apply", "--file", edited, "--dry-run"]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "change-document-invalid");
+
+  // 5. A document of another kind names the command that applies it.
+  r = await cli("rw", ["profile", "apply", "--file", D, "--dry-run"]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "change-document-invalid");
+  assert.match(r.json().error.message, /ensemble project apply/);
+  assert.equal(h.fetches.length, sent);
+
+  // 6. A stale version is not noticed by the dry run, but apply still refuses it.
+  const stale = out();
+  const newer = out();
+  assert.equal((await prepare(["--name", "Stale one"], stale)).code, 0);
+  assert.equal((await prepare(["--name", "Newer one"], newer)).code, 0);
+  r = await cli("rw", ["project", "apply", "--file", newer]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const requests = h.fetches.length;
+  r = await cli("rw", ["project", "apply", "--file", stale, "--dry-run"]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(h.fetches.length, requests);
+  r = await cli("rw", ["project", "apply", "--file", stale]);
+  assert.equal(r.code, 4);
+  assert.equal(r.json().error.code, "conflict");
+
+  // 7. Another connection, or none at all: still local, still naming the origin.
+  const other = await startCliService(t);
+  const issued = await other.issue("read-write", "other");
+  const login = await h.run([
+    "auth",
+    "login",
+    "--connection",
+    "other",
+    "--url",
+    other.origin,
+    "--token-file",
+    h.tokenFile(issued.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const elsewhere = out();
+  assert.equal((await prepare(["--name", "Elsewhere"], elsewhere)).code, 0);
+  const afterLogin = h.fetches.length;
+  r = await h.run([
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--dry-run",
+    "--connection",
+    "other",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(
+    r.json().data.document.service,
+    JSON.parse(readFileSync(elsewhere, "utf8")).service,
+  );
+  assert.equal(h.fetches.length, afterLogin);
+  const loggedOut = harness(t);
+  r = await loggedOut.run([
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--dry-run",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(loggedOut.fetches, []);
+  r = await h.run([
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--connection",
+    "other",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "wrong-service");
+
+  // 8. A dry run takes no request key.
+  const count = h.fetches.length;
+  r = await cli("rw", [
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--dry-run",
+    "--request-id",
+    randomUUID(),
+  ]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "usage");
+  assert.equal(h.fetches.length, count);
+
+  // 9. Capacity and creation documents dry-run the same way.
+  const capacityDoc = out();
+  r = await cli("ro", [
+    "capacity",
+    "prepare",
+    "--global-limit",
+    "6",
+    "--out",
+    capacityDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const profileDoc = out();
+  r = await cli("ro", [
+    "profile",
+    "prepare-create",
+    "--name",
+    "Dry",
+    "--instructions-file",
+    file("dry-p.md", "Dry profile"),
+    "--out",
+    profileDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const fetched = h.fetches.length;
+  for (const [area, doc, kind] of [
+    ["capacity", capacityDoc, "capacity.configure"],
+    ["profile", profileDoc, "profile.create"],
+  ] as const) {
+    r = await cli("rw", [area, "apply", "--file", doc, "--dry-run"]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.json().data.document.kind, kind);
+  }
+  assert.equal(h.fetches.length, fetched);
+});
+
+test("apply says when it replays and when it settles a lost reply", async (t) => {
+  const { s, seed, h, d, file, out, cli, journal } = await setup(t);
+  const projectDoc = async (name: string) => {
+    const doc = out();
+    const r = await h.run([
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      name,
+      "--out",
+      doc,
+      "--connection",
+      "ro",
+    ]);
+    assert.equal(r.code, 0, r.err);
+    return doc;
+  };
+  const version = () => Number(d.project(seed.projectA).version);
+  const posts = (machine = h) =>
+    machine.fetches.filter((f) => f.endsWith("/api/operator/commands")).length;
+  const isCommands = (input: Parameters<typeof fetch>[0]) =>
+    String(input).endsWith("/api/operator/commands");
+  const reset = () => {
+    throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+  };
+  const lostApplied: Partial<CliDeps> = {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (isCommands(input)) reset();
+      return response;
+    },
+  };
+  const lostUnsent: Partial<CliDeps> = {
+    fetch: async (input, init) => {
+      if (isCommands(input)) reset();
+      return fetch(input, init);
+    },
+  };
+  const applyHuman = (doc: string, extra: string[] = []) =>
+    h.run(["project", "apply", "--file", doc, ...extra, "--connection", "rw"]);
+  const first = (text: string) => text.split("\n")[0];
+
+  // 1. A true replay says so, sends the command again, and changes nothing.
+  const fresh = await projectDoc("Fresh");
+  let r = await applyHuman(fresh);
+  assert.equal(r.code, 0, r.err);
+  assert.match(first(r.out) ?? "", /^Applied project\.configure to project:/);
+  assert.match(r.out, /Configuration saved/);
+  const doc = await projectDoc("Replay");
+  const start = version();
+  const applied = await cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(applied.code, 0, applied.err);
+  assert.equal(applied.json().data.replayed, false);
+  assert.equal(version(), start + 1);
+  const sent = posts();
+  const again = await applyHuman(doc);
+  assert.equal(again.code, 0, again.err);
+  assert.equal(first(again.out), "Already applied (replay); nothing changed.");
+  assert.ok(again.out.includes(applied.json().request.key), again.out);
+  assert.doesNotMatch(again.out, /Configuration saved/);
+  const replay = await cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(replay.code, 0, replay.err);
+  assert.equal(replay.json().data.replayed, true);
+  assert.deepEqual(replay.json().request, applied.json().request);
+  assert.deepEqual(replay.json().data.receipt, applied.json().data.receipt);
+  assert.equal(version(), start + 1);
+  assert.equal(posts() - sent, 2);
+  // A later rejected attempt does not erase the record of the receipt.
+  r = await cli("rw", ["project", "apply", "--file", doc], {
+    fetch: async (input, init) => {
+      if (isCommands(input))
+        throw new TypeError("fetch failed", {
+          cause: { code: "ECONNREFUSED" },
+        });
+      return fetch(input, init);
+    },
+  });
+  assert.equal(r.code, 5, r.out);
+  assert.equal(journal().at(-1)?.state, "rejected");
+  r = await cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(r.json().data.replayed, true);
+
+  // 6. The JSON shape only gains `replayed`.
+  assert.deepEqual(Object.keys(replay.json().data).sort(), [
+    "digest",
+    "file",
+    "receipt",
+    "replayed",
+  ]);
+  assert.deepEqual(Object.keys(replay.json()), Object.keys(applied.json()));
+
+  // 2. A reply lost after the service applied the change: the rerun settles it once.
+  const lost = await projectDoc("Lost after applying");
+  const beforeLost = version();
+  r = await cli("rw", ["project", "apply", "--file", lost], lostApplied);
+  assert.equal(r.code, 6, r.out);
+  const lostKey = r.json().error.request.key;
+  assert.equal(version(), beforeLost + 1);
+  r = await cli("rw", ["project", "apply", "--file", lost]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.replayed, null);
+  assert.equal(r.json().request.key, lostKey);
+  assert.equal(version(), beforeLost + 1);
+
+  // 3. A reply lost before the service saw the request: the rerun applies it once.
+  const unsent = await projectDoc("Lost before sending");
+  const beforeUnsent = version();
+  r = await cli("rw", ["project", "apply", "--file", unsent], lostUnsent);
+  assert.equal(r.code, 6, r.out);
+  const unsentKey = r.json().error.request.key;
+  assert.equal(journal().at(-1)?.state, "unknown");
+  assert.equal(version(), beforeUnsent);
+  r = await h.run(["project", "apply", "--file", unsent, "--connection", "rw"]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(
+    r.out.split("\n")[1],
+    `An earlier attempt with request ${unsentKey} lost its reply; the change is applied once.`,
+  );
+  assert.equal(version(), beforeUnsent + 1);
+
+  // 4. A request key from another machine is not a replay this machine can know.
+  const login = async (machine: ReturnType<typeof harness>) => {
+    const issued = await s.issue("read-write", `machine-${randomUUID()}`);
+    const loggedIn = await machine.run([
+      "auth",
+      "login",
+      "--connection",
+      "rw",
+      "--url",
+      s.origin,
+      "--token-file",
+      machine.tokenFile(issued.token),
+    ]);
+    assert.equal(loggedIn.code, 0, loggedIn.err);
+  };
+  const key = applied.json().request.key;
+  const beforeOther = version();
+  const m1 = harness(t);
+  await login(m1);
+  r = await m1.run([
+    "project",
+    "apply",
+    "--file",
+    doc,
+    "--request-id",
+    key,
+    "--connection",
+    "rw",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json().data.replayed, null);
+  const m2 = harness(t);
+  await login(m2);
+  r = await m2.run([
+    "project",
+    "apply",
+    "--file",
+    doc,
+    "--request-id",
+    key,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(
+    r.out.split("\n")[1],
+    `If request ${key} was applied before, this is its recorded receipt; the change is applied once.`,
+  );
+  assert.equal(version(), beforeOther);
+
+  // 5. A creation replays the same way, and creates one profile.
+  const profileId = randomUUID();
+  const profileDoc = out();
+  r = await cli("ro", [
+    "profile",
+    "prepare-create",
+    "--name",
+    "Replay profile",
+    "--instructions-file",
+    file("replay.md", "Replay"),
+    "--id",
+    profileId,
+    "--out",
+    profileDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  r = await cli("rw", ["profile", "apply", "--file", profileDoc]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.replayed, false);
+  r = await h.run([
+    "profile",
+    "apply",
+    "--file",
+    profileDoc,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(first(r.out), "Already applied (replay); nothing changed.");
+  r = await cli("rw", ["profile", "apply", "--file", profileDoc]);
+  assert.equal(r.json().data.replayed, true);
+  assert.equal(Number(d.profile(profileId).version), 1);
+});
+
+test("every change prepare command defaults its document into the working directory", async (t) => {
+  const { seed, h, cli } = await setup(t);
+  const cwd = mkdtempSync(join(h.dir, "cwd-"));
+  const profileId = randomUUID();
+  const projectId = randomUUID();
+  const short = (id: string) => id.slice(0, 8);
+  const routes: [string[], string][] = [
+    [
+      ["profile", "prepare", seed.profileId, "--summary", "Default path"],
+      `ensemble-profile-configure-${short(seed.profileId)}.json`,
+    ],
+    [
+      [
+        "profile",
+        "prepare-create",
+        "--id",
+        profileId,
+        "--name",
+        "Default path profile",
+        "--instructions",
+        "Guidance",
+      ],
+      `ensemble-profile-create-${short(profileId)}.json`,
+    ],
+    [
+      [
+        "project",
+        "prepare-create",
+        "--id",
+        projectId,
+        "--name",
+        "Default path project",
+      ],
+      `ensemble-project-create-${short(projectId)}.json`,
+    ],
+    [
+      [
+        "project",
+        "prepare-routing",
+        seed.projectA,
+        "--credential-ref",
+        "env:DEFAULT_PATH_REF",
+      ],
+      `ensemble-routing-configure-${short(seed.projectA)}.json`,
+    ],
+  ];
+  for (const [args, name] of routes) {
+    const r = await cli("ro", args, { cwd });
+    assert.equal(r.code, 0, `${args.join(" ")}: ${r.err}${r.out}`);
+    assert.equal(r.json().data.file, join(cwd, name), args.join(" "));
+  }
+  assert.deepEqual(
+    readdirSync(cwd).sort(),
+    routes.map(([, name]) => name).sort(),
+  );
 });

@@ -19,6 +19,8 @@ export const adoptCommands = new Map<string, WriteCommand>([
       usage:
         "assignment apply-current ASSIGNMENT_ID --expected-version N [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-version: the assignment's version ('ensemble assignment get ASSIGNMENT_ID'); required.",
       flags: ["expected-version", "request-id"],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "ASSIGNMENT_ID");

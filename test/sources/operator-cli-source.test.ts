@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, statSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
@@ -510,15 +517,6 @@ test("project apply sends the prepared source change once, deactivating selectio
   assert.equal(denied.code, 3, denied.out);
   assert.equal(databaseDigest(w.s.f), before);
   const v = await version();
-  const applied = await w.ok("rw", ["project", "apply", "--file", doc]);
-  assert.deepEqual(applied.data.receipt.result, {
-    commandType: "github.configure",
-    resourceId: atlas,
-    version: v + 1,
-    credentialConfigured: true,
-    selectionCount: 2,
-    repositoryCount: 1,
-  });
   const human = await w.h.run([
     "project",
     "apply",
@@ -529,6 +527,16 @@ test("project apply sends the prepared source change once, deactivating selectio
   ]);
   assert.equal(human.code, 0, human.err);
   assert.match(human.out, /inactive until previewed again/);
+  const applied = await w.ok("rw", ["project", "apply", "--file", doc]);
+  assert.deepEqual(applied.data.receipt.result, {
+    commandType: "github.configure",
+    resourceId: atlas,
+    version: v + 1,
+    credentialConfigured: true,
+    selectionCount: 2,
+    repositoryCount: 1,
+  });
+  assert.equal(applied.data.replayed, true);
   assert.equal(await version(), v + 1, "replay applies once");
   assert.ok((await w.config()).source.selections.every((s: Json) => !s.active));
 
@@ -749,4 +757,36 @@ test("CLI source readback offers the same environment-precedence account before 
     "offered-account",
   );
   assert.equal(o.s.f.runtime.turns, 0);
+});
+
+test("project prepare-source defaults its document into the working directory", async (t) => {
+  const w = await world(t);
+  const cwd = mkdtempSync(join(w.h.dir, "cwd-"));
+  const prepared = await w.ok(
+    "ro",
+    [
+      "project",
+      "prepare-source",
+      w.ids.atlas,
+      "--edit-file",
+      w.file(
+        "edit.json",
+        JSON.stringify({
+          addSelections: [{ kind: "search", query: "is:open" }],
+        }),
+      ),
+    ],
+    { cwd },
+  );
+  const name = `ensemble-github-configure-${w.ids.atlas.slice(0, 8)}.json`;
+  assert.equal(prepared.data.file, join(cwd, name));
+  assert.deepEqual(readdirSync(cwd), [name]);
+  const dry = await w.ok("rw", [
+    "project",
+    "apply",
+    "--file",
+    join(cwd, name),
+    "--dry-run",
+  ]);
+  assert.equal(dry.data.document.kind, "github.configure");
 });
