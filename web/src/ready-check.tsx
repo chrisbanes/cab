@@ -72,9 +72,13 @@ export function ReadyCheck({
     projectId,
     configuration.state.error ? null : configuration.state.data?.data.source,
   );
+  // Only a project with a repository records a source credential; a repository-free
+  // project shows no credential line and has none to check again.
+  const withRepositories = Boolean(created.repositories?.length);
   // A source fixed in another tab is re-read by Check again, as readiness items are.
   const recheckCredential =
-    Boolean(credential.link) || Boolean(configuration.state.error);
+    withRepositories &&
+    (Boolean(credential.link) || Boolean(configuration.state.error));
   // Its own key: the project configuration General tab loads into `project.configure:<id>`.
   const resume = useDraft(p.drafts, `project.resume:${projectId}`);
   // A recorded create is version 1 (see matchesConfigurationReceipt).
@@ -137,22 +141,24 @@ export function ReadyCheck({
           {created.githubProject && (
             <li>GitHub Project linked as an inactive discovery source.</li>
           )}
-          <li>
-            {credential.text}
-            {credential.link && (
-              <>
-                {" "}
-                <ActionLink
-                  variant="secondary"
-                  href={credential.link.href}
-                  target="_blank"
-                  rel="noopener"
-                >
-                  {credential.link.label}
-                </ActionLink>
-              </>
-            )}
-          </li>
+          {withRepositories && (
+            <li>
+              {credential.text}
+              {credential.link && (
+                <>
+                  {" "}
+                  <ActionLink
+                    variant="secondary"
+                    href={credential.link.href}
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    {credential.link.label}
+                  </ActionLink>
+                </>
+              )}
+            </li>
+          )}
         </ul>
       </DraftMessage>
       <div className="setup-inline-actions">
@@ -216,7 +222,8 @@ export function ReadyCheck({
               </ul>
             )}
             <p className="metadata muted">
-              {(items.some((item) => item.link) || credential.link) &&
+              {(items.some((item) => item.link) ||
+                (withRepositories && credential.link)) &&
                 "Links open in a new tab. "}
               Fix the item, then check again here. If you leave this page,
               resume later with the Pause project switch in project

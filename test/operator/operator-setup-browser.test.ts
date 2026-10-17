@@ -16,6 +16,7 @@ import {
 import {
   chooseRepository,
   commandRequest,
+  settleGhRead,
   setupJourney,
 } from "../fixtures/setup-browser.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
@@ -42,10 +43,10 @@ test("Setup creates a paused project from discovered repositories and Projects",
     await page.getByRole("heading", { name: heading }).waitFor();
   assert.equal(
     await page
-      .getByRole("region", { name: "What creation does" })
+      .getByRole("complementary", { name: "What creation does" })
       .locator("li")
       .count(),
-    6,
+    2,
   );
   await page
     .getByText(
@@ -313,6 +314,8 @@ test("Setup falls back to typed entry without discovery and on first run", async
   const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
   await crumbs.getByRole("link", { name: "Overview" }).waitFor();
   await crumbs.getByText("New project").waitFor();
+  // Without discovery step 3 starts collapsed; one activation reveals the typed fields.
+  await page.getByRole("button", { name: "Add a repository" }).click();
   await page
     .getByText(
       "GitHub discovery is unavailable: no discovery credential is configured, so repositories, refs and GitHub Projects can't be listed. Type the repository and ref; the service still verifies the local checkout. Repository access is exactly what you add here.",
@@ -423,6 +426,31 @@ test("Setup checks an unknown create outcome by replaying the exact request", as
       await page.getByLabel("Project name", { exact: true }).isDisabled(),
       true,
     );
+    // Create stays drawn, focusable and held with its reason; no second create is sent.
+    const create = page.getByRole("button", {
+      name: "Create paused project",
+      exact: true,
+    });
+    assert.equal(await create.getAttribute("aria-disabled"), "true");
+    assert.equal(
+      await create.evaluate(
+        (el) =>
+          document.getElementById(el.getAttribute("aria-describedby") ?? "")
+            ?.textContent,
+      ),
+      "Check whether the project was created first.",
+    );
+    await create.focus();
+    assert.equal(
+      await create.evaluate((el) => el === document.activeElement),
+      true,
+    );
+    await page.keyboard.press("Enter");
+    await create.click({ force: true });
+    await page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => done(null))),
+    );
+    assert.equal(aborted, 1);
     await page.unroute("**/api/operator/commands");
     const replay = commandRequest(page);
     await page.getByRole("button", { name: "Check whether it saved" }).click();
@@ -431,6 +459,15 @@ test("Setup checks an unknown create outcome by replaying the exact request", as
       first.key,
     );
     await savedOutcome(page, /^Created Unknown\. It's paused\./);
+    // The check removed the button the operator used, so the ready check takes the focus.
+    await page.waitForFunction(
+      () =>
+        document.activeElement?.getAttribute("aria-label") === "Ready check",
+    );
+    assert.equal(
+      await page.getByLabel("Project name", { exact: true }).count(),
+      0,
+    );
     assert.equal(f.service.domain().projects().length, 1);
   } finally {
     await page.unroute("**/api/operator/commands");
@@ -709,6 +746,7 @@ test("Setup keeps a folder chosen while discovery was unavailable visible after 
 test("Setup validates a typed row holding only a ref instead of dropping it", async (_t, journey) => {
   const { f, page } = await setupJourney(journey, { discovery: false });
   await page.getByLabel("Project name", { exact: true }).fill("Ref only");
+  await page.getByRole("button", { name: "Add a repository" }).click();
   await page.getByLabel("Ref", { exact: true }).fill("main");
   let sent = 0;
   page.on("request", (r) => {
@@ -749,11 +787,13 @@ test("Setup creates the lead profile inline and keeps every other setup value", 
   await page
     .getByLabel("Instructions", { exact: true })
     .fill("Project instructions");
+  await page.getByRole("button", { name: "Add a repository" }).click();
   await page.getByLabel("Repository (owner/name)").fill("acme/atlas");
   await page.getByLabel("Ref", { exact: true }).fill("main");
   await page.getByLabel("Local repository path").fill("~/src/atlas");
-  for (const field of ["Profile name", "Summary", "Profile instructions"])
-    await inline.getByLabel(field, { exact: true }).waitFor();
+  await inline.getByLabel("Profile name", { exact: true }).waitFor();
+  for (const field of ["Summary", "Profile instructions"])
+    assert.equal(await inline.getByLabel(field, { exact: true }).count(), 0);
   assert.equal(await inline.getByLabel("Runtime").inputValue(), "codex");
   await captureBrowserEvidence(page, "1366-setup-inline-profile");
   const sent = sentCommands(page);
@@ -832,10 +872,16 @@ test("Setup keeps its input when the inline profile is rejected", async (_t, jou
     "Atlas",
   );
   assert.equal(sent.length, 0);
+  // The refused name is not recorded, so it holds Create until it is created or cleared.
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  await name.fill("");
+  assert.equal(await create.getAttribute("aria-disabled"), null);
   // The project can still be created without a lead.
-  await page
-    .getByRole("button", { name: "Create paused project", exact: true })
-    .click();
+  await create.click();
   // The inline error does not linger beside the project's own outcome.
   await savedOutcome(page, /^Created Atlas\./);
   assert.equal(sent.at(-1)?.leadProfileId, null);
@@ -894,7 +940,19 @@ const stubReadiness = (
     }),
   );
 const resumeLabel = "Resume and create first task";
-/** Create a repository-free project and wait for its ready check. */
+/** Add the verified acme/atlas checkout as the project's repository. */
+async function addRepository(page: Page) {
+  await chooseRepository(page, "acme/atlas");
+  const path = page.getByLabel("Local repository path");
+  await path.fill("~/src/atlas");
+  await path.blur();
+  await page
+    .getByText(
+      "Verified on this Mac: git checkout · origin acme/atlas · main available.",
+    )
+    .waitFor();
+}
+/** Create the project as entered (repository-free unless the test added one) and wait for its ready check. */
 async function createProject(
   page: Page,
   sent: ReturnType<typeof sentCommands>,
@@ -1072,8 +1130,8 @@ test("Setup lets the operator check again after fixing a failed item", async (_t
   const check = ready.getByRole("button", { name: "Check again", exact: true });
   await check.click();
   await ready.getByText("codex-login fix").waitFor({ state: "detached" });
-  // Check again stays for the unset source credential, which never blocks Resume.
-  assert.equal(await check.count(), 1);
+  // A repository-free project has no source credential to check again.
+  assert.equal(await check.count(), 0);
   await resume.click();
   await composer();
   assert.equal(f.service.domain().project(projectId).paused, 0);
@@ -1527,9 +1585,14 @@ test("Setup records the signed-in GitHub CLI login as the source credential and 
   });
   await stubReadiness(page);
   const sent = sentCommands(page);
-  await page
-    .getByText(/^GitHub source credential: GitHub CLI · @octo\. /)
-    .waitFor();
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  // The line sits in step 3 and appears with the first repository.
+  const line = page.getByText(
+    /^GitHub source credential: GitHub CLI · @octo\. /,
+  );
+  assert.equal(await line.count(), 0);
+  await addRepository(page);
+  await line.waitFor();
   const { ready, projectId, resume } = await createProject(page, sent);
   assert.equal(
     sent.find((c) => c.type === "project.create")?.sourceCredentialRef,
@@ -1553,6 +1616,7 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
   });
   await stubReadiness(page);
   const sent = sentCommands(page);
+  await addRepository(page);
   await page.getByText(/^GitHub source credential: none\. /).waitFor();
   const { ready, projectId, resume } = await createProject(page, sent);
   const create = sent.find((c) => c.type === "project.create");
@@ -1597,4 +1661,725 @@ test("Setup records no source credential without a signed-in GitHub CLI login", 
     0,
   );
   assert.equal(await resume.isEnabled(), true);
+});
+
+const setupBar = (page: Page) => page.locator(".setup-submit");
+const startsWithH2 = (page: Page) =>
+  page.locator("main.page form.setup-grid h2").allTextContents();
+
+test("Setup reads steps 1, 2 and 3 in one column with What creation does beside them, and after them on a phone", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  const aside = page.getByRole("complementary", { name: "What creation does" });
+  await aside.waitFor();
+  assert.deepEqual(await startsWithH2(page), [
+    "1 · Project and lead",
+    "2 · Instructions",
+    "3 · Repository and GitHub · optional",
+    "What creation does",
+  ]);
+  const steps = page.locator("form.setup-grid section.settings-panel");
+  const boxes = async () => {
+    const rects = await steps.evaluateAll((els) =>
+      els.map((el) => el.getBoundingClientRect().toJSON()),
+    );
+    const side = await aside.evaluate((el) =>
+      el.getBoundingClientRect().toJSON(),
+    );
+    return { rects, side };
+  };
+  const wide = await boxes();
+  assert.equal(wide.rects.length, 3);
+  assert.equal(new Set(wide.rects.map((r) => Math.round(r.left))).size, 1);
+  assert.ok(wide.rects[0].top < wide.rects[1].top);
+  assert.ok(wide.rects[1].top < wide.rects[2].top);
+  assert.ok(wide.side.left >= wide.rects[0].right);
+  assert.deepEqual(await aside.locator("li").allTextContents(), [
+    "The project starts Paused. Creating it starts no execution.",
+    "Repository access is exactly the list in step 3.",
+  ]);
+  // DOM order is visual order: nothing under the page reorders.
+  assert.deepEqual(
+    await page.evaluate(() =>
+      [...document.querySelectorAll(".setup-page, .setup-page *")]
+        .map((el) => getComputedStyle(el))
+        .filter((s) => s.order !== "0" || s.flexDirection.includes("reverse"))
+        .map((s) => `${s.order} ${s.flexDirection}`),
+    ),
+    [],
+  );
+  await captureBrowserEvidence(page, "1366-setup-layout");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(
+    () =>
+      document.documentElement.scrollWidth <=
+      document.documentElement.clientWidth,
+  );
+  const phone = await boxes();
+  assert.ok(phone.side.top >= phone.rects[2].bottom);
+  assert.ok(phone.side.left <= phone.rects[0].left + 1);
+  await captureBrowserEvidence(page, "390-setup-layout");
+});
+
+test("Setup keeps Create in a sticky bar that never covers the focused control on a phone and a short desktop window, including with the keyboard open", async (_t, journey) => {
+  const { page } = await setupJourney(journey, {
+    viewport: { width: 390, height: 844 },
+  });
+  await chooseRepository(page, "acme/atlas");
+  await page.getByLabel("Local repository path").waitFor();
+  // Measured after the frame that applies the focus scroll.
+  const probe = () =>
+    page.evaluate(async () => {
+      await new Promise((frame) =>
+        requestAnimationFrame(() => requestAnimationFrame(frame)),
+      );
+      const el = document.activeElement as HTMLElement;
+      const bar = document.querySelector(".setup-submit") as HTMLElement;
+      const b = bar.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      return {
+        label: el.getAttribute("aria-label") ?? el.textContent?.trim() ?? "",
+        inBar: bar.contains(el),
+        top: r.top,
+        bottom: r.bottom,
+        barTop: b.top,
+        barBottom: b.bottom,
+        height: innerHeight,
+      };
+    });
+  // Tab from the first field to the end of the bar: nothing is hidden behind the bar.
+  const walk = async () => {
+    await page.getByLabel("Project name", { exact: true }).focus();
+    const stops: string[] = [];
+    for (let i = 0; i < 80; i++) {
+      const at = await probe();
+      stops.push(at.label);
+      assert.ok(at.top >= 0, `${at.label} is above the viewport`);
+      assert.ok(at.barBottom <= at.height + 0.5, "the bar leaves the viewport");
+      assert.ok(at.barTop < at.height, "the bar is not visible");
+      if (!at.inBar)
+        assert.ok(
+          at.bottom <= at.barTop + 0.5,
+          `${at.label} is covered by the bar: ${JSON.stringify(at)}`,
+        );
+      if (at.label === "Create paused project") break;
+      await page.keyboard.press("Tab");
+    }
+    assert.deepEqual(stops.slice(-2), ["Cancel", "Create paused project"]);
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await page.evaluate(
+        () =>
+          !document
+            .querySelector(".setup-submit")
+            ?.contains(document.activeElement),
+      ),
+      true,
+    );
+  };
+  await walk();
+  // A short desktop window scrolls too, and its bar is shorter.
+  await page.setViewportSize({ width: 1366, height: 420 });
+  await walk();
+  // On-screen keyboard: a short viewport still keeps the typed field and Create visible.
+  await page.setViewportSize({ width: 390, height: 500 });
+  const instructions = page.getByLabel("Instructions", { exact: true });
+  await instructions.focus();
+  await page.keyboard.type("typed with the keyboard open");
+  const view = await page.evaluate(() => {
+    const field = document.activeElement as HTMLElement;
+    const bar = document.querySelector(".setup-submit") as HTMLElement;
+    const create = bar.querySelector("button[type=submit]") as HTMLElement;
+    return {
+      active: field.getAttribute("aria-label"),
+      fieldBottom: field.getBoundingClientRect().bottom,
+      barTop: bar.getBoundingClientRect().top,
+      createTop: create.getBoundingClientRect().top,
+      createBottom: create.getBoundingClientRect().bottom,
+      height: innerHeight,
+    };
+  });
+  assert.equal(view.active, "Instructions");
+  assert.ok(view.fieldBottom <= view.barTop + 0.5);
+  assert.ok(view.createTop >= 0 && view.createBottom <= view.height);
+  const buttons = await setupBar(page)
+    .locator("button, a[data-slot='button']")
+    .evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { height: r.height, top: Math.round(r.top) };
+      }),
+    );
+  assert.equal(buttons.length, 2);
+  assert.ok(buttons.every((b) => b.height >= 44));
+  assert.equal(new Set(buttons.map((b) => b.top)).size, 1);
+});
+
+test("Setup's inline lead profile asks only for a name and runtime, and Settings → Profiles offers the rest", async (_t, journey) => {
+  const { web, page } = await setupJourney(journey, { profiles: false });
+  await stubReadiness(page);
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  await inline.getByLabel("Profile name", { exact: true }).waitFor();
+  assert.equal(await inline.getByLabel("Runtime").inputValue(), "codex");
+  for (const absent of ["Summary", "Profile instructions"])
+    assert.equal(await inline.getByLabel(absent, { exact: true }).count(), 0);
+  await inline
+    .getByText("Add a summary and instructions later in Settings → Profiles.")
+    .waitFor();
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).count(),
+    1,
+  );
+  const sent = sentCommands(page);
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  const lead = page.getByLabel("Lead profile", { exact: true });
+  await lead.waitFor();
+  assert.equal(
+    await lead.evaluate(
+      (el) => (el as HTMLSelectElement).selectedOptions[0]?.text,
+    ),
+    "Ada",
+  );
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const profile = sent.find((c) => c.type === "profile.create");
+  const project = sent.find((c) => c.type === "project.create");
+  assert.equal(project?.leadProfileId, profile?.profileId);
+  // The deferred fields are offered where the profile is configured.
+  await page.goto(`${web.origin}/app/profiles/${profile?.profileId}/settings`);
+  await page.getByLabel("Summary", { exact: true }).waitFor();
+  await page
+    .getByLabel(/instructions/i)
+    .first()
+    .waitFor();
+});
+
+test("Setup collapses step 3 for a repository-free project without discovery and records no source credential", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    ghExecutable: gh.executable,
+  });
+  await stubReadiness(page);
+  await settleGhRead(page, () => page.reload());
+  const add = page.getByRole("button", { name: "Add a repository" });
+  await add.waitFor();
+  assert.equal(await add.getAttribute("aria-expanded"), "false");
+  for (const text of [
+    "GitHub discovery is unavailable",
+    "Signed in to github.com as",
+    "GitHub source credential",
+    "Use GitHub CLI login",
+  ])
+    assert.equal(await page.getByText(text).count(), 0, text);
+  assert.equal(await page.getByLabel("Repository (owner/name)").count(), 0);
+  await captureBrowserEvidence(page, "1366-setup-add-repository");
+  const sent = sentCommands(page);
+  const { ready, projectId } = await createProject(page, sent);
+  const create = sent.find((c) => c.type === "project.create");
+  assert.ok(create);
+  assert.equal("sourceCredentialRef" in create, false);
+  assert.equal("repositories" in create, false);
+  assert.equal(
+    f.service.domain().githubConfiguration(projectId).credentialRef,
+    null,
+  );
+  await ready.getByText("Repository access: none · repository-free.").waitFor();
+  await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
+  assert.equal(await ready.getByText(/GitHub source credential/).count(), 0);
+  assert.equal(
+    await ready.getByRole("button", { name: "Check again" }).count(),
+    0,
+  );
+});
+
+test("Setup opens Add a repository for a rejected row and keeps it open for a kept draft", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { discovery: false });
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  const repository = page.getByLabel("Repository (owner/name)");
+  await repository.waitFor();
+  assert.equal(
+    await repository.evaluate((el) => el === document.activeElement),
+    true,
+  );
+  const ref = page.getByLabel("Ref", { exact: true });
+  await ref.fill("main");
+  // A kept draft with no error opens the section on its own: the row holds a value.
+  await page.getByRole("link", { name: "Set discovery credential" }).click();
+  await page.locator("main.page h1", { hasText: "Settings" }).waitFor();
+  await page.getByRole("link", { name: "New project" }).click();
+  // Once the discovery read has settled as unconfigured the section is still open.
+  await page.getByText("GitHub discovery is unavailable").waitFor();
+  assert.equal(await ref.inputValue(), "main");
+  assert.equal(
+    await page.getByRole("button", { name: "Add a repository" }).count(),
+    0,
+  );
+  // A rejected row: the alert heads the form, above step 1, and the field has the focus.
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  const sent = sentCommands(page);
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByText(fixFields).waitFor();
+  assert.equal(sent.length, 0);
+  const above = await page.evaluate(() => {
+    const alert = document.querySelector('[data-slot="action-outcome"]');
+    const step = document.querySelector(".settings-panel-title");
+    return Boolean(
+      alert &&
+        step &&
+        alert.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  assert.equal(above, true);
+  await repository.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+  // Clearing the row never collapses step 3 under the focus.
+  await ref.fill("");
+  assert.equal(await repository.count(), 1);
+  assert.equal(
+    await page.evaluate(() =>
+      document
+        .querySelector(".setup-repositories")
+        ?.contains(document.activeElement),
+    ),
+    true,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Add a repository" }).count(),
+    0,
+  );
+});
+
+test("Setup offers the GitHub CLI login exactly once, behind Add a repository", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    ghExecutable: gh.executable,
+  });
+  await settleGhRead(page, () => page.reload());
+  const offer = page.getByRole("button", { name: /Use GitHub CLI login/ });
+  await page.getByRole("button", { name: "Add a repository" }).waitFor();
+  assert.equal(await offer.count(), 0);
+  const use = page.getByRole("button", {
+    name: "Use GitHub CLI login (@octo)",
+  });
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  await use.waitFor();
+  assert.equal(await offer.count(), 1);
+  // Opening moves focus to the offer, the first control of the revealed content.
+  assert.equal(await use.evaluate((el) => el === document.activeElement), true);
+  await page
+    .getByText("Signed in to github.com as @octo with the GitHub CLI", {
+      exact: false,
+    })
+    .waitFor();
+  const request = commandRequest(page);
+  await use.click();
+  const body = (await request).postDataJSON();
+  assert.equal(body.type, "discovery.configure");
+  assert.equal(body.credentialRef, "gh:github.com");
+  await page
+    .getByText(
+      "Discovered from GitHub · 3 repositories visible to the credential",
+    )
+    .waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Add a repository" }).count(),
+    0,
+  );
+  assert.equal(await offer.count(), 0);
+  // The offer is gone, so focus moves to the first repository control.
+  await page.waitForFunction(() =>
+    document.activeElement?.closest(".setup-row"),
+  );
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("Setup replaces the form with the ready check, focuses it and keeps the first-project heading", async (_t, journey) => {
+  const { page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const heading = page.locator("main.page h1");
+  await heading.getByText("Set up your first project").waitFor();
+  const sent = sentCommands(page);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page
+    .getByLabel("Lead profile", { exact: true })
+    .selectOption({ label: "Mira" });
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  await create.focus();
+  await page.keyboard.press("Enter");
+  const ready = page.getByRole("region", { name: "Ready check" });
+  await ready.waitFor();
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute("aria-label") === "Ready check",
+  );
+  assert.equal(
+    await ready.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top >= 0 && r.top < innerHeight;
+    }),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).count(),
+    0,
+  );
+  assert.equal(await page.locator(".setup-page form").count(), 0);
+  // Once the sidebar lists the new project the workspace has refreshed; the title stays.
+  const projectId = String(
+    sent.find((c) => c.type === "project.create")?.projectId,
+  );
+  await page.locator(`a[href="/app/projects/${projectId}"]`).first().waitFor();
+  assert.equal(await heading.innerText(), "Set up your first project");
+  assert.equal(
+    await page
+      .getByText(
+        "No projects yet. A project groups tasks with a lead, instructions and explicit repository access.",
+      )
+      .count(),
+    0,
+  );
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await page.evaluate(() => {
+      const root = document.querySelector('[aria-label="Ready check"]');
+      return (
+        root !== document.activeElement &&
+        Boolean(root?.contains(document.activeElement))
+      );
+    }),
+    true,
+  );
+});
+
+test("Setup after Create shows a blank second-project form on reload, without the ready check or a leave prompt", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await stubReadiness(page);
+  const sent = sentCommands(page);
+  await createProject(page, sent);
+  // Nothing is left to lose while the ready check is shown.
+  assert.equal(
+    await page.evaluate(() => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented;
+    }),
+    false,
+  );
+  await page.reload();
+  await page.locator("main.page h1", { hasText: "Create project" }).waitFor();
+  const name = page.getByLabel("Project name", { exact: true });
+  await name.waitFor();
+  assert.equal(await name.inputValue(), "");
+  assert.equal(
+    await page.getByRole("region", { name: "Ready check" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented;
+    }),
+    false,
+  );
+  assert.equal(f.service.domain().projects().length, 1);
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 1);
+});
+
+test("Setup keeps the form and every value when Create is refused, and sends one create for a double submit", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page.getByLabel("Instructions", { exact: true }).fill("Keep me");
+  await addRepository(page);
+  const sent = sentCommands(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let seen = 0;
+  // The first create is held, then refused for the name; later ones reach the service.
+  await page.route("**/api/operator/commands", async (route) => {
+    if (seen++ > 0) return route.continue();
+    await gate;
+    await route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "invalid-input",
+          message: "Check input",
+          fieldPaths: ["name"],
+        },
+      }),
+    });
+  });
+  // Its label reads Creating… while pending, so find it by its place in the bar.
+  const create = setupBar(page).locator("button[type=submit]");
+  await create.dblclick();
+  await page.keyboard.press("Enter");
+  await create
+    .getAttribute("aria-disabled")
+    .then((v) => assert.equal(v, "true"));
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 1);
+  release();
+  await page.getByText(fixFields).waitFor();
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 1);
+  const name = page.getByLabel("Project name", { exact: true });
+  await name.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+  const alertAbove = await page.evaluate(() => {
+    const alert = document.querySelector('[data-slot="action-outcome"]');
+    const step = document.querySelector(".settings-panel-title");
+    return Boolean(
+      alert &&
+        step &&
+        alert.compareDocumentPosition(step) & Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+  assert.equal(alertAbove, true);
+  assert.equal(
+    await page.getByLabel("Instructions", { exact: true }).inputValue(),
+    "Keep me",
+  );
+  assert.equal(
+    await page.getByLabel("Repository", { exact: true }).inputValue(),
+    "R_atlas",
+  );
+  assert.equal(
+    await page.getByLabel("Ref", { exact: true }).inputValue(),
+    "main",
+  );
+  assert.equal(
+    await page.getByLabel("Local repository path").inputValue(),
+    "~/src/atlas",
+  );
+  await name.fill("Atlas");
+  await create.click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  assert.equal(f.service.domain().projects().length, 1);
+});
+
+test("Setup keeps Create focusable with its reason while the lead profile is being created", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  const sent = sentCommands(page);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    if (route.request().postDataJSON().type === "profile.create") await gate;
+    await route.continue();
+  });
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await inline.getByRole("button", { name: /Create profile|Creating/ }).click();
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  // The keyboard reaches Create while the profile is pending.
+  let reached = false;
+  for (let i = 0; i < 40 && !reached; i++) {
+    await page.keyboard.press("Tab");
+    reached = await create.evaluate((el) => el === document.activeElement);
+  }
+  assert.equal(reached, true);
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    ),
+    "Wait for the lead profile to be created.",
+  );
+  await page.keyboard.press("Enter");
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(null))),
+  );
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
+  release();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  await create.waitFor();
+  assert.equal(await create.getAttribute("aria-disabled"), null);
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
+});
+
+test("Setup keeps Create held after a refused lead profile is edited, until the profile is recorded", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  const name = inline.getByLabel("Profile name", { exact: true });
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  const reason = () =>
+    create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    );
+  const sent = sentCommands(page);
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await name.fill("x".repeat(513));
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByText(fixFields).waitFor();
+  // Refused, then corrected without sending it again: the phase stays rejected, the content decides.
+  await name.fill("Ada");
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await reason(),
+    "Create the lead profile first, or clear its name.",
+  );
+  await create.focus();
+  await page.keyboard.press("Enter");
+  await create.click({ force: true });
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(null))),
+  );
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
+  assert.equal(await name.inputValue(), "Ada");
+  assert.equal(
+    await page.getByLabel("Project name", { exact: true }).inputValue(),
+    "Atlas",
+  );
+  // Recording the profile releases Create, and the project then has that lead.
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByLabel("Lead profile", { exact: true }).waitFor();
+  assert.equal(await create.getAttribute("aria-disabled"), null);
+  await create.click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  const profile = sent.find((c) => c.type === "profile.create");
+  assert.equal(
+    sent.find((c) => c.type === "project.create")?.leadProfileId,
+    profile?.profileId,
+  );
+  assert.equal(f.service.domain().projects().length, 1);
+});
+
+test("Setup holds Create with the profile reason while the lead profile outcome is unknown", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await inline.getByRole("button", { name: "Create profile" }).click();
+  await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    ),
+    "Check whether the lead profile was saved first.",
+  );
+  await page.unroute("**/api/operator/commands");
+});
+
+test("Setup keeps Create inactive with its reason while a typed lead profile has not been created", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  const reason = () =>
+    create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    );
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await reason(),
+    "Create the lead profile first, or clear its name.",
+  );
+  await create.click({ force: true });
+  assert.equal(f.service.domain().projects().length, 0);
+  assert.equal(
+    await inline.getByLabel("Profile name", { exact: true }).inputValue(),
+    "Ada",
+  );
+  // Clearing the name is the other way forward.
+  await inline.getByLabel("Profile name", { exact: true }).fill("");
+  assert.equal(await create.getAttribute("aria-disabled"), null);
+  await create.click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  assert.equal(f.service.domain().projects().length, 1);
+});
+
+test("Setup keeps a rejected field's error line above the sticky bar", async (_t, journey) => {
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    viewport: { width: 390, height: 844 },
+  });
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  const repository = page.getByLabel("Repository (owner/name)");
+  await page.getByLabel("Ref", { exact: true }).fill("main");
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  // Scroll until the field ends exactly at the bar, so its error line would sit behind it.
+  await repository.evaluate((el) => {
+    const bar = document.querySelector(".setup-submit") as HTMLElement;
+    window.scrollBy(
+      0,
+      el.getBoundingClientRect().bottom - bar.getBoundingClientRect().top,
+    );
+  });
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await repository.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+  const gap = await page.evaluate(async () => {
+    await new Promise((done) =>
+      requestAnimationFrame(() => requestAnimationFrame(done)),
+    );
+    const error = document.querySelector(
+      ".setup-row .error-text",
+    ) as HTMLElement;
+    const bar = document.querySelector(".setup-submit") as HTMLElement;
+    return (
+      bar.getBoundingClientRect().top - error.getBoundingClientRect().bottom
+    );
+  });
+  assert.ok(gap >= -0.5, `the error line is ${-gap}px behind the bar`);
+});
+
+test("Setup does not open Add a repository while the project is being created or its outcome is unknown", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { discovery: false });
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
+  const add = page.getByRole("button", { name: "Add a repository" });
+  assert.equal(await add.getAttribute("aria-disabled"), "true");
+  await add.click({ force: true });
+  assert.equal(await page.getByLabel("Repository (owner/name)").count(), 0);
+  await page.unroute("**/api/operator/commands");
 });

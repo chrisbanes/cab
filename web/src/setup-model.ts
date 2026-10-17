@@ -115,7 +115,7 @@ export function buildProjectCreate(
   },
   rows: SetupRow[],
   githubProjectNodeId: string,
-  /** The source login setup showed as signed in; anything else records no credential. */
+  /** The source login setup showed as signed in; with anything else, or no repository, no credential is recorded. */
   sourceGh: z.infer<typeof ghLoginStateSchema> | null | undefined = null,
 ) {
   const included = rows.flatMap((r, i) => (blankRow(r) ? [] : [i]));
@@ -145,8 +145,9 @@ export function buildProjectCreate(
     ...(githubProjectNodeId
       ? { githubProject: { projectNodeId: githubProjectNodeId } }
       : {}),
-    // Omitted, never undefined, so a create without it keeps its payload hash.
-    ...(sourceGh?.state === "signed-in"
+    // Omitted, never undefined, so a create without it keeps its payload hash. A project
+    // without a repository has no source to use it, and setup shows the line only with one.
+    ...(sourceGh?.state === "signed-in" && included.length
       ? { sourceCredentialRef: "gh:github.com" }
       : {}),
   } as OperatorCommand;
@@ -414,4 +415,56 @@ export function sourceCredentialLine(
         ? `GitHub source credential: GitHub CLI · @${status.gh.login}`
         : `GitHub source credential: ${kind}`,
   };
+}
+
+/** The phases a setup draft (the project or the inline lead profile) moves through. */
+export type SetupDraftPhase =
+  | "editing"
+  | "pending"
+  | "recorded"
+  | "rejected"
+  | "conflict"
+  | "unknown";
+
+/**
+ * Why Create paused project cannot be used now, or `null` when it would create exactly
+ * what the form shows. Create is always drawn; a hold only makes it `aria-disabled` with
+ * this reason. The first row that applies wins:
+ *
+ * | project draft | inline lead profile                           | Create                        |
+ * | ------------- | --------------------------------------------- | ----------------------------- |
+ * | pending       | any                                           | held: creating the project    |
+ * | unknown       | any                                           | held: check the project first |
+ * | recorded      | any                                           | held: already created         |
+ * | other         | form shown, pending                           | held: profile being created   |
+ * | other         | form shown, unknown                           | held: check the profile first |
+ * | other         | form shown, not recorded, name typed (any of  | held: create or clear it      |
+ * |               | editing, rejected, edited after a rejection)  |                               |
+ * | other         | form shown, recorded; or name blank; or no    | actionable                    |
+ * |               | form (a lead is chosen)                       |                               |
+ *
+ * The profile is judged by its content, never by the phase it happens to be in: editing
+ * a refused profile leaves its phase `rejected`, and a typed name that was not recorded
+ * would otherwise vanish with the form. The GitHub CLI login and the repository
+ * disclosure do not hold Create: they change what step 3 shows, not what is created.
+ */
+export function createHold(state: {
+  project: SetupDraftPhase;
+  /** The inline lead profile form is on the page. */
+  profileForm: boolean;
+  profile: SetupDraftPhase;
+  profileName: string;
+}): string | null {
+  if (state.project === "pending") return "Creating the project…";
+  if (state.project === "unknown")
+    return "Check whether the project was created first.";
+  if (state.project === "recorded") return "The project is already created.";
+  if (!state.profileForm) return null;
+  if (state.profile === "pending")
+    return "Wait for the lead profile to be created.";
+  if (state.profile === "unknown")
+    return "Check whether the lead profile was saved first.";
+  if (state.profile !== "recorded" && state.profileName.trim())
+    return "Create the lead profile first, or clear its name.";
+  return null;
 }

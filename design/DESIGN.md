@@ -354,7 +354,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
 | 07 Tasks, composer & tablet | `24-all-projects-list`, `23-atlas-project-board`, `23b-atlas-project-paused`, `02-composer-optional-expanded`, `800a-tablet-overview-list`, `800b-tablet-inbox-question`, `800c-tablet-task-evidence`, `800d-tablet-search-result`, `800e-tablet-composer-validation`, `800f-tablet-all-projects-board`, `25-phone-board-waiting`, `25b-phone-board-uncertain`, `34-phone-composer-collapsed`, `35-phone-optional-settings-error`, `35b-phone-collapsed-validation`, `800h-phone-composer-short` |
-| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
+| 08 Settings, sign-in & recovery | `133-settings-cli-credentials-empty`, `134-settings-cli-credentials-list`, `135-settings-cli-credentials-name-error`, `136-settings-cli-credentials-unconfirmed`, `137-settings-cli-credentials-token`, `138-settings-cli-credentials-rotation`, `139-settings-cli-credentials-revoke-failed`, `122-profile-create`, `123-profile-revoked`, `123b-profile-instructions-revealed`, `124-routing-relay-unsaved`, `125-routing-relay-saved`, `126-runtime-capacity-recovery`, `126b-runtime-switches-specimen`, `126c-runtime-disable-confirm-specimen`, `127-assignment-recovery-relay`, `129-page-not-found`, `108-signin-desktop`, `109-signin-failed`, `113-account-menu`, `114b-settings-discovery-credential`, `115-project-setup`, `116-project-setup-field-error`, `116b-project-setup-duplicate-name`, `116c-project-name-suffix-specimen`, `117-first-project-setup`, `117b-first-setup-discovery-unavailable`, `117c-first-setup-add-repository`, `131-project-setup-choose-folder`, `118-project-config-general`, `118b-project-instructions-revealed`, `119-project-config-github-source`, `119b-project-source-credential-change`, `119c-source-credential-clear-unknown`, `119d-github-source-import-ready`, `119e-github-source-imported`, `120-project-config-sync-placement`, `120b-sync-credential-unusable`, `140-phone-cli-credentials`, `141-phone-cli-credentials-token`, `142-phone-cli-credentials-revoke`, `128-phone-assignment-recovery`, `110-phone-signin`, `111-phone-signin-pending`, `112-phone-signin-failed`, `121-phone-atlas-configuration` |
 | 09 First run & onboarding | `143-home-getting-started`, `143b-home-checklist-runtime-regressed`, `145-setup-inline-lead-profile`, `145b-setup-profile-created`, `146-setup-ready-check`, `146b-setup-ready-check-blocked`, `148-composer-project-paused`, `149-task-waiting-project-paused`, `149b-task-fix-resume-confirm`, `151-settings-readiness`, `152-runtime-add-claude`, `152b-runtime-claude-token-unavailable`, `149c-wait-reasons-specimen`, `151b-readiness-no-runtime-specimen`, `144-phone-getting-started`, `147-phone-setup-ready-check`, `150-phone-task-waiting-fix` |
 | 10 Action feedback | `154-project-configuration-saved`, `154b-project-configuration-details-expanded`, `155-routing-saved`, `156-project-configuration-field-error`, `157-project-configuration-changed-elsewhere`, `158-project-configuration-unknown-outcome`, `159-change-list-remove-last-repository`, `160-discovery-credential-saved`, `161-composer-created-project-paused`, `162-grouped-questions-answered`, `162b-grouped-questions-send-failed`, `163-task-reply-sent`, `164-stop-confirmation`, `165-cli-credential-revoked`, `ds-action-feedback`, `166a-phone-project-configuration-saved`, `166b-phone-unknown-outcome-locked`, `166c-phone-task-created-project-paused` |
 | 11 Settings, recovery & responsive states | `167-profile-field-error`, `168-routing-field-error`, `169-runtime-capacity-field-error`, `178-profile-revoke-available`, `170-source-config-changed-elsewhere`, `170b-source-config-latest-loaded`, `171-source-config-unknown-outcome`, `172-routing-typesafe-unavailable`, `173-recovery-evidence-unavailable`, `174-recovery-no-admitted-generation`, `175-recovery-pre-turn-witness`, `176-recovery-no-turn-witness`, `177-project-setup-ref-open`, `180a-tablet-settings-index`, `180b-tablet-project-setup`, `180c-tablet-profile`, `180d-tablet-routing`, `180e-tablet-runtime`, `179a-phone-settings-index`, `179b-phone-project-setup`, `179c-phone-profile`, `179d-phone-routing`, `179e-phone-runtime` |
@@ -366,7 +366,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 
 Frame 114's Projects panel carries the installation discovery credential row; 114b
 `114b-settings-discovery-credential` draws it open, and `117b-first-setup-discovery-unavailable` draws the setup alert when discovery is
-unconfigured.
+unconfigured and step 3 is opened; `117c-first-setup-add-repository` draws step 3 collapsed.
 
 - **Configured (114):** "GitHub discovery credential · GitHub CLI · @account ·
   read-only use" with Change and Clear. Clear removes the reference and is the
@@ -383,21 +383,33 @@ unconfigured.
   - The form also carries the use note (read-only use, removed from agent and
     helper environments, keychain limit) and Cancel. The token itself is never
     shown.
-- **Setup alert (117b):** when discovery is unconfigured and the service detects a
-  gh login, the alert offers **Use GitHub CLI login (@account)** before **Set
-  discovery credential**. The action configures the reference in one step and
-  re-reads discovery. Without a detected login, only **Set discovery credential**
-  appears. Discovery never reads with a gh login the operator did not choose for
-  it. Frame 116 draws discovery available and is unchanged.
-- **Setup source credential (115, 117):** "What creation does" states the source
-  credential setup will record before Create. 115 draws a signed-in candidate
-  login, "GitHub source credential: GitHub CLI · @account", recorded as the new
-  project's `gh:github.com` source credential and changed or cleared later in
-  GitHub source settings. 117 draws the unusable case, "GitHub source credential:
-  none", where the source starts without a credential. Not drawn: the line reads
-  "checking…" until the login read returns, and a failed read says the login could
-  not be checked; neither records a credential. There is no opt-out control in
-  setup.
+- **Setup alert (117b, 117c):** while discovery is unconfigured, step 3 starts
+  collapsed (117c): its heading, the line "Optional. Without a repository the
+  project is repository-free; adding one also offers GitHub discovery." and a
+  secondary **Add a repository**. Opening it moves focus to its first control and
+  draws 117b, the opened state: when the service detects a gh login the alert offers
+  **Use GitHub CLI login (@account)** before **Set discovery credential**, the one
+  place setup offers it, even when gh is signed in. The action configures the
+  reference in one step and re-reads discovery. Without a detected login, only **Set
+  discovery credential** appears. Discovery never reads with a gh login the operator
+  did not choose for it. The section opens by itself for a row that holds a value, a
+  rejected repository or GitHub Project, and an unsettled GitHub CLI login, and it
+  never closes again: clearing a row means choosing "No repository · repository-free",
+  an intentional one-way disclosure with no close control. Frame 116 draws discovery
+  available and is unchanged.
+- **Setup source credential (116, 116b, 117, 117b, 131, 145, 145b, 177):** step 3 states the
+  source credential setup will record, as a line after the GitHub Project field, only
+  while a repository row is filled; "What creation does" has exactly two bullets
+  ("The project starts Paused. Creating it starts no execution." and "Repository
+  access is exactly the list in step 3."). The line reads "GitHub source credential:
+  GitHub CLI · @account", recorded as the new project's `gh:github.com` source
+  credential and changed or cleared later in GitHub source settings, or, in the
+  unusable case, "GitHub source credential: none", where the source starts without a
+  credential. 115 draws no repository, so it has no line. A repository-free project
+  records no credential and shows none, here and in the ready check. Not drawn: the
+  line reads "checking…" until the login read returns, and a failed read says the
+  login could not be checked; neither records a credential. There is no opt-out
+  control in setup.
 
 ### Project source credential
 
@@ -509,20 +521,22 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
 - **Project setup (145, 145b):** with no profiles, step 1 replaces the Lead profile
   select with an inline profile form: a help line ("No lead profiles yet. Create one
   here, or leave this blank and choose a lead later; tasks wait for a lead before
-  starting."), Profile name and Summary side by side, Profile instructions, Runtime
-  (Codex preselected) and a secondary Create profile; the page's Create paused
-  project stays primary. In 145b the lead select is back beside Project name with the
+  starting."), Profile name, Runtime (Codex preselected), the line "Add a summary
+  and instructions later in Settings → Profiles." and a secondary Create profile;
+  the page's Create paused project stays primary. The profile and the project stay
+  two submissions. In 145b the lead select is back beside Project name with the
   new profile chosen, and the success line "Profile created. Other setup values kept."
   (the success line in `ds-action-feedback`) sits below the row.
 - **Ready check (146, 146b, 147):** replaces the "Recorded … as a paused project"
-  alert. The frames show the region that appears below the locked setup form after
-  Create.
+  alert. The frames show the region that replaces the setup form after Create and
+  receives focus; the first-project heading stays "Set up your first project" (146
+  and 146b draw no subtitle).
   - Drawn: the success line "Created fixture-app. It's paused."; plain lines
     "Nothing has run.", "Instructions saved." (or "No instructions yet."),
     "Repository access: fixture-org/fixture-app (main), checked on this Mac." (or
     "none · repository-free"), when linked, the GitHub Project, and the recorded
-    source credential, "GitHub source credential: GitHub CLI · @fixture-user"; the
-    Details toggle; the actions, primary Resume and create first task and secondary
+    source credential, "GitHub source credential: GitHub CLI · @fixture-user" (only
+    when the project has a repository); the Details toggle; the actions, primary Resume and create first task and secondary
     Keep paused. On phone (147) the actions stack at full width.
   - Drawn in 146b: a source without a credential reads "GitHub source credential:
     not set. The source won't sync until one is set." with a GitHub source settings
@@ -2374,6 +2388,15 @@ frames 114 and 118–128 as follows:
   Production also collapses each run of consecutive generations that show the same
   state under an expandable "N older records, same state", keeping the newest of the
   run, the held generation, witnesses and the latest receipt expanded.
+- Project setup (115–117c, 131, 145–146b, 177, 179b) reads steps 1, 2 and 3 in one
+  column, with "What creation does" as an aside beside them from 1121px and after
+  them below it, as in the composer; DOM order is visual order and nothing reorders.
+  The sticky bar holds a note, Cancel and then Create paused project at every width
+  (179b draws Cancel then Create in one row). The rejection or unknown-outcome alert
+  sits above step 1 (116, 116b). Create is `aria-disabled` and stays focusable with
+  its reason while the project or the inline profile is being saved or its outcome is
+  unknown, and while a typed profile name is not recorded. After Create the
+  ready check replaces the form and takes focus, and reloading shows a blank form.
 - Paused project badges are idle (slate) with a pause symbol in the sidebar, phone
   drawer and Settings; Enabled, Available and Configured stay slate with a check,
   and Revoked stays amber, rather than the canvas's emerald and rose. Project setup

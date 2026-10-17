@@ -131,3 +131,24 @@ export async function chooseRepository(page: Page, label: string) {
     .locator("option", { hasText: "develop" })
     .waitFor({ state: "attached" });
 }
+
+/**
+ * Run `action`, then wait for the setup page's second GitHub CLI login read, the one it
+ * makes once discovery is known to be unconfigured, and for the frame that applies it.
+ * Until then a login offer that should exist has not rendered, so "no offer" would pass.
+ */
+export async function settleGhRead(page: Page, action: () => Promise<unknown>) {
+  let reads = 0;
+  const second = page.waitForResponse(
+    (r) =>
+      new URL(r.url()).pathname === "/api/operator/discovery" && ++reads >= 2,
+  );
+  await action();
+  await second;
+  await page.evaluate(
+    () =>
+      new Promise<void>((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => done())),
+      ),
+  );
+}

@@ -9,6 +9,7 @@ const test = browserSuite("operator-account-browser");
 import { chromium, type Browser, type Page } from "playwright";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { unpairedBadges } from "../fixtures/operator-settings.js";
+import { settleGhRead } from "../fixtures/setup-browser.js";
 import {
   addProfile,
   addProject,
@@ -1025,10 +1026,22 @@ for (const viewport of viewports)
       0,
     );
     await page.goto(`${web.origin}/app`);
-    await row(await assertOnlyCard(page), "Project")
-      .getByRole("link", { name: "Create project" })
-      .click();
-    await page.waitForURL("**/app/settings/projects/new");
+    const homeCard = await assertOnlyCard(page);
+    // Home's own login read has landed, so only setup's reads count below.
+    await row(homeCard, "GitHub")
+      .getByText(/@fixture-user/)
+      .waitFor();
+    const project = row(homeCard, "Project");
+    await settleGhRead(page, async () => {
+      await project.getByRole("link", { name: "Create project" }).click();
+      await page.waitForURL("**/app/settings/projects/new");
+    });
+    // Step 3 starts collapsed; the one offer is behind "Add a repository".
+    assert.equal(
+      await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),
+      0,
+    );
+    await page.getByRole("button", { name: "Add a repository" }).click();
     await page
       .getByRole("button", { name: "Use GitHub CLI login (@fixture-user)" })
       .waitFor();
