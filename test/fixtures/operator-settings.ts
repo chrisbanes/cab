@@ -290,13 +290,14 @@ export async function signIn(
 }
 /**
  * Evidence capture for the settings pages. The source tab shows saved search queries and
- * local paths, and a revealed field shows private text, so every text field is masked while
+ * local paths, and a revealed field shows private text, so every text field and every
+ * `[data-private]` name is masked while
  * the screenshot is taken: evidence uploaded by CI never carries those values.
  */
 export async function captureSettingsEvidence(page: Page, name: string) {
   const mask = await page.addStyleTag({
     content:
-      "input[id$='-query'], input[id$='-path'], textarea { color: transparent !important; -webkit-text-fill-color: transparent !important; }",
+      "input[id$='-query'], input[id$='-path'], textarea, [data-private] { color: transparent !important; -webkit-text-fill-color: transparent !important; }",
   });
   try {
     await captureBrowserEvidence(page, name);

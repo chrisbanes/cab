@@ -4,6 +4,8 @@ import {
   zeroMatchWarning,
 } from "../../src/operator/readiness-text.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
+import { sourceStateSentences } from "../../src/operator/github-reasons.js";
+import { clockLabel, codeSentence } from "./presentation.js";
 import type { z } from "zod";
 import {
   Circle,
@@ -147,11 +149,14 @@ export function activationLine({
   sourceVersion,
   selections,
   recorded,
+  name,
 }: {
   saved: SavedRecord | undefined;
   sourceVersion: number;
   selections: { id: string | null; active: boolean }[];
   recorded: boolean;
+  /** What the operator calls the source with this id (never its S-n id). */
+  name: (id: string) => string;
 }) {
   const r = saved?.receipt;
   if (
@@ -160,20 +165,21 @@ export function activationLine({
     r.result.configVersion !== sourceVersion
   )
     return null;
-  const id = r.result.selectionId;
+  const id = r.result.selectionId,
+    what = name(id);
   if (!recorded && !selections.some((s) => s.id === id && s.active))
     return {
-      line: `Couldn't confirm that ${id} is active. Preview it again.`,
+      line: `Couldn't confirm that ${what} is active. Preview it again.`,
       refresh: false,
     };
   // The receipt records the prior state; one from before it was recorded says nothing.
   const { alreadyActive } = r.result;
   const state =
     alreadyActive === undefined
-      ? `${id} is active.`
+      ? `${what} is active.`
       : alreadyActive
-        ? `${id} was already active.`
-        : `Activated ${id}.`;
+        ? `${what} was already active.`
+        : `Activated ${what}.`;
   return { line: `${state} ${tasksNotImported}`, refresh: true };
 }
 
@@ -194,11 +200,104 @@ export function observationLabel(o: Observation | undefined) {
   if (!o) return "Not synced";
   if (o.state === "complete")
     return o.lastSuccessfulAt
-      ? `Synced ${clock(Date.parse(o.lastSuccessfulAt))}`
+      ? `Synced ${clockLabel(Date.parse(o.lastSuccessfulAt))}`
       : "Synced";
   if (o.state === "partial") return "Partial";
   if (o.state === "never") return "Not synced";
-  return "Unavailable";
+  return "Sync unknown";
+}
+
+/**
+ * One sentence for a source's last read: the state, the app's clock label and the counts the
+ * read observed. "Not synced yet" when it was never read or has no row; a state the app does
+ * not know reads as the unreadable sentence. Never an ISO time or the word "unavailable".
+ */
+export function sourceStatusLine(
+  o: Observation | undefined,
+  rule: Observations["projects"][number]["readiness"],
+) {
+  const lead = codeSentence(
+    o?.state ?? "never",
+    sourceStateSentences,
+    sourceStateSentences.unavailable,
+  );
+  if (!o || (o.state !== "complete" && o.state !== "partial")) return lead;
+  const at = o.state === "complete" ? o.lastSuccessfulAt : o.lastAttemptAt,
+    when =
+      at && Number.isFinite(Date.parse(at))
+        ? ` ${clockLabel(Date.parse(at))}`
+        : "",
+    counts = o.counts;
+  if (!counts) return `${lead}${when}`;
+  if (o.state === "partial")
+    return `${lead}${when} · ${plural(counts.observed, "issue")} observed so far`;
+  const match =
+    rule.kind === "none"
+      ? ", no readiness rule"
+      : rule.kind === "rule" && counts.matching !== null
+        ? `, ${counts.matching} match the readiness rule`
+        : "";
+  return `${lead}${when} · ${plural(counts.observed, "issue")} observed${match}`;
+}
+
+/** What a saved source is called: its content, never its S-n id or a Project filter. */
+export interface SourceNaming {
+  name: string;
+  /** The kind in words ("repository issues", "search", "GitHub Project"). */
+  kind: string;
+  /** The name is saved private text (a search query): show it only in the signed-in view. */
+  private: boolean;
+}
+
+/**
+ * A saved source named by what it reads. A search is its saved query, which only the
+ * session-only private read supplies (`query`); until then it is "Saved search". A Project
+ * has no stored title, so its name comes from discovery (`projectTitle`) when that lists it.
+ */
+export function sourceName(
+  s: { kind: string; descriptor: string | null },
+  extra: { query?: string | undefined; projectTitle?: string | undefined } = {},
+): SourceNaming {
+  if (s.kind === "repository")
+    return {
+      name: s.descriptor || "Repository",
+      kind: "repository issues",
+      private: false,
+    };
+  if (s.kind === "search")
+    return extra.query?.trim()
+      ? { name: extra.query, kind: "search", private: true }
+      : { name: "Saved search", kind: "search", private: false };
+  return {
+    name: extra.projectTitle || "GitHub Project",
+    kind: "GitHub Project",
+    private: false,
+  };
+}
+
+/** A row heading: the name, then the kind unless the name already says it. */
+export const sourceHeading = (n: SourceNaming) =>
+  n.name === n.kind ? n.name : `${n.name} · ${n.kind}`;
+
+/** The same naming for a row that is not saved yet, from what is typed so far. */
+export function draftSourceName(r: {
+  kind?: unknown;
+  owner?: unknown;
+  name?: unknown;
+  query?: unknown;
+}): SourceNaming {
+  const typed = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  if (r.kind === "project")
+    return { name: "GitHub Project", kind: "GitHub Project", private: false };
+  if (r.kind === "search")
+    return typed(r.query)
+      ? { name: typed(r.query), kind: "search", private: true }
+      : { name: "New source", kind: "search", private: false };
+  const repository =
+    typed(r.owner) && typed(r.name) ? `${typed(r.owner)}/${typed(r.name)}` : "";
+  return repository
+    ? { name: repository, kind: "repository issues", private: false }
+    : { name: "New source", kind: "repository issues", private: false };
 }
 
 /** Badge symbol for `observationLabel`: it pairs with the word, never replaces it. */
@@ -225,15 +324,16 @@ export function repositoryLines(c: ProjectConfigurationData) {
     : ["None · repository-free"];
 }
 
+/** One index line: the S-n id, then what the source reads without any private text. */
 export function selectionLine(
   s: ProjectConfigurationData["source"]["selections"][number],
 ) {
   const kind =
     s.kind === "repository"
-      ? (s.descriptor ?? "repository")
+      ? `${s.descriptor ?? "repository"} issues`
       : s.kind === "project"
-        ? `GitHub Project ${s.descriptor ?? ""}`.trim()
-        : "search · query private";
+        ? "GitHub Project"
+        : "search";
   return `${s.id ?? "ID unavailable"} ${kind}${s.active ? "" : " · inactive"}`;
 }
 

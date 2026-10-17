@@ -1684,12 +1684,14 @@ Presentation and interaction rules that the canvas does not show on its own.
   name ("Atlas · Mira"), or the project ID's first eight characters in mono when
   the leads match or a project has no lead (`116c-project-name-suffix-specimen`).
 - GitHub sources are named by what they read (acme/atlas issues, a search, the
-  Atlas roadmap GitHub Project), with the S-n id in Details. The GitHub source tab
+  Atlas roadmap GitHub Project), with the S-n id in Details. A GitHub Project has
+  no stored title, so its name is the title discovery lists for it and otherwise
+  "GitHub Project"; its filter is never part of a name. The GitHub source tab
   numbers its sections 1–3 in reading order (`119-project-config-github-source`).
   After a save, the same screen offers Preview and import now, which runs the
-  preview-and-activate command and then the refresh. It shows the activation
-  receipt, then the refresh's observation state (complete, partial, never or
-  unavailable) with the observed counts. The refresh creates no receipt, and a
+  preview-and-activate command for each saved inactive source and then one
+  refresh. It shows the activation receipts, then the refresh's observation state
+  (complete, partial, never or unavailable). The refresh creates no receipt, and a
   partial or unavailable read says so and claims no import
   (`119d-github-source-import-ready`, `119e-github-source-imported`). Sync &
   placement remains for later refreshes and placement.
@@ -2329,8 +2331,8 @@ frames 114 and 118–128 as follows:
   definition is a removal plus a new source with a fresh id, added inactive. Local
   repository paths and search queries are loaded when the tab opens and show plainly;
   if that read fails the row says "Local path unavailable" or "Query unavailable" with
-  Try again and saves without it. Project filters stay private: a row reads "<node id>
-  · Filter kept · private" instead of the drawn filter.
+  Try again and saves without it. Project filters stay private: a Project row reads
+  "Filter kept · private" instead of the drawn filter, with its node ID in Details.
   Readiness Project-field conditions pick the Project, field and option by name from
   discovery and fall back to typed node IDs when discovery is unavailable or truncated.
   A GitHub source save deletes the stored activation of each
@@ -2340,22 +2342,24 @@ frames 114 and 118–128 as follows:
   is previewed again in Sync & placement.
 - Frames `119d-github-source-import-ready` and `119e-github-source-imported` chain
   activation and import on the GitHub source tab after a save: Preview and import
-  now runs the preview-and-activate command and then the refresh, showing the
-  activation receipt and then the refresh's observation state; activation and a
-  successful import stay separate evidence.
-  Production does not chain them yet: "Preview and activate selection" in Sync &
-  placement names the selection (or says it was already active), states that
-  tasks aren't imported until sources are refreshed, and offers "Refresh sources"
-  inside that outcome. Production names sources S-1, S-2 and so on where the frames
-  name them by content, and its Selections and Source status rows read active or
-  inactive.
-- Frames 118–121 draw no readiness counts. Production adds, as body text after each
-  Source status row heading and in the GitHub source Readiness panel, the
-  selection's stored counts ("9 observed · 9 open · 0 match label `ready`"); a
-  complete read with no match adds a warning `StatusBadge` and a "Check readiness
-  conditions" link, and the phone "Current state" card appends the counts. Task
-  List and Board name an imported Draft task's unmet conditions instead of "Draft:
-  not Ready".
+  now sends one preview-and-activate command per saved inactive source, then one
+  refresh, showing the activation receipts and then the refresh's observation
+  state; activation and a successful import stay separate evidence. The panel is
+  offered whenever a saved source is inactive or has never been read, so it returns
+  after leaving the tab and offers only what is left to do. Production differs from
+  the frames in three ways. A Project source has no stored title, so its name is the
+  title discovery lists for it and otherwise "GitHub Project"; the Settings index
+  always reads "GitHub Project". The frames' Project name carries the filter
+  (", status:Next"), which production never shows. The Sync & placement select reads
+  a saved search as "Saved search (S-2)", because an option cannot be masked in
+  evidence and a saved query appears only in the signed-in view's rows and panels.
+- Frames 119–121 draw a status sentence per source ("Synced 10:47 · 4 issues
+  observed, 2 match the readiness rule"). Production keeps the selection's detailed
+  stored counts ("9 observed · 9 open · 0 match label `ready`") in the row's
+  Details. A complete read with no match adds a visible warning `StatusBadge` and a
+  "Check readiness conditions" link under the Readiness panel, and the phone
+  "Current state" card appends the counts. Task List and Board name an imported
+  Draft task's unmet conditions instead of "Draft: not Ready".
 - No frame draws the GitHub source Readiness panel without a rule. Production
   shows no condition row and the helper text "No readiness rule: open issues in
   active selections are not filtered by label or Project field"; "Add readiness

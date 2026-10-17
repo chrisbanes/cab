@@ -40,8 +40,14 @@ test("Settings index lists projects, profiles, routing and runtime from their ow
   await projects
     .getByText("acme/atlas · main · checkout configured", { exact: false })
     .waitFor();
-  await projects.getByText("S-1 acme/atlas").waitFor();
-  await projects.getByText("S-3 GitHub Project PVT_atlas · inactive").waitFor();
+  await projects.getByText("S-1 acme/atlas issues").waitFor();
+  await projects.getByText("S-2 search · inactive").waitFor();
+  await projects.getByText("S-3 GitHub Project · inactive").waitFor();
+  // The index names a source by its kind only: no saved query, node id or filter.
+  assert.doesNotMatch(
+    await projects.innerText(),
+    /PRIVATE|PVT_atlas|query private/,
+  );
   // Relay and Fieldnotes link no repository; only Atlas has a GitHub source.
   assert.equal(await projects.getByText("None · repository-free").count(), 2);
   assert.equal(await projects.getByText("No GitHub source").count(), 2);

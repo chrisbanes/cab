@@ -714,8 +714,11 @@ test("source replacement verifies repositories without diagnostic echo and obser
       exact: true,
     })
     .click();
+  // The hostile id is text in the row's Details, never markup.
+  await page.getByText("Partly synced", { exact: false }).waitFor();
+  await page.getByText("Details", { exact: true }).first().click();
   await page
-    .getByText("Literal <script>bad()</script>: partial.", { exact: false })
+    .getByText("Literal <script>bad()</script>", { exact: true })
     .waitFor();
   assert.equal(reads, 1);
   await capture(page, "1366-source-partial");

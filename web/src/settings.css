@@ -496,3 +496,20 @@
 .runtime-limits > summary {
   cursor: pointer;
 }
+
+/* Source names are content (a saved search can be long), so rows and outcomes wrap it. */
+.settings-row h3,
+.import-outcome {
+  overflow-wrap: anywhere;
+}
+
+/* Import issues: the outcome of one press, focused once it settles. */
+.import-outcome {
+  display: grid;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.import-outcome:empty {
+  display: none;
+}
