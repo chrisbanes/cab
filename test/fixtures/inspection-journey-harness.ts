@@ -45,11 +45,6 @@ export const inspectionJourneyBudgets = Object.freeze({
   totalMs: 1_200_000,
 });
 
-export const inspectionJourneyRequiredArgs = Object.freeze([
-  "--live",
-  "--three-turns",
-]);
-
 export const inspectionJourneyMarkers = Object.freeze({
   marker1A: "ensemble-782-marker-1-A\n",
   marker1B: "ensemble-782-marker-1-B\n",
