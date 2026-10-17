@@ -43,7 +43,7 @@ under `STATE/launchd`, and only to note a loaded job's process; none was loaded 
 | Second `service install --mode daemon` | Exit 0 with the same steps and `"started":false`: the job is not loaded and `/Library/LaunchDaemons` holds no plist. The record was not rewritten. |
 | `plutil -lint <staged plist>` | `OK`. |
 | Staged plist | `UserName` `chris`, `HOME` `/Users/chris`, the fixed `PATH`, the auth-file path, the origin, both log paths, `RunAtLoad` true, `KeepAlive` false, and no other environment variable. No token or password appears. |
-| Directories | The LaunchAgents directory was never created; the daemons directory was not written (`ls /Library/LaunchDaemons` unchanged). `STATE/launchd` held only the record and the staged plist (both mode `0600`). |
+| Directories | The LaunchAgents directory was never created; the daemons directory was not written (`ls /Library/LaunchDaemons` unchanged). Install created `STATE/data`, `STATE/launchd` and the log directory `<TMP>/logs` (empty: launchd creates the log files). `STATE/launchd` held only the record and the staged plist (both mode `0600`). |
 | `launchctl print system/<label>` after install | Exit 113. |
 | `service uninstall` | Exit 0: `"mode":"daemon"`, `"installed":true`, `"complete":true`, because nothing was loaded or installed, no process was ever recorded, no log file existed and the port was free. The record and staged plist were removed; data, auth and versions remained. |
 

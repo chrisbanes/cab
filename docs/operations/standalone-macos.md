@@ -226,15 +226,27 @@ sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/local.ensemble.servi
 The printed commands quote paths that need it. Install exits 0 with `"mode":"daemon"`,
 `"started":false` and the two commands in `"steps"`. In daemon mode it only ever calls
 `launchctl print`; it never writes under `/Library`, never runs `bootstrap` or
-`bootout`, and does not sign in or run `doctor`. It writes only under `STATE`: the staged
-plist and the install record. The first
+`bootout`, and does not sign in or run `doctor`. A first install creates, when absent,
+`STATE/data`, `STATE/launchd` and the log directory (default `~/Library/Logs/Ensemble`,
+outside `STATE`, with any missing parents), and writes the staged plist and the install
+record in `STATE/launchd`; it also creates `STATE/auth/operator-auth.json` when that file
+is missing (after the password prompt) and, with a TARBALL, unpacks into
+`STATE/versions/<version>`. Transient files (`STATE/.<label>.lock`, a staging directory in
+`STATE/launchd`, the record's temporary file) are removed again. It creates no
+LaunchAgents directory and writes nothing under `/Library` or `/Library/LaunchDaemons`.
+launchd, not Ensemble, creates the log files, as the daemon account; that ownership is
+untested here and left to [#1149](https://github.com/chrisbanes/ensemble/issues/1149). A
+test asserts this set. The first
 command copies the staged file as it is at that moment (and follows a symbolic
 link at that path), and launchd then runs what the copied plist says, so run it
 soon after install and first check that `shasum -a 256` of the staged file equals
 `plistSha256` in the install record; anything that can write `STATE` as you could
 change the file. Then run the same install command again to verify, with the same
-options and no TARBALL, from the installed release (`"$STATE/versions/<version>/bin/ensemble"
-service install --mode daemon` plus the `--state-dir`, `--label` and `--port` you used; install prints the exact line). Use the same
+options and no TARBALL, from the installed release (`"$STATE/versions/<version>/bin/ensemble" service install`
+with `--state-dir`, `--log-dir`, `--launch-agents-dir`, `--label`, `--port`, `--connection`
+and `--mode daemon` as you gave them; the TARBALL is dropped, `--token-file` is refused in
+daemon mode, and `--diagnostic-*` and `--no-open` mean nothing to a re-run; install prints
+the exact line). Use the same
 `--state-dir` and label in both modes: the exclusion between modes checks the
 record and `/Library`, and a record in another state directory is invisible to it.
 If the copy ran but the job is not loaded, the re-run prints only the `launchctl

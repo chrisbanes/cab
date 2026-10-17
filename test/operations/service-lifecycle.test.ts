@@ -28,11 +28,14 @@ import { test } from "node:test";
 import { z } from "zod";
 import {
   defaultServiceHost,
+  daemonVerifyCommand,
   ghTokenStorage,
   type FirstRun,
   type GhTokenStorage,
   type InstallCli,
   installService,
+  LIFECYCLE_OPTIONS,
+  lifecycleOptions,
   type OperatorConnection,
   type ServiceHost,
   type ServiceOptions,
@@ -40,6 +43,7 @@ import {
   serviceCommand,
   uninstallService,
   upgradeService,
+  VERIFY_OPTIONS,
 } from "../../src/cli/service.js";
 import type { CliDeps } from "../../src/cli/types.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
@@ -2098,7 +2102,7 @@ test("daemon mode install renders, lints and records without touching launchd", 
   for (const step of output.steps) assert.ok(result.stderr.includes(step));
   assert.ok(
     result.stderr.includes(
-      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "ensemble"))} service install --mode daemon --state-dir ${quoted(f.stateDir)} --label ${f.options.label} --port ${f.options.port}`,
+      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "ensemble"))} service install --state-dir ${quoted(f.stateDir)} --log-dir ${quoted(f.options.logDir)} --launch-agents-dir ${quoted(f.options.agentsDir)} --label ${f.options.label} --port ${f.options.port} --connection local --mode daemon`,
     ),
     result.stderr,
   );
@@ -3298,4 +3302,202 @@ test("the default host treats an effective uid of 0 as root even when the real u
   } finally {
     process.geteuid = original as () => number;
   }
+});
+
+/** Splits a command the way a POSIX shell would for the plain and single-quoted words shellWord prints. */
+function shellSplit(command: string): string[] {
+  const words: string[] = [];
+  const pattern = /'((?:[^']|'\\'')*)'|([^\s']+)/g;
+  for (const match of command.matchAll(pattern))
+    words.push(
+      match[1] !== undefined
+        ? match[1].replaceAll("'\\''", "'")
+        : (match[2] as string),
+    );
+  return words;
+}
+
+test("daemon mode verify command carries every install option that matters and drops the rest on purpose", async (t) => {
+  // A new `service install` option must be classified before this passes.
+  assert.deepEqual(
+    Object.keys(VERIFY_OPTIONS).sort(),
+    Object.keys(LIFECYCLE_OPTIONS).sort(),
+  );
+  const f = await setup(t);
+  const options: ServiceOptions = {
+    ...f.options,
+    stateDir: join(f.home, "state with 'quote' and space"),
+    logDir: join(f.home, "logs & more"),
+    agentsDir: join(f.home, "agents $dir"),
+    port: 18_787,
+    diagnostic: { retentionDays: 7 },
+  };
+  const first: FirstRun = {
+    connection: "work-box",
+    open: false,
+    tokenFile: undefined,
+    tarball: join(f.home, "ensemble.tar.gz"),
+    mode: "daemon",
+  };
+  const command = daemonVerifyCommand(options, first, "0.1.0");
+  const [cli, service, install, ...args] = shellSplit(command);
+  assert.equal(
+    cli,
+    join(options.stateDir, "versions", "0.1.0", "bin", "ensemble"),
+  );
+  assert.deepEqual([service, install], ["service", "install"]);
+  const flags = args.filter((word) => word.startsWith("--"));
+  for (const [name, kind] of Object.entries(VERIFY_OPTIONS)) {
+    if (kind === "carried") assert.ok(flags.includes(`--${name}`), name);
+    else assert.equal(flags.includes(`--${name}`), false, name);
+  }
+  assert.equal(command.includes("ensemble.tar.gz"), false, "no TARBALL");
+  // Round trip: the printed command parses back to the effective options it was built from.
+  const parsed = lifecycleOptions(args, { HOME: f.home }, options.daemonsDir);
+  assert.ok(parsed);
+  assert.deepEqual(
+    {
+      stateDir: parsed.options.stateDir,
+      logDir: parsed.options.logDir,
+      agentsDir: parsed.options.agentsDir,
+      label: parsed.options.label,
+      port: parsed.options.port,
+      connection: parsed.connection,
+      mode: parsed.mode,
+      tokenFile: parsed.tokenFile,
+      positionals: parsed.positionals,
+    },
+    {
+      stateDir: options.stateDir,
+      logDir: options.logDir,
+      agentsDir: options.agentsDir,
+      label: options.label,
+      port: options.port,
+      connection: "work-box",
+      mode: "daemon",
+      tokenFile: undefined,
+      positionals: [],
+    },
+  );
+  // The rejected option really is rejected for daemon mode.
+  const fake = new FakeLaunchd(f.snapshots, f.options.daemonsDir);
+  const { io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const unused = (): OperatorConnection => {
+    throw new Error("unused");
+  };
+  assert.equal(
+    await serviceCommand(
+      ["install", "--mode", "daemon", "--token-file", "x"],
+      deps,
+      unused,
+      () => fake.host(),
+    ),
+    2,
+  );
+
+  // A real install with a named connection prints it, and the verify guidance follows it.
+  const real = await f.installDaemon({ connection: "work-box" });
+  assert.equal(real.code, 0, real.stderr);
+  assert.ok(real.stderr.includes("--connection work-box --mode daemon"));
+  runSudoSteps(f);
+  const verified = await f.installDaemon({ connection: "work-box" });
+  assert.match(
+    verified.stderr,
+    /ensemble auth login --connection work-box --url/,
+  );
+});
+
+/** Every path under `root` with its mode and content hash, as a map. */
+function treeMap(root: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of tree(root)) {
+    const cut = entry.lastIndexOf(" ", entry.lastIndexOf(" ") - 1);
+    map.set(entry.slice(0, cut), entry.slice(cut + 1));
+  }
+  return map;
+}
+
+function changes(before: Map<string, string>, after: Map<string, string>) {
+  const created = [...after.keys()].filter((path) => !before.has(path)).sort();
+  const removed = [...before.keys()].filter((path) => !after.has(path)).sort();
+  const changed = [...after.keys()]
+    .filter((path) => before.has(path) && before.get(path) !== after.get(path))
+    .sort();
+  return { created, removed, changed };
+}
+
+test("daemon mode commands write exactly the documented set of files and directories", async (t) => {
+  const f = await setup(t);
+  const root = dirname(f.home);
+  const rel = (path: string) => relative(root, path);
+  const launchd = join(f.stateDir, "launchd");
+  const record = rel(f.recordPath);
+  const staged = rel(f.staged);
+  const nothing = { created: [], removed: [], changed: [] };
+  let before = treeMap(root);
+  const step = () => {
+    const after = treeMap(root);
+    const result = changes(before, after);
+    before = after;
+    return result;
+  };
+
+  // First run: the log directory (outside STATE, with its missing parents), the data and
+  // launchd directories, the install record and the staged plist, and nothing else; the
+  // lock, the staging directory and the record's temporary file are gone again.
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.deepEqual(step(), {
+    created: [
+      rel(join(f.stateDir, "data")),
+      rel(launchd),
+      record,
+      staged,
+      rel(join(f.home, "Library", "Logs")),
+      rel(f.options.logDir),
+    ].sort(),
+    removed: [],
+    changed: [],
+  });
+  assert.equal(
+    existsSync(f.options.agentsDir),
+    false,
+    "no LaunchAgents directory",
+  );
+  assert.deepEqual(
+    readdirSync(f.options.daemonsDir),
+    [],
+    "nothing under the daemons directory",
+  );
+  assert.deepEqual(
+    readdirSync(f.options.logDir),
+    [],
+    "launchd creates the log files, not Ensemble",
+  );
+
+  // A re-run that finds nothing loaded writes nothing at all.
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.deepEqual(step(), nothing);
+
+  // The operator's sudo steps are not Ensemble's writes; verify then records the process.
+  runSudoSteps(f);
+  step();
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.deepEqual(step(), { created: [], removed: [], changed: [record] });
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.deepEqual(step(), nothing);
+
+  // Uninstall with the job loaded changes nothing it already recorded; once everything is
+  // gone it removes the staged plist and the record and creates nothing.
+  assert.equal((await f.uninstall()).code, 0);
+  assert.deepEqual(step(), nothing);
+  runSudoUninstallSteps(f);
+  f.launchd.alive.delete(5000);
+  step();
+  assert.equal((await f.uninstall()).code, 0);
+  assert.deepEqual(step(), {
+    created: [],
+    removed: [record, staged].sort(),
+    changed: [],
+  });
 });

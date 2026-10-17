@@ -896,13 +896,6 @@ class Service {
     );
   }
 
-  /** The command that verifies a daemon install: the installed release's own CLI, no TARBALL. */
-  verifyCommand(version: string): string {
-    const { stateDir, label, port } = this.options;
-    const cli = join(stateDir, "versions", version, "bin", "ensemble");
-    return `${shellWord(cli)} service install --mode daemon --state-dir ${shellWord(stateDir)} --label ${label} --port ${port}`;
-  }
-
   /** The commands the operator runs with sudo to install and start the staged daemon plist. */
   installSteps(alreadyInstalled = false): string[] {
     const installed = shellWord(this.installedDaemon);
@@ -1404,7 +1397,14 @@ async function installServiceLocked(
     ));
     if (daemon) {
       // Nothing reaches launchd: the operator runs the printed steps with sudo.
-      await finishDaemonInstall(service, version as string, logs, false, false);
+      await finishDaemonInstall(
+        service,
+        version as string,
+        logs,
+        false,
+        false,
+        first,
+      );
       return 0;
     }
     service.checkInterrupt();
@@ -1484,7 +1484,7 @@ async function finishDaemonInstall(
   logs: string[],
   started: boolean,
   alreadyInstalled: boolean,
-  first?: FirstRun,
+  first: FirstRun,
 ) {
   const steps = started ? [] : service.installSteps(alreadyInstalled);
   service.write("stdout", {
@@ -1500,7 +1500,7 @@ async function finishDaemonInstall(
     steps,
   });
   await warnGhKeychain(service);
-  if (first) {
+  if (started) {
     // Verifying never opens the browser; the app URL is still printed.
     await finishInstall(
       service,
@@ -1518,7 +1518,7 @@ async function finishDaemonInstall(
   line("Run these commands to install and start the service at boot:");
   for (const step of steps) line(step);
   line(
-    `Then run the same install command again, with the same options and no TARBALL, to verify: ${service.verifyCommand(version)}`,
+    `Then run the same install command again, with the same options and no TARBALL, to verify: ${daemonVerifyCommand(service.options, first, version)}`,
   );
 }
 
@@ -1597,6 +1597,7 @@ async function verifyDaemon(
     logs,
     false,
     installed !== null,
+    first,
   );
   return 0;
 }
@@ -2165,6 +2166,56 @@ export const LIFECYCLE_OPTIONS = {
   mode: { type: "string" },
 } as const;
 
+/**
+ * How each `service install` option reaches the verify command a daemon install prints.
+ * Every option must be classified (a test fails for a new one): carried into the command,
+ * irrelevant to a verify re-run, or rejected for daemon mode. The TARBALL argument is
+ * dropped on purpose, since a re-run takes the installed release and refuses a tarball.
+ */
+export const VERIFY_OPTIONS: Record<
+  keyof typeof LIFECYCLE_OPTIONS,
+  "carried" | "irrelevant" | "rejected"
+> = {
+  "state-dir": "carried",
+  "log-dir": "carried",
+  "launch-agents-dir": "carried",
+  label: "carried",
+  port: "carried",
+  connection: "carried",
+  mode: "carried",
+  "token-file": "rejected",
+  "no-open": "irrelevant",
+  "diagnostic-retention-days": "irrelevant",
+  "diagnostic-storage-mib": "irrelevant",
+};
+
+/** The command that verifies a daemon install: the installed release's CLI with every carried option. */
+export function daemonVerifyCommand(
+  options: ServiceOptions,
+  first: FirstRun,
+  version: string,
+): string {
+  const carried: Record<string, string | number> = {
+    "state-dir": options.stateDir,
+    "log-dir": options.logDir,
+    "launch-agents-dir": options.agentsDir,
+    label: options.label,
+    port: options.port,
+    connection: first.connection,
+    mode: "daemon",
+  };
+  const cli = join(options.stateDir, "versions", version, "bin", "ensemble");
+  return [
+    shellWord(cli),
+    "service",
+    "install",
+    ...Object.entries(carried).flatMap(([name, value]) => [
+      `--${name}`,
+      shellWord(String(value)),
+    ]),
+  ].join(" ");
+}
+
 function parseLifecycleArgs(args: string[]) {
   try {
     return parseArgs({
@@ -2191,7 +2242,7 @@ function diagnosticValue(
 }
 
 /** Lifecycle options with their defaults under HOME; null for a usage error. */
-function lifecycleOptions(
+export function lifecycleOptions(
   args: string[],
   env: NodeJS.ProcessEnv,
   daemonsDir: string,
