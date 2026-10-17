@@ -118,18 +118,41 @@ test("a project saves under its own name, a case-only change and other fields ne
 
 test("with three existing duplicates a fourth is refused and the list order is stable", () => {
   const f = fixture();
-  const ids = ["Atlas", "Relay", "Beacon"].map((name) => f.create(name));
-  for (const id of ids)
+  // Created in descending id order, so insertion order is not id order.
+  const ids = [
+    "00000000-0000-4000-8000-000000000003",
+    "00000000-0000-4000-8000-000000000002",
+    "00000000-0000-4000-8000-000000000001",
+  ] as const;
+  const names = ["Atlas", "ATLAS", "atlas"];
+  for (const [index, id] of ids.entries()) {
+    f.create(`Seed ${index}`, id);
     f.db
-      .prepare("UPDATE domain_projects SET name = 'Atlas' WHERE id = ?")
-      .run(id);
-  assert.throws(() => f.create("atlas"), taken("Atlas"));
+      .prepare("UPDATE domain_projects SET name = ? WHERE id = ?")
+      .run(names[index] ?? "", id);
+  }
+  // The first match by name then id is the one named, whatever the insertion order.
+  assert.throws(() => f.create("aTLAS"), taken("ATLAS"));
   const listed = f.domain.projects();
   assert.deepEqual(
     listed.map((row) => row.id),
-    [...ids].sort(),
+    ["ATLAS", "Atlas", "atlas"].map((name) =>
+      ids.find((id) => f.domain.project(id).name === name),
+    ),
   );
-  assert.ok(listed.every((row) => row.name === "Atlas"));
+});
+
+test("the name key trims and composes a legacy stored name", () => {
+  const f = fixture();
+  const id = f.create("Placeholder");
+  // Stored before names were trimmed and composed: padded, decomposed, upper case.
+  f.db
+    .prepare("UPDATE domain_projects SET name = ? WHERE id = ?")
+    .run("  CAFE\u0301 ", id);
+  assert.throws(() => f.create("caf\u00e9"), taken("  CAFE\u0301 "));
+  // Its own spelling in another form is a save, not a collision.
+  f.configure(id, { name: "caf\u00e9" });
+  assert.equal(f.domain.project(id).name, "caf\u00e9");
 });
 
 test("replaying the original create returns its recorded result after a duplicate exists", () => {
@@ -185,4 +208,35 @@ test("a duplicate name is refused before any repository is probed", async () => 
   assert.equal(probed, 1);
   // The same repository under a taken name fails on the name, not on a repository field.
   await assert.rejects(create("ATLAS 2"), taken("Atlas 2"));
+});
+
+test("replaying a guided create after a same-named project exists returns its recorded result", async () => {
+  const f = fixture(async (link) => ({
+    ...link,
+    gitCommonDirectory: `${link.path}/.git`,
+  }));
+  const command = {
+    type: "project.create" as const,
+    key: randomUUID(),
+    actor: "operator" as const,
+    projectId: randomUUID(),
+    name: "Atlas",
+    leadProfileId: null,
+    repositories: [
+      {
+        repositoryId: "R_1",
+        path: "/repo",
+        ref: "main",
+        owner: "acme",
+        name: "repo",
+      },
+    ],
+  };
+  const first = await f.domain.createProject(command);
+  const other = f.create("Relay");
+  f.db
+    .prepare("UPDATE domain_projects SET name = 'Atlas' WHERE id = ?")
+    .run(other);
+  assert.deepEqual(await f.domain.createProject(command), first);
+  assert.equal(f.count(), 2);
 });

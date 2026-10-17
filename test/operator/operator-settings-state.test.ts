@@ -1164,6 +1164,20 @@ test("only a refused project name carries the service's message", async () => {
   );
   assert.equal(other.phase, "rejected");
   assert.deepEqual(other.errors, { name: "Check this field." });
+  for (const code of ["forbidden", "conflict"] as const) {
+    const refused = new ConfigurationDraft();
+    await refused.submit(
+      new OperatorClient(async () =>
+        Response.json(
+          { error: { code, message: takenMessage, fieldPaths: ["name"] } },
+          { status: code === "conflict" ? 409 : 403 },
+        ),
+      ),
+      projectCreate("atlas"),
+      "csrf",
+    );
+    assert.notEqual(refused.errors.name, takenMessage, code);
+  }
   const several = new ConfigurationDraft();
   await several.submit(
     rejectWith(["name", "leadProfileId"]),

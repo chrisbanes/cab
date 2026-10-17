@@ -98,7 +98,7 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     name: "Atlas three",
     leadProfileId: jonas,
   });
-  const thirdTask = addTask(f, third, "Third task");
+  addTask(f, third, "Third task");
   d.execute({
     type: "project.create",
     actor: "operator",
@@ -153,13 +153,11 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     );
 
   // Selects offer the same distinct texts and choose by id.
-  const withLabels = (rows: readonly (readonly [string, string])[]) =>
-    rows.map(([value, text]) => [value, text]);
   const project = (rows: [string, string][]) =>
     rows.filter(([, text]) => text.startsWith("Atlas"));
   assert.deepEqual(
     project(await options(page, "Project")),
-    withLabels(expected),
+    expected.map(([value, text]) => [value, text]),
   );
   await page
     .getByRole("combobox", { name: "Project", exact: true })
@@ -178,20 +176,19 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     await page.getByText("First request", { exact: true }).count(),
     0,
   );
-  void thirdTask;
 
   await page.goto(`${web.origin}/app/search?query=request`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   assert.deepEqual(
     project(await options(page, "Project")),
-    withLabels(expected),
+    expected.map(([value, text]) => [value, text]),
   );
 
   await page.goto(`${web.origin}/app/tasks/new`);
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   assert.deepEqual(
     project(await options(page, "Project")),
-    withLabels(expected),
+    expected.map(([value, text]) => [value, text]),
   );
 
   await page.goto(`${web.origin}/app/inbox`);
@@ -222,6 +219,31 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     );
   }
 
+  // Every other project list reads the same labels: Overview Projects, Settings and Runtime.
+  for (const [path, heading] of [
+    ["/app", ".overview-project-name"],
+    ["/app/settings", ".settings-row-heading h3"],
+    ["/app/settings/runtime", ".settings-row-heading h3"],
+  ] as const) {
+    await page.goto(`${web.origin}${path}`);
+    for (const [, text] of expected)
+      await page.locator(heading).filter({ hasText: text }).first().waitFor();
+    const shown = (
+      await page
+        .locator(heading)
+        .evaluateAll((nodes) =>
+          nodes.map((node) =>
+            (node.textContent ?? "").replace(/\s+/g, " ").trim(),
+          ),
+        )
+    ).filter((text) => text.startsWith("Atlas"));
+    assert.ok(
+      expected.every(([, text]) => shown.includes(text)),
+      `${path}: ${shown.join(" | ")}`,
+    );
+  }
+
+  await page.goto(`${web.origin}/app/tasks`);
   // Phone: the drawer carries the same labels without horizontal overflow.
   await page.setViewportSize({ width: 375, height: 812 });
   await page

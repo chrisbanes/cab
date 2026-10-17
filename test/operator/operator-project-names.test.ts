@@ -61,20 +61,32 @@ test("a rename into another project's name is refused over HTTP and its own name
   assert.equal(d.project(other).name, "RELAY");
 });
 
-test("a very long duplicate name gets the bounded message, not a server error", async (t) => {
+test("the duplicate message names the other project up to the 256-character limit, then falls back", async (t) => {
   const { s, d } = await startCliOperator(t);
-  const long = "L".repeat(300);
-  d.execute({ ...create(long), actor: "operator" } as never);
-  const response = await s.sessionPost(
-    "/api/operator/commands",
-    create(long.toLowerCase()),
-  );
-  assert.equal(response.status, 400);
-  assert.deepEqual(((await response.json()) as { error: unknown }).error, {
-    code: "invalid-input",
-    message: "Another project has this name. Choose a different name.",
-    fieldPaths: ["name"],
-  });
+  // "Another project is named " + name + ". Choose a different name." is 256 characters at 205.
+  for (const [length, message] of [
+    [
+      205,
+      `Another project is named ${"L".repeat(205)}. Choose a different name.`,
+    ],
+    [206, "Another project has this name. Choose a different name."],
+    [300, "Another project has this name. Choose a different name."],
+  ] as const) {
+    d.execute({
+      ...create("L".repeat(length)),
+      actor: "operator",
+    } as never);
+    const response = await s.sessionPost(
+      "/api/operator/commands",
+      create("l".repeat(length)),
+    );
+    assert.equal(response.status, 400, String(length));
+    assert.deepEqual(((await response.json()) as { error: unknown }).error, {
+      code: "invalid-input",
+      message,
+      fieldPaths: ["name"],
+    });
+  }
 });
 
 test("the CLI reports a duplicate project name with the field, a fix line and exit 2", async (t) => {
@@ -110,7 +122,11 @@ test("the CLI reports a duplicate project name with the field, a fix line and ex
 
 test("project list returns duplicates by id and its table and JSON keep their shape", async (t) => {
   const { s, h, cli, d } = await startCliOperator(t);
-  const ids = [randomUUID(), randomUUID()];
+  // Created in descending id order, so insertion order is not id order.
+  const ids = [
+    "00000000-0000-4000-8000-000000000002",
+    "00000000-0000-4000-8000-000000000001",
+  ];
   for (const [index, projectId] of ids.entries())
     d.execute({
       ...create(`Seed ${index}`),
