@@ -3,19 +3,25 @@ import { randomUUID } from "node:crypto";
 import {
   lstat,
   mkdir,
+  mkdtemp,
   readdir,
   realpath,
+  rm,
   stat,
   symlink,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import type { z } from "zod";
 import { deliveryPolicySchema } from "../../src/core/delivery.js";
 import { DomainPolicyError } from "../../src/core/domain.js";
 import { githubConfigurationSchema } from "../../src/core/github-source-contracts.js";
-import { operatorCommandSchema } from "../../src/operator/contracts.js";
+import {
+  cliCapabilities,
+  operatorCommandSchema,
+  setupHomeSchema,
+} from "../../src/operator/contracts.js";
 import { coordinationTools } from "../../src/standalone/coordination-tools.js";
 import { DiscoveryFailure } from "../../src/standalone/github-discovery.js";
 import {
@@ -26,14 +32,18 @@ import {
   listHomeFolders,
   verifyCheckout,
 } from "../../src/standalone/operator-setup.js";
+import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
+import { databaseDigest } from "../fixtures/database-digest.js";
 import { createFakeGh, fakeGhToken } from "../fixtures/fake-gh.js";
 import {
   gitEnvironmentProbe,
   hardenedGitEnvironment,
   withHostileGitEnvironment,
 } from "../fixtures/git-environment.js";
+import { serveCli } from "../fixtures/operator-cli.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { createSetupHome, fakeDiscovery, git } from "../fixtures/setup-home.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 const configure = (credentialRef: string | null) => ({
   type: "discovery.configure",
@@ -1019,4 +1029,251 @@ test("discovery status reports the login a new project's gh source would use, by
   for (const text of texts)
     for (const secret of ["t-good", "t-stored", "bad", "GH_TOKEN"])
       assert.equal(text.includes(secret), false, secret);
+});
+
+const HOME_PATH = "/api/operator/setup/home";
+type HomeAfter = Parameters<typeof serveCli>[0];
+
+/** A fixture served with a signed-in session, the bearer path and a temp home that has spaces and non-ASCII text. */
+async function startHome(
+  t: HomeAfter,
+  options: {
+    auth?: { now: () => number; idleTimeoutMs: number };
+    suffix?: string;
+  } = {},
+) {
+  const root = await mkdtemp(join(tmpdir(), "ensemble-setup-home-"));
+  const home = join(root, "Home Folder ünï");
+  await mkdir(home);
+  const f = await createOperatorFixture();
+  t.after(async () => {
+    await f.close();
+    await rm(root, { recursive: true, force: true });
+  });
+  const served = await serveCli(t, f, {
+    setup: { home: `${home}${options.suffix ?? ""}` },
+    ...(options.auth ? { auth: options.auth } : {}),
+  });
+  return { ...served, home };
+}
+
+test("the setup home read returns the service home to a signed-in session", async (t) => {
+  const s = await startHome(t);
+  const r = await s.sessionGet(HOME_PATH);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("cache-control"), "no-store");
+  assert.equal(r.headers.get("etag"), null);
+  assert.equal(r.headers.get("last-modified"), null);
+  assert.equal(setupHomeSchema.parse(await r.json()).data.home, s.home);
+
+  const slash = await startHome(t, { suffix: "/" });
+  const trimmed = await slash.sessionGet(HOME_PATH);
+  assert.equal(
+    setupHomeSchema.parse(await trimmed.json()).data.home,
+    slash.home,
+  );
+
+  assert.equal((await s.sessionGet(`${HOME_PATH}?x=1`)).status, 400);
+  // Only an exact GET of the exact path answers; no other method, path form or case does.
+  for (const method of ["POST", "PUT", "DELETE", "HEAD"])
+    assert.equal(
+      (
+        await fetch(`${s.origin}${HOME_PATH}`, {
+          method,
+          headers: { cookie: s.cookie },
+        })
+      ).status,
+      405,
+      method,
+    );
+  for (const path of [
+    `${HOME_PATH}/`,
+    "/api/operator/setup/Home",
+    "/api/operator/Setup/home",
+  ]) {
+    const other = await s.sessionGet(path);
+    assert.equal(other.status, 404, path);
+    assert.ok(!(await other.text()).includes(s.home), path);
+  }
+});
+
+test("the setup home read returns null for an unusable home", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const context = { ownerKey: "k".repeat(64), current: () => true };
+  const homeOf = (home: string) =>
+    setupHomeSchema.parse(
+      new OperatorApi(f.service, [f.directory], undefined, undefined, {
+        home,
+      }).readSetupHome(context),
+    ).data.home;
+  for (const unusable of [
+    "",
+    "relative/home",
+    "/",
+    "/tmp/line\nbreak",
+    "/tmp/carriage\rreturn",
+    `/tmp/${"x".repeat(1100)}`,
+  ])
+    assert.equal(homeOf(unusable), null, JSON.stringify(unusable.slice(0, 20)));
+  // Spaces and non-ASCII text are valid, and a trailing separator or dot segment is dropped.
+  assert.equal(homeOf("/tmp/Home Folder ünï/"), "/tmp/Home Folder ünï");
+  assert.equal(homeOf("/tmp/a/./b"), resolve("/tmp/a/b"));
+  // Exactly the longest suggested reference the command accepts.
+  const suffix = "/.ensemble/claude/claude-token";
+  const longest = `/${"y".repeat(1024 - "file:/".length - suffix.length)}`;
+  assert.equal(`file:${longest}${suffix}`.length, 1024);
+  assert.equal(homeOf(longest), longest);
+  assert.equal(homeOf(`${longest}y`), null);
+});
+
+test("the setup home read refuses read and read-write bearer credentials", async (t) => {
+  const s = await startHome(t);
+  for (const scope of ["read", "read-write"] as const) {
+    const { token } = await s.issue(scope, `home-${scope}`);
+    for (const headers of [{}, { cookie: s.cookie }]) {
+      const r = await s.bearer(token, HOME_PATH, { headers });
+      assert.equal(r.status, 403, scope);
+      assert.equal(r.headers.get("set-cookie"), null);
+      assert.ok(!(await r.text()).includes(s.home));
+    }
+    const post = await s.bearer(token, HOME_PATH, { method: "POST", body: {} });
+    assert.ok(post.status === 403 || post.status === 405);
+    assert.ok(!(await post.text()).includes(s.home));
+  }
+  assert.equal(operatorRouteAuthority("GET", HOME_PATH), "session-only");
+  assert.ok(
+    !(cliCapabilities as readonly string[]).some((c) => /home|setup/.test(c)),
+  );
+});
+
+test("the setup home read refuses missing, anonymous, signed-out and expired sessions", async (t) => {
+  let clock = Date.now();
+  const s = await startHome(t, {
+    auth: { now: () => clock, idleTimeoutMs: 1_000 },
+  });
+  const refused = async (headers: Record<string, string>, label: string) => {
+    const r = await fetch(`${s.origin}${HOME_PATH}`, { headers });
+    assert.equal(r.status, 401, label);
+    assert.ok(!(await r.text()).includes(s.home), label);
+  };
+  await refused({}, "no cookie");
+  const anonymous = await fetch(`${s.origin}/api/operator/session`);
+  await refused(
+    { cookie: anonymous.headers.get("set-cookie")?.split(";")[0] ?? "" },
+    "anonymous session",
+  );
+  assert.equal((await s.sessionGet(HOME_PATH)).status, 200);
+  const expiring = s.cookie;
+  clock += 5_000;
+  await refused({ cookie: expiring }, "expired session");
+
+  const second = await startHome(t);
+  const signedIn = second.cookie;
+  assert.equal((await second.sessionGet(HOME_PATH)).status, 200);
+  assert.equal(
+    (await second.sessionPost("/api/operator/logout", {})).status,
+    200,
+  );
+  const after = await fetch(`${second.origin}${HOME_PATH}`, {
+    headers: { cookie: signedIn },
+  });
+  assert.equal(after.status, 401, "signed-out session");
+  assert.ok(!(await after.text()).includes(second.home));
+});
+
+test("the setup home read records and logs nothing and the home stays out of every other read", async (t) => {
+  const s = await startHome(t);
+  const read = await s.issue("read", "home-leak-ro");
+  const write = await s.issue("read-write", "home-leak-rw");
+  // A reference under the home is configured, as Add Claude would save it.
+  const reference = `file:${s.home}/.ensemble/claude/claude-token`;
+  assert.equal(
+    (
+      await s.sessionPost("/api/operator/commands", {
+        type: "claude-token.configure",
+        key: randomUUID(),
+        credentialRef: reference,
+      })
+    ).status,
+    200,
+  );
+  const chunks: string[] = [];
+  const stderr = process.stderr.write.bind(process.stderr);
+  const stdout = process.stdout.write.bind(process.stdout);
+  const capture = (chunk: unknown) => {
+    chunks.push(String(chunk));
+    return true;
+  };
+  const before = databaseDigest(s.f);
+  process.stderr.write = capture as typeof process.stderr.write;
+  process.stdout.write = capture as typeof process.stdout.write;
+  try {
+    for (let i = 0; i < 3; i++)
+      assert.equal(
+        (await (await s.sessionGet(HOME_PATH)).arrayBuffer()).byteLength > 0,
+        true,
+      );
+  } finally {
+    process.stderr.write = stderr;
+    process.stdout.write = stdout;
+  }
+  assert.equal(databaseDigest(s.f), before);
+  assert.ok(!chunks.join("").includes(s.home));
+  const bodies: string[] = [];
+  const surfaces = [
+    "/api/operator/session",
+    "/api/operator/cli",
+    "/api/operator/claude-token",
+    "/api/operator/readiness",
+    "/api/operator/readiness/claude-token",
+    "/api/operator/runtime",
+    "/api/operator/workspace",
+    "/api/operator/task-list",
+    "/api/operator/inbox",
+    "/api/operator/operations",
+    "/api/operator/discovery",
+  ];
+  for (const path of surfaces)
+    for (const get of [
+      () => s.sessionGet(path),
+      () => s.bearer(read.token, path),
+      () => s.bearer(write.token, path),
+    ]) {
+      const r = await get();
+      bodies.push(`${path} ${r.status} ${await r.text()}`);
+    }
+  for (const body of bodies)
+    assert.ok(!body.includes(s.home), body.slice(0, 80));
+  assert.ok(bodies.some((b) => b.startsWith("/api/operator/claude-token 200")));
+});
+
+test("the setup home read refuses without a current session even when routed past the route table", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory], undefined, undefined, {
+    home: "/tmp/ensemble-home",
+  });
+  const status = (call: () => unknown) => {
+    try {
+      call();
+    } catch (error) {
+      return (error as { status?: number }).status;
+    }
+    return undefined;
+  };
+  assert.equal(
+    status(() => api.readSetupHome()),
+    403,
+  );
+  assert.equal(
+    status(() =>
+      api.readSetupHome({ ownerKey: "k".repeat(64), current: () => false }),
+    ),
+    401,
+  );
+  assert.equal(
+    status(() => api.readSetupHome({ ownerKey: "short", current: () => true })),
+    403,
+  );
 });

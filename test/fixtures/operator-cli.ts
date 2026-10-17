@@ -27,6 +27,8 @@ type ServeOptions = {
   authOrigin?: string;
   controlPaths?: string[];
   previewReader?: ConstructorParameters<typeof OperatorApi>[3];
+  /** Setup seams, such as the home folder the setup routes read. */
+  setup?: ConstructorParameters<typeof OperatorApi>[4];
   /** A controllable session clock and idle timeout, to expire a signed-in session. */
   auth?: { now: () => number; idleTimeoutMs: number };
 };
@@ -115,6 +117,7 @@ export async function serveCli<F extends Fixture>(
       options.controlPaths ?? [f.directory],
       undefined,
       options.previewReader,
+      options.setup,
     );
     return new LocalOperatorHttp(
       new LocalOperatorUi(

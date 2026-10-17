@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { CliError } from "../../src/cli/connections.js";
 import { ServiceClient } from "../../src/cli/transport.js";
@@ -7,6 +9,7 @@ import { cliCapabilities } from "../../src/operator/contracts.js";
 import { operatorRouteAuthority } from "../../src/standalone/operator-credentials.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliService } from "../fixtures/operator-cli.js";
+import { tmpdir } from "../fixtures/temp.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -88,7 +91,9 @@ test("command transport retains only validated source credential refusal metadat
 });
 
 test("bearer credentials read through the service under server-side route authority", async (t) => {
-  const s = await startCliService(t);
+  const home = mkdtempSync(join(tmpdir(), "ensemble-cli-home-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const s = await startCliService(t, { setup: { home } });
   const read = await s.issue("read", "laptop-ro");
   const write = await s.issue("read-write", "agent-rw");
   const taskPath = `/api/operator/tasks/${s.taskId}`;
@@ -146,6 +151,7 @@ test("bearer credentials read through the service under server-side route author
     ["POST", "/api/operator/logout", {}],
     ["POST", "/api/operator/setup/folders", { path: "" }],
     ["POST", "/api/operator/setup/verify-checkout", {}],
+    ["GET", "/api/operator/setup/home"],
     ["GET", `/api/operator/tasks/${s.taskId}/review-draft`],
     ["GET", `/api/operator/tasks/${s.taskId}/local-reviews`],
     ["GET", `/api/operator/tasks/${s.taskId}/local-reviews/${randomUUID()}`],
@@ -167,6 +173,7 @@ test("bearer credentials read through the service under server-side route author
       r = await s.bearer(token, path, { method, body });
       assert.equal(r.status, 403, `${method} ${path}`);
       assert.equal(r.headers.get("set-cookie"), null);
+      assert.ok(!(await r.text()).includes(home), `${method} ${path}`);
     }
   assert.equal(
     s.f.service.operatorCredentials().list().length,
@@ -415,6 +422,7 @@ test("every known API route has an explicit authority", () => {
     "/api/operator/discovery/project-fields",
     "/api/operator/setup/folders",
     "/api/operator/setup/verify-checkout",
+    "/api/operator/setup/home",
     "/api/operator/cli",
     "/api/operator/credentials",
     `/api/operator/credentials/${id}/rotate`,
