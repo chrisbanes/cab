@@ -3,7 +3,10 @@ import { unmetText } from "../../src/operator/readiness-text.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 import { shortId } from "./presentation.js";
-import { nextActor, reasonLabels, type TaskColumn } from "./tasks.js";
+import { taskColumnOf } from "../../src/operator/task-presentation.js";
+import { nextActor, reasonLabels } from "./tasks.js";
+
+export { taskColumnOf };
 
 type Data = TaskRead["data"];
 type Source = NonNullable<Data["review"]>["sources"][number];
@@ -141,30 +144,6 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
 /** The readiness text, then the accountable lead. */
 export function taskStatusLine(data: StatusData) {
   return `${taskReadiness(data)} / Accountable project lead: ${data.lead?.name ?? "Unconfigured"}`;
-}
-
-/** The task's Board column from its own read, in `taskColumn`'s precedence. */
-export function taskColumnOf(
-  data: Pick<Data, "task" | "execution" | "admission" | "source">,
-): TaskColumn {
-  const { task, execution } = data,
-    s = execution.state;
-  if (execution.holds.stop || s === "stopping") return "Stopping";
-  if (execution.holds.uncertainty || s === "uncertain") return "Uncertain";
-  if (s === "running" || s === "starting") return "Running";
-  if (task.state === "done") return "Done";
-  if (task.state === "cancelled") return "Cancelled";
-  if (
-    s === "paused" ||
-    data.source?.closure === "held" ||
-    data.source?.closure === "unattributed" ||
-    data.admission.reasons.includes("project-paused")
-  )
-    return "Paused";
-  if (!task.ready) return "Draft";
-  if (!data.admission.eligible || s === "waiting" || execution.holds.task)
-    return "Waiting";
-  return "Ready";
 }
 
 /** Who acts next, from the task read's attention codes by the List's rule (`nextActor`). */
