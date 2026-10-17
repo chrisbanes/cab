@@ -34,12 +34,14 @@ import {
 import {
   nativeQuestionForm,
   type QuestionAnswers,
+  type QuestionForm,
   questionFormSchema,
 } from "../core/question-forms.js";
 import {
   executionHarnessLabels,
   executionIntentStateSchema,
 } from "../core/execution-runtime.js";
+import type { StructuredQuestionSet } from "../core/structured-questions.js";
 import type { Readiness } from "../core/github-source-contracts.js";
 import type { TaskReadiness } from "../core/github-source.js";
 import { taskReviewReadSchema } from "../core/task-review.js";
@@ -2732,20 +2734,20 @@ export class OperatorApi {
             : true;
     return visit(value);
   }
-  async readQuestion(taskId: string, interactionId: string) {
-    uuid.parse(interactionId);
-    const visibility = this.visibilityToken(),
-      workspaceVisibility = this.service.taskWorkspaceVisibility(taskId),
-      task = this.requireTask(taskId),
-      excluded = await this.exclusions(String(task.projectId), taskId);
-    const view = this.coordination(),
-      v = view.readTask(taskId),
-      interaction = v.questions.find((q) => q.interactionId === interactionId);
-    if (!interaction) throw new OperatorApiError(404, "not-found");
-    const own = view.questionForm(interactionId),
-      native = v.runtimeQuestions?.find(
-        (q) => q.interactionId === interactionId,
-      );
+  // One composition for the exact read and the queue headline, so they cannot disagree.
+  private composedQuestion(
+    interaction: Pick<CoordinationInteraction, "prompt" | "response">,
+    own:
+      | { form: QuestionForm; answers: QuestionAnswers | null }
+      | null
+      | undefined,
+    native:
+      | {
+          request: { questions: StructuredQuestionSet };
+          answers?: Record<string, { answers: string[] }> | null | undefined;
+        }
+      | undefined,
+  ) {
     const source = native ? "native" : own ? "ensemble" : "plain";
     const form =
       own?.form ??
@@ -2781,6 +2783,27 @@ export class OperatorApi {
       );
     if (source === "plain" && interaction.response !== null)
       answers = { answer: { optionIds: [], text: interaction.response } };
+    return { source, form, answers } as const;
+  }
+  async readQuestion(taskId: string, interactionId: string) {
+    uuid.parse(interactionId);
+    const visibility = this.visibilityToken(),
+      workspaceVisibility = this.service.taskWorkspaceVisibility(taskId),
+      task = this.requireTask(taskId),
+      excluded = await this.exclusions(String(task.projectId), taskId);
+    const view = this.coordination(),
+      v = view.readTask(taskId),
+      interaction = v.questions.find((q) => q.interactionId === interactionId);
+    if (!interaction) throw new OperatorApiError(404, "not-found");
+    const own = view.questionForm(interactionId),
+      native = v.runtimeQuestions?.find(
+        (q) => q.interactionId === interactionId,
+      );
+    const { source, form, answers } = this.composedQuestion(
+      interaction,
+      own,
+      native,
+    );
     const intact =
       this.intactQuestion(form, excluded) &&
       this.intactQuestion(answers, excluded);
@@ -2828,6 +2851,35 @@ export class OperatorApi {
       },
       observedAt: Date.now(),
     });
+  }
+  // The queue's headline discloses only what the exact read would: null under privacy exclusions.
+  private requestHeadline(
+    q: CoordinationInteraction,
+    native: { request: { questions: StructuredQuestionSet } } | undefined,
+    excluded: readonly string[] | undefined,
+  ): string | null {
+    if (q.kind === "approval") {
+      const approval = this.interaction(q, excluded);
+      return approval.approvable ? approval.action : null;
+    }
+    // A corrupt stored form must not take the task's other rows down with it.
+    try {
+      const { source, form, answers } = this.composedQuestion(
+        q,
+        this.coordination().questionForm(q.interactionId),
+        native,
+      );
+      if (
+        !this.intactQuestion(form, excluded) ||
+        !this.intactQuestion(answers, excluded)
+      )
+        return null;
+      return source === "plain"
+        ? this.safe(q.prompt, excluded)
+        : (form.questions[0]?.label ?? null);
+    } catch {
+      return null;
+    }
   }
   async readInbox(params = new URLSearchParams()) {
     const allowed = ["cursor", "limit", "kind", "project"];
@@ -2897,6 +2949,7 @@ export class OperatorApi {
             attentionCode,
             destination: `/app/tasks/${taskId}`,
             conversation: null,
+            headline: null,
           });
         for (const q of [...view.questions, ...view.approvals]) {
           const native = view.runtimeQuestions?.find(
@@ -2921,6 +2974,7 @@ export class OperatorApi {
           items.push({
             ...base,
             id: q.interactionId,
+            headline: this.requestHeadline(q, native, excluded),
             kind: q.kind,
             urgency: 1,
             createdAt: q.createdAt * 1000, // coordination SQLite timestamps are unix seconds.

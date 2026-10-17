@@ -49,6 +49,7 @@ export function QuestionResponse({
   onBack,
   compactContext = false,
   holds = [],
+  observedAt,
 }: {
   client: OperatorClient;
   session: Session;
@@ -64,6 +65,8 @@ export function QuestionResponse({
   compactContext?: boolean;
   /** Independent holds an answer does not clear; only the Inbox reads them. */
   holds?: readonly HoldNotice[];
+  /** The host page's last successful read: each change rereads this request, as the page's Refresh and polls do. */
+  observedAt?: number | null | undefined;
 }) {
   const loader = useCallback(
     (signal: AbortSignal) =>
@@ -84,6 +87,18 @@ export function QuestionResponse({
   const content = useRef<HTMLDivElement>(null),
     formElement = useRef<HTMLFormElement>(null);
   const state = data?.form ? states.forQuestion(data) : null;
+  // A background reread never runs while an answer is sending or unconfirmed; the draft lives in `states`.
+  const busy = useRef(false),
+    seen = useRef(observedAt);
+  busy.current = Boolean(state?.sending || state?.lifecycle.uncertain);
+  const poll = resource.poll;
+  const reread = useRef(poll);
+  reread.current = poll;
+  useEffect(() => {
+    if (seen.current === observedAt) return;
+    seen.current = observedAt;
+    if (!busy.current) void reread.current();
+  }, [observedAt]);
   // The check that follows a send replaces the button the operator used, so it takes focus.
   const sent = useRef(false);
   if (state?.sending) sent.current = true;
@@ -205,45 +220,25 @@ export function QuestionResponse({
       <ResourceStatus state={resource.state} retry={resource.refresh} />
       {data && (
         <>
-          <div className="question-context">
-            <StatusBadge {...statusBadges[data.status]} />
-            {state && total > 1 && (
-              <span
-                className="question-progress metadata muted"
-                aria-live="polite"
-              >
-                {completedQuestionCount(
-                  state.form,
-                  recorded && data.answers ? data.answers : state.answers,
-                )}{" "}
-                of {total} completed
-              </span>
-            )}
-            <p className="metadata muted">
-              {compactContext
-                ? ""
-                : `Requester: assignment ${data.requestingAssignmentId}. `}
-              Conversation revision {data.conversationRevision}.
-            </p>
-            {!compactContext && (
-              <ActionLink
-                id={conversationId}
-                variant="secondary"
-                onFocus={evidenceFocus(conversationId)}
-                href={`/app/tasks/${taskId}?assignment=${data.requestingAssignmentId}#history`}
-              >
-                Requesting conversation
-              </ActionLink>
-            )}
-            <ActionLink
-              id={evidenceId}
-              variant="secondary"
-              onFocus={evidenceFocus(evidenceId)}
-              href={`/app/tasks/${taskId}?request=${interactionId}#history`}
-            >
-              Question evidence
-            </ActionLink>
-          </div>
+          {(data.status !== "pending" || (state && total > 1)) && (
+            <div className="question-context">
+              {data.status !== "pending" && (
+                <StatusBadge {...statusBadges[data.status]} />
+              )}
+              {state && total > 1 && (
+                <span
+                  className="question-progress metadata muted"
+                  aria-live="polite"
+                >
+                  {completedQuestionCount(
+                    state.form,
+                    recorded && data.answers ? data.answers : state.answers,
+                  )}{" "}
+                  of {total} completed
+                </span>
+              )}
+            </div>
+          )}
           {notice && (
             <Card className="question-notice" role="alert">
               <h3 className="small-heading">{notice.title}</h3>
@@ -300,10 +295,6 @@ export function QuestionResponse({
                   be retargeted.
                 </p>
               )}
-              <p className="question-hint metadata muted">
-                Preselected and recommended choices are drafts. Submit the
-                complete group explicitly.
-              </p>
               <div
                 className={`question-content ${total > 1 ? "question-content-grouped" : ""}`}
                 ref={content}
@@ -466,7 +457,7 @@ export function QuestionResponse({
                   !state.sending && (
                     <p role="status" className="question-status">
                       {staleRead
-                        ? `Stale read · last read ${resource.state.fetchedAt ? clockLabel(resource.state.fetchedAt) : "unknown"} · refresh to continue`
+                        ? `Stale read · last read ${resource.state.fetchedAt ? clockLabel(resource.state.fetchedAt) : "unknown"} · try again to continue`
                         : draftStatus(state, summary)}
                     </p>
                   )
@@ -491,20 +482,42 @@ export function QuestionResponse({
                             : "Submit answer"}
                     </Button>
                   )}
-                  {state.outcome !== "conflict" &&
-                    !state.lifecycle.uncertain && (
-                      <Button
-                        type="button"
-                        variant={staleRead ? "primary" : "secondary"}
-                        onClick={resource.refresh}
-                      >
-                        Refresh request
-                      </Button>
-                    )}
                 </div>
               </div>
             </form>
           )}
+          <div className="question-context question-context-foot">
+            {state && !recorded && (
+              <p className="question-hint metadata muted">
+                Preselected and recommended choices are drafts. Submit the
+                complete group explicitly.
+              </p>
+            )}
+            <p className="metadata muted">
+              {compactContext
+                ? ""
+                : `Requester: assignment ${data.requestingAssignmentId}. `}
+              Conversation revision {data.conversationRevision}.
+            </p>
+            {!compactContext && (
+              <ActionLink
+                id={conversationId}
+                variant="secondary"
+                onFocus={evidenceFocus(conversationId)}
+                href={`/app/tasks/${taskId}?assignment=${data.requestingAssignmentId}#history`}
+              >
+                Requesting conversation
+              </ActionLink>
+            )}
+            <ActionLink
+              id={evidenceId}
+              variant="secondary"
+              onFocus={evidenceFocus(evidenceId)}
+              href={`/app/tasks/${taskId}?request=${interactionId}#history`}
+            >
+              Question evidence
+            </ActionLink>
+          </div>
         </>
       )}
     </section>
@@ -561,9 +574,8 @@ function draftStatus(
     : `All ${state.form.questions.length} answers ready · not submitted`;
 }
 
-/** Each request status as a worded state badge; the tone supplies its symbol. */
+/** Each status that changes what the operator can do as a worded badge; a pending request needs none. */
 const statusBadges = {
-  pending: { tone: "warning", children: "Awaiting answer" },
   recorded: { tone: "success", children: "Answer recorded" },
   stale: { tone: "idle", children: "Stale" },
   cancelled: { tone: "idle", icon: CircleSlash, children: "Cancelled" },
@@ -571,7 +583,7 @@ const statusBadges = {
   unsupported: { tone: "error", children: "Unsupported" },
   unavailable: { tone: "error", children: "Unavailable" },
 } as const satisfies Record<
-  QuestionRead["data"]["status"],
+  Exclude<QuestionRead["data"]["status"], "pending">,
   ComponentProps<typeof StatusBadge>
 >;
 type Notice = {

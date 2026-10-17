@@ -2549,6 +2549,8 @@ export const inboxItemSchema = z
     requesterName: safeText,
     interactionId: uuid.nullable(),
     revision: revision.nullable(),
+    // The first question's label or the approval's exact action; null when withheld.
+    headline: safeText,
     reason: safeText,
     attentionCode: attentionCodeSchema.nullable(),
     destination: z.string().max(512),

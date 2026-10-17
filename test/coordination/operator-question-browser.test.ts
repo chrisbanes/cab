@@ -7,8 +7,79 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
+import { choiceForm } from "../fixtures/question-data.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 const test = browserSuite("operator-question-browser");
+test("a page refresh does not reread a request whose answer is unconfirmed", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedOwnQuestion(f, choiceForm, "Guide task", "Docs"),
+    web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const questionReads: string[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "GET" &&
+      new URL(request.url()).pathname.endsWith(`/questions/${a.interactionId}`)
+    )
+      questionReads.push(request.url());
+  });
+  await page.goto(
+    `${web.origin}/app/tasks/${a.taskId}?request=${a.interactionId}`,
+  );
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  const form = page.getByRole("region", { name: "Exact question response" });
+  await form.getByRole("radio", { name: /^Team owners/ }).check();
+  // The command reaches the service but its response is lost: the outcome is unconfirmed.
+  await page.route("**/api/operator/commands", async (route) => {
+    await route.fetch();
+    await route.abort("failed");
+  });
+  await form
+    .getByRole("button", { name: "Submit answer", exact: true })
+    .click();
+  await form
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .waitFor();
+  const reads = questionReads.length;
+  // The page's own refresh settles, yet the unconfirmed request is not reread or replaced.
+  const taskRead = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${a.taskId}`,
+  );
+  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await taskRead;
+  await page.evaluate(
+    () => new Promise<void>((resolve) => setTimeout(() => resolve(), 300)),
+  );
+  assert.equal(questionReads.length, reads, questionReads.join());
+  assert.equal(
+    await form.getByRole("radio", { name: /^Team owners/ }).isChecked(),
+    true,
+  );
+  await page.unroute("**/api/operator/commands");
+  await form
+    .getByRole("button", { name: "Check whether it saved", exact: true })
+    .click();
+  await form.getByText("Answer recorded", { exact: true }).first().waitFor();
+  assert.equal(
+    f.service.coordinationView().readTask(a.taskId).questions[0]?.status,
+    "answered",
+  );
+});
+
 test("production mixed form preserves literal schema, keyboard input, field errors and original unknown command across task navigation", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),

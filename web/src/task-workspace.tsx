@@ -1557,6 +1557,7 @@ export function TaskWorkspace({
                     interactionId={params.get("request")!}
                     states={questionStates}
                     onRecorded={refreshAll}
+                    observedAt={resource.state.fetchedAt}
                     requesterName={requesterOf(params.get("request"))}
                   />
                 )}

@@ -24,6 +24,36 @@ export const requestActionLabel = (
       (item.kind === "intervention" ? "execution-uncertain" : item.kind)
   ].inboxAction;
 
+/**
+ * What a request is called in the queue and the pane: the question or exact action when the read
+ * model carries it, otherwise the task title. The generic question and approval reasons are not
+ * shown; the intervention and native-delivery reasons are.
+ */
+export function requestHeading(
+  item: Pick<
+    InboxItem,
+    | "kind"
+    | "headline"
+    | "taskTitle"
+    | "projectName"
+    | "reason"
+    | "attentionCode"
+  >,
+) {
+  const title = item.headline ?? item.taskTitle,
+    subtitle = (
+      item.headline ? [item.projectName, item.taskTitle] : [item.projectName]
+    )
+      .filter(Boolean)
+      .join(" / ");
+  return {
+    title,
+    subtitle: subtitle || null,
+    reason:
+      item.kind === "intervention" || item.attentionCode ? item.reason : null,
+  };
+}
+
 /** Relative age such as "8m", "1h 46m" or "1d 1h"; a future time reads as just now. */
 export function ageLabel(createdAt: number, now: number) {
   const minutes = Math.floor(Math.max(0, now - createdAt) / 60_000);

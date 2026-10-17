@@ -9,6 +9,7 @@ import {
   holdNoticesBesideRequests,
   queueGroups,
   requestActionLabel,
+  requestHeading,
   requestIdentity,
   requestKindLabel,
   taskContext,
@@ -71,11 +72,81 @@ const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
   requesterName: "R",
   interactionId: null,
   revision: null,
+  headline: null,
   reason: "r",
   destination: "/",
   attentionCode: null,
   evidence: "/",
   conversation: null,
+});
+
+test("a request leads with its question or exact action and keeps only the reasons the operator needs", () => {
+  const base = {
+    taskTitle: "Guide",
+    projectName: "Docs",
+    reason: "Operator answer requested",
+    attentionCode: null,
+  } as const;
+  assert.deepEqual(
+    requestHeading({ ...base, kind: "question", headline: "Pick an audience" }),
+    { title: "Pick an audience", subtitle: "Docs / Guide", reason: null },
+  );
+  assert.deepEqual(
+    requestHeading({
+      ...base,
+      kind: "approval",
+      reason: "Review exact approval material",
+      headline: "Create a pull request.",
+    }),
+    { title: "Create a pull request.", subtitle: "Docs / Guide", reason: null },
+  );
+  // A recorded answer waiting on native delivery keeps its reason.
+  assert.deepEqual(
+    requestHeading({
+      ...base,
+      kind: "question",
+      headline: "Pick an audience",
+      reason: "Answer recorded; native delivery remains unresolved",
+      attentionCode: "question-delivery",
+    }),
+    {
+      title: "Pick an audience",
+      subtitle: "Docs / Guide",
+      reason: "Answer recorded; native delivery remains unresolved",
+    },
+  );
+  assert.deepEqual(
+    requestHeading({
+      ...base,
+      kind: "intervention",
+      headline: null,
+      reason: "Execution ownership is uncertain",
+    }),
+    {
+      title: "Guide",
+      subtitle: "Docs",
+      reason: "Execution ownership is uncertain",
+    },
+  );
+  // A withheld headline falls back to the task title, never an "Unavailable" title.
+  assert.deepEqual(
+    requestHeading({ ...base, kind: "question", headline: null }),
+    { title: "Guide", subtitle: "Docs", reason: null },
+  );
+});
+
+test("a request with neither headline nor task title has no title, so the page words its own fallback", () => {
+  assert.deepEqual(
+    requestHeading({
+      kind: "question",
+      headline: null,
+      taskTitle: null,
+      projectName: "Docs",
+      reason: null,
+      attentionCode: null,
+    }),
+    { title: null, subtitle: "Docs", reason: null },
+  );
 });
 
 test("filter counts add up per project and per kind", () => {
