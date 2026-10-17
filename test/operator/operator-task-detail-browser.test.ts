@@ -4439,22 +4439,81 @@ for (const engine of ["chromium", "webkit"] as const)
     engine,
     async (_t, j) => {
       const fixture = await openFixture(j, engine);
+      const sectionOf = (card: string) =>
+        card === "evidence" ? "result-evidence" : card;
       const a = await seed(fixture.f);
+      a.delegatedResult("Recorded decision result", {
+        sourceId: a.source.sourceId,
+        decisions: [{ text: "Closed card decision", attribution: "Task lead" }],
+      });
       const { web, page } = await fixture.launch();
       await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
       await taskTab(page, "Overview").waitFor();
+      const hrefs = await page.evaluate(() =>
+        Promise.all(
+          ["Restore", "Closed"].map((query) =>
+            fetch(
+              `/api/operator/search?query=${query}&historical=true&limit=50`,
+            )
+              .then((r) => r.json())
+              .then((r) => r.data.matches as { type: string; href: string }[]),
+          ),
+        ),
+      );
+      const briefHit = hrefs[0]!.find((m) => m.type === "task"),
+        decisionHit = hrefs[1]!.find((m) => m.type === "decision");
+      assert.ok(
+        briefHit && decisionHit,
+        "Search finds the brief and the decision",
+      );
+      // Search record links, entered from the task list and left and returned to by the
+      // browser's own Back and Forward: no in-app link on the task page captures its state.
+      for (const [hit, card] of [
+        [briefHit, "brief"],
+        [decisionHit, "evidence"],
+      ] as const) {
+        await page.goto("about:blank");
+        await page.goto(`${web.origin}/app/tasks`);
+        await page
+          .getByRole("heading", { name: "All tasks", exact: true })
+          .waitFor();
+        await followInApp(page, hit.href);
+        await page.locator(`#${sectionOf(card)} > details[open]`).waitFor();
+        await overviewCard(page, card).locator("> summary").click();
+        await page
+          .locator(`#${sectionOf(card)} > details:not([open])`)
+          .waitFor();
+        // The browser queues a details' toggle event for its next frame; let it reach the page.
+        await settle(page);
+        await page.goBack();
+        await page
+          .getByRole("heading", { name: "All tasks", exact: true })
+          .waitFor();
+        await page.goForward();
+        await taskTab(page, "Overview").waitFor();
+        await page.locator(`#${sectionOf(card)} > details`).waitFor();
+        await settle(page);
+        assert.equal(
+          await overviewCard(page, card).getAttribute("open"),
+          null,
+          `${hit.href}: ${card} stays closed after Back and Forward`,
+        );
+      }
       for (const [link, card] of [
         ["?section=brief", "brief"],
         ["#brief", "brief"],
         ["?section=assignments", "assignments"],
+        ["?section=result-evidence", "evidence"],
         [`?source=${a.source.sourceId}`, "brief"],
       ] as const) {
         await page.goto("about:blank");
         await page.goto(`${web.origin}/app/tasks/${a.taskId}${link}`);
-        await page.locator(`#${card} > details[open]`).waitFor();
+        await page.locator(`#${sectionOf(card)} > details[open]`).waitFor();
         // Close it through its summary, leave the task and come Back.
         await overviewCard(page, card).locator("> summary").click();
-        await page.locator(`#${card} > details:not([open])`).waitFor();
+        await page
+          .locator(`#${sectionOf(card)} > details:not([open])`)
+          .waitFor();
         await page.evaluate(() => scrollTo(0, 0));
         await followInApp(page, "/app/tasks");
         await page
@@ -4462,7 +4521,7 @@ for (const engine of ["chromium", "webkit"] as const)
           .waitFor();
         await page.goBack();
         await taskTab(page, "Overview").waitFor();
-        await page.locator(`#${card} > details`).waitFor();
+        await page.locator(`#${sectionOf(card)} > details`).waitFor();
         await settle(page);
         assert.equal(
           await overviewCard(page, card).getAttribute("open"),

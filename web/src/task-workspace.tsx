@@ -781,9 +781,12 @@ export function TaskWorkspace({
               ? document.getElementById(linked)
               : null;
       if (target && state.scrollY === 0) {
-        // A Search record can sit in a closed card; only its first arrival opens it.
-        if (record && !history.state?.taskWorkspaceReading)
+        // A Search record can sit in a closed card; only its first arrival opens it, so a
+        // Back or Forward keeps the operator's choice.
+        if (record && !state.recordRevealed) {
+          state.recordRevealed = true;
           openDisclosures(target);
+        }
         // A linked record or section opens on the tab whose panel holds it, unless the link
         // names its tab (`?request=…#history` is that request's History).
         const tab = target.closest<HTMLElement>(".task-panel")?.dataset.tab,

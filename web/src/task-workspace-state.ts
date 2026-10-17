@@ -371,6 +371,8 @@ export class TaskWorkspaceState {
   focusHref: string | null = null;
   historyAnchor: { id: string; y: number } | null = null;
   selectionInitialized = false;
+  /** A linked record's closed card was opened once; a Back or Forward remount never reopens it. */
+  recordRevealed = false;
   selectedResult: string | null = null;
   selectedSource: string | null = null;
 }
