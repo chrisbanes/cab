@@ -976,6 +976,101 @@ test("a Reveal that settles older than the form is read again by itself, and lea
   assert.equal(second.reads.count, 1);
 });
 
+test("a failed Reveal is not remembered: a later save leaves the field kept", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const stale = await privateBody(
+    page,
+    `/api/operator/projects/${ids.atlas}/private-values`,
+  );
+  const { reads } = await scriptReads(
+    page,
+    (n) => (n === 1 ? "fail" : "real"),
+    stale,
+  );
+  await revealButton(page, "instructions").click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "Couldn't load the instructions." })
+    .waitFor();
+  // The operator moves on and saves something else; the text is not read and shown unasked.
+  const name = page.getByLabel("Project name", { exact: true });
+  await name.fill("Renamed");
+  await saveProject(page).click();
+  await savedOutcome(page);
+  await settled(page);
+  assert.equal(reads.count, 1);
+  assert.equal(await instructionsField(page).count(), 0);
+  assert.equal(await showsText(page, SENTINEL), false);
+  assert.equal(f.service.domain().project(ids.atlas).name, "Renamed");
+});
+
+test("routing and profile Reveal wait for a current read, and a newer read reloads the profile", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  const stale = await privateBody(
+    page,
+    `/api/operator/projects/${ids.relay}/private-values`,
+  );
+  const { reads, release } = await scriptReads(
+    page,
+    (n) => (n === 1 ? "hold-stale" : "real"),
+    stale,
+  );
+  await revealButton(page, "routing guidance").click();
+  d.execute({
+    type: "routing.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.relay,
+    expectedVersion: Number(d.routing(ids.relay).version),
+    enabled: true,
+    candidateProfileIds: [ids.profiles.Eli as string],
+  });
+  await refresh(page);
+  release();
+  const field = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  await field.waitFor();
+  assert.equal(await field.inputValue(), "PRIVATE ROUTING GUIDANCE");
+  assert.equal(reads.count, 2);
+
+  // The profile page: a read newer than the loaded form reloads the configuration, then opens.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  const reviewer = ids.profiles.Reviewer as string;
+  await page.goto(`${web.origin}/app/profiles/${reviewer}/settings`);
+  await page.getByLabel("Summary", { exact: true }).waitFor();
+  d.execute({
+    type: "profile.configure",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: reviewer,
+    expectedVersion: Number(d.profile(reviewer).version),
+    summary: "Changed elsewhere",
+  });
+  await page.getByRole("button", { name: "Reveal instructions" }).click();
+  const instructions = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  await instructions.waitFor();
+  assert.equal(
+    await instructions.inputValue(),
+    "PRIVATE REVIEWER INSTRUCTIONS",
+  );
+  assert.equal(
+    await page.getByLabel("Summary", { exact: true }).inputValue(),
+    "Changed elsewhere",
+  );
+});
+
 test("an edit that another writer saved identically is dropped, and later reads apply", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

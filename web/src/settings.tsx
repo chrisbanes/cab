@@ -203,6 +203,10 @@ export function usePrivateValues<T>(
   useEffect(() => {
     if (!autoLoad && read !== undefined && read === loaded) setRequested(false);
   }, [autoLoad, read, loaded]);
+  // A Reveal that failed is the operator's to retry; it is not remembered and acted on later.
+  useEffect(() => {
+    if (!autoLoad && state.error !== null) setRequested(false);
+  }, [autoLoad, state.error]);
   // A failure is the operator's to retry, unless the version moved on since it happened. The
   // version it happened at is noted the first time the failure is seen (idempotent per state).
   const failure = useRef<{ failed: boolean; at: number | undefined }>({
