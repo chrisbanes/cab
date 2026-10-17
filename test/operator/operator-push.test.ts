@@ -308,7 +308,7 @@ async function pushFixture(options: Options = {}) {
     ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
     ...(options.readInbox ? { readInbox: options.readInbox(api) } : {}),
   });
-  const push = web.push as OperatorPush;
+  const push = web.push;
   const subscribe = (label = "Browser") => {
     const device = fake.device(label);
     return { device, row: push.subscribe(subscription(device)) };
@@ -1538,14 +1538,6 @@ test("the service worker is served publicly with its scope and without caching",
     const unknown = await fetch(`${web.origin}/app/service-worker.js/extra`);
     assert.equal(unknown.status, 404);
     assert.equal((await unknown.text()).includes("addEventListener"), false);
-    // Routes are 404 when the process has no push configured.
-    const noPush = await signIn(web);
-    assert.equal((await noPush.get("/api/operator/notifications")).status, 404);
-    assert.equal(
-      (await noPush.post("/api/operator/notifications/subscriptions", {}))
-        .status,
-      404,
-    );
   } finally {
     await f.close();
   }
@@ -1561,7 +1553,7 @@ test("a push listener stops its timers and in-flight sends when the listener sto
       clock,
       intervalMs: 15_000,
     });
-    const push = web.push as OperatorPush;
+    const push = web.push;
     assert.equal(
       clock.pending(),
       1,

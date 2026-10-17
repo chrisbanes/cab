@@ -44,6 +44,7 @@ import {
   useInboxTask,
 } from "./inbox-detail.js";
 import { InboxContext } from "./inbox-context.js";
+import { closeResolvedNotifications } from "./notifications.js";
 import { QuestionResponse } from "./question-response.js";
 import type { QuestionResponseStates } from "./question-response-state.js";
 import "./inbox.css";
@@ -88,13 +89,17 @@ export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
       signal,
     );
     items.push(...page.data.items);
-    if (!page.data.nextCursor)
+    if (!page.data.nextCursor) {
+      // Both callers (the shell's summary and this route) pass through here, so a notification
+      // whose request is no longer waiting closes after whichever read happens.
+      void closeResolvedNotifications(items, page.data.complete);
       return {
         items,
         complete: page.data.complete,
         unavailable: page.data.unavailable,
         observedAt: page.observedAt,
       };
+    }
     if (seen.has(page.data.nextCursor)) throw Error("unavailable");
     seen.add(page.data.nextCursor);
     cursor = page.data.nextCursor;

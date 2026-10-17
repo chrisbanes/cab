@@ -153,8 +153,7 @@ export interface OperatorFixture<R extends Runtime> {
     password: string;
     auth: OperatorAuth;
     http: LocalOperatorHttp;
-    /** Present when `push` options were given. */
-    push: OperatorPush | undefined;
+    push: OperatorPush;
     close(): Promise<void>;
   }>;
   removeDirectoryAfterServiceStop(): Promise<void>;
@@ -476,15 +475,14 @@ export async function createOperatorFixture<
             ghExecutable: setup?.ghExecutable ?? join(directory, "no-gh", "gh"),
           },
         );
-        const push = pushOptions
-          ? await OperatorPush.open({
-              intervalMs: null,
-              readInbox: (query) => api.readInbox(query),
-              ...pushOptions,
-              store: service.operatorPush(),
-              keyFile: join(directory, "operator-push-vapid.json"),
-            })
-          : undefined;
+        // Like the operator command, every listener has push; ticks are manual unless asked.
+        const push = await OperatorPush.open({
+          intervalMs: null,
+          readInbox: (query) => api.readInbox(query),
+          ...pushOptions,
+          store: service.operatorPush(),
+          keyFile: join(directory, "operator-push-vapid.json"),
+        });
         const http = new LocalOperatorHttp(
           new LocalOperatorUi(
             service.domain(),
@@ -498,7 +496,7 @@ export async function createOperatorFixture<
           {
             routes,
             credentials: service.operatorCredentials(),
-            ...(push ? { push } : {}),
+            push,
             web: new OperatorWebBoundary(
               bundle,
               api,
