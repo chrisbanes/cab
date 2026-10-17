@@ -3,6 +3,7 @@ import { Circle, CircleCheck, CirclePause } from "lucide-react";
 import { useCallback } from "react";
 import {
   projectConfigurationSchema,
+  projectPrivateValuesSchema,
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
 import { ActionLink, ResourceStatus, StatusBadge } from "./components.js";
@@ -10,6 +11,7 @@ import { useOperatorResource } from "./resource.js";
 import { RoutingTab } from "./routing-config.js";
 import {
   projectChanges,
+  projectPrivateFields,
   type ProjectConfigurationData,
   type Values,
 } from "./settings-changes.js";
@@ -29,11 +31,14 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
+  PrivateTextField,
   reloadDraft,
+  revealedText,
   submitDraft,
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
 import { SourceTab } from "./source-config.js";
@@ -249,12 +254,24 @@ function GeneralTab(p: TabProps) {
     name: data.project.name ?? "",
     leadProfileId: data.project.leadProfileId ?? "",
     paused: data.project.paused,
-    replaceInstructions: false,
-    instructions: "",
     expectedVersion: String(data.project.version),
   };
   useLoadedDraft(d, initial, p.loadedAt);
-  const lines = projectChanges(data, d.values);
+  const priv = usePrivateValues(
+    p.client,
+    p.session,
+    `/api/operator/projects/${projectId}/private-values`,
+    projectPrivateValuesSchema,
+  );
+  const revealed = revealedText(
+    priv.state,
+    (r) => ({
+      version: r.data.project.version,
+      text: r.data.project.instructions,
+    }),
+    data.project.version,
+  );
+  const lines = projectChanges(data, d.values, revealed);
   const v = d.values;
   const command = () => ({
     type: "project.configure",
@@ -268,7 +285,7 @@ function GeneralTab(p: TabProps) {
     ...(v.leadProfileId !== (data.project.leadProfileId ?? "")
       ? { leadProfileId: v.leadProfileId || null }
       : {}),
-    ...(v.replaceInstructions ? { instructions: v.instructions } : {}),
+    ...projectPrivateFields(v, revealed),
   });
   return (
     <div className="settings-split">
@@ -308,24 +325,21 @@ function GeneralTab(p: TabProps) {
               Unpausing never clears Stop, writer, capacity or uncertainty
               holds.
             </p>
-            <DraftCheck
+            <PrivateTextField
               draft={d}
-              field="replaceInstructions"
-              label="Replace instructions"
-            />
-            <p className="metadata muted">
-              Current private instructions are never loaded into this form.
-              Assignments keep their captured revision until explicit Apply for
-              their next turn. An empty replacement clears them.
-            </p>
-            {v.replaceInstructions && (
-              <DraftField
-                draft={d}
-                field="instructions"
-                label="New instructions"
-                multiline
-              />
-            )}
+              field="instructions"
+              label="Instructions"
+              noun="instructions"
+              revealed={revealed}
+              state={priv.state}
+              onReveal={priv.refresh}
+            >
+              <p className="metadata muted">
+                Private to this signed-in session; revealing is not recorded.
+                Assignments keep their captured revision until explicit Apply
+                for their next turn. Emptying the field clears the instructions.
+              </p>
+            </PrivateTextField>
             <ChangeList lines={lines} />
             <DraftOutcome
               draft={d}

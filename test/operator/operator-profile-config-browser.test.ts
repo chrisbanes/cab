@@ -21,6 +21,16 @@ import {
 } from "../fixtures/operator-web.js";
 
 const test = browserSuite("operator-profile-config-browser");
+/** Whether `text` is anywhere the operator can read: page text or a field's value. */
+const showsText = (page: Page, text: string) =>
+  page.evaluate(
+    (needle) =>
+      document.body.innerText.includes(needle) ||
+      [...document.querySelectorAll("textarea, input")].some((e) =>
+        (e as HTMLTextAreaElement).value.includes(needle),
+      ),
+    text,
+  );
 
 test("Create profile saves with one message, a breadcrumb, boundary aside and Cancel", async (_t, journey) => {
   const { f, page } = await startSettings(
@@ -56,7 +66,7 @@ test("Create profile saves with one message, a breadcrumb, boundary aside and Ca
   assert.equal(Number(created?.version), 1);
 });
 
-test("Reviewer profile edits in place, restores and revokes, and replaces private instructions", async (_t, journey) => {
+test("Reviewer profile edits in place, restores and revokes, and edits revealed instructions", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/profiles/:reviewer/settings",
@@ -93,6 +103,16 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
   );
   assert.equal((await read.text()).includes("PRIVATE"), false);
   assert.equal((await page.content()).includes("PRIVATE"), false);
+  assert.equal(await showsText(page, "PRIVATE"), false);
+  const instructions = page.getByRole("group", {
+    name: "Instructions",
+    exact: true,
+  });
+  assert.match(await instructions.innerText(), /Kept\s*·\s*Reveal/);
+  assert.equal(
+    await page.getByRole("textbox", { name: "Instructions" }).count(),
+    0,
+  );
   const save = page.getByRole("button", { name: "Save profile", exact: true });
   assert.equal(await save.isDisabled(), true);
   await page
@@ -123,18 +143,34 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
   await save.click();
   await page.locator(".settings-status").getByText("Revoked").waitFor();
   assert.equal(d.profile(reviewer).revoked, 1);
-  await page.getByLabel("Replace instructions", { exact: true }).check();
-  await page
-    .getByLabel("New instructions", { exact: true })
-    .fill("PRIVATE NEW REVIEWER INSTRUCTIONS");
+  await page.getByRole("button", { name: "Reveal instructions" }).click();
+  const field = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  await field.waitFor();
+  assert.equal(await field.inputValue(), "PRIVATE REVIEWER INSTRUCTIONS");
+  assert.equal(await field.evaluate((e) => e === document.activeElement), true);
+  assert.equal(await save.isDisabled(), true, "revealing is not a change");
+  const version = Number(d.profile(reviewer).version);
+  await field.fill("PRIVATE NEW REVIEWER INSTRUCTIONS");
   await page
     .getByRole("region", { name: "Changes to save" })
-    .getByText("Instructions replaced", { exact: false })
+    .getByText("Instructions edited", { exact: true })
     .waitFor();
+  assert.equal(
+    (
+      await page.getByRole("region", { name: "Changes to save" }).innerText()
+    ).includes("PRIVATE"),
+    false,
+  );
+  const posted = commandRequest(page);
   await save.click();
-  await page.getByLabel("New instructions", { exact: true }).waitFor({
-    state: "detached",
-  });
+  const body = (await posted).postDataJSON() as Record<string, unknown>;
+  assert.equal(body.instructions, "PRIVATE NEW REVIEWER INSTRUCTIONS");
+  assert.equal(body.expectedVersion, version);
+  await page.getByRole("button", { name: "Reveal instructions" }).waitFor();
+  assert.equal(await field.count(), 0);
   assert.equal(
     d.profile(reviewer).instructions,
     "PRIVATE NEW REVIEWER INSTRUCTIONS",
@@ -144,6 +180,7 @@ test("Reviewer profile edits in place, restores and revokes, and replaces privat
     "Reviews diffs and screenshots",
   );
   assert.equal((await page.content()).includes("PRIVATE"), false);
+  assert.equal(await showsText(page, "PRIVATE"), false);
 });
 
 test("a profile conflict keeps typed input until the newer version is reviewed", async (_t, journey) => {
@@ -154,6 +191,12 @@ test("a profile conflict keeps typed input until the newer version is reviewed",
   const reviewer = ids.profiles.Reviewer as string;
   await page.getByLabel("Summary", { exact: true }).waitFor();
   await page.getByLabel("Summary", { exact: true }).fill("Typed summary");
+  await page.getByRole("button", { name: "Reveal instructions" }).click();
+  const instructions = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  await instructions.fill("TYPED INSTRUCTIONS");
   f.service.domain().execute({
     type: "profile.configure",
     actor: "operator",
@@ -177,6 +220,7 @@ test("a profile conflict keeps typed input until the newer version is reviewed",
     await page.getByLabel("Summary", { exact: true }).inputValue(),
     "Typed summary",
   );
+  assert.equal(await instructions.inputValue(), "TYPED INSTRUCTIONS");
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page.getByText("Current revision 3.").waitFor();
   await warning.getByRole("button", { name: "Review changes" }).click();
@@ -184,9 +228,19 @@ test("a profile conflict keeps typed input until the newer version is reviewed",
     await page.getByLabel("Summary", { exact: true }).inputValue(),
     "Typed summary",
   );
+  // The edit after Reveal is kept and rides on the newer version.
+  assert.equal(await instructions.inputValue(), "TYPED INSTRUCTIONS");
+  const sent = commandRequest(page);
   await page.getByRole("button", { name: "Save profile", exact: true }).click();
+  const body = (await sent).postDataJSON() as Record<string, unknown>;
+  assert.equal(body.expectedVersion, 3);
+  assert.equal(body.instructions, "TYPED INSTRUCTIONS");
   await savedOutcome(page);
   assert.equal(f.service.domain().profile(reviewer).summary, "Typed summary");
+  assert.equal(
+    f.service.domain().profile(reviewer).instructions,
+    "TYPED INSTRUCTIONS",
+  );
 });
 
 test("project settings highlight the project in the sidebar; phone profile pages use Back", async (_t, journey) => {

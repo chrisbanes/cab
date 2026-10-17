@@ -9,7 +9,9 @@ import {
   capacityChanges,
   nextSelectionId,
   profileChanges,
+  profilePrivateFields,
   projectChanges,
+  projectPrivateFields,
   removesAllAccess,
   routingChanges,
   routingCommand,
@@ -104,15 +106,56 @@ test("project and profile change lists name each change without private values",
       name: "Atlas II",
       leadProfileId: jonas,
       paused: true,
-      replaceInstructions: true,
       instructions: "PRIVATE",
     }),
     [
       "Project name: Atlas → Atlas II",
       "Lead profile: Mira → Jonas",
       "Pause project",
-      "Instructions replaced (private, not shown after saving)",
+      "Instructions edited",
     ],
+  );
+  // An unedited reveal adds no line and no command field, and the text is never a line.
+  const base = { name: "Atlas", leadProfileId: mira, paused: false };
+  assert.deepEqual(projectChanges(c, base, "PRIVATE"), []);
+  assert.deepEqual(projectPrivateFields(base, "PRIVATE"), {});
+  assert.deepEqual(
+    projectChanges(c, { ...base, instructions: "PRIVATE" }, "PRIVATE"),
+    [],
+  );
+  assert.deepEqual(
+    projectPrivateFields({ ...base, instructions: "PRIVATE" }, "PRIVATE"),
+    {},
+  );
+  assert.deepEqual(
+    projectChanges(c, { ...base, instructions: "" }, "PRIVATE"),
+    ["Instructions cleared"],
+  );
+  assert.deepEqual(
+    projectPrivateFields({ ...base, instructions: "" }, "PRIVATE"),
+    {
+      instructions: "",
+    },
+  );
+  assert.deepEqual(
+    projectChanges(c, { ...base, instructions: "NEW" }, "PRIVATE"),
+    ["Instructions edited"],
+  );
+  assert.deepEqual(
+    projectPrivateFields({ ...base, instructions: "NEW" }, "PRIVATE"),
+    {
+      instructions: "NEW",
+    },
+  );
+  // Without a revealed baseline an edit still counts, so the version fence decides.
+  assert.deepEqual(projectPrivateFields({ ...base, instructions: "NEW" }), {
+    instructions: "NEW",
+  });
+  assert.equal(
+    projectChanges(c, { ...base, instructions: "NEW" }, "PRIVATE")
+      .join(" ")
+      .includes("NEW"),
+    false,
   );
   const p = {
     profile: {
@@ -147,9 +190,27 @@ test("project and profile change lists name each change without private values",
     ),
     ["Restore Reviewer"],
   );
+  const same = { name: "Reviewer", summary: "Review", capabilities: "Reviews" };
+  assert.deepEqual(profileChanges(p, { ...same, instructions: "NEW" }, "OLD"), [
+    "Instructions edited",
+  ]);
+  assert.deepEqual(profileChanges(p, { ...same, instructions: "" }, "OLD"), [
+    "Instructions cleared",
+  ]);
+  assert.deepEqual(
+    profileChanges(p, { ...same, instructions: "OLD" }, "OLD"),
+    [],
+  );
+  assert.deepEqual(profilePrivateFields({ ...same }, "OLD"), {});
+  assert.deepEqual(
+    profilePrivateFields({ ...same, instructions: "NEW" }, "OLD"),
+    {
+      instructions: "NEW",
+    },
+  );
 });
 
-test("routing lines and command keep guidance out unless replaced", () => {
+test("routing lines and command keep guidance out unless edited", () => {
   const c = config();
   // The saved revoked candidate is not selectable, so dropping it is not a listed change.
   assert.deepEqual(
@@ -160,15 +221,31 @@ test("routing lines and command keep guidance out unless replaced", () => {
     routingChanges(c, {
       enabled: true,
       candidateProfileIds: [worker, mira],
-      replaceGuidance: true,
+      guidance: "PRIVATE",
       referenceMode: "set",
     }),
     [
       "Routing enabled",
       "Candidate added: Mira",
-      "Guidance replaced (private, not shown after saving)",
+      "Routing guidance edited",
       "Credential reference: set new environment reference",
     ],
+  );
+  assert.deepEqual(
+    routingChanges(
+      c,
+      { enabled: false, candidateProfileIds: [worker], guidance: "" },
+      "OLD",
+    ),
+    ["Routing guidance cleared"],
+  );
+  assert.deepEqual(
+    routingChanges(
+      c,
+      { enabled: false, candidateProfileIds: [worker], guidance: "OLD" },
+      "OLD",
+    ),
+    [],
   );
   // A candidate revoked after it was checked is neither listed nor sent.
   assert.deepEqual(
@@ -198,11 +275,24 @@ test("routing lines and command keep guidance out unless replaced", () => {
       expectedVersion: "2",
       enabled: true,
       candidateProfileIds: [worker],
-      guidance: "PRIVATE",
     },
     c,
+    "PRIVATE",
   );
   assert.equal("guidance" in command, false);
+  const edited = routingCommand(
+    projectId,
+    {
+      key: "k",
+      expectedVersion: "2",
+      enabled: true,
+      candidateProfileIds: [worker],
+      guidance: "NEW",
+    },
+    c,
+    "PRIVATE",
+  );
+  assert.equal((edited as Record<string, unknown>).guidance, "NEW");
 });
 
 test("source rows, change lines and command use keep markers and never paths", () => {

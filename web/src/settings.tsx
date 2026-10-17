@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useReducer,
   useRef,
@@ -6,8 +7,10 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
+import type { z } from "zod";
 import type { Workspace, Session } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { useOperatorResource, type ResourceState } from "./resource.js";
 import { ActionOutcome, detailRows } from "./action-feedback.js";
 import {
   outcomeCopy,
@@ -118,6 +121,131 @@ export function DraftField({
         </span>
       )}
     </label>
+  );
+}
+/**
+ * One owner's private values, read only for this signed-in session. The result lives in
+ * component state alone: the scope (session token and owner) clears it on sign-out and
+ * owner change, and unmounting aborts a read in flight. Nothing here is stored or logged.
+ */
+export function usePrivateValues<T>(
+  client: OperatorClient,
+  session: Session,
+  path: string,
+  schema: z.ZodType<T>,
+  autoLoad = false,
+) {
+  // The loader must stay stable: a new one would clear the revealed state.
+  const loader = useCallback(
+    (signal: AbortSignal) => client.read(path, schema, signal),
+    [client, path, schema],
+  );
+  return useOperatorResource(`${session.csrfToken}:${path}`, loader, autoLoad);
+}
+/** The revealed text, only while it was read at the section version now loaded. */
+export function revealedText<T>(
+  state: ResourceState<T>,
+  pick: (data: T) => { version: number; text: string },
+  version: number,
+): string | undefined {
+  const value = state.data ? pick(state.data) : undefined;
+  return value && value.version === version ? value.text : undefined;
+}
+/**
+ * "Kept · Reveal" until the signed-in operator reveals a private text, then the same
+ * multiline field. Revealed text is shown from `revealed` and enters the draft only once
+ * the operator edits it, so an unedited reveal is never sent or kept across pages.
+ */
+export function PrivateTextField({
+  draft,
+  field,
+  label,
+  noun,
+  revealed,
+  state,
+  onReveal,
+  children,
+}: {
+  draft: ConfigurationDraft;
+  field: string;
+  label: string;
+  /** Lower-case name used in the button and error copy, such as "instructions". */
+  noun: string;
+  revealed: string | undefined;
+  state: ResourceState<unknown>;
+  onReveal: () => void;
+  /** Guidance shown under the control in both states. */
+  children?: ReactNode;
+}) {
+  const id = useId(),
+    error = draft.errors[field],
+    area = useRef<HTMLTextAreaElement>(null),
+    focusNext = useRef(false),
+    edited = typeof draft.values[field] === "string",
+    open = edited || revealed !== undefined,
+    loading = state.pending,
+    failed = !loading && state.error !== null;
+  // Focus moves to the field once, after a Reveal the operator asked for has rendered it.
+  useEffect(() => {
+    if (failed) focusNext.current = false;
+    else if (open && focusNext.current) {
+      focusNext.current = false;
+      area.current?.focus();
+    }
+  });
+  if (open)
+    return (
+      <div className="field body">
+        <label className="field body" htmlFor={id}>
+          {label}
+          <Textarea
+            ref={area}
+            id={id}
+            rows={4}
+            aria-label={label}
+            disabled={locked(draft)}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${id}-error` : undefined}
+            className="control"
+            value={edited ? String(draft.values[field]) : (revealed ?? "")}
+            onChange={(e) => draft.set(field, e.target.value)}
+          />
+          {error && (
+            <span id={`${id}-error`} className="error-text" role="alert">
+              {error}
+            </span>
+          )}
+        </label>
+        {children}
+      </div>
+    );
+  return (
+    <fieldset className="field body private-field">
+      <legend>{label}</legend>
+      <p className="body">
+        Kept <span aria-hidden="true">·</span>{" "}
+        <Button
+          type="button"
+          variant="secondary"
+          aria-label={failed ? `Try again to reveal ${noun}` : `Reveal ${noun}`}
+          aria-busy={loading || undefined}
+          aria-disabled={loading || locked(draft) || undefined}
+          onClick={() => {
+            if (loading || locked(draft)) return;
+            focusNext.current = true;
+            onReveal();
+          }}
+        >
+          {failed ? "Try again" : "Reveal"}
+        </Button>
+      </p>
+      {failed && (
+        <span className="error-text" role="alert">
+          Couldn't load the {noun}.
+        </span>
+      )}
+      {children}
+    </fieldset>
   );
 }
 export function DraftCheck({

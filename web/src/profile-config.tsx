@@ -1,6 +1,9 @@
 import { useCallback, useEffect } from "react";
 import { CircleCheck } from "lucide-react";
-import { profileConfigurationSchema } from "../../src/operator/contracts.js";
+import {
+  profileConfigurationSchema,
+  profilePrivateValuesSchema,
+} from "../../src/operator/contracts.js";
 import {
   ActionLink,
   Button,
@@ -10,6 +13,7 @@ import {
 import { useOperatorResource } from "./resource.js";
 import {
   profileChanges,
+  profilePrivateFields,
   runtimeChanged,
   type Values,
 } from "./settings-changes.js";
@@ -31,13 +35,16 @@ import {
   DraftField,
   DraftOutcome,
   Panel,
+  PrivateTextField,
   key,
   locked,
   reloadDraft,
+  revealedText,
   submitDraft,
   useDraft,
   useHeaderRefresh,
   useLoadedDraft,
+  usePrivateValues,
   type SettingsProps,
 } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
@@ -290,15 +297,29 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
         summary: data.profile.summary ?? "",
         capabilities: data.capabilities ?? "",
         replaceCapabilities: false,
-        replaceInstructions: false,
-        instructions: "",
         revoked: data.profile.revoked,
         ...runtimeValues(data.runtime),
         expectedVersion: String(data.profile.version),
       }
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
-  const lines = data ? profileChanges(data, d.values) : [];
+  const priv = usePrivateValues(
+    p.client,
+    p.session,
+    `/api/operator/profiles/${profileId}/private-values`,
+    profilePrivateValuesSchema,
+  );
+  const revealed = data
+    ? revealedText(
+        priv.state,
+        (r) => ({
+          version: r.data.profile.version,
+          text: r.data.profile.instructions,
+        }),
+        data.profile.version,
+      )
+    : undefined;
+  const lines = data ? profileChanges(data, d.values, revealed) : [];
   const name = data?.profile.name ?? "this profile";
   const command = () => {
     if (!data) return {};
@@ -319,7 +340,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
       )
         ? { capabilities: v.capabilities }
         : {}),
-      ...(v.replaceInstructions ? { instructions: v.instructions } : {}),
+      ...profilePrivateFields(v, revealed),
       ...(Boolean(v.revoked) !== data.profile.revoked
         ? { revoked: Boolean(v.revoked) }
         : {}),
@@ -365,7 +386,7 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
             <div className="settings-column">
               <Panel
                 title="Profile"
-                description="Instructions are private; replace them to change them. Name, summary and capabilities are edited in place."
+                description="Name, summary, capabilities and instructions are edited in place. Instructions stay kept until you reveal them."
               >
                 <form
                   onSubmit={(e) =>
@@ -407,23 +428,20 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
                         : `Revoking stops routing and leads from selecting ${name}. It does not stop, cancel or recover running work.`}
                     </p>
                   </div>
-                  <DraftCheck
+                  <PrivateTextField
                     draft={d}
-                    field="replaceInstructions"
-                    label="Replace instructions"
-                  />
-                  <p className="metadata muted">
-                    Current instructions are private and never loaded into this
-                    form.
-                  </p>
-                  {d.values.replaceInstructions && (
-                    <DraftField
-                      draft={d}
-                      field="instructions"
-                      label="New instructions"
-                      multiline
-                    />
-                  )}
+                    field="instructions"
+                    label="Instructions"
+                    noun="instructions"
+                    revealed={revealed}
+                    state={priv.state}
+                    onReveal={priv.refresh}
+                  >
+                    <p className="metadata muted">
+                      Private to this signed-in session; revealing is not
+                      recorded. Emptying the field clears the instructions.
+                    </p>
+                  </PrivateTextField>
                   {data.capabilities === null && (
                     <DraftCheck
                       draft={d}

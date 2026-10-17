@@ -24,7 +24,30 @@ export type ProfileConfigurationData = z.infer<
 >["data"];
 export type RuntimeSettingsData = z.infer<typeof runtimeSettingsSchema>["data"];
 
-const PRIVATE_REPLACED = "(private, not shown after saving)";
+/**
+ * How a private text field differs from the text the operator revealed: `null` when it
+ * was never edited or equals the revealed text. A field edited while its revealed
+ * baseline is unknown counts as edited, so the save carries it and the version fence
+ * decides.
+ */
+export function privateEdit(
+  value: Values[string] | undefined,
+  revealed: string | undefined,
+) {
+  if (typeof value !== "string" || value === revealed) return null;
+  return value === "" ? "cleared" : "edited";
+}
+/** The command field for an edited private text; empty when it was not edited. */
+const privateField = (
+  name: "instructions" | "guidance",
+  value: Values[string] | undefined,
+  revealed: string | undefined,
+) => (privateEdit(value, revealed) ? { [name]: String(value) } : {});
+/** Command fields for the project instructions edit (omitted unless edited). */
+export const projectPrivateFields = (v: Values, revealed?: string) =>
+  privateField("instructions", v.instructions, revealed);
+/** Command fields for the profile instructions edit (omitted unless edited). */
+export const profilePrivateFields = projectPrivateFields;
 const nameOf = (
   profiles: { id: string; name: string | null }[],
   id: string | null | undefined,
@@ -42,7 +65,11 @@ function referenceChange(v: Values) {
       : [];
 }
 
-export function projectChanges(data: ProjectConfigurationData, v: Values) {
+export function projectChanges(
+  data: ProjectConfigurationData,
+  v: Values,
+  revealed?: string,
+) {
   const lines: string[] = [];
   const name = data.project.name ?? "";
   if (v.name !== undefined && v.name !== name)
@@ -54,12 +81,16 @@ export function projectChanges(data: ProjectConfigurationData, v: Values) {
     );
   if (v.paused !== undefined && Boolean(v.paused) !== data.project.paused)
     lines.push(v.paused ? "Pause project" : "Unpause project");
-  if (v.replaceInstructions)
-    lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
+  const instructions = privateEdit(v.instructions, revealed);
+  if (instructions) lines.push(`Instructions ${instructions}`);
   return lines;
 }
 
-export function profileChanges(data: ProfileConfigurationData, v: Values) {
+export function profileChanges(
+  data: ProfileConfigurationData,
+  v: Values,
+  revealed?: string,
+) {
   const lines: string[] = [];
   const name = data.profile.name ?? "";
   if (v.name !== undefined && v.name !== name)
@@ -72,8 +103,8 @@ export function profileChanges(data: ProfileConfigurationData, v: Values) {
       : v.capabilities !== undefined && v.capabilities !== data.capabilities
   )
     lines.push("Capabilities edited");
-  if (v.replaceInstructions)
-    lines.push(`Instructions replaced ${PRIVATE_REPLACED}`);
+  const instructions = privateEdit(v.instructions, revealed);
+  if (instructions) lines.push(`Instructions ${instructions}`);
   if (v.revoked !== undefined && Boolean(v.revoked) !== data.profile.revoked)
     lines.push(`${v.revoked ? "Revoke" : "Restore"} ${name || "profile"}`);
   if (v.runtimeHarness !== undefined && runtimeChanged(data.runtime, v))
@@ -91,7 +122,11 @@ const selectable = (data: ProjectConfigurationData, ids: string[]) =>
 export const savedCandidates = (data: ProjectConfigurationData) =>
   selectable(data, data.routing.candidateProfileIds);
 
-export function routingChanges(data: ProjectConfigurationData, v: Values) {
+export function routingChanges(
+  data: ProjectConfigurationData,
+  v: Values,
+  revealed?: string,
+) {
   const lines: string[] = [];
   if (v.enabled !== undefined && Boolean(v.enabled) !== data.routing.enabled)
     lines.push(v.enabled ? "Routing enabled" : "Routing disabled");
@@ -104,7 +139,8 @@ export function routingChanges(data: ProjectConfigurationData, v: Values) {
   for (const id of saved)
     if (!next.includes(id))
       lines.push(`Candidate removed: ${nameOf(data.profiles, id)}`);
-  if (v.replaceGuidance) lines.push(`Guidance replaced ${PRIVATE_REPLACED}`);
+  const guidance = privateEdit(v.guidance, revealed);
+  if (guidance) lines.push(`Routing guidance ${guidance}`);
   return [...lines, ...referenceChange(v)];
 }
 
@@ -112,6 +148,7 @@ export function routingCommand(
   projectId: string,
   v: Values,
   data: ProjectConfigurationData,
+  revealed?: string,
 ) {
   return {
     type: "routing.configure",
@@ -120,7 +157,7 @@ export function routingCommand(
     expectedVersion: Number(v.expectedVersion),
     enabled: Boolean(v.enabled),
     candidateProfileIds: selectable(data, list(v.candidateProfileIds)),
-    ...(v.replaceGuidance ? { guidance: v.guidance } : {}),
+    ...privateField("guidance", v.guidance, revealed),
     ...reference(v),
   };
 }

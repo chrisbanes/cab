@@ -17,6 +17,7 @@ import {
   phone,
   resolve,
   savedOutcome,
+  signIn,
   startSettings,
   trail,
   unpairedBadges,
@@ -36,6 +37,35 @@ const refresh = async (page: Page) => {
     state: "hidden",
   });
 };
+/** The "Reveal …" button of a private text field. */
+const revealButton = (page: Page, noun: string) =>
+  page.getByRole("button", { name: `Reveal ${noun}`, exact: true });
+/** Whether a private sentinel is anywhere the operator can read: page text or a field's value. */
+const showsText = (page: Page, text: string) =>
+  page.evaluate(
+    (needle) =>
+      document.body.innerText.includes(needle) ||
+      [...document.querySelectorAll("textarea, input")].some((e) =>
+        (e as HTMLTextAreaElement).value.includes(needle),
+      ),
+    text,
+  );
+/** Private-values reads this document has made so far. */
+const revealReads = (page: Page) =>
+  page.evaluate(
+    () =>
+      performance
+        .getEntriesByType("resource")
+        .filter((e) => e.name.includes("/private-values")).length,
+  );
+/** Wait until the page has painted twice, so a late render would have appeared. */
+const settled = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => done())),
+      ),
+  );
 const commandBody = (page: Page) =>
   page
     .waitForRequest(
@@ -44,7 +74,7 @@ const commandBody = (page: Page) =>
     )
     .then((r) => r.postDataJSON() as Record<string, unknown>);
 
-test("General tab edits in place with a change list, saved line and tabs that keep drafts", async (_t, journey) => {
+test("General tab edits in place with Kept · Reveal instructions, a change list, a saved line and tabs that keep drafts", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/projects/:atlas/settings",
@@ -73,17 +103,35 @@ test("General tab edits in place with a change list, saved line and tabs that ke
     "Atlas",
   );
   await page.getByRole("switch", { name: "Pause project" }).waitFor();
+  // Instructions open kept: no field, no text on the page and no read until Reveal.
+  const instructions = page.getByRole("group", {
+    name: "Instructions",
+    exact: true,
+  });
+  assert.match(await instructions.innerText(), /Kept\s*·\s*Reveal/);
   assert.equal(
-    await page.getByLabel("Replace instructions", { exact: true }).isChecked(),
-    false,
+    await page.getByRole("textbox", { name: "Instructions" }).count(),
+    0,
   );
-  await page
-    .getByText("Current private instructions are never loaded into this form", {
-      exact: false,
-    })
-    .waitFor();
+  assert.equal(await showsText(page, "PRIVATE"), false);
+  assert.equal(await revealReads(page), 0);
   const save = page.getByRole("button", { name: "Save project", exact: true });
   assert.equal(await save.isDisabled(), true);
+  await revealButton(page, "instructions").click();
+  const field = page.getByRole("textbox", { name: "Instructions" });
+  await field.waitFor();
+  assert.equal(await field.inputValue(), "PRIVATE ATLAS INSTRUCTIONS");
+  assert.equal(
+    await field.evaluate((e) => e === document.activeElement),
+    true,
+    "focus moves to the revealed field",
+  );
+  assert.equal(await revealReads(page), 1);
+  assert.equal(await save.isDisabled(), true, "revealing is not a change");
+  assert.equal(await changes(page).getByRole("listitem").count(), 0);
+  await page.reload();
+  await page.getByLabel("Project name", { exact: true }).waitFor();
+  await page.getByRole("switch", { name: "Pause project" }).waitFor();
   const references = page.locator(".settings-panel", {
     hasText: "Credential and environment references",
   });
@@ -139,20 +187,437 @@ test("General tab edits in place with a change list, saved line and tabs that ke
     await page.getByLabel("Project name", { exact: true }).inputValue(),
     "Atlas II",
   );
-  await page.getByLabel("Replace instructions", { exact: true }).check();
-  await page
-    .getByLabel("New instructions", { exact: true })
-    .fill("PRIVATE REPLACED PROJECT");
-  await save.click();
-  await page
-    .getByLabel("New instructions", { exact: true })
-    .waitFor({ state: "detached" });
-  assert.equal(d.project(ids.atlas).instructions, "PRIVATE REPLACED PROJECT");
   const read = await page.request.get(
     `${web.origin}/api/operator/projects/${ids.atlas}/configuration`,
   );
   assert.equal((await read.text()).includes("PRIVATE"), false);
-  assert.equal((await page.content()).includes("PRIVATE"), false);
+  assert.equal(await showsText(page, "PRIVATE"), false);
+});
+
+const SENTINEL = "PRIVATE ATLAS INSTRUCTIONS";
+const instructionsField = (page: Page) =>
+  page.getByRole("textbox", { name: "Instructions", exact: true });
+const saveProject = (page: Page) =>
+  page.getByRole("button", { name: "Save project", exact: true });
+/** Bump the project elsewhere (another writer) and return the version it now holds. */
+const bumpProject = (
+  f: Awaited<ReturnType<typeof startSettings>>["f"],
+  projectId: string,
+  name: string,
+) => {
+  const d = f.service.domain();
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(d.project(projectId).version),
+    name,
+  });
+  return Number(d.project(projectId).version);
+};
+
+test("revealed instructions edit in place and save as a versioned change", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  const field = instructionsField(page);
+  await field.waitFor();
+  assert.equal(await field.inputValue(), SENTINEL);
+  const version = Number(d.project(ids.atlas).version),
+    revision = Number(d.project(ids.atlas).instructionsRevision);
+  const edited = `${SENTINEL}. Ask Mira before changing the release checklist.`;
+  await field.fill(edited);
+  await changes(page)
+    .getByText("Instructions edited", { exact: true })
+    .waitFor();
+  assert.equal((await changes(page).innerText()).includes("PRIVATE"), false);
+  const posted = commandBody(page);
+  await saveProject(page).click();
+  const body = await posted;
+  assert.equal(body.instructions, edited);
+  assert.equal(body.expectedVersion, version);
+  assert.equal(body.type, "project.configure");
+  await savedOutcome(page);
+  assert.equal(d.project(ids.atlas).instructions, edited);
+  assert.equal(Number(d.project(ids.atlas).instructionsRevision), revision + 1);
+  // After the re-read the field is kept again; the saved line carries no text.
+  await revealButton(page, "instructions").waitFor();
+  assert.equal(await instructionsField(page).count(), 0);
+  assert.equal(await showsText(page, "PRIVATE"), false);
+  const read = await page.request.get(
+    `${web.origin}/api/operator/projects/${ids.atlas}/configuration`,
+  );
+  assert.equal((await read.text()).includes("PRIVATE"), false);
+  // Revealing again reads the saved text at the new version.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  assert.equal(await instructionsField(page).inputValue(), edited);
+});
+
+test("a stale reveal conflicts and an unedited reveal resets on the newer version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("EDITED BEFORE A CONFLICT");
+  bumpProject(f, ids.atlas, "Atlas elsewhere");
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  // The edit is kept and now rides on the newer version.
+  assert.equal(
+    await instructionsField(page).inputValue(),
+    "EDITED BEFORE A CONFLICT",
+  );
+  const newer = Number(d.project(ids.atlas).version);
+  const resent = commandBody(page);
+  await saveProject(page).click();
+  const body = await resent;
+  assert.equal(body.expectedVersion, newer);
+  assert.equal(body.instructions, "EDITED BEFORE A CONFLICT");
+  await savedOutcome(page);
+  assert.equal(d.project(ids.atlas).instructions, "EDITED BEFORE A CONFLICT");
+
+  // An unedited reveal with another field edited: a newer version resets it to kept.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas typed");
+  bumpProject(f, ids.atlas, "Atlas elsewhere again");
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await revealButton(page, "instructions").waitFor();
+  assert.equal(await instructionsField(page).count(), 0);
+  assert.equal(await showsText(page, "EDITED BEFORE A CONFLICT"), false);
+  const second = commandBody(page);
+  await saveProject(page).click();
+  const sent = await second;
+  assert.equal(
+    "instructions" in sent,
+    false,
+    "an unedited reveal is never sent",
+  );
+  assert.equal(sent.name, "Atlas typed");
+  await savedOutcome(page);
+  assert.equal(d.project(ids.atlas).instructions, "EDITED BEFORE A CONFLICT");
+});
+
+test("revealed instructions clear on navigation, sign-out and project switch", async (_t, journey) => {
+  const { ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const tabs = page.getByRole("navigation", {
+    name: "Project configuration sections",
+  });
+  const gate = { release: () => {} };
+  const held = new Promise<void>((resolve) => {
+    gate.release = resolve;
+  });
+  const consoleErrors: string[] = [];
+  page.on("console", (m) => {
+    if (m.type() === "error") consoleErrors.push(m.text());
+  });
+
+  // Unedited reveal: another tab and back, then another project and back.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  await tabs.getByRole("link", { name: "Routing" }).click();
+  await page.getByRole("switch", { name: "Enable routing" }).waitFor();
+  assert.equal(await showsText(page, SENTINEL), false);
+  await tabs.getByRole("link", { name: "General" }).click();
+  await revealButton(page, "instructions").waitFor();
+  assert.equal(await showsText(page, SENTINEL), false);
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  await page.getByRole("button", { name: "Operator account" }).click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
+  await page
+    .getByRole("link", { name: "Configure Relay", exact: true })
+    .click();
+  await page
+    .getByRole("heading", { name: "Relay · project configuration" })
+    .waitFor();
+  assert.equal(await showsText(page, SENTINEL), false);
+  await page.goto(`${web.origin}/app/projects/${ids.atlas}/settings`);
+  await revealButton(page, "instructions").waitFor();
+
+  // An edit stays, like any unsaved input, across in-app navigation.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("UNSAVED EDIT");
+  await tabs.getByRole("link", { name: "Routing" }).click();
+  await page.getByRole("switch", { name: "Enable routing" }).waitFor();
+  await tabs.getByRole("link", { name: "General" }).click();
+  assert.equal(await instructionsField(page).inputValue(), "UNSAVED EDIT");
+
+  // Navigating away before the read resolves never renders the text.
+  await page.goto(`${web.origin}/app/projects/${ids.atlas}/settings`);
+  await revealButton(page, "instructions").waitFor();
+  await page.route("**/private-values", async (route) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  const requested = page.waitForRequest((r) =>
+    r.url().endsWith("/private-values"),
+  );
+  await revealButton(page, "instructions").click();
+  await requested;
+  await tabs.getByRole("link", { name: "Routing" }).click();
+  await page.getByRole("switch", { name: "Enable routing" }).waitFor();
+  gate.release();
+  await settled(page);
+  assert.equal(await showsText(page, SENTINEL), false);
+  await tabs.getByRole("link", { name: "General" }).click();
+  await revealButton(page, "instructions").waitFor();
+  await page.unroute("**/private-values");
+
+  // Signing out clears the text; signing back in starts kept.
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  await page.getByRole("button", { name: "Operator account" }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  await page.getByLabel("Password").waitFor();
+  assert.equal(await showsText(page, SENTINEL), false);
+  await signIn(page, web, `/app/projects/${ids.atlas}/settings`);
+  await revealButton(page, "instructions").waitFor();
+  assert.equal(await showsText(page, SENTINEL), false);
+
+  // Signing out before the read resolves: the same outcome.
+  const second = { release: () => {} };
+  const heldAgain = new Promise<void>((resolve) => {
+    second.release = resolve;
+  });
+  await page.route("**/private-values", async (route) => {
+    await heldAgain;
+    await route.continue().catch(() => {});
+  });
+  await revealButton(page, "instructions").click();
+  await page.getByRole("button", { name: "Operator account" }).click();
+  await page.getByRole("menuitem", { name: "Sign out", exact: true }).click();
+  await page.getByLabel("Password").waitFor();
+  second.release();
+  await settled(page);
+  assert.equal(await showsText(page, SENTINEL), false);
+  await page.unroute("**/private-values");
+  assert.deepEqual(
+    consoleErrors.filter(
+      (m) => !/private-values|net::ERR|Failed to load resource/.test(m),
+    ),
+    [],
+  );
+});
+
+test("a reveal leaves no trace in the URL, history or storage", async (_t, journey) => {
+  const { ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const url = page.url();
+  const historyLength = await page.evaluate(() => window.history.length);
+  const bodies: string[] = [];
+  page.on("response", (r) => {
+    if (r.url().includes("/api/operator/"))
+      void r
+        .text()
+        .then((text) => {
+          if (text.includes("PRIVATE")) bodies.push(new URL(r.url()).pathname);
+        })
+        .catch(() => {});
+  });
+  const requests: string[] = [];
+  page.on("request", (r) => {
+    requests.push(`${r.url()} ${r.postData() ?? ""}`);
+  });
+  const read = page.waitForResponse((r) => r.url().endsWith("/private-values"));
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  await (await read).finished();
+  await settled(page);
+  assert.equal(page.url(), url);
+  assert.equal(await page.evaluate(() => window.history.length), historyLength);
+  assert.equal(
+    await page
+      .evaluate(() => JSON.stringify(history.state ?? null))
+      .then((s) => s.includes("PRIVATE")),
+    false,
+  );
+  const storage = await page.evaluate(() =>
+    JSON.stringify([
+      ...Object.entries(localStorage),
+      ...Object.entries(sessionStorage),
+    ]),
+  );
+  assert.equal(storage.includes("PRIVATE"), false);
+  assert.equal(
+    (await page.context().cookies()).some((c) => c.value.includes("PRIVATE")),
+    false,
+  );
+  assert.deepEqual(bodies, [
+    `/api/operator/projects/${ids.atlas}/private-values`,
+  ]);
+  assert.equal(requests.filter((r) => r.includes("PRIVATE")).length, 0);
+  assert.equal(requests.filter((r) => r.includes("/private-values")).length, 1);
+});
+
+test("a failed reveal keeps focus and explains without the text", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  await page.route("**/private-values", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  const reveal = revealButton(page, "instructions");
+  await reveal.click();
+  const failed = page.getByRole("alert").filter({
+    hasText: "Couldn't load the instructions.",
+  });
+  await failed.waitFor();
+  assert.equal(await showsText(page, "PRIVATE"), false);
+  assert.equal(await instructionsField(page).count(), 0);
+  const retry = page.getByRole("button", {
+    name: "Try again to reveal instructions",
+    exact: true,
+  });
+  assert.equal(await retry.innerText(), "Try again");
+  assert.equal(
+    await retry.evaluate((e) => e === document.activeElement),
+    true,
+    "focus stays on the control that was used",
+  );
+  assert.equal(await saveProject(page).isDisabled(), true);
+  await page.unroute("**/private-values");
+  await retry.click();
+  await instructionsField(page).waitFor();
+  assert.equal(await instructionsField(page).inputValue(), SENTINEL);
+  assert.equal(await failed.count(), 0);
+  assert.equal(
+    await instructionsField(page).evaluate((e) => e === document.activeElement),
+    true,
+  );
+});
+
+test("two tabs: a reveal never sends unedited text and a stale edit conflicts", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  // A second signed-in browser context is the other tab.
+  const context = await page.context().browser()?.newContext();
+  assert.ok(context);
+  const other = await context.newPage();
+  other.setDefaultTimeout(5000);
+  try {
+    await signIn(other, web, `/app/projects/${ids.atlas}/settings`);
+    await revealButton(page, "instructions").click();
+    await instructionsField(page).waitFor();
+    await revealButton(other, "instructions").click();
+    await instructionsField(other).fill("EDITED IN THE OTHER TAB");
+    await saveProject(other).click();
+    await savedOutcome(other);
+    assert.equal(d.project(ids.atlas).instructions, "EDITED IN THE OTHER TAB");
+
+    // This tab still shows the old text; a name-only save sends no instructions and conflicts.
+    await page
+      .getByLabel("Project name", { exact: true })
+      .fill("Atlas tab one");
+    const nameOnly = commandBody(page);
+    await saveProject(page).click();
+    assert.equal("instructions" in (await nameOnly), false);
+    await page.getByText("A newer version was saved elsewhere.").waitFor();
+    assert.equal(d.project(ids.atlas).name, "Atlas");
+    await outcomeMessages(page)
+      .getByRole("button", { name: "Review changes" })
+      .click();
+    // The unedited reveal went stale with the newer version.
+    await revealButton(page, "instructions").waitFor();
+    assert.equal(await showsText(page, SENTINEL), false);
+
+    // Editing the older reveal is a stale edit: the other tab saves first, so this one conflicts.
+    await revealButton(page, "instructions").click();
+    await instructionsField(page).fill("EDITED IN TAB ONE");
+    bumpProject(f, ids.atlas, "Atlas moved on");
+    await saveProject(page).click();
+    await page.getByText("A newer version was saved elsewhere.").waitFor();
+    assert.equal(d.project(ids.atlas).instructions, "EDITED IN THE OTHER TAB");
+    assert.equal(
+      await instructionsField(page).inputValue(),
+      "EDITED IN TAB ONE",
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+test("empty and very large instructions reveal and save exactly", async (_t, journey) => {
+  const { f, ids, page, web } = await startSettings(
+    journey,
+    "/app/projects/:fieldnotes/settings",
+  );
+  const d = f.service.domain();
+  const set = (instructions: string) =>
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: ids.fieldnotes,
+      expectedVersion: Number(d.project(ids.fieldnotes).version),
+      instructions,
+    });
+  set("");
+  await page.reload();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  assert.equal(await instructionsField(page).inputValue(), "");
+  assert.equal(await instructionsField(page).isEditable(), true);
+  assert.equal(await outcomeMessages(page).count(), 0);
+  assert.equal(await saveProject(page).isDisabled(), true);
+
+  const large = "日本é".repeat(5333) + "x";
+  assert.equal(large.length, 16000);
+  set(large);
+  await page.reload();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).waitFor();
+  assert.equal(await instructionsField(page).inputValue(), large);
+  assert.equal(await saveProject(page).isDisabled(), true);
+  await instructionsField(page).fill(`${large}y`);
+  await saveProject(page).click();
+  const error = page.getByText(
+    "Keep the instructions to 16000 characters or fewer. It has 16001.",
+    { exact: true },
+  );
+  await error.waitFor();
+  assert.equal(d.project(ids.fieldnotes).instructions, large);
+  assert.equal((await error.innerText()).includes("日本"), false);
+  assert.equal(await instructionsField(page).inputValue(), `${large}y`);
+  // Back to the exact limit: the value saves unchanged-length and byte for byte.
+  await instructionsField(page).fill(`${large.slice(0, -1)}z`);
+  await saveProject(page).click();
+  await savedOutcome(page);
+  assert.equal(
+    d.project(ids.fieldnotes).instructions,
+    `${large.slice(0, -1)}z`,
+  );
+  const read = await page.request.get(
+    `${web.origin}/api/operator/projects/${ids.fieldnotes}/configuration`,
+  );
+  assert.equal((await read.text()).includes("日本"), false);
 });
 
 test("General tab validation, conflict and revoked-lead failures keep input", async (_t, journey) => {
@@ -279,7 +744,7 @@ test("phone project settings lead with state and next step and keep the form usa
   );
 });
 
-test("Routing saves candidates in place without sending guidance, and replaces guidance only on request", async (_t, journey) => {
+test("Routing saves candidates in place without sending guidance, and edits revealed guidance in place", async (_t, journey) => {
   const { f, ids, page, web } = await startSettings(
     journey,
     "/app/projects/:relay/settings?tab=routing",
@@ -299,11 +764,13 @@ test("Routing saves candidates in place without sending guidance, and replaces g
     assert.equal(await candidate(name).isChecked(), false, name);
   assert.equal(await candidate("Reviewer").isDisabled(), true);
   await page.getByText("Reviewer · Review (revoked)").waitFor();
-  assert.equal(
-    await page.getByLabel("Replace routing guidance").isChecked(),
-    false,
-  );
-  assert.equal((await page.content()).includes("PRIVATE"), false);
+  const guidance = page.getByRole("group", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  assert.match(await guidance.innerText(), /Kept\s*·\s*Reveal/);
+  assert.equal(await showsText(page, "PRIVATE"), false);
+  assert.equal(await revealReads(page), 0);
   const read = await page.request.get(
     `${web.origin}/api/operator/projects/${ids.relay}/configuration`,
   );
@@ -341,26 +808,48 @@ test("Routing saves candidates in place without sending guidance, and replaces g
   await aside
     .getByText(/^Candidates: (?=.*Mira)(?=.*Eli)(?=.*Builder)(?=.*Worker)/)
     .waitFor();
-  await aside
-    .getByText("Guidance: private · not loaded into this form")
-    .waitFor();
+  await aside.getByText("Guidance: kept", { exact: true }).waitFor();
   await page.waitForFunction(() =>
     [...document.querySelectorAll("button")].some(
       (b) => b.textContent === "Save routing" && b.disabled,
     ),
   );
   await captureBrowserEvidence(page, "1366-routing-saved");
-  await page.getByLabel("Replace routing guidance").check();
-  await page
-    .getByLabel("New routing guidance", { exact: true })
-    .fill("NEW PRIVATE GUIDANCE");
+  await revealButton(page, "routing guidance").click();
+  const field = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  await field.waitFor();
+  assert.equal(await field.inputValue(), "PRIVATE ROUTING GUIDANCE");
+  assert.equal(await field.evaluate((e) => e === document.activeElement), true);
+  assert.equal(await save.isDisabled(), true, "revealing is not a change");
+  const loaded = Number(d.routing(ids.relay).version);
+  await field.fill("NEW PRIVATE GUIDANCE");
+  await changes(page)
+    .getByText("Routing guidance edited", { exact: true })
+    .waitFor();
+  assert.equal((await changes(page).innerText()).includes("PRIVATE"), false);
   const replaced = commandBody(page);
   await save.click();
-  assert.equal((await replaced).guidance, "NEW PRIVATE GUIDANCE");
-  await page
-    .getByLabel("New routing guidance", { exact: true })
-    .waitFor({ state: "detached" });
+  const edit = await replaced;
+  assert.equal(edit.guidance, "NEW PRIVATE GUIDANCE");
+  assert.equal(edit.expectedVersion, loaded);
+  await savedOutcome(page, /^Saved\./);
+  await revealButton(page, "routing guidance").waitFor();
+  assert.equal(await field.count(), 0);
   assert.equal(d.routing(ids.relay).guidance, "NEW PRIVATE GUIDANCE");
+  // Clearing the guidance is an explicit edit to empty.
+  await revealButton(page, "routing guidance").click();
+  await field.fill("");
+  await changes(page)
+    .getByText("Routing guidance cleared", { exact: true })
+    .waitFor();
+  const cleared = commandBody(page);
+  await save.click();
+  assert.equal((await cleared).guidance, "");
+  await savedOutcome(page, /^Saved\./);
+  assert.equal(d.routing(ids.relay).guidance, "");
   await page.getByRole("switch", { name: "Enable routing" }).uncheck();
   await changes(page).getByText("Routing disabled").waitFor();
   await page
@@ -477,12 +966,18 @@ test("Routing names TypeSafe availability in words and who allocates when it can
     .waitFor();
 });
 
-test("Routing conflict keeps the checked candidates until the newer version is reviewed", async (_t, journey) => {
+test("Routing conflict keeps the checked candidates and a revealed guidance edit until the newer version is reviewed", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
     "/app/projects/:relay/settings?tab=routing",
   );
   await page.getByRole("checkbox", { name: /^Nora ·/ }).check();
+  await revealButton(page, "routing guidance").click();
+  const guidance = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  await guidance.fill("EDITED BEFORE A CONFLICT");
   const d = f.service.domain();
   d.execute({
     type: "routing.configure",
@@ -500,6 +995,7 @@ test("Routing conflict keeps the checked candidates until the newer version is r
     await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
     true,
   );
+  assert.equal(await guidance.inputValue(), "EDITED BEFORE A CONFLICT");
   await refresh(page);
   await outcomeMessages(page)
     .getByRole("button", { name: "Review changes" })
@@ -508,6 +1004,16 @@ test("Routing conflict keeps the checked candidates until the newer version is r
     await page.getByRole("checkbox", { name: /^Nora ·/ }).isChecked(),
     true,
   );
+  // The edit is kept and now rides on the newer version.
+  assert.equal(await guidance.inputValue(), "EDITED BEFORE A CONFLICT");
+  const newer = Number(d.routing(ids.relay).version);
+  const sent = commandBody(page);
+  await page.getByRole("button", { name: "Save routing", exact: true }).click();
+  const body = await sent;
+  assert.equal(body.expectedVersion, newer);
+  assert.equal(body.guidance, "EDITED BEFORE A CONFLICT");
+  await savedOutcome(page, /^Saved\./);
+  assert.equal(d.routing(ids.relay).guidance, "EDITED BEFORE A CONFLICT");
 });
 
 test("GitHub source keeps saved rows private and sends keep markers for in-place edits", async (_t, journey) => {
@@ -1036,6 +1542,11 @@ test("a re-read of another writer's routing retires the saved line", async (_t, 
   await refresh(page);
   await savedOutcome(page, /^Saved\. Routing now uses .*Nora/);
   // Another writer saves routing, and the next re-read must not describe it as this save.
+  // An unedited reveal belongs to the version it was read at, so it goes back to kept.
+  await revealButton(page, "routing guidance").click();
+  await page
+    .getByRole("textbox", { name: "Routing guidance", exact: true })
+    .waitFor();
   const d = f.service.domain();
   d.execute({
     type: "routing.configure",
@@ -1056,6 +1567,8 @@ test("a re-read of another writer's routing retires the saved line", async (_t, 
     await page.locator(".settings-status").innerText(),
     /Saved \d\d:\d\d/,
   );
+  await revealButton(page, "routing guidance").waitFor();
+  assert.equal(await showsText(page, "PRIVATE"), false);
 });
 
 test("another writer committing between a routing save and its re-read is not described as saved", async (_t, journey) => {

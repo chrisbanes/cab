@@ -1,3 +1,4 @@
+import { projectPrivateValuesSchema } from "../../src/operator/contracts.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import {
   routingChanges,
@@ -13,15 +14,17 @@ import {
   Aside,
   ChangeList,
   DraftCheck,
-  DraftField,
   DraftOutcome,
   Panel,
+  PrivateTextField,
   ReferenceInput,
   locked,
   reloadDraft,
+  revealedText,
   submitDraft,
   useDraft,
   useLoadedDraft,
+  usePrivateValues,
 } from "./settings.js";
 
 const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
@@ -85,13 +88,22 @@ export function RoutingTab(p: TabProps) {
     expectedVersion: String(data.routing.version),
     enabled: data.routing.enabled,
     candidateProfileIds: savedCandidates(data),
-    replaceGuidance: false,
-    guidance: "",
     referenceMode: "preserve",
     credentialRef: "",
   };
   useLoadedDraft(d, initial, p.loadedAt);
-  const lines = routingChanges(data, d.values);
+  const priv = usePrivateValues(
+    p.client,
+    p.session,
+    `/api/operator/projects/${projectId}/private-values`,
+    projectPrivateValuesSchema,
+  );
+  const revealed = revealedText(
+    priv.state,
+    (r) => ({ version: r.data.routing.version, text: r.data.routing.guidance }),
+    data.routing.version,
+  );
+  const lines = routingChanges(data, d.values, revealed);
   const candidates = Array.isArray(d.values.candidateProfileIds)
     ? d.values.candidateProfileIds
     : [];
@@ -116,7 +128,7 @@ export function RoutingTab(p: TabProps) {
                 d,
                 p.client,
                 p.session,
-                routingCommand(projectId, d.values, data),
+                routingCommand(projectId, d.values, data, revealed),
                 p.refreshConfiguration,
               )
             }
@@ -127,23 +139,21 @@ export function RoutingTab(p: TabProps) {
               label="Enable routing"
               toggle
             />
-            <DraftCheck
+            <PrivateTextField
               draft={d}
-              field="replaceGuidance"
-              label="Replace routing guidance"
-            />
-            <p className="metadata muted">
-              Current guidance is private and never loaded into this form.
-              Guidance is sent to TypeSafe; credentials and transcripts are not.
-            </p>
-            {d.values.replaceGuidance && (
-              <DraftField
-                draft={d}
-                field="guidance"
-                label="New routing guidance"
-                multiline
-              />
-            )}
+              field="guidance"
+              label="Routing guidance"
+              noun="routing guidance"
+              revealed={revealed}
+              state={priv.state}
+              onReveal={priv.refresh}
+            >
+              <p className="metadata muted">
+                Private to this signed-in session; revealing is not recorded.
+                Guidance is sent to TypeSafe; credentials and transcripts are
+                not.
+              </p>
+            </PrivateTextField>
             <fieldset className="settings-candidates" disabled={locked(d)}>
               <legend className="small-heading">Candidate profiles</legend>
               {data.profiles.map((r) => (
@@ -197,9 +207,7 @@ export function RoutingTab(p: TabProps) {
         <section className="settings-aside" aria-label="Saved routing">
           <h2 className="small-heading">Saved routing</h2>
           <p className="body">Candidates: {used.join(", ") || "None"}</p>
-          <p className="metadata muted">
-            Guidance: private · not loaded into this form
-          </p>
+          <p className="metadata muted">Guidance: kept</p>
         </section>
         <Aside
           title="How routing decides"

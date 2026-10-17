@@ -403,3 +403,24 @@
 .recovery-older > summary {
   cursor: pointer;
 }
+
+/* "Kept · Reveal": a labelled group that looks like the field it becomes. */
+.private-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.private-field legend {
+  padding: 0;
+  margin-bottom: var(--space-8);
+}
+
+.private-field > p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+}
