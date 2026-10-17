@@ -39,7 +39,7 @@ export const pullRequestStateLabel = (
 export const checkStatusWord = (status: "success" | "pending" | "failure") =>
   ({ success: "Passed", pending: "Pending", failure: "Failed" })[status];
 
-/** The link only when it is an https github.com URL; the server builds it, this guards a fixture or proxy. */
+/** The link only when it is an https github.com URL: defence in depth behind the read schema, which already rejects any other URL. */
 export function safePullRequestUrl(url: string | undefined) {
   if (!url) return null;
   try {

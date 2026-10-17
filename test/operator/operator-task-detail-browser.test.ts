@@ -2876,7 +2876,10 @@ test("The delivery block links the PR, says its state and blockers in words, and
   assert.equal(await prLink.getAttribute("href"), url);
   assert.match((await prLink.getAttribute("rel")) ?? "", /noopener/);
   assert.equal(await prLink.getAttribute("target"), "_blank");
-  assert.equal(await flat(line), "acme/app#12 Open head 11111111");
+  assert.equal(
+    await flat(line),
+    "acme/app#12 (opens GitHub) Open head 11111111",
+  );
   assert.equal(await line.locator("abbr").getAttribute("title"), head);
   await changes
     .getByText("No checks or repair owner were observed on this head.", {
@@ -2912,7 +2915,10 @@ test("The delivery block links the PR, says its state and blockers in words, and
     reads.set(a.taskId, read(binding));
     await refreshTask(page, a.taskId);
     await line.getByText(badge, { exact: true }).waitFor();
-    assert.equal(await flat(line), `acme/app#12 ${badge} head 11111111`);
+    assert.equal(
+      await flat(line),
+      `acme/app#12 (opens GitHub) ${badge} head 11111111`,
+    );
   }
   await changes
     .getByText("PR merged; task completion still requires", { exact: false })
@@ -2969,6 +2975,29 @@ test("The delivery block links the PR, says its state and blockers in words, and
   assert.equal(
     (await text()).includes("delivery-provider-read-unavailable"),
     false,
+  );
+
+  const readError = changes.getByText("provider-read-unavailable", {
+    exact: true,
+  });
+  assert.equal(await readError.isVisible(), false);
+  await changes
+    .locator("details", { hasText: "Read error" })
+    .getByText("Details", { exact: true })
+    .click();
+  await readError.waitFor();
+
+  // Checks omitted from the read are not "no checks observed".
+  reads.set(a.taskId, read({ omittedCheckCount: 1 }));
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByText("No repair owner is recorded for this pull request.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await changes.getByText("were observed on this head").count(),
+    0,
   );
 
   // Without a verified link the line is plain text and never shows a repository id.

@@ -2672,6 +2672,7 @@ function PullRequestLine({
       {href ? (
         <a href={href} target="_blank" rel="noopener noreferrer">
           {binding.repositoryName}#{binding.number}
+          <span className="sr-only"> (opens GitHub)</span>
         </a>
       ) : (
         <>PR #{binding.number}</>

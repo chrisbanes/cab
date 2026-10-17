@@ -249,7 +249,10 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
 
 /** The PR line links the PR in its own repository and shows the exact head the provider reported. */
 async function expectPullRequest(changes: Locator, head: string) {
-  const link = changes.getByRole("link", { name: "org/repo#7", exact: true });
+  const link = changes.getByRole("link", {
+    name: "org/repo#7 (opens GitHub)",
+    exact: true,
+  });
   await link.waitFor();
   assert.equal(
     await link.getAttribute("href"),
