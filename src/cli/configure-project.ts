@@ -165,7 +165,6 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
           changes,
           diff,
           impact: impact.impact,
-          impactLines: impact.lines,
           notes,
           gaps,
         });
@@ -233,9 +232,9 @@ export const projectWriteCommands = new Map<string, WriteCommand>([
   [
     "project apply",
     {
-      usage: "project apply --file FILE [--request-id UUID]",
+      usage: "project apply --file FILE [--dry-run | --request-id UUID]",
       positionals: 0,
-      flags: ["file", "request-id"],
+      flags: ["file", "request-id", "dry-run"],
       run: (ctx) => applyFile(ctx, "project"),
     },
   ],

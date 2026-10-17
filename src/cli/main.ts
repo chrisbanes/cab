@@ -142,6 +142,7 @@ const OPTIONS_HELP = `Options:
   --help                Show this help
   --all                 With --help: list every command and option
   --verbose             execution list/get and logs only: also print capture notes
+  --dry-run             apply only: print the stored change; connect and send nothing
   --version             Show the Ensemble version
 `;
 
@@ -262,6 +263,7 @@ export const OPTIONS = {
   help: { type: "boolean" },
   all: { type: "boolean" },
   verbose: { type: "boolean" },
+  "dry-run": { type: "boolean" },
   version: { type: "boolean" },
   limit: { type: "string" },
   cursor: { type: "string" },

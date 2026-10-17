@@ -87,6 +87,7 @@ export type Values = {
   "max-duration"?: string | undefined;
   "compare-current"?: boolean | undefined;
   verbose?: boolean | undefined;
+  "dry-run"?: boolean | undefined;
   title?: string | undefined;
   outcome?: string | undefined;
   "outcome-file"?: string | undefined;

@@ -1201,3 +1201,232 @@ test("prepare writes a change document to a default path that never overwrites",
   r = await cli("rw", ["project", "apply", "--file", unquoted]);
   assert.equal(r.code, 0, r.err + r.out);
 });
+
+test("apply --dry-run shows the stored change and sends nothing", async (t) => {
+  const { s, seed, h, d, file, out, cli, journal } = await setup(t);
+  const prepare = (args: string[], doc = out()) =>
+    h.run([
+      "project",
+      "prepare",
+      seed.projectA,
+      ...args,
+      "--out",
+      doc,
+      "--connection",
+      "ro",
+    ]);
+  const D = out();
+  const prepared = await prepare(
+    ["--instructions-file", file("dry.md", "Dry run guidance")],
+    D,
+  );
+  assert.equal(prepared.code, 0, prepared.err);
+  /** From `Changes:` to the line before the closing lines of prepare or of the dry run. */
+  const section = (text: string) => {
+    const l = text.trimEnd().split("\n");
+    const end = l.findIndex(
+      (x) => x.startsWith("Apply with:") || x.startsWith("Not checked"),
+    );
+    // `Gap:` lines are prepare-time coverage, which the document does not store.
+    return l
+      .slice(l.indexOf("Changes:"), end)
+      .filter((x) => !x.startsWith("Gap: "))
+      .join("\n")
+      .trimEnd();
+  };
+  assert.match(section(prepared.out), /\+ Dry run guidance/);
+  assert.match(section(prepared.out), /Affected assignments/);
+  const document = JSON.parse(readFileSync(D, "utf8")) as Json;
+  const state = () => ({
+    fetches: h.fetches.length,
+    journal: journal().length,
+    db: databaseDigest(s.f),
+    file: readFileSync(D, "utf8"),
+  });
+  const before = state();
+
+  // 1. Human output: the prepared change, the origin and installation, the apply command.
+  let r = await h.run([
+    "project",
+    "apply",
+    "--file",
+    D,
+    "--dry-run",
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(state(), before);
+  assert.equal(r.err, "");
+  assert.equal(section(r.out), section(prepared.out));
+  assert.ok(r.out.includes(document.service.origin), r.out);
+  assert.ok(r.out.includes(document.service.installationId), r.out);
+  assert.ok(
+    r.out.includes(
+      "Not checked against the service; apply re-checks the version and installation.",
+    ),
+  );
+  assert.equal(
+    r.out.trimEnd().split("\n").at(-1),
+    `Apply with: ensemble project apply --file ${D}`,
+  );
+
+  // 2. JSON: the stored document, and nothing the service said.
+  r = await cli("rw", ["project", "apply", "--file", D, "--dry-run"]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(state(), before);
+  assert.deepEqual(r.json().data, { file: D, document });
+  for (const key of ["request", "connection", "service"])
+    assert.ok(!(key in r.json()), key);
+
+  // 3. The dry run left no journal key behind: the real apply happens once.
+  const version = Number(d.project(seed.projectA).version);
+  r = await cli("rw", ["project", "apply", "--file", D]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(Number(d.project(seed.projectA).version), version + 1);
+
+  // 4. A document edited after prepare is refused locally.
+  const edited = out();
+  writeFileSync(
+    edited,
+    JSON.stringify({
+      ...document,
+      command: { ...document.command, name: "Edited" },
+    }),
+    { mode: 0o600 },
+  );
+  const sent = h.fetches.length;
+  r = await cli("rw", ["project", "apply", "--file", edited, "--dry-run"]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "change-document-invalid");
+
+  // 5. A document of another kind names the command that applies it.
+  r = await cli("rw", ["profile", "apply", "--file", D, "--dry-run"]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "change-document-invalid");
+  assert.match(r.json().error.message, /ensemble project apply/);
+  assert.equal(h.fetches.length, sent);
+
+  // 6. A stale version is not noticed by the dry run, but apply still refuses it.
+  const stale = out();
+  const newer = out();
+  assert.equal((await prepare(["--name", "Stale one"], stale)).code, 0);
+  assert.equal((await prepare(["--name", "Newer one"], newer)).code, 0);
+  r = await cli("rw", ["project", "apply", "--file", newer]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const requests = h.fetches.length;
+  r = await cli("rw", ["project", "apply", "--file", stale, "--dry-run"]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(h.fetches.length, requests);
+  r = await cli("rw", ["project", "apply", "--file", stale]);
+  assert.equal(r.code, 4);
+  assert.equal(r.json().error.code, "conflict");
+
+  // 7. Another connection, or none at all: still local, still naming the origin.
+  const other = await startCliService(t);
+  const issued = await other.issue("read-write", "other");
+  const login = await h.run([
+    "auth",
+    "login",
+    "--connection",
+    "other",
+    "--url",
+    other.origin,
+    "--token-file",
+    h.tokenFile(issued.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const elsewhere = out();
+  assert.equal((await prepare(["--name", "Elsewhere"], elsewhere)).code, 0);
+  const afterLogin = h.fetches.length;
+  r = await h.run([
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--dry-run",
+    "--connection",
+    "other",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(
+    r.json().data.document.service,
+    JSON.parse(readFileSync(elsewhere, "utf8")).service,
+  );
+  assert.equal(h.fetches.length, afterLogin);
+  const loggedOut = harness(t);
+  r = await loggedOut.run([
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--dry-run",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(loggedOut.fetches, []);
+  r = await h.run([
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--connection",
+    "other",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "wrong-service");
+
+  // 8. A dry run takes no request key.
+  const count = h.fetches.length;
+  r = await cli("rw", [
+    "project",
+    "apply",
+    "--file",
+    elsewhere,
+    "--dry-run",
+    "--request-id",
+    randomUUID(),
+  ]);
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "usage");
+  assert.equal(h.fetches.length, count);
+
+  // 9. Capacity and creation documents dry-run the same way.
+  const capacityDoc = out();
+  r = await cli("ro", [
+    "capacity",
+    "prepare",
+    "--global-limit",
+    "6",
+    "--out",
+    capacityDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const profileDoc = out();
+  r = await cli("ro", [
+    "profile",
+    "prepare-create",
+    "--name",
+    "Dry",
+    "--instructions-file",
+    file("dry-p.md", "Dry profile"),
+    "--out",
+    profileDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const fetched = h.fetches.length;
+  for (const [area, doc, kind] of [
+    ["capacity", capacityDoc, "capacity.configure"],
+    ["profile", profileDoc, "profile.create"],
+  ] as const) {
+    r = await cli("rw", [area, "apply", "--file", doc, "--dry-run"]);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.json().data.document.kind, kind);
+  }
+  assert.equal(h.fetches.length, fetched);
+});

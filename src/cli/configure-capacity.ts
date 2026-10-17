@@ -106,9 +106,9 @@ export const capacityWriteCommands = new Map<string, WriteCommand>([
   [
     "capacity apply",
     {
-      usage: "capacity apply --file FILE [--request-id UUID]",
+      usage: "capacity apply --file FILE [--dry-run | --request-id UUID]",
       positionals: 0,
-      flags: ["file", "request-id"],
+      flags: ["file", "request-id", "dry-run"],
       run: (ctx) => applyFile(ctx, "capacity"),
     },
   ],

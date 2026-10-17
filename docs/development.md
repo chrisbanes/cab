@@ -251,6 +251,12 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      (`wrong-service`), then sends exactly the stored command. It never prompts,
      rebases or overwrites: a stale revision or capacity value is `conflict` (exit
      4); prepare again.
+   - `apply --file FILE --dry-run` validates the document as `apply` does (owner-only,
+     size, schema, digest, kind, command) and prints its stored change, the origin and
+     installation it was prepared for and the `Apply with:` command, without connecting
+     (no request, no journal line; `data` is `{file, document}`). It does not check
+     staleness or the installation, and says so; `apply` still refuses both. It takes no
+     `--request-id`.
    - Profile and project instructions are `--instructions TEXT|-` (`-` reads standard
      input, text only, as for `task create --outcome -`) or `--instructions-file PATH`
      on `profile|project prepare-create` and `profile|project prepare`; give one, and
