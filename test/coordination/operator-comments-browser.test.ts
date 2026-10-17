@@ -14,7 +14,7 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedTaskResult } from "../fixtures/task-review.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-comments-browser");
@@ -230,6 +230,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   await page
     .getByRole("button", { name: "Post GitHub comment", exact: true })
     .click();
+  await openOverviewCard(page, "brief");
   await page
     .getByRole("button", { name: "Ask lead about brief", exact: true })
     .click();
@@ -265,6 +266,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     "Unfinished local message beside GitHub draft",
   );
   await page.getByLabel("Editable reply").fill("");
+  await openOverviewCard(page, "brief");
   await page
     .getByRole("button", { name: "Ask lead about brief", exact: true })
     .click();

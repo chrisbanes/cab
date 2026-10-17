@@ -15,7 +15,7 @@ import {
   setLinkedRepository,
 } from "../fixtures/task-review.js";
 import { leadResumeNotice } from "../../web/src/lead-feedback.js";
-import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openOverviewCard, openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-review-browser");
 test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, comparison identities and local artifact feedback on desktop and phone", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
@@ -297,6 +297,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     await page.getByText("Unpaired recorded evidence", { exact: true }).count(),
     1,
   );
+  await openOverviewCard(page, "brief");
   const bounds = await page
     .locator("nav.task-actions a, #brief select, #review select")
     .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
@@ -304,6 +305,7 @@ test("exact S1 R2 R3 S2 review retains scoped outcomes, captured context, compar
     bounds.every((h) => h >= 32),
     JSON.stringify(bounds),
   );
+  await openOverviewCard(page, "evidence");
   await page.locator("#review").scrollIntoViewIfNeeded();
   await page.getByAltText("before: Before focus").waitFor();
   assert.equal(
@@ -647,8 +649,9 @@ for (const [limitCase, sourceBody] of [
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     const brief = page.locator("#brief"),
       gap = /Retained source body and checklist coverage are unavailable/;
+    await openOverviewCard(page, "brief");
     await brief.getByText(gap).waitFor();
-    const disclosure = brief.locator("details");
+    const disclosure = brief.locator("details[data-record-id]");
     assert.equal(await disclosure.getAttribute("open"), null);
     assert.equal(
       await brief.getByText(/Prefix requirement|Tail requirement/).count(),
@@ -759,15 +762,17 @@ test("partial literal checklist coverage remains explicit with collapsed and exp
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   const partial =
     "Checklist coverage is partial: 128 literal checklist records retained; 2 additional records omitted. Consult the full retained brief.";
+  await openOverviewCard(page, "brief");
   await page.locator("#brief").getByText(partial, { exact: true }).waitFor();
   await page
     .locator("#review")
     .getByText(partial, { exact: true })
     .waitFor({ state: "attached" });
-  assert.equal(await page.locator("#brief details").getAttribute("open"), null);
-  await page.locator("#brief details summary").click();
+  const literal = page.locator("#brief details[data-record-id]");
+  assert.equal(await literal.getAttribute("open"), null);
+  await literal.locator("summary").click();
   await page
-    .locator("#brief details pre")
+    .locator("#brief details[data-record-id] pre")
     .getByText(body, { exact: true })
     .waitFor();
   await page
@@ -905,6 +910,7 @@ test("every lead composer shows the same resume line for a completed lead and ke
     .getByRole("button", { name: "Message task lead", exact: true })
     .click();
   const seen = [await line.first().textContent()];
+  await openOverviewCard(page, "evidence");
   for (const name of ["Ask lead about result", "Ask lead about artifact"]) {
     await reply.fill("");
     await page.getByRole("button", { name, exact: true }).first().click();

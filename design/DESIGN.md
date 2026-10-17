@@ -157,9 +157,11 @@ dimensions.
   imported tasks, title, desired outcome, actions (Execution, and Stop… while the
   task is open; there is no task pause), a status strip (state badge, readiness and holds, next actor, lead,
   updated) and tabs (Overview, Files, Changes, Review, History). Overview leads with
-  any decision card, then the shared brief (requirements with provenance, approach
-  and decisions, the supplied-criteria table with evidence outcomes), the latest
-  result, the assignments table and Message lead. The inspector holds source sync,
+  any decision card, then the latest result (its criterion rows with evidence
+  outcomes), the reply to the lead, and the shared brief (requirements with
+  provenance, approach and decisions, the supplied-criteria table), evidence and the
+  assignments table as collapsed disclosures (`46a-task-overview-laptop`;
+  `03-task-detail` shows them open). The inspector holds source sync,
   holds, dependencies, execution facts and results and artifacts; the holds a
   decision does not clear also appear as lines in the decision card; with no
   approval selected, the open approvals are not repeated as a hold. Requests remain
@@ -347,7 +349,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | --- | --- |
 | 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
-| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
@@ -731,6 +733,7 @@ journey.
 | Desktop task, 1366 × 900 | `46a-task-overview-laptop` |
 | Full-content task inventory | `03-task-detail` |
 | Phone task, 390 × 844 | `47-phone-task-overview` |
+| Phone Task actions open | `47b-phone-task-actions-open` |
 | Phone evidence and earlier results | `48-phone-evidence-earlier-results` |
 | Empty, dependency, refresh and uncertainty specimens | `49-state-comparisons` |
 | Expanded local brief, question, history and retained draft | `50-local-task-brief-history-expanded` |
@@ -1529,15 +1532,17 @@ Presentation and interaction rules that the canvas does not show on its own.
   conversations open through disclosure (`03-task-detail`).
 - The Overview tab reads in this order: pending decisions, holds and wait reasons;
   the latest result with its criterion evidence; the reply to the lead; then the
-  shared brief and assignments as collapsed disclosures with a one-line summary
-  (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
+  shared brief, evidence and assignments as collapsed disclosures with a one-line
+  summary (`46a-task-overview-laptop`; `03-task-detail` shows them open). Captured
   conversations, earlier results and delivery evidence live in History, Changes and
   Review, and the Overview tab does not repeat those tabs as sections.
+- A link to a section or record inside a closed disclosure opens it; polls,
+  refreshes and a returning Back never open or close one.
 - The task header keeps Execution and Stop… only. On a phone (`47-phone-task-overview`)
   the detail header has Back, the task title, a mono subtitle (the source, such as
-  `acme/atlas#142`, or Local task) and one outline overflow action holding
-  Execution and Stop…; the decision card sits in the first viewport, and Message
-  lead is the bottom action.
+  `acme/atlas#142`, or Local task) and one outline "Task actions" disclosure holding
+  Execution and Stop… (open in `47b-phone-task-actions-open`); the decision card sits
+  in the first viewport, and the reply follows the latest result.
 - A task's legacy page (`/coordination/task/:id`) is linked once, as Approval and
   delivery forms, from its History tab; that page links `/task/:id` (Edit task and
   review source). The project page keeps Project settings and links to no legacy
@@ -2038,9 +2043,19 @@ as follows:
   subtitle (plain text with heading, list and checklist markers removed, clamped to
   three lines; when more follows, a closed "Full desired outcome" disclosure in the
   status strip renders the whole outcome as Markdown and stays open across a
-  refresh; a redacted outcome shows neither; the brief keeps the full text) and
-  Execution plus, while
-  the task is open, Stop…, at every width. A finished task offers no Stop…; an
+  refresh; a redacted outcome shows neither; the brief keeps the full text) and,
+  from 760px, Execution plus, while the task is open, Stop…. Below 760px
+  (`47-phone-task-overview`) the header is one row: an icon-only Back (named as
+  below), the one-line title over a mono subtitle (`repository#N`, or "Local task"),
+  and one outline "Task actions" control holding Execution and Stop… (open in
+  `47b-phone-task-actions-open`). The control is a native disclosure with a 44px
+  summary, not an ARIA menu:
+  it is the same element at every width and held open from 760px, so resizing never
+  remounts the Stop confirmation; Escape closes the confirmation first, then the
+  disclosure, and a tap outside closes it. The phone drops the outcome line and the
+  strip's ID slot (the subtitle carries the identity), so the strip's "Full desired
+  outcome" disclosure also shows a one-line outcome there. A finished task offers no
+  Stop…; an
   existing Stop stays as a disabled "Stop requested". Back is the only back
   control: with an in-session origin it reads the origin view ("Board",
   "Overview", "Inbox", "Search", "Tasks"; named "Back to originating view") and
@@ -2073,13 +2088,15 @@ as follows:
   mounted and only the selected one shows, so drafts, expansions, selections and
   unconfirmed checks survive a switch; each tab keeps its own scroll. A switch
   sends nothing and adds no history entry; Back and Forward restore the tab with
-  the reading position. Links choose the first tab: `?section=` (brief, review,
-  reply → Overview; files; changes; local-review → Review; context, history →
-  History), then the fragment, then `path` (Files), `target`/`base` (Changes),
+  the reading position. Links choose the first tab: `?section=` (decisions, brief,
+  review, result-evidence, assignments, reply → Overview; files; changes;
+  local-review → Review; context, history → History), then the fragment, then `path` (Files), `target`/`base` (Changes),
   `review` (Review), `result`/`source` (Overview) and `assignment` (History); a
   `record` or `request` target opens the tab that holds it unless the link names a
   section or fragment (`?request=…#history` opens History). A link followed in
-  place maps the same way. The full header shows
+  place maps the same way. A link to a section or record inside a closed Overview
+  disclosure opens it first (`?section=brief`, `?source=`, `?evidence=` and a Search
+  hit for the brief or a recorded decision). The full header shows
   on every tab, not `06-workspace-changes-review`'s compact header. The tabs scroll
   with the page.
 - A request is never hidden by a tab: the strip's "Next: you · …" is a button that
@@ -2090,8 +2107,19 @@ as follows:
   shows on Changes beside its control. "New updates — jump to latest" opens
   History at its end.
 - Overview is one column of cards beside the inspector (280–320px, from 1024px;
-  below the reply on narrower screens): the decision card, the shared brief, the
-  latest result, the assignments table and the reply. The decision card leads
+  below the last card on narrower screens): the decision card, the latest result,
+  the reply, then Shared brief, Evidence and Assignments · N as closed native
+  disclosures (`46a-task-overview-laptop`, `03-task-detail` open, and
+  `47-phone-task-overview` draw all three; the "Earlier results" and "Changes since
+  viewed" links beside them stay unbuilt). Each summary is one clamped line of recorded
+  facts: "Requirements · GitHub · 2 supplied criteria", "R2 · 1 validation record ·
+  2 artifacts", and each assignment's short id and known state. A pointer line
+  closes the tab: "Captured conversations, earlier results and delivery evidence
+  are in History, Changes and Review." The latest-result card keeps its summary,
+  criterion rows, the viewing reference and the Result revision select visible; the
+  disclosures hold their content mounted, so closing one loses no read, selection or
+  focus target. Open cards belong to the history entry, are written only by their
+  own toggles and links, and a task opened fresh starts with all three closed. The decision card leads
   with any request ("Your decision · approval pending", exact action, target,
   revision and material hash, and "Review material & decide" to the coordination
   view; the page never approves), then pending completion and unresolved result
@@ -2186,12 +2214,13 @@ as follows:
   view." or "Retained evidence for this result can't be shown right now." (anything
   else: "…can't be shown."), with the code inside a closed Details. There is no
   "Approach" block (no recorded approach field), no "Compare screenshots" control
-  (recorded pairs render under the latest result), no clock times, and no
+  (recorded pairs render in the Evidence card), no clock times, and no
   "Earlier results (2)" button (the Result revision select and the inspector keep
   earlier results).
-- Frame 57's entries under the latest result stay: Files, Changes, Review,
-  "Assignment context & identifiers", "Assignment history" and "Message lead"
-  open their tab in place and move to the section, without a history entry.
+- Overview has no in-page entries to other tabs: the tab list, the inspector's
+  result links and the assignment buttons ("Assignment history" in place, without a
+  history entry) are the ways in; frame 57's Files, Changes, Review and context
+  entries are not built.
 - The viewing-reference block under the latest result (the "No viewing baseline …"
   or changes line, "Set viewing reference" and its disclaimer) shows only once the
   task has a result. A check for a viewing write whose response was lost stays
@@ -2203,7 +2232,7 @@ as follows:
   criterion" keeps its exact-reference draft, which names the criterion by its
   line in the brief ("criterion 3 in source revision 1"), not by its C label.
 - The phone keeps one reading column with the same tabs; the drill-in screens of
-  frames 47, 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
+  frames 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
   tab pair of phone frames 14 and 15 are not built, so reading position,
   expansions and unsent replies are not split across history entries. The tab
   list fits at 390px and scrolls inside itself only when narrower.

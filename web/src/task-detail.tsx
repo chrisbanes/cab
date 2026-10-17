@@ -1,13 +1,25 @@
 import type { MouseEvent } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
-import { ActionLink, isPlainClick } from "./components.js";
+import { isPlainClick } from "./components.js";
 import { assignmentRow } from "./task-overview.js";
 import { ExecutionNotices } from "./execution-notice.js";
 import "./task-detail.css";
 
-/** Move to a task section in place: no history entry, focus on its heading. */
+/** Opens the collapsed Overview card that holds a linked record, so a link never lands on a closed one. */
+export function openDisclosures(target: HTMLElement) {
+  const card = target.closest<HTMLDetailsElement>(
+    "details.overview-disclosure",
+  );
+  if (card) card.open = true;
+}
+
+/** Move to a task section in place: no history entry, focus on its heading or card summary. */
 export function showSection(target: HTMLElement) {
   target.scrollIntoView();
+  const summary = target.querySelector<HTMLElement>(
+    ":scope > details.overview-disclosure > summary",
+  );
+  if (summary) return summary.focus({ preventScroll: true });
   const heading = target.querySelector<HTMLElement>("h3,h4");
   if (heading) {
     heading.tabIndex = -1;
@@ -32,32 +44,6 @@ function inPage(id: string, reveal: (id: string) => void, before?: () => void) {
     before();
     requestAnimationFrame(() => reveal(id));
   };
-}
-
-/** Frame 57's contextual entries; they replace the old section-button row. */
-export function EntryLinks({ reveal }: { reveal: (id: string) => void }) {
-  const entries = [
-    ["files", "Files"],
-    ["changes", "Changes"],
-    ["local-review", "Review"],
-    ["context", "Assignment context & identifiers"],
-    ["history", "Assignment history"],
-    ["reply", "Message lead"],
-  ] as const;
-  return (
-    <nav className="entry-links" aria-label="Task material">
-      {entries.map(([id, label]) => (
-        <ActionLink
-          key={id}
-          variant="secondary"
-          href={`#${id}`}
-          onClick={inPage(id, reveal)}
-        >
-          {label}
-        </ActionLink>
-      ))}
-    </nav>
-  );
 }
 
 /** The assignments table; opening one expands that assignment's history. */
