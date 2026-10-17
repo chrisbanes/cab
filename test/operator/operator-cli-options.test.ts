@@ -3,7 +3,12 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { browseCommands, writeCommands } from "../../src/cli/commands.js";
-import { BUILTIN_USAGE, declaredOptions, OPTIONS } from "../../src/cli/main.js";
+import {
+  BUILTIN_USAGE,
+  declaredOptions,
+  OPTIONS,
+  usageOptions,
+} from "../../src/cli/main.js";
 import { ALWAYS_ALLOWED } from "../../src/cli/write.js";
 import { harness } from "../fixtures/cli-harness.js";
 import { startCliService } from "../fixtures/operator-cli.js";
@@ -65,9 +70,9 @@ test("every command declares its options, and a command table entry is never ski
   }
   // A write command's `flags` and its usage line say the same thing.
   for (const [key, command] of writeCommands) {
-    const named = [...command.usage.matchAll(/(?<![\w-])--([a-z][a-z-]*)/g)]
-      .map((m) => m[1] ?? "")
-      .filter((name) => !ALWAYS_ALLOWED.includes(name));
+    const named = usageOptions(command.usage).filter(
+      (name) => !ALWAYS_ALLOWED.includes(name),
+    );
     assert.deepEqual(
       [...new Set(named)].sort(),
       [...command.flags].sort(),

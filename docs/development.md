@@ -275,7 +275,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    `operation get` and the exact retry. Exit codes: 2 invalid input, 3
    authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
-   outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted. Every
+   outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted, and `--version` and `--help` are answered before any command. Every
    human error of the operator commands ends with one `Fix:` line on stderr
    (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors (the
    message, their own command lines and the same line) but keep their own lifecycle

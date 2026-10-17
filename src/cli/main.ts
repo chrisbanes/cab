@@ -141,7 +141,7 @@ const OPTIONS_HELP = `Options:
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
   --all                 With --help: list every command and option
-  --verbose             Also print execution capture notes (read commands)
+  --verbose             execution list/get and logs only: also print capture notes
   --version             Show the Ensemble version
 `;
 
@@ -514,7 +514,7 @@ export function declaredOptions(key: string): readonly string[] | undefined {
   const usage = browseCommands.get(key)?.usage ?? BUILTIN_USAGE.get(key);
   return usage === undefined ? undefined : usageOptions(usage);
 }
-const usageOptions = (usage: string) =>
+export const usageOptions = (usage: string) =>
   [...usage.matchAll(/(?<![\w-])--([a-z][a-z-]*)/g)].map((m) => m[1] ?? "");
 
 async function run(
@@ -530,7 +530,8 @@ async function run(
   const key = singleWord ? area : `${area} ${action}`;
   // Before any handler runs, so no command acts on an option it does not take.
   const declared = declaredOptions(key);
-  if (declared) rejectUnusedFlags(values, declared);
+  if (!declared) throw new CliError("usage", "Unknown command.");
+  rejectUnusedFlags(values, declared);
   if (key === "auth login") {
     expectArgs(positionals, 2);
     rejectManaged(deps.env);
