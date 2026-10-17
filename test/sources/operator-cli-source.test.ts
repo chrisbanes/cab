@@ -517,15 +517,6 @@ test("project apply sends the prepared source change once, deactivating selectio
   assert.equal(denied.code, 3, denied.out);
   assert.equal(databaseDigest(w.s.f), before);
   const v = await version();
-  const applied = await w.ok("rw", ["project", "apply", "--file", doc]);
-  assert.deepEqual(applied.data.receipt.result, {
-    commandType: "github.configure",
-    resourceId: atlas,
-    version: v + 1,
-    credentialConfigured: true,
-    selectionCount: 2,
-    repositoryCount: 1,
-  });
   const human = await w.h.run([
     "project",
     "apply",
@@ -536,6 +527,16 @@ test("project apply sends the prepared source change once, deactivating selectio
   ]);
   assert.equal(human.code, 0, human.err);
   assert.match(human.out, /inactive until previewed again/);
+  const applied = await w.ok("rw", ["project", "apply", "--file", doc]);
+  assert.deepEqual(applied.data.receipt.result, {
+    commandType: "github.configure",
+    resourceId: atlas,
+    version: v + 1,
+    credentialConfigured: true,
+    selectionCount: 2,
+    repositoryCount: 1,
+  });
+  assert.equal(applied.data.replayed, true);
   assert.equal(await version(), v + 1, "replay applies once");
   assert.ok((await w.config()).source.selections.every((s: Json) => !s.active));
 
