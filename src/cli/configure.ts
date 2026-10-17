@@ -204,6 +204,8 @@ function readStdin(ctx: WriteContext, flag: string): Promise<string> {
     const onAbort = () =>
       fail("it was interrupted", `Run the command again with the text.`);
     if (signal?.aborted) return onAbort();
+    if (stdin.readableEnded)
+      return fail("it was already read", `Pass the text with --${flag} TEXT.`);
     stdin.on("data", onData);
     stdin.once("end", onEnd);
     stdin.once("error", onError);

@@ -27,6 +27,13 @@ export class MemoryKeychain implements CredentialStore {
   }
 }
 
+/** A standard input that holds `text` and then ends. */
+export const stdinOf = (text: string) => {
+  const stream = new PassThrough();
+  stream.end(text);
+  return stream as unknown as NodeJS.ReadStream;
+};
+
 export function harness(t: After, overrides: Partial<CliDeps> = {}) {
   const dir = mkdtempSync(join(tmpdir(), "ensemble-cli-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

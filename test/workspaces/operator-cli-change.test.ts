@@ -11,7 +11,7 @@ import {
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { harness } from "../fixtures/cli-harness.js";
+import { harness, stdinOf } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
   instructionSecret,
@@ -233,12 +233,6 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
   assert.equal(Number(d.profile(seed.profileId).version), 8);
 });
 
-const stdinOf = (text: string) => {
-  const stream = new PassThrough();
-  stream.end(text);
-  return stream as unknown as NodeJS.ReadStream;
-};
-
 test("profile and project instructions can be given inline or on stdin", async (t) => {
   const { seed, d, file, out, cli, h } = await setup(t);
   type Kind = {
@@ -359,6 +353,12 @@ test("profile and project instructions can be given inline or on stdin", async (
         "usage",
         /--instructions TEXT/,
       );
+    await refuse(
+      "no name",
+      [k.area, "prepare-create", "--instructions", "X"],
+      "usage",
+      /--name/,
+    );
     await refuse(
       "empty stdin",
       create("Empty", "--instructions", "-"),

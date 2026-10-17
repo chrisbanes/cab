@@ -721,8 +721,7 @@ async function login(
   values: Values,
   deps: CliDeps,
 ): Promise<Result> {
-  const requested =
-    values.connection ?? (deps.env.ENSEMBLE_CONNECTION || undefined);
+  const requested = values.connection ?? deps.env.ENSEMBLE_CONNECTION;
   const nameResult = connectionNameSchema.safeParse(
     requested ?? DEFAULT_CONNECTION,
   );

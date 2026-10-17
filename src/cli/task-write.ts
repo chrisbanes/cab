@@ -206,14 +206,13 @@ async function domainTaskWrite(
   fields: Record<string, unknown>,
   summary: string,
   notes: string[],
-  /** Fills `expectedVersion` from the pre-read when the flag was omitted. */
-  fillVersion = false,
 ) {
   const session = await connectWrite(ctx, TASK_WRITE);
   const read = (await readTask(session, taskId)).data.task;
   const { projectId } = read;
-  if (fillVersion && fields.expectedVersion === undefined)
-    fields = { ...fields, expectedVersion: read.version };
+  // An omitted --expected-version is the version this read saw.
+  const filled = fields.expectedVersion === undefined;
+  if (filled) fields = { ...fields, expectedVersion: read.version };
   const scope = `project:${projectId}`;
   const { key, digest, reused } = await chooseKey(
     ctx,
@@ -233,7 +232,26 @@ async function domainTaskWrite(
         match: (r) => isTask(r, taskId),
       }),
     taskVersion(session, taskId, fields.expectedVersion as number),
-  );
+  ).catch((error: unknown) => {
+    // The settling retry must carry the version this attempt sent, or its digest differs.
+    if (
+      filled &&
+      error instanceof CliError &&
+      error.code === "command-outcome-unknown" &&
+      error.extra.request
+    ) {
+      const flags = `--request-id ${key} --expected-version ${read.version}`;
+      throw new CliError(
+        error.code,
+        error.message.replace(`--request-id ${key}`, flags),
+        {
+          ...error.extra,
+          fix: `Do not assume either outcome: repeat the same command with ${flags} to settle it.`,
+        },
+      );
+    }
+    throw error;
+  });
   const after = await readAfter(session, taskId);
   return writeOutput({
     request,
@@ -377,6 +395,12 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         const ready = boolFlag(v.ready, "ready") ?? true;
         if (v.title === undefined)
           throw new CliError("usage", "--title T is required.");
+        const blockers = (v.blocker ?? []).map((b) => uuidArg(b, "--blocker"));
+        const profileId =
+          v.assignee === undefined
+            ? undefined
+            : uuidArg(v.assignee, "--assignee");
+        // Last, so every other usage error comes before a read of standard input.
         const outcome = await inlineText(ctx, "outcome");
         if (outcome === undefined)
           throw new CliError(
@@ -385,11 +409,6 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           );
         if (!outcome.trim())
           throw new CliError("invalid-input", "The outcome must not be blank.");
-        const blockers = (v.blocker ?? []).map((b) => uuidArg(b, "--blocker"));
-        const profileId =
-          v.assignee === undefined
-            ? undefined
-            : uuidArg(v.assignee, "--assignee");
         const content = {
           type: "task.create",
           projectId,
@@ -506,7 +525,6 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           ready === undefined
             ? []
             : [`Reverse with 'task configure --ready ${!ready}'.`],
-          true,
         );
       },
     },

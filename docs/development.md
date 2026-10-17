@@ -324,8 +324,10 @@ or run `node dist/src/cli/main.js` directly.
      forms are mutually exclusive. `task create` is ready unless `--ready false`.
      `task configure` without `--expected-version` sends the version of the task read
      it already makes; an edit between that read and the send is a `conflict` (exit
-     4). A lost reply is an unknown outcome (exit 6): the same command again reads the
-     new version and is a new request, and the old `--request-id` is refused as
+     4). A lost reply is an unknown outcome (exit 6): repeat the command with the printed
+     `--request-id` and `--expected-version` to settle it. The same command without
+     them reads the current version, which is a new request if the lost one applied
+     and the same request if it did not; the old `--request-id` alone is refused as
      `conflict` rather than applied twice. Imported tasks keep provider-owned title and outcome
      (`policy-denied`) and readiness. The task and initial-assignment ids are derived
      from the request key, so a retry rebuilds the same command. `task create` and

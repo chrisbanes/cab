@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { once } from "node:events";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { completedLead, configure, until } from "../fixtures/completed-lead.js";
+import { stdinOf } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
   failReadAfterPost,
@@ -1167,12 +1169,6 @@ test("a missing outcome file says it is missing", async (t) => {
   assert.match(hostile.err, /^Fix: Check the path given to --outcome-file\.$/m);
 });
 
-const stdinOf = (text: string) => {
-  const stream = new PassThrough();
-  stream.end(text);
-  return stream as unknown as NodeJS.ReadStream;
-};
-
 test("task create takes inline or stdin outcome and defaults to ready", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s, d, file } = o;
@@ -1278,7 +1274,29 @@ test("task create takes inline or stdin outcome and defaults to ready", async (t
   assert.equal(count(), before);
   assert.equal(databaseDigest(s.f), digest);
 
-  // A read-only credential is refused before anything is read from stdin or sent.
+  // Standard input that was already read cannot be read again.
+  const spent = stdinOf("once");
+  spent.resume();
+  await once(spent, "end");
+  assert.match(
+    await refuse("spent stdin", create(["--outcome", "-"]), "invalid-input", {
+      stdin: spent,
+    }),
+    /already read/,
+  );
+  // A bad --blocker is reported before standard input is read.
+  const unread = new PassThrough() as unknown as NodeJS.ReadStream;
+  assert.match(
+    await refuse(
+      "bad blocker",
+      [...create(["--outcome", "-"]), "--blocker", "nope"],
+      "invalid-input",
+      { stdin: unread },
+    ),
+    /--blocker/,
+  );
+
+  // A read-only credential is refused before anything is sent.
   r = await cli("ro", create(["--outcome", "No"]));
   assert.equal(r.code, 3);
   assert.equal(r.json().error.code, "insufficient-scope");
@@ -1372,6 +1390,35 @@ test("task configure uses the current version when --expected-version is omitted
   assert.equal(r.json().error.code, "conflict");
   assert.equal(version(), settled, "nothing applied twice");
 
+  // The retry the CLI prints settles a lost reply: it carries the version that was sent,
+  // so it replays the recorded request instead of conflicting.
+  const sentVersion = version();
+  const unknown = await o.h.run(
+    [...configure("--title", "Lost again"), "--connection", "rw"],
+    { fetch: lostReply },
+  );
+  assert.equal(unknown.code, 6, unknown.err);
+  assert.equal(String(d.task(s.taskId).title), "Lost again");
+  const retry = unknown.err.match(
+    /^Fix: .*repeat the same command with (--request-id \S+ --expected-version \d+) to settle it\.$/m,
+  );
+  assert.ok(retry, unknown.err);
+  assert.match(
+    unknown.err,
+    new RegExp(`retry the same command with ${retry[1]}`),
+  );
+  assert.equal(retry[1]?.endsWith(`--expected-version ${sentVersion}`), true);
+  const applied = version();
+  const settle = await o.h.run([
+    ...configure("--title", "Lost again"),
+    ...(retry[1] ?? "").split(" "),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(settle.code, 0, settle.err);
+  assert.match(settle.out, /Reused unresolved request/);
+  assert.equal(version(), applied, "settled without applying twice");
+
   // 4. A read-only credential is refused with nothing changed.
   const digest = databaseDigest(s.f);
   r = await cli("ro", configure("--title", "Nope"));
@@ -1382,14 +1429,14 @@ test("task configure uses the current version when --expected-version is omitted
   // 5. An explicit stale version still exits 4, and both flags together are refused.
   r = await cli("rw", configure("--title", "Stale", "--expected-version", "1"));
   assert.equal(r.code, 4);
-  assert.equal(String(d.task(s.taskId).title), "Lost");
+  assert.equal(String(d.task(s.taskId).title), "Lost again");
   r = await cli("rw", configure("--outcome", "A", "--outcome-file", "x.md"));
   assert.equal(r.code, 2);
   assert.equal(r.json().error.code, "usage");
   r = await cli("rw", configure());
   assert.equal(r.code, 2);
   assert.match(r.json().error.message, /--outcome/);
-  assert.equal(String(d.task(s.taskId).title), "Lost");
+  assert.equal(String(d.task(s.taskId).title), "Lost again");
 });
 
 const journalLines = (o: Operator) =>

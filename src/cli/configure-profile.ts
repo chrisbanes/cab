@@ -62,29 +62,19 @@ export function restorable(body: Body, revision: number): string {
   return body.text;
 }
 
-/** Proposed instruction text from a file or a restored revision; `given` is text already read. */
+/** Proposed instruction text: a restored revision, else the text `givenInstructions` read. */
 export async function proposedInstructions(
   values: Values,
   restore: (revision: number) => Promise<Body>,
-  given?: string,
+  given: string | undefined,
 ) {
-  if (
-    values["instructions-file"] !== undefined &&
-    values["restore-revision"] !== undefined
-  )
-    throw new CliError(
-      "usage",
-      "Use either --instructions-file or --restore-revision, not both.",
-    );
   const revision = positiveIntFlag(
     values["restore-revision"],
     "restore-revision",
   );
   if (revision !== undefined)
     return restorable(await restore(revision), revision);
-  return (
-    given ?? readTextFile(values["instructions-file"], "instructions-file")
-  );
+  return given;
 }
 
 /** `--instructions TEXT|-` or `--instructions-file`, read once; neither combines with a restore. */

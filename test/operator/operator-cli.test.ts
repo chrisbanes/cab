@@ -256,18 +256,18 @@ test("auth login defaults to the local connection and says where the token comes
   const ttyOut = Object.assign(prompts, {
     isTTY: true,
   }) as unknown as NodeJS.WriteStream;
-  for (const extra of [
-    { stdin: ttyIn, stderr: ttyOut },
-    {},
-  ] as Partial<CliDeps>[]) {
+  // The terminal run has no token file, so only the guard keeps the prompt from showing.
+  for (const [tokenFile, extra] of [
+    [true, {}],
+    [false, { stdin: ttyIn, stderr: ttyOut }],
+  ] as [boolean, Partial<CliDeps>][]) {
     r = await h.run(
       [
         "auth",
         "login",
         "--url",
         other.origin,
-        "--token-file",
-        h.tokenFile(second.token),
+        ...(tokenFile ? ["--token-file", h.tokenFile(second.token)] : []),
       ],
       extra,
     );
@@ -277,7 +277,7 @@ test("auth login defaults to the local connection and says where the token comes
     assert.equal(fixLines(r.err).length, 1);
     assert.match(fixLines(r.err)[0] ?? "", /--connection NAME/);
   }
-  assert.ok(!prompted.includes("Ensemble CLI token"), prompted);
+  assert.doesNotMatch(prompted, /Ensemble CLI token|Create a token/);
   assert.equal(readFileSync(configFile, "utf8"), before);
   assert.deepEqual([...h.keychain.items], keychainBefore);
   assert.equal(h.fetches.length, fetchesBefore);
@@ -291,8 +291,8 @@ test("auth login defaults to the local connection and says where the token comes
   r = await loginFile(first, "--connection", "work");
   assert.equal(r.code, 0, r.err);
 
-  // 6. ENSEMBLE_CONNECTION names the connection, an empty value is unset, and a
-  // bad name is a usage error that changes nothing.
+  // 6. ENSEMBLE_CONNECTION names the connection; an empty value is a bad name, as it is
+  // for every other command; a bad name is a usage error that changes nothing.
   const e = harness(t);
   r = await e.run(
     [
@@ -326,7 +326,16 @@ test("auth login defaults to the local connection and says where the token comes
     ],
     { env: { ENSEMBLE_CLI_CONFIG_DIR: e.configDir, ENSEMBLE_CONNECTION: "" } },
   );
-  assert.equal(r.json().connection, "local");
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "usage");
+  assert.deepEqual(readdirSyncSafe(e.configDir), ["connections.json"]);
+  assert.deepEqual(
+    Object.keys(
+      JSON.parse(readFileSync(join(e.configDir, "connections.json"), "utf8"))
+        .connections,
+    ),
+    ["env-name"],
+  );
   const bad = harness(t);
   for (const name of ["bad name", "", ".dot", "x".repeat(65)]) {
     r = await bad.run([
