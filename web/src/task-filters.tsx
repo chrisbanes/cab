@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Workspace } from "../../src/operator/contracts.js";
+import { workspaceLabels } from "../../src/operator/project-labels.js";
 import { Button } from "./components.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -31,6 +32,7 @@ export function TaskToolbar({
   /** Phone Board: receives the element the column chips are portalled into. */
   columnsSlot?: ((element: HTMLElement | null) => void) | undefined;
 }) {
+  const labels = workspaceLabels(workspace);
   const hasMore = Boolean(filters.q || filters.source || filters.ready);
   const [open, setOpen] = useState(hasMore);
   const switchView = (
@@ -59,7 +61,7 @@ export function TaskToolbar({
             <option value="">All projects</option>
             {workspace?.data.projects.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name ?? "Name unavailable"}
+                {labels.get(p.id)?.text}
               </option>
             ))}
           </NativeSelect>

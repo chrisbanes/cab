@@ -1705,7 +1705,7 @@ test("rich task creation rolls back invalid setup and preserves legacy omitted-f
         type: "project.create",
         actor: "operator",
         projectId,
-        name: "Project",
+        name: projectId === p ? "Project" : "Other project",
         leadProfileId: profile,
       });
     run(f.domain, {
@@ -2325,7 +2325,7 @@ test("capacity expectedCurrent guards concurrent edits and replays", () => {
         type: "project.create",
         actor: "operator",
         projectId,
-        name: "Project",
+        name: projectId === p ? "Project" : "Other project",
         leadProfileId: null,
       });
     const limits = () => f.domain.capacityLimits();

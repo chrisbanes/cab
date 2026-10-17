@@ -41,6 +41,14 @@ export class DomainPolicyError extends Error {
   }
 }
 
+/** Another project already has this name, ignoring case (SPEC "Guided setup"). */
+export class ProjectNameTakenError extends DomainPolicyError {
+  constructor(readonly existingName: string) {
+    super("invalid-input", "Another project has this name", ["name"]);
+    this.name = "ProjectNameTakenError";
+  }
+}
+
 /** A command may have committed even though its completion could not be observed. */
 export class DomainOperationError extends Error {
   constructor(message = "Command outcome is unknown", options?: ErrorOptions) {

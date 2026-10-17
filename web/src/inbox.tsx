@@ -13,7 +13,12 @@ import {
   inboxReadSchema,
   type InboxItem,
   type Session,
+  type Workspace,
 } from "../../src/operator/contracts.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
 import type { OperatorClient } from "./api.js";
 import { ArrowUpRight, ChevronDown, ChevronUp } from "lucide-react";
 import { ActionLink, Button, ResourceStatus } from "./components.js";
@@ -112,7 +117,8 @@ export function Inbox({
   navigate: (path: string) => void;
   state: InboxState;
   questions: QuestionResponseStates;
-  observation: object | null;
+  /** The workspace read: its change refreshes the list and its projects name the filter. */
+  observation: Workspace | null;
   /** Reports the unresolved total and project count (or null) so the shell matches this list. */
   onSummary?: (summary: ReturnType<typeof inboxSummaryOf>) => void;
   /** Reports the header content for this view (null on unmount). */
@@ -270,6 +276,7 @@ export function Inbox({
     );
   }, [onHeader, detailTitle, detailSubtitle, detailTask, subtitle]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
+  const labels = workspaceLabels(observation);
   const loaded = items,
     counts = filterCounts(loaded),
     projects = [
@@ -404,7 +411,8 @@ export function Inbox({
               <option value="">All projects · {counts.total}</option>
               {projects.map(([id, name]) => (
                 <option key={id} value={id}>
-                  {name ?? "Unavailable project"} · {counts.project[id] ?? 0}
+                  {projectLabel(labels, id, name).text} ·{" "}
+                  {counts.project[id] ?? 0}
                 </option>
               ))}
             </NativeSelect>

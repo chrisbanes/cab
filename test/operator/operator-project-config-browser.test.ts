@@ -3692,3 +3692,41 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
     .waitFor();
   assert.equal(await page.getByText(warning, { exact: false }).count(), 0);
 });
+
+test("renaming a project into another project's name shows the service's message and keeps the form; its own name saves", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const name = page.getByLabel("Project name", { exact: true });
+  const save = page.getByRole("button", { name: "Save project", exact: true });
+  await name.fill("relay");
+  await save.click();
+  await name.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+  assert.equal(
+    await name.evaluate((input) => {
+      const id = input.getAttribute("aria-describedby");
+      return id ? document.getElementById(id)?.textContent : null;
+    }),
+    "Another project is named Relay. Choose a different name.",
+  );
+  assert.equal(await name.inputValue(), "relay");
+  assert.equal(d.project(ids.atlas).name, "Atlas");
+  // A case-only change of its own name is not a collision.
+  await name.fill("ATLAS");
+  await save.click();
+  await savedOutcome(page, /^Saved\./);
+  assert.equal(d.project(ids.atlas).name, "ATLAS");
+  // Next to a duplicate that predates the rule, other fields still save.
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_projects SET name = 'ATLAS' WHERE id = ?")
+      .run(ids.fieldnotes),
+  );
+  await refresh(page);
+  await page.getByRole("switch", { name: "Pause project" }).click();
+  await save.click();
+  await savedOutcome(page, /^Saved\./);
+  assert.equal(d.project(ids.atlas).paused, 1);
+});

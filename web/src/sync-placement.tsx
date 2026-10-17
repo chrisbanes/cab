@@ -8,6 +8,10 @@ import { ObservationCounts } from "./observation-counts.js";
 import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
 import type { ConfigurationDraft } from "./settings-state.js";
 import { OutcomeDetails } from "./action-feedback.js";
 import {
@@ -369,7 +373,10 @@ function PlacementConfiguration(
   },
 ) {
   const c = p.placement,
-    d = useDraft(p.drafts, `github.place:${c.taskId}`);
+    d = useDraft(p.drafts, `github.place:${c.taskId}`),
+    labels = workspaceLabels(p.workspace),
+    choiceText = (r: (typeof c.choices)[number]) =>
+      projectLabel(labels, r.id, r.name).text;
   useEffect(
     () =>
       d.initialize({
@@ -386,10 +393,8 @@ function PlacementConfiguration(
       description={`${c.title ?? "Task title unavailable"}; task version ${c.version}.`}
     >
       <p className="body">
-        Matched by{" "}
-        {c.choices.map((r) => r.name ?? "Name unavailable").join(" and ")}. New
-        work is held until you choose its project. Permissions are never
-        combined.
+        Matched by {c.choices.map(choiceText).join(" and ")}. New work is held
+        until you choose its project. Permissions are never combined.
       </p>
       <form
         onSubmit={(e) => {
@@ -398,8 +403,9 @@ function PlacementConfiguration(
           d.set("placementTitle", c.title ?? "");
           d.set(
             "placementProject",
-            c.choices.find((r) => r.id === d.values.chosenProjectId)?.name ??
-              "",
+            c.choices
+              .filter((r) => r.id === d.values.chosenProjectId)
+              .map(choiceText)[0] ?? "",
           );
           void submitDraft(
             e,
@@ -422,7 +428,7 @@ function PlacementConfiguration(
           <option value="">Choose actual membership</option>
           {c.choices.map((r) => (
             <option key={r.id} value={r.id}>
-              {r.name ?? "Name unavailable"}
+              {choiceText(r)}
             </option>
           ))}
         </DraftField>

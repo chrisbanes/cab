@@ -1115,3 +1115,105 @@ test("schema rejections name each field's fix and keep project override keys", a
     [`projectOverrides.${projectId}`]: "Enter a whole number of 1 or more.",
   });
 });
+const takenMessage = "Another project is named Atlas. Choose a different name.";
+const rejectWith = (fieldPaths: string[], message = takenMessage) =>
+  new OperatorClient(async () =>
+    Response.json(
+      { error: { code: "invalid-input", message, fieldPaths } },
+      { status: 400 },
+    ),
+  );
+const projectCreate = (name: string) => ({
+  type: "project.create" as const,
+  key: randomUUID(),
+  projectId: randomUUID(),
+  name,
+  leadProfileId: null,
+});
+const projectConfigure = (name: string) => ({
+  type: "project.configure" as const,
+  key: randomUUID(),
+  projectId: randomUUID(),
+  expectedVersion: 1,
+  name,
+});
+test("a refused project name shows the service's message under the name field", async () => {
+  for (const command of [projectCreate("atlas"), projectConfigure("atlas")]) {
+    const draft = new ConfigurationDraft();
+    draft.set("name", "atlas");
+    await draft.submit(rejectWith(["name"]), command, "csrf");
+    assert.equal(draft.phase, "rejected", command.type);
+    assert.deepEqual(draft.errors, { name: takenMessage }, command.type);
+    assert.equal(draft.notice, outcomeCopy.fields(1), command.type);
+    assert.equal(draft.values.name, "atlas", command.type);
+  }
+});
+test("only a refused project name carries the service's message", async () => {
+  const other = new ConfigurationDraft();
+  await other.submit(
+    rejectWith(["name"]),
+    {
+      type: "profile.create" as const,
+      key: randomUUID(),
+      profileId: randomUUID(),
+      name: "Atlas",
+      instructions: "Be brief",
+      capabilities: "assign" as const,
+    },
+    "csrf",
+  );
+  assert.equal(other.phase, "rejected");
+  assert.deepEqual(other.errors, { name: "Check this field." });
+  for (const code of ["forbidden", "conflict"] as const) {
+    const refused = new ConfigurationDraft();
+    await refused.submit(
+      new OperatorClient(async () =>
+        Response.json(
+          { error: { code, message: takenMessage, fieldPaths: ["name"] } },
+          { status: code === "conflict" ? 409 : 403 },
+        ),
+      ),
+      projectCreate("atlas"),
+      "csrf",
+    );
+    assert.notEqual(refused.errors.name, takenMessage, code);
+  }
+  const several = new ConfigurationDraft();
+  await several.submit(
+    rejectWith(["name", "leadProfileId"]),
+    projectCreate("atlas"),
+    "csrf",
+  );
+  assert.deepEqual(several.errors, {
+    name: "Check this field.",
+    leadProfileId: "Check this field.",
+  });
+});
+test("a refused project name is cleared by the retry that records", async () => {
+  const draft = new ConfigurationDraft();
+  draft.set("name", "atlas");
+  await draft.submit(rejectWith(["name"]), projectCreate("atlas"), "csrf");
+  assert.deepEqual(draft.errors, { name: takenMessage });
+  draft.set("name", "Atlas 2");
+  assert.equal(draft.values.name, "Atlas 2");
+  const command = projectCreate("Atlas 2");
+  const accept = new OperatorClient(async (_url, init) => {
+    const c = JSON.parse(String(init?.body));
+    return Response.json({
+      kind: "configuration",
+      key: c.key,
+      recorded: true,
+      result: {
+        commandType: "project.create",
+        resourceId: c.projectId,
+        version: 1,
+        paused: true,
+        leadProfileId: null,
+        instructionsRevision: 1,
+      },
+    });
+  });
+  await draft.submit(accept, command, "csrf");
+  assert.equal(draft.phase, "recorded");
+  assert.deepEqual(draft.errors, {});
+});

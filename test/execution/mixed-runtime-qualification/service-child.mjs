@@ -212,7 +212,7 @@ export async function setupJourney(service, { facet, model, repository }) {
   exec({
     type: "project.create",
     projectId,
-    name: "C5 disposable journey",
+    name: `C5 disposable journey ${nonce}`,
     leadProfileId,
   });
   exec({

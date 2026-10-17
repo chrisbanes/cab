@@ -38,9 +38,14 @@ import { useOperatorResource } from "./resource.js";
 import {
   ActionLink,
   Button,
+  ProjectName,
   ResourceStatus,
   StatusBadge,
 } from "./components.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
 import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
@@ -257,7 +262,13 @@ export function RuntimeSettings(p: SettingsProps) {
       }
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
-  const lines = data ? capacityChanges(data, d.values) : [];
+  const labels = workspaceLabels(p.workspace);
+  type ProjectRow = NonNullable<typeof data>["projects"][number];
+  const labelOf = (r: ProjectRow) =>
+    projectLabel(labels, r.project.id, r.project.name);
+  const lines = data
+    ? capacityChanges(data, d.values, (r) => labelOf(r).text)
+    : [];
   return (
     <div className="settings-page">
       <ResourceStatus
@@ -351,12 +362,12 @@ export function RuntimeSettings(p: SettingsProps) {
                     type="number"
                   />
                   {data.projects.map((r) => {
-                    const name = r.project.name ?? "project";
+                    const name = labelOf(r).text;
                     return (
                       <div className="settings-row" key={r.project.id}>
                         <div className="settings-row-heading">
                           <h3 className="small-heading">
-                            {r.project.name ?? "Project name unavailable"}
+                            <ProjectName label={labelOf(r)} id={r.project.id} />
                           </h3>
                           <span className="metadata muted">
                             Usage {r.usage} / effective limit {r.limit} ·
@@ -411,7 +422,7 @@ export function RuntimeSettings(p: SettingsProps) {
                   <article className="settings-panel" key={task.taskId}>
                     <div className="settings-row-heading">
                       <h3 className="small-heading">
-                        {r.project.name ?? "Project"} ·{" "}
+                        <ProjectName label={labelOf(r)} id={r.project.id} /> ·{" "}
                         {task.title ?? "Task title unavailable"}
                       </h3>
                       <StatusBadge

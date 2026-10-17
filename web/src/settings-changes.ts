@@ -516,14 +516,20 @@ export function sourceCommand(
   };
 }
 
-export function capacityChanges(data: RuntimeSettingsData, v: Values) {
+export function capacityChanges(
+  data: RuntimeSettingsData,
+  v: Values,
+  /** The project's displayed label, which tells same-named projects apart. */
+  labelOf: (r: RuntimeSettingsData["projects"][number]) => string = (r) =>
+    r.project.name ?? "Project",
+) {
   const lines: string[] = [];
   if (v.globalLimit !== undefined && Number(v.globalLimit) !== data.globalLimit)
     lines.push(
       `Global active-turn cap: ${data.globalLimit} → ${v.globalLimit}`,
     );
   for (const r of data.projects) {
-    const name = r.project.name ?? "Project";
+    const name = labelOf(r);
     const set = Boolean(v[`override-${r.project.id}`]),
       limit = Number(v[`limit-${r.project.id}`]);
     if (set && r.override === null)

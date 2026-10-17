@@ -30,6 +30,10 @@ import {
   type TaskListSummary,
   type Workspace,
 } from "../../src/operator/contracts.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
 import { ClientError, OperatorClient } from "./api.js";
 import { useOperatorResource, type ResourceState } from "./resource.js";
 import {
@@ -40,6 +44,7 @@ import {
   MobileNavigation,
   NavigationRow,
   PageHeader,
+  ProjectName,
   TopBar,
 } from "./components.js";
 import { ActionOutcome } from "./action-feedback.js";
@@ -144,6 +149,7 @@ function ProjectNavigation({
   row: boolean;
 }) {
   const countId = useId();
+  const labels = workspaceLabels(workspace);
   const pathname = path.split(/[?#]/)[0] ?? "";
   const link = (
     href: string,
@@ -220,7 +226,7 @@ function ProjectNavigation({
           pathname === `/app/projects/${p.id}` ||
             (pathname === `/app/projects/${p.id}/settings` && "true"),
           <Folder {...navIcon} />,
-          p.name ?? "Name unavailable",
+          <ProjectName label={projectLabel(labels, p.id, p.name)} id={p.id} />,
           {
             trailing: p.paused ? (
               <StatusBadge tone="idle" icon={CirclePause}>

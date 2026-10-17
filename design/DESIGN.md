@@ -1671,9 +1671,13 @@ Presentation and interaction rules that the canvas does not show on its own.
   refuse a matching name as a field error on the 116 pattern: "Another project is
   named Atlas. Choose a different name." (`116b-project-setup-duplicate-name`).
   Saving a project under its own current name is allowed. Where projects created
-  before this rule share a name, the sidebar, filters and selects add the lead's
+  before this rule share a name, the sidebar, project lists (Overview Projects,
+  Settings → Projects, Runtime), filters and selects add the lead's
   name ("Atlas · Mira"), or the project ID's first eight characters in mono when
-  the leads match or a project has no lead (`116c-project-name-suffix-specimen`).
+  the leads match or a project has no lead, widened only when two IDs start alike;
+  no two projects show the same label, and a unique name stays plain unless it
+  equals another project's full-ID label; IDs that differ only in letter case are
+  numbered "#1", "#2" after the full ID (`116c-project-name-suffix-specimen`).
 - GitHub sources are named by what they read (acme/atlas issues, a search, the
   Atlas roadmap GitHub Project), with the S-n id in Details. A GitHub Project has
   no stored title, so its name is the title discovery lists for it and otherwise

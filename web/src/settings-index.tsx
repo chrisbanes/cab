@@ -11,7 +11,11 @@ import {
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button, StatusBadge } from "./components.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
+import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
 import {
   ClaudeTokenRow,
   DiscoveryCredentialRow,
@@ -87,7 +91,8 @@ function useProjectConfigurations(
 
 export function SettingsWorkspace(p: SettingsProps) {
   const projects = p.workspace?.data.projects ?? [],
-    profiles = p.workspace?.data.profiles ?? [];
+    profiles = p.workspace?.data.profiles ?? [],
+    labels = workspaceLabels(p.workspace);
   const { configs, retry } = useProjectConfigurations(
     p.client,
     p.session.csrfToken,
@@ -154,7 +159,8 @@ export function SettingsWorkspace(p: SettingsProps) {
           >
             <DiscoveryCredentialRow {...p} />
             {projects.map((r) => {
-              const name = r.name ?? "Name unavailable",
+              const label = projectLabel(labels, r.id, r.name),
+                name = label.text,
                 c = configs[r.id],
                 lead = profiles.find(
                   (x) => x.id === c?.project.leadProfileId,
@@ -162,7 +168,9 @@ export function SettingsWorkspace(p: SettingsProps) {
               return (
                 <article className="settings-row" key={r.id}>
                   <div className="settings-row-heading">
-                    <h3 className="small-heading">{name}</h3>
+                    <h3 className="small-heading">
+                      <ProjectName label={label} id={r.id} />
+                    </h3>
                     {c && (
                       <span className="metadata muted">
                         Lead: {lead ?? "Unconfigured"}
@@ -318,13 +326,16 @@ export function SettingsWorkspace(p: SettingsProps) {
             description="Per project. Requires opt-in and a TypeSafe credential reference."
           >
             {projects.map((r) => {
-              const name = r.name ?? "Name unavailable",
+              const label = projectLabel(labels, r.id, r.name),
+                name = label.text,
                 c = configs[r.id];
               return (
                 <article className="settings-row" key={r.id}>
                   <div className="settings-row-heading">
                     <div>
-                      <h3 className="small-heading">{name}</h3>
+                      <h3 className="small-heading">
+                        <ProjectName label={label} id={r.id} />
+                      </h3>
                       {c === undefined ? (
                         <p className="metadata muted">Loading…</p>
                       ) : c === null ? (

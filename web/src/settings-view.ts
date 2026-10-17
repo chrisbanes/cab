@@ -347,6 +347,10 @@ export function projectStateSummary(
   c: ProjectConfigurationData,
   observations: Observations | null,
   unsettled: Extract<OperatorCommand, { type: "github.place" }>[],
+  /** How a placement choice names its project; labels tell same-named projects apart. */
+  choiceText: (
+    r: ProjectConfigurationData["placements"][number]["choices"][number],
+  ) => string = (r) => r.name ?? "unavailable",
 ) {
   const lead =
     c.profiles.find((p) => p.id === c.project.leadProfileId)?.name ??
@@ -369,7 +373,7 @@ export function projectStateSummary(
       : ["No GitHub source"]),
     ...c.placements.map(
       (p) =>
-        `${p.title ?? "A task"} held: choose its project (${p.choices.map((r) => r.name ?? "unavailable").join(" or ")})`,
+        `${p.title ?? "A task"} held: choose its project (${p.choices.map(choiceText).join(" or ")})`,
     ),
     ...unsettled.map(() => "A placement outcome is unknown"),
   ];
