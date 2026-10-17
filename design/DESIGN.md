@@ -1747,7 +1747,9 @@ The web app is the ground truth for these items.
   pane (`800b-tablet-inbox-question`); at or below 760px the single-column queue →
   request → queue. At the sidebar shell (1121px and wider) the queue header holds the
   page's one heading "Inbox", the unresolved summary and Refresh; below it the page
-  header keeps them. The queue groups Intervention, then Questions & approvals
+  header keeps them, except at or below 760px, where the header holds the menu,
+  "Inbox" and the count badge and Refresh ends the one-line filter row (the two
+  selects share the width and truncate long names; there is no pull-to-refresh). The queue groups Intervention, then Questions & approvals
   oldest first, under compact Project and Request kind filters; the selected row is
   the `--overlay` fill with a 2px indigo left edge. The request pane shows the kind
   badge, position, Open task and Previous/Next request, then "Project / Task title"
@@ -1811,7 +1813,7 @@ Production Inbox and shared question response
 - Evidence stays the existing "Question evidence" and "Task evidence" links; the read has no excerpt field, so frame 27's in-pane excerpt is not drawn. Returning from the task restores the selection, scroll position and the link's focus.
 - A single question's choice cards stay in the reading flow (frame 06 pins them); only the submit area is sticky, inside the one scroll owner `.inbox-detail`, so a pinned option list cannot trap scrolling or cover a field.
 - Queue rows use read-model facts only: the kind, the title (the first question's label or the approval's exact action from the item's `headline`, which is null, and the row falls back to the task title, whenever the exact read would withhold it; two lines at most, the full text on hover), "Project / Task title" as the subtitle (the project alone under a task-title fallback), the action ("Answer question", "Review material & decide", "Inspect execution"; an intervention's reason and action come from its attention code, and only operator-owned codes raise one, so a routing fallback has no Inbox item; a recorded native answer whose delivery is unresolved keeps its question row, "Answer recorded; native delivery remains unresolved", with "View task" rather than an answer action; the generic "Operator answer requested" and "Review exact approval material" reasons are not shown, and only an intervention's or delivery row's reason is) and "Requester · HH:MM · age". Frame 02 draws "Review material & decide" as an approval row title; the row leads with the exact action instead, as the issue's acceptance criterion requires. There are no short identifiers (Q-204, A-201: U3 #837), no "Execution uncertain" versus "Intervention problems" subtype (one "Interventions" option), and no grouped-question title on a phone.
-- Kept or omitted on purpose: Refresh stays on the Inbox (in the queue header at the sidebar shell, in the page header below it); the frame's "Today · 11:00" clock and the phone "Search" header action are not built; the header title is 18/600, not the older large title of frames 07 and 08. Frame 29's "Refresh request" button is not built: the request has no refresh control of its own (one refresh per page, Presentation), so the host page's Refresh and polls reread it, and a failed read recovers with the read status's "Try again".
+- Kept or omitted on purpose: Refresh stays on the Inbox (in the queue header at the sidebar shell, in the page header from 761px, and at the end of the phone filter row at 760px and below, where the frame's single header slot holds the unbuilt Search icon); the frame's "Today · 11:00" clock and the phone "Search" header action are not built; the header title is 18/600, not the older large title of frames 07 and 08. Frame 29's "Refresh request" button is not built: the request has no refresh control of its own (one refresh per page, Presentation), so the host page's Refresh and polls reread it, and a failed read recovers with the read status's "Try again".
 - Three-pane workbench against frame 02 (composed from the read model, with no new contract): there are no short identifiers (AP-17, A-104, C-104), so the identity line reads "requester · version N · HH:MM" and the Chain row uses assignment names ("Operator → Mira → Jonas"). The request headline is the question's first label or the approval's exact action (`headline` on the Inbox read, withheld exactly when the exact read is), not the task title; the task title and project sit above it. A pending request shows no "Awaiting answer" badge, and the version line, "Conversation revision N.", "Question evidence" and the drafts note sit below the form (on the task page and Overview cards too); below 1280px the "Task evidence" and "Requesting conversation" links follow them, so a phone shows the options on first view. There is no reviewed-material excerpt, tabs or file counts, no "Version N is out of date" note and no approved state: the exact action, target and version facts and the one Review link stand in for them. The kind badge reads "Approval", "Question" or "Intervention" (no "Pending approval" or execution-uncertain subtype in the Inbox read). The breadcrumb stays "Inbox"; the bar statement keeps the existing bound-decision sentence. Grouped questions read in two columns only where the request pane is at least 640px wide (1121–1279px, and from about 1530px with the inspector); at 1366 beside the inspector they are one column. The inspector shows no task state badge or synced-at time, and its Evidence section has the request's "Task evidence" and "Requesting conversation" links, which appear there instead of in the request pane from 1280px.
 - "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
@@ -1900,9 +1902,13 @@ Production Overview, List and Board
   the segmented link bar is the reach path and keyboard route to a column; from
   1121px it is not rendered, because the headings carry each name and count and the
   board scrolls to a focused card. Uncertain reads rose with its symbol while it has
-  tasks. The phone keeps the
-  three-column tab grid (selected tab on the overlay with an indigo border) and
-  in-flow Previous/Next under the column. The footer reads "Columns describe
+  tasks. The phone puts the Project and State selects and the column tabs (selected
+  tab on the overlay with an indigo border) in one row that scrolls sideways and
+  keeps the selected tab fully visible, with List/Board and Refresh tasks on the
+  line below, More filters under them and in-flow Previous/Next under the column;
+  the total count is read aloud only, as the tabs carry each count. At 759px and
+  below the tabs render in that row, from 760px above the board, one set at any
+  width. The footer reads "Columns describe
   Ensemble work, not GitHub issue state. Cards open the task; nothing here changes
   state, and there is no drag and drop."
 - Board differences from the frames: a Draft column follows Uncertain (not drawn);
@@ -1910,7 +1916,8 @@ Production Overview, List and Board
   keep the Card primitive's 8px radius; the lead reads "<name> · accountable lead"
   rather than "Lead · <name>", with no "No decision"/"No request" footer text; only
   the selected tab is emphasised; the grouping sentence is in the footer rather than
-  the page header; Previous/Next are not a sticky bottom bar. Not built, because no
+  the page header; Previous/Next are not a sticky bottom bar; the phone row of
+  selects and tabs replaces frame 25's tab grid. Not built, because no
   read carries them: "task 1 of 3", "N more waiting tasks", the per-card phone
   readiness note, relative age ("1h 46m ago"), times, short identifiers, "Check
   failed", "repair assigned" or "Repair owner unknown". The phone attention summary
@@ -2116,8 +2123,9 @@ as follows:
   expansions and unsent replies are not split across history entries. The tab
   list fits at 390px and scrolls inside itself only when narrower.
 - The composer's h1 is "Create a task" with the drawn subtitle and the field
-  label stays "Task title"; the phone header of frame 34 ("New task" plus an
-  in-body "Create a task") is not duplicated. Project (200px) and Task title share
+  label stays "Task title"; below 760px the header is Back (naming the project, or
+  Tasks) and a centred "New task" with no subtitle and no mono project line, as
+  frame 34 draws it, and the form carries no second "Create a task". Project (200px) and Task title share
   a row from 760px; Desired outcome follows, then Optional settings as one panel
   that, collapsed, shows a chip per supplied value (an invalid one marked "!" with
   a rose border) and "Open settings to fix …". Its count reads "N supplied" at

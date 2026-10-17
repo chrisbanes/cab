@@ -57,6 +57,30 @@ function layoutProblems(page: Page) {
   });
 }
 
+/** At 390 × 844 the first card, request or composer field must start on the first screen. */
+async function firstViewportProblems(page: Page, route: string) {
+  const target = {
+    boardpaused: page.locator(
+      ".board-columns .selected-column [data-task-id] .task-title",
+    ),
+    inbox: page.locator(".inbox-row"),
+    composer: page.getByLabel("Project", { exact: true }),
+  }[route as "boardpaused" | "inbox" | "composer"];
+  if (!target) return [];
+  await page.evaluate(() => document.fonts.ready);
+  const rects = await target.evaluateAll((es) =>
+    es.map((e) => e.getBoundingClientRect().toJSON()),
+  );
+  if (!rects.length)
+    return [`${route}: nothing to place in the first viewport`];
+  const rect = rects[0]!;
+  return rect.top >= 0 && rect.bottom <= 844
+    ? []
+    : [
+        `${route} first target outside the first viewport: ${JSON.stringify(rect)}`,
+      ];
+}
+
 async function runResponsiveBrowserJourney(
   engineName: "chromium" | "webkit",
   engineType: typeof chromium,
@@ -91,6 +115,8 @@ async function runResponsiveBrowserJourney(
     overview: "/app",
     tasks: "/app/tasks",
     board: "/app/tasks?view=board",
+    // The default Board opens the empty Ready column; the first-viewport check needs a card.
+    boardpaused: "/app/tasks?view=board&state=Paused",
     project: `/app/projects/${question.projectId}`,
     inbox: "/app/inbox",
     question: `/app/tasks/${question.taskId}?request=${question.interactionId}`,
@@ -98,9 +124,11 @@ async function runResponsiveBrowserJourney(
     search: "/app/search?query=Reconcile",
     settings: "/app/settings",
   };
-  const all = Object.keys(routes) as (keyof typeof routes)[];
+  const all = (Object.keys(routes) as (keyof typeof routes)[]).filter(
+    (route) => route !== "boardpaused",
+  );
   const matrix: [number, number, (keyof typeof routes)[]][] = [
-    [390, 844, all],
+    [390, 844, [...all, "boardpaused"]],
     [390, 480, ["inbox", "question", "composer"]],
     [759, 768, ["overview", "tasks"]],
     [760, 768, ["overview", "tasks", "inbox"]],
@@ -114,6 +142,8 @@ async function runResponsiveBrowserJourney(
   const evidence = new Set([
     "390x844:overview",
     "390x844:tasks",
+    "390x844:boardpaused",
+    "390x844:inbox",
     "390x480:question",
     "800x768:inbox",
     "1024x768:composer",
@@ -153,7 +183,7 @@ async function runResponsiveBrowserJourney(
       if (route === "tasks" || route === "project" || route === "overview")
         await page.locator(".task-title").first().waitFor();
       // A phone Board shows one column, which may hold no task.
-      if (route === "board")
+      if (route === "board" || route === "boardpaused")
         await page
           .locator(".board-columns [data-task-id]")
           .first()
@@ -170,6 +200,11 @@ async function runResponsiveBrowserJourney(
           .waitFor();
       for (const problem of await layoutProblems(page))
         failures.push(`${engineName} ${width}x${height} ${route}: ${problem}`);
+      if (width === 390 && height === 844)
+        for (const problem of await firstViewportProblems(page, route))
+          failures.push(
+            `${engineName} ${width}x${height} ${route}: ${problem}`,
+          );
       checked++;
       const key = `${width}x${height}:${route}`;
       if (evidence.has(key))

@@ -108,10 +108,7 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
   assert.equal(await page.getByText(/Unfinished input saved/).count(), 0);
 
   // (a) Heading, subtitle and the panels to the right; no private instructions.
-  assert.equal(
-    await page.locator("main.page h1").textContent(),
-    "Create a task",
-  );
+  assert.equal(await page.locator("main.page h1").innerText(), "Create a task");
   await page
     .getByText(
       "Describe the result you want. The project lead stays accountable.",
@@ -302,6 +299,94 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
     .click();
   await page.locator("main.page h1").waitFor();
   assert.equal(await page.getByText(/Unfinished input saved/).count(), 0);
+});
+
+test("phone composer header is Back and a centred New task with no Refresh or wrapped subtitle", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId } = seed(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  let commands = 0;
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      new URL(r.url()).pathname === "/api/operator/commands"
+    )
+      commands++;
+  });
+  await open(page, web.origin, web.password, projectId);
+  const header = page.locator("header.page-header"),
+    subtitle =
+      "Describe the result you want. The project lead stays accountable.";
+  const rect = (l: Locator) =>
+    l.evaluate((e) => e.getBoundingClientRect().toJSON());
+  const check = async (back: string, height: number) => {
+    await page.setViewportSize({ width: 390, height });
+    await page.evaluate(() => document.fonts.ready);
+    const title = header.locator("h1");
+    assert.equal(await title.innerText(), "New task");
+    assert.equal(
+      await header.getByRole("link", { name: back, exact: true }).count(),
+      1,
+    );
+    const t = await rect(title);
+    assert.ok(
+      Math.abs((t.left + t.right) / 2 - 195) <= 8,
+      `title centre ${(t.left + t.right) / 2}`,
+    );
+    assert.equal(
+      await header.locator(".page-header-title p").isVisible(),
+      false,
+    );
+    assert.equal(await page.getByText(subtitle).isVisible(), false);
+    assert.equal(
+      await page.getByRole("button", { name: "Refresh" }).count(),
+      0,
+    );
+    assert.ok((await rect(header)).height <= 56);
+    assert.ok(await noHorizontalScroll(page));
+  };
+
+  // (1) With ?project=, at the full phone and a short one.
+  await check("Back to Atlas", 844);
+  assert.ok(
+    (await box(page, "Project")).y + (await box(page, "Project")).height <= 844,
+  );
+  await check("Back to Atlas", 480);
+
+  // (2) Without ?project= Back names Tasks.
+  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.locator("main.page h1").waitFor();
+  await check("Back to Tasks", 844);
+  assert.ok(
+    (await box(page, "Project")).y + (await box(page, "Project")).height <= 844,
+  );
+
+  // (3) Tablet and desktop keep the full title and subtitle.
+  for (const width of [760, 1024, 1366]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert.equal(await header.locator("h1").innerText(), "Create a task");
+    await page.getByText(subtitle).waitFor();
+  }
+
+  // (4) Other detail headers are unchanged.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${web.origin}/app/settings/projects/new`);
+  await header.locator("h1").waitFor();
+  assert.equal(await header.getAttribute("data-compact-phone"), null);
+  assert.equal(await header.locator(".page-header-title p").isVisible(), true);
+  assert.equal(commands, 0);
 });
 
 test("Composer never claims on-device saving when storage fails", async (_t, j) => {

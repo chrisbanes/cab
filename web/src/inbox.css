@@ -531,6 +531,20 @@
     min-height: 44px;
     font-size: 13px;
   }
+  /* One line: the selects share the width and truncate; Refresh keeps its own size. */
+  .inbox-filters {
+    flex-wrap: nowrap;
+  }
+  .inbox-filters > span {
+    flex: 1 1 0;
+  }
+  .inbox-filters select {
+    width: 100%;
+    text-overflow: ellipsis;
+  }
+  .inbox-filters > button {
+    flex: none;
+  }
   /* Phone: the header and compact filters leave about 10rem; the page scrolls to the link below. */
   .inbox-rows {
     max-height: calc(100dvh - 10rem);

@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import type {
   InboxItem,
   Workspace,
@@ -34,6 +35,7 @@ import {
 } from "./overview-attention.js";
 import { AttentionBar, type Requests } from "./task-attention.js";
 import { TaskToolbar } from "./task-filters.js";
+import { useMediaQuery } from "./use-media-query.js";
 import {
   columns as allColumns,
   columnCounts,
@@ -215,12 +217,15 @@ export function TaskBoard({
   columns,
   initial,
   requests,
+  columnsTarget,
 }: {
   tasks: TaskListSummary[];
   columns: readonly TaskColumn[];
   /** The column a State filter names, shown first unless the operator already chose one. */
   initial: TaskColumn | undefined;
   requests: Requests;
+  /** Phone: the toolbar row the column chips render into instead of above the board. */
+  columnsTarget?: HTMLElement | null;
 }) {
   const [stored, updateSelected] = useState<number>(
       () =>
@@ -269,38 +274,63 @@ export function TaskBoard({
       area.scrollLeft += Math.min(c.right - a.right, c.left - a.left);
     else if (c.left < a.left) area.scrollLeft -= a.left - c.left;
   }, [tasks.length, initial, columns, selected]);
+  // Keep the pressed chip fully inside the phone row. Assigning scrollLeft is instant and
+  // derives from the selection, so it needs no history restore. It repeats once the web
+  // fonts settle, which widens the chips.
+  useLayoutEffect(() => {
+    const row = columnsTarget?.parentElement;
+    if (!columnsTarget || !row) return;
+    const fit = () => {
+      const chip =
+        columnsTarget.querySelectorAll<HTMLElement>(".column-tab")[selected];
+      if (!chip) return;
+      const r = row.getBoundingClientRect(),
+        c = chip.getBoundingClientRect();
+      if (c.right > r.right) row.scrollLeft += c.right - r.right;
+      else if (c.left < r.left) row.scrollLeft -= r.left - c.left;
+    };
+    fit();
+    let current = true;
+    void document.fonts?.ready.then(() => current && fit());
+    return () => {
+      current = false;
+    };
+  }, [columnsTarget, selected]);
   const before = columns[selected - 1],
     after = columns[selected + 1];
+  const chips = (
+    <div
+      className="column-navigation"
+      role="toolbar"
+      aria-label="Board columns"
+    >
+      {columns.map((column, index) => {
+        const risky = column === "Uncertain" && counts[column] > 0;
+        return (
+          <Button
+            key={column}
+            type="button"
+            variant="ghost"
+            className="column-tab"
+            aria-pressed={selected === index}
+            data-attention={risky ? "true" : undefined}
+            onClick={() => {
+              setSelected(index);
+              document
+                .getElementById(`column-${column}`)
+                ?.scrollIntoView({ block: "nearest", inline: "start" });
+            }}
+          >
+            {risky && <CircleQuestionMark aria-hidden="true" />}
+            {column} · {counts[column]}
+          </Button>
+        );
+      })}
+    </div>
+  );
   return (
     <div className="task-board">
-      <div
-        className="column-navigation"
-        role="toolbar"
-        aria-label="Board columns"
-      >
-        {columns.map((column, index) => {
-          const risky = column === "Uncertain" && counts[column] > 0;
-          return (
-            <Button
-              key={column}
-              type="button"
-              variant="ghost"
-              className="column-tab"
-              aria-pressed={selected === index}
-              data-attention={risky ? "true" : undefined}
-              onClick={() => {
-                setSelected(index);
-                document
-                  .getElementById(`column-${column}`)
-                  ?.scrollIntoView({ block: "nearest", inline: "start" });
-              }}
-            >
-              {risky && <CircleQuestionMark aria-hidden="true" />}
-              {column} · {counts[column]}
-            </Button>
-          );
-        })}
-      </div>
+      {columnsTarget ? createPortal(chips, columnsTarget) : chips}
       <div
         className="board-columns"
         ref={board}
@@ -414,6 +444,8 @@ export function TaskViews({
     notice = capacityNotice(tasks);
   const project = workspace?.data.projects.find((p) => p.id === projectId),
     scope = projectId || filters.project;
+  const phone = useMediaQuery("(max-width: 759px)");
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
   const work = (
     <section
       aria-label={projectId ? "Project tasks" : "Across your projects"}
@@ -428,6 +460,8 @@ export function TaskViews({
         count={tasks.length}
         refresh={refresh}
         pending={state.pending}
+        phone={phone}
+        columnsSlot={phone && filters.view === "board" ? setSlot : undefined}
       />
       {notice && <p className="metadata muted work-capacity">{notice}</p>}
       {/* Home with no project shows the getting-started checklist instead. */}
@@ -455,6 +489,7 @@ export function TaskViews({
           columns={visibleColumns(filters.state)}
           initial={allColumns.find((c) => c === filters.state)}
           requests={requests}
+          columnsTarget={phone && filters.view === "board" ? slot : null}
         />
       ) : (
         <>

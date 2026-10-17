@@ -964,6 +964,42 @@ nav {
     flex-wrap: wrap;
   }
 
+  /* Compact detail header: Back at the start, the title centred between equal side columns. */
+  .page-header[data-variant="detail"][data-compact-phone] {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+  }
+
+  .page-header[data-compact-phone] .page-header-title {
+    grid-column: 2;
+    flex: none;
+    max-width: 100%;
+    text-align: center;
+  }
+
+  .page-header[data-compact-phone] .page-header-title p {
+    display: none;
+  }
+
+  .page-header[data-compact-phone] h1 {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .page-header[data-compact-phone] .page-header-back {
+    grid-column: 1;
+    justify-self: start;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .page-header[data-compact-phone] .page-header-back span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .legacy-operator {
     padding: var(--space-16);
   }

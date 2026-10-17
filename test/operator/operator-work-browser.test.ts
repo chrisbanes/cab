@@ -1693,8 +1693,8 @@ test("board headings show every count, with collapsed empty columns and drawn ca
   assert.ok(tabs.every((r) => r.height >= 44));
   assert.equal(
     new Set(tabs.map((r) => Math.round(r.top))).size,
-    3,
-    "3-column grid of 9 tabs",
+    1,
+    "9 tabs share one scrolling row",
   );
   await bar.getByRole("button", { name: /^Waiting · / }).click();
   assert.equal(await bar.locator('[aria-pressed="true"]').count(), 1);
@@ -2202,6 +2202,198 @@ test("the board column chips render only below the shell breakpoint", async (_t,
     return link.left >= board.left - 1 && link.left < board.right;
   });
   assert.ok(await noPageOverflow(page));
+  assert.equal(commands(), 0);
+});
+
+test("phone board keeps filters and column chips in one horizontal row with the first card on screen", async (_t, journey) => {
+  const { f, ids, web, page, commands } = await start(
+    journey,
+    "/app/tasks?view=board&state=all",
+  );
+  // A long project name must truncate in the Project select, not widen the row.
+  f.service.domain().execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: randomUUID(),
+    name: "Customer onboarding and billing reconciliation platform 2026",
+    leadProfileId: ids.profileId,
+  });
+  await page.setViewportSize(phone);
+  await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
+  const bar = page.getByRole("toolbar", { name: "Board columns" }),
+    state = page.getByRole("combobox", { name: "State", exact: true }),
+    project = page.getByRole("combobox", { name: "Project", exact: true }),
+    row = page.locator(".work-filters"),
+    refresh = page.getByRole("button", { name: "Refresh tasks", exact: true });
+  await bar.waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  const inRow = async (name: string | RegExp) => {
+    const chip = bar.getByRole("button", { name }),
+      [r, c] = await Promise.all([
+        row.evaluate((e) => e.getBoundingClientRect().toJSON()),
+        chip.evaluate((e) => e.getBoundingClientRect().toJSON()),
+      ]);
+    return c.left >= r.left - 1 && c.right <= r.right + 1;
+  };
+
+  // (1) One row: both selects and every chip share a top, the row scrolls, the page does not.
+  const tops = await Promise.all(
+    [project, state, bar.getByRole("button")].map((l) =>
+      l.evaluateAll((es) => es.map((e) => e.getBoundingClientRect().top)),
+    ),
+  ).then((groups) => groups.flat());
+  assert.ok(tops.length >= 9, `selects and chips: ${tops.length}`);
+  assert.ok(Math.max(...tops) - Math.min(...tops) <= 1, `one row: ${tops}`);
+  // Left to right: Project, State, then the chips, which is also the Tab order.
+  const [pr, sr, cr] = await Promise.all(
+    [project, state, bar.getByRole("button").first()].map((l) =>
+      l.evaluate((e) => e.getBoundingClientRect().toJSON()),
+    ),
+  );
+  assert.ok(pr.right <= sr.left + 1 && sr.right <= cr.left + 1, "order");
+  assert.ok(pr.width <= 200, `Project select truncates: ${pr.width}`);
+  const scroller = await row.evaluate((e) => ({
+    overflowX: getComputedStyle(e).overflowX,
+    scrolls: e.scrollWidth > e.clientWidth,
+  }));
+  assert.deepEqual(scroller, { overflowX: "auto", scrolls: true });
+  assert.ok(await noPageOverflow(page));
+
+  // (2) The first card is on the first screen.
+  await bar.getByRole("button", { name: /^Waiting · / }).click();
+  const title = page.locator(
+    ".board-columns .selected-column [data-task-id] .task-title",
+  );
+  assert.ok((await title.count()) >= 1, "the Waiting column holds a card");
+  assert.ok(
+    (await title.first().evaluate((e) => e.getBoundingClientRect().bottom)) <=
+      844,
+  );
+
+  // (3) The pressed chip is fully visible, and the switch and Refresh share the next line.
+  const waiting = bar.getByRole("button", { name: /^Waiting · / });
+  assert.equal(await waiting.getAttribute("aria-pressed"), "true");
+  assert.ok(await inRow(/^Waiting · /));
+  const second = await Promise.all(
+    [
+      page.getByRole("button", { name: "List", exact: true }),
+      page.getByRole("button", { name: "Board", exact: true }),
+      refresh,
+    ].map((c) => c.evaluate((e) => e.getBoundingClientRect().top)),
+  );
+  assert.ok(Math.max(...second) - Math.min(...second) <= 1, `${second}`);
+  assert.ok(Math.min(...second) > Math.max(...tops));
+
+  // (4) The last chip can be chosen and stays fully visible.
+  await bar.getByRole("button", { name: "Cancelled · 1", exact: true }).click();
+  const last = bar.getByRole("button", { name: "Cancelled · 1" });
+  assert.equal(await last.getAttribute("aria-pressed"), "true");
+  assert.ok(await inRow("Cancelled · 1"));
+  assert.ok(await noPageOverflow(page));
+  assert.equal(
+    await page
+      .locator(`.selected-column [data-task-id="${ids.cancelled}"]`)
+      .count(),
+    1,
+  );
+
+  // (5) Crossing the 759/760 boundary moves the chips, never duplicates them or loses the column.
+  for (const [width, inToolbar] of [
+    [760, false],
+    [759, true],
+    [761, false],
+    [390, true],
+  ] as const) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.waitForFunction(
+      ([want]) =>
+        document.querySelectorAll(".work-filters .column-navigation").length ===
+        (want ? 1 : 0),
+      [inToolbar] as const,
+    );
+    assert.equal(await bar.count(), 1, `${width}px`);
+    assert.equal(await refresh.count(), 1, `${width}px`);
+    assert.equal(
+      await page.locator(".task-board > .column-navigation").count(),
+      inToolbar ? 0 : 1,
+      `${width}px`,
+    );
+    assert.equal(
+      await bar
+        .getByRole("button", { name: "Cancelled · 1" })
+        .getAttribute("aria-pressed"),
+      "true",
+      `${width}px`,
+    );
+    assert.ok(await noPageOverflow(page), `${width}px`);
+  }
+  assert.ok(await inRow("Cancelled · 1"));
+
+  // (6) A State change keeps focus on the select and re-points the chips.
+  await state.focus();
+  await state.selectOption("Paused");
+  await bar.getByRole("button", { name: /^Paused · / }).waitFor();
+  assert.equal(
+    await page.evaluate(() =>
+      document.activeElement?.getAttribute("aria-label"),
+    ),
+    "State",
+  );
+  assert.equal(
+    await bar
+      .getByRole("button", { name: /^Paused · / })
+      .getAttribute("aria-pressed"),
+    "true",
+  );
+  assert.ok(await inRow(/^Paused · /));
+  assert.equal(await bar.count(), 1);
+
+  // A fresh load that opens a later column fits its chip once the fonts have settled.
+  await page.goto(`${web.origin}/app/tasks?view=board&state=Paused`);
+  await bar.waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForFunction(() => {
+    const chip = document.querySelector('.column-tab[aria-pressed="true"]')!,
+      row = document.querySelector(".work-filters")!;
+    const c = chip.getBoundingClientRect(),
+      r = row.getBoundingClientRect();
+    return c.left >= r.left - 1 && c.right <= r.right + 1;
+  });
+
+  // (7) Refresh tasks is the one refresh and still rereads the workspace.
+  const read = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/operator/workspace",
+  );
+  await refresh.click();
+  await read;
+
+  // (8) The project route has no Project select; Overview puts the chips in its work panel.
+  await page.goto(`${web.origin}/app/projects/${ids.projectId}?view=board`);
+  await bar.waitFor();
+  assert.equal(await project.count(), 0);
+  assert.equal(
+    await page.locator(".work-filters .column-navigation").count(),
+    1,
+  );
+  const projectTops = await Promise.all(
+    [state, bar.getByRole("button")].map((l) =>
+      l.evaluateAll((es) => es.map((e) => e.getBoundingClientRect().top)),
+    ),
+  ).then((groups) => groups.flat());
+  assert.ok(Math.max(...projectTops) - Math.min(...projectTops) <= 1);
+  await page.goto(`${web.origin}/app?view=board`);
+  await page
+    .locator(".overview-panel .work-toolbar .column-navigation")
+    .waitFor();
+  assert.equal(await bar.count(), 1);
+
+  // (9) List has no chip slot and keeps its visible count.
+  await page.goto(`${web.origin}/app/tasks?view=list`);
+  await page.locator(".task-row").first().waitFor();
+  assert.equal(await page.locator(".work-columns").count(), 0);
+  assert.equal(await bar.count(), 0);
+  assert.ok(await page.locator(".work-count").isVisible());
   assert.equal(commands(), 0);
 });
 
