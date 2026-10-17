@@ -245,6 +245,22 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
               replaces it.
             </p>
           )}
+          {edited &&
+            baseline === undefined &&
+            !priv.state.pending &&
+            priv.state.error !== null && (
+              <p className="body error-text" role="alert">
+                Couldn't check whether this changed elsewhere.{" "}
+                <Button
+                  type="button"
+                  variant="secondary"
+                  aria-label={`Try again to check the ${label.toLowerCase()}`}
+                  onClick={priv.refresh}
+                >
+                  Try again
+                </Button>
+              </p>
+            )}
         </>
       );
     return (

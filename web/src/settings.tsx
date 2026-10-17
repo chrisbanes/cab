@@ -184,11 +184,24 @@ export function useRereadForEdit(
 ) {
   const latest = useRef(refresh);
   latest.current = refresh;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: act per loaded version and edit state only.
+  // A read that was already in flight when the version moved may return the older version,
+  // so try again when it settles, but never more than twice for one loaded version.
+  const attempts = useRef({ loaded, count: 0 });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: act per loaded version, edit state and settled read only.
   useEffect(() => {
-    if (edited && loaded !== undefined && read !== loaded && !pending)
+    if (attempts.current.loaded !== loaded)
+      attempts.current = { loaded, count: 0 };
+    if (
+      edited &&
+      loaded !== undefined &&
+      read !== loaded &&
+      !pending &&
+      attempts.current.count < 2
+    ) {
+      attempts.current.count++;
       latest.current();
-  }, [loaded, edited]);
+    }
+  }, [loaded, edited, pending]);
 }
 /**
  * "Kept · Reveal" until the signed-in operator reveals a private text, then the same
@@ -264,6 +277,14 @@ export function PrivateTextField({
           <p className="metadata muted" role="status">
             This was changed elsewhere since you started editing. Saving
             replaces it.
+          </p>
+        )}
+        {edited && revealed === undefined && failed && (
+          <p className="body error-text" role="alert">
+            Couldn't check whether this changed elsewhere.{" "}
+            <Button type="button" variant="secondary" onClick={onReveal}>
+              Try again
+            </Button>
           </p>
         )}
         {children}

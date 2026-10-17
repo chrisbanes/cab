@@ -5,6 +5,7 @@ import {
   type CommandReceipt,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
+import { sameText } from "./settings-changes.js";
 import { sourceCredentialCopy } from "./settings-view.js";
 import { CommandLifecycle } from "./command-lifecycle.js";
 import type { ReceiptDetails } from "./outcome-copy.js";
@@ -214,10 +215,9 @@ export class ConfigurationDraft {
     )
       return false;
     const { [field]: _value, [`${field}Base`]: _base, ...rest } = this.values;
-    this.values =
-      value === baseline
-        ? rest
-        : { ...rest, [field]: value, [`${field}Base`]: baseline };
+    this.values = sameText(value, baseline)
+      ? rest
+      : { ...rest, [field]: value, [`${field}Base`]: baseline };
     this.dirty = true;
     this.savedAt = null;
     this.changed();

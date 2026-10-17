@@ -621,6 +621,80 @@ test("an edit made against older text says it was changed elsewhere before it re
   assert.equal(d.project(ids.atlas).instructions, "THEIR TEXT");
 });
 
+test("an edit says so when it cannot check whether the text changed elsewhere", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("MY EDIT");
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "THEIR TEXT",
+  });
+  await page.route("**/private-values", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable" } }),
+    }),
+  );
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  // The edit is kept, and the form says it could not compare it with the saved text.
+  const alert = page.getByRole("alert").filter({
+    hasText: "Couldn't check whether this changed elsewhere.",
+  });
+  await alert.waitFor();
+  assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
+  assert.equal(await showsText(page, "THEIR TEXT"), false);
+  await page.unroute("**/private-values");
+  await alert.getByRole("button", { name: "Try again" }).click();
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  assert.equal(await alert.count(), 0);
+});
+
+test("line breaks saved as CRLF do not turn typing and deleting a character into an edit", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "LINE ONE\r\nLINE TWO",
+  });
+  await page.reload();
+  await revealButton(page, "instructions").click();
+  const field = instructionsField(page);
+  await field.waitFor();
+  await field.focus();
+  await page.keyboard.press("Control+End");
+  await page.keyboard.type("X");
+  await changes(page)
+    .getByText("Instructions edited", { exact: true })
+    .waitFor();
+  await page.keyboard.press("Backspace");
+  await noChanges(page);
+  assert.equal(await saveProject(page).isDisabled(), true);
+});
+
 test("revealing after another writer saved opens the newer version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
@@ -1957,6 +2031,68 @@ test("a reverted query or local path is kept again, and an edit survives leaving
     )
     .waitFor();
   assert.equal(await query.inputValue(), "MY REAL EDIT");
+  // Typing the text the edit started from is no edit, and the other writer's text is kept.
+  await query.fill("THEIR QUERY");
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
+  await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
+  assert.deepEqual(await changes(page).getByRole("listitem").allInnerTexts(), [
+    "Ref for acme/atlas: main → HEAD",
+  ]);
+  const last = commandBody(page);
+  await save.click();
+  assert.deepEqual((await last).selections, [
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  await savedOutcome(page);
+  const theirs = d
+    .githubConfiguration(ids.atlas)
+    .selections.find((x) => x.id === "S-2");
+  assert.equal(theirs?.kind === "search" && theirs.query, "THEIR SECOND QUERY");
+
+  // The same for a local path another writer replaced while this one was edited.
+  const mine = await createCheckout(f.directory, "mine-path-checkout");
+  const theirsPath = await createCheckout(f.directory, "their-path-checkout");
+  const current = await path.inputValue();
+  await path.fill(mine);
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [
+      { repositoryId: "acme/atlas", path: theirsPath, ref: "main" },
+    ],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  assert.equal(await path.inputValue(), mine);
+  await path.fill(current);
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(
+    await realpath(
+      d.githubConfiguration(ids.atlas).repositories[0]?.path ?? "",
+    ),
+    await realpath(theirsPath),
+  );
 });
 
 test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {

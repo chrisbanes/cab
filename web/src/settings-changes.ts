@@ -24,6 +24,9 @@ export type ProfileConfigurationData = z.infer<
 >["data"];
 export type RuntimeSettingsData = z.infer<typeof runtimeSettingsSchema>["data"];
 
+/** Text compared as a textarea returns it: line breaks are LF whatever they were saved as. */
+export const sameText = (a: string, b: string | undefined) =>
+  b !== undefined && a.replace(/\r\n?/g, "\n") === b.replace(/\r\n?/g, "\n");
 /**
  * How a private text field differs from the text the operator revealed: `null` when it
  * was never edited or equals the revealed text. A field edited while its revealed
@@ -34,7 +37,7 @@ export function privateEdit(
   value: Values[string] | undefined,
   revealed: string | undefined,
 ) {
-  if (typeof value !== "string" || value === revealed) return null;
+  if (typeof value !== "string" || sameText(value, revealed)) return null;
   return value === "" ? "cleared" : "edited";
 }
 /** The command field for an edited private text; empty when it was not edited. */
