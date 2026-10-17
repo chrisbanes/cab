@@ -637,13 +637,15 @@ test("an edit says so when it cannot check whether the text changed elsewhere", 
     expectedVersion: Number(d.project(ids.atlas).version),
     instructions: "THEIR TEXT",
   });
-  await page.route("**/private-values", (route) =>
-    route.fulfill({
+  let reads = 0;
+  await page.route("**/private-values", (route) => {
+    reads++;
+    return route.fulfill({
       status: 503,
       contentType: "application/json",
       body: JSON.stringify({ error: { code: "unavailable" } }),
-    }),
-  );
+    });
+  });
   await saveProject(page).click();
   await page.getByText("A newer version was saved elsewhere.").waitFor();
   await outcomeMessages(page)
@@ -656,6 +658,11 @@ test("an edit says so when it cannot check whether the text changed elsewhere", 
   await alert.waitFor();
   assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
   assert.equal(await showsText(page, "THEIR TEXT"), false);
+  // One read after the conflict, and one retry when it settled: no loop.
+  await page.waitForFunction(() =>
+    document.body.innerText.includes("Try again"),
+  );
+  assert.equal(reads, 2);
   await page.unroute("**/private-values");
   await alert.getByRole("button", { name: "Try again" }).click();
   await page
@@ -664,6 +671,48 @@ test("an edit says so when it cannot check whether the text changed elsewhere", 
     )
     .waitFor();
   assert.equal(await alert.count(), 0);
+});
+
+test("a private read older than the loaded version is flagged on an edit", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  // Serve the first read again for every later one, so it is always older than the form.
+  let stale = "";
+  const first = page.waitForResponse((r) =>
+    r.url().endsWith("/private-values"),
+  );
+  await revealButton(page, "instructions").click();
+  stale = await (await first).text();
+  await instructionsField(page).fill("MY EDIT");
+  await page.route("**/private-values", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: stale,
+    }),
+  );
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "THEIR TEXT",
+  });
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "Couldn't check whether this changed elsewhere." })
+    .waitFor();
+  assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
+  assert.equal(await showsText(page, "THEIR TEXT"), false);
 });
 
 test("line breaks saved as CRLF do not turn typing and deleting a character into an edit", async (_t, journey) => {
@@ -2093,6 +2142,54 @@ test("a reverted query or local path is kept again, and an edit survives leaving
     ),
     await realpath(theirsPath),
   );
+});
+
+test("a query edit says so when the private read is older than the source version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const query = page.getByLabel("Search query", { exact: true });
+  await query.waitFor();
+  const stale = await page.evaluate(async (id) => {
+    const r = await fetch(`/api/operator/projects/${id}/private-values`);
+    return r.text();
+  }, ids.atlas);
+  await query.fill("MY EDIT");
+  await page.route("**/private-values", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: stale,
+    }),
+  );
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", kind: "search", query: "THEIR QUERY" },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByRole("alert")
+    .filter({ hasText: "Couldn't check whether this changed elsewhere." })
+    .waitFor();
+  assert.equal(await query.inputValue(), "MY EDIT");
+  assert.equal(await showsText(page, "THEIR QUERY"), false);
 });
 
 test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {

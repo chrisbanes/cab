@@ -248,13 +248,13 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           {edited &&
             baseline === undefined &&
             !priv.state.pending &&
-            priv.state.error !== null && (
+            (priv.state.error !== null || privateData !== undefined) && (
               <p className="body error-text" role="alert">
                 Couldn't check whether this changed elsewhere.{" "}
                 <Button
                   type="button"
                   variant="secondary"
-                  aria-label={`Try again to check the ${label.toLowerCase()}`}
+                  aria-label={`Try again to check the ${label.toLowerCase()} for ${String(row?.[name === "query" ? "id" : "repositoryId"] ?? "")}`}
                   onClick={priv.refresh}
                 >
                   Try again

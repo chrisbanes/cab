@@ -279,14 +279,17 @@ export function PrivateTextField({
             replaces it.
           </p>
         )}
-        {edited && revealed === undefined && failed && (
-          <p className="body error-text" role="alert">
-            Couldn't check whether this changed elsewhere.{" "}
-            <Button type="button" variant="secondary" onClick={onReveal}>
-              Try again
-            </Button>
-          </p>
-        )}
+        {edited &&
+          revealed === undefined &&
+          !loading &&
+          (failed || state.data !== null) && (
+            <p className="body error-text" role="alert">
+              Couldn't check whether this changed elsewhere.{" "}
+              <Button type="button" variant="secondary" onClick={onReveal}>
+                Try again
+              </Button>
+            </p>
+          )}
         {children}
       </div>
     );
