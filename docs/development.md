@@ -229,7 +229,9 @@ or run `node dist/src/cli/main.js` directly.
    authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
    outcome, 7 unsupported service. Write commands reject flags they do not use. Every
-   human error ends with one `Fix:` line on stderr (`src/cli/remedy.ts`), and a
+   human error of the operator commands ends with one `Fix:` line on stderr
+   (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors with the
+   same line but keep their own lifecycle error reporting. A
    write that succeeds may end with `Next:` or `Waiting:`/`Fix:` lines; JSON and
    JSONL output carry neither, so envelopes, codes and exit codes do not change.
    A refused or unresolved connection (nothing sent) omits the request ID from the

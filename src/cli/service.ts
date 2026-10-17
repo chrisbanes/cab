@@ -42,6 +42,7 @@ import {
   isInBound,
 } from "../operator/diagnostic-retention.js";
 import { connectionNameSchema } from "./connections.js";
+import { DEFAULT_FIX, fixLine } from "./remedy.js";
 import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
@@ -1391,7 +1392,9 @@ export function defaultServiceHost(): ServiceHost {
 }
 
 function usage(deps: CliDeps): number {
-  deps.stderr.write(`Usage:\n${SERVICE_USAGE}`);
+  deps.stderr.write(
+    `Usage:\n${SERVICE_USAGE}${fixLine(DEFAULT_FIX.usage ?? "")}\n`,
+  );
   return 2;
 }
 

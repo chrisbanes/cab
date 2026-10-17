@@ -668,7 +668,7 @@ test("a missing change document says it is missing and sends nothing", async (t)
   assert.match(r.err, /Change document rejected: it does not exist\./);
   assert.match(
     r.err,
-    /^Fix: Prepare it first with 'ensemble project prepare'/m,
+    /^Fix: Prepare it first with .*'ensemble project prepare'.*then apply/m,
   );
   assert.deepEqual(h.fetches, []);
   assert.equal(existsSync(join(h.configDir, "requests.jsonl")), false);

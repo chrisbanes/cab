@@ -1431,7 +1431,10 @@ test("follow-up on a task without a lead names the fix", async (t) => {
   ]);
   assert.equal(r.code, 4);
   assert.match(r.err, /This task has no project lead\. \(conflict\)/);
-  assert.match(fixOf(r.err), new RegExp(`ensemble task get ${s.taskId}`));
+  assert.equal(
+    fixOf(r.err),
+    `Choose a project lead with 'ensemble project prepare ${s.projectId} --out project.json --lead-profile PROFILE_ID', then 'ensemble project apply --file project.json' ('ensemble profile list' shows profile IDs).`,
+  );
   assert.equal(posts(o), sent);
 });
 

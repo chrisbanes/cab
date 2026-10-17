@@ -579,9 +579,13 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         const session = await connectWrite(ctx, TASK_WRITE);
         const task = (await readTask(session, taskId)).data;
         const lead = task.leadAssignmentId;
+        const chooseLead = cliFix({
+          kind: "choose-lead",
+          projectId: task.task.projectId,
+        });
         if (!lead)
           throw new CliError("conflict", "This task has no project lead.", {
-            fix: `Choose a project lead; 'ensemble task get ${taskId}' prints the commands.`,
+            fix: `Choose a project lead with '${chooseLead[0]}', then '${chooseLead[1]}' ('ensemble profile list' shows profile IDs).`,
           });
         return sendMessage(
           ctx,

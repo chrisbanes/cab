@@ -14,6 +14,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { type BrowseContext, cursorQuery } from "../../src/cli/browse.js";
+import { browseCommands, writeCommands } from "../../src/cli/commands.js";
+import { CHANGE_COMMANDS } from "../../src/cli/configure.js";
 import {
   CliError,
   KeychainCredentialStore,
@@ -941,4 +943,69 @@ test("defaults name a runnable command for auth and cursor failures", async (t) 
   assert.match(r.err, /\(cursor-stale[,)]/);
   assert.match(fix(r.err), /without --cursor/);
   assert.equal(fixLines(r.err).length, 1);
+});
+
+const builtinCommands = [
+  "auth login",
+  "auth status",
+  "auth logout",
+  "connection list",
+  "connection use",
+  "connection remove",
+  "task get",
+];
+const knownCommand = (words: string[]) => {
+  const [first, second] = words;
+  if (first === "service" || first === "snapshot") return true;
+  const keys = [
+    ...builtinCommands,
+    ...browseCommands.keys(),
+    ...writeCommands.keys(),
+  ];
+  return keys.some(
+    (key) =>
+      key === `${first} ${second}` || (!key.includes(" ") && key === first),
+  );
+};
+
+test("every command a remedy names exists in the CLI", () => {
+  // The per-kind table that remedies draw their prepare and read commands from.
+  for (const [kind, commands] of Object.entries(CHANGE_COMMANDS)) {
+    for (const command of [commands.prepare, commands.read(randomUUID())]) {
+      const words = command.split(" ").slice(1);
+      assert.ok(knownCommand(words), `${kind}: ${command}`);
+    }
+  }
+  // Every `ensemble <command>` written in a CLI source file, remedy or not.
+  const dir = join(process.cwd(), "src", "cli");
+  const unknown: string[] = [];
+  let seen = 0;
+  assert.equal(knownCommand(["task", "bogus"]), false, "the check can fail");
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
+    for (const m of readFileSync(join(dir, name), "utf8").matchAll(
+      /\bensemble ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g,
+    )) {
+      seen++;
+      if (!knownCommand([m[1] ?? "", m[2] ?? ""]))
+        unknown.push(`${name}: ${m[0]}`);
+    }
+  assert.ok(seen > 50, `scanned ${seen} command mentions`);
+  assert.deepEqual(unknown, []);
+});
+
+test("service and snapshot usage errors end with one Fix line", async (t) => {
+  const h = harness(t);
+  for (const args of [
+    ["service", "bogus"],
+    ["snapshot", "create"],
+  ]) {
+    const r = await h.run(args);
+    assert.equal(r.code, 2, args.join(" "));
+    assert.equal(r.out, "");
+    assert.equal(fixLines(r.err).length, 1);
+    assert.equal(
+      r.err.trimEnd().split("\n").at(-1),
+      "Fix: Run 'ensemble --help'.",
+    );
+  }
 });

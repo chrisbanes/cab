@@ -10,6 +10,7 @@ import {
   type ChangeDocument,
   type ChangeKind,
   canonicalJson,
+  changeKinds,
   openFailure,
   readChangeDocument,
   writeChangeDocument,
@@ -50,6 +51,43 @@ const AREA: Record<ChangeKind, string> = {
   "routing.configure": "project",
   "capacity.configure": "capacity",
   "github.configure": "project",
+};
+/**
+ * Per change kind, the command that prepares it and the one that reads its target.
+ * Remedies take both from here, so they never name a command for the wrong kind.
+ */
+export const CHANGE_COMMANDS: Record<
+  ChangeKind,
+  { prepare: string; read: (targetId: string) => string }
+> = {
+  "profile.create": {
+    prepare: "ensemble profile prepare-create",
+    read: (id) => `ensemble profile get ${id}`,
+  },
+  "profile.configure": {
+    prepare: "ensemble profile prepare",
+    read: (id) => `ensemble profile get ${id}`,
+  },
+  "project.create": {
+    prepare: "ensemble project prepare-create",
+    read: (id) => `ensemble project get ${id}`,
+  },
+  "project.configure": {
+    prepare: "ensemble project prepare",
+    read: (id) => `ensemble project get ${id}`,
+  },
+  "routing.configure": {
+    prepare: "ensemble project prepare-routing",
+    read: (id) => `ensemble project get ${id}`,
+  },
+  "capacity.configure": {
+    prepare: "ensemble capacity prepare",
+    read: () => "ensemble capacity get",
+  },
+  "github.configure": {
+    prepare: "ensemble project prepare-source",
+    read: (id) => `ensemble project sources ${id}`,
+  },
 };
 export const isCreation = (kind: ChangeKind) => kind.endsWith(".create");
 
@@ -309,7 +347,17 @@ export async function applyFile(
 ): Promise<WriteOutput> {
   if (!ctx.values.file) throw new CliError("usage", "--file FILE is required.");
   const requested = optionalRequestId(ctx.values);
-  const document = await readChangeDocument(ctx.values.file, area);
+  const prepares = [
+    ...new Set(
+      changeKinds
+        .filter((kind) => AREA[kind] === area)
+        .map((kind) => `'${CHANGE_COMMANDS[kind].prepare}'`),
+    ),
+  ];
+  const document = await readChangeDocument(
+    ctx.values.file,
+    `Prepare it first with ${prepares.join(", ")} (see 'ensemble --help'), then apply the file it writes.`,
+  );
   if (AREA[document.kind] !== area)
     throw new CliError(
       "change-document-invalid",
@@ -380,14 +428,11 @@ export async function applyFile(
         "conflict",
         `${document.target.scope} already exists. Nothing was sent.`,
         {
-          fix: `Prepare the creation again with a new ID, or change the existing one with 'ensemble ${area} prepare'.`,
+          fix: `Prepare the creation again with a new ID ('${CHANGE_COMMANDS[document.kind].prepare}'), or change the existing one with '${CHANGE_COMMANDS[document.kind.replace(".create", ".configure") as ChangeKind].prepare}'.`,
         },
       );
   }
-  const read =
-    area === "capacity"
-      ? "ensemble capacity get"
-      : `ensemble ${area} get ${document.target.id}`;
+  const commands = CHANGE_COMMANDS[document.kind];
   const { receipt, request } = await sendCommand(ctx, session, {
     scope: document.target.scope,
     type: document.kind,
@@ -402,7 +447,7 @@ export async function applyFile(
         `${document.target.scope} changed since this document was prepared, or request ${key} was used with other material. Nothing was applied; review the current state and prepare again.`,
         {
           ...error.extra,
-          fix: `Review ${document.target.scope} with '${read}', then run 'ensemble ${area} prepare' again.`,
+          fix: `Review ${document.target.scope} with '${commands.read(document.target.id)}', then run '${commands.prepare}' again.`,
         },
       );
     throw error;

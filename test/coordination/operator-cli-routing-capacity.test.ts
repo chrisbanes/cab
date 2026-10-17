@@ -174,6 +174,23 @@ test("routing changes through reviewed documents", async (t) => {
   r = await cli("rw", ["project", "apply", "--file", doc]);
   assert.equal(r.code, 4, r.out);
   assert.equal(databaseDigest(s.f), before);
+  // A routing document is prepared again with prepare-routing, not project prepare.
+  const human = await h.run([
+    "project",
+    "apply",
+    "--file",
+    doc,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(human.code, 4);
+  assert.match(
+    human.err,
+    new RegExp(
+      `^Fix: Review project:${seed.projectA} with 'ensemble project get ${seed.projectA}', then run 'ensemble project prepare-routing' again\\.$`,
+      "m",
+    ),
+  );
 });
 
 test("capacity reads, prepares and applies with a server-side guard", async (t) => {

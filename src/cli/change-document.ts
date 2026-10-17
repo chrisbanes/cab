@@ -156,10 +156,10 @@ export async function readOwnerOnlyFile(
 /** Reads an owner-only regular file and verifies its schema and digest. */
 export async function readChangeDocument(
   path: string,
-  area: string,
+  /** The remedy for a document that is missing or unusable: how to prepare one. */
+  prepare: string,
   uid = process.getuid?.(),
 ): Promise<ChangeDocument> {
-  const prepare = `Prepare it first with 'ensemble ${area} prepare' (see 'ensemble --help'), then apply the file it writes.`;
   const text = await readOwnerOnlyFile(path, uid, invalid, prepare);
   let value: unknown;
   try {
