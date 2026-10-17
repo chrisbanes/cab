@@ -254,7 +254,7 @@ const commands = (page: Started["page"]) => {
   const sent: { credentialRef: unknown }[] = [];
   page.on("request", (r) => {
     if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
-      sent.push(r.postData() ? r.postDataJSON() : {});
+      sent.push(r.postDataJSON());
   });
   return sent;
 };
@@ -519,6 +519,7 @@ test("the home path stays out of the URL, requests and browser storage", async (
   const urls: string[] = [];
   const posts: string[] = [];
   const bodies: string[] = [];
+  const unread: string[] = [];
   page.on("request", (r) => {
     urls.push(r.url());
     if (!r.url().endsWith("/api/operator/commands") && r.postData())
@@ -532,7 +533,8 @@ test("the home path stays out of the URL, requests and browser storage", async (
       const response = await route.fetch();
       bodies.push(`${path} ${await response.text()}`);
       await route.fulfill({ response });
-    } catch {
+    } catch (error) {
+      unread.push(`${path} ${String(error)}`);
       await route.abort().catch(() => {});
     }
   });
@@ -550,6 +552,7 @@ test("the home path stays out of the URL, requests and browser storage", async (
   await row.getByRole("button", { name: SAVE }).click();
   await request;
   await row.getByText(/reference configured/).waitFor();
+  assert.deepEqual(unread, []);
   assert.ok(bodies.some((b) => b.startsWith("/api/operator/claude-token ")));
   const forms = [home, encodeURIComponent(home), encodeURI(home)];
   for (const form of forms) {
