@@ -163,6 +163,9 @@ the same one once the cause is fixed, or restore the reported snapshot (see
 refuses a newer database schema, so going back to an older release needs that
 restore.
 
+Upgrade refuses a [LaunchDaemon](#launchdaemon-mode) install at its first check,
+before it stops anything; that section gives the switch-back procedure.
+
 ### Uninstall
 
 ```sh
