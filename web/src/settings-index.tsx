@@ -3,7 +3,6 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -182,26 +181,6 @@ export function SettingsWorkspace(
     ...p,
     refreshNonce: (p.refreshNonce ?? 0) + discoveryNonce,
   };
-  // Moving a section's node can drop focus from the control inside it; return it there.
-  const lastFocus = useRef<EventTarget | null>(null);
-  useEffect(() => {
-    const track = (e: FocusEvent) => {
-      lastFocus.current = e.target;
-    };
-    document.addEventListener("focusin", track);
-    return () => document.removeEventListener("focusin", track);
-  }, []);
-  const orderKey = order.join();
-  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when the section order changes.
-  useLayoutEffect(() => {
-    const was = lastFocus.current;
-    if (
-      document.activeElement === document.body &&
-      was instanceof HTMLElement &&
-      was.isConnected
-    )
-      was.focus({ preventScroll: true });
-  }, [orderKey]);
   if (!p.workspaceSettled)
     return (
       <div className="settings-page">

@@ -347,18 +347,23 @@ test("Readiness offers the detected GitHub CLI login and Run again changes nothi
   await offerButton(page).waitFor();
   assert.equal(await row.locator(".identifier").count(), 0);
 
-  // Run again only reads: no command, and the offer is still there afterwards.
-  const reads: string[] = [];
+  // Run again only reads: the readiness checks and the detected login, no command; the
+  // offer is still there afterwards.
+  const requests: string[] = [];
   page.on("request", (r) => {
     const { pathname } = new URL(r.url());
-    if (pathname === "/api/operator/readiness")
-      reads.push(`${r.method()} ${pathname}`);
+    if (pathname.startsWith("/api/"))
+      requests.push(`${r.method()} ${pathname}`);
   });
   await page.getByRole("button", { name: "Run again" }).click();
   await page.waitForFunction(
     () => !document.body.innerText.includes("Refreshing"),
   );
-  assert.deepEqual(reads, ["GET /api/operator/readiness"]);
+  await page.waitForLoadState("networkidle");
+  assert.deepEqual(requests.sort(), [
+    "GET /api/operator/discovery",
+    "GET /api/operator/readiness",
+  ]);
   assert.equal(posts.length, 0);
   await offerButton(page).waitFor();
 

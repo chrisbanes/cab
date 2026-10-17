@@ -8,8 +8,10 @@ import {
   desktop,
   noPageOverflow,
   phone,
+  routeTurnStarted,
   startSettings,
 } from "../fixtures/operator-settings.js";
+import { setupJourney } from "../fixtures/setup-browser.js";
 
 const test = browserSuite("operator-settings-sections-browser");
 
@@ -120,7 +122,11 @@ test("a landed section holds while the content above it grows, until the reader 
     });
   });
   await coldGoto(page, `${web.origin}/app/settings#profiles`);
-  onScreen(await landed(page, "H2", "Profiles"));
+  // Grow as soon as the heading has focus: the settle window is a few seconds, so the
+  // first growth must not wait on anything else.
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === "Profiles",
+  );
   const grow = () =>
     page.evaluate(() => {
       const spacer = document.createElement("div");
@@ -225,6 +231,61 @@ test("first run puts Readiness first and an established install keeps the design
     assert.equal(await first.page.evaluate(() => scrollY), 0);
   }
   await captureBrowserEvidence(first.page, "390-settings-first-run");
+});
+
+test("an empty install puts Readiness first from the service's own first-run signal", async (_t, journey) => {
+  // No route override: the real workspace read says no turn has started.
+  const { page } = await setupJourney(journey, { path: "/app/settings" });
+  await nav(page).waitFor();
+  assert.equal(await page.locator("main h2").first().innerText(), "Readiness");
+  assert.deepEqual(await current(page), ["Readiness"]);
+  assert.equal(
+    await nav(page).getByRole("link").first().innerText(),
+    "Readiness",
+  );
+});
+
+test("a first-run flip while Settings is open reorders the sections and keeps focus", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/settings",
+    desktop,
+    undefined,
+    { turnStarted: false },
+  );
+  await nav(page).waitFor();
+  assert.deepEqual(
+    await page.locator("main h2").allInnerTexts(),
+    firstRunHeadings,
+  );
+  const run = page.getByRole("button", { name: "Run again" });
+  await run.focus();
+  // A turn starts elsewhere; the next workspace read moves Readiness to the end. The
+  // header Refresh is clicked in script so focus stays on Run again.
+  await page.unroute("**/api/operator/workspace");
+  await routeTurnStarted(page, true);
+  await page.evaluate(() =>
+    [...document.querySelectorAll("button")]
+      .find((b) => b.textContent?.trim() === "Refresh")
+      ?.click(),
+  );
+  await page.waitForFunction(
+    () =>
+      [...document.querySelectorAll("main h2")].at(-1)?.textContent ===
+      "Readiness",
+  );
+  assert.deepEqual(
+    await page.locator("main h2").allInnerTexts(),
+    designedHeadings,
+  );
+  assert.deepEqual(
+    await nav(page).getByRole("link").allInnerTexts(),
+    sections.map(([l]) => l),
+  );
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Run again",
+  );
 });
 
 test("an established install keeps Readiness last with the first section current", async (_t, journey) => {
