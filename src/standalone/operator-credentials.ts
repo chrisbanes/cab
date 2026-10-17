@@ -216,6 +216,9 @@ export function operatorRouteAuthority(
     /^\/api\/operator\/credentials\/[^/]+\/(?:rotate|revoke)$/.test(path) ||
     /^\/api\/operator\/tasks\/[^/]+\/(?:review-draft|local-reviews(?:\/[^/]+)?)$/.test(
       path,
+    ) ||
+    /^\/api\/operator\/(?:projects|profiles)\/[^/]+\/private-values$/.test(
+      path,
     );
   if (sessionOnly) return "session-only";
   if (method === "POST")

@@ -6,7 +6,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import type { BrowserJourney } from "./browser-diagnostics.js";
+import {
+  captureBrowserEvidence,
+  type BrowserJourney,
+} from "./browser-diagnostics.js";
 import type { ExecutionHarness } from "../../src/core/execution-runtime.js";
 import type { GitHubReaderFactory } from "../../src/standalone/github-sync.js";
 import type { OperatorSetupSeams } from "../../src/standalone/operator-setup.js";
@@ -272,6 +275,22 @@ export async function signIn(
   await page.getByLabel("Password").fill(web.password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.locator("main.page h1").waitFor();
+}
+/**
+ * Evidence capture for the settings pages. The source tab shows saved search queries and
+ * local paths, and a revealed field shows private text, so every text field is masked while
+ * the screenshot is taken: evidence uploaded by CI never carries those values.
+ */
+export async function captureSettingsEvidence(page: Page, name: string) {
+  const mask = await page.addStyleTag({
+    content:
+      "input[id$='-query'], input[id$='-path'], textarea { color: transparent !important; -webkit-text-fill-color: transparent !important; }",
+  });
+  try {
+    await captureBrowserEvidence(page, name);
+  } finally {
+    await mask.evaluate((e) => (e as Element).remove());
+  }
 }
 export const noPageOverflow = (page: Page) =>
   page.waitForFunction(
