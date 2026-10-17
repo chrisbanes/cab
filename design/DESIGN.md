@@ -1954,8 +1954,12 @@ as follows:
   `12-imported-task-source-execution` for the imported inspector and
   `47-phone-task-overview`, `53-phone-failed-refresh-uncertain` and
   `55-phone-parallel-delegation` for the phone composition. The shell page header
-  keeps Back, the title, the recorded desired outcome as its subtitle (plain text,
-  clamped to three lines; the brief keeps the full text) and Execution plus, while
+  keeps Back, the title, the first line of the recorded desired outcome as its
+  subtitle (plain text with heading, list and checklist markers removed, clamped to
+  three lines; when more follows, a closed "Full desired outcome" disclosure in the
+  status strip renders the whole outcome as Markdown and stays open across a
+  refresh; a redacted outcome shows neither; the brief keeps the full text) and
+  Execution plus, while
   the task is open, Stop…, at every width. A finished task offers no Stop…; an
   existing Stop stays as a disabled "Stop requested". Back is the only back
   control: with an in-session origin it reads the origin view ("Board",

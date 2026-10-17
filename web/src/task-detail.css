@@ -145,6 +145,21 @@ a.task-source-chip:hover {
   cursor: pointer;
 }
 
+/* The rest of the desired outcome: closed by default, the summary is the only chrome. */
+.task-outcome {
+  font-size: var(--type-sm);
+  color: var(--fg-2);
+}
+
+.task-outcome > summary {
+  cursor: pointer;
+  font-size: var(--type-xs);
+}
+
+.task-outcome .file-markdown {
+  margin-top: var(--space-8);
+}
+
 .task-strip .task-tools {
   margin: 0;
 }

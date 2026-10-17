@@ -15,3 +15,22 @@ export const codeSentence = (
   sentences: Readonly<Partial<Record<string, string>>>,
   fallback: string,
 ) => sentences[code] ?? fallback;
+
+/** A line's heading, list and checklist markers, including a bare "- [ ]" left empty. */
+const lineMarkers =
+  /^\s*(?:#{1,6}\s+|(?:[-*+]|\d+\.)\s+)?(?:\[[ xX]\](?:\s+|$))?/;
+
+/**
+ * A recorded outcome as one plain line: its first non-empty line with Markdown markers removed.
+ * `more` is true when anything meaningful follows. A redacted (null) outcome has no line.
+ */
+export function outcomeLine(text: string | null): {
+  line: string;
+  more: boolean;
+} {
+  const lines = (text ?? "")
+    .split("\n")
+    .map((raw) => raw.trim().replace(lineMarkers, "").trim())
+    .filter(Boolean);
+  return { line: lines[0] ?? "", more: lines.length > 1 };
+}

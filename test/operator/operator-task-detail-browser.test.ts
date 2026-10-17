@@ -144,10 +144,10 @@ test("Task detail shows the designed header, two columns and C1/C2 criteria", as
     .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
     .waitFor();
   const header = page.locator(".page-header");
-  // The subtitle is the recorded desired outcome; the strip carries state and the lead.
-  assert.match(
-    (await header.locator(".page-header-title p").textContent()) ?? "",
-    /^## Context/,
+  // The subtitle is the outcome's first line; the strip carries state and the lead.
+  assert.equal(
+    await header.locator(".page-header-title p").textContent(),
+    "Context",
   );
   const strip = page.locator("[data-task-strip]");
   assert.match(
@@ -535,6 +535,12 @@ test("An empty local task says so honestly", async (_t, j) => {
   await page.getByRole("heading", { name: "Empty task", level: 1 }).waitFor();
   const review = page.locator("#review");
   await review.getByText("No result recorded.", { exact: true }).waitFor();
+  // A one-line outcome is the whole subtitle, with nothing to disclose.
+  assert.equal(
+    await page.locator(".page-header-title p").textContent(),
+    "Write the field notes guide.",
+  );
+  assert.equal(await page.locator("details.task-outcome").count(), 0);
   await page
     .locator("#assignments")
     .getByText("No assignments yet.", { exact: true })
@@ -2477,4 +2483,69 @@ test("The viewing reference appears only once a result exists", async (_t, j) =>
     await page.getByLabel("Editable reply").inputValue(),
     "Keep this draft",
   );
+});
+
+test("The outcome shows its first line and a closed disclosure with rendered Markdown", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const subtitle = page.locator(".page-header-title p");
+  await subtitle.waitFor();
+  assert.equal(await subtitle.textContent(), "Context");
+  const disclosure = page.locator("[data-task-strip] details.task-outcome");
+  const summary = disclosure.locator("summary");
+  assert.equal(await summary.textContent(), "Full desired outcome");
+  assert.equal(
+    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
+    false,
+  );
+
+  // The keyboard opens it, and it renders the whole outcome as Markdown.
+  await summary.focus();
+  await page.keyboard.press("Enter");
+  assert.equal(
+    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
+    true,
+  );
+  assert.equal(await disclosure.locator("li").count(), 3);
+  // The preview draws each task item's inert checkbox as "[ ]".
+  const items = await disclosure.locator("li").allInnerTexts();
+  assert.deepEqual(
+    items.map((item) => item.replace(/^\[ \] /, "")),
+    ["Restore focus", "Retain drafts", "Announce results"],
+  );
+  assert.doesNotMatch(await disclosure.innerText(), /- \[ \]|##/);
+
+  // A refresh keeps it open.
+  await refreshTask(page, a.taskId);
+  await settle(page);
+  assert.equal(
+    await disclosure.evaluate((e: HTMLDetailsElement) => e.open),
+    true,
+  );
+});
+
+test("A redacted outcome shows no subtitle and no disclosure", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seed(fixture.f);
+  const { web, page } = await fixture.launch();
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.task.outcome = null;
+      json.data.contentUnavailable = true;
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page
+    .getByRole("heading", { name: "Ship an accessible command menu", level: 1 })
+    .waitFor();
+  await page.locator("[data-task-strip]").waitFor();
+  assert.equal(await page.locator(".page-header-title p").count(), 0);
+  assert.equal(await page.locator("details.task-outcome").count(), 0);
+  await page.unrouteAll({ behavior: "wait" });
 });
