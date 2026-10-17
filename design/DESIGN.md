@@ -1182,7 +1182,7 @@ behaviour remains an implementation acceptance obligation.
 
 ### Observation, provenance and preview semantics
 
-Three contexts remain unmistakable: **Current workspace · as of time**,
+Three contexts remain unmistakable: **Current workspace** (the Files tab, whose file header ends with the time the bytes were read), 
 **Last turn · actual turn/agent/outcome and before/after times**, and **Retained
 result evidence · result/capture time**. Detailed root, repository, baseline,
 content identity, assignment/work/result provenance and capture limits disclose

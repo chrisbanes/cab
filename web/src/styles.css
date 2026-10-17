@@ -1429,12 +1429,8 @@ nav {
   cursor: pointer;
 }
 .file-entry-deleted {
-  align-items: center;
-  gap: 12px;
-  min-height: 32px;
-  border-bottom: 1px solid var(--color-border);
-  padding: 4px 8px;
   color: var(--muted-foreground);
+  cursor: default;
 }
 .file-entry-deleted .file-entry-name {
   text-decoration: line-through;
@@ -1784,16 +1780,10 @@ nav {
   .task-workspace {
     gap: 20px;
   }
-  .file-entry {
-    min-height: 44px;
-    height: 44px;
-    grid-template-columns: minmax(0, 1fr) minmax(72px, 0.6fr) 2ch;
-    gap: 8px;
-    padding-block: 0;
-    font-size: var(--type-xs);
-  }
+  .file-entry,
   .file-entry-deleted {
     min-height: 44px;
+    height: 44px;
     grid-template-columns: minmax(0, 1fr) minmax(72px, 0.6fr) 2ch;
     gap: 8px;
     padding-block: 0;

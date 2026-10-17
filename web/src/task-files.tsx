@@ -64,6 +64,27 @@ function pathLabel(scope: TaskFilesState["scope"], path: readonly string[]) {
   ].join("/");
 }
 
+/** Workspace › repository › folders: the trail to a location, one crumb per level. */
+function crumbsFor(scope: TaskFilesState["scope"], path: readonly string[]) {
+  return [
+    { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
+    ...(scope.kind === "repository"
+      ? [
+          {
+            label: `Repository ${scope.repositoryId}`,
+            scope,
+            path: [] as string[],
+          },
+        ]
+      : []),
+    ...path.map((part, index) => ({
+      label: part,
+      scope,
+      path: path.slice(0, index + 1),
+    })),
+  ];
+}
+
 type PreviewData = NonNullable<TaskFileTabState["preview"]>;
 
 /** The plain notice for a refreshed preview, with the hashes and raw states behind it. */
@@ -1134,45 +1155,13 @@ export function TaskFiles({
     directoryResource.state.pending ||
     Boolean(activeTab && previewResource.state.pending);
   const currentPath = pathLabel(state.scope, state.path);
-  const locationCrumbs = [
-    { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
-    ...(state.scope.kind === "repository"
-      ? [
-          {
-            label: `Repository ${state.scope.repositoryId}`,
-            scope: state.scope,
-            path: [] as string[],
-          },
-        ]
-      : []),
-    ...state.path.map((part, index) => ({
-      label: part,
-      scope: state.scope,
-      path: state.path.slice(0, index + 1),
-    })),
-  ];
+  const locationCrumbs = crumbsFor(state.scope, state.path);
   const selectedLabel = activeTab
     ? pathLabel(activeTab.scope, activeTab.path)
     : null;
   const crumbScope = activeTab?.scope ?? state.scope;
   const crumbPath = activeTab ? activeTab.path.slice(0, -1) : state.path;
-  const crumbs = [
-    { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
-    ...(crumbScope.kind === "repository"
-      ? [
-          {
-            label: `Repository ${crumbScope.repositoryId}`,
-            scope: crumbScope,
-            path: [] as string[],
-          },
-        ]
-      : []),
-    ...crumbPath.map((part, index) => ({
-      label: part,
-      scope: crumbScope,
-      path: crumbPath.slice(0, index + 1),
-    })),
-  ];
+  const crumbs = crumbsFor(crumbScope, crumbPath);
   // biome-ignore lint/correctness/useExhaustiveDependencies: restore reading position only when switching tabs.
   useLayoutEffect(() => {
     if (activeTab) readingArea.current?.scrollTo(0, activeTab.readingScrollTop);

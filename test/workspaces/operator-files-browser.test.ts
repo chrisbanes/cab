@@ -1893,7 +1893,10 @@ test("Files one toolbar Refresh re-reads the listing and the open file, and keep
   // It is off while either read is pending, and back when they have settled.
   for (const url of [previewUrl, filesUrl]) {
     const release = await hold(url);
+    // The other read is not held: let it settle so only the held one keeps Refresh off.
+    const other = settled(url === previewUrl ? "files" : "preview");
     await refresh.click();
+    await other;
     await page.waitForFunction(() =>
       Array.from(document.querySelectorAll("button")).some(
         (button) => button.textContent === "Refresh" && button.disabled,
