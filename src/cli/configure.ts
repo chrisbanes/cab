@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import {
   configurationImpactSchema,
   operatorCommandSchema,
+  textMaxLength,
 } from "../operator/contracts.js";
 import { type CoverageGap, coverage, uuidArg } from "./browse.js";
 import {
@@ -161,7 +162,10 @@ export async function readTextFile(path: string | undefined, flag: string) {
   }
 }
 
-const STDIN_LIMIT = 1 << 20;
+/** No UTF-16 unit takes more than 3 UTF-8 bytes, so more is certainly over the field limit. */
+const STDIN_LIMIT = textMaxLength * 3;
+const tooLong = `longer than the ${textMaxLength} characters a field takes`;
+const shorten = `Shorten the text to ${textMaxLength} characters or fewer.`;
 
 /** All of standard input as UTF-8; Ctrl-C (the CLI's abort signal) ends a read that never closes. */
 function readStdin(ctx: WriteContext, flag: string): Promise<string> {
@@ -190,11 +194,7 @@ function readStdin(ctx: WriteContext, flag: string): Promise<string> {
     const onData = (chunk: Buffer | string) => {
       const buffer = Buffer.from(chunk);
       size += buffer.length;
-      if (size > STDIN_LIMIT)
-        fail(
-          "it is longer than 1 MiB",
-          `Pass the text with --${flag}-file FILE instead.`,
-        );
+      if (size > STDIN_LIMIT) fail(`it is ${tooLong}`, shorten);
       else chunks.push(buffer);
     };
     const onEnd = () =>
@@ -229,15 +229,24 @@ export async function inlineText(
       "usage",
       `Use either --${name} or --${name}-file, not both.`,
     );
-  if (inline !== "-") return inline ?? readTextFile(file, `${name}-file`);
-  const input = await readStdin(ctx, name);
-  if (!input.trim())
+  const text =
+    inline === "-"
+      ? await readStdin(ctx, name)
+      : (inline ?? (await readTextFile(file, `${name}-file`)));
+  if (inline === "-" && !text?.trim())
     throw new CliError(
       "invalid-input",
       `Standard input for --${name} - was empty.`,
       { fix: `Pipe the text in, or pass it as --${name} TEXT.` },
     );
-  return input;
+  // The service refuses longer text however it was given; say so before connecting.
+  if (text !== undefined && text.length > textMaxLength)
+    throw new CliError(
+      "invalid-input",
+      `--${inline === undefined ? `${name}-file` : name} is ${text.length} characters, ${tooLong}.`,
+      { fix: shorten },
+    );
+  return text;
 }
 
 export function requireOut(ctx: WriteContext): string {

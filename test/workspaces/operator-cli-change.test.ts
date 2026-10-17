@@ -370,8 +370,14 @@ test("profile and project instructions can be given inline or on stdin", async (
       "oversized stdin",
       create("Big", "--instructions", "-"),
       "invalid-input",
-      /longer than 1 MiB/,
-      { stdin: stdinOf("x".repeat((1 << 20) + 1)) },
+      /longer than the 16000 characters a field takes/,
+      { stdin: stdinOf("x".repeat(16000 * 3 + 1)) },
+    );
+    await refuse(
+      "too long for the field",
+      create("Long", "--instructions", "x".repeat(16001)),
+      "invalid-input",
+      /is 16001 characters, longer than the 16000 characters a field takes/,
     );
     const interrupt = new AbortController();
     setImmediate(() => interrupt.abort());

@@ -61,7 +61,9 @@ export {
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
 const time = z.number().int().nonnegative().safe();
-const text = z.string().max(16000);
+/** The most characters (UTF-16 units) any operator text field takes. */
+export const textMaxLength = 16000;
+const text = z.string().max(textMaxLength);
 const safeText = text.nullable();
 const attentionCodesSchema = z
   .array(attentionCodeSchema)

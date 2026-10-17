@@ -1251,15 +1251,35 @@ test("task create takes inline or stdin outcome and defaults to ready", async (t
       "oversized stdin",
       create(["--outcome", "-"]),
       "invalid-input",
-      { stdin: stdinOf("x".repeat((1 << 20) + 1)) },
+      { stdin: stdinOf("x".repeat(16000 * 3 + 1)) },
     ),
-    /longer than 1 MiB/,
+    /longer than the 16000 characters a field takes/,
   );
-  await refuse(
-    "too long for the task",
-    create(["--outcome", "x".repeat(16001)]),
-    "invalid-input",
-  );
+  // The limit is the field's, whichever way the text arrives, and is stated as such.
+  for (const [how, args, extra] of [
+    ["inline", create(["--outcome", "x".repeat(16001)]), {}],
+    [
+      "stdin",
+      create(["--outcome", "-"]),
+      { stdin: stdinOf("x".repeat(16001)) },
+    ],
+    [
+      "file",
+      create(["--outcome-file", file("long.md", "x".repeat(16001))]),
+      {},
+    ],
+  ] as const) {
+    const message = await refuse(
+      `16001 characters, ${how}`,
+      args,
+      "invalid-input",
+      extra,
+    );
+    assert.match(
+      message,
+      /is 16001 characters, longer than the 16000 characters a field takes/,
+    );
+  }
   // Standard input that never closes is ended by the CLI's interrupt.
   const interrupt = new AbortController();
   setImmediate(() => interrupt.abort());
@@ -1273,6 +1293,13 @@ test("task create takes inline or stdin outcome and defaults to ready", async (t
   assert.equal(posts(o), sent);
   assert.equal(count(), before);
   assert.equal(databaseDigest(s.f), digest);
+
+  // Exactly the field limit is accepted, from standard input too.
+  r = await cli("rw", create(["--outcome", "-"]), {
+    stdin: stdinOf("y".repeat(16000)),
+  });
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.task(r.json().data.taskId).outcome, "y".repeat(16000));
 
   // Standard input that was already read cannot be read again.
   // These two stdin cases never end on their own, so a regression must fail, not hang.
@@ -1307,7 +1334,7 @@ test("task create takes inline or stdin outcome and defaults to ready", async (t
   r = await cli("ro", create(["--outcome", "No"]));
   assert.equal(r.code, 3);
   assert.equal(r.json().error.code, "insufficient-scope");
-  assert.equal(count(), before);
+  assert.equal(count(), before + 1, "only the exact-limit task was created");
 });
 
 test("task configure uses the current version when --expected-version is omitted", async (t) => {
