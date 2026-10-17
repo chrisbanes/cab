@@ -95,7 +95,7 @@ const healthLine = (h: Health) =>
 
 const executionList: BrowseCommand = {
   usage:
-    "execution list (--task ID | --assignment ID | --project ID) [--limit N] [--cursor TOKEN]",
+    "execution list (--task ID | --assignment ID | --project ID) [--limit N] [--cursor TOKEN] [--verbose]",
   positionals: 0,
   capabilities: ["cli.identity", "execution.read"],
   async run(ctx) {
@@ -132,6 +132,7 @@ const executionList: BrowseCommand = {
       data: read.data,
       observedAt: read.observedAt,
       notes: CAPTURE_NOTES,
+      verboseNotes: true,
       gaps: executions.some((e) => e.capture !== "captured")
         ? ["evidence-unavailable"]
         : [],
@@ -160,7 +161,7 @@ const executionList: BrowseCommand = {
 };
 
 const executionGet: BrowseCommand = {
-  usage: "execution get WORK_ID",
+  usage: "execution get WORK_ID [--verbose]",
   positionals: 1,
   capabilities: ["cli.identity", "execution.read"],
   async run(ctx) {
@@ -176,6 +177,7 @@ const executionGet: BrowseCommand = {
       data: d,
       observedAt: read.observedAt,
       notes: CAPTURE_NOTES,
+      verboseNotes: true,
       gaps: [
         ...captureCoverage(e.capture, d.health.gaps, [], d.health.eventSource),
         ...(e.reason === null && e.state === "held"

@@ -23,6 +23,7 @@ import {
 } from "./browse.js";
 import { exactCommand, positiveIntFlag, readTextFile } from "./configure.js";
 import { CliError } from "./connections.js";
+import { taskHeldLabels } from "./remedy.js";
 import { keyValues, oneLine, table, unavailable } from "./render.js";
 import { connectWrite, readTask, writeOutput } from "./task-write.js";
 import { chooseKey, sendCommand, type WriteCommand } from "./write.js";
@@ -189,9 +190,7 @@ const approvalGet: BrowseCommand = {
     const requester = read.data.assignments.find(
       (a) => a.assignmentId === approval.requestingAssignmentId,
     );
-    const holds = Object.entries(read.data.execution.holds)
-      .filter(([, held]) => held)
-      .map(([name]) => name);
+    const holds = taskHeldLabels(read.data);
     return browseOutput(ctx, {
       data: { approval, holds: read.data.execution.holds },
       observedAt: read.observedAt,

@@ -420,6 +420,43 @@ test("a native question is answered with the React mapping", async (t) => {
   );
 });
 
+test("approval get lists task holds in the UI's words", async (t) => {
+  const o = await startCliOperator(t);
+  const ap = await seedOwnApproval(o.s.f);
+  const get = (args: string[] = []) =>
+    o.h.run([
+      "approval",
+      "get",
+      ap.taskId,
+      ap.interactionId,
+      "--connection",
+      "ro",
+      ...args,
+    ]);
+  const holdsLine = (out: string) =>
+    out.split("\n").find((l) => l.startsWith("Task holds:"));
+  assert.deepEqual(holdsLine((await get()).out)?.split(/ {2,}/), [
+    "Task holds:",
+    "none",
+  ]);
+  await o.s.f.service.stopTask(ap.taskId);
+  const human = await get();
+  assert.equal(human.code, 0, human.err);
+  assert.deepEqual(holdsLine(human.out)?.split(/ {2,}/), [
+    "Task holds:",
+    "Stop requested",
+  ]);
+  const json = (await get(["--output", "json"])).json().data.holds;
+  assert.equal(json.stop, true);
+  assert.deepEqual(Object.keys(json).sort(), [
+    "capacity",
+    "stop",
+    "task",
+    "uncertainty",
+    "writer",
+  ]);
+});
+
 test("approval get and decide bind the exact action, revision and material", async (t) => {
   const o = await startCliOperator(t);
   const { cli, s, d } = o;

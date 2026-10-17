@@ -1,3 +1,5 @@
+import type { AttentionCode } from "../operator/attention.js";
+import { nextActor, type TaskColumn } from "../operator/task-presentation.js";
 import type { CliError } from "./connections.js";
 
 /**
@@ -7,8 +9,54 @@ import type { CliError } from "./connections.js";
  * `DEFAULT_FIX` by code, then `CATEGORY_FIX` by category, so a remedy always exists.
  */
 export const fixLine = (text: string) => `Fix: ${text}`;
-/** `command` is a runnable `ensemble ...` command, not prose. */
+/**
+ * `command` is a runnable `ensemble ...` command, not prose. The task views' `Next:` line is a
+ * different thing: it names who acts next (`nextText`), not a command to run.
+ */
 export const nextLine = (command: string) => `Next: ${command}`;
+
+/**
+ * The task holds in the operator UI's words. The writer, capacity and uncertainty holds share one
+ * clearing condition and one path (`recovery get`), so they read as one `Ownership held`; the
+ * individual flags stay in JSON and in the recovery views.
+ */
+export function heldLabels(holds: {
+  stop: boolean;
+  writer: boolean;
+  capacity: boolean;
+  uncertainty: boolean;
+  task: boolean;
+}): string[] {
+  return [
+    ...(holds.stop ? ["Stop requested"] : []),
+    ...(holds.task ? ["Task hold"] : []),
+    ...(holds.writer || holds.capacity || holds.uncertainty
+      ? ["Ownership held"]
+      : []),
+  ];
+}
+
+/**
+ * The labels for a task read. A Stop sets the task-wide hold flag too, so with a Stop in effect
+ * the flag only counts as a `Task hold` when the read also reports a hold other than Stop
+ * (`taskHold`), as the task page's hold list does.
+ */
+export const taskHeldLabels = (data: {
+  execution: { holds: Parameters<typeof heldLabels>[0] };
+  taskHold: unknown;
+}) =>
+  heldLabels({
+    ...data.execution.holds,
+    task:
+      data.execution.holds.task &&
+      (!data.execution.holds.stop || data.taskHold !== null),
+  });
+
+/** Who acts next, by the UI's rule, without the web's `Next: ` prefix. */
+export function nextText(codes: readonly AttentionCode[], column: TaskColumn) {
+  const { text, operator } = nextActor(codes, column);
+  return { text: text.replace(/^Next: /, ""), operator };
+}
 
 const LOGIN = "run 'ensemble auth login' to store a credential again";
 const LIST = "'ensemble connection list' shows the saved connections";
