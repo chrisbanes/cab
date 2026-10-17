@@ -1676,7 +1676,8 @@ Presentation and interaction rules that the canvas does not show on its own.
   name ("Atlas · Mira"), or the project ID's first eight characters in mono when
   the leads match or a project has no lead, widened only when two IDs start alike;
   no two projects show the same label, and a unique name stays plain unless it
-  equals another project's full-ID label (`116c-project-name-suffix-specimen`).
+  equals another project's full-ID label; IDs that differ only in letter case are
+  numbered "#1", "#2" after the full ID (`116c-project-name-suffix-specimen`).
 - GitHub sources are named by what they read (acme/atlas issues, a search, the
   Atlas roadmap GitHub Project), with the S-n id in Details. A GitHub Project has
   no stored title, so its name is the title discovery lists for it and otherwise

@@ -355,3 +355,50 @@ test("same-named projects whose ids share their first eight characters stay dist
   await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
   assert.deepEqual(await options(page, "Project"), expected);
 });
+
+test("same-named projects whose ids differ only by letter case are numbered in the sidebar and selects", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain();
+  const lower = "abcdef12-0001-4000-8000-00000000abcd";
+  const upper = lower.toUpperCase();
+  for (const [index, projectId] of [lower, upper].entries())
+    d.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: `Case ${index}`,
+      leadProfileId: null,
+    });
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_projects SET name = 'Case' WHERE id IN (?, ?)")
+      .run(lower, upper),
+  );
+  const expected: [string, string][] = [
+    [upper, `Case · ${upper} #1`],
+    [lower, `Case · ${lower} #2`],
+  ];
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, "/app/tasks");
+  await sidebarLinks(page).first().waitFor();
+  assert.deepEqual(
+    await sidebar(page),
+    expected.map(([projectId, text]) => [`/app/projects/${projectId}`, text]),
+  );
+  assert.deepEqual(await options(page, "Project"), expected);
+});

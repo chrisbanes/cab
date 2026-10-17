@@ -262,11 +262,15 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
       id: uuid("99999999", index),
       name,
     }));
+    const pairPrefixes = Array.from(
+      { length: 4 },
+      () => prefixes[random(prefixes.length)] as string,
+    );
     const projects = Array.from({ length: 2 + random(7) }, (_, index) => {
-      const prefix = prefixes[random(prefixes.length)] as string;
+      const base = `${(pairPrefixes[index >> 1] as string).padEnd(30, "0")}${String(index >> 1).padStart(6, "a")}`;
       return {
-        // Unique by the trailing index, with adversarial shared prefixes.
-        id: `${prefix.padEnd(30, "0")}${String(index).padStart(6, "0")}`,
+        // Unique raw ids: shared adversarial prefixes, and pairs that differ only by case.
+        id: index % 2 ? base.toUpperCase() : base,
         name: names[random(names.length)] as string,
         leadProfileId:
           random(3) === 0
@@ -275,7 +279,14 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
       };
     });
     const labels = projectLabels(projects, profiles);
-    // Every label in the workspace is distinct, across groups and against plain names.
+    // Every label in the workspace is distinct, across groups and against plain names, and
+    // does not depend on input order.
+    const reversed = projectLabels(
+      [...projects].reverse(),
+      [...profiles].reverse(),
+    );
+    for (const p of projects)
+      assert.equal(reversed.get(p.id)?.text, labels.get(p.id)?.text);
     const finals = projects.map((p) =>
       projectNameKey(labels.get(p.id)?.text ?? ""),
     );
@@ -362,4 +373,34 @@ test("a project literally named like the unavailable placeholder keeps its plain
   );
   assert.equal(labels.get(id(2))?.text, "Name unavailable");
   assert.equal(labels.get(id(1))?.text, "Name unavailable \u00b7 11111111");
+});
+
+test("ids that differ only by letter case are numbered by raw id order after the full id", () => {
+  const lower = "abcdef12-0001-4000-8000-00000000abcd";
+  const upper = lower.toUpperCase();
+  const projects = [
+    { id: lower, name: "Atlas", leadProfileId: null },
+    { id: upper, name: "atlas", leadProfileId: null },
+  ];
+  const expected = [`Atlas \u00b7 ${lower} #2`, `atlas \u00b7 ${upper} #1`];
+  for (const order of [projects, [...projects].reverse()]) {
+    const labels = projectLabels(order, []);
+    assert.deepEqual(
+      projects.map((p) => labels.get(p.id)?.text),
+      expected,
+    );
+    assert.equal(labels.get(upper)?.suffix?.kind, "id");
+  }
+  // A plain name that already looks like the numbered label still ends up distinct.
+  const plain = {
+    id: id(7),
+    name: `Atlas \u00b7 ${lower} #2`,
+    leadProfileId: null,
+  };
+  const labels = projectLabels([...projects, plain], []);
+  const keys = [...projects, plain].map((p) =>
+    projectNameKey(labels.get(p.id)?.text ?? ""),
+  );
+  assert.equal(new Set(keys).size, 3);
+  assert.equal(labels.get(plain.id)?.text.startsWith(plain.name), true);
 });

@@ -29,9 +29,12 @@ type Suffix = NonNullable<ProjectLabel["suffix"]>;
  * a unique name keeps its plain form unless a generated label at its last rung (the full
  * ID) still equals it. Rungs are the lead name, ID prefixes of growing length, the full ID,
  * and for a plain name only the full ID. Each round moves at least one project one rung
- * and rungs end, so it terminates; two labels ending in different full IDs never match,
- * so it ends distinct, assuming IDs differ in more than letter case (they are generated
- * lowercase UUIDs). The result does not depend on input order.
+ * and rungs end. When labels still clash and nothing can move (IDs that differ only in
+ * letter case fold to the same key), the clashing projects get " #1", " #2" ... by raw
+ * code-unit ID order, once each. Every round moves a project to a strictly later rung or
+ * numbers it, and both happen finitely often, so it terminates; two labels that end in
+ * different full IDs, or in different numbers after the same full ID, never match, so it
+ * ends distinct. The result does not depend on input order.
  */
 export function projectLabels(
   projects: readonly {
@@ -53,6 +56,8 @@ export function projectLabels(
     /** Plain name only for a unique name, then the rungs. */
     rungs: (Suffix | null)[];
     level: number;
+    /** 1-based place among IDs that still clash at the full-ID rung; 0 until needed. */
+    ordinal: number;
     shared: boolean;
   };
   const entries: Entry[] = [];
@@ -85,6 +90,7 @@ export function projectLabels(
         // "Name unavailable" keeps its plain name.
         shared: group.length > 1 || project.name === null,
         level: 0,
+        ordinal: 0,
         rungs:
           group.length === 1
             ? [null, ...(project.name === null ? ids : [full])]
@@ -94,11 +100,18 @@ export function projectLabels(
       });
     }
   }
-  const textOf = (entry: Entry) => {
+  const suffixOf = (entry: Entry): Suffix | null => {
     const suffix = entry.rungs[entry.level] ?? null;
+    return suffix && entry.ordinal
+      ? { kind: "id", text: `${suffix.text} #${entry.ordinal}` }
+      : suffix;
+  };
+  const textOf = (entry: Entry) => {
+    const suffix = suffixOf(entry);
     return `${entry.project.name ?? unavailable}${suffix ? ` · ${suffix.text}` : ""}`;
   };
-  const canMove = (entry: Entry) => entry.level < entry.rungs.length - 1;
+  const canMove = (entry: Entry) =>
+    entry.level < entry.rungs.length - 1 && !entry.ordinal;
   for (;;) {
     const byKey = new Map<string, Entry[]>();
     for (const entry of entries) {
@@ -109,11 +122,21 @@ export function projectLabels(
     for (const clash of byKey.values()) {
       if (clash.length < 2) continue;
       const generated = clash.filter((entry) => entry.shared && canMove(entry));
-      for (const entry of generated.length
-        ? generated
-        : clash.filter(canMove)) {
+      const movers = generated.length ? generated : clash.filter(canMove);
+      for (const entry of movers) {
         entry.level++;
         moved = true;
+      }
+      // Last rung: IDs that differ only in letter case still clash under the key, so they
+      // are numbered by raw (code unit) ID order.
+      if (!movers.length) {
+        const unnumbered = clash
+          .filter((entry) => !entry.ordinal)
+          .sort((a, b) => (a.project.id < b.project.id ? -1 : 1));
+        unnumbered.forEach((entry, index) => {
+          entry.ordinal = index + 1;
+          moved = true;
+        });
       }
     }
     if (!moved) break;
@@ -122,7 +145,7 @@ export function projectLabels(
   for (const entry of entries)
     labels.set(entry.project.id, {
       name: entry.project.name,
-      suffix: entry.rungs[entry.level] ?? null,
+      suffix: suffixOf(entry),
       text: textOf(entry),
     });
   return labels;
