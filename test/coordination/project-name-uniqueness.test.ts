@@ -251,7 +251,10 @@ test("names that differ only by Unicode case folding are the same name", () => {
   assert.throws(() => f.create("STRA\u1e9eE"), taken("Stra\u00dfe"));
   f.create("\u0130");
   f.create("I");
-  assert.equal(f.count(), 4);
+  // Dotless i is its own letter under Unicode default folding.
+  f.create("\u0131");
+  assert.throws(() => f.create("i"), taken("I"));
+  assert.equal(f.count(), 5);
 });
 
 test("rows stored before the fold still save, and a rename into a folded collision is refused", () => {

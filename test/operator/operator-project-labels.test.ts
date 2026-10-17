@@ -131,7 +131,7 @@ test("labels do not depend on the order of the input", () => {
 
 const uuid = (head: string, n: number) =>
   `${head}-${String(n).padStart(4, "0")}-4000-8000-000000000000`;
-test("ids that share their first eight, twelve and sixteen characters widen until distinct", () => {
+test("ids that share their first eight, twelve and sixteen characters widen only the labels that still clash", () => {
   const projects = [
     {
       id: "aaaaaaaa-bbbb-4000-8000-000000000001",
@@ -155,7 +155,7 @@ test("ids that share their first eight, twelve and sixteen characters widen unti
     [
       "Atlas · aaaaaaaa-bbbb-4000-8000-000000000001",
       "Atlas · aaaaaaaa-bbbb-4000-8000-000000000002",
-      "Atlas · aaaaaaaa-cccc-4000-8000-000000000003",
+      "Atlas · aaaaaaaa-ccc",
     ],
   );
   const twelve = projectLabels(
@@ -245,6 +245,10 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
     "\u0130",
     "I",
     "\u0131",
+    "Atlas \u00b7 Mira",
+    "Atlas \u00b7 1a2b3c4d",
+    "Atlas \u00b7 aaaaaaaa",
+    "atlas \u00b7 mira",
   ];
   const leadNames = ["Mira", "mira", "Jonas", "22222222", "aaaaaaaa", null];
   const prefixes = [
@@ -271,22 +275,26 @@ test("every duplicate-name group is distinct and a unique name has no suffix, fo
       };
     });
     const labels = projectLabels(projects, profiles);
-    const byKey = new Map<string, typeof projects>();
+    // Every label in the workspace is distinct, across groups and against plain names.
+    const finals = projects.map((p) =>
+      projectNameKey(labels.get(p.id)?.text ?? ""),
+    );
+    assert.equal(
+      new Set(finals).size,
+      projects.length,
+      JSON.stringify({ projects, finals }),
+    );
+    const sizes = new Map<string, number>();
     for (const p of projects) {
       const key = projectNameKey(p.name);
-      byKey.set(key, [...(byKey.get(key) ?? []), p]);
+      sizes.set(key, (sizes.get(key) ?? 0) + 1);
     }
-    for (const [, group] of byKey) {
-      const texts = group.map((p) =>
-        projectNameKey(labels.get(p.id)?.text ?? ""),
-      );
-      assert.equal(
-        new Set(texts).size,
-        group.length,
-        JSON.stringify({ projects, texts }),
-      );
-      if (group.length === 1)
-        assert.equal(labels.get(group[0]!.id)?.suffix, null);
+    // A unique name stays plain, and an unshared name never gains a lead suffix.
+    for (const p of projects) {
+      const suffix = labels.get(p.id)?.suffix;
+      if (sizes.get(projectNameKey(p.name)) === 1)
+        assert.equal(suffix, null, p.name);
+      else assert.ok(suffix, p.name);
     }
   }
 });
@@ -308,4 +316,38 @@ test("names that differ only by Unicode case folding share a group, and a unique
     "\u0130",
     "I",
   ]);
+});
+
+test("a generated label that equals another project's plain name moves, and the plain name stays", () => {
+  const projects = [
+    { id: id(1), name: "Atlas", leadProfileId: mira.id },
+    { id: id(2), name: "Atlas", leadProfileId: jonas.id },
+    { id: id(3), name: "Atlas \u00b7 Mira", leadProfileId: null },
+  ];
+  const labels = projectLabels(projects, profiles);
+  assert.deepEqual(
+    projects.map((p) => labels.get(p.id)?.text),
+    ["Atlas \u00b7 11111111", "Atlas \u00b7 Jonas", "Atlas \u00b7 Mira"],
+  );
+  assert.equal(labels.get(id(3))?.suffix, null);
+});
+
+test("generated labels from different groups cannot match, and a plain name matching a full-id label gets its own id", () => {
+  const first = {
+    id: "11111111-2222-4333-8444-555555555555",
+    name: "Atlas",
+    leadProfileId: null,
+  };
+  const second = { ...first, id: "11111111-2222-4333-8444-555555555556" };
+  const plain = {
+    id: id(5),
+    name: `Atlas \u00b7 ${second.id}`,
+    leadProfileId: null,
+  };
+  const labels = projectLabels([first, second, plain], []);
+  const texts = [first, second, plain].map((p) => labels.get(p.id)?.text);
+  assert.equal(new Set(texts.map((t) => projectNameKey(t ?? ""))).size, 3);
+  assert.equal(labels.get(first.id)?.text, `Atlas \u00b7 ${first.id}`);
+  assert.equal(labels.get(second.id)?.text, `Atlas \u00b7 ${second.id}`);
+  assert.equal(labels.get(plain.id)?.text, `${plain.name} \u00b7 ${plain.id}`);
 });
