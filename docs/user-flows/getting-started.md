@@ -28,8 +28,11 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
 
 - Only the first incomplete required row is primary; the rest are secondary.
 - GitHub is optional for a repository-free project: the row says so and never blocks
-  the Project row. It is informational: the one-click **Use GitHub CLI login
-  (@account)** is offered once, in [project setup](project-setup.md) step 3.
+  the Project row. It is informational and links to Settings → GitHub discovery. The one-click
+  **Use GitHub CLI login (@account)** is offered in [project setup](project-setup.md)
+  step 3 (the first-run path) and, separately, on the Settings → Readiness GitHub
+  discovery row ([readiness check](readiness-check.md)); see "GitHub discovery
+  credential" in `design/DESIGN.md` for why.
 - Settings actions open their own section, so no two rows open the same place:
   `/app/settings#readiness`, `#github-discovery`, `#readiness-claude-executable`
   and `/app/settings/runtime#add-claude`.

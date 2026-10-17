@@ -986,7 +986,7 @@ test("Home keeps the card until a task starts a turn, then shows the board", asy
 });
 
 for (const viewport of viewports)
-  test(`Home first run offers the GitHub CLI login only in project setup at ${viewport.width}`, async (_t, journey) => {
+  test(`Home first run offers the GitHub CLI login only in the first-run path (project setup) at ${viewport.width}`, async (_t, journey) => {
     const { web, page } = await launch(journey, viewport);
     await routeReadiness(page, { pass: true });
     await page.route("**/api/operator/discovery", async (route) => {

@@ -1956,7 +1956,7 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
   );
 });
 
-test("Setup offers the GitHub CLI login exactly once, behind Add a repository", async (_t, journey) => {
+test("Setup offers the GitHub CLI login exactly once in the first-run path, behind Add a repository", async (_t, journey) => {
   const gh = createFakeGh();
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {

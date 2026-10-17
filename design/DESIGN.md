@@ -408,8 +408,12 @@ collapsed.
 - **Readiness offer (114c):** the Readiness GitHub discovery row, when it reads Not
   configured, no discovery credential is configured and the service detects a
   signed-in gh login, shows a secondary **Use GitHub CLI login (@account)** in
-  place of its fix line. It is the same one-step configure as the setup alert and
-  Run again still only re-reads. Signed out, not installed, unreadable, a configured
+  place of its fix line. It is the same one-step configure as the setup alert, as
+  a separate, explicit offer: the first-run path (setup step 3, behind Add a
+  repository) offers it where a new project needs discovery, and Settings offers it
+  where an installation already exists, while the Home checklist row stays
+  informational and links to the GitHub discovery section. Run again still only
+  re-reads. Signed out, not installed, unreadable, a configured
   but unreadable credential and a failed discovery read keep the server's fix line.
   Saving or clearing the credential here or in the section re-reads both, so Clear
   brings the offer back.
@@ -528,7 +532,8 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   only when an enabled project has a lead profile, and otherwise offers Create
   project, Choose a lead or Resume. First task is unavailable with "Needs a project
   first." until a project exists. The GitHub row is informational (no one-click
-  login; that offer is in project setup). In 143b the paused fixture-app is not Done:
+  login; it links to the GitHub discovery section, and the offers are in project setup
+  and Readiness). In 143b the paused fixture-app is not Done:
   the Project row reads Not started with Resume, which confirms as in 149b. After the
   first turn Home keeps only rows that need attention. The account menu's Getting
   started (`113-account-menu`) opens `/app/getting-started`, the same card with a

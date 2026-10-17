@@ -33,7 +33,7 @@ note, **Cancel** and then **Create paused project** at every width.
    repository-free; adding one also offers GitHub discovery." and **Add a
    repository**. Opening it moves focus to its first control and reveals the setup
    alert (117b) with **Use GitHub CLI login** when gh is signed in, the one place
-   setup offers it, and **Set discovery credential**. It opens by itself for a row
+   the first-run path offers it (Settings → Readiness offers the same step later), and **Set discovery credential**. It opens by itself for a row
    that holds a value, a rejected repository or GitHub Project, and an unsettled
    GitHub CLI login. It never closes again: clearing a row means choosing "No
    repository · repository-free". The GitHub source credential line appears here
