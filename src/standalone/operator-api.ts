@@ -436,6 +436,27 @@ function githubIssueUrl(repositoryName: string | null, number: number | null) {
     : null;
 }
 
+/**
+ * The pull request's link, built only from a name verified for the PR's own repository:
+ * the source's name counts only when its repository id is the PR's, and neither path
+ * segment may be a dot segment.
+ */
+export function githubPullUrl(
+  repositoryName: string | null,
+  sourceRepositoryId: string | null,
+  pullRequestRepositoryId: string,
+  number: number,
+) {
+  if (
+    !repositoryName ||
+    sourceRepositoryId !== pullRequestRepositoryId ||
+    !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repositoryName) ||
+    repositoryName.split("/").some((part) => part === "." || part === "..")
+  )
+    return null;
+  return `https://github.com/${repositoryName}/pull/${number}`;
+}
+
 /** See `OperatorApi.exclusionBase`; one read attempt owns it. */
 type ExclusionBase = {
   readonly values: readonly (readonly [tag: string | null, value: string])[];
@@ -4457,6 +4478,16 @@ export class OperatorApi {
   ) {
     const v = this.service.delivery().publicTask(taskId),
       b = v.binding;
+    // The source's name is the PR's repository name only when `githubPullUrl` verifies it is the PR's own.
+    const source = b ? this.sourceSummary(taskId, excluded) : null;
+    const url = b
+      ? githubPullUrl(
+          source?.repositoryName ?? null,
+          source?.identity.repositoryId ?? null,
+          b.observation.repositoryId,
+          b.observation.number,
+        )
+      : null;
     return deliveryReadSchema.parse({
       mode: v.mode,
       policyVersion: v.policyVersion,
@@ -4467,9 +4498,11 @@ export class OperatorApi {
         ? {
             revision: b.revision,
             number: b.observation.number,
-            repositoryName:
-              this.sourceSummary(taskId, excluded)?.repositoryName ??
-              b.observation.repositoryId,
+            repositoryName: url
+              ? (source?.repositoryName ?? b.observation.repositoryId)
+              : b.observation.repositoryId,
+            ...(url ? { url } : {}),
+            draft: b.observation.draft,
             headSha: b.observation.headSha,
             state: b.observation.state,
             observedAt: b.observedAt,

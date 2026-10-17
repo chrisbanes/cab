@@ -7,6 +7,7 @@ import {
   until,
   scriptedDeliveryProvider,
 } from "../fixtures/delivery-integration.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
   test(`assembled ${mode} uses production HTTP parsing, own closure, terminal completion and durable reopen`, async () => {
@@ -95,6 +96,38 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     }
   });
 }
+
+test("the delivery read links an imported task's pull request in its own repository", async () => {
+  const f = await createReleaseDeliveryFixture("reviewable-pr");
+  try {
+    await f.register();
+    const read = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery;
+    assert.equal(read?.binding?.url, "https://github.com/org/repo/pull/7");
+    assert.equal(read.binding.repositoryName, "org/repo");
+    assert.equal(read.binding.draft, false);
+  } finally {
+    await f.close();
+  }
+});
+
+test("the delivery read gives no link and no source repository name for a pull request in another repository", async () => {
+  const f = await createReleaseDeliveryFixture("reviewable-pr");
+  try {
+    await f.register();
+    await f.terminal(1);
+    f.moveBoundPullRequestToRepository("R_kgDOcross");
+    await f.reopen();
+    const binding = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery?.binding;
+    assert.equal(binding?.url, undefined);
+    assert.equal(binding?.repositoryName, "R_kgDOcross");
+  } finally {
+    await f.close();
+  }
+});
 
 test("connected feedback is literal and deduplicated; changed settlement, outage and task Stop remain conservative across restart", async () => {
   const f = await createReleaseDeliveryFixture();

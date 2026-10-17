@@ -1169,6 +1169,9 @@ export const deliveryReadSchema = z
         revision,
         number: revision,
         repositoryName: text,
+        /** Built by the server for the PR's own repository only; the web renders no other link. */
+        url: z.url().startsWith("https://github.com/").optional(),
+        draft: z.boolean().optional(),
         headSha: text,
         state: z.enum(["OPEN", "CLOSED", "MERGED"]),
         observedAt: time,
