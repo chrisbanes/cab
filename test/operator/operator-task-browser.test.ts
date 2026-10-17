@@ -1510,22 +1510,18 @@ for (const viewport of [
       .getByRole("link", { name: ids.importedTitle, exact: true })
       .click();
     assert.ok(page.url().endsWith(`/app/tasks/${ids.importedId}`));
-    await page.getByRole("link", { name: "Execution", exact: true }).waitFor();
+    // Below 760px Execution sits in the closed Task actions disclosure, which role queries skip.
+    const execution = page.locator(
+      `.task-header-actions a[href="/runtime/task/${ids.importedId}"]`,
+    );
+    await execution.waitFor({ state: "attached" });
     assert.equal(
       await page
         .locator('input[name="title"],textarea[name="outcome"]')
         .count(),
       0,
     );
-    assert.equal(
-      await page
-        .getByRole("link", {
-          name: "Execution",
-          exact: true,
-        })
-        .count(),
-      1,
-    );
+    assert.equal(await execution.count(), 1);
     for (const name of ["Advanced task controls", "Requests and coordination"])
       assert.equal(
         await page.getByRole("link", { name, exact: true }).count(),

@@ -2066,9 +2066,9 @@ as follows:
   mounted and only the selected one shows, so drafts, expansions, selections and
   unconfirmed checks survive a switch; each tab keeps its own scroll. A switch
   sends nothing and adds no history entry; Back and Forward restore the tab with
-  the reading position. Links choose the first tab: `?section=` (brief, review,
-  reply → Overview; files; changes; local-review → Review; context, history →
-  History), then the fragment, then `path` (Files), `target`/`base` (Changes),
+  the reading position. Links choose the first tab: `?section=` (decisions, brief,
+  review, result-evidence, assignments, reply → Overview; files; changes;
+  local-review → Review; context, history → History), then the fragment, then `path` (Files), `target`/`base` (Changes),
   `review` (Review), `result`/`source` (Overview) and `assignment` (History); a
   `record` or `request` target opens the tab that holds it unless the link names a
   section or fragment (`?request=…#history` opens History). A link followed in
@@ -2192,7 +2192,7 @@ as follows:
   view." or "Retained evidence for this result can't be shown right now." (anything
   else: "…can't be shown."), with the code inside a closed Details. There is no
   "Approach" block (no recorded approach field), no "Compare screenshots" control
-  (recorded pairs render under the latest result), no clock times, and no
+  (recorded pairs render in the Evidence card), no clock times, and no
   "Earlier results (2)" button (the Result revision select and the inspector keep
   earlier results).
 - Overview has no in-page entries to other tabs: the tab list, the inspector's

@@ -32,9 +32,5 @@ export async function openOverviewCard(page: Page, name: OverviewCardName) {
   const card = overviewCard(page, name);
   if ((await card.getAttribute("open")) === null)
     await card.locator("> summary").click();
-  await page
-    .locator(
-      `#${name === "evidence" ? "result-evidence" : name} > details[open]`,
-    )
-    .waitFor();
+  await card.and(page.locator("[open]")).waitFor();
 }

@@ -92,17 +92,11 @@ export function TaskHeaderActions({
   const keep = useRef<HTMLButtonElement>(null),
     overflow = useRef<HTMLDetailsElement>(null);
   // A tap outside closes the phone overflow; the Stop dialog's own layer is not outside.
-  const dialogOpen = useRef(open);
-  dialogOpen.current = open;
   useEffect(() => {
-    if (!phone) return;
+    if (!phone || open) return;
     const away = (event: PointerEvent) => {
       const details = overflow.current;
-      if (
-        details?.open &&
-        !dialogOpen.current &&
-        !details.contains(event.target as Node)
-      ) {
+      if (details?.open && !details.contains(event.target as Node)) {
         // Close the element itself: its own toggle event may still be queued behind this tap.
         details.open = false;
         setMenuOpen(false);
@@ -110,7 +104,7 @@ export function TaskHeaderActions({
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [phone]);
+  }, [phone, open]);
   // A page restored from the back-forward cache after the Stop post starts closed again.
   useEffect(() => {
     const restored = (event: PageTransitionEvent) => {
@@ -126,16 +120,15 @@ export function TaskHeaderActions({
     <details
       ref={overflow}
       className="task-header-overflow"
-      open={!phone || menuOpen}
+      open={!phone || menuOpen || open}
       onToggle={(event) => {
         if (phone) setMenuOpen(event.currentTarget.open);
       }}
       onKeyDown={(event) => {
-        // The dialog closes on its own Escape first (it prevents the default); the next one
-        // closes the overflow and returns to its summary.
+        // The portalled dialog keeps its own Escape (its target is outside this element); the
+        // next one closes the overflow and returns to its summary.
         if (
           event.key !== "Escape" ||
-          event.defaultPrevented ||
           !phone ||
           !event.currentTarget.open ||
           !event.currentTarget.contains(event.target as Node)
@@ -163,6 +156,9 @@ export function TaskHeaderActions({
           <Dialog
             open={open}
             onOpenChange={(next) => {
+              // On a phone the trigger lives in the overflow, which stays open behind the dialog
+              // and after it, so focus returns to a visible Stop….
+              if (phone) setMenuOpen(true);
               setOpen(next);
               if (!next) setSent(false);
             }}

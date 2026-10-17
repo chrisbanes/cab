@@ -5,19 +5,16 @@ import { assignmentRow } from "./task-overview.js";
 import { ExecutionNotices } from "./execution-notice.js";
 import "./task-detail.css";
 
-/** Opens the collapsed Overview card that holds or is `target`, so a link never lands on a closed one. */
+/** Opens the collapsed Overview card that holds a linked record, so a link never lands on a closed one. */
 export function openDisclosures(target: HTMLElement) {
-  const card =
-    target.closest<HTMLDetailsElement>("details.overview-disclosure") ??
-    target.querySelector<HTMLDetailsElement>(
-      ":scope > details.overview-disclosure",
-    );
+  const card = target.closest<HTMLDetailsElement>(
+    "details.overview-disclosure",
+  );
   if (card) card.open = true;
 }
 
 /** Move to a task section in place: no history entry, focus on its heading or card summary. */
 export function showSection(target: HTMLElement) {
-  openDisclosures(target);
   target.scrollIntoView();
   const summary = target.querySelector<HTMLElement>(
     ":scope > details.overview-disclosure > summary",

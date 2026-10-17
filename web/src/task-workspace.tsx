@@ -380,6 +380,13 @@ export function TaskWorkspace({
       )
         state.overview.add("brief");
       if (state.selectedResult && evidenceItem) state.overview.add("evidence");
+      // A section or fragment naming a card opens it once, here; a Back to this entry
+      // remounts the page with the operator's own choice kept.
+      const named =
+        params.get("section") ?? (path.split("#")[1] || location.hash.slice(1));
+      if (named === "brief" || named === "assignments")
+        state.overview.add(named);
+      if (named === "result-evidence") state.overview.add("evidence");
       if (params.has("assignment"))
         state.expanded.add(params.get("assignment") ?? "");
       // Exact inspection links; the service still enforces scope and exclusions.
@@ -774,7 +781,9 @@ export function TaskWorkspace({
               ? document.getElementById(linked)
               : null;
       if (target && state.scrollY === 0) {
-        openDisclosures(target);
+        // A Search record can sit in a closed card; only its first arrival opens it.
+        if (record && !history.state?.taskWorkspaceReading)
+          openDisclosures(target);
         // A linked record or section opens on the tab whose panel holds it, unless the link
         // names its tab (`?request=…#history` is that request's History).
         const tab = target.closest<HTMLElement>(".task-panel")?.dataset.tab,
