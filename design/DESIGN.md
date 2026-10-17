@@ -563,8 +563,10 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   Settings right column with Pass, Fail and Not configured badges, a Geist Mono fix
   line under each failure, and Run again as its only action. Add Claude sits at the
   top of the runtime page's left column: copyable token-file commands, a Token
-  reference field (`file:` or `env:`), Save, and a live Token readable row. A
-  failure names neither the path nor the value and offers Clear.
+  reference field (`file:` or `env:`), Save, and a live Token readable row. Set opens
+  the field with the suggested `file:` path when no reference is configured; `~` and
+  `$HOME` are refused with the full path offered. A failure names neither the path
+  nor the value and offers Clear.
 - **Execution runtimes (126, 126b, 126c, 151b):** the runtime page opens with an
   Execution runtimes section above Capacity (126). Each runtime row shows its
   status, the first two lines of its effective policy and a "Limits and untested
