@@ -776,7 +776,7 @@ test("readiness matching with no condition is no edit, and the adopted note goes
  */
 const scriptReads = async (
   page: Page,
-  plan: (n: number) => "hold-stale" | "stale" | "fail" | "real",
+  plan: (n: number) => "hold-stale" | "hold-fail" | "stale" | "fail" | "real",
   stale: string,
 ) => {
   let release!: () => void;
@@ -787,12 +787,12 @@ const scriptReads = async (
   await page.route("**/private-values", async (route) => {
     const n = ++reads.count;
     const how = plan(n);
-    if (how === "hold-stale") await gate;
+    if (how === "hold-stale" || how === "hold-fail") await gate;
     if (how === "hold-stale" || how === "stale")
       await route
         .fulfill({ status: 200, contentType: "application/json", body: stale })
         .catch(() => {});
-    else if (how === "fail")
+    else if (how === "fail" || how === "hold-fail")
       await route
         .fulfill({
           status: 503,
@@ -856,6 +856,50 @@ test("the source tab reads again by itself when the first read settles older tha
   );
   assert.equal(reads.count, 2, "one automatic re-read, no manual Try again");
   assert.equal(await page.getByText("Query unavailable").count(), 0);
+  await settled(page);
+  assert.equal(reads.count, 2, "no loop");
+});
+
+test("a read that fails after a refresh advanced the version is read again once", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const { reads, release } = await scriptReads(
+    page,
+    (n) => (n === 1 ? "hold-fail" : "real"),
+    "",
+  );
+  // The request starts at version N and is held; a refresh moves the form to N+1; then it fails.
+  await projectTabs(page).getByRole("link", { name: "GitHub source" }).click();
+  await page.getByText("Loading search query", { exact: false }).waitFor();
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", kind: "search", query: "AFTER THE REFRESH" },
+      { id: "S-3", keep: true },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await refresh(page);
+  release();
+  // The failure belongs to version N, so one automatic read at N+1 follows, with no Try again.
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector(
+          'input[aria-label="Search query"]',
+        ) as HTMLInputElement | null
+      )?.value === "AFTER THE REFRESH",
+  );
+  assert.equal(reads.count, 2);
   await settled(page);
   assert.equal(reads.count, 2, "no loop");
 });

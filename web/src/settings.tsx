@@ -185,9 +185,29 @@ export function usePrivateValues<T>(
   } = {},
 ) {
   const { autoLoad = false, loaded, version, edit = false } = options;
+  // The version a read begins at is stamped when the request starts and travels with its
+  // failure, so a failure is judged against the version it was made at, not whatever is loaded
+  // when it is rendered.
+  const loadedNow = useRef(loaded);
+  loadedNow.current = loaded;
+  const requests = useRef({
+    seq: 0,
+    failedAt: undefined as number | undefined,
+  });
   // The loader must stay stable: a new one would clear the revealed state.
   const loader = useCallback(
-    (signal: AbortSignal) => client.read(path, schema, signal),
+    async (signal: AbortSignal) => {
+      const seq = ++requests.current.seq;
+      const startedAt = loadedNow.current;
+      try {
+        return await client.read(path, schema, signal);
+      } catch (error) {
+        // Only the latest, uncancelled request's failure is the one that is shown.
+        if (!signal.aborted && seq === requests.current.seq)
+          requests.current.failedAt = startedAt;
+        throw error;
+      }
+    },
     [client, path, schema],
   );
   const resource = useOperatorResource(
@@ -207,22 +227,14 @@ export function usePrivateValues<T>(
   useEffect(() => {
     if (!autoLoad && state.error !== null) setRequested(false);
   }, [autoLoad, state.error]);
-  // A failure is the operator's to retry, unless the version moved on since it happened. The
-  // version it happened at is noted the first time the failure is seen (idempotent per state).
-  const failure = useRef<{ failed: boolean; at: number | undefined }>({
-    failed: false,
-    at: undefined,
-  });
-  if (state.error === null) failure.current = { failed: false, at: undefined };
-  else if (!failure.current.failed)
-    failure.current = { failed: true, at: loaded };
+  // A failure is the operator's to retry, unless the version moved on since the request began.
   useBoundedRetry(
     loaded,
     (requested || edit) &&
       loaded !== undefined &&
       !inFlight &&
       (read === undefined || read < loaded) &&
-      (state.error === null || failure.current.at !== loaded),
+      (state.error === null || requests.current.failedAt !== loaded),
     resource.refresh,
   );
   useBoundedRetry(
