@@ -10,6 +10,7 @@ import {
   type Change,
   checkExpected,
   consistentRead,
+  inlineText,
   readImpact,
   readTextFile,
   requireOut,
@@ -20,7 +21,7 @@ import { CliError } from "./connections.js";
 import { lineDiff } from "./diff.js";
 import type { ServiceClient } from "./transport.js";
 import type { Values } from "./types.js";
-import type { WriteCommand } from "./write.js";
+import type { WriteCommand, WriteContext } from "./write.js";
 
 const API = "/api/operator";
 
@@ -61,26 +62,33 @@ export function restorable(body: Body, revision: number): string {
   return body.text;
 }
 
-/** Proposed instruction text from a file or a restored revision. */
+/** Proposed instruction text: a restored revision, else the text `givenInstructions` read. */
 export async function proposedInstructions(
   values: Values,
   restore: (revision: number) => Promise<Body>,
+  given: string | undefined,
 ) {
-  if (
-    values["instructions-file"] !== undefined &&
-    values["restore-revision"] !== undefined
-  )
-    throw new CliError(
-      "usage",
-      "Use either --instructions-file or --restore-revision, not both.",
-    );
   const revision = positiveIntFlag(
     values["restore-revision"],
     "restore-revision",
   );
   if (revision !== undefined)
     return restorable(await restore(revision), revision);
-  return readTextFile(values["instructions-file"], "instructions-file");
+  return given;
+}
+
+/** `--instructions TEXT|-` or `--instructions-file`, read once; neither combines with a restore. */
+export function givenInstructions(ctx: WriteContext) {
+  const v = ctx.values;
+  if (
+    (v.instructions !== undefined || v["instructions-file"] !== undefined) &&
+    v["restore-revision"] !== undefined
+  )
+    throw new CliError(
+      "usage",
+      "Use either --instructions or --instructions-file, or --restore-revision, not both.",
+    );
+  return inlineText(ctx, "instructions");
 }
 
 export function instructionChange(
@@ -132,13 +140,14 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
     "profile prepare",
     {
       usage:
-        "profile prepare PROFILE_ID --out FILE [--expected-version N] [--name S] [--summary S] [--instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false]",
+        "profile prepare PROFILE_ID --out FILE [--expected-version N] [--name S] [--summary S] [--instructions TEXT|- | --instructions-file PATH | --restore-revision N] [--capabilities-file PATH] [--revoked true|false]",
       positionals: 1,
       flags: [
         "out",
         "expected-version",
         "name",
         "summary",
+        "instructions",
         "instructions-file",
         "restore-revision",
         "capabilities-file",
@@ -156,6 +165,8 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
           ctx.values["capabilities-file"],
           "capabilities-file",
         );
+        // Read once before connecting: standard input cannot be read again on a retried read.
+        const given = await givenInstructions(ctx);
         const session = await ctx.connect([
           "cli.identity",
           "workspace.read",
@@ -171,8 +182,10 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
           (r) => r.data.profile.version,
           async () => {
             current = await instructionsOf(client, id);
-            proposed = await proposedInstructions(ctx.values, (r) =>
-              instructionsOf(client, id, r),
+            proposed = await proposedInstructions(
+              ctx.values,
+              (r) => instructionsOf(client, id, r),
+              given,
             );
             impact = await readImpact(client, "profile", id, "profile");
           },
@@ -241,34 +254,30 @@ export const profileWriteCommands = new Map<string, WriteCommand>([
     "profile prepare-create",
     {
       usage:
-        "profile prepare-create --out FILE --name S --instructions-file PATH [--summary S] [--capabilities-file PATH] [--id UUID]",
+        "profile prepare-create --out FILE --name S (--instructions TEXT|- | --instructions-file PATH) [--summary S] [--capabilities-file PATH] [--id UUID]",
       positionals: 0,
       flags: [
         "out",
         "name",
         "summary",
+        "instructions",
         "instructions-file",
         "capabilities-file",
         "id",
       ],
       async run(ctx) {
         requireOut(ctx);
-        if (
-          ctx.values.name === undefined ||
-          ctx.values["instructions-file"] === undefined
-        )
-          throw new CliError(
-            "usage",
-            "--name and --instructions-file are required.",
-          );
+        const usage = new CliError(
+          "usage",
+          "--name and --instructions TEXT (or - for standard input, or --instructions-file PATH) are required.",
+        );
+        if (ctx.values.name === undefined) throw usage;
         const id =
           ctx.values.id === undefined
             ? randomUUID()
             : uuidArg(ctx.values.id, "--id");
-        const instructions = (await readTextFile(
-          ctx.values["instructions-file"],
-          "instructions-file",
-        )) as string;
+        const instructions = await inlineText(ctx, "instructions");
+        if (instructions === undefined) throw usage;
         const capabilities =
           (await readTextFile(
             ctx.values["capabilities-file"],

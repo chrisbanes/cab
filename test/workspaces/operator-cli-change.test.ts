@@ -9,8 +9,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import { harness } from "../fixtures/cli-harness.js";
+import { harness, stdinOf } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
   instructionSecret,
@@ -230,6 +231,294 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
       );
   }
   assert.equal(Number(d.profile(seed.profileId).version), 8);
+});
+
+test("profile and project instructions can be given inline or on stdin", async (t) => {
+  const { seed, d, file, out, cli, h } = await setup(t);
+  type Kind = {
+    area: "profile" | "project";
+    /** The id of an existing target and its idempotent "bump the version" command. */
+    target: string;
+    idField: "profileId" | "projectId";
+    stored(id: string): unknown;
+    current(): number;
+    bump(): void;
+    /** Instructions are optional on create. */
+    optionalOnCreate: boolean;
+  };
+  const kinds: Kind[] = [
+    {
+      area: "profile",
+      target: seed.profileId,
+      idField: "profileId",
+      stored: (id) => d.profileRevision(id, 1).instructions,
+      current: () => Number(d.profile(seed.profileId).version),
+      bump: () =>
+        d.execute({
+          type: "profile.configure",
+          actor: "operator",
+          key: randomUUID(),
+          profileId: seed.profileId,
+          expectedVersion: Number(d.profile(seed.profileId).version),
+          summary: "Changed meanwhile",
+        } as never),
+      optionalOnCreate: false,
+    },
+    {
+      area: "project",
+      target: seed.projectB,
+      idField: "projectId",
+      stored: (id) => d.instructionRevision(id, 1),
+      current: () => Number(d.project(seed.projectB).version),
+      bump: () =>
+        d.execute({
+          type: "project.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId: seed.projectB,
+          expectedVersion: Number(d.project(seed.projectB).version),
+          paused: !d.project(seed.projectB).paused,
+        } as never),
+      optionalOnCreate: true,
+    },
+  ];
+  for (const k of kinds) {
+    const create = (name: string, ...rest: string[]) => [
+      k.area,
+      "prepare-create",
+      "--name",
+      name,
+      ...rest,
+    ];
+    const created = async (args: string[], extra = {}) => {
+      const doc = out();
+      const prepared = await cli("ro", [...args, "--out", doc], extra);
+      assert.equal(
+        prepared.code,
+        0,
+        `${k.area}: ${prepared.err}${prepared.out}`,
+      );
+      const applied = await cli("rw", [k.area, "apply", "--file", doc]);
+      assert.equal(applied.code, 0, `${k.area}: ${applied.err}${applied.out}`);
+      return JSON.parse(readFileSync(doc, "utf8")).command[k.idField] as string;
+    };
+
+    // 1. Inline text becomes the first revision; 2. `-` reads standard input verbatim.
+    const inline = await created(
+      create("Inline", "--instructions", "Be brief\n'$(x)'"),
+    );
+    assert.equal(k.stored(inline), "Be brief\n'$(x)'", k.area);
+    const piped = await created(create("Piped", "--instructions", "-"), {
+      stdin: stdinOf("From stdin\n"),
+    });
+    assert.equal(k.stored(piped), "From stdin\n", k.area);
+    // The field limit counts characters, so 16,000 four-byte ones are accepted.
+    const astral = await created(create("Astral", "--instructions", "-"), {
+      stdin: stdinOf("😀".repeat(16000)),
+    });
+    assert.equal(k.stored(astral), "😀".repeat(16000), k.area);
+    // The file form still works.
+    const filed = await created(
+      create("Filed", "--instructions-file", file("i.md", "From a file")),
+    );
+    assert.equal(k.stored(filed), "From a file", k.area);
+
+    // 3-5. Refusals write no document and send nothing.
+    const sent = h.fetches.length;
+    const refuse = async (
+      name: string,
+      args: string[],
+      code: string,
+      message: RegExp,
+      extra = {},
+    ) => {
+      const doc = out();
+      const r = await cli("ro", [...args, "--out", doc], extra);
+      assert.equal(r.code, 2, `${k.area} ${name}: ${r.out}`);
+      assert.equal(r.json().error.code, code, `${k.area} ${name}`);
+      assert.match(r.json().error.message, message, `${k.area} ${name}`);
+      assert.equal(existsSync(doc), false, `${k.area} ${name}`);
+    };
+    await refuse(
+      "both flags",
+      create(
+        "Both",
+        "--instructions",
+        "X",
+        "--instructions-file",
+        file("b.md", "B"),
+      ),
+      "usage",
+      /either --instructions or --instructions-file, not both/,
+    );
+    if (!k.optionalOnCreate)
+      await refuse(
+        "neither flag",
+        create("None"),
+        "usage",
+        /--instructions TEXT/,
+      );
+    await refuse(
+      "no name",
+      [k.area, "prepare-create", "--instructions", "X"],
+      "usage",
+      /--name/,
+    );
+    await refuse(
+      "empty stdin",
+      create("Empty", "--instructions", "-"),
+      "invalid-input",
+      /was empty/,
+      { stdin: stdinOf("") },
+    );
+    await refuse(
+      "oversized stdin",
+      create("Big", "--instructions", "-"),
+      "invalid-input",
+      /longer than the 16000 characters a field takes/,
+      { stdin: stdinOf("x".repeat(16000 * 4 + 1)) },
+    );
+    // Over the field limit by whichever way the text arrives: inline, file and stdin.
+    const over =
+      /is 16001 characters, longer than the 16000 characters a field takes/;
+    await refuse(
+      "inline over the limit",
+      create("Long", "--instructions", "x".repeat(16001)),
+      "invalid-input",
+      over,
+    );
+    await refuse(
+      "file over the limit",
+      create("Long", "--instructions-file", file("long.md", "x".repeat(16001))),
+      "invalid-input",
+      over,
+    );
+    await refuse(
+      "stdin over the limit",
+      create("Long", "--instructions", "-"),
+      "invalid-input",
+      over,
+      { stdin: stdinOf("x".repeat(16001)) },
+    );
+    await refuse(
+      "stdin astral over the limit",
+      create("Long", "--instructions", "-"),
+      "invalid-input",
+      /longer than the 16000 characters a field takes/,
+      { stdin: stdinOf("😀".repeat(16001)) },
+    );
+    await refuse(
+      "prepare stdin over the limit",
+      [k.area, "prepare", k.target, "--instructions", "-"],
+      "invalid-input",
+      over,
+      { stdin: stdinOf("x".repeat(16001)) },
+    );
+    const interrupt = new AbortController();
+    setImmediate(() => interrupt.abort());
+    await refuse(
+      "open stdin",
+      create("Open", "--instructions", "-"),
+      "invalid-input",
+      /interrupted/,
+      {
+        stdin: new PassThrough() as unknown as NodeJS.ReadStream,
+        signal: interrupt.signal,
+      },
+    );
+    await refuse(
+      "prepare with restore",
+      [
+        k.area,
+        "prepare",
+        k.target,
+        "--instructions",
+        "X",
+        "--restore-revision",
+        "1",
+      ],
+      "usage",
+      /--restore-revision, not both/,
+    );
+    await refuse(
+      "prepare with file and restore",
+      [
+        k.area,
+        "prepare",
+        k.target,
+        "--instructions-file",
+        file("r.md", "R"),
+        "--restore-revision",
+        "1",
+      ],
+      "usage",
+      /--restore-revision, not both/,
+    );
+    assert.equal(
+      h.fetches.length,
+      sent,
+      `${k.area}: refusals are decided before connecting`,
+    );
+
+    // 6. prepare takes inline and stdin text, and diffs it.
+    const doc = out();
+    let r = await cli("ro", [
+      k.area,
+      "prepare",
+      k.target,
+      "--instructions",
+      "New guidance",
+      "--out",
+      doc,
+    ]);
+    assert.equal(r.code, 0, `${k.area}: ${r.err}${r.out}`);
+    assert.equal(
+      JSON.parse(readFileSync(doc, "utf8")).command.instructions,
+      "New guidance",
+    );
+    const human = await h.run(
+      [
+        k.area,
+        "prepare",
+        k.target,
+        "--instructions",
+        "-",
+        "--out",
+        out(),
+        "--connection",
+        "ro",
+      ],
+      { stdin: stdinOf("Piped guidance\n") },
+    );
+    assert.equal(human.code, 0, human.err);
+    assert.match(human.out, /\+ Piped guidance/);
+
+    // Standard input is read once even when the target changes during the read and the
+    // read is repeated.
+    let bumped = false;
+    const racing: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (
+        !bumped &&
+        String(input).endsWith(`/${k.area}s/${k.target}/configuration`)
+      ) {
+        bumped = true;
+        k.bump();
+      }
+      return response;
+    };
+    const retried = out();
+    r = await cli(
+      "ro",
+      [k.area, "prepare", k.target, "--instructions", "-", "--out", retried],
+      { stdin: stdinOf("Read once\n"), fetch: racing },
+    );
+    assert.equal(r.code, 0, `${k.area}: ${r.err}${r.out}`);
+    assert.equal(bumped, true, k.area);
+    const document = JSON.parse(readFileSync(retried, "utf8"));
+    assert.equal(document.command.instructions, "Read once\n");
+    assert.equal(document.command.expectedVersion, k.current(), k.area);
+  }
 });
 
 test("project changes and creation apply exactly once", async (t) => {

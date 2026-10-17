@@ -21,6 +21,7 @@ import {
   uuidArg,
 } from "./browse.js";
 import { CliError } from "./connections.js";
+import { nextLine } from "./remedy.js";
 import { closureSuffix } from "./task-write.js";
 import { isoTime, keyValues, oneLine, table, unavailable } from "./render.js";
 
@@ -104,7 +105,12 @@ const profileList: BrowseCommand = {
                 oneLine(p.summary),
               ]),
             )
-          : "No profiles.",
+          : [
+              "No profiles.",
+              nextLine(
+                "ensemble profile prepare-create --out profile.json --name NAME --instructions TEXT",
+              ),
+            ].join("\n"),
         `Runtime: ${runtimeLine(runtime)}`,
       ].join("\n"),
     });

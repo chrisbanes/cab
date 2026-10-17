@@ -61,7 +61,11 @@ export {
 export const uuid = z.string().uuid();
 const revision = z.number().int().positive().safe();
 const time = z.number().int().nonnegative().safe();
-const text = z.string().max(16000);
+/** The most Unicode characters (code points, as zod counts them) any operator text field takes. */
+export const textMaxLength = 16000;
+const text = z.string().max(textMaxLength);
+/** Whether `value` fits a text field, by the same check the service applies. */
+export const fitsTextField = (value: string) => text.safeParse(value).success;
 const safeText = text.nullable();
 const attentionCodesSchema = z
   .array(attentionCodeSchema)

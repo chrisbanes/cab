@@ -77,10 +77,19 @@ export const EXIT: Record<string, [number, string]> = {
   "unsupported-service": [7, "unsupported"],
 };
 
+/** Login copy and defaults, kept together so the help layout can move them. */
+const AUTH_LOGIN_USAGE =
+  "auth login --url ORIGIN [--connection NAME] [--token-file PATH]";
+const DEFAULT_CONNECTION = "local";
+/** The loopback origin `service install` serves on by default. */
+const DEFAULT_ORIGIN = "http://127.0.0.1:8787";
+const tokenSource = (origin: string) =>
+  `Create a token in Settings → CLI credentials in the web UI, then run: ensemble auth login --url ${origin}`;
+
 const USAGE = `Usage: ensemble <command> [options]
 
 Commands:
-  auth login --connection NAME --url ORIGIN [--token-file PATH]
+  ${AUTH_LOGIN_USAGE}
   auth status [--connection NAME]
   auth logout [--connection NAME]
   connection list
@@ -183,6 +192,7 @@ export async function main(
         "expected-version": { type: "string" },
         name: { type: "string" },
         summary: { type: "string" },
+        instructions: { type: "string" },
         "instructions-file": { type: "string" },
         "capabilities-file": { type: "string" },
         "restore-revision": { type: "string" },
@@ -209,6 +219,7 @@ export async function main(
         "max-duration": { type: "string" },
         "compare-current": { type: "boolean" },
         title: { type: "string" },
+        outcome: { type: "string" },
         "outcome-file": { type: "string" },
         ready: { type: "string" },
         blocker: { type: "string", multiple: true },
@@ -710,14 +721,56 @@ async function login(
   values: Values,
   deps: CliDeps,
 ): Promise<Result> {
-  const nameResult = connectionNameSchema.safeParse(values.connection);
-  if (!nameResult.success || !values.url)
+  const requested = values.connection ?? deps.env.ENSEMBLE_CONNECTION;
+  const nameResult = connectionNameSchema.safeParse(
+    requested ?? DEFAULT_CONNECTION,
+  );
+  if (!nameResult.success)
     throw new CliError(
       "usage",
-      "auth login requires --connection NAME (letters, digits, . _ -) and --url ORIGIN.",
+      `${values.connection === undefined ? "ENSEMBLE_CONNECTION" : "--connection"} must be a connection name: letters, digits, . _ - starting with a letter or digit.`,
     );
+  if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
   const origin = connectionOrigin(values.url);
+  // A name nobody chose must not quietly re-point a connection that exists, add a second
+  // connection for a service that already has one, or leave several connections with no
+  // default (every later command would then fail `connection-ambiguous`). It never
+  // changes the default itself.
+  if (requested === undefined) {
+    const { connections, default: chosen } = await config.read();
+    const existing = connections[name];
+    const same = Object.keys(connections)
+      .filter((other) => connections[other]?.url === origin)
+      .sort();
+    // Another connection already has this origin: replace it, or add a second on purpose.
+    const sameFix = `Run ${same.map((other) => `'ensemble auth login --url ${origin} --connection ${other}'`).join(" or ")} to replace the token, or pass --connection OTHER to add a second connection (then run 'ensemble connection use NAME' to pick the default).`;
+    if (existing && existing.url !== origin)
+      throw new CliError(
+        "usage",
+        `Connection ${name} already points at ${existing.url}.`,
+        {
+          fix: same.length
+            ? `${same.join(", ")} already ${same.length === 1 ? "has" : "have"} ${origin}. ${sameFix}`
+            : `Pass --connection NAME to log in to ${origin}, or --connection ${name} to replace it.`,
+        },
+      );
+    if (!existing && same.length)
+      throw new CliError(
+        "usage",
+        `${same.length === 1 ? "Connection" : "Connections"} ${same.join(", ")} already ${same.length === 1 ? "points" : "point"} at ${origin}.`,
+        { fix: sameFix },
+      );
+    const saved = Object.keys(connections).sort();
+    if (!existing && saved.length && !(chosen && connections[chosen]))
+      throw new CliError(
+        "usage",
+        `${saved.length === 1 ? "Connection" : "Connections"} ${saved.join(", ")} ${saved.length === 1 ? "is" : "are"} saved and no default connection is set, so adding ${name} would make every command ask for --connection.`,
+        {
+          fix: `Choose a default with 'ensemble connection use NAME' (${saved.join(", ")}) and run this again, or pass --connection NAME to add ${origin}, then choose a default with 'ensemble connection use NAME'.`,
+        },
+      );
+  }
   const tokenFile = values["token-file"] && resolve(values["token-file"]);
   if (!tokenFile && deps.platform !== "darwin")
     throw new CliError(
@@ -726,11 +779,12 @@ async function login(
     );
   let token: string;
   if (tokenFile) token = await readTokenFile(tokenFile);
-  else if (deps.stdin.isTTY && deps.stderr.isTTY)
+  else if (deps.stdin.isTTY && deps.stderr.isTTY) {
+    deps.stderr.write(`${tokenSource(origin)}\n`);
     token = (
       await readHiddenPassword(deps.stdin, deps.stderr, "Ensemble CLI token: ")
     ).trim();
-  else
+  } else
     throw new CliError(
       "usage",
       "Enter the token in an interactive terminal, or pass --token-file PATH.",

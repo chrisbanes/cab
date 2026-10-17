@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { once } from "node:events";
+import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { completedLead, configure, until } from "../fixtures/completed-lead.js";
+import { stdinOf } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
   failReadAfterPost,
@@ -143,10 +146,9 @@ test("task create derives ids from the request key and reports admission", async
 
   // Invalid input sends nothing.
   const sent = posts(o);
-  for (const [name, text, ready] of [
-    ["blank.md", "   ", "false"],
-    ["long.md", "x".repeat(16001), "false"],
-    ["ok.md", "fine", undefined],
+  for (const [name, text] of [
+    ["blank.md", "   "],
+    ["long.md", "x".repeat(16001)],
   ] as const) {
     r = await cli("rw", [
       "task",
@@ -157,7 +159,8 @@ test("task create derives ids from the request key and reports admission", async
       "Bad",
       "--outcome-file",
       file(name, text),
-      ...(ready ? ["--ready", ready] : []),
+      "--ready",
+      "false",
     ]);
     assert.equal(r.code, 2, `${name} ${r.out}`);
   }
@@ -1164,6 +1167,334 @@ test("a missing outcome file says it is missing", async (t) => {
     1,
   );
   assert.match(hostile.err, /^Fix: Check the path given to --outcome-file\.$/m);
+});
+
+test("task create takes inline or stdin outcome and defaults to ready", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s, d, file } = o;
+  const create = (outcome: string[], extra: string[] = []) => [
+    "task",
+    "create",
+    "--project",
+    s.projectId,
+    "--title",
+    "Inline",
+    ...outcome,
+    ...extra,
+  ];
+  const count = () => d.tasks(s.projectId).length;
+
+  // 1. Inline text and no --ready: the task is created ready with that outcome.
+  let r = await cli("rw", create(["--outcome", "Inline\nwith $(odd) 'chars'"]));
+  assert.equal(r.code, 0, r.err + r.out);
+  const created = d.task(r.json().data.taskId);
+  assert.equal(created.outcome, "Inline\nwith $(odd) 'chars'");
+  assert.equal(Boolean(created.ready), true);
+
+  // 6. --ready false still creates a task that is not ready.
+  r = await cli("rw", create(["--outcome", "Held"], ["--ready", "false"]));
+  assert.equal(r.code, 0, r.err);
+  assert.equal(Boolean(d.task(r.json().data.taskId).ready), false);
+
+  // 2. `-` reads standard input verbatim.
+  r = await cli("rw", create(["--outcome", "-"]), {
+    stdin: stdinOf("From stdin\n"),
+  });
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(d.task(r.json().data.taskId).outcome, "From stdin\n");
+  // `--outcome-file -` stays a literal path.
+  r = await cli("rw", create(["--outcome-file", "-"]), {
+    stdin: stdinOf("ignored"),
+  });
+  assert.equal(r.code, 2);
+  assert.match(r.json().error.message, /Cannot read --outcome-file "-"/);
+
+  // 3-5. Refusals send nothing and create nothing.
+  const sent = posts(o);
+  const before = count();
+  const digest = databaseDigest(s.f);
+  const refuse = async (
+    name: string,
+    args: string[],
+    code: string,
+    extra: Parameters<typeof cli>[2] = {},
+  ) => {
+    const r = await cli("rw", args, extra);
+    assert.equal(r.code, 2, `${name}: ${r.out}`);
+    assert.equal(r.json().error.code, code, name);
+    return r.json().error.message as string;
+  };
+  assert.match(
+    await refuse("empty stdin", create(["--outcome", "-"]), "invalid-input", {
+      stdin: stdinOf(""),
+    }),
+    /was empty/,
+  );
+  await refuse("blank stdin", create(["--outcome", "-"]), "invalid-input", {
+    stdin: stdinOf(" \n\n"),
+  });
+  await refuse("blank inline", create(["--outcome", "  "]), "invalid-input");
+  assert.match(
+    await refuse(
+      "both flags",
+      create(["--outcome", "X", "--outcome-file", file("o.md", "F")]),
+      "usage",
+    ),
+    /either --outcome or --outcome-file, not both/,
+  );
+  assert.match(
+    await refuse("neither flag", create([]), "usage"),
+    /--outcome TEXT/,
+  );
+  assert.match(
+    await refuse(
+      "oversized stdin",
+      create(["--outcome", "-"]),
+      "invalid-input",
+      { stdin: stdinOf("x".repeat(16000 * 4 + 1)) },
+    ),
+    /Cannot read --outcome - from standard input: it is longer than the 16000 characters a field takes/,
+  );
+  // The limit is the field's, whichever way the text arrives, and is stated as such.
+  for (const [how, args, extra] of [
+    ["inline", create(["--outcome", "x".repeat(16001)]), {}],
+    ["inline astral", create(["--outcome", "😀".repeat(16001)]), {}],
+    [
+      "stdin",
+      create(["--outcome", "-"]),
+      { stdin: stdinOf("x".repeat(16001)) },
+    ],
+    [
+      "file",
+      create(["--outcome-file", file("long.md", "x".repeat(16001))]),
+      {},
+    ],
+  ] as const) {
+    const message = await refuse(
+      `16001 characters, ${how}`,
+      args,
+      "invalid-input",
+      extra,
+    );
+    assert.match(
+      message,
+      /is 16001 characters, longer than the 16000 characters a field takes/,
+    );
+  }
+  // Standard input that never closes is ended by the CLI's interrupt.
+  const interrupt = new AbortController();
+  setImmediate(() => interrupt.abort());
+  assert.match(
+    await refuse("open stdin", create(["--outcome", "-"]), "invalid-input", {
+      stdin: new PassThrough() as unknown as NodeJS.ReadStream,
+      signal: interrupt.signal,
+    }),
+    /interrupted/,
+  );
+  assert.equal(posts(o), sent);
+  assert.equal(count(), before);
+  assert.equal(databaseDigest(s.f), digest);
+
+  // 16,001 four-byte characters (64,004 bytes) is over the field limit too.
+  assert.match(
+    await refuse("stdin astral", create(["--outcome", "-"]), "invalid-input", {
+      stdin: stdinOf("😀".repeat(16001)),
+    }),
+    /longer than the 16000 characters a field takes/,
+  );
+  // Exactly the field limit is accepted, from standard input too. The service counts
+  // Unicode characters, so 16,000 four-byte ones (64,000 bytes) and 10,000 of them
+  // (40,000 bytes, over a two-bytes-per-character cap) are in range.
+  let accepted = 0;
+  for (const text of [
+    "y".repeat(16000),
+    "😀".repeat(16000),
+    "😀".repeat(10000),
+  ]) {
+    r = await cli("rw", create(["--outcome", "-"]), { stdin: stdinOf(text) });
+    assert.equal(r.code, 0, `${text.length} units: ${r.err}${r.out}`);
+    assert.equal(d.task(r.json().data.taskId).outcome, text);
+    accepted++;
+  }
+  // Inline text over the limit in units but within it in characters is accepted too.
+  r = await cli("rw", create(["--outcome", "😀".repeat(8001)]));
+  assert.equal(r.code, 0, r.err + r.out);
+  accepted++;
+
+  // Standard input that was already read cannot be read again.
+  // These two stdin cases never end on their own, so a regression must fail, not hang.
+  const interrupted = () => {
+    const stop = new AbortController();
+    setImmediate(() => stop.abort());
+    return stop.signal;
+  };
+  const spent = stdinOf("once");
+  spent.resume();
+  await once(spent, "end");
+  assert.match(
+    await refuse("spent stdin", create(["--outcome", "-"]), "invalid-input", {
+      stdin: spent,
+      signal: interrupted(),
+    }),
+    /already read/,
+  );
+  // A bad --blocker is reported before standard input is read.
+  const unread = new PassThrough() as unknown as NodeJS.ReadStream;
+  assert.match(
+    await refuse(
+      "bad blocker",
+      [...create(["--outcome", "-"]), "--blocker", "nope"],
+      "invalid-input",
+      { stdin: unread, signal: interrupted() },
+    ),
+    /--blocker/,
+  );
+
+  // A read-only credential is refused before anything is sent.
+  r = await cli("ro", create(["--outcome", "No"]));
+  assert.equal(r.code, 3);
+  assert.equal(r.json().error.code, "insufficient-scope");
+  assert.equal(
+    count(),
+    before + accepted,
+    "only the in-range tasks were created",
+  );
+});
+
+test("task configure uses the current version when --expected-version is omitted", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s, d, lostReply } = o;
+  const version = () => Number(d.task(s.taskId).version);
+  const configure = (...flags: string[]) => [
+    "task",
+    "configure",
+    s.taskId,
+    ...flags,
+  ];
+
+  // 1. The version it read is the version it sends, and the receipt carries it.
+  const read = version();
+  const bodies: Record<string, unknown>[] = [];
+  const recording: typeof fetch = (input, init) => {
+    if (String(input).endsWith("/api/operator/commands"))
+      bodies.push(JSON.parse(String(init?.body)));
+    return fetch(input, init);
+  };
+  let r = await cli("rw", configure("--title", "New"), { fetch: recording });
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0]?.expectedVersion, read);
+  assert.equal(bodies[0]?.title, "New");
+  assert.equal(String(d.task(s.taskId).title), "New");
+  assert.equal(r.json().data.receipt.result.version, read + 1);
+  assert.equal(version(), read + 1);
+  // Inline and stdin outcomes work, with the human receipt too.
+  r = await cli("rw", configure("--outcome", "Inline outcome"));
+  assert.equal(r.code, 0, r.err);
+  assert.equal(String(d.task(s.taskId).outcome), "Inline outcome");
+  r = await cli("rw", configure("--outcome", "-"), {
+    stdin: stdinOf("Piped outcome\n"),
+  });
+  assert.equal(r.code, 0, r.err);
+  assert.equal(String(d.task(s.taskId).outcome), "Piped outcome\n");
+  const human = await o.h.run([
+    ...configure("--title", "Human"),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(human.code, 0, human.err);
+  assert.equal(String(d.task(s.taskId).title), "Human");
+
+  // 2. An edit between the read and the send is a stale version: exit 4, theirs stands.
+  let raced = false;
+  const racing: typeof fetch = (input, init) => {
+    if (!raced && String(input).endsWith("/api/operator/commands")) {
+      raced = true;
+      d.execute({
+        type: "task.configure",
+        actor: "operator",
+        key: randomUUID(),
+        projectId: s.projectId,
+        taskId: s.taskId,
+        expectedVersion: version(),
+        title: "Theirs",
+      });
+    }
+    return fetch(input, init);
+  };
+  const theirs = version() + 1;
+  r = await cli("rw", configure("--title", "Mine"), { fetch: racing });
+  assert.equal(raced, true);
+  assert.equal(r.code, 4, r.out);
+  assert.equal(r.json().error.code, "conflict");
+  assert.equal(String(d.task(s.taskId).title), "Theirs");
+  assert.equal(version(), theirs);
+
+  // 3. A lost reply is an unknown outcome; the same arguments again are a new
+  // request at the new version, and the old request id cannot apply it twice.
+  const before = version();
+  r = await cli("rw", configure("--title", "Lost"), { fetch: lostReply });
+  assert.equal(r.code, 6, r.out);
+  const lost = r.json().error.request.key as string;
+  assert.equal(String(d.task(s.taskId).title), "Lost");
+  assert.equal(version(), before + 1);
+  r = await cli("rw", configure("--title", "Lost"));
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.reusedRequest, false);
+  assert.equal(String(d.task(s.taskId).title), "Lost");
+  const settled = version();
+  r = await cli("rw", configure("--title", "Lost", "--request-id", lost));
+  assert.equal(r.code, 4, r.out);
+  assert.equal(r.json().error.code, "conflict");
+  assert.equal(version(), settled, "nothing applied twice");
+
+  // The retry the CLI prints settles a lost reply: it carries the version that was sent,
+  // so it replays the recorded request instead of conflicting.
+  const sentVersion = version();
+  const unknown = await o.h.run(
+    [...configure("--title", "Lost again"), "--connection", "rw"],
+    { fetch: lostReply },
+  );
+  assert.equal(unknown.code, 6, unknown.err);
+  assert.equal(String(d.task(s.taskId).title), "Lost again");
+  const retry = unknown.err.match(
+    /^Fix: .*repeat the same command with (--request-id \S+ --expected-version \d+) to settle it\.$/m,
+  );
+  assert.ok(retry, unknown.err);
+  assert.match(
+    unknown.err,
+    new RegExp(`retry the same command with ${retry[1]}`),
+  );
+  assert.equal(retry[1]?.endsWith(`--expected-version ${sentVersion}`), true);
+  const applied = version();
+  const settle = await o.h.run([
+    ...configure("--title", "Lost again"),
+    ...(retry[1] ?? "").split(" "),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(settle.code, 0, settle.err);
+  assert.match(settle.out, /Reused unresolved request/);
+  assert.equal(version(), applied, "settled without applying twice");
+
+  // 4. A read-only credential is refused with nothing changed.
+  const digest = databaseDigest(s.f);
+  r = await cli("ro", configure("--title", "Nope"));
+  assert.equal(r.code, 3);
+  assert.equal(r.json().error.code, "insufficient-scope");
+  assert.equal(databaseDigest(s.f), digest);
+
+  // 5. An explicit stale version still exits 4, and both flags together are refused.
+  r = await cli("rw", configure("--title", "Stale", "--expected-version", "1"));
+  assert.equal(r.code, 4);
+  assert.equal(String(d.task(s.taskId).title), "Lost again");
+  r = await cli("rw", configure("--outcome", "A", "--outcome-file", "x.md"));
+  assert.equal(r.code, 2);
+  assert.equal(r.json().error.code, "usage");
+  r = await cli("rw", configure());
+  assert.equal(r.code, 2);
+  assert.match(r.json().error.message, /--outcome/);
+  assert.equal(String(d.task(s.taskId).title), "Lost again");
 });
 
 const journalLines = (o: Operator) =>

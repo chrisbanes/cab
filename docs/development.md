@@ -153,9 +153,17 @@ or run `node dist/src/cli/main.js` directly.
    credentials**. Choose read-only or read/write and a lifetime of 7–90 days. The
    token is shown once; rotate to issue a replacement, then revoke the old one.
    Revocation is irreversible.
-2. `ensemble auth login --connection home --url ORIGIN` prompts for the token with
-   masked input and stores it in the macOS Keychain (service `ensemble-cli`, account
-   = connection name). For unattended callers, pass `--token-file PATH` instead: a
+2. `ensemble auth login --url ORIGIN` stores connection `local` (the name `service
+   install` uses) unless `--connection NAME` or `ENSEMBLE_CONNECTION` names another.
+   A name nobody chose refuses (exit 2, nothing prompted, sent or changed) to re-point
+   an existing `local` at a different origin, to add `local` for an origin another
+   connection already has, or to add `local` beside saved connections when none is the
+   default (every bare command would then be ambiguous); the `Fix:` line names the
+   connections. It never changes the default: `ensemble connection use NAME` does. Pass
+   `--connection NAME` to log in to a second service, to replace a named connection, or
+   to add a second one for the same service. It says where the token comes from, then
+   prompts for it with masked input and stores it in the macOS Keychain (service
+   `ensemble-cli`, account = connection name). For unattended callers, pass `--token-file PATH` instead: a
    regular, non-symlink file owned by you with mode `0600` or stricter, holding one
    token. The file is referenced, never copied. There is no literal-token flag and no
    plaintext fallback; without the Keychain or a token file, login fails with
@@ -204,6 +212,14 @@ or run `node dist/src/cli/main.js` directly.
      (`wrong-service`), then sends exactly the stored command. It never prompts,
      rebases or overwrites: a stale revision or capacity value is `conflict` (exit
      4); prepare again.
+   - Profile and project instructions are `--instructions TEXT|-` (`-` reads standard
+     input, text only, as for `task create --outcome -`) or `--instructions-file PATH`
+     on `profile|project prepare-create` and `profile|project prepare`; give one, and
+     neither with `--restore-revision`. Instruction text is at most 16,000 Unicode
+     characters (code points) however it is given. Other text-file flags
+     (`--capabilities-file`, `--guidance-file`, `--edit-file`, `--message-file` and the
+     like) take files only.
+     An empty `profile list` ends with a `Next:` line naming `profile prepare-create`.
    - `--restore-revision N` proposes revision N's exact instructions as a new
      revision, and refuses redacted or omitted text. `--revoked`, `--paused`,
      `--enabled`, `--candidates`, `--credential-ref env:NAME|none` and
@@ -305,11 +321,22 @@ or run `node dist/src/cli/main.js` directly.
 7. Operating tasks and attention. `inbox list`, `question get` and `approval get`
    work with either scope; the rest need a read/write credential (a read-only one
    exits 3 before anything is sent):
-   - `task create --project ID --title T --outcome-file FILE --ready true|false
-     [--blocker ID]... [--assignee PROFILE_ID]`, `task configure TASK_ID
-     --expected-version N [--title T] [--outcome-file FILE] [--ready true|false]`
-     and `task add-dependency|remove-dependency TASK_ID --blocker ID
-     --expected-version N`. Imported tasks keep provider-owned title and outcome
+   - `task create --project ID --title T (--outcome TEXT|- | --outcome-file FILE)
+     [--ready true|false] [--blocker ID]... [--assignee PROFILE_ID]`, `task configure
+     TASK_ID [--expected-version N] [--title T] [--outcome TEXT|- | --outcome-file
+     FILE] [--ready true|false]` and `task add-dependency|remove-dependency TASK_ID
+     --blocker ID --expected-version N`. `--outcome -` reads standard input (text
+     only, until it closes; Ctrl-C cancels), and the inline and file forms are
+     mutually exclusive. Outcome and instruction text, however given, is at most
+     16,000 Unicode characters (the service's text-field limit); longer text is refused
+     before anything is sent. `task create` is ready unless `--ready false`.
+     `task configure` without `--expected-version` sends the version of the task read
+     it already makes; an edit between that read and the send is a `conflict` (exit
+     4). A lost reply is an unknown outcome (exit 6): repeat the command with the printed
+     `--request-id` and `--expected-version` to settle it. The same command without
+     them reads the current version, which is a new request if the lost one applied
+     and the same request if it did not; if it applied, the old `--request-id` alone is
+     refused as `conflict` rather than applied twice. Imported tasks keep provider-owned title and outcome
      (`policy-denied`) and readiness. The task and initial-assignment ids are derived
      from the request key, so a retry rebuilds the same command. `task create` and
      `task resume` end with the task's `Waiting:`/`Fix:` lines, as `task get` prints

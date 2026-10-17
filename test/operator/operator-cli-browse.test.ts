@@ -44,6 +44,40 @@ const strip = ({ nextCursor, catalogFingerprint, ...rest }: Json) => rest;
 const forge = (kind: string, q: string, c: string) =>
   Buffer.from(JSON.stringify({ v: 1, k: kind, q, c })).toString("base64url");
 
+test("an empty profile list prints the create command next", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t);
+  const read = await s.issue("read", "empty-profiles");
+  const login = await h.run([
+    "auth",
+    "login",
+    "--url",
+    s.origin,
+    "--token-file",
+    h.tokenFile(read.token),
+  ]);
+  assert.equal(login.code, 0, login.err);
+  const human = await h.run(["profile", "list"]);
+  assert.equal(human.code, 0, human.err);
+  const lines = human.out.trimEnd().split("\n");
+  assert.equal(lines[0], "No profiles.");
+  assert.equal(
+    lines[1],
+    "Next: ensemble profile prepare-create --out profile.json --name NAME --instructions TEXT",
+  );
+  assert.match(lines[2] ?? "", /^Runtime: /);
+  assert.equal(human.err, "");
+  // JSON carries no Next line and no new keys.
+  const json = await h.run(["profile", "list", "--output", "json"]);
+  assert.equal(json.code, 0, json.err);
+  assert.ok(!json.out.includes("Next:"));
+  assert.deepEqual(Object.keys(json.json().data).sort(), [
+    "profiles",
+    "runtime",
+  ]);
+  assert.deepEqual(json.json().data.profiles, []);
+});
+
 test("project, profile and task identities stay distinct across projects", async (t) => {
   const { s, seed, h, ok, api } = await setup(t);
   let r = await h.run(["project", "list"]);
