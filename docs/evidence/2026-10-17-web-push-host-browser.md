@@ -24,7 +24,7 @@ crashed runtime.
   temporary data and auth directories, removed after the run. The real `fetchPushTransport`
   sent every push. The installed Ensemble service, its port, state and auth file, the
   user's own browser profile and every credential were not touched.
-- Code: branch `cb/issue-1145-web-push` at commit `50116190` (`main` at `7eb44177` merged in), the commit before this record.
+- Code: branch `cb/issue-1145-web-push` at commit `50116190` (`main` at `7eb44177` merged in), the commit before this record. Later commits change only the partial-read baseline limit, the shared Inbox link builder, a send-time host re-check and failure copy; the live steps were not re-run for them.
 
 ## Steps and results
 
