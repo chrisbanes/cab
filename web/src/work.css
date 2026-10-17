@@ -920,8 +920,6 @@
     white-space: nowrap;
   }
 
-  /* The chips carry each column's count, so the total is read aloud only. */
-
   .overview-stats {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
