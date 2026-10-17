@@ -1,3 +1,4 @@
+import { clockLabel } from "../../src/operator/clock-label.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
@@ -714,6 +715,83 @@ test("the runtime harness check follows the profiles in use", async (t) => {
     "Codex runtime is not running; Claude runtime is not enabled on this service",
   );
   assert.match(both.fix ?? "", /^Restart the service/);
+});
+
+test("readiness names the automatic restart while pending and the toggle once exhausted", async (t) => {
+  const f = fixture(t);
+  const nextAt = Date.UTC(2026, 9, 17, 14, 30, 0);
+  const pending = {
+    state: "pending" as const,
+    attempt: 2 as const,
+    nextAt,
+    lastFailure: "exited" as const,
+    attempts: [],
+  };
+  const exhausted = {
+    state: "exhausted" as const,
+    since: nextAt,
+    lastFailure: "start-failed" as const,
+    attempts: [],
+  };
+  const down = (restart?: typeof pending | typeof exhausted) => ({
+    harnessStatuses: () => [
+      {
+        harness: "codex" as const,
+        enabled: true,
+        state: "unavailable" as const,
+        ...(restart ? { restart } : {}),
+      },
+      {
+        harness: "claude" as const,
+        enabled: true,
+        state: "available" as const,
+      },
+    ],
+  });
+  const line = `Restarting · attempt 2 of 3 · next at ${clockLabel(nextAt)}`;
+  const remedy =
+    "turn Codex off and on in Settings → Runtime, or restart the service";
+  for (const [restart, expected] of [
+    [
+      undefined,
+      "Turn Codex off and on in Settings → Runtime, or restart the service",
+    ],
+    [pending, `${line}; if it stays unavailable, ${remedy}`],
+    [exhausted, `Retries exhausted; ${remedy}`],
+  ] as const) {
+    const login = await check(f, "codex-login", {
+      ...down(restart),
+      codexLogin: async () => "unavailable",
+    });
+    assert.equal(login.fix, expected, "codex-login");
+    const harness = await check(f, "runtime-harness", {
+      ...down(restart),
+      ...profiles(codexProfile()),
+    });
+    assert.equal(harness.reason, "Codex runtime is not running");
+    assert.equal(
+      harness.fix,
+      restart
+        ? expected
+        : "Restart the service, or edit the profile's model or reasoning effort",
+      "runtime-harness",
+    );
+  }
+  const claudeDown = await check(f, "claude-executable", {
+    harnessStatuses: () => [
+      { harness: "codex" as const, enabled: true, state: "available" as const },
+      {
+        harness: "claude" as const,
+        enabled: true,
+        state: "unavailable" as const,
+        restart: pending,
+      },
+    ],
+  });
+  assert.equal(
+    claudeDown.fix,
+    `${line}; if it stays unavailable, turn Claude off and on in Settings → Runtime, or restart the service`,
+  );
 });
 
 test("the data and auth paths check names the rule, not the path", async (t) => {

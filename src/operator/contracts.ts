@@ -133,6 +133,44 @@ const harnessStatusBase = {
   /** Null until the runtime has read them; then the server validates against them. */
   settings: supportedRuntimeSettingsSchema.nullable(),
 };
+/** A closed set chosen by the service; runtime error text is never carried (it can hold secrets). */
+export const runtimeRestartFailureSchema = z.enum([
+  "exited",
+  "start-failed",
+  "start-timed-out",
+  "spawn-failed",
+]);
+export type RuntimeRestartFailure = z.infer<typeof runtimeRestartFailureSchema>;
+export const runtimeRestartAttemptSchema = z
+  .object({
+    attempt: z.number().int().min(1).max(3),
+    at: time,
+    outcome: z.enum(["started", "failed"]),
+    failure: runtimeRestartFailureSchema.nullable(),
+  })
+  .strict();
+export type RuntimeRestartAttempt = z.infer<typeof runtimeRestartAttemptSchema>;
+/** In memory only. `attempt` of a pending retry is the next attempt number. */
+export const runtimeRestartSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("pending"),
+      attempt: z.number().int().min(1).max(3),
+      nextAt: time,
+      lastFailure: runtimeRestartFailureSchema,
+      attempts: z.array(runtimeRestartAttemptSchema).max(3),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal("exhausted"),
+      since: time,
+      lastFailure: runtimeRestartFailureSchema,
+      attempts: z.array(runtimeRestartAttemptSchema).max(3),
+    })
+    .strict(),
+]);
+export type RuntimeRestart = z.infer<typeof runtimeRestartSchema>;
 /**
  * One per harness; `enabled` is the operator's persisted setting. `not-configured` (shown as
  * "Not enabled") is a disabled runtime, or an enabled one whose executable is not on the service
@@ -160,6 +198,8 @@ export const harnessStatusSchema = z.discriminatedUnion("state", [
       enabled: z.boolean(),
       state: z.literal("unavailable"),
       since: time,
+      /** Absent while an attempt runs, or when nothing is scheduled. */
+      restart: runtimeRestartSchema.optional(),
     })
     .strict(),
 ]);

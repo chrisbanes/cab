@@ -7,6 +7,11 @@ import {
   type TaskRead,
   unsupportedRuntimeField,
 } from "../../src/operator/contracts.js";
+import {
+  settingsFix,
+  unavailableAlert as unavailableAlertText,
+  unavailableNote,
+} from "../../src/operator/runtime-restart-copy.js";
 export { runtimeSummary };
 import type { Values } from "./settings-changes.js";
 import { settingsSectionHref } from "./settings-sections.js";
@@ -19,8 +24,7 @@ export const harnessStateLabel: Record<HarnessStatus["state"], string> = {
 
 /** Why a runtime is in its state and what to do about it; null when it is available. */
 export function harnessReason(status: HarnessStatus) {
-  if (status.state === "unavailable")
-    return "Turn it off and on, or restart the service";
+  if (status.state === "unavailable") return settingsFix(status.restart);
   if (status.state === "available") return null;
   return status.reason === "disabled"
     ? "Disabled in Settings"
@@ -49,8 +53,7 @@ export const disableConfirmation = (
 };
 
 /** Shell alert copy; the server-rendered Runtime page repeats it. */
-export const unavailableAlert = (status: Pick<HarnessStatus, "harness">) =>
-  `${executionHarnessLabels[status.harness]} runtime unavailable — turn it off and on in Settings → Runtime, or restart the service`;
+export const unavailableAlert = unavailableAlertText;
 
 /** Draft values of the profile runtime fields. */
 export const runtimeValues = (runtime: ProfileRuntime): Values => ({
@@ -119,7 +122,7 @@ export function harnessNote(status: HarnessStatus | undefined) {
   const label = executionHarnessLabels[status.harness];
   return status.state === "not-configured"
     ? `The ${label} runtime is not enabled on this service. ${status.reason === "disabled" ? "Turn it on in Settings → Runtime." : installAdvice(status.harness)} Assignments using this profile wait until it is; they never fall back to another runtime.`
-    : `The ${label} runtime is unavailable; turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.`;
+    : `${unavailableNote(status.harness)} Assignments using this profile wait meanwhile and never fall back to another runtime.`;
 }
 
 type Assignment = TaskRead["data"]["assignments"][number];
@@ -192,7 +195,7 @@ export function waitRoute(a: Assignment): ExecutionNoticeModel | null {
       `${label} runtime unavailable; turn it off and on in Settings → Runtime, or restart the service`
   )
     return {
-      message: `The ${label} runtime is unavailable. Turn it off and on in Settings → Runtime to start a fresh one; if it stays unavailable, restart the service. Queued work waits; running work is held, see Recovery.`,
+      message: `${unavailableNote(harness)} Queued work waits; running work is held, see Recovery.`,
       routes: [runtimeStatusRoute, recoveryRoute(a)],
     };
   if (reason.startsWith(`${label} runtime unavailable: `))

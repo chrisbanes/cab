@@ -1,10 +1,7 @@
 // Shared wording rules for the operator UI: design/DESIGN.md -> Interaction notes -> Presentation.
 
-/** The app's clock label, local HH:MM (DESIGN.md Presentation: times use the app's clock label). */
-export function clockLabel(at: number) {
-  const date = new Date(at);
-  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
-}
+import { clockLabel } from "../../src/operator/clock-label.js";
+export { clockLabel };
 
 /** "Updated 16:48", or "Updated 16:47–16:48" only when the first and last reads show different clock labels. */
 export function updatedLabel(first: number, last: number) {

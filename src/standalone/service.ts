@@ -47,7 +47,10 @@ import {
 import { GitHubSourceStore } from "../core/github-source.js";
 import { Store } from "../core/store.js";
 import { reviewMetadataSchema } from "../core/task-review.js";
-import type { HarnessStatus } from "../operator/contracts.js";
+import type {
+  HarnessStatus,
+  RuntimeRestartFailure,
+} from "../operator/contracts.js";
 import { ClaudeRuntime, releaseClaudeTemporaryBase } from "./claude.js";
 import {
   claudeTokenExclusions,
@@ -184,9 +187,18 @@ import {
   type TaskExecutionContext,
 } from "./state.js";
 import {
+  defaultRestartClock,
+  newRestartState,
+  type RestartState,
+  type RuntimeRestartOptions,
+  runtimeRestartDelaysMs,
+  runtimeRestartStableMs,
+} from "./runtime-restart.js";
+import {
   ExecutionSupervisor,
   type ExecutionSupervisorOptions,
   type StopObservation,
+  type SupervisorClock,
 } from "./supervisor.js";
 import { MacProcessTerminationVerifier } from "./termination.js";
 import {
@@ -335,6 +347,8 @@ export interface StandaloneServiceOptions {
   runtimeHarnesses?: readonly ExecutionHarness[];
   /** A live or secondary start cannot block healthy work; defaults to 10 seconds. */
   secondaryRuntimeStartTimeoutMs?: number;
+  /** Clocks for the automatic restart schedule; tests inject fakes. */
+  runtimeRestart?: RuntimeRestartOptions;
   /**
    * Whether the harness's executable (`codex`, `claude`) is on the service `PATH`. Defaults to a
    * `PATH` lookup for real runtimes and to true for injected factories.
@@ -514,6 +528,8 @@ export class StandaloneService {
     ExecutionHarness,
     number
   >();
+  /** Automatic restart schedule per harness; in memory, so a service restart begins afresh. */
+  private readonly runtimeRestarts = new Map<ExecutionHarness, RestartState>();
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
   /** Harnesses whose runtime said at start that it cannot run here; see RuntimeNotEnabledError. */
   private readonly runtimeNotEnabled = new Set<ExecutionHarness>();
@@ -546,6 +562,8 @@ export class StandaloneService {
   private readonly callbacks = new Map<string, Set<Promise<unknown>>>();
   private readonly routingCoordinators = new Map<string, RoutingCoordinator>();
   private readonly retryNow: () => number;
+  private readonly restartClock: SupervisorClock;
+  private readonly wallNow: () => number;
   private readonly fallbackBackoffMs: number;
   private readonly maxFallbackBackoffMs: number;
   private generation: ServiceGeneration | undefined;
@@ -569,6 +587,8 @@ export class StandaloneService {
     private readonly options: StandaloneServiceOptions = {},
   ) {
     this.retryNow = options.retry?.now ?? Date.now;
+    this.restartClock = options.runtimeRestart?.clock ?? defaultRestartClock;
+    this.wallNow = options.runtimeRestart?.wallNow ?? Date.now;
     const fallback = options.retry?.fallbackBackoffMs ?? 1000;
     const maximum = options.retry?.maxFallbackBackoffMs ?? 30_000;
     if (
@@ -1001,6 +1021,7 @@ export class StandaloneService {
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       spawnEnvironment.spawnEnvironment();
       this.runtimeUnavailableSince.clear();
+      this.abortRuntimeRestarts();
       this.runtimeNotEnabled.clear();
       this.spawnRuntime = (harness) => {
         // Keyed by the requested harness: test fakes do not declare one.
@@ -1026,7 +1047,7 @@ export class StandaloneService {
         try {
           this.runtimes.set(harness, this.spawnRuntime(harness));
         } catch {
-          this.runtimeUnavailableSince.set(harness, Date.now());
+          this.noteRuntimeUnavailable(harness, "spawn-failed");
         }
       }
       const supervisor = new ExecutionSupervisor(
@@ -1164,6 +1185,9 @@ export class StandaloneService {
         diagnostics,
         claude,
       };
+      // Boot-time failures begin their schedule only now that attempts can be admitted.
+      for (const harness of [...this.runtimeUnavailableSince.keys()])
+        this.armRuntimeRestart(harness);
       scheduler.start();
       await this.wakeScheduler();
       this.timers.add(
@@ -1186,6 +1210,7 @@ export class StandaloneService {
       }
     } catch (error) {
       generation.accepting = false;
+      this.abortRuntimeRestarts();
       // Read live, as stop() may release these while start() is still running.
       const { scheduler, workspaces } = this.acquired ?? {};
       workspaces?.cancelGitWork();
@@ -1255,6 +1280,7 @@ export class StandaloneService {
   ): Promise<boolean> {
     let startup: Promise<void> | undefined;
     let startupSettled = false;
+    let timedOut = false;
     let timer: NodeJS.Timeout | undefined;
     try {
       startup = runtime.start().finally(() => {
@@ -1264,19 +1290,26 @@ export class StandaloneService {
         ? Promise.race([
             this.untilFailure(runtime, startup, runtimeFailedError),
             new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () => reject(new Error("Secondary runtime startup timed out")),
-                this.options.secondaryRuntimeStartTimeoutMs ?? 10_000,
-              );
+              timer = setTimeout(() => {
+                timedOut = true;
+                reject(new Error("Secondary runtime startup timed out"));
+              }, this.options.secondaryRuntimeStartTimeoutMs ?? 10_000);
             }),
           ])
         : startup);
+      if (!this.runtimeUnavailableSince.has(harness))
+        this.restartStateOf(harness).availableAt =
+          this.restartClock.monotonicNow();
       return true;
     } catch (error) {
       if (this.runtimes.get(harness) === runtime) this.runtimes.delete(harness);
       if (error instanceof RuntimeNotEnabledError)
         this.runtimeNotEnabled.add(harness);
-      else this.runtimeUnavailableSince.set(harness, Date.now());
+      else
+        this.noteRuntimeUnavailable(
+          harness,
+          timedOut ? "start-timed-out" : "start-failed",
+        );
       // Healthy work never waits on a failed runtime's cleanup.
       const cleanup = this.detachRuntimeStop(runtime);
       if (startup && !startupSettled) {
@@ -1362,6 +1395,8 @@ export class StandaloneService {
           );
         result = domain.execute(domainCommand);
       }
+      // The operator's toggle is the documented recovery: it begins a fresh schedule.
+      this.clearRuntimeRestart(harness);
       await this.reconcileRuntime(harness);
       return parseDomainCommandOutcome("runtime.configure", result).result;
     });
@@ -1425,12 +1460,178 @@ export class StandaloneService {
     try {
       runtime = this.spawnRuntime(harness);
     } catch {
-      this.runtimeUnavailableSince.set(harness, Date.now());
+      this.noteRuntimeUnavailable(harness, "spawn-failed");
       return;
     }
     this.runtimes.set(harness, runtime);
     if (await this.startOrDetach(harness, runtime, true))
       await this.wakeScheduler();
+  }
+
+  private restartStateOf(harness: ExecutionHarness): RestartState {
+    let state = this.runtimeRestarts.get(harness);
+    if (!state) {
+      state = newRestartState();
+      this.runtimeRestarts.set(harness, state);
+    }
+    return state;
+  }
+
+  /**
+   * The only place a runtime becomes unavailable. The first failure of an episode names it and
+   * applies the stability rule (10 minutes available starts a fresh count); every report then
+   * tries to arm the next attempt, which ignores duplicates.
+   */
+  private noteRuntimeUnavailable(
+    harness: ExecutionHarness,
+    failure: RuntimeRestartFailure,
+  ): void {
+    const state = this.restartStateOf(harness);
+    if (!this.runtimeUnavailableSince.has(harness)) {
+      this.runtimeUnavailableSince.set(harness, this.wallNow());
+      state.lastFailure = failure;
+      if (
+        state.availableAt !== undefined &&
+        this.restartClock.monotonicNow() - state.availableAt >=
+          runtimeRestartStableMs
+      ) {
+        state.attempts = 0;
+        state.history = [];
+      }
+      state.availableAt = undefined;
+    }
+    this.armRuntimeRestart(harness);
+  }
+
+  /**
+   * Sleeps for the next attempt, or marks the schedule exhausted after the third. A disabled or
+   * not-enabled runtime, a stopped or unpublished service, a pending sleep, an attempt in
+   * flight and an exhausted schedule all arm nothing.
+   */
+  private armRuntimeRestart(harness: ExecutionHarness): void {
+    const generation = this.generation;
+    if (
+      !this.current ||
+      !generation?.accepting ||
+      !this.spawnRuntime ||
+      !this.runtimeHarnesses.includes(harness) ||
+      !this.current.domain.runtimeEnabled(harness) ||
+      this.runtimeNotEnabled.has(harness) ||
+      !this.runtimeUnavailableSince.has(harness)
+    )
+      return;
+    const state = this.restartStateOf(harness);
+    if (state.pending || state.inFlight || state.exhaustedAt !== undefined)
+      return;
+    const delay = runtimeRestartDelaysMs[state.attempts];
+    if (delay === undefined) {
+      state.exhaustedAt = this.wallNow();
+      return;
+    }
+    const token = {};
+    const abort = new AbortController();
+    state.pending = {
+      token,
+      abort,
+      attempt: state.attempts + 1,
+      nextAt: this.wallNow() + delay,
+    };
+    // Aborting resolves the sleep, so the signal tells a fired sleep from a cancelled one.
+    void this.restartClock.sleep(delay, abort.signal).then(
+      () => {
+        if (!abort.signal.aborted)
+          void this.runtimeRestartAttempt(harness, generation, state, token);
+      },
+      () => {},
+    );
+  }
+
+  /** Goes through the toggle path, so it queues behind and yields to an operator toggle. */
+  private async runtimeRestartAttempt(
+    harness: ExecutionHarness,
+    generation: ServiceGeneration,
+    state: RestartState,
+    token: object,
+  ): Promise<void> {
+    const current = () =>
+      this.generation === generation &&
+      generation.accepting &&
+      this.runtimeRestarts.get(harness) === state &&
+      state.pending?.token === token &&
+      this.runtimeUnavailableSince.has(harness) &&
+      this.current?.domain.runtimeEnabled(harness) === true &&
+      !this.runtimeNotEnabled.has(harness);
+    if (!current()) return;
+    try {
+      await this.toggleRuntime(harness, async () => {
+        if (!current()) return;
+        const attempt = state.attempts + 1;
+        const at = this.wallNow();
+        state.pending = undefined;
+        state.inFlight = true;
+        state.attempts = attempt;
+        try {
+          await this.reconcileRuntime(harness);
+        } catch {
+          // A reconcile that threw has left the runtime absent; keep the schedule going.
+          if (!this.runtimeUnavailableSince.has(harness))
+            this.noteRuntimeUnavailable(harness, "start-failed");
+        } finally {
+          state.inFlight = false;
+        }
+        if (this.runtimeRestarts.get(harness) !== state) return;
+        const started =
+          this.runtimes.has(harness) &&
+          !this.runtimeUnavailableSince.has(harness);
+        state.history.push({
+          attempt,
+          at,
+          outcome: started ? "started" : "failed",
+          failure: started ? null : (state.lastFailure ?? "start-failed"),
+        });
+        if (this.runtimeNotEnabled.has(harness))
+          this.runtimeRestarts.delete(harness);
+        else if (!started) this.armRuntimeRestart(harness);
+      });
+    } catch {
+      // Refused because the service stopped; nothing to retry and nothing to report.
+    }
+  }
+
+  /** An operator toggle, or the start of a service: forgets the schedule and any sleep. */
+  private clearRuntimeRestart(harness: ExecutionHarness): void {
+    this.runtimeRestarts.get(harness)?.pending?.abort.abort();
+    this.runtimeRestarts.delete(harness);
+  }
+
+  /** Stop and failed-start teardown: cancels every sleep so none can outlive the generation. */
+  private abortRuntimeRestarts(): void {
+    for (const state of this.runtimeRestarts.values())
+      state.pending?.abort.abort();
+    this.runtimeRestarts.clear();
+  }
+
+  private restartStatus(harness: ExecutionHarness) {
+    const state = this.runtimeRestarts.get(harness);
+    if (!state?.lastFailure) return undefined;
+    const { lastFailure } = state;
+    const attempts = state.history.map((entry) => ({ ...entry }));
+    if (state.exhaustedAt !== undefined)
+      return {
+        state: "exhausted" as const,
+        since: state.exhaustedAt,
+        lastFailure,
+        attempts,
+      };
+    if (state.pending)
+      return {
+        state: "pending" as const,
+        attempt: state.pending.attempt,
+        nextAt: state.pending.nextAt,
+        lastFailure,
+        attempts,
+      };
+    return undefined;
   }
 
   /** Stops each disabled runtime that no submitting, running or held execution still needs. */
@@ -1488,7 +1689,7 @@ export class StandaloneService {
         this.runtimes.get(harness) === runtime &&
         !this.runtimeUnavailableSince.has(harness)
       )
-        this.runtimeUnavailableSince.set(harness, Date.now());
+        this.noteRuntimeUnavailable(harness, "exited");
     });
     const acceptsNew = () =>
       !refuseNew &&
@@ -1745,6 +1946,8 @@ export class StandaloneService {
   }
 
   private async stopOwned(): Promise<void> {
+    // Before awaiting: a queued attempt then finds the generation closed and does nothing.
+    this.abortRuntimeRestarts();
     // A live enable may be starting a runtime; let it land in `runtimes` first.
     await Promise.all([...this.runtimeToggles.values()]);
     this.spawnRuntime = undefined;
@@ -2081,9 +2284,18 @@ export class StandaloneService {
           settings,
         };
       const since = this.runtimeUnavailableSince.get(harness);
-      return since === undefined
-        ? { harness, enabled, state: "available", policy, settings }
-        : { harness, enabled, state: "unavailable", since, policy, settings };
+      if (since === undefined)
+        return { harness, enabled, state: "available", policy, settings };
+      const restart = this.restartStatus(harness);
+      return {
+        harness,
+        enabled,
+        state: "unavailable",
+        since,
+        ...(restart ? { restart } : {}),
+        policy,
+        settings,
+      };
     });
   }
 

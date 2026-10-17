@@ -3,6 +3,8 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { clockLabel } from "../../src/operator/clock-label.js";
+import { ManualRestartClock, settle } from "../fixtures/restart-clock.js";
 import { tmpdir } from "../fixtures/temp.js";
 import type { DomainCommand } from "../../src/core/domain.js";
 import type { Runtime } from "../../src/standalone/codex.js";
@@ -210,12 +212,18 @@ test("runtime overview reports effective access limits without exposing configur
 test("runtime overview shows the restart notice only after a runtime failure", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-failure-"));
   let fail!: (error: Error) => void;
-  const service = new StandaloneService(join(directory, "data"), () => ({
-    ...runtime,
-    onFailure(listener: (error: Error) => void) {
-      fail = listener;
-    },
-  }));
+  const clock = new ManualRestartClock();
+  const service = new StandaloneService(
+    join(directory, "data"),
+    () => ({
+      ...runtime,
+      onFailure(listener: (error: Error) => void) {
+        fail = listener;
+      },
+    }),
+    undefined,
+    { runtimeRestart: { clock, wallNow: clock.wallNow } },
+  );
   t.after(async () => {
     await service.stop();
     rmSync(directory, { recursive: true, force: true });
@@ -237,15 +245,71 @@ test("runtime overview shows the restart notice only after a runtime failure", a
   assert.doesNotMatch(await read(), /Codex runtime unavailable/);
   fail(new Error("Runtime lost <script>"));
   const body = await read();
-  assert.match(
-    body,
-    /<p role="alert">Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service<\/p>/,
+  assert.ok(
+    body.includes(
+      `<p role="alert">Codex runtime unavailable — Restarting · attempt 1 of 3 · next at ${clockLabel(clock.wall + 30_000)}</p>`,
+    ),
   );
   assert.doesNotMatch(body, /Runtime lost|<script>/);
 });
 
+test("runtime overview says retries are exhausted once the third restart fails", async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-exhausted-"));
+  let fail!: (error: Error) => void;
+  let starts = 0;
+  const clock = new ManualRestartClock();
+  const service = new StandaloneService(
+    join(directory, "data"),
+    () => ({
+      ...runtime,
+      async start() {
+        if (++starts > 1) throw new Error("App Server will not start");
+      },
+      onFailure(listener: (error: Error) => void) {
+        fail = listener;
+      },
+    }),
+    undefined,
+    { runtimeRestart: { clock, wallNow: clock.wallNow } },
+  );
+  t.after(async () => {
+    await service.stop();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  await service.start();
+  const route = runtimeOperatorRoutes(service).find(
+    (candidate) => candidate.method === "GET" && candidate.path === "/runtime",
+  );
+  assert.ok(route);
+  fail(new Error("Runtime lost"));
+  for (const [index, delay] of [30_000, 120_000, 600_000].entries()) {
+    clock.advance(delay);
+    await settle(() => starts === index + 2);
+  }
+  await settle(() => {
+    const status = service.harnessStatuses()[0];
+    return (
+      status?.state === "unavailable" && status.restart?.state === "exhausted"
+    );
+  });
+
+  const page = await route.handler({
+    params: {},
+    fields: {},
+    csrfToken: "test-token",
+  });
+  assert.ok(page.kind === "html");
+  assert.ok(
+    page.body.includes(
+      '<p role="alert">Codex runtime unavailable — Retries exhausted; turn it off and on in Settings → Runtime, or restart the service</p>',
+    ),
+  );
+  assert.doesNotMatch(page.body, /will not start/);
+});
+
 test("runtime overview alerts once per unavailable harness and never for a disabled one", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "ensemble-runtime-harnesses-"));
+  const clock = new ManualRestartClock();
   const options = (harnesses: ("codex" | "claude")[]) =>
     new StandaloneService(
       join(directory, harnesses.join("-")),
@@ -254,7 +318,10 @@ test("runtime overview alerts once per unavailable harness and never for a disab
         return { ...runtime };
       },
       undefined,
-      { runtimeHarnesses: harnesses },
+      {
+        runtimeHarnesses: harnesses,
+        runtimeRestart: { clock, wallNow: clock.wallNow },
+      },
     );
   const disabled = options(["codex"]),
     failed = options(["codex", "claude"]);
@@ -279,10 +346,12 @@ test("runtime overview alerts once per unavailable harness and never for a disab
   };
   assert.doesNotMatch(await read(disabled), /runtime unavailable/);
   const body = await read(failed);
-  assert.match(
-    body,
-    /<p role="alert">Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service<\/p>/,
+  assert.ok(
+    body.includes(
+      `<p role="alert">Claude runtime unavailable — Restarting · attempt 1 of 3 · next at ${clockLabel(clock.wall + 30_000)}</p>`,
+    ),
   );
+  assert.equal(body.match(/runtime unavailable/g)?.length, 1);
   assert.doesNotMatch(body, /Codex runtime unavailable/);
 });
 
