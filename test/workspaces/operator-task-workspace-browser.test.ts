@@ -14,7 +14,10 @@ import {
   leadReceivesNotice,
   leadResumeNotice,
 } from "../../web/src/lead-feedback.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  seedReviewTask,
+  setLinkedRepository,
+} from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 const test = browserSuite("operator-task-workspace-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
@@ -33,6 +36,8 @@ test("production workspace retains literal history, pending request, focused rep
   const a = await seedReviewTask(f),
     r = a.delegatedResult("Original source-faithful result"),
     questionId = randomUUID();
+  // Delivery controls belong to a task whose project links a repository.
+  setLinkedRepository(f, a.projectId, true);
   f.seedPersistedState((db) => {
     for (let i = 0; i < 250; i++)
       db.prepare(
@@ -821,6 +826,8 @@ test("a replayed auxiliary request focuses its control after the page commits", 
   );
   const a = await seedReviewTask(f),
     r = a.delegatedResult("Result to view");
+  // Delivery controls belong to a task whose project links a repository.
+  setLinkedRepository(f, a.projectId, true);
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({

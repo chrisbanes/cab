@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { test } from "node:test";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import {
+  deliveryApplies,
   executionFacts,
   sourceFacts,
   taskColumnOf,
@@ -203,5 +204,19 @@ test("executionFacts counts running assignments and states delivery", () => {
       leadAssignmentId: null,
     } as unknown as Data).lead,
     null,
+  );
+});
+
+test("delivery applies to a GitHub source, a linked repository or a bound pull request only", () => {
+  const applies = (data: unknown) => deliveryApplies(data as Data);
+  assert.equal(applies({ source: null }), false);
+  // A read without the field counts as unlinked.
+  assert.equal(applies({ source: null, delivery: { binding: null } }), false);
+  assert.equal(applies({ source: null, repositoryLinked: false }), false);
+  assert.equal(applies({ source: {} }), true);
+  assert.equal(applies({ source: null, repositoryLinked: true }), true);
+  assert.equal(
+    applies({ source: null, delivery: { binding: { number: 7 } } }),
+    true,
   );
 });

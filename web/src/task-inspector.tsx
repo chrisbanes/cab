@@ -4,6 +4,7 @@ import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick } from "./components.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
+  deliveryApplies,
   executionFacts,
   sourceFacts,
   taskColumnOf,
@@ -166,8 +167,12 @@ export function TaskInspector({
           <dd>{facts.running ? `${facts.running} running` : "None running"}</dd>
           <dt>Lead runtime</dt>
           <dd>{facts.lead ?? "No lead assignment"}</dd>
-          <dt>Delivery</dt>
-          <dd>{facts.delivery}</dd>
+          {deliveryApplies(data) && (
+            <>
+              <dt>Delivery</dt>
+              <dd>{facts.delivery}</dd>
+            </>
+          )}
         </dl>
       </Group>
       <Group label="Results & artifacts">

@@ -45,6 +45,7 @@ import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
   leadFeedbackMode,
   leadReceivesNotice,
+  leadUnavailableNotice,
   leadResumeNotice,
 } from "./lead-feedback.js";
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
@@ -63,7 +64,12 @@ import {
   tabForSection,
   tabIds,
 } from "./task-tabs.js";
-import { briefParts, criterionRows, taskNextActor } from "./task-overview.js";
+import {
+  briefParts,
+  criterionRows,
+  deliveryApplies,
+  taskNextActor,
+} from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 
@@ -1260,6 +1266,8 @@ export function TaskWorkspace({
       changed();
     }
   }
+  // A task without a GitHub source can never post a comment, whatever was selected earlier.
+  const destination = data?.source ? state.destination : "lead";
   async function send() {
     if (!state.draft.trim() || pending) return;
     if (state.frozen) {
@@ -1268,7 +1276,7 @@ export function TaskWorkspace({
     }
     const key = crypto.randomUUID();
     let input: OperatorCommand;
-    if (state.destination === "lead") {
+    if (destination === "lead") {
       if (!lead) return;
       input = {
         type: "message",
@@ -1329,12 +1337,29 @@ export function TaskWorkspace({
         }}
       />
     );
+  // Exactly one sentence sits above the box: what this destination does now.
+  const replyNote =
+    destination === "lead"
+      ? !lead
+        ? "This project has no lead to message yet."
+        : leadMode === "resumes"
+          ? leadResumeNotice(leadName)
+          : leadMode === "receives"
+            ? leadReceivesNotice(leadName)
+            : leadUnavailableNotice(leadName)
+      : !data.commentPolicy?.available
+        ? data.commentPolicy?.reason
+          ? `${data.commentPolicy.reason}.`
+          : "GitHub comments aren't available for this task."
+        : data.commentPolicy.mode === "approval"
+          ? "You review the exact comment before it posts to the GitHub issue."
+          : "Posts a comment on the GitHub issue.";
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
       <div className="task-actions">
         <Button
-          variant={state.destination === "lead" ? "primary" : "secondary"}
+          variant={destination === "lead" ? "primary" : "secondary"}
           disabled={pending || state.uncertain}
           onClick={() => {
             state.destination = "lead";
@@ -1343,32 +1368,25 @@ export function TaskWorkspace({
         >
           Message task lead
         </Button>
-        <Button
-          variant={state.destination === "github" ? "primary" : "secondary"}
-          disabled={
-            pending || state.uncertain || !data.commentPolicy?.available
-          }
-          onClick={() => {
-            state.destination = "github";
-            changed();
-          }}
-        >
-          Post GitHub comment
-        </Button>
+        {data.source && (
+          <Button
+            variant={destination === "github" ? "primary" : "secondary"}
+            disabled={
+              pending || state.uncertain || !data.commentPolicy?.available
+            }
+            onClick={() => {
+              state.destination = "github";
+              changed();
+            }}
+          >
+            Post GitHub comment
+          </Button>
+        )}
       </div>
-      <p>
-        {state.destination === "lead"
-          ? `Local Ensemble inbox for ${lead?.name ?? "unconfigured lead"}. Does not post to GitHub or approve work.`
-          : `GitHub issue comment · ${data.commentPolicy?.mode ?? "unavailable"} policy · ${data.commentPolicy?.reason ?? ""}`}
-      </p>
-      {state.destination === "lead" && state.reference && (
-        <p>Immutable reference: {JSON.stringify(state.reference)}</p>
-      )}
-      {state.destination === "lead" && lead && leadMode === "resumes" && (
-        <p role="status">{leadResumeNotice(leadName)}</p>
-      )}
-      {state.destination === "lead" && lead && leadMode === "receives" && (
-        <p className="metadata muted">{leadReceivesNotice(leadName)}</p>
+      {destination === "lead" && lead && leadMode === "resumes" ? (
+        <p role="status">{replyNote}</p>
+      ) : (
+        <p className="metadata muted">{replyNote}</p>
       )}
       <label htmlFor="workspace-reply">Editable reply</label>
       <Textarea
@@ -1378,59 +1396,61 @@ export function TaskWorkspace({
         onChange={(e) => {
           state.draft = e.target.value;
           if (state.notice?.tone === "success") state.notice = null;
-          if (state.destination === "github") state.commentReview = null;
+          if (destination === "github") state.commentReview = null;
           changed();
         }}
         rows={5}
       />
-      {state.destination === "github" &&
-        data.commentPolicy?.mode === "approval" && (
-          <>
-            <Button
-              disabled={pending || state.uncertain || !state.draft.trim()}
-              onClick={() =>
+      {destination === "lead" && state.reference && (
+        <p>Immutable reference: {JSON.stringify(state.reference)}</p>
+      )}
+      {destination === "github" && data.commentPolicy?.mode === "approval" && (
+        <>
+          <Button
+            disabled={pending || state.uncertain || !state.draft.trim()}
+            onClick={() =>
+              void command({
+                type: "comment.review",
+                key: crypto.randomUUID(),
+                operationId: crypto.randomUUID(),
+                taskId,
+                expectedTaskVersion: data.task.version,
+                body: state.draft,
+              })
+            }
+          >
+            Review exact GitHub comment
+          </Button>
+          {state.commentReview && (
+            <CommentReview
+              record={state.commentReview}
+              disabled={pending || state.uncertain}
+              confirm={(decision) => {
+                const review = state.commentReview;
+                if (!review) return;
                 void command({
-                  type: "comment.review",
+                  type: "comment.confirm",
                   key: crypto.randomUUID(),
-                  operationId: crypto.randomUUID(),
                   taskId,
-                  expectedTaskVersion: data.task.version,
-                  body: state.draft,
-                })
-              }
-            >
-              Review exact GitHub comment
-            </Button>
-            {state.commentReview && (
-              <CommentReview
-                record={state.commentReview}
-                disabled={pending || state.uncertain}
-                confirm={(decision) => {
-                  const review = state.commentReview;
-                  if (!review) return;
-                  void command({
-                    type: "comment.confirm",
-                    key: crypto.randomUUID(),
-                    taskId,
-                    reviewId: review.reviewId,
-                    expectedRevision: review.revision,
-                    materialHash: review.materialHash,
-                    decision,
-                  });
-                }}
-              />
-            )}
-          </>
-        )}
+                  reviewId: review.reviewId,
+                  expectedRevision: review.revision,
+                  materialHash: review.materialHash,
+                  decision,
+                });
+              }}
+            />
+          )}
+        </>
+      )}
       {(pending || !state.uncertain) && (
         <Button
           disabled={
             pending ||
             !state.draft.trim() ||
-            (state.destination === "lead" &&
+            (destination === "lead" &&
               (!lead || leadMode === "unavailable") &&
               !state.uncertain) ||
-            (state.destination === "github" &&
+            (destination === "github" &&
               (!data.commentPolicy?.available ||
                 (data.commentPolicy.mode === "approval" &&
                   state.commentReview?.decision !== "approved")) &&
@@ -1440,17 +1460,10 @@ export function TaskWorkspace({
         >
           {pending
             ? "Sending…"
-            : state.destination === "lead"
+            : destination === "lead"
               ? "Send to task lead"
               : "Post comment"}
         </Button>
-      )}
-      {state.destination === "lead" && lead && leadMode === "unavailable" && (
-        <p>
-          Task lead is {lead.state}; local message delivery is unavailable. The
-          exact-reference draft remains editable. Existing coordination controls
-          retain the lifecycle boundary.
-        </p>
       )}
       {!pending && outcome && (
         <ActionOutcome
@@ -2620,10 +2633,13 @@ function Changes({
   unconfirmed: ReactNode;
 }) {
   const changes = selected?.metadata.changes,
-    d = data.delivery;
+    d = data.delivery,
+    delivers = deliveryApplies(data);
   return (
     <section id="changes">
-      <h3 className="section-heading">Changes and delivery</h3>
+      <h3 className="section-heading">
+        {delivers ? "Changes and delivery" : "Changes"}
+      </h3>
       <TaskWorkspaceChanges
         client={client}
         session={session}
@@ -2655,7 +2671,7 @@ function Changes({
           ))}
         </>
       )}
-      {d?.binding && (
+      {delivers && d?.binding && (
         <>
           <p>
             PR #{d.binding.number} · {d.binding.repositoryName} ·{" "}
@@ -2705,40 +2721,43 @@ function Changes({
           )}
         </>
       )}
-      {d && d.omittedBlockerCount > 0 && (
+      {delivers && d && d.omittedBlockerCount > 0 && (
         <p>
           {d.omittedBlockerCount} retained delivery blockers omitted; blocker
           coverage is partial.
         </p>
       )}
-      {d?.blockers.map((b) => (
-        <p key={b}>{b}</p>
-      ))}
-      <Button
-        variant="secondary"
-        data-unconfirmed-control="delivery.refresh"
-        onClick={refresh}
-        disabled={refreshDisabled}
-      >
-        Refresh delivery status
-      </Button>
+      {delivers && d?.blockers.map((b) => <p key={b}>{b}</p>)}
+      {delivers && (
+        <Button
+          variant="secondary"
+          data-unconfirmed-control="delivery.refresh"
+          onClick={refresh}
+          disabled={refreshDisabled}
+        >
+          Refresh delivery status
+        </Button>
+      )}
       {unconfirmed}
-      <p>
-        Refresh reads provider state; it does not post, approve, merge or clear
-        a hold.
-      </p>
-      {d && d.omittedActionCount > 0 && (
+      {delivers && (
+        <p>
+          Refresh reads provider state; it does not post, approve, merge or
+          clear a hold.
+        </p>
+      )}
+      {delivers && d && d.omittedActionCount > 0 && (
         <p>
           {d.omittedActionCount} earlier retained delivery actions omitted;
           action history is partial.
         </p>
       )}
-      {d?.actions.map((a) => (
-        <p key={a.operationId}>
-          {a.kind}: {a.state} · {a.reason ?? "receipt recorded"} · operation{" "}
-          {a.operationId}
-        </p>
-      ))}
+      {delivers &&
+        d?.actions.map((a) => (
+          <p key={a.operationId}>
+            {a.kind}: {a.state} · {a.reason ?? "receipt recorded"} · operation{" "}
+            {a.operationId}
+          </p>
+        ))}
     </section>
   );
 }

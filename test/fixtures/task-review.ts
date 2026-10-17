@@ -5,6 +5,138 @@ import { ExecutionState } from "../../src/standalone/state.js";
 import type { ReviewMetadata } from "../../src/core/task-review.js";
 import type { TaskWorkspaceRepositoryInput } from "../../src/standalone/workspaces.js";
 import type { createOperatorFixture } from "./operator-web.js";
+/** Links (or unlinks) one GitHub repository on the project without running repository verification. */
+export function setLinkedRepository(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  projectId: string,
+  linked: boolean,
+) {
+  f.seedPersistedState((db) =>
+    db
+      .prepare(
+        "UPDATE project_github_sources SET version=version+1, repositories=? WHERE projectId=?",
+      )
+      .run(
+        JSON.stringify(
+          linked
+            ? [
+                {
+                  repositoryId: "R-LINKED",
+                  path: "/fixture/linked",
+                  ref: "main",
+                  gitCommonDirectory: "/fixture/linked/.git",
+                },
+              ]
+            : [],
+        ),
+        projectId,
+      ),
+  );
+}
+/** An imported GitHub task with a lead, and an `issue.comment` grant that `setGrant` can change. */
+export async function seedImportedCommentTask(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  mode: "allow" | "approval" | null,
+) {
+  const profileId = randomUUID(),
+    projectId = randomUUID(),
+    d = f.service.domain(),
+    title = "Imported comment task";
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId,
+    name: "Task lead",
+    instructions: "Coordinate",
+    capabilities: "review",
+  });
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "Comment project",
+    leadProfileId: profileId,
+  });
+  d.execute({
+    type: "github.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: 1,
+    credentialRef: null,
+    selections: [
+      {
+        id: "repo",
+        kind: "repository",
+        repositoryId: "R-COMMENT",
+        owner: "fixture",
+        name: "source",
+      },
+    ],
+    readiness: { mode: "all", conditions: [{ kind: "label", name: "ready" }] },
+    repositories: [],
+  });
+  d.execute({
+    type: "github.activate",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    selectionId: "repo",
+    expectedVersion: 2,
+  });
+  f.service.githubSources().reconcileSelection(projectId, "repo", {
+    complete: true,
+    reason: null,
+    issues: [
+      {
+        providerInstance: "github.com",
+        nodeId: "I-COMMENT",
+        repositoryId: "R-COMMENT",
+        repositoryName: "fixture/source",
+        number: 7,
+        title,
+        body: "Supplied GitHub brief",
+        state: "open",
+        labels: ["ready"],
+        projectFields: [],
+      },
+    ],
+  });
+  f.service.githubSources().reconcileBlockers("I-COMMENT", {
+    complete: true,
+    blockers: [],
+    reason: null,
+  });
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    expectedVersion: Number(d.project(projectId).version),
+    paused: false,
+  });
+  const taskId = String(d.tasks(projectId).find((t) => t.title === title)?.id);
+  d.ensureLeadAssignment(taskId);
+  await f.service.provisionTask(taskId);
+  const setGrant = (next: "allow" | "approval" | null) =>
+    d.execute({
+      type: "delivery.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      expectedVersion: f.service.delivery().configuration(projectId).version,
+      mode: "reviewable-pr",
+      credentialRef: null,
+      grants: next
+        ? [{ action: "issue.comment", repositoryId: "R-COMMENT", mode: next }]
+        : [],
+      requiredChecks: [],
+    });
+  setGrant(mode);
+  return { projectId, taskId, setGrant };
+}
 export async function seedReviewTask(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
   name = "Review project",

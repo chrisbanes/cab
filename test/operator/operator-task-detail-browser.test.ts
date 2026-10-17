@@ -12,7 +12,16 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { guideForm } from "../fixtures/question-data.js";
 import { seedOwnApproval, seedOwnQuestion } from "../fixtures/questions.js";
 import { seedCatalog } from "../fixtures/operator-work.js";
-import { seedReviewTask } from "../fixtures/task-review.js";
+import {
+  seedImportedCommentTask,
+  seedReviewTask,
+  setLinkedRepository,
+} from "../fixtures/task-review.js";
+import {
+  leadReceivesNotice,
+  leadResumeNotice,
+  leadUnavailableNotice,
+} from "../../web/src/lead-feedback.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("ui-task-detail");
@@ -2191,4 +2200,243 @@ test("The decision card and inspector list only the other open approvals as hold
   assert.equal(await aside.getByText("Approval pending").count(), 2);
   assert.equal(await page.getByText(approvalHold).count(), 0);
   assert.equal(await card.getByText(waitLabel).count(), 0);
+});
+
+const refreshTask = async (page: Page, taskId: string) => {
+  const reread = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === `/api/operator/tasks/${taskId}`,
+  );
+  await page.getByRole("button", { name: "Refresh task", exact: true }).click();
+  await reread;
+};
+/** The text of every paragraph between the destination buttons and the reply label. */
+const sentencesAboveReply = (page: Page) =>
+  page.evaluate(() => {
+    const card = document.querySelector("#reply")!;
+    const out: string[] = [];
+    for (
+      let node = card.querySelector(".task-actions")!.nextElementSibling;
+      node && node.tagName !== "LABEL";
+      node = node.nextElementSibling
+    )
+      out.push(`${node.tagName}:${node.textContent}`);
+    return out;
+  });
+
+test("A local task without a repository shows no GitHub reply or delivery lines", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "Local task",
+    "Write the guide.",
+  );
+  a.result("Guide drafted");
+  const { web, page, commands } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page
+    .getByRole("heading", { name: "Latest result", level: 3 })
+    .waitFor();
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  const delivery = inspector.locator("dt", { hasText: /^Delivery$/ });
+  const github = page.getByRole("button", { name: "Post GitHub comment" });
+  const refreshDelivery = page.getByRole("button", {
+    name: "Refresh delivery status",
+  });
+  assert.equal(await github.count(), 0);
+  assert.equal(await delivery.count(), 0);
+  await openTaskTab(page, "Changes");
+  assert.equal(await refreshDelivery.count(), 0);
+  assert.equal(await page.locator("#changes h3").innerText(), "Changes");
+
+  // The project gains a repository while the page is open: Refresh shows delivery, keeps the draft.
+  await openTaskTab(page, "Overview");
+  await page.getByLabel("Editable reply").fill("Keep this draft");
+  setLinkedRepository(fixture.f, a.projectId, true);
+  await refreshTask(page, a.taskId);
+  await delivery.waitFor();
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Keep this draft",
+  );
+  assert.equal(await github.count(), 0);
+  await openTaskTab(page, "Changes");
+  await refreshDelivery.waitFor();
+  assert.equal(
+    await page.locator("#changes h3").innerText(),
+    "Changes and delivery",
+  );
+
+  // A local task's Send is a lead message, never a comment.
+  await openTaskTab(page, "Overview");
+  await page.getByRole("button", { name: "Send to task lead" }).click();
+  await page.getByText("Sent.", { exact: false }).first().waitFor();
+  assert.deepEqual(
+    commands.map((c) => {
+      const command = c as Record<string, unknown>;
+      return [command.type, command.message, command.recipientAssignmentId];
+    }),
+    [["message", "Keep this draft", a.assignmentId]],
+  );
+});
+
+test("The reply box has one sentence above it", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "Local task",
+    "Write the guide.",
+  );
+  a.result("Guide drafted");
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page.getByLabel("Editable reply").waitFor();
+  // The lead completed its assignment, so a message resumes it.
+  const resumes = leadResumeNotice("Task lead");
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
+  assert.doesNotMatch(
+    await page.locator("body").innerText(),
+    /Local Ensemble inbox|Sending does not bypass/,
+  );
+
+  // The immutable reference sits below the box; one sentence still sits above.
+  await page.getByRole("button", { name: "Ask lead about result" }).click();
+  const reference = page.getByText(/^Immutable reference:/);
+  await reference.waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${resumes}`]);
+  assert.equal(
+    await page
+      .getByLabel("Editable reply")
+      .evaluate((box) =>
+        Boolean(
+          box.compareDocumentPosition(
+            [...document.querySelectorAll("#reply p")].find((p) =>
+              p.textContent?.startsWith("Immutable reference:"),
+            )!,
+          ) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ),
+    true,
+  );
+
+  // The server's other modes each replace that one sentence and keep the draft.
+  await page.getByLabel("Editable reply").fill("Keep this draft");
+  let mode: "receives" | "unavailable" = "receives";
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.leadFeedback = { mode, awaitingRecoveryMessage: false };
+      await route.fulfill({ response, json });
+    },
+  );
+  await refreshTask(page, a.taskId);
+  await page
+    .getByText(leadReceivesNotice("Task lead"), { exact: true })
+    .waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [
+    `P:${leadReceivesNotice("Task lead")}`,
+  ]);
+  mode = "unavailable";
+  await refreshTask(page, a.taskId);
+  await page
+    .getByText(leadUnavailableNotice("Task lead"), { exact: true })
+    .waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [
+    `P:${leadUnavailableNotice("Task lead")}`,
+  ]);
+  assert.equal(
+    await page.getByRole("button", { name: "Send to task lead" }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Keep this draft",
+  );
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+test("A project without a lead says so above the reply box", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const d = fixture.f.service.domain(),
+    projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    name: "Fieldnotes",
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "task.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId,
+    taskId,
+    title: "Leadless task",
+    outcome: "Write the field notes guide.",
+    ready: false,
+  });
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  await page.getByLabel("Editable reply").waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [
+    "P:This project has no lead to message yet.",
+  ]);
+  assert.equal(
+    await page.getByRole("button", { name: "Post GitHub comment" }).count(),
+    0,
+  );
+});
+
+test("The GitHub reply says what posting does in one sentence and keeps its draft when the policy changes", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, "approval");
+  const { web, page, commands } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  await page.getByLabel("Editable reply").fill("Exact comment body");
+  assert.deepEqual(await sentencesAboveReply(page), [
+    "P:You review the exact comment before it posts to the GitHub issue.",
+  ]);
+
+  a.setGrant("allow");
+  await refreshTask(page, a.taskId);
+  await page
+    .getByText("Posts a comment on the GitHub issue.", { exact: true })
+    .waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [
+    "P:Posts a comment on the GitHub issue.",
+  ]);
+
+  // The grant goes away after GitHub was selected: the reason replaces the sentence.
+  a.setGrant(null);
+  await refreshTask(page, a.taskId);
+  await page
+    .getByText("No project grant for issue comments.", { exact: true })
+    .waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [
+    "P:No project grant for issue comments.",
+  ]);
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post GitHub comment" })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  assert.deepEqual(commands, []);
 });

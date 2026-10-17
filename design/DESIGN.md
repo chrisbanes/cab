@@ -2029,13 +2029,24 @@ as follows:
   execution"; then for every task Holds (each open request and each hold title,
   counted; the other open approvals when one is selected, none when no
   approval is selected), Dependencies (local dependencies as links, or "None"), Execution
-  (state, running assignments, the lead's runtime, delivery mode and bound pull
-  request) and Results & artifacts (each recorded result, newest first, opening
+  (state, running assignments, the lead's runtime and, only for a task with a
+  GitHub source, a linked repository or a bound pull request, the delivery mode
+  and bound pull request) and Results & artifacts (each recorded result, newest first, opening
   it in the latest-result card, and the bound pull request). The per-selection
   sync lines and dependency blocks have left the brief. There is no GitHub
   Project status (memberships carry node ids only), "Unblocks" list, "Last turn"
   time, workspace path or per-task artifact list; artifacts stay in the latest
   result's evidence. The inspector is Overview's alone.
+- The reply offers "Message task lead" for every task and "Post GitHub comment"
+  only for an imported task; the Changes tab's delivery block (heading "Changes and
+  delivery", bound pull request, checks, feedback, blockers, actions and "Refresh
+  delivery status") shows only for a task with a GitHub source, a linked project
+  repository (`repositoryLinked` on the task read) or a bound pull request, and the
+  heading is "Changes" otherwise. Exactly one sentence sits above the reply box,
+  for the selected destination: the lead's resume, receive or unavailable line, "This
+  project has no lead to message yet.", or the comment policy (a reason from the
+  server, or what posting does). The "Immutable reference" line sits below the box.
+  A task without a GitHub source always sends a lead message.
 - Stop task submits the retained `/runtime/control/stop` form and lands on the
   Execution page, where the Stop observation and Resume live. Unsent reply text on
   the task page is not carried across that navigation; Keep running, Escape and

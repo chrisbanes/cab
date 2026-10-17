@@ -3361,6 +3361,9 @@ export class OperatorApi {
       review: await this.reviewProjection(taskId, excluded, selection),
       delivery: this.deliveryProjection(taskId, excluded),
       commentPolicy: this.commentPolicy(taskId),
+      repositoryLinked:
+        this.domain().githubConfiguration(String(t.projectId)).repositories
+          .length > 0,
       contentUnavailable:
         excluded === undefined ||
         [

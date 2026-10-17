@@ -216,6 +216,14 @@ const deliveryModes = {
   "through-merge": "Through merge",
 } as const;
 
+/**
+ * Delivery belongs to a task with a GitHub source, a linked repository or a bound pull request.
+ * A read without `repositoryLinked` counts as unlinked, so these controls need proof to appear.
+ */
+export const deliveryApplies = (
+  data: Pick<Data, "source" | "repositoryLinked" | "delivery">,
+) => Boolean(data.source || data.repositoryLinked || data.delivery?.binding);
+
 /** The inspector's execution facts: running assignments, lead runtime and delivery. */
 export function executionFacts(
   data: Pick<Data, "assignments" | "leadAssignmentId" | "delivery">,
