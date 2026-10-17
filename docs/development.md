@@ -153,9 +153,13 @@ or run `node dist/src/cli/main.js` directly.
    credentials**. Choose read-only or read/write and a lifetime of 7–90 days. The
    token is shown once; rotate to issue a replacement, then revoke the old one.
    Revocation is irreversible.
-2. `ensemble auth login --connection home --url ORIGIN` prompts for the token with
-   masked input and stores it in the macOS Keychain (service `ensemble-cli`, account
-   = connection name). For unattended callers, pass `--token-file PATH` instead: a
+2. `ensemble auth login --url ORIGIN` stores connection `local` (the name `service
+   install` uses) unless `--connection NAME` or `ENSEMBLE_CONNECTION` names another.
+   A name nobody chose refuses to re-point an existing `local` at a different origin
+   (exit 2, nothing changed); pass `--connection NAME` to log in to a second service,
+   or `--connection local` to replace it. It says where the token comes from, then
+   prompts for it with masked input and stores it in the macOS Keychain (service
+   `ensemble-cli`, account = connection name). For unattended callers, pass `--token-file PATH` instead: a
    regular, non-symlink file owned by you with mode `0600` or stricter, holding one
    token. The file is referenced, never copied. There is no literal-token flag and no
    plaintext fallback; without the Keychain or a token file, login fails with

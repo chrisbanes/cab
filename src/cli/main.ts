@@ -77,10 +77,19 @@ export const EXIT: Record<string, [number, string]> = {
   "unsupported-service": [7, "unsupported"],
 };
 
+/** Login copy and defaults, kept together so the help layout can move them. */
+const AUTH_LOGIN_USAGE =
+  "auth login --url ORIGIN [--connection NAME] [--token-file PATH]";
+const DEFAULT_CONNECTION = "local";
+/** The loopback origin `service install` serves on by default. */
+const DEFAULT_ORIGIN = "http://127.0.0.1:8787";
+const tokenSource = (origin: string) =>
+  `Create a token in Settings → CLI credentials in the web UI, then run: ensemble auth login --url ${origin}`;
+
 const USAGE = `Usage: ensemble <command> [options]
 
 Commands:
-  auth login --connection NAME --url ORIGIN [--token-file PATH]
+  ${AUTH_LOGIN_USAGE}
   auth status [--connection NAME]
   auth logout [--connection NAME]
   connection list
@@ -710,14 +719,31 @@ async function login(
   values: Values,
   deps: CliDeps,
 ): Promise<Result> {
-  const nameResult = connectionNameSchema.safeParse(values.connection);
-  if (!nameResult.success || !values.url)
+  const requested =
+    values.connection ?? (deps.env.ENSEMBLE_CONNECTION || undefined);
+  const nameResult = connectionNameSchema.safeParse(
+    requested ?? DEFAULT_CONNECTION,
+  );
+  if (!nameResult.success)
     throw new CliError(
       "usage",
-      "auth login requires --connection NAME (letters, digits, . _ -) and --url ORIGIN.",
+      "A connection name uses letters, digits, . _ - and starts with a letter or digit.",
     );
+  if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
   const origin = connectionOrigin(values.url);
+  // A name nobody chose must not quietly re-point a connection that exists.
+  if (requested === undefined) {
+    const existing = (await config.read()).connections[name];
+    if (existing && existing.url !== origin)
+      throw new CliError(
+        "usage",
+        `Connection ${name} already points at ${existing.url}.`,
+        {
+          fix: `Pass --connection NAME to log in to ${origin}, or --connection ${name} to replace it.`,
+        },
+      );
+  }
   const tokenFile = values["token-file"] && resolve(values["token-file"]);
   if (!tokenFile && deps.platform !== "darwin")
     throw new CliError(
@@ -726,11 +752,12 @@ async function login(
     );
   let token: string;
   if (tokenFile) token = await readTokenFile(tokenFile);
-  else if (deps.stdin.isTTY && deps.stderr.isTTY)
+  else if (deps.stdin.isTTY && deps.stderr.isTTY) {
+    deps.stderr.write(`${tokenSource(origin)}\n`);
     token = (
       await readHiddenPassword(deps.stdin, deps.stderr, "Ensemble CLI token: ")
     ).trim();
-  else
+  } else
     throw new CliError(
       "usage",
       "Enter the token in an interactive terminal, or pass --token-file PATH.",

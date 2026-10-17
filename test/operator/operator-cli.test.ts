@@ -193,6 +193,201 @@ test("expired, revoked and malformed credentials fail safely", async (t) => {
       assert.ok(!text.includes(token));
 });
 
+test("auth login defaults to the local connection and says where the token comes from", async (t) => {
+  const s = await startCliService(t);
+  const other = await startCliService(t);
+  const h = harness(t);
+  const configFile = join(h.configDir, "connections.json");
+  const sentence = (origin: string) =>
+    `Create a token in Settings → CLI credentials in the web UI, then run: ensemble auth login --url ${origin}`;
+  // Tokens are issued per service.
+  const first = { origin: s.origin, token: (await s.issue("read", "a")).token };
+  const second = {
+    origin: other.origin,
+    token: (await other.issue("read", "b")).token,
+  };
+  const loginFile = (
+    service: { origin: string; token: string },
+    ...extra: string[]
+  ) =>
+    h.run([
+      "auth",
+      "login",
+      "--url",
+      service.origin,
+      "--token-file",
+      h.tokenFile(service.token),
+      ...extra,
+    ]);
+
+  // 1. No --connection: the name is local, and every command finds it.
+  let r = await loginFile(first, "--output", "json");
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json().connection, "local");
+  const saved = JSON.parse(readFileSync(configFile, "utf8"));
+  assert.deepEqual(Object.keys(saved.connections), ["local"]);
+  assert.equal(saved.connections.local.url, s.origin);
+  r = await h.run(["task", "get", s.taskId]);
+  assert.equal(r.code, 0, r.err);
+
+  // 5. Logging in again to the same origin replaces it; one connection remains.
+  r = await loginFile(first);
+  assert.equal(r.code, 0, r.err);
+  assert.deepEqual(
+    Object.keys(JSON.parse(readFileSync(configFile, "utf8")).connections),
+    ["local"],
+  );
+  assert.equal((await h.run(["task", "get", s.taskId])).code, 0);
+
+  // 4. A defaulted name never re-points local at another origin: nothing is
+  // prompted, fetched, written or stored.
+  const before = readFileSync(configFile, "utf8");
+  const keychainBefore = [...h.keychain.items];
+  const fetchesBefore = h.fetches.length;
+  const prompts = new PassThrough();
+  let prompted = "";
+  prompts.on("data", (c) => {
+    prompted += c;
+  });
+  const ttyIn = Object.assign(new PassThrough(), {
+    isTTY: true,
+    isRaw: false,
+  }) as unknown as NodeJS.ReadStream;
+  const ttyOut = Object.assign(prompts, {
+    isTTY: true,
+  }) as unknown as NodeJS.WriteStream;
+  for (const extra of [
+    { stdin: ttyIn, stderr: ttyOut },
+    {},
+  ] as Partial<CliDeps>[]) {
+    r = await h.run(
+      [
+        "auth",
+        "login",
+        "--url",
+        other.origin,
+        "--token-file",
+        h.tokenFile(second.token),
+      ],
+      extra,
+    );
+    assert.equal(r.code, 2);
+    assert.match(r.err, /Connection local already points at /);
+    assert.match(r.err, /\(usage\)/);
+    assert.equal(fixLines(r.err).length, 1);
+    assert.match(fixLines(r.err)[0] ?? "", /--connection NAME/);
+  }
+  assert.ok(!prompted.includes("Ensemble CLI token"), prompted);
+  assert.equal(readFileSync(configFile, "utf8"), before);
+  assert.deepEqual([...h.keychain.items], keychainBefore);
+  assert.equal(h.fetches.length, fetchesBefore);
+  // An explicit --connection still replaces it, and a named one is added.
+  r = await loginFile(second, "--connection", "local");
+  assert.equal(r.code, 0, r.err);
+  assert.equal(
+    JSON.parse(readFileSync(configFile, "utf8")).connections.local.url,
+    other.origin,
+  );
+  r = await loginFile(first, "--connection", "work");
+  assert.equal(r.code, 0, r.err);
+
+  // 6. ENSEMBLE_CONNECTION names the connection, an empty value is unset, and a
+  // bad name is a usage error that changes nothing.
+  const e = harness(t);
+  r = await e.run(
+    [
+      "auth",
+      "login",
+      "--url",
+      s.origin,
+      "--token-file",
+      e.tokenFile(first.token),
+      "--output",
+      "json",
+    ],
+    {
+      env: {
+        ENSEMBLE_CLI_CONFIG_DIR: e.configDir,
+        ENSEMBLE_CONNECTION: "env-name",
+      },
+    },
+  );
+  assert.equal(r.json().connection, "env-name");
+  r = await e.run(
+    [
+      "auth",
+      "login",
+      "--url",
+      s.origin,
+      "--token-file",
+      e.tokenFile(first.token),
+      "--output",
+      "json",
+    ],
+    { env: { ENSEMBLE_CLI_CONFIG_DIR: e.configDir, ENSEMBLE_CONNECTION: "" } },
+  );
+  assert.equal(r.json().connection, "local");
+  const bad = harness(t);
+  for (const name of ["bad name", "", ".dot", "x".repeat(65)]) {
+    r = await bad.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      bad.tokenFile(first.token),
+    ]);
+    assert.equal(r.code, 2, name);
+    assert.match(r.err, /\(usage\)/);
+  }
+  assert.deepEqual(readdirSyncSafe(bad.configDir), []);
+  assert.deepEqual(bad.fetches, []);
+
+  // 2. A missing --url is a usage error with the acceptance sentence and no side effects.
+  const none = harness(t);
+  for (const extra of [[], ["--connection", "home"]]) {
+    r = await none.run(["auth", "login", ...extra]);
+    assert.equal(r.code, 2);
+    assert.match(r.err, /\(usage\)/);
+    assert.ok(r.err.includes(sentence("http://127.0.0.1:8787")), r.err);
+    assert.equal(fixLines(r.err).length, 1);
+    r = await none.run(["auth", "login", ...extra, "--output", "json"]);
+    assert.equal(r.json().error.code, "usage");
+    assert.equal(r.json().error.message, sentence("http://127.0.0.1:8787"));
+  }
+  assert.deepEqual(none.fetches, []);
+  assert.deepEqual(readdirSyncSafe(none.configDir), []);
+
+  // 3. The prompt names the given origin, then asks for the token.
+  const memory = new MemoryKeychain();
+  const p = harness(t, { keychain: () => memory });
+  const stdin = Object.assign(new PassThrough(), {
+    isTTY: true,
+    isRaw: false,
+    setRawMode() {
+      return stdin;
+    },
+  }) as unknown as NodeJS.ReadStream;
+  setImmediate(() =>
+    (stdin as unknown as PassThrough).write(`${first.token}\r`),
+  );
+  r = await p.run(["auth", "login", "--url", s.origin], {
+    stdin,
+    stderr: Object.assign(new PassThrough(), {
+      isTTY: true,
+    }) as unknown as NodeJS.WriteStream,
+  });
+  assert.equal(r.code, 0, r.err);
+  assert.ok(
+    r.err.startsWith(`${sentence(s.origin)}\nEnsemble CLI token: `),
+    r.err,
+  );
+  assert.equal(memory.items.get("local"), first.token);
+  assert.ok(!r.out.includes(first.token) && !r.err.includes(first.token));
+});
+
 test("Keychain store failures save nothing and never fall back to plaintext", async (t) => {
   const s = await startCliService(t);
   const token = (await s.issue("read")).token;
