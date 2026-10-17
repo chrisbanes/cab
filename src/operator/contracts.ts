@@ -2514,6 +2514,41 @@ export const projectConfigurationSchema = envelope(
     })
     .strict(),
 );
+/**
+ * Exact private text for one project, readable only by a signed-in web session.
+ * Never reuse these schemas in a configuration read, list or CLI output.
+ */
+export const projectPrivateValuesSchema = envelope(
+  z
+    .object({
+      project: z
+        .object({
+          version: revision,
+          instructionsRevision: revision,
+          instructions: text,
+        })
+        .strict(),
+      routing: z.object({ version: revision, guidance: text }).strict(),
+      source: z
+        .object({
+          version: revision,
+          searches: z.array(z.object({ id: text, query: text }).strict()),
+          repositories: z.array(
+            z.object({ repositoryId: text, path: text }).strict(),
+          ),
+        })
+        .strict(),
+    })
+    .strict(),
+);
+/** Exact private instructions of one profile, readable only by a signed-in web session. */
+export const profilePrivateValuesSchema = envelope(
+  z
+    .object({
+      profile: z.object({ version: revision, instructions: text }).strict(),
+    })
+    .strict(),
+);
 export const questionReadSchema = z
   .object({
     data: z
