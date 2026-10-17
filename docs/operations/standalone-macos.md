@@ -289,7 +289,11 @@ keeps the service process Ensemble last saw. `service install --mode daemon`
 re-runs, and `service uninstall` while the job is loaded, read it with
 `launchctl print` and store its pid, start time and boot session in the record
 (`observedProcess`; `null` for a loaded job with no process, `"unknown"` when its
-identity could not be read). Nothing is ever signalled. When the job and the plist are
+identity could not be read). Nothing is ever signalled. The confirmation covers only
+the main service process last observed, not its descendants, so run the printed
+commands right after the `uninstall` that printed them; if the host rebooted or the
+job restarted in between, run `service uninstall` again first so that it observes
+the running process. When the job and the plist are
 gone, uninstall clears the record only once that process is confirmed gone: its pid is
 absent, belongs to a process with another start time, or predates this boot, and
 `127.0.0.1:PORT` is free. Then it removes the staged plist and the record and exits 0

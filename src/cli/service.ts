@@ -1805,7 +1805,7 @@ async function uninstallDaemon(
     rmSync(service.recordPath, { force: true });
   } else {
     service.io.stderr.write(
-      `Run these commands, then run \`ensemble service uninstall\` again to finish:\n${steps.join("\n")}\n`,
+      `Run these commands now, then run \`ensemble service uninstall\` again to finish (after a reboot or restart of the job, run \`ensemble service uninstall\` again first):\n${steps.join("\n")}\n`,
     );
   }
   service.write("stdout", {
