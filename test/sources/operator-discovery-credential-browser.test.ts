@@ -518,3 +518,89 @@ test("Readiness reconciles an unknown GitHub CLI login outcome", async (_t, jour
   assert.equal(new Set(posts.map((p) => p.key)).size, 1);
   assert.equal(await row.getByRole("button").count(), 0);
 });
+
+test("Readiness keeps the fix line when the discovery read fails", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = readinessRow(page);
+  await offerButton(page).waitFor();
+  await page.route("**/api/operator/discovery", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+    }),
+  );
+  await page.getByRole("button", { name: "Run again" }).click();
+  await row.locator(".identifier").waitFor();
+  assert.equal(await row.locator(".identifier").innerText(), fixLine);
+  assert.equal(await row.getByRole("button").count(), 0);
+});
+
+test("Readiness finishes an offer sent before the page was left and re-entered", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { f, page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = readinessRow(page);
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await offerButton(page).click();
+  // The page is left and re-entered while the save is still in flight.
+  await page.getByRole("link", { name: "Tasks", exact: true }).click();
+  await page.waitForURL("**/app/tasks");
+  await page.goBack();
+  await row.waitFor();
+  release();
+  await row.getByText("Pass", { exact: true }).waitFor();
+  await credentialRow(page)
+    .getByText("GitHub CLI · @octo · read-only use")
+    .waitFor();
+  assert.equal(
+    f.service.domain().discoveryCredentialReference(),
+    "gh:github.com",
+  );
+});
+
+test("Readiness leaves focus alone when the reader moved on before the offer finished", async (_t, journey) => {
+  const gh = createFakeGh();
+  journey.cleanup(async () => gh.close(), "fake-gh.close");
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    path: "/app/settings",
+    ghExecutable: gh.executable,
+  });
+  const row = readinessRow(page);
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/api/operator/commands", async (route) => {
+    await held;
+    await route.continue();
+  });
+  await offerButton(page).focus();
+  await page.keyboard.press("Enter");
+  // The reader tabs on to another control while the save is pending.
+  await page.getByRole("link", { name: "Create project" }).focus();
+  release();
+  await row.getByText("Pass", { exact: true }).waitFor();
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Create project",
+  );
+});

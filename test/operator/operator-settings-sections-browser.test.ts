@@ -286,6 +286,11 @@ test("a first-run flip while Settings is open reorders the sections and keeps fo
     await page.evaluate(() => document.activeElement?.textContent),
     "Run again",
   );
+  // The focused control moved with its section; the page follows it into view.
+  await page.waitForFunction(() => {
+    const box = document.activeElement?.getBoundingClientRect();
+    return Boolean(box && box.top >= 0 && box.bottom <= innerHeight);
+  });
 });
 
 test("an established install keeps Readiness last with the first section current", async (_t, journey) => {
@@ -328,6 +333,50 @@ test("Settings section navigation is reachable by keyboard in order", async (_t,
   );
   await page.keyboard.press("Enter");
   onScreen(await landed(page, "H2", "Readiness"));
+});
+
+test("a check anchor marks Readiness current and a hash-only change lands with focus", async (_t, journey) => {
+  const { page, web } = await startSettings(journey, "/app/settings");
+  await coldGoto(page, `${web.origin}/app/settings#readiness-codex-login`);
+  onScreen(await landed(page, "H3", "Codex login"));
+  assert.deepEqual(await current(page), ["Readiness"]);
+  // Typing a new fragment into the address bar is a hash-only navigation.
+  await page.goto(`${web.origin}/app/settings#profiles`);
+  onScreen(await landed(page, "H2", "Profiles"));
+  assert.deepEqual(await current(page), ["Profiles"]);
+});
+
+test("Back to a route with a fragment and no saved position still scrolls to the top", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/tasks");
+  await page.locator("main.page h1").waitFor();
+  // An entry the shell never left, on a route that does not land on fragments.
+  await page.evaluate(() => {
+    const { scrollY, ...state } = history.state;
+    history.pushState(state, "", "/app/tasks#elsewhere");
+    history.back();
+  });
+  await page.waitForURL(/\/app\/tasks$/);
+  await nextFrames(page);
+  await page.evaluate(() => {
+    const calls: unknown[][] = [];
+    const scrollTo = window.scrollTo.bind(window) as (...a: unknown[]) => void;
+    Object.assign(window, {
+      scrollCalls: calls,
+      scrollTo: (...a: unknown[]) => {
+        calls.push(a);
+        scrollTo(...a);
+      },
+    });
+    history.forward();
+  });
+  await page.waitForURL(/#elsewhere$/);
+  await nextFrames(page);
+  assert.deepEqual(
+    await page.evaluate(
+      () => (window as unknown as { scrollCalls: unknown[] }).scrollCalls,
+    ),
+    [[0, 0]],
+  );
 });
 
 for (const fragment of ["bogus", "readiness-unknown"])

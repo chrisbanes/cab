@@ -181,6 +181,16 @@ export function SettingsWorkspace(
     ...p,
     refreshNonce: (p.refreshNonce ?? 0) + discoveryNonce,
   };
+  // A reorder can carry the focused control far from where the reader is looking.
+  const orderKey = order.join();
+  const shownOrder = useRef(orderKey);
+  useEffect(() => {
+    if (shownOrder.current === orderKey) return;
+    shownOrder.current = orderKey;
+    const active = document.activeElement;
+    if (active && document.querySelector(".settings-index")?.contains(active))
+      active.scrollIntoView({ block: "nearest" });
+  }, [orderKey]);
   if (!p.workspaceSettled)
     return (
       <div className="settings-page">

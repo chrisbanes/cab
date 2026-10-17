@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { readinessCheckIds } from "../../src/operator/readiness.js";
 
 /** The Settings index sections, in the designed order (frame 114), with their stable fragments. */
 export const SETTINGS_SECTIONS = [
@@ -42,9 +43,17 @@ function fragmentId() {
   }
 }
 
-/** The section the fragment names, or null (an unknown fragment names none). */
+/**
+ * The section the fragment names, or null (an unknown fragment names none). A check's own
+ * anchor (`#readiness-<check id>`) names the Readiness section it sits in.
+ */
 export function fragmentSection(): SettingsSectionId | null {
   const id = fragmentId();
+  if (
+    id?.startsWith("readiness-") &&
+    readinessCheckIds.some((c) => `readiness-${c}` === id)
+  )
+    return "readiness";
   return SETTINGS_SECTIONS.find((s) => s.id === id)?.id ?? null;
 }
 
@@ -69,10 +78,17 @@ function land(target: HTMLElement) {
       target.scrollIntoView();
   });
   settle.observe(document.body);
+  // Chromium clears focus after a browser-made hash change lands, so give it back.
+  const refocus = () => {
+    if (document.activeElement === document.body)
+      heading?.focus({ preventScroll: true });
+  };
+  addEventListener("hashchange", refocus);
   const events = ["wheel", "touchstart", "pointerdown", "keydown", "pagehide"];
   const stop = () => {
     clearTimeout(timer);
     settle.disconnect();
+    removeEventListener("hashchange", refocus);
     for (const e of events) removeEventListener(e, stop);
   };
   const timer = setTimeout(stop, SETTLE_MS);

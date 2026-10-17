@@ -76,17 +76,29 @@ export function ReadinessPanel(
         : null
       : null;
   const heading = useRef<HTMLHeadingElement>(null);
-  // The offer leaves once Readiness re-reads, so a keyboard user's focus moves first.
-  const settle = (hadFocus: boolean) => {
-    if (d.phase !== "recorded") return;
-    p.onDiscoveryChange();
-    if (hadFocus && heading.current) {
-      heading.current.tabIndex = -1;
-      heading.current.focus({ preventScroll: true });
+  // A recorded offer is announced once from the draft, so it re-reads the page's views
+  // whichever instance sent it (this one may have mounted while the save was pending).
+  // Focus moves to the check only if it was still on the offer, or nowhere: the offer leaves
+  // once Readiness re-reads.
+  const announced = useRef<number | null>(null);
+  const { onDiscoveryChange } = p;
+  useEffect(() => {
+    if (d.phase !== "recorded" || d.savedAt === null) return;
+    if (announced.current === d.savedAt) return;
+    announced.current = d.savedAt;
+    onDiscoveryChange();
+    const h = heading.current,
+      active = document.activeElement;
+    if (
+      h &&
+      (active === document.body || h.closest("article")?.contains(active))
+    ) {
+      h.tabIndex = -1;
+      h.focus({ preventScroll: true });
     }
-  };
-  const offer = async (hadFocus: boolean) => {
-    await d.submit(
+  }, [d, d.phase, d.savedAt, onDiscoveryChange]);
+  const offer = () =>
+    d.submit(
       p.client,
       {
         type: "discovery.configure",
@@ -95,8 +107,6 @@ export function ReadinessPanel(
       },
       p.session.csrfToken,
     );
-    settle(hadFocus);
-  };
   return (
     <Panel
       id="readiness"
@@ -148,10 +158,9 @@ export function ReadinessPanel(
                 // Stays in place while saving so focus is not dropped; the pending
                 // save and a recorded one are not sent twice.
                 aria-disabled={d.phase === "pending" || d.phase === "recorded"}
-                onClick={(e) =>
-                  d.phase === "recorded"
-                    ? undefined
-                    : void offer(document.activeElement === e.currentTarget)
+                className="aria-disabled:opacity-50"
+                onClick={() =>
+                  d.phase === "recorded" ? undefined : void offer()
                 }
               >
                 {d.phase === "pending"
@@ -165,10 +174,7 @@ export function ReadinessPanel(
               <DraftMessage
                 draft={d}
                 success={null}
-                check={async () => {
-                  await d.reconcile(p.client, p.session.csrfToken);
-                  settle(false);
-                }}
+                check={() => d.reconcile(p.client, p.session.csrfToken)}
               />
             )}
           </article>

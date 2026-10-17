@@ -1663,7 +1663,7 @@ Presentation and interaction rules that the canvas does not show on its own.
   each jump adds one history entry, scrolls to the section and focuses its heading.
   Back and Forward to an entry with a saved position restore it instead; a reload keeps the
   fragment. An unknown fragment does nothing, and the current section follows the
-  fragment (the first section when none). Readiness checks have their own
+  fragment (the first section when none; a check anchor marks Readiness). Readiness checks have their own
   anchors (`#readiness-claude-executable`) and the Runtime page has
   `/app/settings/runtime#add-claude`; Home checklist Settings actions use them.
 - On settings pages no primary navigation item is selected. Project configuration
