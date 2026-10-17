@@ -16,7 +16,6 @@ import {
   noPageOverflow,
   outcomeMessages,
   phone,
-  reloadAfterSetupHome,
   savedOutcome,
   startSettings,
 } from "../fixtures/operator-settings.js";
@@ -209,7 +208,6 @@ test("the Settings overview Claude row is not prefilled and refuses ~", async (t
     undefined,
     { setup: { home } },
   );
-  await reloadAfterSetupHome(page);
   const row = page.getByRole("region", { name: "Claude subscription token" });
   await row.getByText("Claude subscription token · not configured").waitFor();
   let sent = 0;
@@ -219,13 +217,19 @@ test("the Settings overview Claude row is not prefilled and refuses ~", async (t
   await row.getByRole("button", { name: "Set", exact: true }).click();
   const input = row.getByLabel("Claude token reference");
   assert.equal(await input.inputValue(), "");
-  await input.fill("~/t");
-  await row.getByRole("button", { name: "Save reference" }).click();
-  await row
-    .getByRole("alert")
-    .filter({
-      hasText: `Use the full path: file:${home}/t. ~ and $HOME are not expanded.`,
-    })
-    .waitFor();
+  // The refusal offers the home once the page has read it, so refuse again until it does.
+  const offered = `Use the full path: file:${home}/t. ~ and $HOME are not expanded.`;
+  const alert = row.getByRole("alert").filter({ hasText: "Use the full path" });
+  for (let attempt = 0; attempt < 100; attempt++) {
+    await input.fill("~/t");
+    await row.getByRole("button", { name: "Save reference" }).click();
+    await alert.waitFor();
+    if ((await alert.innerText()) === offered) break;
+  }
+  assert.equal(await alert.innerText(), offered);
   assert.equal(sent, 0);
+  // With the home known, Set still opens an empty field here.
+  await row.getByRole("button", { name: "Cancel" }).click();
+  await row.getByRole("button", { name: "Set", exact: true }).click();
+  assert.equal(await input.inputValue(), "");
 });
