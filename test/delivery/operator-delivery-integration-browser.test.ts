@@ -386,9 +386,24 @@ test("uncertain effect and independent Stop remain visible after restart; expire
     .waitFor();
   // The hold line is in Overview's decision card; the strip names the state on every tab.
   await openTaskTab(page, "Overview");
-  await page
-    .getByText("task hold — use exact recovery controls", { exact: true })
-    .waitFor();
+  const heldLines = page
+    .getByRole("list", { name: "Also held", exact: true })
+    .locator("li");
+  await heldLines.first().waitFor();
+  const heldLabels = (await heldLines.allInnerTexts()).map(
+    (line) => line.split("\n")[0],
+  );
+  // A Stop-only task has no separate task hold line.
+  assert.deepEqual(heldLabels, [
+    "Operator Stop",
+    "Writer ownership",
+    "Capacity",
+    "Uncertainty",
+  ]);
+  assert.equal(
+    await page.getByText(/hold — use exact recovery controls/).count(),
+    0,
+  );
   assert.equal(f.runtime.turns, 0);
   assert.equal(f.scripted.state.writes, 1);
   assert.equal(f.service.domain().task(f.taskId).state, "open");

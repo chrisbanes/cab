@@ -1114,6 +1114,151 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
   assert.equal(await revoked.locator(".wait-detail").innerText(), "Linus");
 });
 
+test("Holds stay listed beneath Fix: Resume project with what clears them and Execution details", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain();
+  const projectId = randomUUID(),
+    taskId = randomUUID();
+  d.execute({
+    type: "project.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    name: "fixture-app",
+    leadProfileId: null,
+  });
+  d.execute({
+    type: "task.create",
+    actor: "operator",
+    key: randomUUID(),
+    projectId,
+    taskId,
+    title: "Add a health-check endpoint",
+    outcome: "Probe",
+    ready: true,
+  });
+  await f.service.stopTask(taskId);
+  f.seedPersistedState((db) =>
+    db
+      .prepare("INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)")
+      .run(taskId, "Archival is awaiting review"),
+  );
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const commands: Record<string, unknown>[] = [];
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/api/operator/commands")
+    )
+      commands.push(request.postDataJSON());
+  });
+  await signIn(page, web.origin, web.password, `/app/tasks/${taskId}`);
+  const waits = page.locator(".wait-reasons");
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor();
+  const primary = waits.locator(".wait-primary");
+  await primary
+    .getByText("Also held · Resume project doesn't clear these", {
+      exact: true,
+    })
+    .waitFor();
+  const held = waits.getByRole("list", { name: "Also held", exact: true });
+  const expectedLines = [
+    "Operator Stop Clears when the task's Stop is resumed. Execution details",
+    "Task hold Archival is awaiting review. Recovery stays blocked while it remains. Execution details",
+  ];
+  const lines = async () =>
+    (await held.locator("li").allInnerTexts()).map((t) =>
+      t.replace(/\s+/g, " ").trim(),
+    );
+  assert.deepEqual(await lines(), expectedLines);
+  const links = held.getByRole("link", {
+    name: "Execution details",
+    exact: true,
+  });
+  assert.equal(await links.count(), 2);
+  for (const href of await links.evaluateAll((a) =>
+    a.map((x) => x.getAttribute("href")),
+  ))
+    assert.equal(href, `/runtime/task/${taskId}`);
+  // Holds are never a Fix: no buttons and no Fix text inside the list.
+  assert.equal(await held.getByRole("button").count(), 0);
+  assert.equal(await held.getByText(/^Fix:/).count(), 0);
+  assert.equal(
+    await page.getByText(/hold — use exact recovery controls/).count(),
+    0,
+  );
+
+  // The confirmation names exactly the holds that stay; Cancel sends nothing.
+  const fix = waits.getByRole("button", { name: "Fix: Resume project" });
+  await fix.click();
+  const dialog = page.getByRole("alertdialog");
+  await dialog.getByText("Holds and access are unchanged.").waitFor();
+  await dialog
+    .getByText("The Operator Stop and task hold stay.", { exact: true })
+    .waitFor();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await dialog.waitFor({ state: "hidden" });
+  assert.equal(commands.length, 0);
+
+  // Resume sends one project.configure; the stale read keeps the holds listed and no second Fix.
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(
+    new RegExp(`/api/operator/tasks/${taskId}(\\?.*)?$`),
+    async (route) => {
+      await gate;
+      await route.continue();
+    },
+  );
+  await fix.click();
+  await dialog.getByRole("button", { name: "Resume", exact: true }).click();
+  await waits.getByText("Project resumed.", { exact: true }).waitFor();
+  assert.equal(commands.length, 1);
+  assert.deepEqual(
+    {
+      type: commands[0]?.type,
+      projectId: commands[0]?.projectId,
+      paused: commands[0]?.paused,
+    },
+    { type: "project.configure", projectId, paused: false },
+  );
+  assert.deepEqual(await lines(), expectedLines);
+  assert.equal(
+    await waits.getByRole("button", { name: "Fix: Resume project" }).count(),
+    0,
+  );
+  release();
+
+  // After the re-read the paused wait is gone: the holds stay listed, with no heading.
+  await waits.getByText("Waiting · Project paused", { exact: true }).waitFor({
+    state: "detached",
+  });
+  assert.deepEqual(await lines(), expectedLines);
+  assert.equal(await waits.getByText(/^Also held ·/).count(), 0);
+  assert.equal(await held.getByRole("button").count(), 0);
+  assert.equal(commands.length, 1);
+  assert.equal(d.project(projectId).paused, 0);
+  assert.ok(await noHorizontalScroll(page));
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.ok(await noHorizontalScroll(page));
+});
+
 test("Task detail explains a held assignment, revoked repository access and unresolved recovery without sending anything", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),

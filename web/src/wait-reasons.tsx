@@ -6,6 +6,7 @@ import {
 } from "../../src/operator/contracts.js";
 import {
   fixLabels,
+  type HoldLine,
   type Wait,
   type WaitFix,
   type WaitLink,
@@ -67,12 +68,15 @@ function WaitAction({
   primary,
   p,
   resume,
+  holds,
 }: {
   wait: Wait;
   taskId: string | null;
   primary: boolean;
   p: WaitProps;
   resume: ConfigurationDraft;
+  /** Names of the holds that outlast Resume project. */
+  holds?: readonly string[] | undefined;
 }) {
   const variant = primary ? "primary" : "secondary";
   if (wait.fix?.kind === "resume-project")
@@ -82,6 +86,7 @@ function WaitAction({
         draft={resume}
         projectId={wait.fix.projectId}
         variant={variant}
+        holds={holds}
       />
     );
   if (wait.fix)
@@ -111,6 +116,35 @@ const WaitDetail = ({ wait }: { wait: Wait }) =>
     <p className="metadata muted wait-detail">{wait.detail}</p>
   ) : null;
 
+/** Holds a Fix leaves in place: what clears each, and the task's Execution view. Never a Fix. */
+function HoldList({
+  lines,
+  href,
+  heading,
+}: {
+  lines: readonly HoldLine[];
+  href: string;
+  heading?: string | undefined;
+}) {
+  return (
+    <div className="wait-holds">
+      {heading && <p className="metadata muted">{heading}</p>}
+      <ul aria-label="Also held">
+        {lines.map((line) => (
+          <li key={line.kind}>
+            <span className="wait-hold-label">{line.label}</span>
+            <span className="metadata muted wait-hold-clears">
+              {line.clears}
+            </span>
+            {/* Server-rendered page outside the app shell: a plain anchor loads it as a document. */}
+            <a href={href}>Execution details</a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /**
  * Frames 149–150: the first wait is primary with its Fix; the rest stay listed with
  * their own Fix or link. The Resume project outcome stays after the wait it cleared.
@@ -121,6 +155,8 @@ export function WaitReasons({
   projectId,
   prefix = "Waiting · ",
   variant = "list",
+  holds = [],
+  executionHref,
   ...p
 }: WaitProps & {
   waits: readonly Wait[];
@@ -130,6 +166,10 @@ export function WaitReasons({
   prefix?: string;
   /** `numbered` (the composer panel, 149c): every reason numbered, each Fix secondary. */
   variant?: "list" | "numbered";
+  /** The task's execution holds (list variant only), listed beneath the waits. */
+  holds?: readonly HoldLine[];
+  /** The task's Execution view, which each hold line links. */
+  executionHref?: string;
 }) {
   const [first, ...rest] = waits;
   // One owner for the draft: its store notifies a single listener.
@@ -162,6 +202,13 @@ export function WaitReasons({
         <ResumeOutcome p={p} draft={resume} projectId={projectId} />
       </div>
     );
+  const heldLines = executionHref ? holds : [];
+  const pausedFirst = first?.code === "project-paused";
+  const holdList = (heading?: string) =>
+    heldLines.length > 0 &&
+    executionHref && (
+      <HoldList lines={heldLines} href={executionHref} heading={heading} />
+    );
   return (
     <div className="wait-reasons">
       {first && (
@@ -177,9 +224,12 @@ export function WaitReasons({
               primary
               p={p}
               resume={resume}
+              holds={heldLines.map((line) => line.name)}
             />
           </div>
           <WaitDetail wait={first} />
+          {pausedFirst &&
+            holdList("Also held · Resume project doesn't clear these")}
         </div>
       )}
       {rest.length > 0 && (
@@ -201,6 +251,7 @@ export function WaitReasons({
           ))}
         </ul>
       )}
+      {!pausedFirst && holdList()}
       <ResumeOutcome p={p} draft={resume} projectId={projectId} />
     </div>
   );
@@ -258,12 +309,15 @@ export function ResumeProjectFix({
   projectId,
   variant = "primary",
   label = "Fix: Resume project",
+  holds = [],
 }: {
   p: WaitProps;
   draft: ConfigurationDraft;
   projectId: string;
   variant?: "primary" | "secondary";
   label?: string;
+  /** Holds that stay after Resume, named in the confirmation. */
+  holds?: readonly string[] | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const cancel = useRef<HTMLButtonElement>(null);
@@ -309,6 +363,13 @@ export function ResumeProjectFix({
         <DialogDescription className="body">
           New turns can start. Holds and access are unchanged.
         </DialogDescription>
+        {holds.length > 0 && (
+          <p className="body">
+            The{" "}
+            {new Intl.ListFormat("en", { type: "conjunction" }).format(holds)}{" "}
+            stay.
+          </p>
+        )}
         <p className="metadata muted">
           Pause project in project configuration reverses it.
         </p>

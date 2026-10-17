@@ -1101,17 +1101,32 @@ export class ExecutionState {
   }
 
   taskHold(taskId: string): string | undefined {
+    return this.firstTaskHoldReason(taskId, false);
+  }
+
+  /** The reason of a task hold other than the operator Stop, which the task shows on its own line. */
+  nonStopTaskHoldReason(taskId: string): string | undefined {
+    return this.firstTaskHoldReason(taskId, true);
+  }
+
+  private firstTaskHoldReason(
+    taskId: string,
+    excludeStop: boolean,
+  ): string | undefined {
     const row = this.db
       .prepare(`SELECT COALESCE(NULLIF(reason, ''), 'Task held') AS reason
         FROM (
           SELECT reason, 0 AS priority FROM task_writer_ambiguity_holds WHERE taskId = ?
           UNION ALL
           SELECT reason, CASE WHEN holdKind = 'operator-stop' THEN 2 ELSE 1 END
-            FROM task_writer_holds WHERE taskId = ?
+            FROM task_writer_holds
+            WHERE taskId = ? AND (? = 0 OR holdKind IS NOT 'operator-stop')
           UNION ALL
           SELECT reason, 3 AS priority FROM task_archival_holds WHERE taskId = ?
         ) ORDER BY priority LIMIT 1`)
-      .get(taskId, taskId, taskId) as { reason: string } | undefined;
+      .get(taskId, taskId, excludeStop ? 1 : 0, taskId) as
+      | { reason: string }
+      | undefined;
     return row?.reason;
   }
 
