@@ -430,6 +430,8 @@ test("Readiness keeps the existing fix line unless a gh login is signed in", asy
     assert.equal(await row.locator(".identifier").innerText(), fixLine);
     assert.equal(await row.getByRole("button").count(), 0, state);
   }
+  // Let both discovery reads finish, so only Run again can pick up the new login.
+  await page.waitForLoadState("networkidle");
   // Signing in elsewhere shows up on Run again, which re-reads the detected login.
   gh.set("signed-in");
   await page.getByRole("button", { name: "Run again" }).click();
