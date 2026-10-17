@@ -259,7 +259,7 @@ export function RuntimeSettings(p: SettingsProps) {
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
   // `/app/settings/runtime#add-claude` lands once the panel exists.
-  useFragmentLanding(Boolean(data), (id) => id === "add-claude");
+  useFragmentLanding(Boolean(data));
   const lines = data ? capacityChanges(data, d.values) : [];
   return (
     <div className="settings-page">

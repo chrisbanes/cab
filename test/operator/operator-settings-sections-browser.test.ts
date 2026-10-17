@@ -346,17 +346,19 @@ test("a check anchor marks Readiness current and a hash-only change lands with f
   assert.deepEqual(await current(page), ["Profiles"]);
 });
 
-test("Back to a route with a fragment and no saved position still scrolls to the top", async (_t, journey) => {
-  const { page } = await startSettings(journey, "/app/tasks");
-  await page.locator("main.page h1").waitFor();
-  // An entry the shell never left, on a route that does not land on fragments.
-  await page.evaluate(() => {
+/**
+ * Enters a history entry the shell never left (no saved scroll position) at `url`, by
+ * Forward after Back, and returns the `scrollTo` calls the shell made while doing so.
+ */
+async function forwardInto(page: Page, url: string) {
+  await page.evaluate((target) => {
     const { scrollY, ...state } = history.state;
-    history.pushState(state, "", "/app/tasks#elsewhere");
+    history.pushState({ ...state, navKey: crypto.randomUUID() }, "", target);
     history.back();
-  });
-  await page.waitForURL(/\/app\/tasks$/);
+  }, url);
   await nextFrames(page);
+  // Entering the new entry starts from a page with nothing focused.
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur());
   await page.evaluate(() => {
     const calls: unknown[][] = [];
     const scrollTo = window.scrollTo.bind(window) as (...a: unknown[]) => void;
@@ -369,14 +371,91 @@ test("Back to a route with a fragment and no saved position still scrolls to the
     });
     history.forward();
   });
-  await page.waitForURL(/#elsewhere$/);
   await nextFrames(page);
+  await nextFrames(page);
+  return page.evaluate(
+    () => (window as unknown as { scrollCalls: unknown[] }).scrollCalls,
+  );
+}
+const focusedHeading = (page: Page) =>
+  page.evaluate(() => {
+    const a = document.activeElement;
+    return a && /^H[23]$/.test(a.tagName) ? a.textContent : null;
+  });
+
+test("Back to a route with a fragment and no saved position still scrolls to the top", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/tasks");
+  await page.locator("main.page h1").waitFor();
+  assert.deepEqual(await forwardInto(page, "/app/tasks#elsewhere"), [[0, 0]]);
+});
+
+test("Back or Forward into a Settings fragment skips the top restore only for a target the page lands on", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  // A section on this page: the page lands on it and the shell leaves the scroll alone.
+  assert.deepEqual(await forwardInto(page, "/app/settings#profiles"), []);
+  assert.equal(await focusedHeading(page), "Profiles");
+  // A check anchor whose article is drawn is a target too.
   assert.deepEqual(
-    await page.evaluate(
-      () => (window as unknown as { scrollCalls: unknown[] }).scrollCalls,
-    ),
+    await forwardInto(page, "/app/settings#readiness-codex-login"),
+    [],
+  );
+  assert.equal(await focusedHeading(page), "Codex login");
+  // No target: unknown, malformed, a check that does not exist, or another route's anchor.
+  for (const hash of [
+    "unknown",
+    "%E0%A4%A",
+    "readiness-unknown",
+    "add-claude",
+  ]) {
+    assert.deepEqual(
+      await forwardInto(page, `/app/settings#${hash}`),
+      [[0, 0]],
+      hash,
+    );
+    assert.equal(await focusedHeading(page), null, hash);
+  }
+});
+
+test("Back or Forward into a check anchor restores the top while its read has failed, and lands once it is drawn", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.route("**/api/operator/readiness", (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "unavailable", message: "x" } }),
+    }),
+  );
+  await page.reload();
+  await nav(page).waitFor();
+  await page.getByRole("button", { name: "Run again" }).waitFor();
+  await page.getByText("Readiness checks are unavailable").waitFor();
+  assert.deepEqual(
+    await forwardInto(page, "/app/settings#readiness-codex-login"),
     [[0, 0]],
   );
+  assert.equal(await focusedHeading(page), null);
+  // The read recovers: the article appears and the page lands on it.
+  await page.unroute("**/api/operator/readiness");
+  await page.getByRole("button", { name: "Run again" }).click();
+  await page.waitForFunction(
+    () => document.activeElement?.textContent === "Codex login",
+  );
+});
+
+test("Back or Forward into an add-claude anchor on the Runtime page skips the restore once the panel is drawn", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings/runtime");
+  await page.getByRole("heading", { name: "Add Claude" }).waitFor();
+  assert.deepEqual(
+    await forwardInto(page, "/app/settings/runtime#add-claude"),
+    [],
+  );
+  assert.equal(await focusedHeading(page), "Add Claude");
+  assert.deepEqual(await forwardInto(page, "/app/settings/runtime#unknown"), [
+    [0, 0],
+  ]);
 });
 
 for (const fragment of ["bogus", "readiness-unknown"])

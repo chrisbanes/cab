@@ -56,6 +56,7 @@ import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
 import { ProjectSetup, type SetupHeader } from "./project-setup.js";
 import { SettingsWorkspace } from "./settings-index.js";
+import { landingElement } from "./settings-sections.js";
 import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
 import { ProjectConfiguration } from "./project-config.js";
 import { settingsHeader } from "./settings-view.js";
@@ -600,12 +601,14 @@ export function App() {
       setPath(location.pathname + location.search);
       setNavigationVersion((n) => n + 1);
       const saved = (history.state as { scrollY?: number } | null)?.scrollY;
-      // A Settings page lands on its fragment itself when the entry has no saved position.
-      const landsItself =
-        saved === undefined &&
-        location.hash !== "" &&
-        ["/app/settings", "/app/settings/runtime"].includes(location.pathname);
-      if (!landsItself) requestAnimationFrame(() => scrollTo(0, saved ?? 0));
+      const { pathname, hash } = location;
+      // Decided when the frame runs, with the page rendered: an entry without a saved
+      // position that the Settings page lands on itself is left to it; anything else
+      // (including a fragment the page has no target for yet) is restored to the top.
+      requestAnimationFrame(() => {
+        if (saved === undefined && landingElement(pathname, hash)) return;
+        scrollTo(0, saved ?? 0);
+      });
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);

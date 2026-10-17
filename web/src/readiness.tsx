@@ -49,9 +49,7 @@ export function ReadinessPanel(
   };
   useHeaderRefresh(p.refreshNonce, reread);
   // A check's own article is a landing target (`#readiness-<check id>`) once it exists.
-  useFragmentLanding(Boolean(readiness.state.data), (id) =>
-    id.startsWith("readiness-"),
-  );
+  useFragmentLanding(Boolean(readiness.state.data));
   const checks = readiness.state.data?.data.checks;
   const d = useDraft(p.drafts, "discovery.configure:readiness");
   useEffect(() => d.startOperation({ key: key() }), [d]);

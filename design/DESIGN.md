@@ -1681,7 +1681,9 @@ Presentation and interaction rules that the canvas does not show on its own.
 - Settings section links (`114-settings-index`) are real `/app/settings#section` links:
   each jump adds one history entry, scrolls to the section and focuses its heading.
   Back and Forward to an entry with a saved position restore it instead; a reload keeps the
-  fragment. An unknown fragment does nothing, and the current section follows the
+  fragment. An unknown fragment does nothing: Back or Forward into one restores the top like any
+  other entry, and only a fragment the page has a target for skips that restore. The
+  current section follows the
   fragment (the first section when none; a check anchor marks Readiness). Readiness checks have their own
   anchors (`#readiness-claude-executable`) and the Runtime page has
   `/app/settings/runtime#add-claude`; Home checklist Settings actions use them.

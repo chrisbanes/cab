@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { readinessCheckIds } from "../../src/operator/readiness.js";
 
 /** The Settings index sections, in the designed order (frame 114), with their stable fragments. */
@@ -34,13 +34,36 @@ export const settingsSectionHref = (id: SettingsSectionId) =>
 export const readinessCheckHref = (checkId: string) =>
   `/app/settings#readiness-${checkId}`;
 
-/** The fragment as an element id, or null when it is absent or not decodable. */
-function fragmentId() {
+/** A fragment as an element id, or null when it is empty or not decodable. */
+function fragmentId(hash = location.hash) {
   try {
-    return decodeURIComponent(location.hash.slice(1)) || null;
+    return decodeURIComponent(hash.slice(1)) || null;
   } catch {
     return null;
   }
+}
+
+/**
+ * The one answer to "does this page land on this fragment right now": the element a
+ * fragment names on a Settings route, or null. The route decides which ids are targets
+ * (a section or a check's own anchor on `/app/settings`, `add-claude` on the Runtime
+ * page), and the element must be on the page, so a page that has not rendered its target
+ * yet (reads or the workspace still loading, a failed readiness read) answers null.
+ * `useFragmentLanding` lands on it and the shell's popstate restore skips scrolling
+ * only for it, so the two cannot disagree.
+ */
+export function landingElement(
+  pathname: string,
+  hash: string,
+): HTMLElement | null {
+  const id = fragmentId(hash);
+  if (!id) return null;
+  const supported =
+    pathname === "/app/settings"
+      ? SETTINGS_SECTIONS.some((s) => s.id === id) ||
+        readinessCheckIds.some((c) => `readiness-${c}` === id)
+      : pathname === "/app/settings/runtime" && id === "add-claude";
+  return supported ? document.getElementById(id) : null;
 }
 
 /**
@@ -80,7 +103,10 @@ function land(target: HTMLElement) {
   settle.observe(document.body);
   // Chromium clears focus after a browser-made hash change lands, so give it back.
   const refocus = () => {
-    if (document.activeElement === document.body)
+    if (
+      document.activeElement === document.body &&
+      landingElement(location.pathname, location.hash) === target
+    )
       heading?.focus({ preventScroll: true });
   };
   addEventListener("hashchange", refocus);
@@ -96,29 +122,25 @@ function land(target: HTMLElement) {
   return stop;
 }
 
+/** The history entry that has been landed on; every hook of a page shares it. */
+let landedEntry: string | null = null;
+
 /**
- * Land on the element the URL fragment names, once per history entry and only when that
- * entry has no saved scroll position (a Back or Forward restore keeps the app's own scroll
- * and focus restore). `ready` holds the landing until the page can no longer reorder or
- * grow its target; `accepts` limits which ids this page lands on, so any other fragment
- * does nothing.
+ * Land on the element `landingElement` finds for the URL, once per history entry and only
+ * when that entry has no saved scroll position (a Back or Forward restore keeps the app's
+ * own scroll and focus restore). `ready` holds the landing until the page can no longer
+ * reorder or grow its target. Several hooks on one page may call this: the first whose
+ * target is on the page lands, and a target that appears later (a check's article after
+ * its read) is landed on by whichever hook sees it.
  */
-export function useFragmentLanding(
-  ready: boolean,
-  accepts: (id: string) => boolean,
-) {
+export function useFragmentLanding(ready: boolean) {
   const state = history.state as { navKey?: string; scrollY?: number } | null;
   const entry = state?.navKey ?? "";
-  const landed = useRef<string | null>(null);
-  const acceptsNow = useRef(accepts);
-  acceptsNow.current = accepts;
   useEffect(() => {
-    const id = fragmentId();
-    if (!ready || landed.current === entry || !id || !acceptsNow.current(id))
-      return;
-    const target = document.getElementById(id);
+    if (!ready || landedEntry === entry) return;
+    const target = landingElement(location.pathname, location.hash);
     if (!target) return;
-    landed.current = entry;
+    landedEntry = entry;
     if (typeof state?.scrollY === "number") return;
     return land(target);
   }, [entry, ready]);

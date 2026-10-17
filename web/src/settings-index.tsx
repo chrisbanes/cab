@@ -175,9 +175,7 @@ export function SettingsWorkspace(
     id: SettingsSectionId;
   } | null>(null);
   const chosen = picked?.from === current ? picked.id : current;
-  useFragmentLanding(p.workspaceSettled, (id) =>
-    SETTINGS_SECTIONS.some((x) => x.id === id),
-  );
+  useFragmentLanding(p.workspaceSettled);
   // Discovery is shown by its own section and by a Readiness row; a save in either
   // re-reads both.
   const [discoveryNonce, setDiscoveryNonce] = useState(0);
