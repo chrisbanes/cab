@@ -1026,7 +1026,12 @@ for (const viewport of viewports)
       0,
     );
     await page.goto(`${web.origin}/app`);
-    const project = row(await assertOnlyCard(page), "Project");
+    const homeCard = await assertOnlyCard(page);
+    // Home's own login read has landed, so only setup's reads count below.
+    await row(homeCard, "GitHub")
+      .getByText(/@fixture-user/)
+      .waitFor();
+    const project = row(homeCard, "Project");
     await settleGhRead(page, async () => {
       await project.getByRole("link", { name: "Create project" }).click();
       await page.waitForURL("**/app/settings/projects/new");

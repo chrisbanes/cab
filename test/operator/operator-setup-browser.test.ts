@@ -1965,11 +1965,8 @@ test("Setup offers the GitHub CLI login exactly once, behind Add a repository", 
   );
   assert.equal(await offer.count(), 0);
   // The offer is gone, so focus moves to the first repository control.
-  assert.equal(
-    await page.evaluate(() =>
-      document.activeElement?.closest(".setup-row") ? true : false,
-    ),
-    true,
+  await page.waitForFunction(() =>
+    document.activeElement?.closest(".setup-row"),
   );
   assert.equal(
     f.service.domain().discoveryCredentialReference(),

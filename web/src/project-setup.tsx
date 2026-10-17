@@ -486,6 +486,10 @@ export function ProjectSetup(
   useEffect(() => {
     if (!focusAfterRead.current || discovery.state === "loading") return;
     focusAfterRead.current = false;
+    // Not while the operator has moved on to another field in the meantime.
+    const at = document.activeElement;
+    if (at && at !== document.body && !repoContent.current?.contains(at))
+      return;
     focusFirstControl();
   }, [discovery.state]);
   // The browser scrolls a focused control into view, not out from under the sticky bar
@@ -679,6 +683,7 @@ export function ProjectSetup(
                   aria-expanded="false"
                   aria-controls={repoContentId}
                   aria-disabled={disabled || undefined}
+                  className="aria-disabled:opacity-50"
                   onClick={openRepositories}
                 >
                   Add a repository
