@@ -22,7 +22,7 @@ each screen leading to the next and nothing to look up.
    sign-in page.
 2. Sign in. Home shows the getting-started card and nothing else until the first
    turn.
-3. Project setup creates the lead profile inline and the project in one submission;
+3. Project setup creates the lead profile inline (name and runtime), then the project;
    the ready check replaces the form and offers Resume and create first task.
 4. The composer opens with the project selected; Create and start.
 5. Task detail shows the running turn, or the wait with its Fix where one exists

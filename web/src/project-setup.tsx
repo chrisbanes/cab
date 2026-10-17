@@ -436,7 +436,13 @@ export function ProjectSetup(
         ? "Wait for the lead profile to be created."
         : inline.phase === "unknown"
           ? "Check whether the lead profile was saved first."
-          : null;
+          : // A profile name typed but never submitted would vanish with the form. One the
+            // service refused stays visible with its error, so the project may go on without it.
+            inlineProfile &&
+              inline.phase === "editing" &&
+              String(inline.values.name ?? "").trim()
+            ? "Create the lead profile first, or clear its name."
+            : null;
   const reason = createReason();
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -462,24 +468,43 @@ export function ProjectSetup(
   const collapsed = unconfigured && !repoOpen && !forced;
   const repoContent = useRef<HTMLDivElement>(null);
   const repoContentId = useId();
-  const openRepositories = () => {
-    flushSync(() => setRepoOpen(true));
+  const focusFirstControl = () =>
     repoContent.current
       ?.querySelector<HTMLElement>(
-        ".setup-inline-actions button, .setup-row :is(input, select)",
+        ".setup-inline-actions button:not(:disabled), .setup-row :is(input, select):not(:disabled)",
       )
       ?.focus();
+  const openRepositories = () => {
+    if (disabled) return;
+    flushSync(() => setRepoOpen(true));
+    focusFirstControl();
   };
+  // Choosing the login replaces the controls it was chosen with while discovery is read
+  // again, so focus moves into the content once that read settles.
+  const focusAfterRead = useRef(false);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs when a discovery read settles.
+  useEffect(() => {
+    if (!focusAfterRead.current || discovery.state === "loading") return;
+    focusAfterRead.current = false;
+    focusFirstControl();
+  }, [discovery.state]);
   // The browser scrolls a focused control into view, not out from under the sticky bar
   // (scroll-margin and scroll-padding only act on a control that is off screen).
   const bar = useRef<HTMLDivElement>(null);
   const clearOfBar = (e: FocusEvent<HTMLFormElement>) => {
     const target = e.target;
-    if (!bar.current || bar.current.contains(target)) return;
+    // Not a dialog portalled out of the form, and not the bar itself.
+    if (!e.currentTarget.contains(target) || bar.current?.contains(target))
+      return;
     // After the browser's own scroll, in the same frame.
     requestAnimationFrame(() => {
       if (!bar.current) return;
-      const box = target.getBoundingClientRect();
+      // The control and the error line under it.
+      const box = (
+        target.closest(".setup-field-stack") ??
+        target.closest("label.field") ??
+        target
+      ).getBoundingClientRect();
       const hidden = box.bottom - bar.current.getBoundingClientRect().top;
       // A control taller than the free space keeps its top on screen.
       if (hidden > 0)
@@ -653,6 +678,7 @@ export function ProjectSetup(
                   variant="secondary"
                   aria-expanded="false"
                   aria-controls={repoContentId}
+                  aria-disabled={disabled || undefined}
                   onClick={openRepositories}
                 >
                   Add a repository
@@ -703,6 +729,7 @@ export function ProjectSetup(
                                       { key: key() },
                                       true,
                                     );
+                                    focusAfterRead.current = true;
                                     retry();
                                   }
                                 }}
@@ -741,6 +768,7 @@ export function ProjectSetup(
                       await ghDraft.reconcile(p.client, csrf);
                       if (ghDraft.phase === "recorded") {
                         ghDraft.startOperation({ key: key() }, true);
+                        focusAfterRead.current = true;
                         retry();
                       }
                     }}

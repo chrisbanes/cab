@@ -41,7 +41,8 @@ note, **Cancel** and then **Create paused project** at every width.
 4. **Create.** Creates the project paused, as today. A rejection or an unknown
    outcome appears at the top of the form (116, 116b) and keeps every value. Create
    stays focusable but inactive, with its reason, while the project or the inline
-   profile is being saved, and a repeated click or Enter sends nothing more.
+   profile is being saved or while a profile name has been typed and not created,
+   and a repeated click or Enter sends nothing more.
 5. **Ready check.** Replaces the form and takes focus; the heading "Set up your
    first project" stays for the visit. It replaces the "Recorded … as a paused
    project" alert:

@@ -8,7 +8,11 @@ import {
   outcomeMessages,
   savedOutcome,
 } from "../fixtures/operator-settings.js";
-import { commandRequest, setupJourney } from "../fixtures/setup-browser.js";
+import {
+  commandRequest,
+  settleGhRead,
+  setupJourney,
+} from "../fixtures/setup-browser.js";
 const test = browserSuite("operator-discovery-credential-browser");
 
 test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) => {
@@ -194,6 +198,7 @@ test("Setup offers the detected GitHub CLI login in one step", async (_t, journe
     name: "Use GitHub CLI login (@octo)",
   });
   // Step 3 starts collapsed; the offer is one activation away and focus lands on it.
+  await settleGhRead(page, () => page.reload());
   assert.equal(await use.count(), 0);
   await page.getByRole("button", { name: "Add a repository" }).click();
   await use.waitFor();

@@ -395,7 +395,7 @@ unconfigured and step 3 is opened; `117c-first-setup-add-repository` draws step 
   never closes again: clearing a row means choosing "No repository · repository-free",
   an intentional one-way disclosure with no close control. Frame 116 draws discovery
   available and is unchanged.
-- **Setup source credential (116–117b, 131, 145, 145b, 177):** step 3 states the
+- **Setup source credential (116, 116b, 117, 117b, 131, 145, 145b, 177):** step 3 states the
   source credential setup will record, as a line after the GitHub Project field, only
   while a repository row is filled; "What creation does" has exactly two bullets
   ("The project starts Paused. Creating it starts no execution." and "Repository

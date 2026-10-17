@@ -16,6 +16,7 @@ import {
 import {
   chooseRepository,
   commandRequest,
+  settleGhRead,
   setupJourney,
 } from "../fixtures/setup-browser.js";
 import { createFakeGh } from "../fixtures/fake-gh.js";
@@ -1834,6 +1835,7 @@ test("Setup collapses step 3 for a repository-free project without discovery and
     ghExecutable: gh.executable,
   });
   await stubReadiness(page);
+  await settleGhRead(page, () => page.reload());
   const add = page.getByRole("button", { name: "Add a repository" });
   await add.waitFor();
   assert.equal(await add.getAttribute("aria-expanded"), "false");
@@ -1930,6 +1932,7 @@ test("Setup offers the GitHub CLI login exactly once, behind Add a repository", 
     discovery: false,
     ghExecutable: gh.executable,
   });
+  await settleGhRead(page, () => page.reload());
   const offer = page.getByRole("button", { name: /Use GitHub CLI login/ });
   await page.getByRole("button", { name: "Add a repository" }).waitFor();
   assert.equal(await offer.count(), 0);
@@ -1939,16 +1942,8 @@ test("Setup offers the GitHub CLI login exactly once, behind Add a repository", 
   await page.getByRole("button", { name: "Add a repository" }).click();
   await use.waitFor();
   assert.equal(await offer.count(), 1);
-  // Opening moves focus into the revealed content: the offer when its read had landed,
-  // otherwise the first repository field.
-  assert.equal(
-    await page.evaluate(() =>
-      document
-        .querySelector(".setup-repositories-content")
-        ?.contains(document.activeElement),
-    ),
-    true,
-  );
+  // Opening moves focus to the offer, the first control of the revealed content.
+  assert.equal(await use.evaluate((el) => el === document.activeElement), true);
   await page
     .getByText("Signed in to github.com as @octo with the GitHub CLI", {
       exact: false,
@@ -1969,6 +1964,13 @@ test("Setup offers the GitHub CLI login exactly once, behind Add a repository", 
     0,
   );
   assert.equal(await offer.count(), 0);
+  // The offer is gone, so focus moves to the first repository control.
+  assert.equal(
+    await page.evaluate(() =>
+      document.activeElement?.closest(".setup-row") ? true : false,
+    ),
+    true,
+  );
   assert.equal(
     f.service.domain().discoveryCredentialReference(),
     "gh:github.com",
@@ -2040,6 +2042,15 @@ test("Setup after Create shows a blank second-project form on reload, without th
   await stubReadiness(page);
   const sent = sentCommands(page);
   await createProject(page, sent);
+  // Nothing is left to lose while the ready check is shown.
+  assert.equal(
+    await page.evaluate(() => {
+      const leaving = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(leaving);
+      return leaving.defaultPrevented;
+    }),
+    false,
+  );
   await page.reload();
   await page.locator("main.page h1", { hasText: "Create project" }).waitFor();
   const name = page.getByLabel("Project name", { exact: true });
@@ -2170,9 +2181,99 @@ test("Setup keeps Create focusable with its reason while the lead profile is bei
     "Wait for the lead profile to be created.",
   );
   await page.keyboard.press("Enter");
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(null))),
+  );
   assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
   release();
   await page.getByLabel("Lead profile", { exact: true }).waitFor();
   await create.waitFor();
   assert.equal(await create.getAttribute("aria-disabled"), null);
+  assert.equal(sent.filter((c) => c.type === "project.create").length, 0);
+});
+
+test("Setup keeps Create inactive with its reason while a typed lead profile has not been created", async (_t, journey) => {
+  const { f, page } = await setupJourney(journey, { profiles: false });
+  const inline = profileGroup(page);
+  await inline.waitFor();
+  const create = page.getByRole("button", {
+    name: "Create paused project",
+    exact: true,
+  });
+  const reason = () =>
+    create.evaluate(
+      (el) =>
+        document.getElementById(el.getAttribute("aria-describedby") ?? "")
+          ?.textContent,
+    );
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await inline.getByLabel("Profile name", { exact: true }).fill("Ada");
+  assert.equal(await create.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await reason(),
+    "Create the lead profile first, or clear its name.",
+  );
+  await create.click({ force: true });
+  assert.equal(f.service.domain().projects().length, 0);
+  assert.equal(
+    await inline.getByLabel("Profile name", { exact: true }).inputValue(),
+    "Ada",
+  );
+  // Clearing the name is the other way forward.
+  await inline.getByLabel("Profile name", { exact: true }).fill("");
+  assert.equal(await create.getAttribute("aria-disabled"), null);
+  await create.click();
+  await page.getByRole("region", { name: "Ready check" }).waitFor();
+  assert.equal(f.service.domain().projects().length, 1);
+});
+
+test("Setup keeps a rejected field's error line above the sticky bar", async (_t, journey) => {
+  const { page } = await setupJourney(journey, {
+    discovery: false,
+    viewport: { width: 390, height: 844 },
+  });
+  await page.getByRole("button", { name: "Add a repository" }).click();
+  const repository = page.getByLabel("Repository (owner/name)");
+  await page.getByLabel("Ref", { exact: true }).fill("main");
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  // Scroll until the field ends exactly at the bar, so its error line would sit behind it.
+  await repository.evaluate((el) => {
+    const bar = document.querySelector(".setup-submit") as HTMLElement;
+    window.scrollBy(
+      0,
+      el.getBoundingClientRect().bottom - bar.getBoundingClientRect().top,
+    );
+  });
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await repository.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
+  const gap = await page.evaluate(async () => {
+    await new Promise((done) =>
+      requestAnimationFrame(() => requestAnimationFrame(done)),
+    );
+    const error = document.querySelector(
+      ".setup-row .error-text",
+    ) as HTMLElement;
+    const bar = document.querySelector(".setup-submit") as HTMLElement;
+    return (
+      bar.getBoundingClientRect().top - error.getBoundingClientRect().bottom
+    );
+  });
+  assert.ok(gap >= -0.5, `the error line is ${-gap}px behind the bar`);
+});
+
+test("Setup does not open Add a repository while the project is being created or its outcome is unknown", async (_t, journey) => {
+  const { page } = await setupJourney(journey, { discovery: false });
+  await page.getByLabel("Project name", { exact: true }).fill("Atlas");
+  await page.route("**/api/operator/commands", (route) => route.abort());
+  await page
+    .getByRole("button", { name: "Create paused project", exact: true })
+    .click();
+  await page.getByRole("button", { name: "Check whether it saved" }).waitFor();
+  const add = page.getByRole("button", { name: "Add a repository" });
+  assert.equal(await add.getAttribute("aria-disabled"), "true");
+  await add.click({ force: true });
+  assert.equal(await page.getByLabel("Repository (owner/name)").count(), 0);
+  await page.unroute("**/api/operator/commands");
 });
