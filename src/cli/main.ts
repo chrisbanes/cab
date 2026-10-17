@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -22,6 +22,8 @@ import {
 import { coverage, uuidArg } from "./browse.js";
 import { browseCommands, writeCommands } from "./commands.js";
 import {
+  defaultServiceHost,
+  type InstallCli,
   type OperatorConnection,
   SERVICE_USAGE,
   serviceCommand,
@@ -38,6 +40,7 @@ import { rejectUnusedFlags } from "./write.js";
 export type { CliDeps } from "./types.js";
 
 const SCHEMA = "ensemble.cli/v1";
+const KEYCHAIN_CLEANUP_MS = 20_000;
 const TASK_CAPABILITIES = ["cli.identity", "task.read"] as const;
 
 export const EXIT: Record<string, [number, string]> = {
@@ -142,8 +145,12 @@ export async function main(
 ): Promise<number> {
   // Local commands on the service's own Mac, outside the operator CLI's options.
   if (argv[0] === "service")
-    return serviceCommand(argv.slice(1), deps, (name) =>
-      operatorConnection(deps, name),
+    return serviceCommand(
+      argv.slice(1),
+      deps,
+      (name) => operatorConnection(deps, name),
+      defaultServiceHost,
+      installCli(deps),
     );
   if (argv[0] === "snapshot") return snapshotCommand(argv.slice(1), deps);
   let json = false;
@@ -571,7 +578,108 @@ async function loadToken(connection: Connection, deps: CliDeps) {
       "credential-store-unavailable",
       "The macOS Keychain is unavailable; use --token-file.",
     );
-  return deps.keychain().get(credential.account);
+  return deps.keychain().get(credential.account, deps.signal);
+}
+
+/** Validates the token against the service, then stores it and records the connection. */
+export async function saveLogin(
+  config: ConnectionConfig,
+  deps: CliDeps,
+  name: string,
+  origin: string,
+  token: string,
+  tokenFile: string | undefined,
+  signal?: AbortSignal,
+) {
+  // Validate before storing anything.
+  const identity = await new ServiceClient(origin, token, deps.fetch).identity([
+    "cli.identity",
+  ]);
+  const current: CliConfig = await config.read();
+  const keychain = deps.keychain();
+  const priorKeychain =
+    current.connections[name]?.credential?.kind === "keychain";
+  // A failure from here on must leave the prior connection's Keychain token in place. Only
+  // "not found" means there is none; any other read failure stops before anything is replaced.
+  let prior: string | undefined;
+  if (!tokenFile && priorKeychain)
+    try {
+      prior = await keychain.get(name, signal);
+    } catch (error) {
+      if (!(error instanceof CliError && error.code === "credential-not-found"))
+        throw error;
+    }
+  current.connections[name] = {
+    url: origin,
+    installationId: identity.service.installationId,
+    credential: tokenFile
+      ? { kind: "token-file", path: tokenFile }
+      : { kind: "keychain", account: name },
+  };
+  try {
+    if (!tokenFile) await keychain.set(name, token, signal);
+    await config.write(current);
+  } catch (error) {
+    if (!tokenFile) {
+      // The restore must finish even after an interrupt, so it has its own bound.
+      const bound = AbortSignal.timeout(KEYCHAIN_CLEANUP_MS);
+      await (prior === undefined
+        ? keychain.delete(name, bound)
+        : keychain.set(name, prior, bound)
+      ).catch(() =>
+        deps.stderr.write(
+          `The previous ${name} login could not be restored in the Keychain; run 'ensemble auth login --connection ${name} --url ${origin}' again.\n`,
+        ),
+      );
+    }
+    throw error;
+  }
+  // Best effort, and it stops with the storage signal: the new login is already in place.
+  if (tokenFile && priorKeychain)
+    await keychain.delete(name, signal).catch(() => undefined);
+  return identity;
+}
+
+/** The CLI half of `service install`: password prompt, login and doctor. */
+export function installCli(deps: CliDeps): InstallCli {
+  return {
+    interactive: Boolean(deps.stdin.isTTY && deps.stderr.isTTY),
+    readPassword: (prompt, signal) =>
+      readHiddenPassword(deps.stdin, deps.stderr, prompt, signal),
+    login: async (name, origin, token, tokenFile, signal) => {
+      rejectManaged(deps.env);
+      // The identity check stops with the install's timeout or interrupt.
+      const cancellable: CliDeps = {
+        ...deps,
+        fetch: (input, init) => deps.fetch(input, { ...init, signal }),
+      };
+      if (tokenFile)
+        writeFileSync(tokenFile, `${token}\n`, { flag: "wx", mode: 0o600 });
+      try {
+        await saveLogin(
+          new ConnectionConfig(configDirectory(deps.env)),
+          cancellable,
+          name,
+          origin,
+          token,
+          tokenFile,
+          signal,
+        );
+      } catch (error) {
+        // The token is revoked on failure; do not leave a dead one on disk.
+        if (tokenFile) rmSync(tokenFile, { force: true });
+        throw error;
+      }
+    },
+    doctor: async (name, signal) => {
+      await main(["doctor", "--connection", name], {
+        ...deps,
+        stdout: deps.stderr,
+        signal,
+        fetch: (input, init) => deps.fetch(input, { ...init, signal }),
+      });
+    },
+  };
 }
 
 async function login(
@@ -606,22 +714,14 @@ async function login(
     );
   if (!operatorCredentialTokenSchema.safeParse(token).success)
     throw new CliError("invalid-input", "That is not an Ensemble CLI token.");
-  // Validate before storing anything.
-  const identity = await new ServiceClient(origin, token, deps.fetch).identity([
-    "cli.identity",
-  ]);
-  const current: CliConfig = await config.read();
-  if (!tokenFile) await deps.keychain().set(name, token);
-  else if (current.connections[name]?.credential?.kind === "keychain")
-    await deps.keychain().delete(name);
-  current.connections[name] = {
-    url: origin,
-    installationId: identity.service.installationId,
-    credential: tokenFile
-      ? { kind: "token-file", path: tokenFile }
-      : { kind: "keychain", account: name },
-  };
-  await config.write(current);
+  const identity = await saveLogin(
+    config,
+    deps,
+    name,
+    origin,
+    token,
+    tokenFile,
+  );
   return {
     connection: name,
     service: {

@@ -1,36 +1,53 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  accessSync,
   closeSync,
+  constants,
   existsSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { hostname } from "node:os";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { z } from "zod";
 import { childProcessEnvironment } from "../core/child-environment.js";
 import {
+  operatorCredentialIssuedSchema,
+  sessionSchema,
+} from "../operator/contracts.js";
+import {
   diagnosticRetentionDays,
   diagnosticStorageMib,
   isInBound,
 } from "../operator/diagnostic-retention.js";
+import { connectionNameSchema } from "./connections.js";
 import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
 export const SERVICE_USAGE = `Local service commands (run on the service's Mac):
-  service install [SERVICE_OPTIONS]
+  service install [TARBALL] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
   service upgrade VERSION_DIR [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
@@ -51,7 +68,12 @@ SERVICE_OPTIONS:
 The diagnostic options (install and upgrade) are written into the LaunchAgent;
 upgrade keeps the recorded values unless an option changes them, and default
 clears one. To change a value, run upgrade with the installed release directory.
-install binds the LaunchAgent to the release it runs from (STATE/versions/V).
+install binds the LaunchAgent to the release it runs from (STATE/versions/V), or
+to TARBALL unpacked into STATE/versions. It asks once for the operator password
+(creating the auth file when it is missing), then signs the CLI in with a read
+credential (90 days, kept in the Keychain or --token-file), runs doctor and opens
+the app. Those steps never undo a started service; if one fails, install prints
+the manual login line. --connection defaults to local; --no-open skips the browser.
 upgrade stops the job, takes a verified snapshot, starts VERSION_DIR and checks
 readiness through a logged-in CLI connection with a read credential. A failed
 upgrade leaves the job stopped and reports the snapshot and logs; recover with
@@ -68,6 +90,8 @@ const POLL_MS = 1_000;
 const HEALTH_PROBE_MS = 5_000;
 // Above the service's own 10 s bound on its slowest readiness checks.
 const READINESS_PROBE_MS = 20_000;
+// Stops a stalled doctor read.
+const DOCTOR_MS = 60_000;
 
 /** An identity from `captureIdentity`, passed back unchanged to `exited`. */
 export type ProcessIdentity = object;
@@ -88,6 +112,37 @@ export type ServiceHost = {
   rename(from: string, to: string): void;
   /** A signal that aborts after `ms`; tests shorten it. */
   timeout(ms: number): AbortSignal;
+  /** Unpacks a release tarball into `dir`, dropping its top directory; false on failure. */
+  extract(tarball: string, dir: string, signal?: AbortSignal): Promise<boolean>;
+  /** Opens a URL in the default browser. */
+  open(url: string, signal?: AbortSignal): Promise<void>;
+  hostname(): string;
+};
+
+/** The interactive CLI work around install; absent when a caller cannot sign in. */
+export type InstallCli = {
+  interactive: boolean;
+  /** Rejects when `signal` aborts. */
+  readPassword(prompt: string, signal?: AbortSignal): Promise<string>;
+  login(
+    connection: string,
+    origin: string,
+    token: string,
+    tokenFile: string | undefined,
+    /** Aborts the identity check and the storage; the caller then revokes the credential. */
+    signal: AbortSignal,
+  ): Promise<void>;
+  /** Stops reading when `signal` aborts. */
+  doctor(connection: string, signal: AbortSignal): Promise<void>;
+};
+
+/** What install adds beyond the LaunchAgent: unpack, password, login, doctor, open. */
+export type FirstRun = {
+  tarball?: string | undefined;
+  cli?: InstallCli | undefined;
+  connection: string;
+  tokenFile?: string | undefined;
+  open: boolean;
 };
 
 export type ServiceOptions = {
@@ -151,6 +206,22 @@ const manifestSchema = z.object({
   platform: z.literal("darwin-arm64"),
   version: z.string().regex(/^[0-9A-Za-z][0-9A-Za-z.+-]*$/),
 });
+
+/** The first file a release needs to run that is missing from `root`, if any. */
+const missingReleaseFile = (root: string) =>
+  [
+    join(root, "node", "bin", "node"),
+    join(root, "dist", "src", "standalone", "cli.js"),
+  ].find((file) => !lstatSync(file, { throwIfNoEntry: false })?.isFile());
+
+const processAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+};
 
 /** A failure with a fixed message; raw causes can hold paths or secrets and are never shown. */
 class ServiceFailure extends Error {}
@@ -244,13 +315,79 @@ class Service {
       throw refuse(
         "The release's manifest.json does not describe its version directory",
       );
-    for (const file of [
-      join(root, "node", "bin", "node"),
-      join(root, "dist", "src", "standalone", "cli.js"),
-    ])
-      if (!lstatSync(file, { throwIfNoEntry: false })?.isFile())
-        throw refuse(`The release is incomplete: ${file} is missing`);
+    const missing = missingReleaseFile(root);
+    if (missing)
+      throw refuse(`The release is incomplete: ${missing} is missing`);
     return version;
+  }
+
+  /**
+   * Unpack `tarball` into STATE/versions/<manifest version> through a staging directory,
+   * publishing it only once complete. An existing complete version with the same manifest
+   * is reused and a complete one with a different manifest is refused; an incomplete one
+   * cannot be a running release, so it is replaced.
+   */
+  async unpack(tarball: string): Promise<string> {
+    const { stateDir } = this.options;
+    this.requireDirectory(stateDir, "State directory", false);
+    const versions = join(stateDir, "versions");
+    mkdirSync(versions, { recursive: true, mode: 0o700 });
+    if (realpathSync(versions) !== versions)
+      throw refuse(`${versions} must be a real directory`);
+    // A killed install leaves its staging directory, named for its pid.
+    for (const name of readdirSync(versions)) {
+      const pid = /^\.staging-(\d+)-/.exec(name)?.[1];
+      if (pid && !processAlive(Number(pid)))
+        rmSync(join(versions, name), { recursive: true, force: true });
+    }
+    const staging = mkdtempSync(join(versions, `.staging-${process.pid}-`));
+    const aside = `${staging}-old`;
+    try {
+      const unpacked = await this.host.extract(
+        tarball,
+        staging,
+        this.io.signal,
+      );
+      // An interrupt kills the extraction; report it as such, not as a bad tarball.
+      this.checkInterrupt();
+      if (!unpacked)
+        throw new ServiceFailure("The tarball could not be unpacked");
+      let manifest: Buffer;
+      let version: string;
+      try {
+        manifest = readFileSync(join(staging, "manifest.json"));
+        version = manifestSchema.parse(
+          JSON.parse(manifest.toString("utf8")),
+        ).version;
+      } catch {
+        throw refuse("The tarball holds no valid release manifest.json");
+      }
+      const missing = missingReleaseFile(staging);
+      if (missing)
+        throw refuse(
+          `The tarball's release is incomplete: ${relative(staging, missing)} is missing`,
+        );
+      const target = join(versions, version);
+      const existing = lstatSync(target, { throwIfNoEntry: false });
+      if (existing) {
+        let same = false;
+        try {
+          same = readFileSync(join(target, "manifest.json")).equals(manifest);
+        } catch {
+          same = false;
+        }
+        if (existing.isDirectory() && !missingReleaseFile(target)) {
+          if (same) return target;
+          throw refuse(`${target} already holds a different release`);
+        }
+        renameSync(target, aside);
+      }
+      renameSync(staging, target);
+      return target;
+    } finally {
+      rmSync(staging, { recursive: true, force: true });
+      rmSync(aside, { recursive: true, force: true });
+    }
   }
 
   readRecord(): InstallRecord | null {
@@ -615,45 +752,253 @@ function portIsFree(port: number): Promise<boolean> {
 const message = (error: unknown) =>
   error instanceof ServiceFailure ? error.message : "operation failed";
 
+/**
+ * Sign in with the operator password over the session API the UI uses, issue one 90-day read
+ * credential and hand its token to `store`. The session is always logged out again, and a
+ * credential that could not be stored is revoked. Cleanup ignores the interrupt but is
+ * bounded, and its result is verified: `credentialActive` and `sessionOpen` report a revoke
+ * or logout that did not succeed, so the caller can tell the operator.
+ */
+export async function issueInstallCredential(
+  host: ServiceHost,
+  origin: string,
+  password: string,
+  name: string,
+  store: (token: string, signal: AbortSignal) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<{
+  outcome: "stored" | "wrong-password" | "failed";
+  /** A minted credential that could not be confirmed revoked. */
+  credentialActive: boolean;
+  /** The sign-in session that could not be confirmed logged out. */
+  sessionOpen: boolean;
+}> {
+  let cookie = "";
+  let credentialActive = false;
+  let sessionOpen = false;
+  let csrf = "";
+  // Cleanup calls ignore the interrupt: a minted credential must still be revoked.
+  const call = async (
+    method: string,
+    path: string,
+    body?: object,
+    interruptible = true,
+  ) => {
+    const response = await host.fetch(`${origin}${path}`, {
+      method,
+      headers: {
+        origin,
+        ...(cookie ? { cookie } : {}),
+        ...(csrf ? { "x-csrf-token": csrf } : {}),
+        ...(body ? { "content-type": "application/json" } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+      signal: AbortSignal.any([
+        host.timeout(HEALTH_PROBE_MS),
+        ...(interruptible && signal ? [signal] : []),
+      ]),
+    });
+    cookie = response.headers.get("set-cookie")?.split(";")[0] ?? cookie;
+    return response;
+  };
+  const nextSession = async (response: Response) => {
+    csrf = sessionSchema.parse(await response.json()).csrfToken;
+  };
+  // One retry: a revoke that is not confirmed leaves a 90-day credential active.
+  const revoke = async (id: string) => {
+    for (let attempt = 0; attempt < 2; attempt += 1)
+      try {
+        const response = await call(
+          "POST",
+          `/api/operator/credentials/${id}/revoke`,
+          {},
+          false,
+        );
+        await response.body?.cancel();
+        if (response.ok) return true;
+      } catch {
+        // Retried once, then reported.
+      }
+    return false;
+  };
+  let signedIn = false;
+  // A login the server may have accepted whose reply never arrived: its session cannot be closed.
+  let loginPending = false;
+  let mintAccepted = false;
+  let outcome: "stored" | "wrong-password" | "failed" = "failed";
+  const attempt = async () => {
+    await nextSession(await call("GET", "/api/operator/session"));
+    loginPending = true;
+    const login = await call("POST", "/api/operator/login", { password });
+    loginPending = false;
+    if (login.status === 401) {
+      await login.body?.cancel();
+      outcome = "wrong-password";
+      return;
+    }
+    if (login.status !== 200) return;
+    signedIn = true;
+    await nextSession(login);
+    // Nothing is minted once interrupted; past this point the mint is not interruptible, as an
+    // abort after the server minted it would orphan the credential.
+    if (signal?.aborted) return;
+    // A mint that times out or resets in flight may still exist on the server.
+    mintAccepted = true;
+    const minted = await call(
+      "POST",
+      "/api/operator/credentials",
+      { name, scope: "read", expiresInDays: 90 },
+      false,
+    );
+    mintAccepted = minted.ok;
+    const issued = operatorCredentialIssuedSchema.parse(await minted.json());
+    mintAccepted = false;
+    try {
+      // `store` is awaited to the end so that what it persisted always matches what is
+      // reported; its signal bounds and cancels its network check, and a failure revokes.
+      await store(
+        issued.token,
+        AbortSignal.any([
+          host.timeout(READINESS_PROBE_MS),
+          ...(signal ? [signal] : []),
+        ]),
+      );
+    } catch {
+      credentialActive = !(await revoke(issued.credential.id));
+      return;
+    }
+    outcome = "stored";
+    return;
+  };
+  try {
+    await attempt();
+  } catch {
+    // A mint the server accepted but whose reply was unusable cannot be revoked by id.
+    credentialActive ||= mintAccepted;
+    sessionOpen ||= loginPending;
+  } finally {
+    // The result is read after this runs, so a failed logout is reported.
+    if (signedIn)
+      sessionOpen = !(await call("POST", "/api/operator/logout", {}, false)
+        .then(async (r) => {
+          await r.body?.cancel();
+          return r.ok;
+        })
+        .catch(() => false));
+  }
+  return { outcome, credentialActive, sessionOpen };
+}
+
 /** Install the LaunchAgent for the release at `releaseRoot`; undoes itself on failure. */
 export function installService(
   options: ServiceOptions,
   releaseRoot: string,
   host: ServiceHost,
   io: ServiceIo,
+  first: FirstRun = { connection: "local", open: false },
 ): Promise<number> {
+  // A first install has no state directory yet; create it so the lock below covers it.
+  try {
+    if (
+      first.tarball &&
+      statSync(first.tarball, { throwIfNoEntry: false })?.isFile()
+    )
+      mkdirSync(options.stateDir, { recursive: true, mode: 0o700 });
+  } catch {
+    // The locked preflight reports what is wrong.
+  }
   return withLock(options, host, io, "install", () =>
-    installServiceLocked(options, releaseRoot, host, io),
+    installServiceLocked(options, releaseRoot, host, io, first),
   );
 }
+
+const NO_JOB_STAGES = ["preflight", "unpack", "auth"];
 
 async function installServiceLocked(
   options: ServiceOptions,
   releaseRoot: string,
   host: ServiceHost,
   io: ServiceIo,
+  first: FirstRun,
 ): Promise<number> {
   const service = new Service(options, host, io);
+  const { tarball, cli } = first;
   let stage = "preflight";
   let record: InstallRecord | null = null;
   let logs: string[] = [];
   try {
-    const version = service.releaseVersion(releaseRoot);
+    let root = releaseRoot;
+    let version = tarball ? undefined : service.releaseVersion(root);
+    if (tarball) {
+      try {
+        accessSync(tarball, constants.R_OK);
+      } catch {
+        throw refuse(`${tarball} is not a readable file`);
+      }
+      if (!statSync(tarball).isFile())
+        throw refuse(`${tarball} is not a readable file`);
+    }
+    if (cli && first.tokenFile) {
+      // Found only after the mint it would waste a credential.
+      if (lstatSync(first.tokenFile, { throwIfNoEntry: false }))
+        throw refuse(
+          `${first.tokenFile} already exists; choose another --token-file`,
+        );
+      if (!existsSync(dirname(first.tokenFile)))
+        throw refuse(`The directory for ${first.tokenFile} does not exist`);
+    }
     if (await service.loadedJob())
       throw refuse(`The ${options.label} job is already loaded`);
     if (existsSync(service.recordPath) || existsSync(service.activation))
       throw refuse(
         `${options.label} is already installed; use service upgrade or service uninstall`,
       );
-    if (!existsSync(service.authFile))
+    const authMissing = !existsSync(service.authFile);
+    if (authMissing && !cli?.interactive)
       throw refuse(
-        `${service.authFile} is missing; run \`ensemble service init-auth\``,
+        `${service.authFile} is missing; run install in an interactive terminal or run \`ensemble service init-auth\``,
       );
     if (!(await portIsFree(options.port)))
       throw refuse(`Port ${options.port} on 127.0.0.1 is in use`);
+    // The one password prompt. A cancelled prompt only skips sign-in, unless the password
+    // is needed to create the auth file.
+    let password: string | undefined;
+    service.checkInterrupt();
+    if (cli?.interactive)
+      try {
+        password =
+          (await cli.readPassword(
+            authMissing
+              ? "New Ensemble operator password: "
+              : "Ensemble operator password: ",
+            io.signal,
+          )) || undefined;
+      } catch {
+        password = undefined;
+      }
+    service.checkInterrupt();
+    if (authMissing && password === undefined)
+      throw refuse("An operator password is required to create the auth file");
+    if (tarball) {
+      stage = "unpack";
+      root = await service.unpack(tarball);
+      version = service.releaseVersion(root);
+    }
+    service.checkInterrupt();
+    if (authMissing && password !== undefined) {
+      stage = "auth";
+      mkdirSync(dirname(service.authFile), { recursive: true, mode: 0o700 });
+      const { OperatorAuth } = await import("../standalone/operator-auth.js");
+      try {
+        await OperatorAuth.initialize(service.authFile, password);
+      } catch {
+        throw new ServiceFailure("The operator auth file could not be created");
+      }
+    }
+    service.checkInterrupt();
     stage = "render";
     service.prepareDirectories();
-    ({ record, logs } = await service.activate(version, releaseRoot, {
+    ({ record, logs } = await service.activate(version as string, root, {
       dataDirectory: service.dataDir,
       authFile: service.authFile,
       origin: service.origin,
@@ -664,6 +1009,9 @@ async function installServiceLocked(
     await service.bootstrap();
     stage = "health";
     await service.waitForApp(service.origin);
+    // From here the service stays installed whatever happens: nothing below may throw.
+    const signInResult = await signIn(service, first, password);
+    const { connection, credentialActive, sessionOpen } = signInResult;
     service.write("stdout", {
       ok: true,
       operation: "install",
@@ -672,11 +1020,15 @@ async function installServiceLocked(
       origin: service.origin,
       plist: service.activation,
       logs,
+      connection,
+      credentialActive,
+      sessionOpen,
     });
+    await finishInstall(service, first, signInResult);
     return 0;
   } catch (error) {
     let jobStopped: boolean | null = null;
-    if (stage !== "preflight") {
+    if (!NO_JOB_STAGES.includes(stage)) {
       jobStopped = await service.leaveStopped(record);
       // Without a confirmed exit the record stays, so uninstall can finish the job.
       try {
@@ -694,6 +1046,103 @@ async function installServiceLocked(
       logs,
     });
     return 1;
+  }
+}
+
+/** What the sign-in left behind: the stored connection name (else null) and any cleanup that failed. */
+type SignIn = {
+  connection: string | null;
+  credentialName: string;
+  credentialActive: boolean;
+  sessionOpen: boolean;
+};
+
+/** Issues and stores the CLI credential. Never throws. */
+async function signIn(
+  service: Service,
+  first: FirstRun,
+  password: string | undefined,
+): Promise<SignIn> {
+  const { cli } = first;
+  const none = {
+    connection: null,
+    credentialName: "",
+    credentialActive: false,
+    sessionOpen: false,
+  };
+  if (!cli || password === undefined) return none;
+  try {
+    const name = [...`install · ${service.host.hostname()}`]
+      .filter((c) => c.charCodeAt(0) >= 32 && c.charCodeAt(0) !== 127)
+      .slice(0, 64)
+      .join("");
+    const issued = await issueInstallCredential(
+      service.host,
+      service.origin,
+      password,
+      name,
+      (token, storing) =>
+        cli.login(
+          first.connection,
+          service.origin,
+          token,
+          first.tokenFile,
+          storing,
+        ),
+      service.io.signal,
+    );
+    return {
+      connection: issued.outcome === "stored" ? first.connection : null,
+      credentialName: name,
+      credentialActive: issued.credentialActive,
+      sessionOpen: issued.sessionOpen,
+    };
+  } catch {
+    return none;
+  }
+}
+
+/** Doctor, the manual login line when not signed in, then the app URL. Human lines go to stderr; never throws. */
+async function finishInstall(
+  service: Service,
+  first: FirstRun,
+  { connection, credentialName, credentialActive, sessionOpen }: SignIn,
+) {
+  const app = `${service.origin}/app`;
+  const line = (text: string) => service.io.stderr.write(`${text}\n`);
+  const interrupted = () => service.io.signal?.aborted === true;
+  try {
+    if (connection !== null && !interrupted() && first.cli) {
+      const stop = AbortSignal.any([
+        service.host.timeout(DOCTOR_MS),
+        ...(service.io.signal ? [service.io.signal] : []),
+      ]);
+      // Doctor stops its own reads on `stop`; `bounded` only backs that up.
+      await bounded(first.cli.doctor(connection, stop), stop);
+    }
+  } catch {
+    // The URL below is still printed.
+  }
+  try {
+    if (credentialActive)
+      line(
+        `The credential "${credentialName}" may still be active; revoke it in Settings → CLI credentials.`,
+      );
+    if (sessionOpen)
+      line(
+        "The install's sign-in session could not be closed; it ends on its own.",
+      );
+    if (connection === null) {
+      line(
+        `Log in the CLI with a read credential from Settings → CLI credentials: ensemble auth login --connection ${first.connection} --url ${service.origin}`,
+      );
+      line("Then run: ensemble doctor");
+    }
+    line(`Open ${app}`);
+    if (first.open && !interrupted())
+      await service.host.open(app, service.io.signal);
+  } catch {
+    // Install already succeeded; a doctor or open failure is not an install failure.
   }
 }
 
@@ -879,12 +1328,20 @@ async function uninstallServiceLocked(
 function run(
   command: string,
   args: string[],
+  timeout = 20_000,
+  signal?: AbortSignal,
 ): Promise<{ status: number; stdout: string }> {
   return new Promise((done) =>
     execFile(
       command,
       args,
-      { encoding: "utf8", timeout: 20_000, env: childProcessEnvironment() },
+      {
+        encoding: "utf8",
+        timeout,
+        env: childProcessEnvironment(),
+        // Aborting kills the child.
+        ...(signal ? { signal } : {}),
+      },
       (error, stdout) =>
         done({
           status: !error ? 0 : typeof error.code === "number" ? error.code : -1,
@@ -916,6 +1373,20 @@ export function defaultServiceHost(): ServiceHost {
     sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
     timeout: (ms) => AbortSignal.timeout(ms),
     rename: renameSync,
+    // bsdtar refuses absolute and `..` member paths by default.
+    extract: async (tarball, dir, signal) =>
+      (
+        await run(
+          "/usr/bin/tar",
+          ["-xzf", tarball, "--strip-components", "1", "-C", dir],
+          300_000,
+          signal,
+        )
+      ).status === 0,
+    open: async (url, signal) => {
+      await run("/usr/bin/open", [url], 20_000, signal);
+    },
+    hostname,
   };
 }
 
@@ -939,6 +1410,8 @@ function parseLifecycleArgs(args: string[]) {
         label: { type: "string" },
         port: { type: "string" },
         connection: { type: "string" },
+        "token-file": { type: "string" },
+        "no-open": { type: "boolean" },
         "diagnostic-retention-days": { type: "string" },
         "diagnostic-storage-mib": { type: "string" },
       },
@@ -1010,7 +1483,13 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
           },
         }),
   };
-  return { options, positionals, connection: values.connection };
+  return {
+    options,
+    positionals,
+    connection: values.connection,
+    tokenFile: values["token-file"],
+    noOpen: values["no-open"] === true,
+  };
 }
 
 /** `ensemble service …`: argv starts after `service`. */
@@ -1019,6 +1498,7 @@ export async function serviceCommand(
   deps: CliDeps,
   operatorConnection: (name: string | undefined) => OperatorConnection,
   host: () => ServiceHost = defaultServiceHost,
+  cli?: InstallCli,
 ): Promise<number> {
   const [command, ...args] = argv;
   if (command === "init-auth") return initAuth(args, deps);
@@ -1030,8 +1510,14 @@ export async function serviceCommand(
     const parsed = lifecycleOptions(args, deps.env);
     if (
       !parsed ||
-      parsed.positionals.length !== (command === "upgrade" ? 1 : 0) ||
-      (command !== "upgrade" && parsed.connection !== undefined) ||
+      parsed.positionals.length > (command === "uninstall" ? 0 : 1) ||
+      parsed.positionals.length < (command === "upgrade" ? 1 : 0) ||
+      (command === "uninstall" && parsed.connection !== undefined) ||
+      (command !== "install" &&
+        (parsed.tokenFile !== undefined || parsed.noOpen)) ||
+      (parsed.connection !== undefined &&
+        command === "install" &&
+        !connectionNameSchema.safeParse(parsed.connection).success) ||
       (command === "uninstall" && parsed.options.diagnostic !== undefined) ||
       (command !== "install" && args.some((arg) => arg.startsWith("--port")))
     )
@@ -1044,6 +1530,13 @@ export async function serviceCommand(
         resolve(fileURLToPath(new URL("../../..", import.meta.url))),
         host(),
         deps,
+        {
+          tarball: parsed.positionals[0] && resolve(parsed.positionals[0]),
+          cli,
+          connection: parsed.connection ?? "local",
+          tokenFile: parsed.tokenFile && resolve(parsed.tokenFile),
+          open: !parsed.noOpen,
+        },
       );
     if (command === "uninstall") return uninstallService(options, host(), deps);
     return upgradeService(

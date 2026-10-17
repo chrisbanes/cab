@@ -1,10 +1,13 @@
 #!/usr/bin/env node
-// Bounded live proof for #980: install release A, upgrade to release B, then
-// uninstall, under a throwaway label with every path in a fresh private root.
-// Only `launchctl print|bootout` of that label is used outside the commands
-// under test, and only after its plist path matches the throwaway plist.
+// Bounded live proof for #980 and #1080: install release A from its tarball with the
+// one-command install (password prompt on a pseudo-terminal, read credential, CLI
+// login, doctor), upgrade to release B, then uninstall, under a throwaway label with
+// every path in a fresh private root. Only `launchctl print|bootout` of that label is
+// used outside the commands under test, and only after its plist path matches the
+// throwaway plist. It never touches the default label, the real Library folders, the
+// login Keychain (the token goes to a file) or the browser (--no-open).
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -16,12 +19,10 @@ import {
   realpathSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 
 const LAUNCHCTL = "/bin/launchctl";
 const repo = process.cwd();
@@ -36,7 +37,7 @@ const pids = new Set();
 function step(name, value) {
   evidence.steps[name] = value;
   evidence.durationsMs[name] = Date.now() - started;
-  process.stderr.write(`[980-live] ${name}\n`);
+  process.stderr.write(`[1080-live] ${name}\n`);
 }
 
 function run(command, args, options = {}) {
@@ -61,6 +62,60 @@ function print() {
     new RegExp(`^\\t${name} = (.*)$`, "m").exec(result.out)?.[1];
   const pid = field("pid");
   return { path: field("path"), pid: pid ? Number(pid) : undefined };
+}
+
+/**
+ * Runs a command on a pseudo-terminal (stdout, stderr and stdin are all the pty) and types
+ * `password` once, when `prompt` appears. The raw output is returned to the caller only
+ * for assertions and is never written to the evidence.
+ */
+function runOnPty(command, args, { env, prompt, password }) {
+  return new Promise((done, fail) => {
+    // BSD script rejects a socket as stdin, which is what Node gives a piped child; `cat`
+    // turns it into an anonymous pipe. It ends when stdin closes, right after the password.
+    const child = spawn(
+      "/bin/sh",
+      [
+        "-c",
+        'cat | "$@"',
+        "sh",
+        "/usr/bin/script",
+        "-q",
+        "/dev/null",
+        command,
+        ...args,
+      ],
+      {
+        env: { ...env, TERM: "dumb" },
+        stdio: ["pipe", "pipe", "pipe"],
+        detached: true,
+      },
+    );
+    let output = "";
+    let typed = false;
+    const timer = setTimeout(() => {
+      child.stdin.end();
+      // The whole group: `cat`, `script` and `ensemble` outlive a kill of `sh` alone.
+      process.kill(-child.pid, "SIGTERM");
+    }, 600_000);
+    child.stdout.on("data", (chunk) => {
+      output += chunk;
+      // A refusal before the prompt must not leave `cat` waiting for input.
+      if (!typed && output.includes('{"ok":false')) child.stdin.end();
+      if (!typed && output.includes(prompt)) {
+        typed = true;
+        child.stdin.end(`${password}\r`);
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      output += chunk;
+    });
+    child.on("error", fail);
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      done({ code, output, typed });
+    });
+  });
 }
 
 const processGone = (pid) =>
@@ -103,7 +158,10 @@ function baseline() {
       .out.split("\n")
       .slice(1)
       .map((line) => line.split("\t")[2])
-      .filter(Boolean)
+      // Spotlight's mdworker.shared labels come and go on their own.
+      .filter(
+        (label) => label && !label.startsWith("com.apple.mdworker.shared."),
+      )
       .sort(),
     launchAgents: listing(join(library, "LaunchAgents"), true),
     applicationSupportEnsemble: listing(
@@ -194,7 +252,12 @@ function buildAndUnpack(commit, out, versions) {
     "-C",
     directory,
   ]);
-  return { directory, version: manifest.version, commit: manifest.commit };
+  return {
+    directory,
+    version: manifest.version,
+    commit: manifest.commit,
+    tarball: join(out, tarball),
+  };
 }
 
 async function main() {
@@ -220,11 +283,14 @@ async function main() {
   assert.equal(print(), null, "throwaway label must start unloaded");
   step("1-preflight", { labelAbsent: true });
 
+  // Release A is unpacked only to run its `ensemble`; install unpacks the tarball itself.
+  mkdirSync(join(root, "bootstrap"), { mode: 0o700 });
   const a = buildAndUnpack(
     "HEAD",
     join(root, "build-a"),
-    join(state, "versions"),
+    join(root, "bootstrap"),
   );
+  const installedA = join(state, "versions", a.version);
   const bumpCommit = versionBumpCommit("0.1.1-live.980");
   const b = buildAndUnpack(
     bumpCommit,
@@ -243,23 +309,10 @@ async function main() {
   // Baselines are taken right around the launchd work to limit unrelated churn.
   before = baseline();
 
-  mkdirSync(join(state, "auth"), { mode: 0o700 });
+  // The auth file is deliberately not created: install must create it from the prompt.
   const authFile = join(state, "auth", "operator-auth.json");
   const password = randomBytes(24).toString("hex");
-  const auth = run(
-    join(a.directory, "node", "bin", "node"),
-    [
-      "--input-type=module",
-      "-e",
-      `const { OperatorAuth } = await import(${JSON.stringify(pathToFileURL(join(a.directory, "dist/src/standalone/operator-auth.js")).href)});
-await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
-    ],
-    { env: { PATH: "/usr/bin:/bin", AUTH_FILE: authFile, PASSWORD: password } },
-  );
-  assert.equal(auth.code, 0, "auth init failed");
-  step("3-auth", {
-    authFileMode: (statSync(authFile).mode & 0o777).toString(8),
-  });
+  assert.equal(existsSync(authFile), false);
 
   const env = {
     PATH: "/usr/bin:/bin",
@@ -279,14 +332,44 @@ await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
   const ensemble = (release, args) =>
     run(join(release.directory, "bin", "ensemble"), args, { env });
 
-  const install = ensemble(a, [
-    "service",
-    "install",
-    ...options,
-    "--port",
-    String(port),
-  ]);
-  assert.equal(install.code, 0, `install failed: ${install.err}`);
+  const tokenFile = join(cli, "token");
+  const installed = await runOnPty(
+    join(a.directory, "bin", "ensemble"),
+    [
+      "service",
+      "install",
+      a.tarball,
+      "--connection",
+      "live",
+      "--token-file",
+      tokenFile,
+      "--no-open",
+      ...options,
+      "--port",
+      String(port),
+    ],
+    { env, prompt: "New Ensemble operator password: ", password },
+  );
+  assert.ok(installed.typed, "the new-password prompt appeared");
+  assert.equal(installed.code, 0, "install failed (output withheld)");
+  assert.ok(
+    !installed.output.includes(password) && !installed.output.includes("ens_"),
+    "neither the password nor a token appears in the terminal output",
+  );
+  const result = JSON.parse(
+    installed.output
+      .split(/\r?\n/)
+      .find((line) => line.startsWith('{"ok":true,"operation":"install"')),
+  );
+  assert.equal(result.connection, "live");
+  assert.match(installed.output, /Check\s+Status\s+Reason/, "doctor table");
+  assert.ok(installed.output.includes(`Open ${origin}/app`));
+  assert.equal(
+    statSync(authFile).mode & 0o777,
+    0o600,
+    "install created the auth file",
+  );
+  assert.equal(statSync(tokenFile).mode & 0o777, 0o600);
   const lint = run("/usr/bin/plutil", ["-lint", activation]);
   assert.equal(lint.code, 0);
   const programNode = run("/usr/bin/plutil", [
@@ -295,61 +378,44 @@ await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
     "raw",
     activation,
   ]).out.trim();
-  assert.equal(programNode, join(a.directory, "node", "bin", "node"));
+  assert.equal(programNode, join(installedA, "node", "bin", "node"));
   const jobA = await until(() => print()?.pid && print(), 60_000, "job A pid");
   assert.equal(jobA.path, activation);
   pids.add(jobA.pid);
   const app = await fetch(`${origin}/app`);
   assert.equal(app.status, 200);
+  const status = ensemble(a, [
+    "auth",
+    "status",
+    "--connection",
+    "live",
+    "--output",
+    "json",
+  ]);
+  assert.equal(status.code, 0, `auth status failed: ${status.err}`);
+  const { credential } = JSON.parse(status.out).data;
+  assert.equal(credential.scope, "read");
+  assert.ok(credential.name.startsWith("install · "));
+  assert.equal(credential.expiresAt - credential.createdAt, 90 * 86_400_000);
   step("4-install", {
-    output: JSON.parse(install.out),
+    output: result,
+    passwordPromptOnPty: true,
+    authFileCreatedByInstall: "0600",
+    versionDirectoryCreatedByInstall: existsSync(installedA),
     plutilLint: "OK",
-    programArguments0: "versions/0.1.0/node/bin/node",
+    programArguments0: `versions/${a.version}/node/bin/node`,
     printPathIsActivation: true,
     pidPresent: true,
     appStatus: app.status,
+    doctorTableOnTerminal: true,
+    outputHasNoPasswordOrToken: true,
   });
-
-  let response = await fetch(`${origin}/api/operator/session`);
-  let cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
-  let csrf = (await response.json()).csrfToken;
-  const post = (path, body) =>
-    fetch(`${origin}${path}`, {
-      method: "POST",
-      headers: {
-        cookie,
-        origin,
-        "x-csrf-token": csrf,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-  response = await post("/api/operator/login", { password });
-  assert.equal(response.status, 200, "session login");
-  cookie = response.headers.get("set-cookie")?.split(";")[0] ?? "";
-  csrf = (await response.json()).csrfToken;
-  response = await post("/api/operator/credentials", {
-    name: "live-980",
-    scope: "read",
-    expiresInDays: 1,
+  step("5-cli-login", {
+    credentialNamePrefix: "install · ",
+    scope: credential.scope,
+    expiresInDays: 90,
+    tokenFileMode: "0600",
   });
-  assert.equal(response.status, 200, "issue read credential");
-  const tokenFile = join(cli, "token");
-  writeFileSync(tokenFile, `${(await response.json()).token}\n`, {
-    mode: 0o600,
-  });
-  const login = ensemble(a, [
-    "auth",
-    "login",
-    "--connection",
-    "live",
-    "--url",
-    origin,
-    "--token-file",
-    tokenFile,
-  ]);
-  assert.equal(login.code, 0, `auth login failed: ${login.err}`);
-  step("5-cli-login", { scope: "read" });
 
   const upgrade = ensemble(b, [
     "service",
@@ -387,7 +453,7 @@ await OperatorAuth.initialize(process.env.AUTH_FILE, process.env.PASSWORD);`,
     join(state, "data"),
     authFile,
     report.snapshot,
-    a.directory,
+    installedA,
     b.directory,
     ...report.logs,
   ])

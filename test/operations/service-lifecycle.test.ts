@@ -3,15 +3,19 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -19,6 +23,9 @@ import { createServer } from "node:net";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import {
+  defaultServiceHost,
+  type FirstRun,
+  type InstallCli,
   installService,
   type OperatorConnection,
   type ServiceHost,
@@ -29,6 +36,7 @@ import {
 } from "../../src/cli/service.js";
 import type { CliDeps } from "../../src/cli/types.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
+import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { markedDataDirectory } from "../fixtures/marked-data.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -51,6 +59,19 @@ class FakeLaunchd {
   identityUnavailable = false;
   printPath: string | undefined;
   health = 200;
+  /** Operator API requests the install's sign-in made. */
+  requests: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body: unknown;
+  }[] = [];
+  password = "test-password";
+  loginStatus: number | undefined;
+  revokeStatus = 200;
+  logoutStatus = 200;
+  onApi: (path: string) => void = () => {};
+  opened: string[] = [];
   onBootstrap: () => void = () => {};
   overrides: Partial<ServiceHost> = {};
 
@@ -105,7 +126,10 @@ class FakeLaunchd {
         if (exited) this.events.push("exited");
         return exited;
       },
-      fetch: async (url) => {
+      fetch: async (url, init) => {
+        const { pathname } = new URL(String(url));
+        if (pathname.startsWith("/api/operator/"))
+          return this.api(pathname, init);
         this.fetched.push(String(url));
         return new Response(null, { status: this.health });
       },
@@ -123,12 +147,76 @@ class FakeLaunchd {
           });
         renameSync(from, to);
       },
+      extract: async (tarball, dir) => {
+        execFileSync("tar", [
+          "-xzf",
+          tarball,
+          "--strip-components",
+          "1",
+          "-C",
+          dir,
+        ]);
+        return true;
+      },
+      open: async (url) => {
+        this.opened.push(url);
+      },
+      hostname: () => "test-host",
       ...this.overrides,
     };
   }
 
   mutations() {
     return this.calls.filter(([command]) => command !== "print");
+  }
+
+  /** The operator session, login, credential, revoke and logout routes, as the contract states them. */
+  api(path: string, init: RequestInit | undefined): Response {
+    const headers = Object.fromEntries(
+      Object.entries((init?.headers ?? {}) as Record<string, string>),
+    );
+    const body =
+      typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    this.requests.push({
+      method: init?.method ?? "GET",
+      path,
+      headers,
+      body,
+    });
+    this.onApi(path);
+    init?.signal?.throwIfAborted();
+    const json = (value: unknown, status = 200) =>
+      new Response(JSON.stringify(value), {
+        status,
+        headers: { "set-cookie": "session=abc; HttpOnly" },
+      });
+    const csrfToken = "c".repeat(43);
+    if (path === "/api/operator/session")
+      return json({ authenticated: false, csrfToken });
+    if (path === "/api/operator/login")
+      return body.password === this.password
+        ? json({ authenticated: true, csrfToken })
+        : new Response(null, { status: this.loginStatus ?? 401 });
+    if (path === "/api/operator/credentials")
+      return json({
+        credential: {
+          id: "11111111-1111-4111-8111-111111111111",
+          name: body.name,
+          scope: body.scope,
+          createdAt: 1,
+          expiresAt: 2,
+          lastUsedAt: null,
+          revokedAt: null,
+          replacesId: null,
+          state: "active",
+        },
+        token: `ens_11111111-1111-4111-8111-111111111111_${"s".repeat(43)}`,
+      });
+    if (path.endsWith("/revoke"))
+      return new Response("{}", { status: this.revokeStatus });
+    if (path === "/api/operator/logout")
+      return new Response("{}", { status: this.logoutStatus });
+    return json({});
   }
 }
 
@@ -194,7 +282,11 @@ function capture() {
   return { out, io };
 }
 
-async function setup(t: { after(fn: () => void): void }, data = false) {
+async function setup(
+  t: { after(fn: () => void): void },
+  data = false,
+  { unpacked = true, auth = true } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), "ensemble-service-"));
   chmodSync(root, 0o700);
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -204,8 +296,10 @@ async function setup(t: { after(fn: () => void): void }, data = false) {
   chmodSync(join(stateDir, "auth"), 0o700);
   writeFileSync(join(stateDir, "config.yaml"), "legacy: pipeline\n");
   const authFile = join(stateDir, "auth", "operator-auth.json");
-  writeFileSync(authFile, "{}\n", { mode: 0o600 });
-  const releaseA = release(stateDir, "0.1.0");
+  if (auth) writeFileSync(authFile, "{}\n", { mode: 0o600 });
+  const releaseA = unpacked
+    ? release(stateDir, "0.1.0")
+    : join(stateDir, "versions", "0.1.0");
   if (data) markedDataDirectory(join(stateDir, "data"));
   const options: ServiceOptions = {
     stateDir,
@@ -1207,4 +1301,666 @@ test("a record holding an out-of-range diagnostic value is refused before anythi
   assert.equal(f.launchd.jobs.has(f.options.label), true);
   writeFileSync(f.recordPath, original);
   assert.equal((await f.upgrade()).code, 0);
+});
+
+const TOKEN = `ens_11111111-1111-4111-8111-111111111111_${"s".repeat(43)}`;
+
+class FakeCli implements InstallCli {
+  interactive = true;
+  /** undefined cancels the prompt. */
+  password: string | undefined = "test-password";
+  failLogin = false;
+  prompts: string[] = [];
+  calls: string[] = [];
+  logins: unknown[][] = [];
+  signals: unknown[] = [];
+
+  /** Set to make the prompt wait until its signal aborts, like an open terminal prompt. */
+  hang = false;
+  /** Runs once the hanging prompt is open. */
+  onPrompt: () => void = () => {};
+
+  async readPassword(prompt: string, signal?: AbortSignal) {
+    this.prompts.push(prompt);
+    if (this.hang) {
+      const closed = new Promise<string>((_, reject) =>
+        signal?.addEventListener("abort", () => reject(new Error("aborted"))),
+      );
+      this.onPrompt();
+      return closed;
+    }
+    if (this.password === undefined) throw new Error("cancelled");
+    return this.password;
+  }
+  async login(...args: unknown[]) {
+    this.calls.push("login");
+    this.logins.push(args.slice(0, 4));
+    this.signals.push(args[4]);
+    if (this.failLogin) throw new Error("keychain unavailable");
+  }
+  /** Doctor never answers until released. */
+  doctorHangs = false;
+  releaseDoctor: () => void = () => {};
+
+  async doctor(connection: string) {
+    this.calls.push(`doctor ${connection}`);
+    // A referenced timer, so a lone run keeps the event loop alive until the bound fires.
+    if (this.doctorHangs)
+      await new Promise<void>((resolve) => {
+        this.releaseDoctor = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(resolve, 10_000);
+      });
+  }
+}
+
+/** A release tarball whose single top directory holds the release; `note` makes its manifest differ. */
+function tarballOf(
+  root: string,
+  version: string,
+  note?: string,
+  omit?: string,
+) {
+  const build = mkdtempSync(join(root, "build-"));
+  release(build, version);
+  if (omit) rmSync(join(build, "versions", version, omit));
+  if (note)
+    writeFileSync(
+      join(build, "versions", version, "manifest.json"),
+      JSON.stringify({
+        schema: "ensemble.release/v1",
+        platform: "darwin-arm64",
+        version,
+        note,
+      }),
+    );
+  const file = join(
+    root,
+    `ensemble-${version}${note ?? ""}${omit ? "-incomplete" : ""}.tar.gz`,
+  );
+  execFileSync("tar", ["-czf", file, "-C", join(build, "versions"), version]);
+  rmSync(build, { recursive: true, force: true });
+  return file;
+}
+
+async function tarballSetup(
+  t: { after(fn: () => void): void },
+  fixture: Parameters<typeof setup>[2] & { data?: boolean } = {},
+) {
+  const f = await setup(t, fixture.data, { unpacked: false, ...fixture });
+  const tarball = tarballOf(dirname(f.home), "0.1.0");
+  const origin = `http://127.0.0.1:${f.options.port}`;
+  const run = async (
+    overrides: Partial<FirstRun> = {},
+    cli: FakeCli = new FakeCli(),
+    signal?: AbortSignal,
+  ) => {
+    const { out, io } = capture();
+    const code = await installService(
+      f.options,
+      f.releaseA,
+      f.launchd.host(),
+      { ...io, signal },
+      { tarball, cli, connection: "local", open: true, ...overrides },
+    );
+    return { code, ...out, cli };
+  };
+  return { ...f, tarball, origin, run };
+}
+
+test("install TARBALL unpacks, asks for the password, signs in, runs doctor and opens the app", async (t) => {
+  const f = await tarballSetup(t);
+  const result = await f.run();
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(readdirSync(join(f.stateDir, "versions")), ["0.1.0"]);
+  assert.equal(
+    programArguments(f.activation)[0],
+    join(f.stateDir, "versions", "0.1.0", "node", "bin", "node"),
+  );
+  assert.deepEqual(result.cli.prompts, ["Ensemble operator password: "]);
+  assert.deepEqual(
+    f.launchd.requests.map(({ method, path }) => `${method} ${path}`),
+    [
+      "GET /api/operator/session",
+      "POST /api/operator/login",
+      "POST /api/operator/credentials",
+      "POST /api/operator/logout",
+    ],
+  );
+  const credential = f.launchd.requests[2];
+  assert.deepEqual(credential?.body, {
+    name: "install · test-host",
+    scope: "read",
+    expiresInDays: 90,
+  });
+  assert.equal(credential?.headers.origin, f.origin);
+  assert.equal(credential?.headers["x-csrf-token"], "c".repeat(43));
+  assert.equal(credential?.headers.cookie, "session=abc");
+  assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, undefined]]);
+  assert.ok(result.cli.signals[0] instanceof AbortSignal);
+  assert.deepEqual(result.cli.calls, ["login", "doctor local"]);
+  assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.ok, true);
+  assert.equal(output.connection, "local");
+  assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
+  assert.doesNotMatch(result.stderr + result.stdout, /test-password|ens_/);
+});
+
+test("install creates the auth file from the password when it is missing", async (t) => {
+  const f = await tarballSetup(t, { auth: false });
+  f.launchd.password = "new-password";
+  const cli = new FakeCli();
+  cli.password = "new-password";
+  const result = await f.run({}, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(cli.prompts, ["New Ensemble operator password: "]);
+  assert.equal(statSync(f.authFile).mode & 0o777, 0o600);
+  const auth = await OperatorAuth.open({
+    authFile: f.authFile,
+    origin: "http://127.0.0.1:8787",
+  });
+  try {
+    assert.ok(
+      await auth.authenticate(auth.createAnonymousSession().id, "new-password"),
+    );
+  } finally {
+    auth.close();
+  }
+  assert.equal(JSON.parse(result.stdout).connection, "local");
+});
+
+test("a missing auth file without a usable password refuses before anything changes", async (t) => {
+  for (const arrange of [
+    (cli: FakeCli) => {
+      cli.interactive = false;
+    },
+    (cli: FakeCli) => {
+      cli.password = undefined;
+    },
+    (cli: FakeCli) => {
+      cli.password = "";
+    },
+  ]) {
+    const f = await tarballSetup(t, { auth: false });
+    const cli = new FakeCli();
+    arrange(cli);
+    const before = tree(f.home);
+    const result = await f.run({}, cli);
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stderr).stage, "preflight");
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(tree(f.home), before);
+    assert.equal(existsSync(f.authFile), false);
+  }
+});
+
+test("tarball install keeps every refusal and creates nothing for the cheap ones", async (t) => {
+  const cases: [
+    string,
+    (f: Awaited<ReturnType<typeof tarballSetup>>) => unknown,
+    RegExp,
+  ][] = [
+    [
+      "label already loaded",
+      (f) => f.launchd.jobs.set(f.options.label, { path: "/x", pid: 1 }),
+      /already loaded/,
+    ],
+    [
+      "existing record",
+      (f) => {
+        mkdirSync(join(f.stateDir, "launchd"), { mode: 0o700 });
+        writeFileSync(f.recordPath, "{}");
+      },
+      /already installed/,
+    ],
+    ["tarball is not a file", (f) => rmSync(f.tarball), /not a readable file/],
+  ];
+  for (const [name, arrange, reason] of cases) {
+    const f = await tarballSetup(t);
+    arrange(f);
+    const before = tree(f.home);
+    const result = await f.run();
+    assert.equal(result.code, 1, name);
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "preflight", name);
+    assert.match(report.error, reason, name);
+    assert.deepEqual(f.launchd.mutations(), [], name);
+    assert.deepEqual(tree(f.home), before, name);
+    assert.deepEqual(result.cli.prompts, [], name);
+  }
+  const f = await tarballSetup(t);
+  const busy = createServer().listen(f.options.port, "127.0.0.1");
+  await new Promise((done) => busy.once("listening", done));
+  try {
+    const before = tree(f.home);
+    const result = await f.run();
+    assert.equal(result.code, 1);
+    assert.match(JSON.parse(result.stderr).error, /in use/);
+    assert.deepEqual(tree(f.home), before);
+  } finally {
+    await new Promise((done) => busy.close(done));
+  }
+});
+
+test("an existing version directory is reused when its manifest matches and refused otherwise", async (t) => {
+  const same = await setup(t);
+  writeFileSync(join(same.releaseA, "marker"), "kept");
+  const reused = await installService(
+    same.options,
+    same.releaseA,
+    same.launchd.host(),
+    capture().io,
+    {
+      tarball: tarballOf(dirname(same.home), "0.1.0"),
+      cli: new FakeCli(),
+      connection: "local",
+      open: false,
+    },
+  );
+  assert.equal(reused, 0);
+  assert.equal(readFileSync(join(same.releaseA, "marker"), "utf8"), "kept");
+  assert.deepEqual(readdirSync(join(same.stateDir, "versions")), ["0.1.0"]);
+
+  const other = await setup(t);
+  const before = tree(join(other.stateDir, "versions"));
+  const { out, io } = capture();
+  const code = await installService(
+    other.options,
+    other.releaseA,
+    other.launchd.host(),
+    io,
+    {
+      tarball: tarballOf(dirname(other.home), "0.1.0", "different"),
+      cli: new FakeCli(),
+      connection: "local",
+      open: false,
+    },
+  );
+  assert.equal(code, 1);
+  const report = JSON.parse(out.stderr);
+  assert.equal(report.stage, "unpack");
+  assert.equal(report.jobStopped, null);
+  assert.match(report.error, /already holds a different release/);
+  assert.deepEqual(tree(join(other.stateDir, "versions")), before);
+  assert.deepEqual(other.launchd.mutations(), []);
+});
+
+test("a wrong password, cancelled prompt or failed store leaves the service installed with the manual login line", async (t) => {
+  const login = (f: { origin: string }) =>
+    `ensemble auth login --connection local --url ${f.origin}`;
+  const settled = async (
+    f: Awaited<ReturnType<typeof tarballSetup>>,
+    result: Awaited<ReturnType<typeof f.run>>,
+  ) => {
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(existsSync(f.recordPath), true);
+    assert.equal(existsSync(f.activation), true);
+    assert.deepEqual(f.launchd.mutations(), [
+      ["bootstrap", `gui/${UID}`, f.activation],
+    ]);
+    assert.equal(JSON.parse(result.stdout).connection, null);
+    assert.ok(result.stderr.includes(login(f)));
+    assert.ok(result.stderr.includes("Then run: ensemble doctor"));
+    assert.deepEqual(
+      result.cli.calls.filter((c) => c.startsWith("doctor")),
+      [],
+    );
+  };
+
+  let f = await tarballSetup(t);
+  f.launchd.password = "other-password";
+  await settled(f, await f.run());
+  assert.deepEqual(
+    f.launchd.requests.map(({ path }) => path),
+    ["/api/operator/session", "/api/operator/login"],
+  );
+
+  f = await tarballSetup(t);
+  const cancelled = new FakeCli();
+  cancelled.password = undefined;
+  await settled(f, await f.run({}, cancelled));
+  assert.deepEqual(f.launchd.requests, []);
+
+  f = await tarballSetup(t);
+  const failing = new FakeCli();
+  failing.failLogin = true;
+  await settled(f, await f.run({}, failing));
+  const revokes = f.launchd.requests.filter(({ path }) =>
+    path.endsWith("/revoke"),
+  );
+  assert.equal(revokes.length, 1);
+  assert.equal(
+    revokes[0]?.path,
+    "/api/operator/credentials/11111111-1111-4111-8111-111111111111/revoke",
+  );
+  assert.equal(f.launchd.requests.at(-1)?.path, "/api/operator/logout");
+});
+
+test("an unconfirmed revoke or logout is reported in the result and on stderr, and the install still succeeds", async (t) => {
+  const f = await tarballSetup(t);
+  f.launchd.revokeStatus = 500;
+  f.launchd.logoutStatus = 500;
+  const failing = new FakeCli();
+  failing.failLogin = true;
+  const result = await f.run({}, failing);
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.connection, null);
+  assert.equal(output.credentialActive, true);
+  assert.equal(output.sessionOpen, true);
+  assert.match(
+    result.stderr,
+    /The credential "install · test-host" may still be active; revoke it in Settings → CLI credentials\./,
+  );
+  assert.match(result.stderr, /could not be closed/);
+  assert.equal(existsSync(f.recordPath), true);
+  // The revoke is tried twice.
+  assert.equal(
+    f.launchd.requests.filter(({ path }) => path.endsWith("/revoke")).length,
+    2,
+  );
+
+  const clean = await tarballSetup(t);
+  const ok = await clean.run();
+  assert.equal(JSON.parse(ok.stdout).credentialActive, false);
+  assert.equal(JSON.parse(ok.stdout).sessionOpen, false);
+});
+
+test("a doctor that never answers is abandoned on its bound and the URL is still printed and opened", async (t) => {
+  const f = await tarballSetup(t);
+  const cli = new FakeCli();
+  cli.doctorHangs = true;
+  t.after(() => cli.releaseDoctor());
+  const result = await f.run({}, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stderr, new RegExp(`Open ${f.origin}/app`));
+  assert.deepEqual(f.launchd.opened, [`${f.origin}/app`]);
+});
+
+test("an interrupt while signing in leaves the service installed", async (t) => {
+  const f = await tarballSetup(t);
+  const interrupt = new AbortController();
+  f.launchd.onApi = (path) => {
+    if (path === "/api/operator/login") interrupt.abort();
+  };
+  const result = await f.run({}, new FakeCli(), interrupt.signal);
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.launchd.mutations(), [
+    ["bootstrap", `gui/${UID}`, f.activation],
+  ]);
+  assert.equal(existsSync(f.recordPath), true);
+  assert.equal(JSON.parse(result.stdout).connection, null);
+  assert.deepEqual(result.cli.calls, []);
+  assert.deepEqual(f.launchd.opened, []);
+});
+
+test("--no-open skips the browser and --token-file reaches the CLI login", async (t) => {
+  const f = await tarballSetup(t);
+  const tokenFile = join(dirname(f.home), "install.token");
+  const result = await f.run({ open: false, tokenFile });
+  assert.equal(result.code, 0, result.stderr);
+  assert.deepEqual(f.launchd.opened, []);
+  assert.deepEqual(result.cli.logins, [["local", f.origin, TOKEN, tokenFile]]);
+});
+
+test("upgrade never signs in or mints a credential", async (t) => {
+  const f = await tarballSetup(t, { data: true });
+  assert.equal((await f.run()).code, 0);
+  f.launchd.requests = [];
+  f.launchd.clock += 60_000;
+  const releaseB = release(f.stateDir, "0.2.0");
+  const code = await upgradeService(
+    { ...f.options, port: 1 },
+    releaseB,
+    {
+      origin: async () => f.origin,
+      readiness: async () => [{ id: "codex-login", status: "pass" }],
+    },
+    f.launchd.host(),
+    capture().io,
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(f.launchd.requests, []);
+});
+
+test("install accepts a tarball, a connection, a token file and --no-open; other commands do not", async (t) => {
+  const f = await setup(t);
+  const fake = new FakeLaunchd(f.snapshots);
+  const { io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const unused = (): OperatorConnection => {
+    throw new Error("unused");
+  };
+  const run = (...argv: string[]) =>
+    serviceCommand(argv, deps, unused, () => fake.host());
+  for (const argv of [
+    ["install", "a.tgz", "b.tgz"],
+    ["install", "--connection", "bad name"],
+    ["upgrade", f.releaseA, "--token-file", "x"],
+    ["upgrade", f.releaseA, "--no-open"],
+    ["uninstall", "--token-file", "x"],
+    ["uninstall", "--no-open"],
+    ["uninstall", "--connection", "x"],
+  ])
+    assert.equal(await run(...argv), 2, argv.join(" "));
+  // Accepted: it then refuses the missing tarball before touching launchd.
+  assert.equal(
+    await run(
+      "install",
+      join(f.home, "missing.tar.gz"),
+      "--connection",
+      "live",
+      "--token-file",
+      join(f.home, "token"),
+      "--no-open",
+      "--label",
+      f.options.label,
+    ),
+    1,
+  );
+  assert.deepEqual(fake.mutations(), []);
+});
+
+test("a first install with no state directory creates it and still holds the lock", async (t) => {
+  const f = await tarballSetup(t, { auth: false });
+  rmSync(f.stateDir, { recursive: true });
+  const lock = join(f.stateDir, `.${f.options.label}.lock`);
+  let lockedAtBootstrap = false;
+  f.launchd.onBootstrap = () => {
+    lockedAtBootstrap = existsSync(lock);
+  };
+  const cli = new FakeCli();
+  f.launchd.password = "test-password";
+  const result = await f.run({}, cli);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(lockedAtBootstrap, true);
+  assert.equal(existsSync(lock), false);
+  assert.equal(statSync(f.stateDir).mode & 0o777, 0o700);
+  assert.equal(statSync(f.authFile).mode & 0o777, 0o600);
+});
+
+test("an interrupt during the tarball extraction stops before the auth file, the LaunchAgent or any launchd change", async (t) => {
+  for (const extracted of [false, true]) {
+    const f = await tarballSetup(t, { auth: false });
+    const interrupt = new AbortController();
+    const real = f.launchd.host().extract;
+    // `false` is tar killed by the signal; `true` is tar finishing just as the interrupt lands.
+    f.launchd.overrides.extract = async (tarball, dir, signal) => {
+      assert.equal(signal, interrupt.signal);
+      if (extracted) await real(tarball, dir);
+      interrupt.abort();
+      return extracted;
+    };
+    const result = await f.run({}, new FakeCli(), interrupt.signal);
+    assert.equal(result.code, 1, String(extracted));
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "unpack");
+    assert.equal(report.error, "interrupted");
+    assert.equal(existsSync(f.authFile), false);
+    assert.equal(existsSync(f.activation), false);
+    assert.equal(existsSync(f.recordPath), false);
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), []);
+    assert.deepEqual(f.launchd.requests, []);
+  }
+});
+
+test("the default tar extraction is killed when its signal aborts", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "ensemble-extract-"));
+  // tar blocks opening a FIFO that has no writer, standing in for a long extraction.
+  const fifo = join(root, "release.tar.gz");
+  execFileSync("mkfifo", [fifo]);
+  const destination = join(root, "out");
+  mkdirSync(destination);
+  // Only this process's own child counts: GNU tar forks a helper that the abort cannot reach,
+  // which is released below.
+  const running = () =>
+    execFileSync(
+      "ps",
+      ["-A", "-ww", "-o", "pid=", "-o", "ppid=", "-o", "args="],
+      {
+        encoding: "utf8",
+      },
+    )
+      .split("\n")
+      .some((line) => {
+        const [, parent] = line.trim().split(/\s+/);
+        return Number(parent) === process.pid && line.includes(fifo);
+      });
+  t.after(() => {
+    // Release a blocked GNU helper first, then remove the directory.
+    try {
+      closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+    } catch {
+      // No reader is waiting.
+    }
+    rmSync(root, { recursive: true, force: true });
+  });
+  const interrupt = new AbortController();
+  const extraction = defaultServiceHost().extract(
+    fifo,
+    destination,
+    interrupt.signal,
+  );
+  const deadline = Date.now() + 5000;
+  while (!running() && Date.now() < deadline)
+    await new Promise((done) => setTimeout(done, 25));
+  assert.equal(running(), true, "tar started");
+  const started = Date.now();
+  interrupt.abort();
+  assert.equal(await extraction, false);
+  assert.ok(Date.now() - started < 5000, "returns promptly");
+  while (running() && Date.now() < deadline + 5000)
+    await new Promise((done) => setTimeout(done, 25));
+  assert.equal(running(), false, "tar was terminated");
+  assert.deepEqual(readdirSync(destination), []);
+});
+
+test("an interrupt before or during the password prompt stops the install before it changes anything", async (t) => {
+  for (const when of ["before", "during"] as const) {
+    const f = await tarballSetup(t, { auth: false });
+    const interrupt = new AbortController();
+    const cli = new FakeCli();
+    if (when === "before") interrupt.abort();
+    else {
+      cli.hang = true;
+      cli.onPrompt = () => interrupt.abort();
+    }
+    const before = tree(f.home);
+    const result = await f.run({}, cli, interrupt.signal);
+    assert.equal(result.code, 1, when);
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "preflight", when);
+    assert.equal(report.error, "interrupted", when);
+    assert.deepEqual(
+      cli.prompts,
+      when === "before" ? [] : ["New Ensemble operator password: "],
+    );
+    assert.equal(existsSync(f.authFile), false, when);
+    assert.deepEqual(f.launchd.mutations(), [], when);
+    assert.deepEqual(tree(f.home), before, when);
+    assert.equal(
+      existsSync(join(f.stateDir, `.${f.options.label}.lock`)),
+      false,
+      when,
+    );
+  }
+});
+
+test("a tarball with an incomplete release is refused before publishing, and a rerun with a good one succeeds", async (t) => {
+  for (const omit of ["node/bin/node", "dist/src/standalone/cli.js"]) {
+    const f = await tarballSetup(t);
+    const bad = tarballOf(dirname(f.home), "0.1.0", undefined, omit);
+    const refused = await f.run({ tarball: bad });
+    assert.equal(refused.code, 1, omit);
+    const report = JSON.parse(refused.stderr);
+    assert.equal(report.stage, "unpack", omit);
+    assert.match(report.error, /incomplete/, omit);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), [], omit);
+    assert.deepEqual(f.launchd.mutations(), [], omit);
+    const retried = await f.run();
+    assert.equal(retried.code, 0, retried.stderr);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), ["0.1.0"]);
+  }
+});
+
+test("an incomplete or empty version directory is replaced, a complete different one is not", async (t) => {
+  for (const damage of ["missing node", "empty"]) {
+    const f = await tarballSetup(t);
+    const target = join(f.stateDir, "versions", "0.1.0");
+    release(f.stateDir, "0.1.0");
+    if (damage === "empty") {
+      rmSync(target, { recursive: true });
+      mkdirSync(target);
+    } else rmSync(join(target, "node", "bin", "node"));
+    const result = await f.run();
+    assert.equal(result.code, 0, `${damage}: ${result.stderr}`);
+    assert.ok(existsSync(join(target, "node", "bin", "node")), damage);
+    assert.deepEqual(readdirSync(join(f.stateDir, "versions")), ["0.1.0"]);
+  }
+});
+
+test("a symlinked versions directory is refused before anything is extracted", async (t) => {
+  const f = await tarballSetup(t);
+  const elsewhere = join(dirname(f.home), "elsewhere");
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, join(f.stateDir, "versions"));
+  const result = await f.run();
+  assert.equal(result.code, 1);
+  assert.equal(JSON.parse(result.stderr).stage, "unpack");
+  assert.deepEqual(readdirSync(elsewhere), []);
+  assert.deepEqual(f.launchd.mutations(), []);
+});
+
+test("a staging directory left by a dead install is swept, a live one is kept", async (t) => {
+  const f = await tarballSetup(t);
+  const versions = join(f.stateDir, "versions");
+  mkdirSync(versions, { recursive: true });
+  const dead = spawnSync("true").pid;
+  mkdirSync(join(versions, `.staging-${dead}-abc`));
+  mkdirSync(join(versions, `.staging-${process.pid}-abc`));
+  assert.equal((await f.run()).code, 0);
+  assert.deepEqual(
+    readdirSync(versions).sort(),
+    ["0.1.0", `.staging-${process.pid}-abc`].sort(),
+  );
+});
+
+test("a token file that already exists is refused before anything changes or any credential is minted", async (t) => {
+  for (const tokenFile of [
+    (f: { home: string }) => f.home,
+    (f: { home: string }) => join(f.home, "missing", "token"),
+  ]) {
+    const f = await tarballSetup(t);
+    const before = tree(f.home);
+    const result = await f.run({ tokenFile: tokenFile(f) });
+    assert.equal(result.code, 1);
+    assert.equal(JSON.parse(result.stderr).stage, "preflight");
+    assert.deepEqual(f.launchd.requests, []);
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(tree(f.home), before);
+  }
 });

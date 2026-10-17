@@ -21,6 +21,7 @@ directory. The defaults are:
 | Logs | `~/Library/Logs/Ensemble/<label>.<version>.<UTC time>.{out,err}.log` |
 | LaunchAgent | `~/Library/LaunchAgents/<label>.plist` |
 
+Commands below use `STATE="$HOME/Library/Application Support/Ensemble"`.
 The label defaults to `local.ensemble.service` and the port to `8787`
 (`http://127.0.0.1:8787`). `--state-dir`, `--log-dir`, `--launch-agents-dir`,
 `--label` and, at install only, `--port` override them; upgrade keeps the
@@ -34,48 +35,87 @@ private. The state directory may already hold unrelated files, such as the
 earlier pipeline implementation's `config.yaml` and `state/`; the commands read
 and change only the entries above.
 
-Unpack a release into its version directory, then initialize the operator
-password once. `init-auth` reads the password from a hidden terminal prompt and
-writes a mode `0600` verifier, not the password:
-
-```sh
-STATE="$HOME/Library/Application Support/Ensemble"
-mkdir -p "$STATE/versions/0.1.0"
-tar -xzf ensemble-0.1.0-darwin-arm64.tar.gz --strip-components 1 -C "$STATE/versions/0.1.0"
-"$STATE/versions/0.1.0/bin/ensemble" service init-auth
-```
-
 ### Install
 
-```sh
-"$STATE/versions/0.1.0/bin/ensemble" service install
-```
-
-Install binds the LaunchAgent to the release it runs from. It refuses, changing
-nothing, unless that release sits directly in `STATE/versions` with a
-`manifest.json` naming the same version, the label is not loaded, no install
-record or LaunchAgent for the label exists, the auth file exists, and the port is
-free. It then renders the plist with the same validation as before (absolute
-canonical paths, no symlinks, new log files, the fixed `PATH`, `RunAtLoad=true`,
-`KeepAlive=false`, no secrets), lints it with `plutil -lint`, records it, moves it
-into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and waits up to 120
-seconds for `/app`. The plist names the release's own `node/bin/node` and
-`dist/src/standalone/cli.js`, so each version keeps its exact executable.
-
-If bootstrap or the wait fails, install boots out the job it started, confirms
-the process exited, removes the LaunchAgent and its record, keeps the data, auth
-and logs, reports the log paths and exits 1. Run it again after fixing the cause.
-If the exit cannot be confirmed, it reports `"jobStopped":false` and keeps the
-record so that `service uninstall` can finish.
-
-Then log in the operator CLI with a read credential issued in Settings →
-Credentials. Upgrade reads readiness through this connection, and `ensemble
-doctor` shows the same checks:
+Install a release tarball with one command. It unpacks the tarball, installs the
+service, signs the CLI in and opens the app:
 
 ```sh
-"$STATE/versions/0.1.0/bin/ensemble" auth login --connection local --url http://127.0.0.1:8787
-"$STATE/versions/0.1.0/bin/ensemble" doctor
+tar -xzf ensemble-0.1.0-darwin-arm64.tar.gz
+ensemble-0.1.0-darwin-arm64/bin/ensemble service install ensemble-0.1.0-darwin-arm64.tar.gz
 ```
+
+The first `tar` only makes the tarball's own `ensemble` available to run. Install
+unpacks the tarball again into `STATE/versions/<version>` through a staging
+directory. If that version directory already exists with the same
+`manifest.json`, it is reused; with a different complete one, install refuses and
+changes nothing. The release is published only once it holds `node/bin/node` and
+`dist/src/standalone/cli.js`, and an incomplete version directory (for example
+from an interrupted hand unpack) is replaced. A later failure keeps the unpacked
+version, so a rerun reuses it, and a leftover `.staging-<pid>-*` directory from a
+killed install is removed by the next one.
+`service install` with no tarball binds to the release it runs from, which must
+already sit in `STATE/versions` (for example one you unpacked there with
+`tar -xzf FILE --strip-components 1 -C "$STATE/versions/0.1.0"`).
+
+Install refuses, changing nothing beyond creating an empty `STATE` (mode `0700`), unless the tarball is a readable file (or the
+release sits directly in `STATE/versions` with a `manifest.json` naming the same
+version), the label is not loaded, no install record or LaunchAgent for the label
+exists, and the port is free. With `--token-file`, the path must not exist and its
+directory must. A missing auth file also refuses outside an
+interactive terminal; run install in one, or run `ensemble service init-auth`
+first. It then asks once, on a hidden prompt, for the operator password (a new
+password when the auth file is missing, which it creates as a mode `0600`
+verifier, not the password). It renders the plist with the same validation as
+before (absolute canonical paths, no symlinks, new log files, the fixed `PATH`,
+`RunAtLoad=true`, `KeepAlive=false`, no secrets), lints it with `plutil -lint`,
+records it, moves it into `~/Library/LaunchAgents`, runs `launchctl bootstrap` and
+waits up to 120 seconds for `/app`. The plist names the release's own
+`node/bin/node` and `dist/src/standalone/cli.js`, so each version keeps its exact
+executable.
+
+If unpacking fails, install exits 1 before any job exists. If bootstrap or the
+wait fails, install boots out the job it started, confirms the process exited,
+removes the LaunchAgent and its record, keeps the data, auth and logs, reports the
+log paths and exits 1. Either way it keeps what it already created: the unpacked
+version, and the auth file once created, so a rerun asks for the existing password
+instead of a new one. Run it again after fixing the cause. If the exit cannot be confirmed, it reports `"jobStopped":false` and
+keeps the record so that `service uninstall` can finish.
+
+Once `/app` answers, the service stays installed whatever follows. Install signs
+in with the password over the session API the UI uses, issues one `read`
+credential named `install · <hostname>` that expires in 90 days, and stores it as
+the CLI connection `local` (`--connection NAME` renames it). The token goes to the
+login Keychain, or with `--token-file PATH` to a new `0600` file at that path
+(an existing file is refused). Install then runs `ensemble doctor` for that
+connection, prints its table and `Fix` lines on stderr, and opens
+`http://127.0.0.1:PORT/app` unless you pass `--no-open`. The JSON result stays on
+stdout and gains `"connection":"local"`, or `null` when the CLI was not logged in,
+plus `"credentialActive"` and `"sessionOpen"`. `credentialActive` is true when the
+minted credential could not be confirmed revoked (the revoke is tried twice) or its
+creation was not confirmed; install then prints its name and tells you to revoke it in
+Settings → CLI credentials. `sessionOpen` is true when the sign-in logout was not
+confirmed or the login reply was lost. The exit status stays 0 because the service is installed.
+The password and token are never printed or put on a command line.
+
+If the prompt is cancelled (the Ctrl-C keypress there skips sign-in; it does not
+stop the install, whereas a SIGINT sent from outside stops it before anything changes)
+or skipped, the password is wrong (one attempt only),
+the credential cannot be stored (it is then revoked), or doctor or the browser
+open fails, install still exits 0 with the service running. It prints the manual
+step and you finish it yourself, using a read credential issued in Settings → CLI
+credentials:
+
+```sh
+ensemble auth login --connection local --url http://127.0.0.1:8787
+ensemble doctor
+```
+
+The issued credential widens nothing: whoever runs install as the service user
+already holds the auth file and the data directory. It is listed, rotatable and
+revocable in Settings → CLI credentials like any other. Upgrade never signs in or
+issues a credential; it reads readiness through this connection, so an expired or
+revoked credential stops upgrade with the existing message until you log in again.
 
 ### Upgrade
 
@@ -171,7 +211,8 @@ and check `/app`.
 
 ### Not yet proven
 
-The [bounded live run](../evidence/980-service-lifecycle-2026-10-14.md) used a
+The bounded live runs ([lifecycle](../evidence/980-service-lifecycle-2026-10-14.md),
+[one-command install](../evidence/1080-one-command-install-2026-10-16.md)) used a
 throwaway label and temporary directories. These still need the maintainer:
 
 - the first install with the default label into the real
@@ -182,6 +223,8 @@ throwaway label and temporary directories. These still need the maintainer:
   turn, where the bootout interrupts work and recovery holds apply;
 - installing from a CI-built tagged release, or from a browser-downloaded tarball
   with quarantine attributes;
+- the install's Keychain write and browser open, which the live run replaced with
+  `--token-file` and `--no-open`;
 - Claude turns under launchd;
 - the [#761](https://github.com/chrisbanes/ensemble/issues/761) cutover.
 
@@ -596,8 +639,9 @@ service against a fresh data directory, and expects the operator UI and one of i
 assets within 120 seconds before stopping that service. It does not exercise a real
 Codex login.
 
-To run a release as the service, unpack it into `STATE/versions/<version>` and
-use [`ensemble service install`](#install) or [`upgrade`](#upgrade).
+To run a release as the service, use [`ensemble service install`](#install) with its
+tarball, or [`upgrade`](#upgrade) with a release unpacked into
+`STATE/versions/<version>`.
 
 ### Tagged releases
 
