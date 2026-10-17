@@ -26,6 +26,39 @@ function fixture(t: { after(fn: () => void): void }) {
   return root;
 }
 
+test("a --help after -- is the value of a service or snapshot command, not a help request", (t) => {
+  const root = fixture(t);
+  const home = { HOME: root };
+  // The tarball named `--help` does not exist: install refuses in preflight and creates nothing.
+  const install = run(MAIN, ["service", "install", "--", "--help"], home);
+  assert.equal(install.code, 1);
+  assert.equal(install.out, "");
+  const report = JSON.parse(install.err);
+  assert.equal(report.operation, "install");
+  assert.equal(report.stage, "preflight");
+  assert.match(report.error, /--help is not a readable file$/);
+  assert.equal(existsSync(join(root, "Library")), false);
+  // The version directory named `--help` is not an install to upgrade.
+  const upgrade = run(MAIN, ["service", "upgrade", "--", "--help"], home);
+  assert.equal(upgrade.code, 1);
+  assert.equal(upgrade.out, "");
+  assert.match(JSON.parse(upgrade.err).error, /is not installed/);
+  // The authentication file named `--help`: init-auth stops before creating anything.
+  const auth = run(MAIN, ["service", "init-auth", "--", "--help"], home);
+  assert.equal(auth.code, 1);
+  assert.equal(auth.out, "");
+  assert.match(auth.err, /run it in an interactive terminal/);
+  // snapshot takes no option terminator, so `--` and `--help` are two unexpected words.
+  const snapshot = run(MAIN, ["snapshot", "verify", "--", "--help"], home);
+  assert.equal(snapshot.code, 2);
+  assert.equal(snapshot.out, "");
+  assert.match(
+    snapshot.err,
+    /^ensemble: Unexpected arguments\. \(usage\)\nUsage:\n/,
+  );
+  assert.equal(existsSync(join(root, "Library")), false);
+});
+
 test("ensemble snapshot create, verify and restore match the operations entry point", (t) => {
   const root = fixture(t);
   const data = join(root, "data");

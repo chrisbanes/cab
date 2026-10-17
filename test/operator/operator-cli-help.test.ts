@@ -163,6 +163,34 @@ test("help requests that are not an area fail as usage errors", async (t) => {
   }
 });
 
+test("words after a standalone -- are values, not help, version or --all requests", async (t) => {
+  const h = harness(t);
+  // Each word reaches `task get` as its TASK_ID instead of being read as an option or command.
+  for (const args of [
+    ["task", "get", "--", "--help"],
+    ["task", "get", "--", "--version"],
+    ["task", "get", "--", "help"],
+    ["task", "get", "help"],
+  ]) {
+    const r = await h.run(args);
+    const name = args.join(" ");
+    assert.equal(r.code, 2, name);
+    assert.equal(r.out, "", name);
+    assert.equal(
+      lines(r.err)[0],
+      "ensemble: TASK_ID must be a UUID. (invalid-input)",
+      name,
+    );
+    assert.equal(fixLines(r.err).length, 1, name);
+  }
+  // `--all` after the terminator is an extra word, not the help flag.
+  const all = await h.run(["task", "list", "--", "--all"]);
+  assert.equal(all.code, 2);
+  assert.equal(all.out, "");
+  assert.equal(lines(all.err)[0], "ensemble: Unexpected arguments. (usage)");
+  assert.equal(fixLines(all.err).length, 1);
+});
+
 test("a request for help on an unknown word prints the start block", async (t) => {
   const h = harness(t);
   const r = await h.run(["bogus", "--help"]);

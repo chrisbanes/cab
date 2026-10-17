@@ -93,14 +93,18 @@ const LIFECYCLE_COMMANDS = ["install", "upgrade", "uninstall", "init-auth"];
  * The area whose help `argv` asks for: `service --help`, `service
  * install|upgrade|uninstall|init-auth ... --help` and `snapshot ... --help`. `service
  * serve|operator|run|list` forwards every argument, `--help` included, to the service.
+ * Only words before a standalone `--` count.
  */
 export function localHelpArea(argv: string[]): LocalArea | undefined {
-  const [area, command] = argv;
-  if (area === "snapshot") return argv.includes("--help") ? area : undefined;
+  // After a standalone `--` every word is a positional value, even one spelled `--help`.
+  const end = argv.indexOf("--");
+  const words = end < 0 ? argv : argv.slice(0, end);
+  const [area, command] = words;
+  if (area === "snapshot") return words.includes("--help") ? area : undefined;
   if (
     area === "service" &&
     (command === "--help" ||
-      (LIFECYCLE_COMMANDS.includes(command ?? "") && argv.includes("--help")))
+      (LIFECYCLE_COMMANDS.includes(command ?? "") && words.includes("--help")))
   )
     return area;
   return undefined;
