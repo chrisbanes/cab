@@ -34,7 +34,7 @@ Every semicolon-separated foundation inventory control appears individually belo
 | project.create | name | / | /app/settings/projects/new | Implemented replacement; original control retained. |
 | project.create | lead | / | /app/settings/projects/new | Implemented replacement; original control retained. |
 | project.create | instructions, repositories, GitHub Project | none (React only) | /app/settings/projects/new | Implemented in guided setup; the retained `/` form keeps name and lead only. |
-| discovery.configure | discovery credential reference set/clear | none (React only) | /app/settings (Projects panel) | Implemented; shown only as configured or not configured. |
+| discovery.configure | discovery credential reference set/clear | none (React only) | /app/settings (GitHub discovery section) | Implemented; shown only as configured or not configured. |
 | claude-token.configure | Claude token reference (`file:/absolute/path` or `env:NAME`) set/clear | none (React only) | /app/settings (Runtime and recovery panel) | Implemented; shown only as configured, available, token unavailable or restart required. |
 | discovery read | repositories, branches, GitHub Projects, Project single-select fields | none (React only) | /app/settings/projects/new | Implemented read-only GitHub lists; nothing stored. |
 | setup folders | list home subfolders and Git status | none (React only) | /app/settings/projects/new (Choose folder…) | Implemented authenticated POST; not available to agents. |

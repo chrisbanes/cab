@@ -15,7 +15,8 @@ what the service can and cannot use, with one fix line per problem.
 - `ensemble doctor` in the operator CLI (any read credential; the service must advertise `diagnostics.read`).
 - `ensemble service install`, which prints this table with its `Fix` lines on
   stderr after it signs the CLI in, before it opens the app. A failed check does not fail the install.
-- Settings → Readiness panel.
+- Settings → Readiness (`/app/settings#readiness`), the first section until a task
+  starts a turn and the last afterwards.
 - [Getting started](getting-started.md) Runtime row and [first task](first-task.md)
   Fix actions.
 
@@ -58,4 +59,9 @@ service sees rather than the operator's interactive shell.
   check again.
 - `ensemble doctor` exits 0 whenever the read succeeds, whatever the checks report;
   its JSON `data` is the service's `data` unchanged.
-- Re-running is the only action. The check changes nothing.
+- Re-running is the only action of the check, and it changes nothing. In Settings
+  only, when GitHub discovery is not configured and the service detects a signed-in
+  `gh` login, the row offers **Use GitHub CLI login (@account)** in place of its fix
+  line. That is a separate, explicit step: the existing discovery credential
+  command, sent once. Signed out, not installed, unreadable or a configured but
+  unreadable credential keep the fix line, and `ensemble doctor` always prints it.

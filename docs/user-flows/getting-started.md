@@ -30,6 +30,9 @@ wizard progress. A row shows Done, Next or Needs attention, with one action.
 - GitHub is optional for a repository-free project: the row says so and never blocks
   the Project row. It is informational: the one-click **Use GitHub CLI login
   (@account)** is offered once, in [project setup](project-setup.md) step 3.
+- Settings actions open their own section, so no two rows open the same place:
+  `/app/settings#readiness`, `#github-discovery`, `#readiness-claude-executable`
+  and `/app/settings/runtime#add-claude`.
 - Create task is shown but unavailable while no project exists: it stays focusable
   and its reason ("Needs a project first.") is announced.
 - A required row (Runtime, Project, First task) that is not done
