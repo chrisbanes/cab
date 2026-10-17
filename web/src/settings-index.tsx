@@ -18,7 +18,11 @@ import {
   sourceObservationSchema,
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button, StatusBadge } from "./components.js";
+import {
+  projectLabel,
+  workspaceLabels,
+} from "../../src/operator/project-labels.js";
+import { ActionLink, Button, ProjectName, StatusBadge } from "./components.js";
 import {
   ClaudeTokenRow,
   DiscoveryCredentialRow,
@@ -109,7 +113,8 @@ export function SettingsWorkspace(
   },
 ) {
   const projects = p.workspace?.data.projects ?? [],
-    profiles = p.workspace?.data.profiles ?? [];
+    profiles = p.workspace?.data.profiles ?? [],
+    projectLabels = workspaceLabels(p.workspace);
   const { configs, retry } = useProjectConfigurations(
     p.client,
     p.session.csrfToken,
@@ -215,7 +220,8 @@ export function SettingsWorkspace(
         }
       >
         {projects.map((r) => {
-          const name = r.name ?? "Name unavailable",
+          const label = projectLabel(projectLabels, r.id, r.name),
+            name = label.text,
             c = configs[r.id],
             lead = profiles.find(
               (x) => x.id === c?.project.leadProfileId,
@@ -223,7 +229,9 @@ export function SettingsWorkspace(
           return (
             <article className="settings-row" key={r.id}>
               <div className="settings-row-heading">
-                <h3 className="small-heading">{name}</h3>
+                <h3 className="small-heading">
+                  <ProjectName label={label} id={r.id} />
+                </h3>
                 {c && (
                   <span className="metadata muted">
                     Lead: {lead ?? "Unconfigured"}
@@ -381,13 +389,16 @@ export function SettingsWorkspace(
         description="Per project. Requires opt-in and a TypeSafe credential reference."
       >
         {projects.map((r) => {
-          const name = r.name ?? "Name unavailable",
+          const label = projectLabel(projectLabels, r.id, r.name),
+            name = label.text,
             c = configs[r.id];
           return (
             <article className="settings-row" key={r.id}>
               <div className="settings-row-heading">
                 <div>
-                  <h3 className="small-heading">{name}</h3>
+                  <h3 className="small-heading">
+                    <ProjectName label={label} id={r.id} />
+                  </h3>
                   {c === undefined ? (
                     <p className="metadata muted">Loading…</p>
                   ) : c === null ? (

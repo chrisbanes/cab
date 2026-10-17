@@ -11,6 +11,7 @@ import {
   type Session,
   type Workspace,
 } from "../../src/operator/contracts.js";
+import { workspaceLabels } from "../../src/operator/project-labels.js";
 import type { z } from "zod";
 import type { OperatorClient } from "./api.js";
 import { useOperatorResource } from "./resource.js";
@@ -130,6 +131,7 @@ export function Search({
     [historyInput, setHistorical] = useState(historical),
     [after, setAfter] = useState(localDay(params.get("after"))),
     [before, setBefore] = useState(localDay(params.get("before")));
+  const labels = workspaceLabels(workspace);
   const origin = (history.state as { workspaceOrigin?: string } | null)
     ?.workspaceOrigin;
   const backToItem = returnsToItem(origin);
@@ -327,7 +329,7 @@ export function Search({
                   <option value="">All permitted projects</option>
                   {workspace?.data.projects.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name ?? "Unavailable"}
+                      {labels.get(p.id)?.text}
                     </option>
                   ))}
                 </NativeSelect>

@@ -70,7 +70,8 @@ const create = (extra: Record<string, unknown>) => ({
   type: "project.create",
   key: randomUUID(),
   projectId: randomUUID(),
-  name: "Atlas",
+  // Names are unique ignoring case, and a world creates several projects.
+  name: `Atlas ${randomUUID().slice(0, 8)}`,
   leadProfileId: null,
   ...extra,
 });
@@ -410,13 +411,11 @@ test("post-commit notification failure of a guided create stays unknown and repl
     },
     verifiedRepository,
   );
-  const command = {
-    ...create({
-      instructions: "x",
-      repositories: [atlas(join(home.home, "src", "atlas"))],
-    }),
-    actor: "operator",
-  } as never;
+  const input = create({
+    instructions: "x",
+    repositories: [atlas(join(home.home, "src", "atlas"))],
+  });
+  const command = { ...input, actor: "operator" } as never;
   await assert.rejects(
     store.createProject(command),
     (e) =>
@@ -434,7 +433,7 @@ test("post-commit notification failure of a guided create stays unknown and repl
     f.service
       .domain()
       .projects()
-      .filter((p) => p.name === "Atlas").length,
+      .filter((p) => p.id === input.projectId).length,
     1,
   );
 });

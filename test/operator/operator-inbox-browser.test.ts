@@ -806,7 +806,7 @@ test("phone: queue to detail to queue restores the anchor and focus without sele
   assert.equal(await header.locator("h1").textContent(), "Question · 5 of 9");
   assert.match(
     (await header.locator(".page-header-title p").textContent())!,
-    /^(Atlas|Relay|Fieldnotes)$/,
+    /^(Atlas|Relay|Fieldnotes)( \d+)?$/,
   );
   assert.equal(
     await header.getByRole("link", { name: "Open task" }).count(),

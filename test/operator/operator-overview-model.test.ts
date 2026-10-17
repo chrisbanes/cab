@@ -166,7 +166,7 @@ test("project rows give lead, active work uncertain first and imported tasks", (
   const [atlas, relay] = projectRows(workspace, tasks);
   assert.deepEqual(atlas, {
     id: a,
-    name: "Atlas",
+    label: { name: "Atlas", suffix: null, text: "Atlas" },
     paused: false,
     lead: "Mira",
     activity: ["1 uncertain", "2 running"],
@@ -174,7 +174,7 @@ test("project rows give lead, active work uncertain first and imported tasks", (
   });
   assert.deepEqual(relay, {
     id: b,
-    name: "Relay",
+    label: { name: "Relay", suffix: null, text: "Relay" },
     paused: true,
     lead: null,
     activity: ["1 paused"],

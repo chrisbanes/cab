@@ -4,6 +4,10 @@ import type {
   TaskListSummary,
   Workspace,
 } from "../../src/operator/contracts.js";
+import {
+  projectLabel,
+  projectLabels,
+} from "../../src/operator/project-labels.js";
 import { inboxSummaryOf } from "./request-presentation.js";
 import {
   columnCounts,
@@ -85,12 +89,16 @@ export function projectRows(
   workspace: Workspace["data"] | null | undefined,
   tasks: readonly TaskListSummary[] | undefined,
 ) {
+  const labels = projectLabels(
+    workspace?.projects ?? [],
+    workspace?.profiles ?? [],
+  );
   return (workspace?.projects ?? []).map((project) => {
     const own = tasks?.filter((t) => t.projectId === project.id) ?? [],
       counts = columnCounts(own.filter((t) => isActiveColumn(taskColumn(t))));
     return {
       id: project.id,
-      name: project.name,
+      label: projectLabel(labels, project.id, project.name),
       paused: project.paused,
       lead: project.leadProfileId
         ? (workspace?.profiles.find((p) => p.id === project.leadProfileId)

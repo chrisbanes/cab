@@ -984,7 +984,7 @@ function addGitHubProject(domain: DomainStore): string {
   execute({
     type: "project.create",
     projectId,
-    name: "Alpha",
+    name: `Alpha ${projectId.slice(0, 8)}`,
     leadProfileId: profileId,
   });
   execute({

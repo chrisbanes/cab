@@ -22,6 +22,7 @@ import {
   DomainNotFoundError,
   DomainOperationError,
   DomainPolicyError,
+  ProjectNameTakenError,
   TaskNotOpenError,
 } from "../core/domain.js";
 import {
@@ -384,6 +385,19 @@ function domainApiError(error: unknown): OperatorApiError | undefined {
     return new OperatorApiError(409, "conflict");
   if (error instanceof DomainNotFoundError)
     return new OperatorApiError(404, "not-found");
+  if (error instanceof ProjectNameTakenError) {
+    const named = `Another project is named ${error.existingName}. Choose a different name.`;
+    return new OperatorApiError(
+      400,
+      "invalid-input",
+      ["name"],
+      undefined,
+      // The response schema bounds a message to 256 characters.
+      named.length <= 256
+        ? named
+        : "Another project has this name. Choose a different name.",
+    );
+  }
   if (error instanceof DomainPolicyError)
     return new OperatorApiError(
       error.code === "forbidden" ? 403 : 400,
