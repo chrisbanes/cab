@@ -758,8 +758,11 @@ class Service {
   }
 
   /**
-   * Records, read-only, the process launchd runs for the loaded daemon so that a later
-   * uninstall can confirm its exit. No pid is recorded as null; a process whose identity
+   * Records the process launchd runs for the loaded daemon so that a later uninstall can
+   * confirm its exit. It reads launchd and the process table only, and writes only the
+   * install record, atomically (temp file and rename in the same directory, fsynced), and
+   * only when what it sees differs from what the record holds; a record that cannot be
+   * written stays as it was and fails the command with a fixed message. No pid is recorded as null; a process whose identity
    * cannot be read replaces the old identity with "unknown", which holds uninstall.
    */
   async observeDaemon(
@@ -777,7 +780,13 @@ class Service {
     if (JSON.stringify(observed) === JSON.stringify(record.observedProcess))
       return record;
     const next: InstallRecord = { ...record, observedProcess: observed };
-    this.writeRecord(next);
+    try {
+      this.writeRecord(next);
+    } catch {
+      throw new ServiceFailure(
+        "The install record could not be updated with the running service process; nothing was changed",
+      );
+    }
     return next;
   }
 
@@ -1423,8 +1432,9 @@ async function finishDaemonInstall(
 }
 
 /**
- * Re-run of a daemon install: confirms what launchd and /Library hold against the record
- * without changing anything. Running and matching: wait for /app. Otherwise reprint the steps.
+ * Re-run of a daemon install: confirms what launchd and /Library hold against the record.
+ * It changes nothing there and writes only the install record, to note the running service
+ * process. Running and matching: wait for /app. Otherwise reprint the steps.
  */
 async function verifyDaemon(
   service: Service,

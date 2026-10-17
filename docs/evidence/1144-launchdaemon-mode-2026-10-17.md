@@ -34,7 +34,8 @@ and belong to [#1149](https://github.com/chrisbanes/ensemble/issues/1149), using
 
 The CLI ran from a release layout under `<TMP>/state/versions/0.1.0`, with an auth file made by
 `OperatorAuth.initialize` and `--state-dir`, `--log-dir` and `--launch-agents-dir` in `<TMP>`.
-The printed `sudo` steps were never run.
+The printed `sudo` steps were never run. Daemon verify and uninstall write only the install record
+under `STATE/launchd`, and only to note a loaded job's process; none was loaded here.
 
 | Step | Result |
 | --- | --- |

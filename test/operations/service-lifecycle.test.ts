@@ -2840,7 +2840,7 @@ test("daemon mode uninstall keeps the record while the booted-out process is sti
     1,
   );
   assert.match(JSON.parse(out.stderr).error, /switch back first/);
-  // A daemon install only re-verifies the recorded daemon; it records and starts nothing.
+  // A daemon install only re-verifies the recorded daemon; it starts nothing and writes nothing in /Library.
   const rerun = await f.installDaemon();
   assert.equal(JSON.parse(rerun.stdout).started, false);
   assert.deepEqual(readFileSync(f.recordPath), bytes);
@@ -3002,4 +3002,52 @@ test("daemon mode exit confirmation treats a reused pid or a new boot as gone, a
   const child = spawnSync("/bin/sleep", ["0"]);
   assert.equal(child.status, 0);
   assert.equal(await host.exited({ ...identity, processId: "99999999" }), true);
+});
+
+test("daemon mode record update failure leaves the record intact, fails with a fixed message and never reports complete", {
+  skip: process.getuid?.() === 0,
+}, async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  const launchd = join(f.stateDir, "launchd");
+  const bytes = readFileSync(f.recordPath);
+  const before = readdirSync(launchd).sort();
+  // The directory refuses new files, so the record cannot be replaced.
+  chmodSync(launchd, 0o500);
+  f.launchd.calls = [];
+  try {
+    const verify = await f.installDaemon();
+    assert.equal(verify.code, 1);
+    const verifyError = JSON.parse(verify.stderr);
+    assert.match(verifyError.error, /install record could not be updated/);
+    assert.doesNotMatch(verify.stderr, /EACCES|EPERM|permission denied/i);
+    assert.equal(verify.stderr.includes(f.stateDir), false);
+    assert.deepEqual(
+      f.launchd.fetched,
+      [],
+      "it did not go on to wait for /app",
+    );
+
+    const uninstall = await f.uninstall();
+    assert.equal(uninstall.code, 1);
+    assert.match(
+      JSON.parse(uninstall.stderr).error,
+      /install record could not be updated/,
+    );
+    assert.equal(uninstall.stdout, "", "no steps and no complete result");
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(readFileSync(f.recordPath), bytes);
+    assert.deepEqual(
+      readdirSync(launchd).sort(),
+      before,
+      "no temporary file is left",
+    );
+  } finally {
+    chmodSync(launchd, 0o700);
+  }
+
+  // Writable again: the same commands now record the process and carry on.
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(f.record().observedProcess.processId, "5000");
 });

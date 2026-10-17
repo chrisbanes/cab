@@ -226,7 +226,8 @@ sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/local.ensemble.servi
 The printed commands quote paths that need it. Install exits 0 with `"mode":"daemon"`,
 `"started":false` and the two commands in `"steps"`. In daemon mode it only ever calls
 `launchctl print`; it never writes under `/Library`, never runs `bootstrap` or
-`bootout`, and does not sign in or run `doctor`. The first
+`bootout`, and does not sign in or run `doctor`. It writes only under `STATE`: the staged
+plist and the install record. The first
 command copies the staged file as it is at that moment (and follows a symbolic
 link at that path), and launchd then runs what the copied plist says, so run it
 soon after install and first check that `shasum -a 256` of the staged file equals
@@ -246,7 +247,13 @@ manual `ensemble auth login` line, `ensemble doctor` and the app URL (it never o
 the browser), as the LaunchAgent install does when it could not sign in. When the job is not loaded it
 prints the steps again with `"started":false`. When the plist or job differs from
 the record it refuses and changes nothing; so does a different release, a tarball
-or a different port. The re-run writes nothing, so it is safe to repeat.
+or a different port. The re-run never writes under `/Library`, never changes launchd
+and never signals a process. Its only write is to the install record: when it finds the
+daemon loaded it stores the running process (see the
+uninstall paragraphs below), and only when that differs from what the
+record holds, atomically with a temporary file and rename in the same directory. If the
+record cannot be written, the re-run fails with a fixed message and leaves the record as
+it was. Repeating it is safe.
 
 The daemon plist is the LaunchAgent's plus `UserName` and `HOME`: the same
 `ProgramArguments`, the fixed `PATH`, the auth-file path and origin, the optional
@@ -289,7 +296,11 @@ keeps the service process Ensemble last saw. `service install --mode daemon`
 re-runs, and `service uninstall` while the job is loaded, read it with
 `launchctl print` and store its pid, start time and boot session in the record
 (`observedProcess`; `null` for a loaded job with no process, `"unknown"` when its
-identity could not be read). Nothing is ever signalled. The confirmation covers only
+identity could not be read). That is the only thing either command writes, and only
+when it differs from the stored value: under `STATE/launchd`, never under `/Library`,
+and uninstall does it before it prints the steps, so a record that cannot be written
+fails the command (exit 1, fixed message, record unchanged) and no steps are printed.
+Nothing is ever signalled. The confirmation covers only
 the main service process last observed, not its descendants, so run the printed
 commands right after the `uninstall` that printed them; if the host rebooted or the
 job restarted in between, run `service uninstall` again first so that it observes
