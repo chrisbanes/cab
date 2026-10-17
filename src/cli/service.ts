@@ -179,8 +179,11 @@ export type ServiceHost = {
   hostname(): string;
   /** The account the service runs as (never `$HOME`): its user name and home directory. */
   account(): { name: string; home: string };
-  /** Where the stored github.com login keeps its token; never reads the token. */
-  ghTokenStorage(): Promise<GhTokenStorage>;
+  /**
+   * Where the stored github.com login keeps its token, as `gh` sees it running in exactly
+   * `env` (the daemon's own environment); never reads the token.
+   */
+  ghTokenStorage(env: Record<string, string>): Promise<GhTokenStorage>;
 };
 
 export type GhTokenStorage = "keyring" | "file" | "unknown";
@@ -1399,7 +1402,7 @@ async function installServiceLocked(
       // Nothing reaches launchd: the operator runs the printed steps with sudo.
       await finishDaemonInstall(
         service,
-        version as string,
+        record as InstallRecord,
         logs,
         false,
         false,
@@ -1461,14 +1464,27 @@ async function installServiceLocked(
   }
 }
 
-const GH_KEYCHAIN_WARNING =
-  "The GitHub CLI login is in the login keychain, which a LaunchDaemon cannot read before you log in; run `gh auth login --insecure-storage` on this Mac (see the macOS operations guide).";
+/** The keychain warning; `home` is the daemon account's, where its gh login must live. */
+const ghKeychainWarning = (home: string) =>
+  `The GitHub CLI login the daemon will use (read under ${home} with launchd's fixed environment, so GH_CONFIG_DIR and XDG_CONFIG_HOME do not apply) is in the login keychain, which a LaunchDaemon cannot read before you log in; run \`gh auth login --insecure-storage\` as that account with GH_CONFIG_DIR and XDG_CONFIG_HOME unset (see the macOS operations guide).`;
 
-/** The fixed keychain warning, written without failing the install. */
-async function warnGhKeychain(service: Service) {
+/** The daemon's environment: what its plist sets, and nothing from this shell. */
+async function daemonEnvironment(configuration: Configuration) {
+  const { launchdEnvironment } = await import("../standalone/launchd.js");
+  return launchdEnvironment(configuration);
+}
+
+/** The keychain warning, written without failing the install. */
+async function warnGhKeychain(service: Service, configuration: Configuration) {
   try {
-    if ((await service.host.ghTokenStorage()) === "keyring")
-      service.io.stderr.write(`${GH_KEYCHAIN_WARNING}\n`);
+    if (
+      (await service.host.ghTokenStorage(
+        await daemonEnvironment(configuration),
+      )) === "keyring"
+    )
+      service.io.stderr.write(
+        `${ghKeychainWarning(configuration.home ?? "")}\n`,
+      );
   } catch {
     // A warning only.
   }
@@ -1480,12 +1496,13 @@ async function warnGhKeychain(service: Service) {
  */
 async function finishDaemonInstall(
   service: Service,
-  version: string,
+  record: InstallRecord,
   logs: string[],
   started: boolean,
   alreadyInstalled: boolean,
   first: FirstRun,
 ) {
+  const { version } = record;
   const steps = started ? [] : service.installSteps(alreadyInstalled);
   service.write("stdout", {
     ok: true,
@@ -1499,7 +1516,7 @@ async function finishDaemonInstall(
     started,
     steps,
   });
-  await warnGhKeychain(service);
+  await warnGhKeychain(service, record.configuration);
   if (started) {
     // Verifying never opens the browser; the app URL is still printed.
     await finishInstall(
@@ -1583,7 +1600,7 @@ async function verifyDaemon(
           observed,
         ),
       );
-    await finishDaemonInstall(service, record.version, logs, true, true, first);
+    await finishDaemonInstall(service, record, logs, true, true, first);
     return 0;
   }
   // Present and matching, not loaded: only loading remains, so the staged copy is not needed.
@@ -1593,7 +1610,7 @@ async function verifyDaemon(
     );
   await finishDaemonInstall(
     service,
-    record.version,
+    record,
     logs,
     false,
     installed !== null,
@@ -2007,13 +2024,15 @@ const ghStatusSchema = z.object({
  * describes the stored login a LaunchDaemon would see. Anything unreadable is `unknown`.
  */
 export async function ghTokenStorage(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv,
+  /** `gh` by name, resolved on `env`'s PATH as launchd would; tests name a file. */
+  executable = "gh",
 ): Promise<GhTokenStorage> {
   const scrubbed = childProcessEnvironment(env);
   for (const name of GH_TOKEN_VARIABLES) delete scrubbed[name];
   scrubbed.GH_PROMPT_DISABLED = "1";
   const result = await run(
-    "gh",
+    executable,
     [
       "auth",
       "status",
@@ -2048,29 +2067,40 @@ export async function ghTokenStorage(
 export async function daemonGhWarning(
   env: NodeJS.ProcessEnv,
   uid: number | undefined = process.getuid?.(),
+  executable = "gh",
 ): Promise<string | null> {
   // Never run gh as root: it could create root-owned state under the operator's HOME.
   if (uid === 0) return null;
   if (!env.HOME || !isAbsolute(env.HOME)) return null;
   const directory = join(env.HOME, STATE_DIR, "launchd");
+  let configuration: Configuration | undefined;
   try {
-    const isDaemon = readdirSync(directory).some((name) => {
-      if (!name.endsWith(".json")) return false;
+    for (const name of readdirSync(directory)) {
+      if (!name.endsWith(".json")) continue;
       try {
-        return (
-          recordSchema.parse(
-            JSON.parse(readFileSync(join(directory, name), "utf8")),
-          ).mode === "daemon"
+        const record = recordSchema.parse(
+          JSON.parse(readFileSync(join(directory, name), "utf8")),
         );
+        if (record.mode === "daemon") {
+          configuration = record.configuration;
+          break;
+        }
       } catch {
-        return false;
+        // Not a readable record.
       }
-    });
-    if (!isDaemon) return null;
+    }
   } catch {
     return null;
   }
-  return (await ghTokenStorage(env)) === "keyring" ? GH_KEYCHAIN_WARNING : null;
+  if (!configuration) return null;
+  // The login the daemon will read, under its account's HOME, not this shell's environment.
+  const storage = await ghTokenStorage(
+    await daemonEnvironment(configuration),
+    executable,
+  );
+  return storage === "keyring"
+    ? ghKeychainWarning(configuration.home ?? "")
+    : null;
 }
 
 export function defaultServiceHost(): ServiceHost {
@@ -2137,7 +2167,7 @@ export function defaultServiceHost(): ServiceHost {
       const { username, homedir } = userInfo();
       return { name: username, home: homedir };
     },
-    ghTokenStorage: () => ghTokenStorage(process.env),
+    ghTokenStorage: (env) => ghTokenStorage(env),
   };
 }
 

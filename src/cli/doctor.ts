@@ -24,6 +24,7 @@ export const doctorCommand: BrowseCommand = {
       const warning = await daemonGhWarning(
         ctx.deps.env,
         ctx.deps.uid ?? process.getuid?.(),
+        ctx.deps.ghExecutable,
       );
       if (warning) ctx.deps.stderr.write(`${warning}\n`);
     } catch {

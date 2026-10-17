@@ -200,17 +200,42 @@ function stringElement(value: string): string {
   return `<string>${xml(value)}</string>`;
 }
 
-function diagnosticEntries(configuration: LaunchAgentConfiguration): string {
-  return [
-    [diagnosticRetentionDays.name, configuration.diagnosticRetentionDays],
-    [diagnosticStorageMib.name, configuration.diagnosticStorageMib],
-  ]
-    .filter(([, value]) => value !== undefined)
-    .map(
-      ([name, value]) =>
-        `\n    <key>${name}</key>\n    ${stringElement(String(value))}`,
-    )
-    .join("");
+/**
+ * The environment launchd gives the job, and the only one: the fixed PATH, the daemon
+ * account's HOME (daemon only), the auth file and origin, and the diagnostic limits when
+ * set. The plist renders exactly this, and anything that predicts how the job behaves
+ * (such as where its GitHub CLI login is read from) must run in exactly this.
+ */
+export function launchdEnvironment(
+  configuration: Pick<
+    LaunchAgentConfiguration,
+    | "authFile"
+    | "origin"
+    | "home"
+    | "diagnosticRetentionDays"
+    | "diagnosticStorageMib"
+  >,
+): Record<string, string> {
+  return {
+    PATH: LAUNCHD_PATH,
+    ...(configuration.home === undefined ? {} : { HOME: configuration.home }),
+    ENSEMBLE_OPERATOR_AUTH_FILE: configuration.authFile,
+    ENSEMBLE_OPERATOR_ORIGIN: configuration.origin,
+    ...(configuration.diagnosticRetentionDays === undefined
+      ? {}
+      : {
+          [diagnosticRetentionDays.name]: String(
+            configuration.diagnosticRetentionDays,
+          ),
+        }),
+    ...(configuration.diagnosticStorageMib === undefined
+      ? {}
+      : {
+          [diagnosticStorageMib.name]: String(
+            configuration.diagnosticStorageMib,
+          ),
+        }),
+  };
 }
 
 export function renderLaunchAgent(
@@ -240,16 +265,9 @@ ${argumentsList.map((argument) => `    ${stringElement(argument)}`).join("\n")}
   </array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key>
-    ${stringElement(LAUNCHD_PATH)}${
-      configuration.home === undefined
-        ? ""
-        : `\n    <key>HOME</key>\n    ${stringElement(configuration.home)}`
-    }
-    <key>ENSEMBLE_OPERATOR_AUTH_FILE</key>
-    ${stringElement(configuration.authFile)}
-    <key>ENSEMBLE_OPERATOR_ORIGIN</key>
-    ${stringElement(configuration.origin)}${diagnosticEntries(configuration)}
+${Object.entries(launchdEnvironment(configuration))
+  .map(([name, value]) => `    <key>${name}</key>\n    ${stringElement(value)}`)
+  .join("\n")}
   </dict>
   <key>StandardOutPath</key>
   ${stringElement(configuration.stdoutPath)}

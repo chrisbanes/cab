@@ -77,6 +77,8 @@ class FakeLaunchd {
   listeners: number[] | null | undefined;
   ghStorage: GhTokenStorage = "unknown";
   ghProbes = 0;
+  /** The environment each gh probe was asked to run under. */
+  ghEnvironments: Record<string, string>[] = [];
   alive = new Set<number>();
   /** Start time of a pid that is not the default, to model pid reuse. */
   pidStarts = new Map<number, string>();
@@ -224,8 +226,9 @@ class FakeLaunchd {
         const job = [...this.systemJobs.values()][0];
         return job && job.pid > 0 ? [job.pid] : [];
       },
-      ghTokenStorage: async () => {
+      ghTokenStorage: async (env) => {
         this.ghProbes += 1;
+        this.ghEnvironments.push(env);
         return this.ghStorage;
       },
       ...this.overrides,
@@ -2701,7 +2704,7 @@ test("daemon mode install warns about a keychain gh login without blocking", asy
 
 test("daemon mode gh token storage probe never reads a token", async (t) => {
   const gh = fakeStatusGh(t);
-  assert.equal(await ghTokenStorage(gh.env("keyring")), "keyring");
+  assert.equal(await ghTokenStorage(gh.env("keyring"), gh.exe), "keyring");
   const lines = readFileSync(gh.log, "utf8").trim().split("\n");
   assert.equal(
     lines[0],
@@ -2725,7 +2728,7 @@ test("daemon mode gh token storage probe never reads a token", async (t) => {
     ["garbage", "unknown"],
   ];
   for (const [mode, expected] of outcomes) {
-    const result = await ghTokenStorage(gh.env(mode));
+    const result = await ghTokenStorage(gh.env(mode), gh.exe);
     assert.equal(result, expected, mode);
     assert.equal(JSON.stringify(result).includes("canary"), false);
   }
@@ -3500,4 +3503,111 @@ test("daemon mode commands write exactly the documented set of files and directo
     removed: [record, staged].sort(),
     changed: [],
   });
+});
+
+/** Sets variables for the duration of `run`, as an installing shell would have them. */
+async function withShellEnvironment(
+  values: Record<string, string>,
+  run: () => Promise<void>,
+) {
+  const saved = Object.fromEntries(
+    Object.keys(values).map((key) => [key, process.env[key]]),
+  );
+  Object.assign(process.env, values);
+  try {
+    await run();
+  } finally {
+    for (const [key, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  }
+}
+
+test("daemon mode gh probe runs in the daemon's own environment, never the installing shell's", async (t) => {
+  const gh = fakeStatusGh(t);
+  const shell = mkdtempSync(join(tmpdir(), "ensemble-shell-gh-"));
+  t.after(() => rmSync(shell, { recursive: true, force: true }));
+  mkdirSync(join(shell, "custom"), { recursive: true });
+  writeFileSync(join(shell, "custom", "hosts.yml"), "github.com:\n");
+  mkdirSync(join(shell, "xdg", "gh"), { recursive: true });
+  writeFileSync(join(shell, "xdg", "gh", "hosts.yml"), "github.com:\n");
+  const shellVariables = {
+    GH_CONFIG_DIR: join(shell, "custom"),
+    XDG_CONFIG_HOME: join(shell, "xdg"),
+    GH_TOKEN: "canary-shell-token",
+    GITHUB_TOKEN: "canary-shell-github",
+    HTTPS_PROXY: "http://proxy.invalid:1",
+    CODEX_HOME: join(shell, "codex"),
+    CLAUDE_CODE_OAUTH_TOKEN: "canary-shell-claude",
+  };
+  const probe = (f: Fixture) => {
+    f.launchd.overrides = {
+      ghTokenStorage: (env) => {
+        f.launchd.ghEnvironments.push(env);
+        return ghTokenStorage(env, gh.exe);
+      },
+    };
+  };
+
+  // The shell has a file login; the daemon account's HOME has only the keychain: warned.
+  await withShellEnvironment(shellVariables, async () => {
+    const f = await setup(t);
+    probe(f);
+    const result = await f.installDaemon();
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(result.stderr.includes(KEYCHAIN_WARNING));
+    assert.ok(
+      result.stderr.includes(f.home),
+      "it names the daemon account's HOME",
+    );
+
+    // The probe ran under exactly the environment the rendered plist gives the job.
+    const seen = Object.fromEntries(
+      readFileSync(join(f.home, ".gh-probe.log"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => [
+          line.slice(0, line.indexOf("=")),
+          line.slice(line.indexOf("=") + 1),
+        ]),
+    );
+    for (const key of ["PWD", "SHLVL", "_", "OLDPWD", "GH_PROMPT_DISABLED"])
+      delete seen[key];
+    const sorted = (value: Record<string, string>) =>
+      Object.fromEntries(
+        Object.entries(value).sort(([a], [b]) => a.localeCompare(b)),
+      );
+    assert.deepEqual(sorted(seen), sorted(environment(f.staged)));
+    assert.deepEqual(f.launchd.ghEnvironments[0], environment(f.staged));
+    const { launchdEnvironment } = await import(
+      "../../src/standalone/launchd.js"
+    );
+    assert.deepEqual(
+      environment(f.staged),
+      launchdEnvironment(f.record().configuration),
+    );
+    assert.deepEqual(Object.keys(seen).sort(), [
+      "ENSEMBLE_OPERATOR_AUTH_FILE",
+      "ENSEMBLE_OPERATOR_ORIGIN",
+      "HOME",
+      "PATH",
+    ]);
+  });
+
+  // The reverse: the account's HOME has the file login, the shell's variables point elsewhere.
+  await withShellEnvironment(
+    { ...shellVariables, GH_CONFIG_DIR: join(shell, "none") },
+    async () => {
+      const f = await setup(t);
+      probe(f);
+      mkdirSync(join(f.home, ".config", "gh"), { recursive: true });
+      writeFileSync(
+        join(f.home, ".config", "gh", "hosts.yml"),
+        "github.com:\n",
+      );
+      const result = await f.installDaemon();
+      assert.equal(result.code, 0, result.stderr);
+      assert.equal(result.stderr.includes(KEYCHAIN_WARNING), false);
+    },
+  );
 });

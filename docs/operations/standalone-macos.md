@@ -369,7 +369,12 @@ rest is the cost; anything running as you can read it. Install in daemon mode,
 and `ensemble doctor` on a host with a daemon install record under the default
 state directory, warn on stderr (exit status and stdout unchanged) when
 `gh auth status --json hosts` reports the keychain as the token source, without
-reading the token. A host that installed with a custom `--state-dir` gets only
+reading the token. The probe runs `gh` in exactly the environment the plist gives the
+job (its fixed `PATH`, so `gh` must be in `/opt/homebrew/bin` or `/usr/local/bin`, and the
+daemon account's `HOME`), not your shell's: `GH_CONFIG_DIR`, `XDG_CONFIG_HOME`, `GH_TOKEN`
+and the rest do not apply, because launchd passes none of them, so the daemon reads
+`~/.config/gh/hosts.yml` of its own account. Run `gh auth login --insecure-storage` as
+that account with those variables unset, and the warning names the HOME it checked. A host that installed with a custom `--state-dir` gets only
 the install-time warning. The delivery credential is `env:` only and neither plist
 carries an environment variable, so delivery cannot be configured under either mode
 yet. This is a known gap.
