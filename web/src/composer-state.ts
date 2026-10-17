@@ -61,7 +61,7 @@ const validInputSchema = composerInputSchema.extend({
     .max(128)
     .refine((ids) => new Set(ids).size === ids.length, "Duplicate dependency"),
 });
-export const briefLimit = 16000;
+const briefLimit = 16000;
 /** The brief as submitted: outcome plus the Context and Reference links sections. */
 export function composeOutcome(input: ComposerInput) {
   let outcome = input.outcome;

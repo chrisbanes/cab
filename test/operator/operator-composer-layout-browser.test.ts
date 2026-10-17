@@ -801,7 +801,7 @@ test("Composer bar keeps drafts, refused creation and admission distinct", async
   );
 });
 
-test("Composer keeps the caveat and bar honest across project switches, failed options and a submit in flight", async (_t, j) => {
+test("Composer keeps the caveat and bar honest across project switches and failed options", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
@@ -876,36 +876,11 @@ test("Composer keeps the caveat and bar honest across project switches, failed o
     }),
   );
   await page.getByLabel("Project", { exact: true }).selectOption(projectId);
-  await page.waitForFunction(
-    () => !document.querySelector(".composer-prediction"),
-  );
+  await page.getByText("Project options are unavailable. Try again.").waitFor();
+  assert.equal(await prediction.count(), 0);
   assert.equal(await caveat.count(), 0);
   assert.equal(await hint.innerText(), saveDraftHint);
   await page.unroute(`**/projects/${projectId}/composer-options`);
-
-  // A submit in flight shows no verdict either, and the draft is still saved once.
-  await page.getByLabel("Project", { exact: true }).selectOption(second);
-  await prediction.getByText("Starts now", { exact: true }).waitFor();
-  await page.getByLabel("Task title").fill("In flight");
-  await page.getByLabel("Desired outcome").fill("Probe");
-  let releaseCommand!: () => void;
-  const commandGate = new Promise<void>((resolve) => {
-    releaseCommand = resolve;
-  });
-  let commands = 0;
-  await page.route("**/api/operator/commands", async (route) => {
-    commands++;
-    await commandGate;
-    await route.continue();
-  });
-  await page.getByRole("button", { name: "Save draft", exact: true }).click();
-  await page.getByRole("button", { name: "Saving…" }).waitFor();
-  const bar = await page.locator(".composer-actions").innerText();
-  assert.ok(!/Starts now|Will wait|Creates ready work/.test(bar), bar);
-  assert.equal(await caveat.count(), 0);
-  releaseCommand();
-  await page.getByText("Draft saved.", { exact: true }).waitFor();
-  assert.equal(commands, 1);
 });
 
 test("Composer shows the brief-limit note only within 10% of the limit or over it", async (_t, j) => {

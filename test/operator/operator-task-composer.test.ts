@@ -847,6 +847,10 @@ test("brief limit note threshold counts the encoded outcome, context and links",
     true,
   );
   const links = [`https://example.com/${"a".repeat(200)}`];
+  // The "\n\nReference links (passive context; no repository access):\n" header is 59 characters.
+  const link = (n: number) => [`https://example.com/${"a".repeat(n - 20)}`];
+  assert.equal(near({ outcome: "x".repeat(14000), links: link(340) }), false);
+  assert.equal(near({ outcome: "x".repeat(14000), links: link(341) }), true);
   assert.equal(near({ outcome: "x".repeat(14300) }), false);
   assert.equal(near({ outcome: "x".repeat(14300), links }), true);
   // One length calculation serves the note and the submit check.

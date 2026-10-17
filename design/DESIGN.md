@@ -2085,14 +2085,15 @@ as follows:
   status line, but production keeps the full prediction there.
 - The sticky bar reads "Unfinished input saved on this device · not yet an
   Ensemble draft" only after a successful on-device write, then the one hint "Save
-  draft keeps it without starting." (the bar never states the verdict, with or
-  without a prediction; the panel does), Create and start and Save draft. Create and start comes
-  before Save draft in DOM and visual order at every width, so focus order equals
-  visual order (the desktop artboard right-aligns Save draft, then Create and
-  start).
+  draft keeps it without starting." (otherwise the optional-settings error hint; the
+  bar never states the verdict, with or without a prediction, which the panel
+  does), Create and start and Save draft. Create and start comes before Save draft
+  in DOM and visual order at every width, so focus order equals visual order (the
+  desktop artboard right-aligns Save draft, then Create and start).
   There is no ⌘↵ shortcut and no "Markdown supported" note; the 16,000-character
-  brief note appears only when the outcome, context and links together reach 14,400
-  characters (within 10% of the limit) or exceed it. Refused and unconfirmed outcomes sit directly above the bar.
+  brief note appears only when the outcome, context and links together reach
+  14,400 characters (within 10% of the limit) or exceed it. Refused and
+  unconfirmed outcomes sit directly above the bar.
   After creation the receipt view (Task created or Draft saved, Open task, the
   execution state and "It will wait: …") replaces the form, rather than frames
   161/166c's locked form with an outcome line in the bar.
