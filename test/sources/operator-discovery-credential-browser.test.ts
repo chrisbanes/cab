@@ -8,7 +8,11 @@ import {
   outcomeMessages,
   savedOutcome,
 } from "../fixtures/operator-settings.js";
-import { commandRequest, setupJourney } from "../fixtures/setup-browser.js";
+import {
+  commandRequest,
+  settleGhRead,
+  setupJourney,
+} from "../fixtures/setup-browser.js";
 const test = browserSuite("operator-discovery-credential-browser");
 
 test("Settings uses the GitHub CLI login, then clears it", async (_t, journey) => {
@@ -193,6 +197,10 @@ test("Setup offers the detected GitHub CLI login in one step", async (_t, journe
   const use = page.getByRole("button", {
     name: "Use GitHub CLI login (@octo)",
   });
+  // Step 3 starts collapsed; the offer is one activation away and focus lands on it.
+  await settleGhRead(page, () => page.reload());
+  assert.equal(await use.count(), 0);
+  await page.getByRole("button", { name: "Add a repository" }).click();
   await use.waitFor();
   await page
     .getByText("Signed in to github.com as @octo with the GitHub CLI", {
@@ -233,6 +241,7 @@ test("Setup reconciles an unknown GitHub CLI login outcome", async (_t, journey)
   const use = page.getByRole("button", {
     name: "Use GitHub CLI login (@octo)",
   });
+  await page.getByRole("button", { name: "Add a repository" }).click();
   // The service records the command but its response is lost, so a re-read sees it configured.
   await page.route("**/api/operator/commands", async (route) => {
     await route.fetch();
@@ -279,6 +288,7 @@ test("Setup offers no gh action when gh is not signed in", async (_t, journey) =
     discovery: false,
     ghExecutable: gh.executable,
   });
+  await page.getByRole("button", { name: "Add a repository" }).click();
   await page.getByRole("link", { name: "Set discovery credential" }).waitFor();
   assert.equal(
     await page.getByRole("button", { name: /Use GitHub CLI login/ }).count(),

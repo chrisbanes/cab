@@ -54,7 +54,7 @@ import { TaskComposer } from "./task-composer.js";
 import { RuntimeSettings, AssignmentRecovery } from "./recovery.js";
 import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
-import { ProjectSetup } from "./project-setup.js";
+import { ProjectSetup, type SetupHeader } from "./project-setup.js";
 import { SettingsWorkspace } from "./settings-index.js";
 import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
 import { ProjectConfiguration } from "./project-config.js";
@@ -638,6 +638,8 @@ export function App() {
   const [inboxRouteSummary, setInboxRouteSummary] =
     useState<ReturnType<typeof inboxSummaryOf>>(null);
   const [inboxHeader, setInboxHeader] = useState<InboxHeader | null>(null);
+  // Project setup reports its latched first-run state and whether the project was created.
+  const [setupHeader, setSetupHeader] = useState<SetupHeader | null>(null);
   const [taskHeader, setTaskHeader] = useState<TaskHeaderReport | null>(null);
   const inboxSummary = useOperatorResource(
     session?.authenticated ? session.csrfToken : null,
@@ -773,7 +775,12 @@ export function App() {
     query = search.includes("?") ? search.slice(search.indexOf("?")) : "";
   const settingsPage = unknownRoute
     ? null
-    : settingsHeader(pathname, query, workspace.state.data);
+    : settingsHeader(
+        pathname,
+        query,
+        workspace.state.data,
+        setupHeader?.firstRun,
+      );
   const title = settingsPage
     ? settingsPage.title
     : unknownRoute
@@ -813,9 +820,12 @@ export function App() {
       : pathname === "/app/tasks/new"
         ? "Describe the result you want. The project lead stays accountable."
         : pathname === "/app/settings/projects/new"
-          ? workspace.state.data?.data.projects.length === 0
-            ? "No projects yet. A project groups tasks with a lead, instructions and explicit repository access."
-            : "Three short steps. Saving creates a paused project; nothing runs until you resume it."
+          ? setupHeader?.created
+            ? undefined
+            : (setupHeader?.firstRun ??
+                workspace.state.data?.data.projects.length === 0)
+              ? "No projects yet. A project groups tasks with a lead, instructions and explicit repository access."
+              : "Three short steps. Saving creates a paused project; nothing runs until you resume it."
           : undefined;
   // The Inbox route refreshes its own list (and so the count) when the workspace read changes.
   const refreshAll = () => {
@@ -1106,6 +1116,7 @@ export function App() {
               workspace={workspace.state.data}
               refresh={workspace.refresh}
               navigate={navigate}
+              onHeader={setSetupHeader}
             />
           ) : pathname === "/app/settings/profiles/new" ? (
             <ProfileCreate
