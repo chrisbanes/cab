@@ -180,6 +180,77 @@ test("a name-only save keeps a stored Claude model the runtime no longer support
   assert.equal(d.profile(profileId).summary, "Renamed summary");
 });
 
+test("a runtime setting switched back leaves the profile form clean", async (_t, journey) => {
+  const { f, page, web } = await startSettings(
+    journey,
+    "/app/settings",
+    desktop,
+    undefined,
+    claudeEnabled,
+  );
+  const profileId = crypto.randomUUID();
+  f.service.domain().execute({
+    type: "profile.create",
+    actor: "operator",
+    key: crypto.randomUUID(),
+    profileId,
+    name: "Plain Codex",
+    instructions: "x",
+    capabilities: "x",
+    runtime: { harness: "codex" },
+  });
+  await page.goto(`${web.origin}/app/profiles/${profileId}/settings`);
+  const runtime = page.getByLabel("Runtime", { exact: true });
+  await runtime.selectOption("claude");
+  const model = page.getByLabel("Model", { exact: true });
+  if ((await model.evaluate((e) => e.tagName)) === "INPUT")
+    await model.fill("custom-model");
+  else await model.selectOption({ index: 1 });
+  await runtime.selectOption("codex");
+  const region = page.getByRole("region", { name: "Changes to save" });
+  await region.getByText("No changes yet.", { exact: false }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Discard changes" }).count(),
+    0,
+  );
+});
+
+test("an override that was switched off again leaves the capacity form clean, and 04 equals 4", async (_t, journey) => {
+  const { f, page } = await startSettings(journey, "/app/settings/runtime");
+  const region = page.getByRole("region", { name: "Changes to save" });
+  const cap = page.getByLabel("Global active-turn cap", { exact: true });
+  await cap.waitFor();
+  const saved = await cap.inputValue();
+  await page.getByLabel("Set capacity override for Atlas").check();
+  await page.getByLabel("Active-turn cap for Atlas", { exact: true }).fill("7");
+  await page.getByLabel("Set capacity override for Atlas").uncheck();
+  await cap.fill(`0${saved}`);
+  await region.getByText("No changes yet.", { exact: false }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Discard changes" }).count(),
+    0,
+  );
+  // Another writer changes the cap; the clean form takes it on Refresh.
+  const d = f.service.domain();
+  d.execute({
+    type: "capacity.configure",
+    actor: "operator",
+    key: randomUUID(),
+    globalLimit: Number(saved) + 5,
+    projectOverrides: {},
+  });
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.waitForFunction(
+    (value) =>
+      (
+        document.querySelector(
+          'input[aria-label="Global active-turn cap"]',
+        ) as HTMLInputElement | null
+      )?.value === value,
+    String(Number(saved) + 5),
+  );
+});
+
 /** Both runtimes enabled; `claude` resolves on PATH only while `onPath.claude` is true. */
 const switchable = (onPath = { claude: true }) => ({
   ...claudeEnabled,

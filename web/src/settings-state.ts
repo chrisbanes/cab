@@ -127,11 +127,9 @@ function fieldFix(issue: z.core.$ZodIssue, input: unknown) {
   return "Check this field.";
 }
 
-/** Fields that change with every operation, or are bookkeeping, and are not input. */
+/** Fields that change with every operation and are not input. */
 const housekeeping = (field: string) =>
-  field === "key" ||
-  field === "expectedVersion" ||
-  field.startsWith("placement");
+  field === "key" || field === "expectedVersion";
 /** Draft fields that hold JSON rows; their per-render `rowKey` and property order are not input. */
 const jsonFields = new Set([
   "selections",
@@ -140,13 +138,25 @@ const jsonFields = new Set([
   "rows",
 ]);
 /** A field only counts while the field that controls it is on (hidden residue is not input). */
+const noRows = (value: unknown) => {
+  try {
+    const rows: unknown = JSON.parse(String(value ?? "[]"));
+    return Array.isArray(rows) && rows.length === 0;
+  } catch {
+    return false;
+  }
+};
 const inactive = (
   field: string,
   values: Record<string, string | boolean | string[]>,
 ) =>
   (field === "credentialRef" && values.referenceMode !== "set") ||
   ((field === "runtimeModel" || field === "runtimeEffort") &&
-    values.runtimeHarness !== "claude");
+    values.runtimeHarness !== "claude") ||
+  // A project's cap counts only while its override is on.
+  (field.startsWith("limit-") && !values[`override-${field.slice(6)}`]) ||
+  // Matching applies to conditions; with none there is nothing to match.
+  (field === "mode" && "conditions" in values && noRows(values.conditions));
 /**
  * A comparable form of a draft value: lists of ids are sets, whole-number limits compare as
  * numbers, JSON rows ignore `rowKey` and property order, and all other text is exact.
@@ -330,6 +340,8 @@ export class ConfigurationDraft {
         this.details = {};
         this.credentialRefusal = false;
       }
+      // The note that the latest version was loaded described input that is gone now.
+      if (undone && this.notice === outcomeCopy.adopted) this.notice = "";
       this.values = { ...values };
       this.base = { ...values };
       this.changed();

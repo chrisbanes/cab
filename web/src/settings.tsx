@@ -63,12 +63,14 @@ export function useLoadedDraft(
   // A read that arrived while the form had edits was left alone. When every edit is undone
   // the form is clean again, so it takes the latest read at once.
   const clean = !d.dirty;
-  const wasClean = useRef(clean);
+  const wasClean = useRef({ d, clean });
   // biome-ignore lint/correctness/useExhaustiveDependencies: only the form turning clean matters.
   useEffect(() => {
-    if (values && clean && !wasClean.current && d.phase !== "recorded")
+    // Another draft (the page now edits something else) starts from its own state.
+    const was = wasClean.current.d === d ? wasClean.current.clean : clean;
+    if (values && clean && !was && d.phase !== "recorded")
       d.initialize(fresh(values), true);
-    wasClean.current = clean;
+    wasClean.current = { d, clean };
   }, [d, clean]);
 }
 const fresh = (values: Values) => ({ ...values, key: crypto.randomUUID() });

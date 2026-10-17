@@ -668,6 +668,56 @@ test("an edit that parses to the same JSON as the saved text is still an edit an
   await page.getByRole("button", { name: "Discard changes" }).waitFor();
 });
 
+test("readiness matching with no condition is no edit, and the adopted note goes when the input is undone", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  const matching = page.getByLabel("Readiness matching", { exact: true });
+  await matching.waitFor();
+  await page.getByRole("button", { name: "Remove condition 1" }).click();
+  await save.click();
+  await savedOutcome(page);
+  await matching.selectOption({ label: "Any condition" });
+  await matching.selectOption({ label: "All conditions" });
+  await assertClean(page, "Save changes");
+  await matching.selectOption({ label: "Any condition" });
+  await assertClean(page, "Save changes");
+  // After Review changes, typing the adopted value back clears the note that it was loaded.
+  const ref = page.getByLabel("Linked repository ref", { exact: true });
+  await ref.fill("HEAD");
+  await api.execute({
+    type: "github.configure",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: d.githubConfiguration(ids.atlas).version,
+    selections: [
+      { id: "S-1", keep: true },
+      { id: "S-2", keep: true },
+      { id: "S-3", keep: true },
+    ],
+    readiness: null,
+    repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+  } as Parameters<OperatorApi["execute"]>[0]);
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByText("Loaded the latest version.", { exact: false })
+    .waitFor();
+  await ref.fill("main");
+  await page.waitForFunction(
+    () => !document.body.innerText.includes("Loaded the latest version."),
+  );
+  await assertClean(page, "Save changes");
+});
+
 test("a reverted routing edit leaves the form clean and picks up a later read", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
