@@ -1638,3 +1638,60 @@ test("apply says when it replays and when it settles a lost reply", async (t) =>
   assert.equal(r.json().data.replayed, true);
   assert.equal(Number(d.profile(profileId).version), 1);
 });
+
+test("every change prepare command defaults its document into the working directory", async (t) => {
+  const { seed, h, cli } = await setup(t);
+  const cwd = mkdtempSync(join(h.dir, "cwd-"));
+  const profileId = randomUUID();
+  const projectId = randomUUID();
+  const short = (id: string) => id.slice(0, 8);
+  const routes: [string[], string][] = [
+    [
+      ["profile", "prepare", seed.profileId, "--summary", "Default path"],
+      `ensemble-profile-configure-${short(seed.profileId)}.json`,
+    ],
+    [
+      [
+        "profile",
+        "prepare-create",
+        "--id",
+        profileId,
+        "--name",
+        "Default path profile",
+        "--instructions",
+        "Guidance",
+      ],
+      `ensemble-profile-create-${short(profileId)}.json`,
+    ],
+    [
+      [
+        "project",
+        "prepare-create",
+        "--id",
+        projectId,
+        "--name",
+        "Default path project",
+      ],
+      `ensemble-project-create-${short(projectId)}.json`,
+    ],
+    [
+      [
+        "project",
+        "prepare-routing",
+        seed.projectA,
+        "--credential-ref",
+        "env:DEFAULT_PATH_REF",
+      ],
+      `ensemble-routing-configure-${short(seed.projectA)}.json`,
+    ],
+  ];
+  for (const [args, name] of routes) {
+    const r = await cli("ro", args, { cwd });
+    assert.equal(r.code, 0, `${args.join(" ")}: ${r.err}${r.out}`);
+    assert.equal(r.json().data.file, join(cwd, name), args.join(" "));
+  }
+  assert.deepEqual(
+    readdirSync(cwd).sort(),
+    routes.map(([, name]) => name).sort(),
+  );
+});
