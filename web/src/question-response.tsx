@@ -107,14 +107,47 @@ export function QuestionResponse({
     const owner =
       content.current?.closest<HTMLElement>(".inbox-detail") ?? content.current;
     if (!owner || !state) return;
-    owner.scrollTop = state.scrollTop;
+    const target = state.scrollTop,
+      inputs = ["wheel", "touchstart", "pointerdown", "keydown"];
+    let restoring = true;
+    const observer = new ResizeObserver(() => restore());
+    const stopRestoring = () => {
+      restoring = false;
+      observer.disconnect();
+      for (const event of inputs) document.removeEventListener(event, takeOver);
+    };
+    const record = () => {
+      // A clamped restoration must retain its desired offset until more content arrives.
+      if (!restoring) state.scrollTop = owner.scrollTop;
+    };
+    const takeOver = () => {
+      stopRestoring();
+      record();
+    };
+    const restore = () => {
+      if (!restoring) return;
+      owner.scrollTop = target;
+      if (Math.abs(owner.scrollTop - target) <= 1) stopRestoring();
+    };
+    for (const event of inputs)
+      document.addEventListener(event, takeOver, { passive: true });
+    restore();
+    if (restoring)
+      observer.observe(content.current?.closest(".question-response") ?? owner);
     if (state.focusId)
       document.getElementById(state.focusId)?.focus({ preventScroll: true });
-    const record = () => {
-      state.scrollTop = owner.scrollTop;
-    };
     owner.addEventListener("scroll", record);
-    return () => owner.removeEventListener("scroll", record);
+    // Navigation can beat the final scroll event; teardown can already have removed content.
+    document.addEventListener("click", takeOver, true);
+    document.addEventListener("submit", takeOver, true);
+    window.addEventListener("popstate", takeOver, true);
+    return () => {
+      stopRestoring();
+      owner.removeEventListener("scroll", record);
+      document.removeEventListener("click", takeOver, true);
+      document.removeEventListener("submit", takeOver, true);
+      window.removeEventListener("popstate", takeOver, true);
+    };
   }, [state]);
   const sameForm =
     state &&

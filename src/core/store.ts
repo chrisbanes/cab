@@ -125,13 +125,6 @@ export class Store {
   private createTables(): void {
     this.db.exec(`CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY, projectId TEXT NOT NULL, title TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS assignments (
-      id TEXT PRIMARY KEY, taskId TEXT NOT NULL REFERENCES tasks(id),
-      projectId TEXT NOT NULL, brief TEXT NOT NULL,
-      state TEXT NOT NULL CHECK(state IN ('pending','launching','running','completed')),
-      result TEXT, instructions TEXT,
-      UNIQUE(taskId)
     );`);
   }
 
@@ -144,20 +137,6 @@ export class Store {
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       instructions TEXT
-    );
-    CREATE TABLE IF NOT EXISTS project_host_bindings (
-      projectId TEXT NOT NULL REFERENCES projects(id),
-      hostKey TEXT NOT NULL REFERENCES host_installation(hostKey),
-      externalProjectId TEXT NOT NULL,
-      coordinatorConversationId TEXT,
-      PRIMARY KEY(projectId, hostKey),
-      UNIQUE(hostKey, externalProjectId)
-    );
-    CREATE TABLE IF NOT EXISTS conversation_bindings (
-      assignmentId TEXT PRIMARY KEY REFERENCES assignments(id),
-      hostKey TEXT NOT NULL REFERENCES host_installation(hostKey),
-      externalConversationId TEXT NOT NULL,
-      UNIQUE(hostKey, externalConversationId)
     );`);
   }
 

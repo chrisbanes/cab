@@ -1384,16 +1384,90 @@ test("SQLite binding failure leaves a durable held submission, while corrupt ini
 
 test("version 2 core schema migrates transactionally to standalone schema", () => {
   const root = mkdtempSync(join(tmpdir(), "ensemble-s02-"));
-  const db = new DatabaseSync(join(root, "core.sqlite"));
+  const filename = join(root, "core.sqlite");
+  let db = new DatabaseSync(filename);
   try {
-    const key = new Store(db).ensureHost("standalone-codex");
-    db.exec("DROP TABLE execution_intents; PRAGMA user_version = 2");
+    db.exec(`PRAGMA foreign_keys = ON;
+      CREATE TABLE host_installation (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        hostKind TEXT NOT NULL,
+        hostKey TEXT NOT NULL UNIQUE
+      );
+      INSERT INTO host_installation VALUES (1, 'standalone-codex', '10000000-0000-4000-8000-000000000001');
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        title TEXT NOT NULL
+      );
+      CREATE TABLE assignments (
+        id TEXT PRIMARY KEY,
+        taskId TEXT NOT NULL REFERENCES tasks(id),
+        projectId TEXT NOT NULL,
+        brief TEXT NOT NULL,
+        state TEXT NOT NULL CHECK(state IN ('pending','launching','running','completed')),
+        result TEXT,
+        instructions TEXT,
+        UNIQUE(taskId)
+      );
+      CREATE TABLE projects (
+        id TEXT PRIMARY KEY,
+        instructions TEXT
+      );
+      CREATE TABLE project_host_bindings (
+        projectId TEXT NOT NULL REFERENCES projects(id),
+        hostKey TEXT NOT NULL REFERENCES host_installation(hostKey),
+        externalProjectId TEXT NOT NULL,
+        coordinatorConversationId TEXT,
+        PRIMARY KEY(projectId, hostKey),
+        UNIQUE(hostKey, externalProjectId)
+      );
+      CREATE TABLE conversation_bindings (
+        assignmentId TEXT PRIMARY KEY REFERENCES assignments(id),
+        hostKey TEXT NOT NULL REFERENCES host_installation(hostKey),
+        externalConversationId TEXT NOT NULL,
+        UNIQUE(hostKey, externalConversationId)
+      );
+      INSERT INTO tasks VALUES ('task-1', 'project-1', 'Legacy task');
+      INSERT INTO assignments VALUES (
+        'assignment-1', 'task-1', 'project-1', 'Legacy brief', 'running',
+        'Legacy result', 'Legacy instructions'
+      );
+      INSERT INTO projects VALUES ('project-1', 'Legacy project instructions');
+      INSERT INTO project_host_bindings VALUES (
+        'project-1', '10000000-0000-4000-8000-000000000001', 'external-project-1',
+        'coordinator-conversation-1'
+      );
+      INSERT INTO conversation_bindings VALUES (
+        'assignment-1', '10000000-0000-4000-8000-000000000001',
+        'external-conversation-1'
+      );
+      PRAGMA user_version = 2;`);
+    const legacyTables = [
+      "host_installation",
+      "tasks",
+      "assignments",
+      "projects",
+      "project_host_bindings",
+      "conversation_bindings",
+    ];
+    const snapshot = () =>
+      legacyTables.map((name) => ({
+        schema: db
+          .prepare(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+          )
+          .get(name),
+        rows: db.prepare(`SELECT * FROM ${name}`).all(),
+      }));
+    const legacySnapshot = snapshot();
+    const key = "10000000-0000-4000-8000-000000000001";
     assert.equal(new Store(db).ensureHost("standalone-codex"), key);
     assert.equal(
       (db.prepare("PRAGMA user_version").get() as { user_version: number })
         .user_version,
       6,
     );
+    assert.deepEqual(snapshot(), legacySnapshot);
     assert.ok(
       db
         .prepare(
@@ -1401,6 +1475,18 @@ test("version 2 core schema migrates transactionally to standalone schema", () =
         )
         .get(),
     );
+    assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
+
+    db.close();
+    db = new DatabaseSync(filename);
+    assert.equal(new Store(db).ensureHost("standalone-codex"), key);
+    assert.equal(
+      (db.prepare("PRAGMA user_version").get() as { user_version: number })
+        .user_version,
+      6,
+    );
+    assert.deepEqual(snapshot(), legacySnapshot);
+    assert.equal(db.prepare("PRAGMA foreign_key_check").all().length, 0);
   } finally {
     db.close();
     rmSync(root, { recursive: true, force: true });

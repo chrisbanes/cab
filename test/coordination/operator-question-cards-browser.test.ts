@@ -468,6 +468,119 @@ for (const [name, engine] of engines) {
   );
 
   test(
+    `${name}: evidence return restores the departure position after independent holds load, unless the operator scrolls`,
+    { browserEngine: name },
+    async (_t, j) => {
+      const { page, web, group } = await openQuestions(j, engine, {
+        width: 1366,
+        height: 600,
+      });
+      const form = page.getByRole("region", {
+          name: "Exact question response",
+        }),
+        detail = page.locator(".inbox-detail"),
+        evidence = form.getByRole("link", {
+          name: "Question evidence",
+          exact: true,
+        }),
+        selected = form.getByRole("radio", { name: /^Workspace owners/ });
+      await selected.check();
+      await form
+        .locator(".question-holds")
+        .getByText(/Project paused/)
+        .waitFor();
+      for (const takeover of [false, true]) {
+        // Leave before the browser dispatches the new position's scroll event.
+        const departure = await evidence.evaluate((link) => {
+          const owner = link.closest<HTMLElement>(".inbox-detail")!;
+          owner.scrollTop = 60;
+          owner.dispatchEvent(new Event("scroll"));
+          link.focus({ preventScroll: true });
+          owner.scrollTop = owner.scrollHeight - owner.clientHeight - 5;
+          const top = owner.scrollTop;
+          (link as HTMLAnchorElement).click();
+          return top;
+        });
+        assert.ok(departure > 60);
+        await page.waitForURL(/\/app\/tasks\//);
+        let release = () => {};
+        const pending = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let requested = () => {};
+        const taskRead = new Promise<void>((resolve) => {
+          requested = resolve;
+        });
+        const taskUrl = `${web.origin}/api/operator/tasks/${group.taskId}`;
+        await page.route(taskUrl, async (route) => {
+          if (new URL(page.url()).pathname === "/app/inbox") {
+            requested();
+            await pending;
+          }
+          await route.continue();
+        });
+        try {
+          await page.goBack();
+          await selected.waitFor();
+          await taskRead;
+          await settle(page);
+          assert.equal(await selected.isChecked(), true);
+          assert.equal(
+            await evidence.evaluate((el) => document.activeElement === el),
+            true,
+          );
+          const maximum = await detail.evaluate(
+            (el) => el.scrollHeight - el.clientHeight,
+          );
+          assert.ok(
+            maximum < departure,
+            JSON.stringify({ maximum, departure }),
+          );
+          assert.equal(
+            await detail.evaluate((el) => el.scrollTop),
+            maximum,
+            "restore reaches the temporary limit while the independent task read is pending",
+          );
+          let expected = departure;
+          if (takeover) {
+            const bounds = (await detail.boundingBox())!;
+            await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + 30);
+            await page.mouse.wheel(0, -120);
+            await page.waitForFunction(
+              (limit) =>
+                document.querySelector(".inbox-detail")!.scrollTop < limit,
+              maximum,
+            );
+            await settle(page);
+            expected = await detail.evaluate((el) => el.scrollTop);
+          }
+          release();
+          await form
+            .locator(".question-holds")
+            .getByText(/Project paused/)
+            .waitFor();
+          await settle(page);
+          assert.equal(
+            await detail.evaluate((el) => el.scrollTop),
+            expected,
+            takeover
+              ? "late holds preserve the operator's new position"
+              : "late holds restore the exact departure position",
+          );
+          assert.equal(await selected.isChecked(), true);
+          assert.equal(
+            await evidence.evaluate((el) => document.activeElement === el),
+            true,
+          );
+        } finally {
+          release();
+          await page.unrouteAll({ behavior: "wait" });
+        }
+      }
+    },
+  );
+
+  test(
     `${name}: requests that cannot take an answer show titled notices with the server reason, and evidence return restores selection, scroll and focus`,
     { browserEngine: name },
     async (_t, j) => {
@@ -496,6 +609,7 @@ for (const [name, engine] of engines) {
       // A plain focus() scrolls the link into view; its scroll event lands before or after the
       // Enter depending on load, which would make 60 not the position the Inbox recorded.
       await evidence.evaluate((el) => el.focus({ preventScroll: true }));
+      assert.equal(await detail.evaluate((el) => el.scrollTop), 60);
       await page.keyboard.press("Enter");
       await page.waitForURL(/\/app\/tasks\//);
       await page.goBack();
