@@ -821,49 +821,45 @@ export function FilePreviewBody({
         </>
       )}
       {data.kind === "base64" && data.mime !== "application/pdf" && (
-        <>
-          <RasterDocumentView
-            key={tab.key}
-            preview={data}
-            tab={tab}
-            changed={changed}
+        <RasterDocumentView
+          key={tab.key}
+          preview={data}
+          tab={tab}
+          changed={changed}
+        />
+      )}
+      {data.kind === "base64" &&
+        data.mime === "application/pdf" &&
+        (data.maxDisplayedPages !== undefined &&
+        data.maxCanvasPixels !== undefined ? (
+          <PdfDocumentView
+            key={`${tab.key}:${data.sha256}`}
+            data={data.data}
+            maxDisplayedPages={data.maxDisplayedPages}
+            maxCanvasPixels={data.maxCanvasPixels}
+            page={tab.pdfPage}
+            zoom={tab.pdfZoom}
+            setPage={(page) => {
+              tab.pdfPage = page;
+              changed();
+            }}
+            setZoom={(zoom) => {
+              tab.pdfZoom = zoom;
+              changed();
+            }}
+            scrollLeft={tab.pdfScrollLeft}
+            scrollTop={tab.pdfScrollTop}
+            onScroll={(left, top) => {
+              tab.pdfScrollLeft = left;
+              tab.pdfScrollTop = top;
+            }}
           />
-        </>
-      )}
-      {data.kind === "base64" && data.mime === "application/pdf" && (
-        <>
-          {data.maxDisplayedPages !== undefined &&
-          data.maxCanvasPixels !== undefined ? (
-            <PdfDocumentView
-              key={`${tab.key}:${data.sha256}`}
-              data={data.data}
-              maxDisplayedPages={data.maxDisplayedPages}
-              maxCanvasPixels={data.maxCanvasPixels}
-              page={tab.pdfPage}
-              zoom={tab.pdfZoom}
-              setPage={(page) => {
-                tab.pdfPage = page;
-                changed();
-              }}
-              setZoom={(zoom) => {
-                tab.pdfZoom = zoom;
-                changed();
-              }}
-              scrollLeft={tab.pdfScrollLeft}
-              scrollTop={tab.pdfScrollTop}
-              onScroll={(left, top) => {
-                tab.pdfScrollLeft = left;
-                tab.pdfScrollTop = top;
-              }}
-            />
-          ) : (
-            <p role="alert">
-              This PDF could not be opened safely: the service did not state its
-              preview limits.
-            </p>
-          )}
-        </>
-      )}
+        ) : (
+          <p role="alert">
+            This PDF could not be opened safely: the service did not state its
+            preview limits.
+          </p>
+        ))}
     </>
   );
 }
