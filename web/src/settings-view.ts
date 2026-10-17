@@ -308,6 +308,28 @@ export function holdPills(h: {
   ];
 }
 
+/**
+ * Consecutive recovery records that display the same state, newest first as `shown`.
+ * Only the work id and generation differ within a run, so nothing visible is hidden;
+ * a witness id makes its record unique, so it never joins a run.
+ */
+export function recoveryRecordRuns<
+  R extends { workId: unknown; generation: unknown },
+>(records: readonly R[]): { shown: R; older: R[] }[] {
+  const runs: { signature: string; items: R[] }[] = [];
+  for (const record of records) {
+    const { workId: _w, generation: _g, ...state } = record;
+    const signature = JSON.stringify(state);
+    const last = runs.at(-1);
+    if (last?.signature === signature) last.items.push(record);
+    else runs.push({ signature, items: [record] });
+  }
+  return runs.map(({ items }) => ({
+    shown: items[items.length - 1] as R,
+    older: items.slice(0, -1),
+  }));
+}
+
 /** Controlled source failures contain no provider output or private reference names. */
 export function sourceCredentialCopy(reason: string | null | undefined) {
   switch (reason) {

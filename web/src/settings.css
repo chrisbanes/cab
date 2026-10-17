@@ -395,3 +395,11 @@
     content: none;
   }
 }
+
+.recovery-older {
+  display: grid;
+  gap: var(--space-12);
+}
+.recovery-older > summary {
+  cursor: pointer;
+}
