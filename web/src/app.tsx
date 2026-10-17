@@ -459,20 +459,19 @@ function knownRoute(pathname: string) {
   );
 }
 /**
- * The URL each history entry the shell made or adopted had, by entry key. Browsers may copy
- * `history.state` into a new entry made by a native fragment change, so a saved scroll
- * position in the state proves nothing about the entry: only an entry reached again at the
- * URL it was recorded for is a traversal to the same entry.
+ * Each entry the shell makes or adopts carries the URL it was made for in its own state
+ * (`entryUrl`). Browsers may copy `history.state` into a new entry made by a native
+ * fragment change, so a saved scroll position in the state proves nothing by itself: only
+ * an entry reached at the URL stamped in its state is a traversal to the same entry. The
+ * stamp lives in the entry, so there is no in-memory registry to go stale.
  */
-const entryUrls = new Map<string, string>();
-const currentUrl = () => location.href;
+const absoluteUrl = (href: string) => new URL(href, location.href).href;
 const ownsState = () => {
-  const key = (history.state as { navKey?: string } | null)?.navKey;
-  return key !== undefined && entryUrls.get(key) === currentUrl();
+  const stamp = (history.state as { entryUrl?: unknown } | null)?.entryUrl;
+  return typeof stamp === "string" && stamp === location.href;
 };
 function pushAppEntry(href: string, navigationScope: string) {
   const fromSearch = location.pathname === "/app/search";
-  const navKey = crypto.randomUUID();
   history.pushState(
     {
       origin: location.pathname + location.search,
@@ -480,7 +479,8 @@ function pushAppEntry(href: string, navigationScope: string) {
         ? history.state?.workspaceOrigin
         : location.pathname + location.search,
       navigationScope,
-      navKey,
+      navKey: crypto.randomUUID(),
+      entryUrl: absoluteUrl(href),
       entryIndex: (history.state?.entryIndex ?? 0) + 1,
       workspaceIndex: fromSearch
         ? (history.state?.workspaceIndex ?? 0)
@@ -489,7 +489,6 @@ function pushAppEntry(href: string, navigationScope: string) {
     "",
     href,
   );
-  entryUrls.set(navKey, currentUrl());
 }
 export function App() {
   const drafts = useRef(new ConfigurationDrafts());
@@ -503,13 +502,15 @@ export function App() {
       location.pathname === "/app/search"
         ? "/app/search"
         : location.pathname + location.search + location.hash;
-    const navKey = crypto.randomUUID();
     history.replaceState(
-      { navigationScope: navigationScope.current, navKey },
+      {
+        navigationScope: navigationScope.current,
+        navKey: crypto.randomUUID(),
+        entryUrl: absoluteUrl(next),
+      },
       "",
       next,
     );
-    entryUrls.set(navKey, currentUrl());
     setPath(next);
   };
   const clientRef = useRef<OperatorClient | null>(null);
@@ -569,18 +570,16 @@ export function App() {
           history.state.navigationScope !== navigationScope.current
         )
           clearPrivateNavigation();
-        if (identity) {
-          const navKey = history.state?.navKey ?? crypto.randomUUID();
+        if (identity)
           history.replaceState(
             {
               ...history.state,
               navigationScope: navigationScope.current,
-              navKey,
+              navKey: history.state?.navKey ?? crypto.randomUUID(),
+              entryUrl: location.href,
             },
             "",
           );
-          entryUrls.set(navKey, currentUrl());
-        }
         acceptedIdentity.current = identity;
         setLogoutPending(false);
         setStillSignedIn(false);
@@ -750,9 +749,11 @@ export function App() {
     addressPath === "/login" && session?.authenticated ? "/app" : addressPath;
   useEffect(() => {
     if (pathname !== addressPath) {
-      history.replaceState({ ...history.state }, "", "/app");
-      if (history.state?.navKey)
-        entryUrls.set(history.state.navKey, currentUrl());
+      history.replaceState(
+        { ...history.state, entryUrl: absoluteUrl("/app") },
+        "",
+        "/app",
+      );
       setPath("/app");
     }
   }, [pathname, addressPath]);

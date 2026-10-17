@@ -762,6 +762,42 @@ test("the first entry and a natively made entry restore their own saved position
   assert.deepEqual(await focusLog(page), []);
 });
 
+test("entries made before a reload start clean in the new document and land their fragment", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  const click = (name: string) =>
+    nav(page)
+      .getByRole("link", { name, exact: true })
+      .evaluate((a) => (a as HTMLElement).click());
+  await page.evaluate(() => scrollTo(0, 300));
+  await click("Profiles");
+  await landed(page, "H2", "Profiles");
+  await page.evaluate(() => scrollTo(0, 120));
+  await click("Readiness");
+  await landed(page, "H2", "Readiness");
+  await page.reload();
+  await nav(page).waitFor();
+  // Each load has its own navigation scope, so an entry from the earlier document keeps
+  // no saved position or focus (the privacy guard); it lands its fragment like a new entry.
+  await page.goBack();
+  await page.waitForURL(/#profiles$/);
+  onScreen(await landed(page, "H2", "Profiles"));
+  assert.equal(
+    await page.evaluate(() => (history.state as { scrollY?: number }).scrollY),
+    undefined,
+  );
+  // Entries made in this document own their state again: leave through a link, come Back.
+  await page.evaluate(() => scrollTo(0, 90));
+  await click("Routing");
+  await landed(page, "H2", "Routing");
+  await page.goBack();
+  await page.waitForURL(/#profiles$/);
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(await page.evaluate(() => scrollY), 90);
+});
+
 for (const fragment of ["bogus", "readiness-unknown"])
   test(`an unknown Settings fragment #${fragment} leaves the page at the top`, async (_t, journey) => {
     const { page, web } = await startSettings(journey, "/app/settings");
