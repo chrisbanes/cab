@@ -7,6 +7,7 @@ import {
 } from "../../src/operator/contracts.js";
 import { ClientError, type OperatorClient } from "./api.js";
 import {
+  comparisonReadKey,
   matchesWorkspaceComparisonRead,
   type ExpectedWorkspaceComparisonRead,
 } from "./comparison-read-match.js";
@@ -295,11 +296,7 @@ export function TaskWorkspaceChanges({
     baseBranch: state.target === "branch" ? baseBranch : null,
     changeSet: state.target === "uncommitted" ? changeSet : null,
   };
-  const key = JSON.stringify({
-    auth: session.csrfToken,
-    taskId,
-    ...expected,
-  });
+  const key = comparisonReadKey(session.csrfToken, taskId, expected);
   const baseBranchOptionsScopeKey = JSON.stringify({
     auth: session.csrfToken,
     taskId,

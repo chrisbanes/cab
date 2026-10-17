@@ -198,7 +198,19 @@ test("production retained result evidence keeps original bytes and opens current
   await retained
     .getByRole("button", { name: /^file · retained-proof\.png/ })
     .click();
-  await retained.getByText(/Bounded raster preview · 1 × 1 pixels/).waitFor();
+  await retained
+    .locator(".file-header-line")
+    .getByText(/^retained-proof\.png · image\/png · [\d,]+ bytes · 1 × 1 px$/)
+    .waitFor();
+  // The hash sits in the collapsed disclosure, not in the header line.
+  assert.equal(
+    await retained.locator(".file-header details").getAttribute("open"),
+    null,
+  );
+  assert.doesNotMatch(
+    await retained.locator(".file-header-line").innerText(),
+    /SHA-256|[0-9a-f]{64}/,
+  );
 
   // Removing the workspace file and reloading keeps the original bytes.
   await rm(textPath);

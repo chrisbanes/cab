@@ -114,6 +114,8 @@ export class TaskFilesState {
   directoryObservedAt: number | null = null;
   /** Why a direct file link was not opened. */
   linkNotice = "";
+  /** The jump from the workspace listing to a repository root happens at most once. */
+  defaultLocationApplied = false;
   /** Explicitly opens current bytes, e.g. from retained evidence; never implied. */
   openCurrentFile(scope: WorkspaceDirectory["scope"], path: string[]) {
     const key = JSON.stringify([scope, path]);

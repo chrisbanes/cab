@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -14,14 +15,22 @@ import {
 } from "../../src/operator/contracts.js";
 import type { OperatorClient } from "./api.js";
 import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
-import { Button, StatusBadge } from "./components.js";
+import { comparisonReadKey } from "./comparison-read-match.js";
+import { Button } from "./components.js";
+import {
+  changeLetter,
+  changeMarkers,
+  changeWord,
+} from "./file-change-markers.js";
 import type { PDFDocumentProxy, PDFDocumentLoadingTask } from "pdfjs-dist";
 import {
   TaskFileTabState,
   type ReviewAnchorCandidate,
+  type TaskChangesState,
   type TaskFilesState,
 } from "./task-workspace-state.js";
 import { CommentAction, ReviewComposer } from "./local-review.js";
+import { clockLabel } from "./presentation.js";
 import { RangeControls } from "./range-controls.js";
 import { useOperatorResource } from "./resource.js";
 import { workspaceFileAnchor } from "./review-anchor.js";
@@ -53,6 +62,27 @@ function pathLabel(scope: TaskFilesState["scope"], path: readonly string[]) {
       : `Repository ${scope.repositoryId}`,
     ...path,
   ].join("/");
+}
+
+/** Workspace › repository › folders: the trail to a location, one crumb per level. */
+function crumbsFor(scope: TaskFilesState["scope"], path: readonly string[]) {
+  return [
+    { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
+    ...(scope.kind === "repository"
+      ? [
+          {
+            label: `Repository ${scope.repositoryId}`,
+            scope,
+            path: [] as string[],
+          },
+        ]
+      : []),
+    ...path.map((part, index) => ({
+      label: part,
+      scope,
+      path: path.slice(0, index + 1),
+    })),
+  ];
 }
 
 type PreviewData = NonNullable<TaskFileTabState["preview"]>;
@@ -648,6 +678,55 @@ function RasterDocumentView({
   );
 }
 
+/**
+ * One line for the open file (path · type · size · time) and, collapsed below it, the hash and
+ * read times. Shared by current Files and retained evidence; `rows` are the caller's own facts.
+ */
+export function FileHeader({
+  path,
+  data,
+  observedAt,
+  rows,
+  resetKey,
+}: {
+  path: string;
+  data: NonNullable<NonNullable<TaskFileTabState["preview"]>["preview"]> | null;
+  observedAt: number | null;
+  rows: ReadonlyArray<readonly [label: string, value: string]>;
+  /** The disclosure starts collapsed again when this changes: another tab or other bytes. */
+  resetKey: string;
+}) {
+  const facts = [path];
+  if (data) {
+    facts.push(
+      data.mime.split(";")[0]?.trim() ?? data.mime,
+      `${data.size.toLocaleString()} bytes`,
+    );
+    if (data.kind === "base64" && data.width && data.height)
+      facts.push(`${data.width} × ${data.height} px`);
+  }
+  if (observedAt !== null) facts.push(clockLabel(observedAt));
+  const all = [...rows, ...(data ? [["SHA-256", data.sha256] as const] : [])];
+  return (
+    <div className="file-header">
+      <p className="file-header-line">{facts.join(" · ")}</p>
+      {all.length > 0 && (
+        <details key={resetKey} className="file-provenance">
+          <summary>Provenance &amp; limits</summary>
+          <dl>
+            {all.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd className="identifier">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** Renders ready preview bytes; shared by current Files and retained evidence. */
 export function FilePreviewBody({
   data,
@@ -679,10 +758,6 @@ export function FilePreviewBody({
     <>
       {data.kind === "text" && (
         <>
-          <p className="identifier">
-            {data.mime} · {data.size.toLocaleString()} bytes · SHA-256{" "}
-            {data.sha256}
-          </p>
           {isMarkdown && (
             <div
               className="task-actions file-preview-controls"
@@ -733,9 +808,6 @@ export function FilePreviewBody({
             <MarkdownPreview text={data.text} />
           ) : (
             <>
-              {data.mime !== "text/markdown" && !isMarkdown && (
-                <p className="muted">Source view · selectable lines</p>
-              )}
               <SourceLines
                 text={data.text}
                 tab={tab}
@@ -745,24 +817,26 @@ export function FilePreviewBody({
               />
               {comment && (
                 <>
-                  <p className="muted" aria-live="polite">
-                    {tab.selectedRange
-                      ? `Selected lines ${tab.selectedRange.startLine}–${tab.selectedRange.endLine}`
-                      : "Select a line, or use Set start and Set end for a range, to comment."}
-                  </p>
-                  <CommentAction
-                    originKey={comment.originKey}
-                    label={comment.label}
-                    anchor={
-                      tab.selectedRange
-                        ? comment.anchorFor(
-                            tab.selectedRange.startLine,
-                            tab.selectedRange.endLine,
-                            data.sha256,
-                          )
-                        : null
-                    }
-                  />
+                  <div className="task-actions file-comment-actions">
+                    <p className="muted" aria-live="polite">
+                      {tab.selectedRange
+                        ? `Selected lines ${tab.selectedRange.startLine}–${tab.selectedRange.endLine}`
+                        : "Select a line, or use Set start and Set end for a range, to comment."}
+                    </p>
+                    <CommentAction
+                      originKey={comment.originKey}
+                      label={comment.label}
+                      anchor={
+                        tab.selectedRange
+                          ? comment.anchorFor(
+                              tab.selectedRange.startLine,
+                              tab.selectedRange.endLine,
+                              data.sha256,
+                            )
+                          : null
+                      }
+                    />
+                  </div>
                   <ReviewComposer originKey={comment.originKey} />
                 </>
               )}
@@ -771,56 +845,45 @@ export function FilePreviewBody({
         </>
       )}
       {data.kind === "base64" && data.mime !== "application/pdf" && (
-        <>
-          <p className="identifier">
-            Bounded raster preview · {data.width} × {data.height} pixels ·
-            SHA-256 {data.sha256}
-          </p>
-          <RasterDocumentView
-            key={tab.key}
-            preview={data}
-            tab={tab}
-            changed={changed}
+        <RasterDocumentView
+          key={tab.key}
+          preview={data}
+          tab={tab}
+          changed={changed}
+        />
+      )}
+      {data.kind === "base64" &&
+        data.mime === "application/pdf" &&
+        (data.maxDisplayedPages !== undefined &&
+        data.maxCanvasPixels !== undefined ? (
+          <PdfDocumentView
+            key={`${tab.key}:${data.sha256}`}
+            data={data.data}
+            maxDisplayedPages={data.maxDisplayedPages}
+            maxCanvasPixels={data.maxCanvasPixels}
+            page={tab.pdfPage}
+            zoom={tab.pdfZoom}
+            setPage={(page) => {
+              tab.pdfPage = page;
+              changed();
+            }}
+            setZoom={(zoom) => {
+              tab.pdfZoom = zoom;
+              changed();
+            }}
+            scrollLeft={tab.pdfScrollLeft}
+            scrollTop={tab.pdfScrollTop}
+            onScroll={(left, top) => {
+              tab.pdfScrollLeft = left;
+              tab.pdfScrollTop = top;
+            }}
           />
-        </>
-      )}
-      {data.kind === "base64" && data.mime === "application/pdf" && (
-        <>
-          <p className="identifier">
-            PDF · {data.size.toLocaleString()} bytes · SHA-256 {data.sha256}
+        ) : (
+          <p role="alert">
+            This PDF could not be opened safely: the service did not state its
+            preview limits.
           </p>
-          {data.maxDisplayedPages !== undefined &&
-          data.maxCanvasPixels !== undefined ? (
-            <PdfDocumentView
-              key={`${tab.key}:${data.sha256}`}
-              data={data.data}
-              maxDisplayedPages={data.maxDisplayedPages}
-              maxCanvasPixels={data.maxCanvasPixels}
-              page={tab.pdfPage}
-              zoom={tab.pdfZoom}
-              setPage={(page) => {
-                tab.pdfPage = page;
-                changed();
-              }}
-              setZoom={(zoom) => {
-                tab.pdfZoom = zoom;
-                changed();
-              }}
-              scrollLeft={tab.pdfScrollLeft}
-              scrollTop={tab.pdfScrollTop}
-              onScroll={(left, top) => {
-                tab.pdfScrollLeft = left;
-                tab.pdfScrollTop = top;
-              }}
-            />
-          ) : (
-            <p role="alert">
-              This PDF could not be opened safely: the service did not state its
-              preview limits.
-            </p>
-          )}
-        </>
-      )}
+        ))}
     </>
   );
 }
@@ -830,11 +893,14 @@ export function TaskFiles({
   session,
   taskId,
   state,
+  changes,
 }: {
   client: OperatorClient;
   session: Session;
   taskId: string;
   state: TaskFilesState;
+  /** Read-only: the Branch comparisons the Changes tab has already read. Files never reads one. */
+  changes: TaskChangesState;
 }) {
   const [, render] = useState(0);
   const readingArea = useRef<HTMLDivElement>(null);
@@ -897,6 +963,30 @@ export function TaskFiles({
         explorerEntries.current[index]?.focus(),
       );
   }, [directory, directoryKey, state, changed]);
+  // Open at a repository root once, when nothing else has chosen a location: a link, an open
+  // tab or any navigation wins, and the jump never moves focus.
+  useEffect(() => {
+    if (state.defaultLocationApplied) return;
+    if (activeTab || state.scope.kind !== "workspace" || state.path.length) {
+      state.defaultLocationApplied = true;
+      return;
+    }
+    if (directory?.state !== "ready" || directory.scope.kind !== "workspace")
+      return;
+    state.defaultLocationApplied = true;
+    const repositories = directory.entries.flatMap((entry) =>
+      entry.kind === "repository" ? [entry.repositoryId] : [],
+    );
+    const repositoryId =
+      changes.repositoryId && repositories.includes(changes.repositoryId)
+        ? changes.repositoryId
+        : repositories[0];
+    if (!repositoryId) return;
+    state.scope = { kind: "repository", repositoryId };
+    state.path = [];
+    state.explorerFocusKey = null;
+    changed();
+  }, [activeTab, directory, changes, state, changed]);
   const directoryObservedAt =
     directoryResource.state.data?.observedAt ?? state.directoryObservedAt;
   const previewKey = activeTab
@@ -970,6 +1060,7 @@ export function TaskFiles({
     path: string[],
     focusEntryKey: string | null = null,
   ) => {
+    state.defaultLocationApplied = true;
     state.scope = scope;
     state.path = path;
     state.mobileView = "list";
@@ -983,6 +1074,7 @@ export function TaskFiles({
   };
   const selectFile = (path: string[], focusEntryKey: string) => {
     const key = JSON.stringify([state.scope, path]);
+    state.defaultLocationApplied = true;
     if (!state.tabs.some((tab) => tab.key === key))
       state.tabs.push(new TaskFileTabState(key, state.scope, [...path]));
     state.activeTabKey = key;
@@ -995,6 +1087,7 @@ export function TaskFiles({
   const openTab = (key: string) => {
     const tab = state.tabs.find((item) => item.key === key);
     if (!tab) return;
+    state.defaultLocationApplied = true;
     state.activeTabKey = key;
     state.scope = tab.scope;
     state.path = tab.path.slice(0, -1);
@@ -1028,29 +1121,47 @@ export function TaskFiles({
         explorerEntries.current[index]?.focus(),
       );
   };
+  // Markers come only from the Branch read the Changes tab holds for this repository and the base
+  // it is using; a missing read is silent and an unusable one is explained.
+  const markerRepository =
+    state.scope.kind === "repository" ? state.scope.repositoryId : null;
+  const comparisonRead = markerRepository
+    ? changes.comparisonReads[
+        comparisonReadKey(session.csrfToken, taskId, {
+          target: "branch",
+          repositoryId: markerRepository,
+          baseBranch: changes.baseBranchByRepository[markerRepository] ?? null,
+          changeSet: null,
+        })
+      ]
+    : undefined;
+  const markers = markerRepository
+    ? changeMarkers(comparisonRead, markerRepository, state.path)
+    : null;
+  const listed = directory?.state === "ready";
+  const markersUnusable =
+    listed && comparisonRead !== undefined && markers === null;
+  const deletedRows =
+    markers && directory?.state === "ready"
+      ? markers.deleted.filter(
+          (item) =>
+            !directory.entries.some(
+              (entry) =>
+                entry.kind !== "repository" && entry.name === item.name,
+            ),
+        )
+      : [];
+  const refreshing =
+    directoryResource.state.pending ||
+    Boolean(activeTab && previewResource.state.pending);
   const currentPath = pathLabel(state.scope, state.path);
+  const locationCrumbs = crumbsFor(state.scope, state.path);
   const selectedLabel = activeTab
     ? pathLabel(activeTab.scope, activeTab.path)
     : null;
   const crumbScope = activeTab?.scope ?? state.scope;
   const crumbPath = activeTab ? activeTab.path.slice(0, -1) : state.path;
-  const crumbs = [
-    { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
-    ...(crumbScope.kind === "repository"
-      ? [
-          {
-            label: `Repository ${crumbScope.repositoryId}`,
-            scope: crumbScope,
-            path: [] as string[],
-          },
-        ]
-      : []),
-    ...crumbPath.map((part, index) => ({
-      label: part,
-      scope: crumbScope,
-      path: crumbPath.slice(0, index + 1),
-    })),
-  ];
+  const crumbs = crumbsFor(crumbScope, crumbPath);
   // biome-ignore lint/correctness/useExhaustiveDependencies: restore reading position only when switching tabs.
   useLayoutEffect(() => {
     if (activeTab) readingArea.current?.scrollTo(0, activeTab.readingScrollTop);
@@ -1069,36 +1180,14 @@ export function TaskFiles({
       <div className="task-actions file-toolbar">
         <Button
           variant="secondary"
-          onClick={() => navigate({ kind: "workspace" }, [])}
-          disabled={state.scope.kind === "workspace" && state.path.length === 0}
-        >
-          Workspace root
-        </Button>
-        {state.scope.kind === "repository" && (
-          <Button
-            variant="secondary"
-            onClick={() => navigate(state.scope, [])}
-            disabled={state.path.length === 0}
-          >
-            Repository root
-          </Button>
-        )}
-        <Button
-          variant="secondary"
-          onClick={() => directoryResource.refresh()}
-          disabled={directoryResource.state.pending}
-        >
-          {directoryResource.state.pending ? "Refreshing…" : "Refresh files"}
-        </Button>
-        <Button
-          variant="secondary"
-          aria-pressed={state.showIgnored}
+          disabled={refreshing}
+          aria-busy={refreshing}
           onClick={() => {
-            state.showIgnored = !state.showIgnored;
-            changed();
+            directoryResource.refresh();
+            if (activeTab) previewResource.refresh();
           }}
         >
-          {state.showIgnored ? "Hide ignored files" : "Show ignored files"}
+          Refresh
         </Button>
       </div>
       {directoryResource.state.error && (
@@ -1117,11 +1206,6 @@ export function TaskFiles({
           This directory listing is truncated at the service entry bound.
         </p>
       )}
-      {directory && directory.ignoreStatus === "incomplete" && (
-        <p role="status">
-          Ignore status is incomplete, so some ignored files may be omitted.
-        </p>
-      )}
       <div className="file-workbench" data-mobile-view={state.mobileView}>
         <aside
           className="file-rail"
@@ -1129,7 +1213,45 @@ export function TaskFiles({
           aria-label="File explorer"
         >
           <h4>Explorer</h4>
-          <p className="file-current-location">{currentPath}</p>
+          <nav className="file-location" aria-label="Explorer location">
+            {locationCrumbs.map((crumb, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: breadcrumb depth is its identity; labels can repeat.
+              <Fragment key={`${index}:${crumb.label}`}>
+                {index > 0 && <span aria-hidden="true">›</span>}
+                {index === locationCrumbs.length - 1 ? (
+                  <span
+                    className="file-location-current"
+                    aria-current="location"
+                  >
+                    {crumb.label}
+                  </span>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => navigate(crumb.scope, crumb.path)}
+                  >
+                    {crumb.label}
+                  </Button>
+                )}
+              </Fragment>
+            ))}
+          </nav>
+          {listed && markers && (
+            <p className="file-observation">
+              Changes marked from the Branch comparison
+              {markers.baseBranch ? ` against ${markers.baseBranch}` : ""} read
+              at {clockLabel(markers.observedAt)}.
+              {markers.truncated
+                ? " It lists only part of the changes, so some changed files may not be marked."
+                : ""}
+            </p>
+          )}
+          {markersUnusable && (
+            <p className="file-observation">
+              Changed files aren't marked: the Changes tab has no complete
+              Branch comparison for this repository.
+            </p>
+          )}
           {directory?.state === "ready" ? (
             <ul
               className="file-entry-list"
@@ -1149,13 +1271,25 @@ export function TaskFiles({
                     : entry.size === null
                       ? entry.kind
                       : `${entry.kind} · ${entry.size.toLocaleString()} bytes`;
+                const change =
+                  entry.kind === "repository"
+                    ? undefined
+                    : markers?.files.get(entry.name);
+                const holdsChanges =
+                  entry.kind === "directory" &&
+                  markers?.directories.has(entry.name);
+                const changeNote = change
+                  ? `, ${changeWord[change]} in Branch comparison`
+                  : holdsChanges
+                    ? ", contains changed files"
+                    : "";
                 return (
                   <li key={`${entry.kind}:${name}`}>
                     <button
                       type="button"
                       className="file-entry"
                       title={fullPath}
-                      aria-label={`${name}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}`}
+                      aria-label={`${name}, ${size}, full path ${fullPath}${entry.ignored ? ", ignored" : ""}${changeNote}`}
                       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight Enter Space"
                       tabIndex={
                         state.explorerFocusKey === entryKey ||
@@ -1248,11 +1382,42 @@ export function TaskFiles({
                         {size}
                         {entry.ignored ? " · ignored" : ""}
                       </span>
+                      <span
+                        className="file-entry-marker"
+                        data-change={
+                          change ?? (holdsChanges ? "within" : undefined)
+                        }
+                        aria-hidden="true"
+                      >
+                        {change
+                          ? changeLetter[change]
+                          : holdsChanges
+                            ? "•"
+                            : ""}
+                      </span>
                     </button>
                   </li>
                 );
               })}
-              {directory.entries.length === 0 && (
+              {deletedRows.map((item) => (
+                <li
+                  key={`deleted:${item.name}`}
+                  className="file-entry-deleted"
+                  data-change="deleted"
+                >
+                  <span className="file-entry-name">
+                    {item.name}
+                    {item.directory ? "/" : ""}
+                  </span>
+                  <span className="file-entry-metadata">
+                    deleted in Branch comparison
+                  </span>
+                  <span className="file-entry-marker" aria-hidden="true">
+                    {changeLetter.deleted}
+                  </span>
+                </li>
+              ))}
+              {directory.entries.length === 0 && deletedRows.length === 0 && (
                 <li>No entries in this location.</li>
               )}
             </ul>
@@ -1263,6 +1428,27 @@ export function TaskFiles({
                 : "Loading this location…"}
             </p>
           )}
+          <div className="file-rail-footer">
+            <label className="check-field">
+              <input
+                type="checkbox"
+                className="native-check"
+                checked={state.showIgnored}
+                onChange={(event) => {
+                  state.showIgnored = event.target.checked;
+                  changed();
+                }}
+              />
+              Show ignored files
+            </label>
+            <p className="muted">Sensitive exclusions still apply.</p>
+            {directory?.ignoreStatus === "incomplete" && (
+              <p role="status">
+                Ignore status is incomplete, so some ignored files may be
+                omitted.
+              </p>
+            )}
+          </div>
         </aside>
         <div
           className="file-reading-area"
@@ -1345,23 +1531,30 @@ export function TaskFiles({
               }}
             >
               <div className="file-preview" aria-live="polite">
-                <h4>{activeTab.path.at(-1)}</h4>
-                <details>
-                  <summary>Full path</summary>
-                  <code>{selectedLabel}</code>
-                </details>
-                {directoryObservedAt !== null && (
-                  <p className="file-observation">
-                    Current workspace · as of{" "}
-                    {new Date(directoryObservedAt).toLocaleTimeString()}
-                  </p>
-                )}
-                {previewObservedAt !== null && (
-                  <p className="file-observation">
-                    Selected bytes · as of{" "}
-                    {new Date(previewObservedAt).toLocaleTimeString()}
-                  </p>
-                )}
+                <FileHeader
+                  path={activeTab.path.join("/")}
+                  data={
+                    preview?.state === "ready"
+                      ? (preview.preview ?? null)
+                      : null
+                  }
+                  observedAt={previewObservedAt}
+                  resetKey={`${activeTab.key}:${preview?.state === "ready" ? preview.preview?.sha256 : ""}`}
+                  rows={[
+                    ["Location", selectedLabel ?? ""],
+                    ...(directoryObservedAt !== null
+                      ? [
+                          [
+                            "Listing observed",
+                            clockLabel(directoryObservedAt),
+                          ] as const,
+                        ]
+                      : []),
+                    ...(previewObservedAt !== null
+                      ? [["File read", clockLabel(previewObservedAt)] as const]
+                      : []),
+                  ]}
+                />
                 {activeTab.changeNotice && (
                   <>
                     <p role="status" className="file-change-notice">
@@ -1411,24 +1604,11 @@ export function TaskFiles({
                     }}
                   />
                 )}
-                <Button
-                  className="file-refresh-preview"
-                  variant="secondary"
-                  disabled={previewResource.state.pending}
-                  onClick={() => previewResource.refresh()}
-                >
-                  {previewResource.state.pending
-                    ? "Refreshing selected file…"
-                    : "Refresh selected file"}
-                </Button>
               </div>
             </div>
           )}
         </div>
       </div>
-      <StatusBadge>
-        {directory?.ignoreStatus ?? "loading"} ignore status
-      </StatusBadge>
     </section>
   );
 }

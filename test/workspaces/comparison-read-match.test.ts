@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceComparisonRead } from "../../src/operator/contracts.js";
-import { matchesWorkspaceComparisonRead } from "../../web/src/comparison-read-match.js";
+import {
+  comparisonReadKey,
+  matchesWorkspaceComparisonRead,
+} from "../../web/src/comparison-read-match.js";
 
 const taskId = "cee1f027-8169-46de-84a6-9c7e70ef91e3";
 const comparisonId = "f6d207ea-dd9d-423a-ae70-cde35c65f1f1";
@@ -92,5 +95,33 @@ test("no-merge-base is scoped to the exact listed task, repository, and target",
       taskId,
     ),
     false,
+  );
+});
+
+test("comparisonReadKey keeps the exact key the Changes tab has always built", () => {
+  const legacy = (auth: string, value: typeof expected | object) =>
+    JSON.stringify({ auth, taskId, ...value });
+  const uncommitted = {
+    target: "uncommitted",
+    repositoryId: "repo-beta",
+    baseBranch: null,
+    changeSet: "staged",
+  } as const;
+  assert.equal(
+    comparisonReadKey("csrf", taskId, expected),
+    legacy("csrf", expected),
+  );
+  assert.equal(
+    comparisonReadKey("csrf", taskId, uncommitted),
+    legacy("csrf", uncommitted),
+  );
+  // Reads never cross a base branch, repository or session.
+  assert.notEqual(
+    comparisonReadKey("csrf", taskId, expected),
+    comparisonReadKey("csrf", taskId, { ...expected, baseBranch: null }),
+  );
+  assert.notEqual(
+    comparisonReadKey("csrf", taskId, expected),
+    comparisonReadKey("other", taskId, expected),
   );
 });

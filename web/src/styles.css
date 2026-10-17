@@ -1330,6 +1330,7 @@ nav {
   margin-top: 0;
 }
 .task-files .file-toolbar [data-slot="button"],
+.task-files .file-location [data-slot="button"],
 .task-files .file-breadcrumbs [data-slot="button"],
 .task-files .pdf-controls [data-slot="button"],
 .task-files .file-preview-controls [data-slot="button"] {
@@ -1365,12 +1366,31 @@ nav {
 .file-rail h4 {
   margin: 0 8px 8px;
 }
-.file-current-location {
+.file-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
   margin: 8px;
   color: var(--muted-foreground);
+}
+.file-location-current {
   font-family: var(--font-mono);
   font-size: var(--type-xs);
   overflow-wrap: anywhere;
+}
+.file-rail-footer {
+  margin: 8px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+}
+.file-rail-footer p {
+  margin: 4px 0;
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+}
+.file-comment-actions p {
+  margin: 0;
 }
 .file-reading-area {
   display: flex;
@@ -1392,9 +1412,10 @@ nav {
   padding: 0;
   list-style: none;
 }
-.file-entry {
+.file-entry,
+.file-entry-deleted {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.7fr);
+  grid-template-columns: minmax(0, 1fr) minmax(100px, 0.7fr) 2ch;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -1406,6 +1427,19 @@ nav {
   color: inherit;
   text-align: left;
   cursor: pointer;
+}
+.file-entry-deleted {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+.file-entry-deleted .file-entry-name {
+  text-decoration: line-through;
+}
+.file-entry-marker {
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  text-align: center;
 }
 .file-entry:hover,
 .file-entry:focus-visible {
@@ -1489,8 +1523,24 @@ nav {
   color: var(--muted-foreground);
   font-size: var(--type-xs);
 }
-.file-preview h4 {
-  margin: 0 0 12px;
+.file-header-line {
+  margin: 0 0 4px;
+  font-family: var(--font-mono);
+  font-size: var(--type-xs);
+  overflow-wrap: anywhere;
+}
+.file-provenance dl {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+}
+.file-provenance dt {
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+}
+.file-provenance dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .file-preview details {
   margin-block: 8px 16px;
@@ -1730,10 +1780,11 @@ nav {
   .task-workspace {
     gap: 20px;
   }
-  .file-entry {
+  .file-entry,
+  .file-entry-deleted {
     min-height: 44px;
     height: 44px;
-    grid-template-columns: minmax(0, 1fr) minmax(72px, 0.6fr);
+    grid-template-columns: minmax(0, 1fr) minmax(72px, 0.6fr) 2ch;
     gap: 8px;
     padding-block: 0;
     font-size: var(--type-xs);

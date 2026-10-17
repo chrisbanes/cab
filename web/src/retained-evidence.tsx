@@ -15,7 +15,7 @@ import {
 import { codeSentence } from "./presentation.js";
 import { useOperatorResource } from "./resource.js";
 import { resultEvidenceAnchor } from "./review-anchor.js";
-import { FilePreviewBody } from "./task-files.js";
+import { FileHeader, FilePreviewBody } from "./task-files.js";
 import type {
   RetainedEvidenceState,
   TaskFilesState,
@@ -401,28 +401,37 @@ export function RetainedResultEvidence({
                   <p role="alert">This retained diff could not be displayed.</p>
                 )
               ) : (
-                <FilePreviewBody
-                  data={content.preview}
-                  name={content.item.path}
-                  tab={state.tab(
-                    content.itemId,
-                    retainedScope(content.item.repositoryId),
-                    content.item.path.split("/"),
-                  )}
-                  changed={changed}
-                  comment={{
-                    originKey: `retained:${content.itemId}`,
-                    label: `retained result ${data.resultId}`,
-                    anchorFor: (startLine, endLine, contentSha256) =>
-                      resultEvidenceAnchor(
-                        taskId,
-                        { resultId: data.resultId, ...data.identity },
-                        content.item,
-                        { startLine, endLine },
-                        contentSha256,
-                      ),
-                  }}
-                />
+                <>
+                  <FileHeader
+                    path={content.item.path}
+                    data={content.preview}
+                    observedAt={null}
+                    rows={[]}
+                    resetKey={`${content.itemId}:${content.preview.sha256}`}
+                  />
+                  <FilePreviewBody
+                    data={content.preview}
+                    name={content.item.path}
+                    tab={state.tab(
+                      content.itemId,
+                      retainedScope(content.item.repositoryId),
+                      content.item.path.split("/"),
+                    )}
+                    changed={changed}
+                    comment={{
+                      originKey: `retained:${content.itemId}`,
+                      label: `retained result ${data.resultId}`,
+                      anchorFor: (startLine, endLine, contentSha256) =>
+                        resultEvidenceAnchor(
+                          taskId,
+                          { resultId: data.resultId, ...data.identity },
+                          content.item,
+                          { startLine, endLine },
+                          contentSha256,
+                        ),
+                    }}
+                  />
+                </>
               )}
               {content.item.kind === "file" && (
                 <Button
