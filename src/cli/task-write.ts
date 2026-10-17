@@ -23,6 +23,7 @@ import {
   type WriteCommand,
   type WriteContext,
   type WriteOutput,
+  withConflictRemedy,
 } from "./write.js";
 
 export const TASK_WRITE = ["cli.identity", "task.read", "task.write"] as const;
@@ -158,6 +159,19 @@ export function writeOutput(o: {
   };
 }
 
+/** What `withConflictRemedy` needs for a task's `--expected-version`. */
+export const taskVersion = (
+  session: Session,
+  taskId: string,
+  sent: number | undefined,
+) => ({
+  subject: `Task ${taskId}`,
+  sent,
+  read: `ensemble task get ${taskId}`,
+  current: () =>
+    readAfter(session, taskId).then((t) => t && { version: t.task.version }),
+});
+
 const isTask = (receipt: CommandReceipt, taskId: string) =>
   receipt.kind === "domain" &&
   "state" in receipt.result &&
@@ -181,15 +195,19 @@ async function domainTaskWrite(
     { scope, type },
     { taskId, ...fields },
   );
-  const { receipt, request } = await sendCommand(ctx, session, {
-    scope,
-    type,
-    key,
-    digest,
-    resource: taskId,
-    command: exactCommand({ type, projectId, taskId, ...fields }, key),
-    match: (r) => isTask(r, taskId),
-  });
+  const { receipt, request } = await withConflictRemedy(
+    () =>
+      sendCommand(ctx, session, {
+        scope,
+        type,
+        key,
+        digest,
+        resource: taskId,
+        command: exactCommand({ type, projectId, taskId, ...fields }, key),
+        match: (r) => isTask(r, taskId),
+      }),
+    taskVersion(session, taskId, fields.expectedVersion as number),
+  );
   const after = await readAfter(session, taskId);
   return writeOutput({
     request,
@@ -214,6 +232,21 @@ async function messageText(ctx: WriteContext) {
     );
   return text;
 }
+
+/** The service's only operator-message denial without a reference: the recipient is not in the task. */
+const notAnAssignment = (
+  taskId: string,
+  recipient: string,
+  extra: CliError["extra"] = {},
+) =>
+  new CliError(
+    "policy-denied",
+    `Assignment ${recipient} is not an assignment of task ${taskId}.`,
+    {
+      ...extra,
+      fix: `Run 'ensemble task get ${taskId} --output json' and use an assignment ID from its assignments list.`,
+    },
+  );
 
 async function sendMessage(
   ctx: WriteContext,
@@ -242,17 +275,34 @@ async function sendMessage(
     command,
   );
   if (!reused) gate();
-  const { receipt, request } = await sendCommand(ctx, session, {
-    scope,
-    type: "message",
-    key,
-    digest,
-    resource: taskId,
-    command: exactCommand(command, key),
-    match: (r) =>
-      r.kind === "coordination" &&
-      r.taskId === taskId &&
-      r.recipientAssignmentId === recipient,
+  const { receipt, request } = await withConflictRemedy(
+    () =>
+      sendCommand(ctx, session, {
+        scope,
+        type: "message",
+        key,
+        digest,
+        resource: taskId,
+        command: exactCommand(command, key),
+        match: (r) =>
+          r.kind === "coordination" &&
+          r.taskId === taskId &&
+          r.recipientAssignmentId === recipient,
+      }),
+    {
+      subject: `Assignment ${recipient}`,
+      sent: expected,
+      read: `ensemble assignment get ${recipient}`,
+      current: () =>
+        readAfter(session, taskId).then((t) => {
+          const a = t?.assignments.find((x) => x.assignmentId === recipient);
+          return a && { version: a.version, state: a.state };
+        }),
+    },
+  ).catch((error: unknown) => {
+    if (error instanceof CliError && error.code === "policy-denied")
+      throw notAnAssignment(taskId, recipient, error.extra);
+    throw error;
   });
   const name =
     task.assignments.find((a) => a.assignmentId === recipient)?.name ??
@@ -477,13 +527,17 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
             const lead = task.assignments.find(
               (a) => a.assignmentId === recipient,
             );
+            if (!lead) throw notAnAssignment(taskId, recipient);
             if (
               recipient === task.leadAssignmentId &&
-              lead?.state === "completed"
+              lead.state === "completed"
             )
               throw new CliError(
                 "usage",
                 `The project lead has completed; use 'ensemble task follow-up ${taskId}' to resume it.`,
+                {
+                  fix: `Run 'ensemble task follow-up ${taskId} --expected-version N --message-file FILE', with N from 'ensemble assignment get ${recipient}'.`,
+                },
               );
           },
         );
@@ -505,7 +559,9 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         const task = (await readTask(session, taskId)).data;
         const lead = task.leadAssignmentId;
         if (!lead)
-          throw new CliError("conflict", "This task has no project lead.");
+          throw new CliError("conflict", "This task has no project lead.", {
+            fix: `Choose a project lead; 'ensemble task get ${taskId}' prints the commands.`,
+          });
         return sendMessage(
           ctx,
           session,
@@ -521,6 +577,12 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
                 task.leadFeedback?.mode === "receives"
                   ? `The lead has not completed; use 'ensemble task message ${taskId} --to ${lead}'.`
                   : "The lead cannot be resumed: the task is not open or the lead is unavailable.",
+                {
+                  fix:
+                    task.leadFeedback?.mode === "receives"
+                      ? `Run 'ensemble task message ${taskId} --to ${lead} --expected-version N --message-file FILE', with N from 'ensemble assignment get ${lead}'.`
+                      : `Run 'ensemble task get ${taskId}' to see the task's state and lead.`,
+                },
               );
           },
         );

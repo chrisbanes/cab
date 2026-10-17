@@ -142,6 +142,9 @@ export async function consistentRead<T>(
   throw new CliError(
     "conflict",
     "The target kept changing while it was read. Prepare the change again.",
+    {
+      fix: "Prepare the change again once nothing else is editing the target.",
+    },
   );
 }
 
@@ -150,6 +153,9 @@ export function checkExpected(current: number, expected: number | undefined) {
     throw new CliError(
       "conflict",
       `The target is at version ${current}, not ${expected}. Review the current state and prepare again.`,
+      {
+        fix: `Review the target with its 'get' command, then prepare again with --expected-version ${current}.`,
+      },
     );
 }
 
@@ -364,8 +370,15 @@ export async function applyFile(
       throw new CliError(
         "conflict",
         `${document.target.scope} already exists. Nothing was sent.`,
+        {
+          fix: `Prepare the creation again with a new ID, or change the existing one with 'ensemble ${area} prepare'.`,
+        },
       );
   }
+  const read =
+    area === "capacity"
+      ? "ensemble capacity get"
+      : `ensemble ${area} get ${document.target.id}`;
   const { receipt, request } = await sendCommand(ctx, session, {
     scope: document.target.scope,
     type: document.kind,
@@ -378,7 +391,10 @@ export async function applyFile(
       throw new CliError(
         "conflict",
         `${document.target.scope} changed since this document was prepared, or request ${key} was used with other material. Nothing was applied; review the current state and prepare again.`,
-        error.extra,
+        {
+          ...error.extra,
+          fix: `Review ${document.target.scope} with '${read}', then run 'ensemble ${area} prepare' again.`,
+        },
       );
     throw error;
   });

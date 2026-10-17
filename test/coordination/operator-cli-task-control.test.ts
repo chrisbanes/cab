@@ -242,3 +242,39 @@ test("CLI and retained forms share the Stop hold and the session projection", as
   await s.f.service.resumeTask(s.taskId);
   assert.equal(stopped(o, s.taskId), false);
 });
+
+test("stop and resume with a stale expected version name the current version", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  const current = Number(
+    (await o.cli("rw", ["task", "get", s.taskId])).json().data.task.version,
+  );
+  for (const verb of ["stop", "resume"]) {
+    const args = [
+      "task",
+      verb,
+      s.taskId,
+      "--expected-version",
+      String(current + 5),
+      "--connection",
+      "rw",
+    ];
+    const human = await o.h.run(args);
+    assert.equal(human.code, 4, `${verb}: ${human.err}`);
+    assert.match(
+      human.err,
+      new RegExp(
+        `Task ${s.taskId} is at version ${current}, not ${current + 5}\\.`,
+      ),
+    );
+    const fix = human.err.match(/^Fix: (.*)$/m)?.[1] ?? "";
+    assert.match(fix, new RegExp(`ensemble task get ${s.taskId}`));
+    assert.match(fix, new RegExp(`--expected-version ${current}\\b`));
+    const json = await o.h.run([...args, "--output", "json"]);
+    assert.equal(json.code, 4);
+    assert.equal(json.json().error.code, "conflict");
+    assert.equal(json.json().error.outcome, "not-applied");
+    assert.equal(json.json().error.request.type, `task.${verb}`);
+  }
+  assert.equal(stopped(o, s.taskId), false);
+});

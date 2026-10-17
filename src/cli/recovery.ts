@@ -322,6 +322,9 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
       throw new CliError(
         "conflict",
         `The assignment is at version ${d.assignmentVersion}, conversation revision ${d.conversationRevision}. Review 'ensemble recovery get ${assignmentId}' and prepare again. Nothing was written.`,
+        {
+          fix: `Run 'ensemble recovery get ${assignmentId}', then prepare again with the version and conversation revision it shows.`,
+        },
       );
   } else {
     record = d.records.find((r) => r.workId === ctx.values.work);
@@ -338,6 +341,9 @@ async function prepare(ctx: Parameters<WriteCommand["run"]>[0]) {
     throw new CliError(
       "conflict",
       `${path} is not eligible now: blocked by ${blockedBy.join(", ")}. Nothing was written.`,
+      {
+        fix: `Run 'ensemble recovery get ${assignmentId}' to see what blocks it, then prepare again once it is clear.`,
+      },
     );
   const exact = exactCommand(
     record
@@ -522,7 +528,10 @@ async function submit(ctx: Parameters<WriteCommand["run"]>[0]) {
           "Missing, expired or stale evidence is not a successful recovery; the task is not resumed.",
           ...(await afterLines(session, assignmentId, workId)),
         ].join("\n"),
-        error.extra,
+        {
+          ...error.extra,
+          fix: `Run 'ensemble recovery get ${assignmentId}', then prepare a new document with 'ensemble recovery prepare'.`,
+        },
       );
     throw error;
   }

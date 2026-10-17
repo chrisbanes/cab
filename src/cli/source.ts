@@ -327,12 +327,18 @@ export function sourceEditCommand(
     throw new CliError(
       "conflict",
       "A saved selection or repository link cannot be named in this read, so the CLI cannot keep it. Nothing was prepared.",
+      {
+        fix: `Review the saved source with 'ensemble project sources ${projectId}'.`,
+      },
     );
   const unavailableRule = source.readiness.kind === "unavailable";
   if (unavailableRule && edit.readiness === undefined)
     throw new CliError(
       "conflict",
       'The saved readiness cannot be read; replace it with "readiness" in the edit file. Nothing was prepared.',
+      {
+        fix: `Add a "readiness" rule to the edit file, then run 'ensemble project prepare-source ${projectId}' again.`,
+      },
     );
   const saved = source.selections.map((s) => ({ ...s, id: String(s.id) }));
   const remove = edit.removeSelections ?? [];
@@ -618,7 +624,13 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
             source.credential?.usable === false
           ) {
             const reason = source.credential?.reason ?? "missing-credential";
-            throw new CliError("conflict", sourceCredentialExplanation(reason));
+            throw new CliError(
+              "conflict",
+              sourceCredentialExplanation(reason),
+              {
+                fix: `Fix the credential as described above, then run 'ensemble project preview-source ${projectId}' again.`,
+              },
+            );
           }
         }
         const { receipt, request } = await sendCommand(ctx, session, {
@@ -643,13 +655,19 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "conflict",
               sourceCredentialExplanation(error.extra.credentialReason),
-              error.extra,
+              {
+                ...error.extra,
+                fix: `Fix the credential as described above, then run 'ensemble project preview-source ${projectId}' again.`,
+              },
             );
           if (error instanceof CliError && error.code === "conflict")
             throw new CliError(
               "conflict",
               "Not activated: the source version changed, the selection is unknown, or the provider read was incomplete. Nothing is active from this request.",
-              error.extra,
+              {
+                ...error.extra,
+                fix: `Run 'ensemble project sources ${projectId}', then preview again with --expected-version set to its version.`,
+              },
             );
           throw error;
         });
@@ -739,12 +757,16 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "conflict",
               "The task has no placement conflict to resolve. Nothing was sent.",
+              {
+                fix: `Run 'ensemble task get ${taskId}' to see where the task is placed.`,
+              },
             );
           checkExpected(placement.version, expected);
           if (!placement.choices.some((c) => c.id === to))
             throw new CliError(
               "conflict",
               `--to ${to} is not one of the task's matching projects (${placement.choices.map((c) => c.id).join(", ")}). Nothing was sent.`,
+              { fix: "Choose --to from the matching projects listed above." },
             );
         }
         const sent = await sendCommand(ctx, session, {
@@ -768,7 +790,10 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
           throw new CliError(
             "conflict",
             "Not placed: the task changed, already has an assignment, or the chosen project no longer matches it. The task is unchanged.",
-            error.extra,
+            {
+              ...error.extra,
+              fix: `Run 'ensemble task get ${taskId}', then place it again with the version shown by 'ensemble project sources ${before.projectId}'.`,
+            },
           );
         });
         const after = await task();

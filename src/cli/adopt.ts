@@ -5,7 +5,12 @@ import { positiveIntFlag } from "./configure.js";
 import { CliError } from "./connections.js";
 import { receiptLines } from "./operation.js";
 import { keyValues } from "./render.js";
-import { optionalRequestId, sendCommand, type WriteCommand } from "./write.js";
+import {
+  optionalRequestId,
+  sendCommand,
+  type WriteCommand,
+  withConflictRemedy,
+} from "./write.js";
 
 export const adoptCommands = new Map<string, WriteCommand>([
   [
@@ -42,20 +47,35 @@ export const adoptCommands = new Map<string, WriteCommand>([
           requested ??
           (await ctx.journal.find(service, digest)) ??
           randomUUID();
-        const { receipt, request } = await sendCommand(ctx, session, {
-          scope: `project:${read.data.projectId}`,
-          type: "assignment.apply",
-          key,
-          digest,
-          resource: id,
-          command: {
-            type: "assignment.apply",
-            key,
-            projectId: read.data.projectId,
-            assignmentId: id,
-            expectedVersion: expected,
+        const { receipt, request } = await withConflictRemedy(
+          () =>
+            sendCommand(ctx, session, {
+              scope: `project:${read.data.projectId}`,
+              type: "assignment.apply",
+              key,
+              digest,
+              resource: id,
+              command: {
+                type: "assignment.apply",
+                key,
+                projectId: read.data.projectId,
+                assignmentId: id,
+                expectedVersion: expected,
+              },
+            }),
+          {
+            subject: `Assignment ${id}`,
+            sent: expected,
+            read: `ensemble assignment get ${id}`,
+            current: () =>
+              session.client
+                .get(`/api/operator/assignments/${id}`, assignmentDetailSchema)
+                .then((a) => ({
+                  version: a.data.version,
+                  state: a.data.state,
+                })),
           },
-        });
+        );
         return {
           request,
           data: { receipt },

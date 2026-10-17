@@ -253,3 +253,48 @@ test("a lost reply is reconciled with operation get and replays once", async (t)
     );
   assert.equal(r.json().data.comparison.boundIsCurrent, true);
 });
+
+test("apply-current with a stale version names the current version", async (t) => {
+  const { cli, d, h, s, seed } = await setup(t);
+  const version = () => Number(d.assignment(seed.assignmentA).version);
+  const first = await cli("rw", [
+    "assignment",
+    "apply-current",
+    seed.assignmentA,
+    "--expected-version",
+    String(version()),
+  ]);
+  assert.equal(first.code, 0, first.out);
+  const current = version();
+  const before = databaseDigest(s.f);
+  const args = [
+    "assignment",
+    "apply-current",
+    seed.assignmentA,
+    "--expected-version",
+    String(current - 1),
+    // The first apply recorded this material, so a new key makes this a fresh request.
+    "--request-id",
+    randomUUID(),
+    "--connection",
+    "rw",
+  ];
+  const human = await h.run(args);
+  assert.equal(human.code, 4);
+  assert.match(
+    human.err,
+    new RegExp(
+      `Assignment ${seed.assignmentA} \\(\\w+\\) is at version ${current}, not ${current - 1}\\.`,
+    ),
+  );
+  const fix = human.err.match(/^Fix: (.*)$/m)?.[1] ?? "";
+  assert.match(fix, new RegExp(`ensemble assignment get ${seed.assignmentA}`));
+  assert.match(fix, new RegExp(`--expected-version ${current}\\b`));
+  const json = await h.run([...args, "--output", "json"]);
+  const error = (JSON.parse(json.out) as Json).error;
+  assert.equal(json.code, 4);
+  assert.equal(error.code, "conflict");
+  assert.equal(error.outcome, "not-applied");
+  assert.equal(error.request.type, "assignment.apply");
+  assert.equal(databaseDigest(s.f), before);
+});

@@ -288,6 +288,9 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
           throw new CliError(
             "policy-denied",
             "The question form is withheld; it cannot be answered here.",
+            {
+              fix: `Run 'ensemble question get ${taskId} ${interactionId}' to see what is withheld.`,
+            },
           );
         const answers = await readAnswers(ctx.values["answers-file"], q.form);
         // Exactly the React mapping per question source.
@@ -326,11 +329,17 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
           throw new CliError(
             "conflict",
             `The question is ${q.status}; it cannot be answered.`,
+            {
+              fix: `Run 'ensemble question get ${taskId} ${interactionId}' to see its state.`,
+            },
           );
         if (!reused && q.revision !== revision)
           throw new CliError(
             "conflict",
             `The question is at revision ${q.revision}, not ${revision}.`,
+            {
+              fix: `Retry with --expected-revision ${q.revision}; 'ensemble question get ${taskId} ${interactionId}' shows it.`,
+            },
           );
         const { receipt, request } = await sendCommand(ctx, session, {
           scope,
@@ -409,6 +418,9 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
           throw new CliError(
             "policy-denied",
             "The approval action is withheld; it cannot be decided here.",
+            {
+              fix: `Run 'ensemble approval get ${taskId} ${interactionId}' to see what is withheld.`,
+            },
           );
         // Send exactly what the service disclosed; a withheld material is filled
         // from the retained record for a denial only.
@@ -436,21 +448,33 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "conflict",
               `The approval is already ${approval.status}.`,
+              {
+                fix: `Run 'ensemble approval get ${taskId} ${interactionId}' to see the decision.`,
+              },
             );
           if (approval.revision !== revision)
             throw new CliError(
               "conflict",
               `The approval is at revision ${approval.revision}, not ${revision}.`,
+              {
+                fix: `Retry with --expected-revision ${approval.revision}; 'ensemble approval get ${taskId} ${interactionId}' shows it.`,
+              },
             );
           if ((approval.materialHash ?? undefined) !== hash)
             throw new CliError(
               "conflict",
               "--material-hash does not match the approval's material.",
+              {
+                fix: `Copy the material hash from 'ensemble approval get ${taskId} ${interactionId}'.`,
+              },
             );
           if (decision === "approved" && !approval.approvable)
             throw new CliError(
               "policy-denied",
               "This approval cannot be approved: its material or target is withheld or was never recorded. It can only be denied.",
+              {
+                fix: `Decide it with --decision denied; 'ensemble approval get ${taskId} ${interactionId}' shows the material.`,
+              },
             );
         }
         const { receipt, request } = await sendCommand(ctx, session, {
