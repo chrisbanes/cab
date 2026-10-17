@@ -267,11 +267,17 @@ export function TaskBoard({
       )
         capture();
     };
+    const search = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k")
+        capture();
+    };
     document.addEventListener("click", leave, true);
     document.addEventListener("submit", leave, true);
+    document.addEventListener("keydown", search, true);
     return () => {
       document.removeEventListener("click", leave, true);
       document.removeEventListener("submit", leave, true);
+      document.removeEventListener("keydown", search, true);
     };
   }, [capture]);
   useLayoutEffect(() => {

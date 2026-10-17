@@ -491,6 +491,28 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   await page.goBack();
   await card.waitFor();
   assert.equal(await board.evaluate((e) => e.scrollLeft), searchScroll);
+  // With the sidebar hidden, Search work's shortcut navigates directly to Search.
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const shortcutScroll = await board.evaluate((e) => {
+    e.scrollLeft = 300;
+    const offset = e.scrollLeft;
+    document.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "k",
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    return offset;
+  });
+  assert.ok(shortcutScroll > 0 && shortcutScroll !== searchScroll);
+  await page.waitForURL((u) => u.pathname === "/app/search");
+  assert.equal(await page.evaluate(() => history.state?.board), undefined);
+  await page.goBack();
+  await card.waitFor();
+  assert.equal(await board.evaluate((e) => e.scrollLeft), shortcutScroll);
+  await page.setViewportSize({ width: 1366, height: 900 });
   // After sign-out and sign-in the header reads "Task" until the new read lands.
   await card.click();
   await page
