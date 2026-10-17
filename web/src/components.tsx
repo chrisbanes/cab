@@ -20,6 +20,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "./lib/utils.js";
+import { shortId } from "./presentation.js";
 import { Alert, AlertDescription } from "./ui/alert.js";
 import { Badge } from "./ui/badge.js";
 import { Button as PrimitiveButton } from "./ui/button.js";
@@ -109,6 +110,27 @@ const badgeTones = {
   error: { variant: "destructive", Icon: CircleX },
   success: { variant: "success", Icon: CircleCheck },
 } as const;
+/**
+ * An identifier as short mono metadata, never inside a sentence. The full value is the title (and
+ * the abbreviation's expansion for assistive technology); `focusable` is off inside a link.
+ */
+export function ShortId({
+  value,
+  focusable = true,
+}: {
+  value: string;
+  focusable?: boolean;
+}) {
+  return (
+    <abbr
+      className="identifier"
+      title={value}
+      tabIndex={focusable ? 0 : undefined}
+    >
+      {shortId(value)}
+    </abbr>
+  );
+}
 export function StatusBadge({
   children,
   tone = "neutral",

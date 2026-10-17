@@ -25,7 +25,7 @@ import {
 } from "../../src/operator/contracts.js";
 import { holdLines } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button, ResourceStatus } from "./components.js";
+import { ActionLink, Button, ResourceStatus, ShortId } from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import type {
   ReplyOutcome,
@@ -45,6 +45,7 @@ import { RetainedResultEvidence } from "./retained-evidence.js";
 import {
   leadFeedbackMode,
   leadReceivesNotice,
+  leadUnavailableNotice,
   leadResumeNotice,
 } from "./lead-feedback.js";
 import { LocalReviewPanel, LocalReviewProvider } from "./local-review.js";
@@ -63,7 +64,12 @@ import {
   tabForSection,
   tabIds,
 } from "./task-tabs.js";
-import { briefParts, criterionRows, taskNextActor } from "./task-overview.js";
+import {
+  briefParts,
+  criterionRows,
+  deliveryApplies,
+  taskNextActor,
+} from "./task-overview.js";
 import type { ConfigurationDrafts } from "./settings-state.js";
 import { WaitReasons } from "./wait-reasons.js";
 
@@ -1267,6 +1273,12 @@ export function TaskWorkspace({
       changed();
     }
   }
+  // A task without a GitHub source has no GitHub destination: the stored pointer moves to the
+  // lead, so draft, notice, reference and approval all follow one destination. A reply that is
+  // in flight or unresolved keeps its own until it is checked. The GitHub draft is kept.
+  if (data && !data.source && state.destination === "github" && !state.frozen)
+    state.destination = "lead";
+  const destination = state.destination;
   async function send() {
     if (!state.draft.trim() || pending) return;
     if (state.frozen) {
@@ -1275,7 +1287,7 @@ export function TaskWorkspace({
     }
     const key = crypto.randomUUID();
     let input: OperatorCommand;
-    if (state.destination === "lead") {
+    if (destination === "lead") {
       if (!lead) return;
       input = {
         type: "message",
@@ -1287,6 +1299,7 @@ export function TaskWorkspace({
         ...(state.reference ? { reference: state.reference } : {}),
       };
     } else {
+      if (!data?.source) return;
       input = {
         type: "comment.send",
         key: state.commentReview?.operationId ?? key,
@@ -1336,12 +1349,29 @@ export function TaskWorkspace({
         }}
       />
     );
+  // Exactly one sentence sits above the box: what this destination does now.
+  const replyNote =
+    destination === "lead"
+      ? !lead
+        ? "This project has no lead to message yet."
+        : leadMode === "resumes"
+          ? leadResumeNotice(leadName)
+          : leadMode === "receives"
+            ? leadReceivesNotice(leadName)
+            : leadUnavailableNotice(leadName)
+      : !data.commentPolicy?.available
+        ? data.commentPolicy?.reason
+          ? `${data.commentPolicy.reason}.`
+          : "GitHub comments aren't available for this task."
+        : data.commentPolicy.mode === "approval"
+          ? "You review the exact comment before it posts to the GitHub issue."
+          : "Posts a comment on the GitHub issue.";
   const reply = (
     <section id="reply" className="reply-card">
       <h3 className="section-heading">Reply</h3>
       <div className="task-actions">
         <Button
-          variant={state.destination === "lead" ? "primary" : "secondary"}
+          variant={destination === "lead" ? "primary" : "secondary"}
           disabled={pending || state.uncertain}
           onClick={() => {
             state.destination = "lead";
@@ -1350,32 +1380,25 @@ export function TaskWorkspace({
         >
           Message task lead
         </Button>
-        <Button
-          variant={state.destination === "github" ? "primary" : "secondary"}
-          disabled={
-            pending || state.uncertain || !data.commentPolicy?.available
-          }
-          onClick={() => {
-            state.destination = "github";
-            changed();
-          }}
-        >
-          Post GitHub comment
-        </Button>
+        {data.source && (
+          <Button
+            variant={destination === "github" ? "primary" : "secondary"}
+            disabled={
+              pending || state.uncertain || !data.commentPolicy?.available
+            }
+            onClick={() => {
+              state.destination = "github";
+              changed();
+            }}
+          >
+            Post GitHub comment
+          </Button>
+        )}
       </div>
-      <p>
-        {state.destination === "lead"
-          ? `Local Ensemble inbox for ${lead?.name ?? "unconfigured lead"}. Does not post to GitHub or approve work.`
-          : `GitHub issue comment · ${data.commentPolicy?.mode ?? "unavailable"} policy · ${data.commentPolicy?.reason ?? ""}`}
-      </p>
-      {state.destination === "lead" && state.reference && (
-        <p>Immutable reference: {JSON.stringify(state.reference)}</p>
-      )}
-      {state.destination === "lead" && lead && leadMode === "resumes" && (
-        <p role="status">{leadResumeNotice(leadName)}</p>
-      )}
-      {state.destination === "lead" && lead && leadMode === "receives" && (
-        <p className="metadata muted">{leadReceivesNotice(leadName)}</p>
+      {destination === "lead" && lead && leadMode === "resumes" ? (
+        <p role="status">{replyNote}</p>
+      ) : (
+        <p className="metadata muted">{replyNote}</p>
       )}
       <label htmlFor="workspace-reply">Editable reply</label>
       <Textarea
@@ -1385,59 +1408,61 @@ export function TaskWorkspace({
         onChange={(e) => {
           state.draft = e.target.value;
           if (state.notice?.tone === "success") state.notice = null;
-          if (state.destination === "github") state.commentReview = null;
+          if (destination === "github") state.commentReview = null;
           changed();
         }}
         rows={5}
       />
-      {state.destination === "github" &&
-        data.commentPolicy?.mode === "approval" && (
-          <>
-            <Button
-              disabled={pending || state.uncertain || !state.draft.trim()}
-              onClick={() =>
+      {destination === "lead" && state.reference && (
+        <p>Immutable reference: {JSON.stringify(state.reference)}</p>
+      )}
+      {destination === "github" && data.commentPolicy?.mode === "approval" && (
+        <>
+          <Button
+            disabled={pending || state.uncertain || !state.draft.trim()}
+            onClick={() =>
+              void command({
+                type: "comment.review",
+                key: crypto.randomUUID(),
+                operationId: crypto.randomUUID(),
+                taskId,
+                expectedTaskVersion: data.task.version,
+                body: state.draft,
+              })
+            }
+          >
+            Review exact GitHub comment
+          </Button>
+          {state.commentReview && (
+            <CommentReview
+              record={state.commentReview}
+              disabled={pending || state.uncertain}
+              confirm={(decision) => {
+                const review = state.commentReview;
+                if (!review) return;
                 void command({
-                  type: "comment.review",
+                  type: "comment.confirm",
                   key: crypto.randomUUID(),
-                  operationId: crypto.randomUUID(),
                   taskId,
-                  expectedTaskVersion: data.task.version,
-                  body: state.draft,
-                })
-              }
-            >
-              Review exact GitHub comment
-            </Button>
-            {state.commentReview && (
-              <CommentReview
-                record={state.commentReview}
-                disabled={pending || state.uncertain}
-                confirm={(decision) => {
-                  const review = state.commentReview;
-                  if (!review) return;
-                  void command({
-                    type: "comment.confirm",
-                    key: crypto.randomUUID(),
-                    taskId,
-                    reviewId: review.reviewId,
-                    expectedRevision: review.revision,
-                    materialHash: review.materialHash,
-                    decision,
-                  });
-                }}
-              />
-            )}
-          </>
-        )}
+                  reviewId: review.reviewId,
+                  expectedRevision: review.revision,
+                  materialHash: review.materialHash,
+                  decision,
+                });
+              }}
+            />
+          )}
+        </>
+      )}
       {(pending || !state.uncertain) && (
         <Button
           disabled={
             pending ||
             !state.draft.trim() ||
-            (state.destination === "lead" &&
+            (destination === "lead" &&
               (!lead || leadMode === "unavailable") &&
               !state.uncertain) ||
-            (state.destination === "github" &&
+            (destination === "github" &&
               (!data.commentPolicy?.available ||
                 (data.commentPolicy.mode === "approval" &&
                   state.commentReview?.decision !== "approved")) &&
@@ -1447,17 +1472,10 @@ export function TaskWorkspace({
         >
           {pending
             ? "Sending…"
-            : state.destination === "lead"
+            : destination === "lead"
               ? "Send to task lead"
               : "Post comment"}
         </Button>
-      )}
-      {state.destination === "lead" && lead && leadMode === "unavailable" && (
-        <p>
-          Task lead is {lead.state}; local message delivery is unavailable. The
-          exact-reference draft remains editable. Existing coordination controls
-          retain the lifecycle boundary.
-        </p>
       )}
       {!pending && outcome && (
         <ActionOutcome
@@ -1724,8 +1742,9 @@ export function TaskWorkspace({
                           brief.known && <p>None supplied</p>
                         )}
                         <p className="metadata muted">
-                          {source.kind} source revision {source.revision} ·{" "}
-                          {source.sourceId}
+                          {source.kind === "github" ? "GitHub" : "Local"} source
+                          · revision {source.revision} ·{" "}
+                          <ShortId value={source.sourceId} />
                         </p>
                         <Disclosure
                           id={source.sourceId}
@@ -1784,8 +1803,9 @@ export function TaskWorkspace({
                 {selected ? (
                   <div data-record-id={selected.resultId}>
                     <p className="metadata muted">
-                      Result {selected.resultId} · assignment{" "}
-                      {selected.assignmentId} · work revision{" "}
+                      R{data.results.indexOf(selected) + 1} ·{" "}
+                      <ShortId value={selected.resultId} /> · assignment{" "}
+                      <ShortId value={selected.assignmentId} /> · work revision{" "}
                       {selected.workRevision} · {date(selected.createdAt)}
                     </p>
                     <Literal text={selected.summary} />
@@ -1824,36 +1844,43 @@ export function TaskWorkspace({
                   !state.selectedResult && <p>No result recorded.</p>
                 )}
                 <EntryLinks reveal={reveal} />
-                <p className="metadata muted">{changes}</p>
-                <Button
-                  variant="secondary"
-                  data-unconfirmed-control="review.view"
-                  onClick={() =>
-                    void command({
-                      type: "review.view",
-                      key: crypto.randomUUID(),
-                      taskId,
-                      sourceId: state.selectedSource
-                        ? (source?.sourceId ?? null)
-                        : selected
-                          ? (meta?.metadata.sourceId ?? null)
-                          : (source?.sourceId ?? null),
-                      resultIds: selected ? [selected.resultId] : [],
-                    })
-                  }
-                  disabled={
-                    Boolean(state.selectedResult && !selected) ||
-                    Boolean(state.selectedSource && !source) ||
-                    Boolean(unconfirmed)
-                  }
-                >
-                  Set viewing reference
-                </Button>
+                {/* A viewing reference needs a result to view; a lost response stays checkable. */}
+                {data.results.length > 0 && (
+                  <>
+                    <p className="metadata muted">{changes}</p>
+                    <Button
+                      variant="secondary"
+                      data-unconfirmed-control="review.view"
+                      onClick={() =>
+                        void command({
+                          type: "review.view",
+                          key: crypto.randomUUID(),
+                          taskId,
+                          sourceId: state.selectedSource
+                            ? (source?.sourceId ?? null)
+                            : selected
+                              ? (meta?.metadata.sourceId ?? null)
+                              : (source?.sourceId ?? null),
+                          resultIds: selected ? [selected.resultId] : [],
+                        })
+                      }
+                      disabled={
+                        Boolean(state.selectedResult && !selected) ||
+                        Boolean(state.selectedSource && !source) ||
+                        Boolean(unconfirmed)
+                      }
+                    >
+                      Set viewing reference
+                    </Button>
+                  </>
+                )}
                 {unconfirmedCheck("review.view")}
-                <p>
-                  Viewing records availability only; it does not approve work or
-                  clear holds. Retained records may be incomplete.
-                </p>
+                {data.results.length > 0 && (
+                  <p>
+                    Viewing records availability only; it does not approve work
+                    or clear holds. Retained records may be incomplete.
+                  </p>
+                )}
                 <label htmlFor="retained-result-revision">
                   Result revision{" "}
                   <NativeSelect
@@ -1868,7 +1895,7 @@ export function TaskWorkspace({
                     <option value="">Latest result</option>
                     {data.results.map((r, i) => (
                       <option key={r.resultId} value={r.resultId}>
-                        Result {i + 1} · {r.workId}
+                        R{i + 1}
                       </option>
                     ))}
                   </NativeSelect>
@@ -1950,16 +1977,18 @@ export function TaskWorkspace({
               })
             }
             refreshDisabled={Boolean(unconfirmed)}
-            unconfirmed={
-              unconfirmedCheck("delivery.refresh") ||
-              (!pending && !state.uncertain && deliveryOutcome && (
+            unconfirmed={unconfirmedCheck("delivery.refresh")}
+            outcome={
+              !pending &&
+              !state.uncertain &&
+              deliveryOutcome && (
                 <ActionOutcome
                   key={`${deliveryOutcome.tone}:${deliveryOutcome.message}`}
                   tone={deliveryOutcome.tone}
                   message={deliveryOutcome.message}
                   details={deliveryOutcome.details}
                 />
-              ))
+              )
             }
           />
         </TabPanel>
@@ -2363,18 +2392,23 @@ function CriteriaRows({
           </p>
           <p>{row.text}</p>
           <p className="metadata muted">
-            Source revision {row.revision} ·{" "}
-            {row.record?.scope ?? "No supporting scope supplied"} · provenance{" "}
-            {row.record?.provenance ?? "Unavailable"}
+            {[
+              `Source revision ${row.revision}`,
+              row.record?.scope,
+              row.record?.provenance,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </p>
           {row.records.length > 1 && (
             <div>
               <p>Duplicate criterion identity; overall outcome unknown.</p>
               <Literal
                 text={row.records
-                  .map(
-                    (record) =>
-                      `${record.outcome} · ${record.scope} · provenance ${record.provenance}`,
+                  .map((record) =>
+                    [record.outcome, record.scope, record.provenance]
+                      .filter(Boolean)
+                      .join(" · "),
                   )
                   .join("\n")}
               />
@@ -2446,19 +2480,26 @@ function ReviewEvidence({
         ))}
       <h4>Validation records</h4>
       {metadata.validations.length ? (
-        metadata.validations.map((v) => (
-          <p key={`${v.label}:${v.scope}:${v.provenance}`}>
-            {v.label}: {v.outcome} · {v.scope} · {v.provenance} · checked head{" "}
-            {v.checkedHead ?? "not supplied"} · {(() => {
-              const binding = data.delivery?.binding;
-              if (!v.checkedHead || !binding?.headSha || binding.readError)
-                return "Head comparison unknown; current bound head unavailable";
-              return v.checkedHead === binding.headSha
-                ? `Recorded against the current bound head ${binding.headSha}`
-                : `Stale validation; checked head ${v.checkedHead}, current bound head ${binding.headSha}`;
-            })()}
-          </p>
-        ))
+        metadata.validations.map((v) => {
+          const head = data.delivery?.binding?.headSha,
+            unknown =
+              !v.checkedHead || !head || data.delivery?.binding?.readError;
+          return (
+            <p key={`${v.label}:${v.scope}:${v.provenance}`}>
+              {v.label}: {v.outcome} · {v.scope} · {v.provenance} ·{" "}
+              {v.checkedHead && (
+                <>
+                  checked head <ShortId value={v.checkedHead} /> ·{" "}
+                </>
+              )}
+              {unknown
+                ? "Head comparison unknown"
+                : v.checkedHead === head
+                  ? "Matches the current pull request head"
+                  : "Checked an earlier head than the current pull request head"}
+            </p>
+          );
+        })
       ) : (
         <p>No supplied validation record. No overall pass is inferred.</p>
       )}
@@ -2611,6 +2652,7 @@ function Changes({
   refresh,
   refreshDisabled,
   unconfirmed,
+  outcome,
 }: {
   data: TaskRead["data"];
   selected:
@@ -2623,14 +2665,19 @@ function Changes({
   changed: () => void;
   refresh: () => void;
   refreshDisabled: boolean;
-  /** The check for a refresh whose response was lost, shown beside its button. */
+  /** The check for a refresh whose response was lost; it stays until resolved, even once delivery stops applying. */
   unconfirmed: ReactNode;
+  /** The last settled refresh's outcome; it leaves with the delivery controls. */
+  outcome: ReactNode;
 }) {
   const changes = selected?.metadata.changes,
-    d = data.delivery;
+    d = data.delivery,
+    delivers = deliveryApplies(data);
   return (
     <section id="changes">
-      <h3 className="section-heading">Changes and delivery</h3>
+      <h3 className="section-heading">
+        {delivers ? "Changes and delivery" : "Changes"}
+      </h3>
       <TaskWorkspaceChanges
         client={client}
         session={session}
@@ -2712,40 +2759,43 @@ function Changes({
           )}
         </>
       )}
-      {d && d.omittedBlockerCount > 0 && (
+      {delivers && d && d.omittedBlockerCount > 0 && (
         <p>
           {d.omittedBlockerCount} retained delivery blockers omitted; blocker
           coverage is partial.
         </p>
       )}
-      {d?.blockers.map((b) => (
-        <p key={b}>{b}</p>
-      ))}
-      <Button
-        variant="secondary"
-        data-unconfirmed-control="delivery.refresh"
-        onClick={refresh}
-        disabled={refreshDisabled}
-      >
-        Refresh delivery status
-      </Button>
-      {unconfirmed}
-      <p>
-        Refresh reads provider state; it does not post, approve, merge or clear
-        a hold.
-      </p>
-      {d && d.omittedActionCount > 0 && (
+      {delivers && d?.blockers.map((b) => <p key={b}>{b}</p>)}
+      {delivers && (
+        <Button
+          variant="secondary"
+          data-unconfirmed-control="delivery.refresh"
+          onClick={refresh}
+          disabled={refreshDisabled}
+        >
+          Refresh delivery status
+        </Button>
+      )}
+      {unconfirmed || (delivers && outcome)}
+      {delivers && (
+        <p>
+          Refresh reads provider state; it does not post, approve, merge or
+          clear a hold.
+        </p>
+      )}
+      {delivers && d && d.omittedActionCount > 0 && (
         <p>
           {d.omittedActionCount} earlier retained delivery actions omitted;
           action history is partial.
         </p>
       )}
-      {d?.actions.map((a) => (
-        <p key={a.operationId}>
-          {a.kind}: {a.state} · {a.reason ?? "receipt recorded"} · operation{" "}
-          {a.operationId}
-        </p>
-      ))}
+      {delivers &&
+        d?.actions.map((a) => (
+          <p key={a.operationId}>
+            {a.kind}: {a.state} · {a.reason ?? "receipt recorded"} · operation{" "}
+            {a.operationId}
+          </p>
+        ))}
     </section>
   );
 }

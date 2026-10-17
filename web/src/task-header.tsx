@@ -7,6 +7,8 @@ import {
 } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { ActionLink, Button } from "./components.js";
+import { outcomeLine } from "./presentation.js";
+import { MarkdownPreview } from "./task-files.js";
 import {
   originLabel,
   stopConsequences,
@@ -46,8 +48,8 @@ export function taskHeaderReport(
   return {
     taskId: data.task.id,
     title,
-    // The recorded desired outcome; the strip carries state and readiness.
-    subtitle: data.task.outcome || undefined,
+    // The outcome's first line; the strip discloses the rest and carries state and readiness.
+    subtitle: outcomeLine(data.task.outcome).line || undefined,
     back: origin
       ? {
           href: origin,
@@ -168,7 +170,8 @@ export function TaskStrip({
   const identity = taskIdentity(data),
     column = taskColumnOf(data),
     Icon = stateIcons[column],
-    next = taskNextActor(data);
+    next = taskNextActor(data),
+    outcome = outcomeLine(data.task.outcome);
   return (
     <div className="task-strip" data-task-strip>
       <div className="task-strip-facts">
@@ -202,6 +205,12 @@ export function TaskStrip({
         )}
         <span>Accountable lead · {data.lead?.name ?? "Unconfigured"}</span>
       </div>
+      {outcome.more && data.task.outcome && (
+        <details className="task-outcome">
+          <summary>Full desired outcome</summary>
+          <MarkdownPreview text={data.task.outcome} />
+        </details>
+      )}
       {children}
     </div>
   );
