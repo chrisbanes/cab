@@ -133,6 +133,44 @@ const harnessStatusBase = {
   /** Null until the runtime has read them; then the server validates against them. */
   settings: supportedRuntimeSettingsSchema.nullable(),
 };
+/** A closed set chosen by the service; runtime error text is never carried (it can hold secrets). */
+export const runtimeRestartFailureSchema = z.enum([
+  "exited",
+  "start-failed",
+  "start-timed-out",
+  "spawn-failed",
+]);
+export type RuntimeRestartFailure = z.infer<typeof runtimeRestartFailureSchema>;
+export const runtimeRestartAttemptSchema = z
+  .object({
+    attempt: z.number().int().min(1).max(3),
+    at: time,
+    outcome: z.enum(["started", "failed"]),
+    failure: runtimeRestartFailureSchema.nullable(),
+  })
+  .strict();
+export type RuntimeRestartAttempt = z.infer<typeof runtimeRestartAttemptSchema>;
+/** In memory only. `attempt` of a pending retry is the next attempt number. */
+export const runtimeRestartSchema = z.discriminatedUnion("state", [
+  z
+    .object({
+      state: z.literal("pending"),
+      attempt: z.number().int().min(1).max(3),
+      nextAt: time,
+      lastFailure: runtimeRestartFailureSchema,
+      attempts: z.array(runtimeRestartAttemptSchema).max(3),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal("exhausted"),
+      since: time,
+      lastFailure: runtimeRestartFailureSchema,
+      attempts: z.array(runtimeRestartAttemptSchema).max(3),
+    })
+    .strict(),
+]);
+export type RuntimeRestart = z.infer<typeof runtimeRestartSchema>;
 /**
  * One per harness; `enabled` is the operator's persisted setting. `not-configured` (shown as
  * "Not enabled") is a disabled runtime, or an enabled one whose executable is not on the service
@@ -160,6 +198,8 @@ export const harnessStatusSchema = z.discriminatedUnion("state", [
       enabled: z.boolean(),
       state: z.literal("unavailable"),
       since: time,
+      /** Absent while an attempt runs, or when nothing is scheduled. */
+      restart: runtimeRestartSchema.optional(),
     })
     .strict(),
 ]);
@@ -2584,7 +2624,7 @@ export const questionReadSchema = z
   })
   .strict();
 export type QuestionRead = z.infer<typeof questionReadSchema>;
-export const inboxItemSchema = z
+export const taskInboxItemSchema = z
   .object({
     id: z.string().min(1).max(128),
     kind: z.enum(["question", "approval", "intervention"]),
@@ -2607,6 +2647,30 @@ export const inboxItemSchema = z
     conversation: z.string().max(512).nullable(),
   })
   .strict();
+/**
+ * A runtime whose automatic restarts are exhausted. Derived on every read from in-memory
+ * restart state, never stored, and carries no task or project field.
+ */
+export const runtimeInboxItemSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    kind: z.literal("runtime"),
+    urgency: z.literal(0),
+    /** The wall time of exhaustion, equal to `since`. */
+    createdAt: time,
+    harness: executionHarnessSchema,
+    since: time,
+    headline: z.string().max(200),
+    reason: z.string().max(200),
+    lastFailure: runtimeRestartFailureSchema,
+    attempts: z.array(runtimeRestartAttemptSchema).max(3),
+    destination: z.string().max(512),
+  })
+  .strict();
+export const inboxItemSchema = z.union([
+  taskInboxItemSchema,
+  runtimeInboxItemSchema,
+]);
 export const inboxReadSchema = z
   .object({
     data: z
@@ -2620,6 +2684,8 @@ export const inboxReadSchema = z
     observedAt: time,
   })
   .strict();
+export type TaskInboxItem = z.infer<typeof taskInboxItemSchema>;
+export type RuntimeInboxItem = z.infer<typeof runtimeInboxItemSchema>;
 export type InboxItem = z.infer<typeof inboxItemSchema>;
 // Fixed strict command envelope maxima; question JSON independently remains <=256 KiB.
 export const questionCommandRawLimit =

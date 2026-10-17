@@ -300,7 +300,11 @@ export function readyCheckItems(input: {
           workspace.runtime.state === "unavailable" &&
           status?.state !== "not-configured")
       )
-        items.push({ text: unavailableAlert({ harness }) });
+        items.push({
+          text: unavailableAlert(
+            status?.state === "unavailable" ? status : { harness },
+          ),
+        });
       else if (status?.state === "not-configured" && !noRuntime)
         items.push({
           text: `${executionHarnessLabels[harness]} runtime isn't enabled for this service.`,

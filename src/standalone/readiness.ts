@@ -11,7 +11,9 @@ import {
 import type {
   discoveryStatusSchema,
   HarnessStatus,
+  RuntimeRestart,
 } from "../operator/contracts.js";
+import { readinessFix } from "../operator/runtime-restart-copy.js";
 import {
   type ClaudeTokenCheckResult,
   claudeTokenCheckSchema,
@@ -62,6 +64,7 @@ export type ReadinessDeps = {
     "harness" | "state" | "enabled"
   > & {
     reason?: "disabled" | "executable-missing";
+    restart?: RuntimeRestart | undefined;
   })[];
   harnessSettings: (
     harness: ExecutionHarness,
@@ -234,16 +237,8 @@ export class Readiness {
       case "claude-executable":
         return (
           this.notEnabled(id, "claude") ??
-          (this.deps
-            .harnessStatuses()
-            .some((s) => s.harness === "claude" && s.state === "unavailable")
-            ? outcome(
-                id,
-                "fail",
-                "The Claude runtime is not running",
-                "Turn Claude off and on in Settings → Runtime, or restart the service",
-              )
-            : this.claudeExecutable())
+          this.unavailableRuntime("claude", id) ??
+          this.claudeExecutable()
         );
       case "claude-token":
         return this.notEnabled(id, "claude") ?? this.claudeTokenCheck();
@@ -293,6 +288,26 @@ export class Readiness {
       : outcome(id, "not-configured", `\`${name}\` not found on PATH`, fix);
   }
 
+  private restartOf(harness: ExecutionHarness) {
+    return this.deps.harnessStatuses().find((s) => s.harness === harness)
+      ?.restart;
+  }
+
+  /** A failed check when the runtime is running no longer, with the fix its restart state calls for. */
+  private unavailableRuntime(harness: ExecutionHarness, id: ReadinessCheckId) {
+    const status = this.deps
+      .harnessStatuses()
+      .find((s) => s.harness === harness);
+    return status?.state === "unavailable"
+      ? outcome(
+          id,
+          "fail",
+          `The ${executionHarnessLabels[harness]} runtime is not running`,
+          readinessFix(harness, status.restart),
+        )
+      : undefined;
+  }
+
   private async codexLogin(): Promise<ReadinessCheck> {
     const id = "codex-login";
     let result: "verified" | "policy" | "failed" | "unavailable" | "timeout";
@@ -322,7 +337,7 @@ export class Readiness {
       "fail",
       reason,
       result === "unavailable"
-        ? "Turn Codex off and on in Settings → Runtime, or restart the service"
+        ? readinessFix("codex", this.restartOf("codex"))
         : fixes.codexLogin,
     );
   }
@@ -453,6 +468,7 @@ export class Readiness {
     // A runtime that failed, or a profile it rejects: only these call for a restart.
     let other = false;
     let notEnabledFix: string | undefined;
+    let unavailableFix: string | undefined;
     for (const harness of new Set(used.map((p) => p.runtime.harness))) {
       const state = states.get(harness);
       if (state === "available") continue;
@@ -467,6 +483,8 @@ export class Readiness {
       } else {
         other = true;
         reasons.push(`${label} runtime is not running`);
+        const restart = statuses.find((s) => s.harness === harness)?.restart;
+        if (restart) unavailableFix ??= readinessFix(harness, restart);
       }
     }
     const settings =
@@ -501,7 +519,11 @@ export class Readiness {
       "fail",
       reasons.join("; "),
       other
-        ? fixes.harness
+        ? unavailableFix
+          ? rejected > 0
+            ? `${unavailableFix}; or edit the profile's model or reasoning effort`
+            : unavailableFix
+          : fixes.harness
         : (notEnabledFix ??
             (unknownSettings ? fixes.harnessSettings : fixes.harness)),
     );

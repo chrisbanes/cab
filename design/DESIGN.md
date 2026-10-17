@@ -127,15 +127,27 @@ dimensions.
   layouts by itself. Phone controls accommodate touch, keyboard and safe-area space
   without covering content.
 - **Overview (`01-attention-overview`):** title and a stat strip (Needs you,
-  Uncertain, Active tasks, Running turns), then Needs you as cards — execution
-  uncertainty first, then questions and approvals oldest first — each with the
-  request, reason, inline evidence and its response. A single-choice question can be
+  Uncertain, Active tasks, Running turns), then Needs you as cards — an exhausted
+  runtime first, then execution uncertainty, then questions and approvals oldest
+  first — each with the request, reason, inline evidence and its response. The
+  runtime card (risk tone) shows the headline "Codex runtime unavailable", the reason
+  "Restart retries exhausted" and one "Open runtime settings" link; it has no project
+  or task line, and it counts in Needs you and the sidebar total. A single-choice question can be
   answered in its card; an approval always opens exact material. A dashed row names
   further requests and opens the Inbox. Below, the work table (List/Board switch,
   filters; Task, State, Next, Lead, Updated) sits beside a Projects panel (lead,
   activity, source sync) and Recent results, which stay separate from requests.
-- **Inbox (`02-inbox-approval`):** three panes. The queue is grouped (Intervention,
-  then Questions & approvals oldest first) under its filters. The request pane shows
+- **Inbox (`02-inbox-approval`, `02b-inbox-runtime-exhausted`):** three panes. The
+  queue is grouped (Intervention, then Questions & approvals oldest first) under its
+  filters. A runtime whose automatic restarts are exhausted is a non-task item that
+  leads Intervention (`02b`): the row reads "Codex runtime unavailable · Retries
+  exhausted", appears under All projects only and counts in the totals. Its request
+  pane shows the kind "Runtime", the position, the headline, the reason "Restart
+  retries exhausted", the last failure ("The runtime process exited") and the
+  attempts ("Attempt 1 · 14:02 · Failed — The runtime failed to start"), then a sticky
+  bar with one "Open runtime settings" link. It has no Open task, no task-context
+  inspector and no task read; the phone detail has the same content, a Back to Inbox
+  header and no Open task (not drawn, same layout). The request pane shows
   kind, position, project/task, the request as a question, requester and identities,
   exact material, version and hold notes, and a sticky response bar. Questions are
   answered there; an approval ends with the statement of what a decision covers and
@@ -353,7 +365,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 
 | Page | Artboards |
 | --- | --- |
-| 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
+| 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `02b-inbox-runtime-exhausted`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
 | 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
@@ -610,11 +622,17 @@ document states what is implemented. Fixtures are fixture-app, `fixture-org/fixt
   status, the first two lines of its effective policy and a "Limits and untested
   surfaces · N" disclosure, closed by default, holding the remaining policy lines
   and the runtime's disclosed limits; its open state is a per-viewer convenience.
-  The row's "<Runtime> enabled" switch sits beside its status badge, in four states: enabled
-  and Available; enabled and Unavailable with the Fix "Turn it off and on, or restart
-  the service."; disabled, "Not enabled · Disabled in Settings", with no shell alert;
-  and refused because the binary is missing, an inline error naming it while the
-  switch stays off (126b). Turning off a runtime that bound tasks use asks first:
+  The row's "<Runtime> enabled" switch sits beside its status badge, in five states: enabled
+  and Available; enabled and Unavailable while Ensemble restarts it, with the Fix
+  "Restarting · attempt N of 3 · next at HH:MM" (126 draws attempt 2 with the shell
+  alert "Codex runtime unavailable — Restarting · attempt 2 of 3 · next at 14:32");
+  enabled and Unavailable once retries are exhausted, with the Fix "Retries exhausted ·
+  turn it off and on, or restart the service" (the alert reads "… — Retries exhausted;
+  turn it off and on in Settings → Runtime, or restart the service" and the Inbox
+  carries the runtime item); disabled, "Not enabled · Disabled in Settings", with no
+  shell alert; and refused because the binary is missing, an inline error naming it
+  while the switch stays off (126b). The retries run after 30 s, 2 min and 10 min; a
+  disabled runtime is never restarted. Turning off a runtime that bound tasks use asks first:
   "N tasks use Claude. Running turns finish; their next turns wait until Claude is
   enabled again." with Cancel and Turn off (126c); without bound tasks it saves at
   once. With no runtime enabled, Readiness fails "An execution runtime is enabled"
@@ -1628,6 +1646,9 @@ Presentation and interaction rules that the canvas does not show on its own.
 
 - The filters are Projects and Request type. Each has an All option, and every
   option shows a count. Filters combine.
+- A runtime item (an exhausted execution runtime) shows under All projects only: it
+  counts in the total and under the "Runtime" request type, never under a project,
+  and any project filter hides it.
 - The sidebar Inbox count is always the total of unresolved items. The queue
   heading shows the filtered count. Count changes never move the visible row.
 - Only the queue and the reading pane scroll. Native scrollbars appear only when
@@ -1912,6 +1933,7 @@ Production Inbox and shared question response
 - "Recommended by <requester>" appears in the Inbox and on the task page (`/app/tasks/:id?request=`), which passes the requesting assignment's name.
 - Choice labels use the focus ring on `:focus-within`, because WebKit drops `:focus-visible` on a radio after arrow keys.
 - Entry points that apply: Inbox desktop three-pane, tablet two-pane and phone, and the `/app/inbox?task=&request=` deep link (it opens the request pane and the inspector); the shared `QuestionResponse` at `/app/tasks/:id?request=` (it shows the holds an answer does not clear, in the answering wording); Overview question cards, which answer a pending single-choice question through the same shared `QuestionResponse` (other forms link to the Inbox), and task-row attention links (unchanged); the retained HTML coordination page (unchanged). Counterparts: failed answer, Retry answer; stale read, Try again (or the page Refresh); conflict, Review current request; recorded, Back to Inbox; filter, Clear filters; approval, decision at the retained destination.
+- Runtime item (`02b-inbox-runtime-exhausted`): selected by `/app/inbox?request=runtime%3Acodex` with no `task` parameter, from the "Runtime" request type or the queue; the Overview card and the phone queue open the same item. Not drawn, same layout: the phone runtime detail (header Back to Inbox, "Runtime · N of M", no Open task), the compact tablet Inbox (`800b-tablet-inbox-question`) and the runtime rows of `179e-phone-runtime` and `180e-tablet-runtime`, which carry the Fix text of `126`. Previous and Next request stay wide-layout tools. The detail has no task-context inspector at any width.
 - Open approvals as holds: every hold surface passes the approval in view and omits only that one. Any other open approval on the task is listed as "Execution held (approval needs a decision)" in the surface's wording. The task-page decision card and inspector already list every open approval as its own row ("Your decision · approval pending", "Approval pending"), so they list that hold only for the other open approvals when `?request=` selects an approval, and none when no approval is selected, rather than repeating every approval as a hold. The Overview approval card and the Inbox approval pane omit their own approval; the Inbox and Overview question footers list every open approval as a hold, since no approval is in view.
 - Hold copy in the approval pane, from the task read's `admission.reasons`; each reads "Approval does not clear it" or "Approving does not clear it":
   - Blocked GitHub dependencies: "Execution blocked by dependency", the open blockers as `owner/repo#n`, and "Source-owned hold … execution still waits for the GitHub blocker."
@@ -2426,7 +2448,10 @@ frames 114 and 118–128 as follows:
   profile "Execution policy" aside and task history list them in full.
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
-  execution policy" disclosure. The shell raises one alert per unavailable runtime.
+  execution policy" disclosure. The shell raises one alert per unavailable runtime; it
+  says "Restarting · attempt N of 3 · next at HH:MM" while Ensemble retries and
+  "Retries exhausted" once it stops, in the same words as the Runtime page, Settings,
+  Readiness and the CLI.
 - Frame `127-assignment-recovery-relay` draws "1 older recovery record omitted".
   Production also collapses each run of consecutive generations that show the same
   state under an expandable "N older records, same state", keeping the newest of the

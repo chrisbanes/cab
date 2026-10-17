@@ -13,6 +13,7 @@ import type { ExecutionIntent } from "./state.js";
 import type { StandaloneService } from "./service.js";
 import type { StopObservation } from "./supervisor.js";
 import { escapeHtml, hidden } from "./operator-html.js";
+import { unavailableAlert } from "../operator/runtime-restart-copy.js";
 import {
   type ExecutionHarness,
   executionHarnessLabels,
@@ -112,8 +113,7 @@ function overview(api: RuntimeOperatorApi, csrfToken: string): string {
   const unavailable = statuses
     .filter((status) => status.state === "unavailable")
     .map(
-      (status) =>
-        `<p role="alert">${executionHarnessLabels[status.harness]} runtime unavailable — turn it off and on in Settings → Runtime, or restart the service</p>`,
+      (status) => `<p role="alert">${escapeHtml(unavailableAlert(status))}</p>`,
     )
     .join("");
   return `<main><h1>Runtime</h1>${unavailable}<section><h2>Capacity</h2><p>Global active turns: ${capacity.globalLimit}; currently in use: ${capacity.currentUsage.global}.</p><p>Default project active turns: ${capacity.defaultProjectLimit}.</p>${projects

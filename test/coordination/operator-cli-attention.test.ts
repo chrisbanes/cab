@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { nativeQuestionForm } from "../../src/core/question-forms.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import { startCliOperator } from "../fixtures/operator-cli.js";
 import { mixedAnswers } from "../fixtures/question-data.js";
@@ -112,6 +113,74 @@ test("inbox list filters and pages on the server with read-only credentials", as
   r = await cli("ro", ["inbox", "list", "--limit", "1", "--cursor", token]);
   assert.equal(r.code, 4, r.out);
   assert.equal(r.json().error.code, "cursor-stale");
+});
+
+test("inbox list prints and filters the runtime item", async (t) => {
+  const exhaustion = exhaustibleRuntime();
+  const o = await startCliOperator(t, {
+    runtimeFactory: exhaustion.factory,
+    service: exhaustion.serviceOptions,
+  });
+  const { cli, s } = o;
+  const q = await seedOwnQuestion(s.f);
+  await exhaustion.exhaust(s.f.runtime);
+
+  let r = await cli("ro", ["inbox", "list", "--kind", "runtime"]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const [item, ...others] = r.json().data.items;
+  assert.equal(item.kind, "runtime");
+  assert.equal(item.harness, "codex");
+  assert.equal("taskId" in item, false, "a runtime item names no task");
+  assert.equal(others.length, 0);
+  assert.equal(item.lastFailure, "start-failed");
+  assert.equal(JSON.stringify(r.json()).includes("will not start"), false);
+
+  const human = await o.h.run([
+    "inbox",
+    "list",
+    "--kind",
+    "runtime",
+    "--connection",
+    "ro",
+  ]);
+  assert.match(human.out, /runtime\s+codex\s+\(ensemble runtime list\)/);
+  assert.match(human.out, /Restart retries exhausted/);
+
+  // Unfiltered it leads the list; a project excludes it; an unknown kind names the choices.
+  r = await cli("ro", ["inbox", "list"]);
+  assert.deepEqual(
+    r.json().data.items.map((i: { kind: string }) => i.kind),
+    ["runtime", "question"],
+  );
+  const scoped = await o.h.run([
+    "inbox",
+    "list",
+    "--kind",
+    "runtime",
+    "--project",
+    q.projectId,
+    "--connection",
+    "ro",
+  ]);
+  assert.match(scoped.out, /Nothing needs attention\./);
+  r = await cli("ro", ["inbox", "list", "--kind", "bogus"]);
+  assert.equal(r.code, 2);
+  assert.match(
+    r.err + r.out,
+    /--kind must be question, approval, intervention, runtime\./,
+  );
+
+  // `runtime list` carries the same state and, as JSON, the restart facts.
+  r = await cli("ro", ["runtime", "list"]);
+  assert.equal(r.code, 0, r.err + r.out);
+  const codex = r
+    .json()
+    .data.runtimes.find((x: { harness: string }) => x.harness === "codex");
+  assert.equal(codex.state, "unavailable");
+  assert.equal(codex.restart.state, "exhausted");
+  assert.equal(codex.restart.attempts.length, 3);
+  const text = await o.h.run(["runtime", "list", "--connection", "ro"]);
+  assert.match(text.out, /Unavailable \(retries exhausted\)/);
 });
 
 test("question get and answer require every answer explicitly and record once", async (t) => {

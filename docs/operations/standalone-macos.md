@@ -195,13 +195,23 @@ remove that plist and `STATE/launchd/<label>.json` and install again.
 Restart the installed job with `launchctl kickstart -k
 "gui/$(id -u)/local.ensemble.service"`; operator sessions reset and you log in
 again. If the Codex App Server process exits while the service runs, the
-operator workspace and `/runtime` page show "Codex runtime unavailable — turn it
-off and on in Settings → Runtime, or restart the service". Queued requests stay
-queued with that reason and nothing new is admitted; turns already running are
-held for recovery. Nothing restarts the App Server automatically. Turning the
-runtime off and on in Settings → Runtime replaces it with a fresh one; if it
-stays unavailable, the same `kickstart -k` recovers it. Startup reconciliation
-and the usual admission checks then apply.
+operator workspace and `/runtime` page show "Codex runtime unavailable —
+Restarting · attempt 1 of 3 · next at HH:MM". The service restarts only the
+App Server, after 30 seconds, then 2 minutes, then 10 minutes; a start that
+fails at boot follows the same schedule, and a restarted runtime that stays up
+for 10 minutes starts a fresh count. Queued requests stay queued with the
+unavailable reason and nothing new is admitted until the new App Server passes
+startup and the usual admission checks; turns already running are held for
+recovery and are never relaunched or resumed by the restart. After the third
+failed attempt the service stops retrying, the alert reads "Retries exhausted;
+turn it off and on in Settings → Runtime, or restart the service", and one
+Codex runtime item appears first in the Inbox (`ensemble inbox list --kind
+runtime`). Turning the runtime off and on in Settings → Runtime replaces it with
+a fresh one and begins a new schedule; if it stays unavailable, the same
+`kickstart -k` recovers it. Turning the runtime off cancels pending retries.
+Restart state lives in memory, so a service restart starts afresh. The "next at"
+time is the service's local time on the `/runtime` page and the browser's or
+CLI's local time elsewhere.
 
 The LaunchAgent in `~/Library/LaunchAgents` is meant to start the service when
 the user logs into the GUI session; the procedure does not claim unattended

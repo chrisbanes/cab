@@ -1,8 +1,11 @@
+import { taskItems } from "../fixtures/inbox-items.js";
 import { Agent, request as httpRequest } from "node:http";
 import type { Socket } from "node:net";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { randomUUID } from "node:crypto";
+import { databaseDigest } from "../fixtures/database-digest.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import { wrapTaskExclusions } from "../fixtures/exclusions-hook.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
@@ -38,7 +41,7 @@ test("action Inbox is cross-project summary-only, selected form is exact and ans
     assert.equal(queue.data.items.length, 2);
     assert.equal(queue.data.complete, true);
     assert.equal(
-      queue.data.items.some((i) => i.projectId === a.projectId),
+      taskItems(queue.data.items).some((i) => i.projectId === a.projectId),
       true,
     );
     assert.equal(JSON.stringify(queue).includes("options"), false);
@@ -129,7 +132,7 @@ test("Inbox headlines are the approval action, a plain prompt, or null for an in
     const headlineOf = (
       items: Awaited<ReturnType<OperatorApi["readInbox"]>>["data"]["items"],
       taskId: string,
-    ) => items.find((i) => i.taskId === taskId)?.headline;
+    ) => taskItems(items).find((i) => i.taskId === taskId)?.headline;
     const items = (await new OperatorApi(f.service, [f.directory]).readInbox())
       .data.items;
     assert.equal(
@@ -142,7 +145,7 @@ test("Inbox headlines are the approval action, a plain prompt, or null for an in
     );
     assert.equal(headlineOf(items, intervention.taskId), null);
     assert.equal(
-      items.find((i) => i.taskId === intervention.taskId)?.kind,
+      taskItems(items).find((i) => i.taskId === intervention.taskId)?.kind,
       "intervention",
     );
     const withheld = await new OperatorApi(f.service, [
@@ -166,7 +169,9 @@ test("a corrupt stored form leaves its row without a headline and the rest of th
     });
     const queue = await new OperatorApi(f.service, [f.directory]).readInbox();
     assert.equal(queue.data.unavailable, false);
-    const byTask = new Map(queue.data.items.map((i) => [i.taskId, i]));
+    const byTask = new Map(
+      taskItems(queue.data.items).map((i) => [i.taskId, i]),
+    );
     assert.equal(byTask.size, 2);
     assert.equal(byTask.get(bad.taskId)?.headline, null);
     assert.equal(
@@ -766,6 +771,130 @@ test("Inbox limit, kind and project filter before paging and bind their cursors"
         /invalid-input/,
         bad,
       );
+  } finally {
+    await f.close();
+  }
+});
+
+test("an exhausted runtime is one derived Inbox item, first, all-projects only, and gone on recovery", async () => {
+  const exhaustion = exhaustibleRuntime();
+  const f = await createOperatorFixture(
+    null,
+    undefined,
+    undefined,
+    {},
+    exhaustion.factory,
+    exhaustion.serviceOptions,
+  );
+  try {
+    const a = await seedOwnQuestion(f),
+      b = await seedOwnQuestion(f, choiceForm, "Second task"),
+      intervention = await seedOwnIntervention(f);
+    const api = new OperatorApi(f.service, [f.directory]);
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
+      false,
+      "a healthy runtime has no item",
+    );
+    await exhaustion.exhaust(f.runtime);
+    const digest = databaseDigest(f);
+
+    const read = await api.readInbox();
+    const [first, ...rest] = read.data.items;
+    assert.ok(first?.kind === "runtime");
+    assert.equal(first.id, "runtime:codex");
+    assert.equal(first.urgency, 0);
+    assert.equal(first.harness, "codex");
+    assert.equal(first.createdAt, first.since);
+    assert.equal(first.destination, "/app/settings/runtime");
+    assert.deepEqual(
+      first.attempts.map((x) => [x.attempt, x.outcome, x.failure]),
+      [
+        [1, "failed", "start-failed"],
+        [2, "failed", "start-failed"],
+        [3, "failed", "start-failed"],
+      ],
+    );
+    assert.equal(rest.filter((i) => i.kind === "runtime").length, 0);
+    assert.equal(rest.length, 3);
+    assert.equal(rest[0]?.id, `intervention:${intervention.taskId}`);
+    assert.equal(
+      JSON.stringify(read).includes("will not start"),
+      false,
+      "no runtime error text",
+    );
+    assert.equal(inboxReadSchema.parse(read).data.items.length, 4);
+
+    // Derived on every read: identical twice, and nothing was written for it.
+    assert.deepEqual((await api.readInbox()).data.items, read.data.items);
+    assert.equal(databaseDigest(f), digest, "reading it writes nothing");
+    const stored: string[] = [];
+    f.seedPersistedState((db) => {
+      for (const { name } of db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .all() as { name: string }[])
+        if (
+          JSON.stringify(db.prepare(`SELECT * FROM "${name}"`).all()).includes(
+            "runtime:codex",
+          )
+        )
+          stored.push(name);
+    });
+    assert.deepEqual(stored, []);
+
+    // One item per page, and the cursor continues past it into the task items.
+    const page1 = await api.readInbox(new URLSearchParams("limit=1"));
+    assert.deepEqual(
+      page1.data.items.map((i) => i.id),
+      ["runtime:codex"],
+    );
+    assert.ok(page1.data.nextCursor);
+    const page2 = await api.readInbox(
+      new URLSearchParams({ limit: "1", cursor: page1.data.nextCursor }),
+    );
+    assert.equal(
+      page2.data.items[0]?.id,
+      `intervention:${intervention.taskId}`,
+    );
+
+    // The kind is exact; a project filter excludes it.
+    const kinds = async (query: string) =>
+      (await api.readInbox(new URLSearchParams(query))).data.items.map(
+        (i) => i.kind,
+      );
+    assert.deepEqual(await kinds("kind=runtime"), ["runtime"]);
+    assert.equal((await kinds("kind=intervention")).includes("runtime"), false);
+    assert.equal(
+      (await kinds(`project=${a.projectId}`)).includes("runtime"),
+      false,
+    );
+    assert.equal(
+      (await kinds(`project=${b.projectId}`)).includes("runtime"),
+      false,
+    );
+
+    // The operator's toggle recovers it: the item goes with the schedule.
+    exhaustion.gate.failStarts = false;
+    await f.service.configureRuntime({
+      key: randomUUID(),
+      harness: "codex",
+      enabled: true,
+    });
+    assert.equal(
+      (await api.readInbox()).data.items.some((i) => i.kind === "runtime"),
+      false,
+    );
+
+    // Exhausting again is again exactly one item, with a newer time.
+    exhaustion.clock.advance(60_000);
+    await exhaustion.exhaust(f.runtime);
+    const again = (await api.readInbox()).data.items.filter(
+      (i) => i.kind === "runtime",
+    );
+    assert.equal(again.length, 1);
+    assert.ok(again[0]?.kind === "runtime" && again[0].since > first.since);
   } finally {
     await f.close();
   }

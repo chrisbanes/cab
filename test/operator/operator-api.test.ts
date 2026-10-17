@@ -1,3 +1,4 @@
+import { taskItems } from "../fixtures/inbox-items.js";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -1397,8 +1398,9 @@ test("retained ownership without a confirmed active intent and held request stay
     (await listedAttention(api, ids.taskId)).includes("execution-uncertain"),
   );
   assert.equal(
-    (await api.readInbox()).data.items.find((i) => i.taskId === ids.taskId)
-      ?.attentionCode,
+    taskItems((await api.readInbox()).data.items).find(
+      (i) => i.taskId === ids.taskId,
+    )?.attentionCode,
     "execution-uncertain",
   );
 });
@@ -1469,7 +1471,7 @@ test("a non-Stop task hold is execution-uncertain on the List, the task read and
     "execution-uncertain",
   ]);
   const inbox = await api.readInbox(),
-    item = inbox.data.items.find((i) => i.taskId === ids.taskId);
+    item = taskItems(inbox.data.items).find((i) => i.taskId === ids.taskId);
   assert.equal(item?.attentionCode, "execution-uncertain");
   assert.equal(item?.reason, "Execution ownership is uncertain");
   // The contract validates the new fields at runtime.
@@ -2251,7 +2253,9 @@ test("catalog attention tracks current rejected completion and lead review, excl
   assert.ok((await codes(other.taskId)).includes("lead-review"));
   // Ensemble owns a routing fallback, so it raises no Inbox intervention.
   assert.deepEqual(
-    (await api.readInbox()).data.items.filter((i) => i.taskId === other.taskId),
+    taskItems((await api.readInbox()).data.items).filter(
+      (i) => i.taskId === other.taskId,
+    ),
     [],
   );
   f.service.domain().execute({
@@ -2306,7 +2310,7 @@ test("an answered native question awaiting delivery is Ensemble's, not an operat
   assert.ok(question);
   assert.deepEqual(await listedAttention(api, task.taskId), ["question"]);
   assert.deepEqual(
-    (await api.readInbox()).data.items
+    taskItems((await api.readInbox()).data.items)
       .filter((i) => i.taskId === task.taskId)
       .map((i) => i.kind),
     ["question"],
@@ -2327,7 +2331,7 @@ test("an answered native question awaiting delivery is Ensemble's, not an operat
   ]);
   // The recorded answer stays listed as Ensemble's delivery, with no intervention.
   assert.deepEqual(
-    (await api.readInbox()).data.items
+    taskItems((await api.readInbox()).data.items)
       .filter((i) => i.taskId === task.taskId)
       .map(({ kind, attentionCode, reason }) => ({
         kind,
@@ -2444,7 +2448,7 @@ test("a routing fallback on a task with no project lead clears without operator 
     (await listedAttention(api, seeded.taskId)).includes("lead-review"),
   );
   assert.deepEqual(
-    (await api.readInbox()).data.items.filter(
+    taskItems((await api.readInbox()).data.items).filter(
       (i) => i.taskId === seeded.taskId,
     ),
     [],

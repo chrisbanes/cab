@@ -7,8 +7,13 @@ import {
   type BrowserJourney,
 } from "../fixtures/browser-diagnostics.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
+import { clockLabel } from "../../src/operator/clock-label.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
-import { unpairedBadges } from "../fixtures/operator-settings.js";
+import {
+  noPageOverflow,
+  unpairedBadges,
+} from "../fixtures/operator-settings.js";
 import { choiceForm } from "../fixtures/question-data.js";
 import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
@@ -30,9 +35,22 @@ async function openInbox<T = undefined>(
   path = "/app/inbox",
   extra?: (f: Fixture) => Promise<T>,
   fakeClock = false,
+  runtimes?: Pick<
+    ReturnType<typeof exhaustibleRuntime>,
+    "factory" | "serviceOptions"
+  >,
 ) {
   const f = await j.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+    runtimes
+      ? (createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          j.fixtureOptions,
+          runtimes.factory,
+          runtimes.serviceOptions,
+        ) as unknown as Promise<Fixture>)
+      : createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
   );
   let browser: Browser | undefined;
   j.cleanup(
@@ -116,6 +134,7 @@ test("queue rows are request cards with kind, action and relative age; filters a
       "Questions · 3",
       "Approvals · 0",
       "Interventions · 0",
+      "Runtime · 0",
     ],
   );
   // One group heading for questions and approvals, in server order under the filters.
@@ -1856,4 +1875,198 @@ test("without a task read the inspector says the source is unavailable, and an i
     "Unavailable",
   );
   assert.equal(await aside.locator("dt", { hasText: /^Chain$/ }).count(), 0);
+});
+
+for (const [name, viewport] of [
+  ["1366", { width: 1366, height: 900 }],
+  ["390", { width: 390, height: 844 }],
+] as const)
+  test(`a runtime item leads Intervention, opens its detail with Open runtime settings, and hides under a project filter at ${name}`, async (_t, j) => {
+    const exhaustion = exhaustibleRuntime();
+    const phoneLayout = viewport.width < 760;
+    const { page } = await openInbox(
+      j,
+      2,
+      viewport,
+      "/app/inbox",
+      (fixture) => exhaustion.exhaust(fixture.runtime),
+      false,
+      exhaustion,
+    );
+    const rows = page.locator(".inbox-row");
+    await rows.nth(2).waitFor();
+    const runtimeRow = rows.first();
+    assert.equal(await runtimeRow.getAttribute("data-kind"), "runtime");
+    const rowText = (await runtimeRow.textContent()) ?? "";
+    for (const expected of [
+      "Runtime",
+      "Codex runtime unavailable",
+      "Retries exhausted",
+      "Open runtime settings",
+    ])
+      assert.ok(rowText.includes(expected), `${expected} in ${rowText}`);
+    // Its group leads, counts it, and the sidebar total includes it.
+    const groups = await page
+      .locator(".inbox-queue .inbox-group")
+      .allTextContents();
+    assert.deepEqual(groups, [
+      "Intervention · 1",
+      "Questions & approvals · oldest first",
+    ]);
+    assert.equal(
+      await page
+        .locator(phoneLayout ? ".page-header-count" : ".inbox-summary")
+        .textContent(),
+      phoneLayout ? "3 unresolved" : "3 unresolved across 2 projects",
+    );
+    assert.deepEqual(
+      await page
+        .getByLabel("Request kind", { exact: true })
+        .evaluate((select) =>
+          [...(select as HTMLSelectElement).options].map((o) => o.text),
+        ),
+      [
+        "All request types · 3",
+        "Questions · 2",
+        "Approvals · 0",
+        "Interventions · 0",
+        "Runtime · 1",
+      ],
+    );
+
+    const taskReads: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/operator/tasks/")) taskReads.push(r.url());
+    });
+    await runtimeRow.click();
+    const detail = page.getByRole("region", { name: "Selected request" });
+    await detail
+      .getByRole("heading", { name: "Codex runtime unavailable" })
+      .waitFor();
+    const url = new URL(page.url());
+    assert.equal(url.searchParams.get("request"), "runtime:codex");
+    assert.equal(url.searchParams.has("task"), false);
+    assert.ok(url.search.includes("request=runtime%3Acodex"), url.search);
+
+    const text = (await detail.textContent()) ?? "";
+    for (const expected of [
+      "Restart retries exhausted",
+      "The runtime failed to start",
+    ])
+      assert.ok(text.includes(expected), `${expected} in ${text}`);
+    const base = exhaustion.clock.wall;
+    const attempts = detail.locator(".inbox-attempts li");
+    assert.deepEqual(await attempts.allInnerTexts(), [
+      `Attempt 1 · ${clockLabel(base - 750_000 + 30_000)} · Failed — The runtime failed to start`,
+      `Attempt 2 · ${clockLabel(base - 750_000 + 150_000)} · Failed — The runtime failed to start`,
+      `Attempt 3 · ${clockLabel(base)} · Failed — The runtime failed to start`,
+    ]);
+    const action = detail.getByRole("link", { name: "Open runtime settings" });
+    assert.equal(await action.getAttribute("href"), "/app/settings/runtime");
+    // The action follows the attempts in reading order and takes keyboard focus.
+    assert.equal(
+      await action.evaluate((a) =>
+        Boolean(
+          (document
+            .querySelector(".inbox-attempts")
+            ?.compareDocumentPosition(a) ?? 0) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+      ),
+      true,
+    );
+    await action.focus();
+    assert.equal(
+      await action.evaluate((a) => document.activeElement === a),
+      true,
+    );
+
+    // It has no task: nothing to open, no inspector, and no task was read.
+    assert.equal(
+      await page.getByRole("link", { name: "Open task" }).count(),
+      0,
+    );
+    assert.equal(await page.locator(".inbox-context").count(), 0);
+    assert.deepEqual(taskReads, []);
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-inbox-runtime`, {
+      fullPage: false,
+    });
+
+    if (phoneLayout) {
+      const header = page.locator("header.page-header");
+      assert.equal(
+        await header.locator("h1").textContent(),
+        "Runtime · 1 of 3",
+      );
+      assert.equal(
+        await header.locator("a, button").count(),
+        1,
+        "Back only: there is no task to open",
+      );
+      await page
+        .getByRole("link", { name: "Back to Inbox", exact: true })
+        .click();
+      await rows.first().waitFor({ state: "visible" });
+      await settle(page);
+      assert.equal(
+        await runtimeRow.evaluate((el) => document.activeElement === el),
+        true,
+        "Back restores focus to the row",
+      );
+    }
+
+    // A project filter hides it: the item belongs to no project.
+    if (!phoneLayout) {
+      await page
+        .getByLabel("Project", { exact: true })
+        .selectOption({ index: 1 });
+      await settle(page);
+      assert.equal(
+        await page.locator('.inbox-row[data-kind="runtime"]').count(),
+        0,
+      );
+      assert.equal(await rows.count(), 1);
+    }
+  });
+
+test("a runtime link whose item has recovered says it is unavailable and reads no task", async (_t, j) => {
+  const { page, web } = await openInbox(
+    j,
+    1,
+    { width: 1366, height: 900 },
+    "/app/inbox?request=runtime%3Acodex",
+  );
+  const taskReads: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/operator/tasks/")) taskReads.push(r.url());
+  });
+  // Load the link again with the listener in place, so a read at load would be seen.
+  await page.reload();
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByText("Selected request is unavailable.").waitFor();
+  assert.equal(
+    await page.locator('.inbox-row[data-kind="runtime"]').count(),
+    0,
+  );
+  assert.deepEqual(taskReads, []);
+});
+
+test("an Inbox holding only an exhausted runtime counts it without naming projects", async (_t, j) => {
+  const exhaustion = exhaustibleRuntime();
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (fixture) => exhaustion.exhaust(fixture.runtime),
+    false,
+    exhaustion,
+  );
+  await page.locator('.inbox-row[data-kind="runtime"]').waitFor();
+  assert.equal(
+    await page.locator(".inbox-summary").textContent(),
+    "1 unresolved",
+  );
 });
