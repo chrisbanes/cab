@@ -205,11 +205,6 @@
   margin: 0;
 }
 
-/* A focused control scrolls clear of the bar. */
-.setup-page :is(input, select, textarea, button, a[href], [tabindex]) {
-  scroll-margin-bottom: calc(6rem + var(--operator-safe-area-inset-bottom));
-}
-
 .setup-submit [aria-disabled="true"] {
   opacity: 0.5;
   cursor: not-allowed;
@@ -227,10 +222,6 @@
 
   .setup-submit > :is(a, button) {
     flex: 1 1 0;
-  }
-
-  .setup-page :is(input, select, textarea, button, a[href], [tabindex]) {
-    scroll-margin-bottom: calc(10rem + var(--operator-safe-area-inset-bottom));
   }
 }
 

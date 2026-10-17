@@ -1,4 +1,5 @@
 import {
+  type FocusEvent,
   type FormEvent,
   useEffect,
   useId,
@@ -469,6 +470,22 @@ export function ProjectSetup(
       )
       ?.focus();
   };
+  // The browser scrolls a focused control into view, not out from under the sticky bar
+  // (scroll-margin and scroll-padding only act on a control that is off screen).
+  const bar = useRef<HTMLDivElement>(null);
+  const clearOfBar = (e: FocusEvent<HTMLFormElement>) => {
+    const target = e.target;
+    if (!bar.current || bar.current.contains(target)) return;
+    // After the browser's own scroll, in the same frame.
+    requestAnimationFrame(() => {
+      if (!bar.current) return;
+      const box = target.getBoundingClientRect();
+      const hidden = box.bottom - bar.current.getBoundingClientRect().top;
+      // A control taller than the free space keeps its top on screen.
+      if (hidden > 0)
+        window.scrollBy(0, Math.min(hidden, Math.max(box.top, 0)));
+    });
+  };
   // A rejection with no field to focus still has to be seen above the sticky bar.
   const outcome = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -493,7 +510,7 @@ export function ProjectSetup(
 
   return (
     <section className="settings-page setup-page">
-      <form className="setup-grid" onSubmit={submit}>
+      <form className="setup-grid" onSubmit={submit} onFocus={clearOfBar}>
         <div ref={outcome} className="setup-outcome">
           <DraftMessage
             draft={d}
@@ -1074,7 +1091,7 @@ export function ProjectSetup(
             <li>Repository access is exactly the list in step 3.</li>
           </ul>
         </aside>
-        <div className="setup-submit">
+        <div ref={bar} className="setup-submit">
           <p id={noteId} className="metadata muted">
             {reason ??
               "Saving creates a paused project; nothing runs until you resume it."}

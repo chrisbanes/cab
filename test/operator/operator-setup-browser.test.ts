@@ -1688,14 +1688,18 @@ test("Setup reads steps 1, 2 and 3 in one column with What creation does beside 
   await captureBrowserEvidence(page, "390-setup-layout");
 });
 
-test("Setup keeps Create in a sticky bar that never covers the focused control on a phone, including with the keyboard open", async (_t, journey) => {
+test("Setup keeps Create in a sticky bar that never covers the focused control on a phone and a short desktop window, including with the keyboard open", async (_t, journey) => {
   const { page } = await setupJourney(journey, {
     viewport: { width: 390, height: 844 },
   });
   await chooseRepository(page, "acme/atlas");
   await page.getByLabel("Local repository path").waitFor();
+  // Measured after the frame that applies the focus scroll.
   const probe = () =>
-    page.evaluate(() => {
+    page.evaluate(async () => {
+      await new Promise((frame) =>
+        requestAnimationFrame(() => requestAnimationFrame(frame)),
+      );
       const el = document.activeElement as HTMLElement;
       const bar = document.querySelector(".setup-submit") as HTMLElement;
       const b = bar.getBoundingClientRect();
@@ -1710,33 +1714,40 @@ test("Setup keeps Create in a sticky bar that never covers the focused control o
         height: innerHeight,
       };
     });
-  await page.getByLabel("Project name", { exact: true }).focus();
-  const stops: string[] = [];
-  for (let i = 0; i < 80; i++) {
-    const at = await probe();
-    stops.push(at.label);
-    assert.ok(at.top >= 0, `${at.label} is above the viewport`);
-    assert.ok(at.barBottom <= at.height + 0.5, "the bar leaves the viewport");
-    assert.ok(at.barTop < at.height, "the bar is not visible");
-    if (!at.inBar)
-      assert.ok(
-        at.bottom <= at.barTop + 0.5,
-        `${at.label} is covered by the bar`,
-      );
-    if (at.label === "Create paused project") break;
+  // Tab from the first field to the end of the bar: nothing is hidden behind the bar.
+  const walk = async () => {
+    await page.getByLabel("Project name", { exact: true }).focus();
+    const stops: string[] = [];
+    for (let i = 0; i < 80; i++) {
+      const at = await probe();
+      stops.push(at.label);
+      assert.ok(at.top >= 0, `${at.label} is above the viewport`);
+      assert.ok(at.barBottom <= at.height + 0.5, "the bar leaves the viewport");
+      assert.ok(at.barTop < at.height, "the bar is not visible");
+      if (!at.inBar)
+        assert.ok(
+          at.bottom <= at.barTop + 0.5,
+          `${at.label} is covered by the bar: ${JSON.stringify(at)}`,
+        );
+      if (at.label === "Create paused project") break;
+      await page.keyboard.press("Tab");
+    }
+    assert.deepEqual(stops.slice(-2), ["Cancel", "Create paused project"]);
     await page.keyboard.press("Tab");
-  }
-  assert.deepEqual(stops.slice(-2), ["Cancel", "Create paused project"]);
-  await page.keyboard.press("Tab");
-  assert.equal(
-    await page.evaluate(
-      () =>
-        !document
-          .querySelector(".setup-submit")
-          ?.contains(document.activeElement),
-    ),
-    true,
-  );
+    assert.equal(
+      await page.evaluate(
+        () =>
+          !document
+            .querySelector(".setup-submit")
+            ?.contains(document.activeElement),
+      ),
+      true,
+    );
+  };
+  await walk();
+  // A short desktop window scrolls too, and its bar is shorter.
+  await page.setViewportSize({ width: 1366, height: 420 });
+  await walk();
   // On-screen keyboard: a short viewport still keeps the typed field and Create visible.
   await page.setViewportSize({ width: 390, height: 500 });
   const instructions = page.getByLabel("Instructions", { exact: true });
@@ -1863,7 +1874,20 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
     await repository.evaluate((el) => el === document.activeElement),
     true,
   );
-  await page.getByLabel("Ref", { exact: true }).fill("main");
+  const ref = page.getByLabel("Ref", { exact: true });
+  await ref.fill("main");
+  // A kept draft with no error opens the section on its own: the row holds a value.
+  await page.getByRole("link", { name: "Set discovery credential" }).click();
+  await page.locator("main.page h1", { hasText: "Settings" }).waitFor();
+  await page.getByRole("link", { name: "New project" }).click();
+  // Once the discovery read has settled as unconfigured the section is still open.
+  await page.getByText("GitHub discovery is unavailable").waitFor();
+  assert.equal(await ref.inputValue(), "main");
+  assert.equal(
+    await page.getByRole("button", { name: "Add a repository" }).count(),
+    0,
+  );
+  // A rejected row: the alert heads the form, above step 1, and the field has the focus.
   await page.getByLabel("Project name", { exact: true }).fill("Atlas");
   const sent = sentCommands(page);
   await page
@@ -1871,7 +1895,6 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
     .click();
   await page.getByText(fixFields).waitFor();
   assert.equal(sent.length, 0);
-  // The alert heads the form, above step 1, and the rejected field has the focus.
   const above = await page.evaluate(() => {
     const alert = document.querySelector('[data-slot="action-outcome"]');
     const step = document.querySelector(".settings-panel-title");
@@ -1883,21 +1906,8 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
   });
   assert.equal(above, true);
   await repository.and(page.locator('[aria-invalid="true"]:focus')).waitFor();
-  // Leaving and returning keeps the draft, and the disclosure with it.
-  await page.getByRole("link", { name: "Set discovery credential" }).click();
-  await page.locator("main.page h1", { hasText: "Settings" }).waitFor();
-  await page.getByRole("link", { name: "New project" }).click();
-  await page.getByLabel("Ref", { exact: true }).waitFor();
-  assert.equal(
-    await page.getByLabel("Ref", { exact: true }).inputValue(),
-    "main",
-  );
-  assert.equal(
-    await page.getByRole("button", { name: "Add a repository" }).count(),
-    0,
-  );
   // Clearing the row never collapses step 3 under the focus.
-  await page.getByLabel("Ref", { exact: true }).fill("");
+  await ref.fill("");
   assert.equal(await repository.count(), 1);
   assert.equal(
     await page.evaluate(() =>
