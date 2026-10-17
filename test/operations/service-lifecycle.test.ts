@@ -22,6 +22,7 @@ import {
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
+import { PassThrough } from "node:stream";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
@@ -47,7 +48,15 @@ import { fakeStatusGh } from "../fixtures/fake-status-gh.js";
 import { markedDataDirectory } from "../fixtures/marked-data.js";
 import { tmpdir } from "../fixtures/temp.js";
 
-const UID = process.getuid?.() ?? 0;
+/** The owner of what these tests create, whoever runs them: the fake host's uid is never the process's. */
+const UID = (() => {
+  const probe = mkdtempSync(join(tmpdir(), "ensemble-uid-"));
+  try {
+    return statSync(probe).uid;
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+})();
 const sha256 = (path: string) =>
   createHash("sha256").update(readFileSync(path)).digest("hex");
 
@@ -90,11 +99,17 @@ class FakeLaunchd {
   onBootstrap: () => void = () => {};
   overrides: Partial<ServiceHost> = {};
 
-  constructor(readonly snapshots: string) {}
+  constructor(
+    readonly snapshots: string,
+    readonly daemonsDir = "",
+  ) {}
 
   host(): ServiceHost {
     return {
       uid: UID,
+      // Never the runner's own identity; the root refusal test overrides it.
+      isRoot: () => false,
+      daemonsDir: () => this.daemonsDir,
       launchctl: async (args) => {
         this.calls.push(args);
         const [command, target = ""] = args;
@@ -352,7 +367,7 @@ async function setup(
   };
   const snapshots = join(stateDir, "snapshots");
   mkdirSync(snapshots, { mode: 0o700 });
-  const launchd = new FakeLaunchd(snapshots);
+  const launchd = new FakeLaunchd(snapshots, options.daemonsDir);
   launchd.home = home;
   mkdirSync(options.daemonsDir, { mode: 0o755 });
   const activation = join(options.agentsDir, `${options.label}.plist`);
@@ -471,7 +486,7 @@ test("install renders, lints, records and bootstraps the versioned LaunchAgent",
 
 test("lifecycle options default under HOME", async (t) => {
   const f = await setup(t);
-  const fake = new FakeLaunchd(f.snapshots);
+  const fake = new FakeLaunchd(f.snapshots, f.options.daemonsDir);
   const { out, io } = capture();
   const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
   const unused = (): OperatorConnection => {
@@ -1299,7 +1314,7 @@ test("upgrade to the installed release re-renders a changed value through every 
 
 test("service install, upgrade and uninstall validate diagnostic options before acting", async (t) => {
   const f = await setup(t);
-  const fake = new FakeLaunchd(f.snapshots);
+  const fake = new FakeLaunchd(f.snapshots, f.options.daemonsDir);
   const { io } = capture();
   const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
   const unused = (): OperatorConnection => ({
@@ -1795,7 +1810,7 @@ test("upgrade never signs in or mints a credential", async (t) => {
 
 test("install accepts a tarball, a connection, a token file and --no-open; other commands do not", async (t) => {
   const f = await setup(t);
-  const fake = new FakeLaunchd(f.snapshots);
+  const fake = new FakeLaunchd(f.snapshots, f.options.daemonsDir);
   const { io } = capture();
   const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
   const unused = (): OperatorConnection => {
@@ -2565,7 +2580,7 @@ test("daemon mode upgrade refuses before stopping anything", async (t) => {
 
 test("daemon mode root refusal changes nothing", async (t) => {
   const f = await setup(t);
-  f.launchd.overrides = { uid: 0 };
+  f.launchd.overrides = { isRoot: () => true };
   const before = stateTrees(f);
   const unused: OperatorConnection = {
     origin: async () => {
@@ -2695,7 +2710,7 @@ test("daemon mode gh token storage probe never reads a token", async (t) => {
 
 test("daemon mode CLI parses --mode only for install", async (t) => {
   const f = await setup(t);
-  const fake = new FakeLaunchd(f.snapshots);
+  const fake = new FakeLaunchd(f.snapshots, f.options.daemonsDir);
   const { io } = capture();
   const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
   const unused = (): OperatorConnection => {
@@ -3004,50 +3019,83 @@ test("daemon mode exit confirmation treats a reused pid or a new boot as gone, a
   assert.equal(await host.exited({ ...identity, processId: "99999999" }), true);
 });
 
-test("daemon mode record update failure leaves the record intact, fails with a fixed message and never reports complete", {
-  skip: process.getuid?.() === 0,
-}, async (t) => {
+test("daemon mode record update failure leaves the record intact, fails with a fixed message and never reports complete", async (t) => {
   const f = await setup(t);
   assert.equal((await f.installDaemon()).code, 0);
   runSudoSteps(f);
   const launchd = join(f.stateDir, "launchd");
   const bytes = readFileSync(f.recordPath);
+  // A directory sits where the record's temporary file goes, so the write fails the same
+  // way for every user, root included, and the record is never replaced.
+  const blocker = `${f.recordPath}.${process.pid}.tmp`;
+  mkdirSync(blocker);
   const before = readdirSync(launchd).sort();
-  // The directory refuses new files, so the record cannot be replaced.
-  chmodSync(launchd, 0o500);
   f.launchd.calls = [];
-  try {
-    const verify = await f.installDaemon();
-    assert.equal(verify.code, 1);
-    const verifyError = JSON.parse(verify.stderr);
-    assert.match(verifyError.error, /install record could not be updated/);
-    assert.doesNotMatch(verify.stderr, /EACCES|EPERM|permission denied/i);
-    assert.equal(verify.stderr.includes(f.stateDir), false);
-    assert.deepEqual(
-      f.launchd.fetched,
-      [],
-      "it did not go on to wait for /app",
-    );
 
-    const uninstall = await f.uninstall();
-    assert.equal(uninstall.code, 1);
-    assert.match(
-      JSON.parse(uninstall.stderr).error,
-      /install record could not be updated/,
-    );
-    assert.equal(uninstall.stdout, "", "no steps and no complete result");
-    assert.deepEqual(f.launchd.mutations(), []);
-    assert.deepEqual(readFileSync(f.recordPath), bytes);
-    assert.deepEqual(
-      readdirSync(launchd).sort(),
-      before,
-      "no temporary file is left",
-    );
-  } finally {
-    chmodSync(launchd, 0o700);
-  }
+  const verify = await f.installDaemon();
+  assert.equal(verify.code, 1);
+  assert.match(
+    JSON.parse(verify.stderr).error,
+    /install record could not be updated/,
+  );
+  assert.doesNotMatch(verify.stderr, /EISDIR|EACCES|EPERM|permission denied/i);
+  assert.equal(verify.stderr.includes(f.stateDir), false);
+  assert.deepEqual(f.launchd.fetched, [], "it did not go on to wait for /app");
+
+  const uninstall = await f.uninstall();
+  assert.equal(uninstall.code, 1);
+  assert.match(
+    JSON.parse(uninstall.stderr).error,
+    /install record could not be updated/,
+  );
+  assert.equal(uninstall.stdout, "", "no steps and no complete result");
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.deepEqual(readFileSync(f.recordPath), bytes);
+  assert.deepEqual(
+    readdirSync(launchd).sort(),
+    before,
+    "nothing else is left behind",
+  );
 
   // Writable again: the same commands now record the process and carry on.
+  rmSync(blocker, { recursive: true });
   assert.equal((await f.installDaemon()).code, 0);
   assert.equal(f.record().observedProcess.processId, "5000");
+});
+
+test("daemon mode refuses the service and init-auth as root before starting or creating anything", async (t) => {
+  const f = await setup(t);
+  const root = new FakeLaunchd(f.snapshots, f.options.daemonsDir);
+  root.overrides = { isRoot: () => true };
+  const { out, io } = capture();
+  // A terminal that has already ended, so a missing guard fails instead of waiting for a password.
+  const tty = Object.assign(new PassThrough(), {
+    isTTY: true,
+  }) as unknown as NodeJS.ReadStream;
+  tty.end();
+  const deps = {
+    env: { HOME: f.home },
+    ...io,
+    stdin: tty,
+    stdout: { ...io.stdout, isTTY: true },
+  } as unknown as CliDeps;
+  const unused = (): OperatorConnection => {
+    throw new Error("unused");
+  };
+  const authDir = join(f.home, "fresh-state", "auth");
+  // No data directory: were a guard missing, the service would refuse its arguments and exit
+  // at once rather than start.
+  for (const argv of [
+    ["serve"],
+    ["operator"],
+    ["init-auth", "--state-dir", join(f.home, "fresh-state")],
+  ])
+    assert.equal(
+      await serviceCommand(argv, deps, unused, () => root.host()),
+      1,
+      argv.join(" "),
+    );
+  assert.equal(out.stderr.split(`${ROOT_MESSAGE}\n`).length - 1, 3);
+  assert.equal(existsSync(authDir), false);
+  assert.deepEqual(root.calls, []);
 });

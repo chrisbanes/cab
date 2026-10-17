@@ -140,7 +140,12 @@ export type ProcessIdentity = object;
 
 /** Everything that reaches launchd, the OS or the network; tests use a fake. */
 export type ServiceHost = {
+  /** The account's uid: owner of the directories Ensemble checks, and the gui domain. */
   uid: number;
+  /** Whether the process runs as root, which every command refuses. */
+  isRoot(): boolean;
+  /** Where a LaunchDaemon plist is installed. */
+  daemonsDir(): string;
   launchctl(args: string[]): Promise<{ status: number; stdout: string }>;
   /** Whether `plutil -lint` accepts the file. */
   lint(path: string): Promise<boolean>;
@@ -1159,7 +1164,7 @@ async function refusedAsRoot(
   io: ServiceIo,
   operation: string,
 ): Promise<number | null> {
-  if (host.uid !== 0) return null;
+  if (!host.isRoot()) return null;
   const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
   io.stderr.write(
     `${JSON.stringify({ ok: false, operation, stage: "preflight", error: ROOT_REFUSAL, jobStopped: null })}\n`,
@@ -1951,6 +1956,8 @@ export function defaultServiceHost(): ServiceHost {
   const termination = import("../standalone/termination.js");
   return {
     uid: process.getuid?.() ?? -1,
+    isRoot: () => process.getuid?.() === 0,
+    daemonsDir: () => DAEMONS_DIR,
     launchctl: (args) => run("/bin/launchctl", args),
     lint: async (path) =>
       (await run("/usr/bin/plutil", ["-lint", path])).status === 0,
@@ -2052,7 +2059,11 @@ function diagnosticValue(
 }
 
 /** Lifecycle options with their defaults under HOME; null for a usage error. */
-function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
+function lifecycleOptions(
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  daemonsDir: string,
+) {
   const parsed = parseLifecycleArgs(args);
   if (!parsed) return null;
   const { values, positionals } = parsed;
@@ -2092,7 +2103,7 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
     stateDir,
     logDir,
     agentsDir,
-    daemonsDir: DAEMONS_DIR,
+    daemonsDir,
     label,
     port: Number(port),
     ...(retentionDays === undefined && storageMib === undefined
@@ -2124,13 +2135,14 @@ export async function serviceCommand(
   cli?: InstallCli,
 ): Promise<number> {
   const [command, ...args] = argv;
-  if (command === "init-auth") return initAuth(args, deps);
+  if (command === "init-auth") return initAuth(args, deps, host);
   if (
     command === "install" ||
     command === "upgrade" ||
     command === "uninstall"
   ) {
-    const parsed = lifecycleOptions(args, deps.env);
+    const serviceHost = host();
+    const parsed = lifecycleOptions(args, deps.env, serviceHost.daemonsDir());
     if (
       !parsed ||
       parsed.positionals.length > (command === "uninstall" ? 0 : 1) ||
@@ -2154,7 +2166,7 @@ export async function serviceCommand(
         options,
         // dist/src/cli/service.js → the release root.
         resolve(fileURLToPath(new URL("../../..", import.meta.url))),
-        host(),
+        serviceHost,
         deps,
         {
           tarball: parsed.positionals[0] && resolve(parsed.positionals[0]),
@@ -2165,12 +2177,13 @@ export async function serviceCommand(
           mode: parsed.mode,
         },
       );
-    if (command === "uninstall") return uninstallService(options, host(), deps);
+    if (command === "uninstall")
+      return uninstallService(options, serviceHost, deps);
     return upgradeService(
       options,
       resolve(parsed.positionals[0] as string),
       operatorConnection(parsed.connection),
-      host(),
+      serviceHost,
       deps,
     );
   }
@@ -2180,6 +2193,12 @@ export async function serviceCommand(
     command === "run" ||
     command === "list"
   ) {
+    // Ensemble never runs the service as root, whatever started it.
+    if (host().isRoot()) {
+      const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
+      deps.stderr.write(`${ROOT_REFUSAL}\n`);
+      return 1;
+    }
     const standalone = await import("../standalone/cli.js");
     try {
       await standalone.main(argv);
@@ -2192,15 +2211,14 @@ export async function serviceCommand(
   return usage(deps, "service");
 }
 
-async function initAuth(args: string[], deps: CliDeps): Promise<number> {
+async function initAuth(
+  args: string[],
+  deps: CliDeps,
+  host: () => ServiceHost,
+): Promise<number> {
   const parsed = parseLifecycleArgs(args);
   if (!parsed || parsed.positionals.length > 1 || parsed.values.mode)
     return usage(deps, "service");
-  if (process.getuid?.() === 0) {
-    const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
-    deps.stderr.write(`${ROOT_REFUSAL}\n`);
-    return 1;
-  }
   const home = deps.env.HOME;
   const stateDir =
     parsed.values["state-dir"] !== undefined
@@ -2215,6 +2233,11 @@ async function initAuth(args: string[], deps: CliDeps): Promise<number> {
     deps.stderr.write(
       "Operator authentication initialization failed: run it in an interactive terminal\n",
     );
+    return 1;
+  }
+  if (host().isRoot()) {
+    const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
+    deps.stderr.write(`${ROOT_REFUSAL}\n`);
     return 1;
   }
   let authFile = parsed.positionals[0];

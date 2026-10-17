@@ -68,7 +68,6 @@ export async function main(
   commandLine = process.argv.slice(2),
   serviceFactory: (dataDir: string) => StandaloneService = productionService,
 ): Promise<void> {
-  assertNotRoot(process.getuid?.());
   const [command, dataDir, ...args] = commandLine;
   if (!command || !dataDir)
     throw new Error(
@@ -207,5 +206,11 @@ export async function main(
   }
 }
 
-if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url)
+if (
+  process.argv[1] &&
+  pathToFileURL(process.argv[1]).href === import.meta.url
+) {
+  // The service's own entry point, as launchd starts it, never runs as root.
+  assertNotRoot(process.getuid?.());
   await main();
+}

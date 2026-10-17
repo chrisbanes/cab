@@ -198,7 +198,7 @@ test("doctor daemon host warns about a keychain gh login on stderr only", async 
     ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
     HOME: home,
   };
-  const result = await h.run(["doctor", "--output", "json"], { env });
+  const result = await h.run(["doctor", "--output", "json"], { env, uid: 501 });
   assert.equal(result.code, 0, result.err);
   const api = readinessSchema.parse(
     await (await s.bearer(read.token, "/api/operator/readiness")).json(),
@@ -223,6 +223,7 @@ test("doctor daemon host stays silent without a daemon record or with a file log
 
   const gh = fakeStatusGh(t);
   const none = await h.run(["doctor", "--output", "json"], {
+    uid: 501,
     env: {
       ...gh.env("keyring"),
       ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
@@ -234,6 +235,7 @@ test("doctor daemon host stays silent without a daemon record or with a file log
   assert.equal(existsSync(gh.log), false, "gh is never run without a record");
 
   const agent = await h.run(["doctor", "--output", "json"], {
+    uid: 501,
     env: {
       ...gh.env("keyring"),
       ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
@@ -245,6 +247,7 @@ test("doctor daemon host stays silent without a daemon record or with a file log
   assert.equal(existsSync(gh.log), false, "a LaunchAgent record never runs gh");
 
   const file = await h.run(["doctor", "--output", "json"], {
+    uid: 501,
     env: {
       ...gh.env("/Users/operator/.config/gh/hosts.yml"),
       ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
