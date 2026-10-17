@@ -143,11 +143,14 @@ function behaviour(overrides: Partial<Behaviour> = {}): Behaviour {
   };
 }
 
+/** Gates are all released before a service stops, so a failed assertion never hangs shutdown. */
+const openGates: Array<() => void> = [];
 function deferred() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
     resolve = done;
   });
+  openGates.push(resolve);
   return { promise, resolve };
 }
 
@@ -234,6 +237,7 @@ async function withService<T>(
   try {
     return await run({ ...context, clock, dataDir });
   } finally {
+    for (const release of openGates.splice(0)) release();
     await context.service.stop();
     rmSync(root, { recursive: true, force: true });
   }
@@ -907,4 +911,45 @@ test("backoff follows the monotonic clock while shown times follow the wall cloc
       firedWall + 120_000,
     );
   });
+});
+
+test("work created while a restarted runtime is still starting waits and runs once it has started", async () => {
+  const gate = deferred();
+  await withService(
+    {},
+    async ({ service, clock, created, behaviours, latest }) => {
+      await service.start();
+      await service.configureCapacity({ key: randomUUID(), globalLimit: 4 });
+      const lead = profile(service, "codex");
+      const projectId = project(service, lead);
+      latest("codex").crash();
+      behaviours.codex.startGate = gate.promise;
+      clock.advance(30_000);
+      await settle(() => created.codex.length === 2);
+      const queued = await task(service, projectId, lead);
+      const describe = () => ({
+        state: intent(service, queued)?.state,
+        reason: intent(service, queued)?.reason,
+        calls: latest("codex").calls,
+      });
+      await settle(
+        () => intent(service, queued)?.reason === waitReason,
+        describe,
+      );
+      await flush();
+      assert.deepEqual(
+        latest("codex").calls,
+        [],
+        "nothing reaches the starting runtime",
+      );
+      assert.equal(intent(service, queued)?.state, "ready");
+      gate.resolve();
+      await settle(
+        () => intent(service, queued)?.state === "completed",
+        describe,
+      );
+      assert.equal(turnStarts([latest("codex")]).length, 1);
+      assert.equal(turnStarts([created.codex[0] as FakeRuntime]).length, 0);
+    },
+  );
 });

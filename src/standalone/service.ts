@@ -533,6 +533,8 @@ export class StandaloneService {
   private readonly runtimeHarnesses: readonly ExecutionHarness[];
   /** Harnesses whose runtime said at start that it cannot run here; see RuntimeNotEnabledError. */
   private readonly runtimeNotEnabled = new Set<ExecutionHarness>();
+  /** A replacement runtime is starting: no work is admitted to it until its start succeeds. */
+  private readonly runtimeStarting = new Set<ExecutionHarness>();
   /** Settles when a non-default runtime reports failure; see untilFailure. */
   private readonly runtimeFailed = new WeakMap<Runtime, Promise<void>>();
   /** A failed secondary runtime's cleanup; shutdown awaits and reports it. */
@@ -1021,6 +1023,7 @@ export class StandaloneService {
       // Preserve the snapshot even for injected runtimes which do not spawn a child.
       spawnEnvironment.spawnEnvironment();
       this.runtimeUnavailableSince.clear();
+      this.runtimeStarting.clear();
       this.abortRuntimeRestarts();
       this.runtimeNotEnabled.clear();
       this.spawnRuntime = (harness) => {
@@ -1464,8 +1467,15 @@ export class StandaloneService {
       return;
     }
     this.runtimes.set(harness, runtime);
-    if (await this.startOrDetach(harness, runtime, true))
-      await this.wakeScheduler();
+    // The runtime is listed before its start finishes, but queued work must wait for the start.
+    this.runtimeStarting.add(harness);
+    let started: boolean;
+    try {
+      started = await this.startOrDetach(harness, runtime, true);
+    } finally {
+      this.runtimeStarting.delete(harness);
+    }
+    if (started) await this.wakeScheduler();
   }
 
   private restartStateOf(harness: ExecutionHarness): RestartState {
@@ -1867,7 +1877,10 @@ export class StandaloneService {
   private runtimeWaitReason(harness: ExecutionHarness): string | undefined {
     if (!this.harnessEnabled(harness))
       return `${executionHarnessLabels[harness]} runtime is not configured`;
-    if (this.runtimeUnavailableSince.has(harness))
+    if (
+      this.runtimeUnavailableSince.has(harness) ||
+      this.runtimeStarting.has(harness)
+    )
       return `${executionHarnessLabels[harness]} runtime unavailable; turn it off and on in Settings → Runtime, or restart the service`;
     return undefined;
   }
