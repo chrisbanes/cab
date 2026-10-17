@@ -1452,7 +1452,7 @@ test("Files first-open location yields to a link and does not repeat", async (_t
     path: "?section=files&repository=alpha&path=README.md",
   });
   const { page, files } = s;
-  // The link opens its file and keeps alpha, although beta is listed first.
+  // The link opens its file and keeps alpha, whichever repository the listing names first.
   const openTab = files.locator(".file-tab-open[aria-current='page']");
   await openTab.waitFor();
   assert.equal(await openTab.innerText(), "README.md");
@@ -1480,8 +1480,10 @@ test("Files first-open location yields to a link and does not repeat", async (_t
 });
 
 test("Files markers follow the Changes tab's repository, base branch and refresh, never another repository", async (_t, j) => {
+  // The listing order is the file system's, so the link names the repository Files opens.
   const s = await startMarkedFiles(j, {
     repositories: [{ id: "beta" }, { id: "alpha", ref: "main" }],
+    path: "?section=files&repository=beta",
   });
   const { page, files } = s;
   const unmarked =
@@ -1490,7 +1492,8 @@ test("Files markers follow the Changes tab's repository, base branch and refresh
   const marker = (name: RegExp) =>
     s.entry(name).locator(".file-entry-marker").innerText();
 
-  // beta is listed first and keeps the HEAD ref: it has no complete comparison to mark from.
+  // Files opens beta, the repository the Changes tab uses; it keeps the HEAD ref, so it has no
+  // complete comparison to mark from.
   await s.list("Repository beta").waitFor();
   await files.getByText(unmarked).waitFor();
   assert.equal(await files.getByText(/Changes marked from/).count(), 0);
