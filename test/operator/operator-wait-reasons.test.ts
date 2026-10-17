@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { holdPills } from "../../web/src/settings-view.js";
 import { taskStatusLines, waitLines } from "../../src/cli/task-write.js";
 import {
   cliFix,
   deriveWaits,
+  holdLines,
   orderWaits,
   runtimeWaitCodes,
   waitCodes,
@@ -527,4 +529,71 @@ test("a write command's status row carries the power hold's reason", () => {
     "Held by power supervision",
   );
   assert.equal(status([]), "none");
+});
+
+test("hold lines state what clears each hold, list Stop once and follow the recovery labels", () => {
+  const none = {
+    stop: false,
+    writer: false,
+    capacity: false,
+    uncertainty: false,
+  };
+  const all = { stop: true, writer: true, capacity: true, uncertainty: true };
+  assert.deepEqual(holdLines(all, { reason: "Archival is awaiting review" }), [
+    {
+      kind: "stop",
+      label: "Operator Stop",
+      clears: "Clears when the task's Stop is resumed.",
+      name: "Operator Stop",
+    },
+    {
+      kind: "task",
+      label: "Task hold",
+      clears:
+        "Archival is awaiting review. Recovery stays blocked while it remains.",
+      name: "task hold",
+    },
+    {
+      kind: "writer",
+      label: "Writer ownership",
+      clears: "Clears when we know the execution ended.",
+      name: "writer ownership",
+    },
+    {
+      kind: "capacity",
+      label: "Capacity",
+      clears: "Clears when we know the execution ended.",
+      name: "capacity hold",
+    },
+    {
+      kind: "uncertainty",
+      label: "Uncertainty",
+      clears: "Clears when we know the execution ended.",
+      name: "uncertainty hold",
+    },
+  ]);
+  assert.deepEqual(holdLines(none, null), []);
+  // A withheld reason is not echoed as an empty string or null; a full stop is not doubled.
+  assert.equal(
+    holdLines(none, { reason: null })[0]?.clears,
+    "No reason recorded. Recovery stays blocked while it remains.",
+  );
+  assert.equal(
+    holdLines(none, { reason: "Held already." })[0]?.clears,
+    "Held already. Recovery stays blocked while it remains.",
+  );
+  assert.equal(
+    holdLines(none, { reason: "Awaiting review…" })[0]?.clears,
+    "Awaiting review… Recovery stays blocked while it remains.",
+  );
+  // A Stop-only task has no task hold and so exactly one line.
+  assert.deepEqual(
+    holdLines({ ...none, stop: true }, null).map((line) => line.kind),
+    ["stop"],
+  );
+  // The labels are the recovery page's hold pills, in the same order.
+  assert.deepEqual(
+    holdLines(all, { reason: "x" }).map((line) => line.label),
+    holdPills({ ...all, task: true }).map((pill) => pill.label),
+  );
 });

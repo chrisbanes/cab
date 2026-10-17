@@ -1379,6 +1379,55 @@ test("retained ownership without a confirmed active intent and held request stay
     "execution-uncertain",
   );
 });
+test("the task read names a non-Stop task hold's recorded reason and omits a Stop-only hold", async (t) => {
+  const f = await createOperatorFixture();
+  t.after(() => f.close());
+  const api = new OperatorApi(f.service, [f.directory]);
+  const stopOnly = await seed(f),
+    stopAndArchival = await seed(f),
+    emptyReason = await seed(f),
+    private_ = await seed(f);
+  for (const { taskId } of [stopOnly, stopAndArchival])
+    await f.service.stopTask(taskId);
+  f.seedPersistedState((db) => {
+    const archival = db.prepare(
+      "INSERT INTO task_archival_holds (taskId, reason) VALUES (?, ?)",
+    );
+    archival.run(stopAndArchival.taskId, "Archival is awaiting review");
+    archival.run(private_.taskId, "Held for PRIVATE INSTRUCTIONS review");
+    db.prepare(
+      "INSERT INTO task_writer_holds (taskId, reason) VALUES (?, '')",
+    ).run(emptyReason.taskId);
+  });
+  const read = (taskId: string) => api.readTask(taskId);
+  const stop = await read(stopOnly.taskId);
+  assert.equal(stop.data.execution.holds.stop, true);
+  assert.equal(stop.data.taskHold, null);
+  // Stop would come first in `taskHold()`; the task line must skip it.
+  const both = await read(stopAndArchival.taskId);
+  assert.equal(both.data.execution.holds.stop, true);
+  assert.deepEqual(both.data.taskHold, {
+    reason: "Archival is awaiting review",
+  });
+  assert.deepEqual((await read(emptyReason.taskId)).data.taskHold, {
+    reason: "Task held",
+  });
+  // Excluded text in a reason is redacted, not echoed.
+  const withheld = await read(private_.taskId);
+  assert.ok(!JSON.stringify(withheld).includes("PRIVATE INSTRUCTIONS review"));
+  assert.deepEqual(withheld.data.taskHold, {
+    reason: "Held for [redacted] review",
+  });
+  assert.equal(taskSchema.safeParse(both).success, true);
+  assert.equal(taskSchema.safeParse(withheld).success, true);
+  assert.equal(
+    taskSchema.safeParse({
+      ...both,
+      data: { ...both.data, taskHold: { reason: 1 } },
+    }).success,
+    false,
+  );
+});
 test("a non-Stop task hold is execution-uncertain on the List, the task read and the Inbox", async (t) => {
   const f = await createOperatorFixture();
   t.after(() => f.close());

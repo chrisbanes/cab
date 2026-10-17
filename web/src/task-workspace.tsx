@@ -23,6 +23,7 @@ import {
   taskSchema,
   type Workspace,
 } from "../../src/operator/contracts.js";
+import { holdLines } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
 import { ActionLink, Button, ResourceStatus } from "./components.js";
 import { useOperatorResource } from "./resource.js";
@@ -1670,12 +1671,9 @@ export function TaskWorkspace({
                   drafts={drafts}
                   workspace={workspace ?? null}
                   onChanged={refreshAll}
+                  holds={holdLines(data.execution.holds, data.taskHold)}
+                  executionHref={`/runtime/task/${taskId}`}
                 />
-                {Object.entries(data.execution.holds)
-                  .filter(([, v]) => v)
-                  .map(([k]) => (
-                    <p key={k}>{k} hold — use exact recovery controls</p>
-                  ))}
               </section>
               <section id="brief">
                 <h3 className="section-heading">Shared brief</h3>

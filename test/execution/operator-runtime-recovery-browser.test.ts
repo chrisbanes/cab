@@ -260,6 +260,33 @@ test("Assignment recovery is read-only, shows the uncertainty alert and five ind
     await page.getByText(/for this assignment omitted/).innerText(),
     /task-wide holds above include verified sibling and omitted generations/,
   );
+  // Identical older generations collapse under one expandable summary; the newest stays shown.
+  const evidence = page.locator("section", {
+    has: page.getByRole("heading", { name: "Selected assignment evidence" }),
+  });
+  const cards = evidence.locator("article.settings-row:visible");
+  const summary = evidence.locator("summary", {
+    hasText: /^\d+ older records?, same state$/,
+  });
+  assert.equal(await summary.count(), 1);
+  const olderCount = Number(
+    (await summary.innerText()).match(/^(\d+) older/)?.[1],
+  );
+  const total = siblingRead.data.records.length;
+  assert.ok(olderCount > 0);
+  assert.equal((await cards.count()) + olderCount, total);
+  const newest = siblingRead.data.records.at(-1) as unknown as {
+    generation: { workRevision: number | null; requestSequence: number };
+  };
+  await evidence
+    .getByRole("heading", {
+      name: `Generation ${newest.generation.workRevision}; request ${newest.generation.requestSequence}`,
+      exact: true,
+    })
+    .first()
+    .waitFor();
+  await summary.click();
+  assert.equal(await cards.count(), total);
   assert.equal(
     await page
       .getByRole("link", { name: "Task detail", exact: true })

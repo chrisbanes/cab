@@ -2187,6 +2187,10 @@ frames 114 and 118–128 as follows:
   Task rows, assignment history and recovery name the runtime, explain runtime
   waits and held Claude failures with route links, and history adds an "Effective
   execution policy" disclosure. The shell raises one alert per unavailable runtime.
+- Frame `127-assignment-recovery-relay` draws "1 older recovery record omitted".
+  Production also collapses each run of consecutive generations that show the same
+  state under an expandable "N older records, same state", keeping the newest of the
+  run, the held generation, witnesses and the latest receipt expanded.
 - Paused project badges are idle (slate) with a pause symbol in the sidebar, phone
   drawer and Settings; Enabled, Available and Configured stay slate with a check,
   and Revoked stays amber, rather than the canvas's emerald and rose. Project setup

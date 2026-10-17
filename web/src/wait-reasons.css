@@ -65,3 +65,33 @@
 .project-paused-text p {
   margin: 0;
 }
+
+.wait-holds {
+  flex-basis: 100%;
+  min-width: 0;
+  display: grid;
+  gap: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+}
+.wait-holds p,
+.wait-holds ul {
+  margin: 0;
+}
+.wait-holds ul {
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-8);
+}
+.wait-holds li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4) var(--space-12);
+}
+.wait-hold-clears {
+  flex: 1 1 16rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

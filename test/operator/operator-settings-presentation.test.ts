@@ -25,6 +25,7 @@ import {
 import {
   holdPills,
   projectStateSummary,
+  recoveryRecordRuns,
   readinessNextStep,
   joinNames,
   activationLine,
@@ -836,4 +837,67 @@ test("the phone summary appends stored counts and points to readiness when nothi
   assert.equal(partial.next, "Nothing needs attention here.");
   const none = projectStateSummary(c, observations(null), []);
   assert.equal(none.state[1], "GitHub S-1 active · synced");
+});
+
+test("recovery records collapse only consecutive records that display the same state", () => {
+  const record = (workId: string, generation: number, extra = {}) => ({
+    workId,
+    generation: { workRevision: generation, requestSequence: generation },
+    binding: null,
+    intentState: "completed",
+    requestState: "completed",
+    holds: {
+      stop: false,
+      task: false,
+      writer: false,
+      capacity: false,
+      uncertainty: false,
+    },
+    observations: ["exact-terminal-completed"],
+    pendingEffectCount: 0,
+    receiptRecorded: false,
+    workspace: "preserved",
+    ...extra,
+  });
+  const r1 = record("w1", 1),
+    r2 = record("w2", 2),
+    r3 = record("w3", 3);
+  const r4 = record("w4", 4, {
+    requestState: "held",
+    holds: {
+      stop: false,
+      task: false,
+      writer: true,
+      capacity: false,
+      uncertainty: false,
+    },
+  });
+  const r5 = record("w5", 5, { receiptRecorded: true });
+  assert.deepEqual(recoveryRecordRuns([r1, r2, r3, r4, r5]), [
+    { shown: r3, older: [r1, r2] },
+    { shown: r4, older: [] },
+    { shown: r5, older: [] },
+  ]);
+  // A record equal to an earlier run, but not adjacent to it, stays its own run.
+  const r6 = record("w6", 6);
+  assert.deepEqual(
+    recoveryRecordRuns([r1, r4, r6]).map((run) => run.shown),
+    [r1, r4, r6],
+  );
+  // A witness carries its own id, so it never joins a neighbour's run.
+  const witness = (id: string, n: number) =>
+    record(`w${n}`, n, {
+      noTurnSubmission: {
+        id,
+        source: "operator-adopted",
+        idleThreadMayExist: true,
+      },
+    });
+  const n1 = witness(randomUUID(), 7),
+    n2 = witness(randomUUID(), 8);
+  assert.deepEqual(
+    recoveryRecordRuns([r1, n1, n2, r2]).map((run) => run.shown),
+    [r1, n1, n2, r2],
+  );
+  assert.deepEqual(recoveryRecordRuns([]), []);
 });

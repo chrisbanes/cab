@@ -3269,6 +3269,10 @@ export class StandaloneService {
     return this.started().state.taskHold(taskId);
   }
 
+  nonStopTaskHoldReason(taskId: string): string | undefined {
+    return this.started().state.nonStopTaskHoldReason(taskId);
+  }
+
   hasNonStopTaskHold(taskId: string): boolean {
     return this.started().state.hasNonStopTaskHold(taskId);
   }

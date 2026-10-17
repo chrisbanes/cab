@@ -1948,6 +1948,15 @@ export class OperatorApi {
   private selection(a: Row) {
     return selectAssignmentExecution(a, this.service);
   }
+  private nonStopTaskHold(
+    taskId: string,
+    excluded: readonly string[] | undefined,
+  ) {
+    const reason = this.service.nonStopTaskHoldReason(taskId);
+    return reason === undefined
+      ? null
+      : { reason: this.safe(reason, excluded) };
+  }
   private execution(task: Row): Execution {
     const selections = this.domain()
       .assignments(String(task.id))
@@ -2947,7 +2956,7 @@ export class OperatorApi {
             revision: null,
             reason: attentionNext[attentionCode].reason,
             attentionCode,
-            destination: `/app/tasks/${taskId}`,
+            destination: `/app/tasks/${taskId}?section=decisions`,
             conversation: null,
             headline: null,
           });
@@ -3273,6 +3282,7 @@ export class OperatorApi {
       admission,
       waits: this.taskWaits(t, admission, execution, excluded, view.approvals),
       execution,
+      taskHold: this.nonStopTaskHold(taskId, excluded),
       localDependencies: d.dependencies(taskId).map((id) => {
         const b = d.task(id);
         return { id, title: this.safe(b.title, excluded), state: b.state };

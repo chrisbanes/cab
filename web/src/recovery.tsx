@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useId,
@@ -41,7 +42,7 @@ import {
   StatusBadge,
 } from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
-import { holdPills, plural } from "./settings-view.js";
+import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
 import {
   Aside,
@@ -496,6 +497,61 @@ function Witness({
   );
 }
 
+type RecoveryRecordData = ReturnType<
+  typeof assignmentRecoverySchema.parse
+>["data"]["records"][number];
+
+const recordKey = (r: RecoveryRecordData) =>
+  `${r.workId}-${r.generation.workRevision}-${r.generation.requestSequence}`;
+
+function RecoveryRecord({ r }: { r: RecoveryRecordData }) {
+  return (
+    <article className="settings-row">
+      <h3 className="small-heading">
+        {`Generation ${r.generation.workRevision ?? "unavailable"}; request ${r.generation.requestSequence}`}
+      </h3>
+      <p className="body">
+        {`Intent ${r.intentState}; request ${r.requestState ?? "unavailable"}; binding ${
+          r.binding
+            ? `assignment version ${r.binding.assignmentVersion}, instructions ${r.binding.instructionsRevision}, profile ${r.binding.profileRevision}`
+            : "unavailable"
+        }.`}
+      </p>
+      <p className="body">
+        Observations: {r.observations.join(", ") || "unavailable"}. Pending
+        effects: {r.pendingEffectCount}. Receipt{" "}
+        {`${r.receiptRecorded ? "recorded" : "not recorded"}; workspace ${r.workspace}.`}
+      </p>
+      {r.preTurnRejection && (
+        <Witness
+          title="Before-turn refusal"
+          id={r.preTurnRejection.id}
+          source={r.preTurnRejection.source}
+        >
+          The runtime refused to resume the archived conversation before any
+          turn was sent. This attempt never reached a turn.
+        </Witness>
+      )}
+      {r.noTurnSubmission && (
+        <Witness
+          title="No turn sent"
+          id={r.noTurnSubmission.id}
+          source={r.noTurnSubmission.source}
+        >
+          An operator confirmed that no turn was sent for this attempt. An idle
+          conversation may still exist that Ensemble hasn't seen.
+        </Witness>
+      )}
+      <p className="metadata muted">
+        Stop {r.holds.stop ? "active" : "inactive"}; writer{" "}
+        {r.holds.writer ? "held" : "not recorded"}; capacity{" "}
+        {r.holds.capacity ? "held" : "not recorded"}; uncertainty{" "}
+        {r.holds.uncertainty ? "active" : "not recorded"}.
+      </p>
+    </article>
+  );
+}
+
 export function AssignmentRecovery(
   p: SettingsProps & { assignmentId: string },
 ) {
@@ -626,56 +682,20 @@ export function AssignmentRecovery(
                     execution ended or that its holds were released.
                   </p>
                 )}
-                {data.records.map((r) => (
-                  <article
-                    className="settings-row"
-                    key={`${r.workId}-${r.generation.workRevision}-${r.generation.requestSequence}`}
-                  >
-                    <h3 className="small-heading">
-                      {`Generation ${r.generation.workRevision ?? "unavailable"}; request ${r.generation.requestSequence}`}
-                    </h3>
-                    <p className="body">
-                      Intent {r.intentState}; request{" "}
-                      {r.requestState ?? "unavailable"}; binding{" "}
-                      {r.binding
-                        ? `assignment version ${r.binding.assignmentVersion}, instructions ${r.binding.instructionsRevision}, profile ${r.binding.profileRevision}`
-                        : "unavailable"}
-                      .
-                    </p>
-                    <p className="body">
-                      Observations: {r.observations.join(", ") || "unavailable"}
-                      . Pending effects: {r.pendingEffectCount}. Receipt{" "}
-                      {`${r.receiptRecorded ? "recorded" : "not recorded"}; workspace ${r.workspace}.`}
-                    </p>
-                    {r.preTurnRejection && (
-                      <Witness
-                        title="Before-turn refusal"
-                        id={r.preTurnRejection.id}
-                        source={r.preTurnRejection.source}
-                      >
-                        The runtime refused to resume the archived conversation
-                        before any turn was sent. This attempt never reached a
-                        turn.
-                      </Witness>
+                {recoveryRecordRuns(data.records).map(({ shown, older }) => (
+                  <Fragment key={recordKey(shown)}>
+                    <RecoveryRecord r={shown} />
+                    {older.length > 0 && (
+                      <details className="recovery-older">
+                        <summary className="metadata">
+                          {plural(older.length, "older record")}, same state
+                        </summary>
+                        {older.map((r) => (
+                          <RecoveryRecord key={recordKey(r)} r={r} />
+                        ))}
+                      </details>
                     )}
-                    {r.noTurnSubmission && (
-                      <Witness
-                        title="No turn sent"
-                        id={r.noTurnSubmission.id}
-                        source={r.noTurnSubmission.source}
-                      >
-                        An operator confirmed that no turn was sent for this
-                        attempt. An idle conversation may still exist that
-                        Ensemble hasn't seen.
-                      </Witness>
-                    )}
-                    <p className="metadata muted">
-                      Stop {r.holds.stop ? "active" : "inactive"}; writer{" "}
-                      {r.holds.writer ? "held" : "not recorded"}; capacity{" "}
-                      {r.holds.capacity ? "held" : "not recorded"}; uncertainty{" "}
-                      {r.holds.uncertainty ? "active" : "not recorded"}.
-                    </p>
-                  </article>
+                  </Fragment>
                 ))}
               </Panel>
             </div>

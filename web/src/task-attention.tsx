@@ -7,7 +7,12 @@ import {
   interventionRequester,
 } from "./request-presentation.js";
 import type { ResourceState } from "./resource.js";
-import { attentionCandidate, isUncertain, taskDetailHref } from "./tasks.js";
+import {
+  attentionCandidate,
+  isUncertain,
+  taskDecisionHref,
+  taskDetailHref,
+} from "./tasks.js";
 
 export type InboxRead = Awaited<ReturnType<typeof loadInbox>>;
 export type Requests = ResourceState<InboxRead>;
@@ -39,7 +44,10 @@ export function AttentionBar({
             : "Next: runtime · confirm execution ended. No operator request recorded."}
         </p>
       </div>
-      <ActionLink variant="secondary" href={taskDetailHref(task)}>
+      <ActionLink
+        variant="secondary"
+        href={(uncertain ? taskDecisionHref : taskDetailHref)(task)}
+      >
         {uncertain ? "Inspect execution" : "Open task"}
       </ActionLink>
       <a className="control work-link" href="/app/inbox">

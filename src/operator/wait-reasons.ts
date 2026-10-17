@@ -284,6 +284,71 @@ export function deriveWaits(f: WaitFacts): Wait[] {
   return orderWaits(waits);
 }
 
+/** A hold that outlasts Resume project: what it is, what clears it, and what the Fix confirmation calls it. */
+export interface HoldLine {
+  kind: "stop" | "task" | "writer" | "capacity" | "uncertainty";
+  label: string;
+  clears: string;
+  name: string;
+}
+
+const sentence = (text: string) =>
+  /[.!?…)"'”]$/.test(text) ? text : `${text}.`;
+const knownEnded = "Clears when we know the execution ended.";
+
+/**
+ * The task's execution holds in a fixed order, each with what clears it (149c). Labels equal
+ * the recovery page's hold pills. `taskHold` is the reason of a hold other than Stop, so a
+ * Stop-only task lists Stop once; a null reason means the text is withheld.
+ */
+export function holdLines(
+  holds: {
+    stop: boolean;
+    writer: boolean;
+    capacity: boolean;
+    uncertainty: boolean;
+  },
+  taskHold: { reason: string | null } | null,
+): HoldLine[] {
+  const lines: HoldLine[] = [];
+  if (holds.stop)
+    lines.push({
+      kind: "stop",
+      label: "Operator Stop",
+      clears: "Clears when the task's Stop is resumed.",
+      name: "Operator Stop",
+    });
+  if (taskHold)
+    lines.push({
+      kind: "task",
+      label: "Task hold",
+      clears: `${sentence(taskHold.reason?.trim() || "No reason recorded.")} Recovery stays blocked while it remains.`,
+      name: "task hold",
+    });
+  if (holds.writer)
+    lines.push({
+      kind: "writer",
+      label: "Writer ownership",
+      clears: knownEnded,
+      name: "writer ownership",
+    });
+  if (holds.capacity)
+    lines.push({
+      kind: "capacity",
+      label: "Capacity",
+      clears: knownEnded,
+      name: "capacity hold",
+    });
+  if (holds.uncertainty)
+    lines.push({
+      kind: "uncertainty",
+      label: "Uncertainty",
+      clears: knownEnded,
+      name: "uncertainty hold",
+    });
+  return lines;
+}
+
 /** The CLI's Fix line: the command to run or the Settings path to open. */
 export function cliFix(fix: WaitFix): string[] {
   switch (fix.kind) {

@@ -1308,6 +1308,8 @@ export const taskSchema = envelope(
         .strict(),
       waits: z.array(waitSchema).max(waitCodes.length),
       execution: executionSchema,
+      // The recorded reason of a task hold other than Stop; null when there is none.
+      taskHold: z.object({ reason: safeText }).strict().nullable(),
       localDependencies: z.array(
         z.object({ id: uuid, title: safeText, state: taskState }).strict(),
       ),
