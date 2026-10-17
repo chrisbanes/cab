@@ -2031,7 +2031,7 @@ for (const [name, viewport] of [
   });
 
 test("a runtime link whose item has recovered says it is unavailable and reads no task", async (_t, j) => {
-  const { page } = await openInbox(
+  const { page, web } = await openInbox(
     j,
     1,
     { width: 1366, height: 900 },
@@ -2041,10 +2041,32 @@ test("a runtime link whose item has recovered says it is unavailable and reads n
   page.on("request", (r) => {
     if (r.url().includes("/api/operator/tasks/")) taskReads.push(r.url());
   });
+  // Load the link again with the listener in place, so a read at load would be seen.
+  await page.reload();
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByText("Selected request is unavailable.").waitFor();
   assert.equal(
     await page.locator('.inbox-row[data-kind="runtime"]').count(),
     0,
   );
   assert.deepEqual(taskReads, []);
+});
+
+test("an Inbox holding only an exhausted runtime counts it without naming projects", async (_t, j) => {
+  const exhaustion = exhaustibleRuntime();
+  const { page } = await openInbox(
+    j,
+    0,
+    { width: 1366, height: 900 },
+    "/app/inbox",
+    (fixture) => exhaustion.exhaust(fixture.runtime),
+    false,
+    exhaustion,
+  );
+  await page.locator('.inbox-row[data-kind="runtime"]').waitFor();
+  assert.equal(
+    await page.locator(".inbox-summary").textContent(),
+    "1 unresolved",
+  );
 });

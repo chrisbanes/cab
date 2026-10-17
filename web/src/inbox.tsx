@@ -261,7 +261,9 @@ export function Inbox({
         ? `${count} unresolved · confirmation retained`
         : count === 0
           ? "0 unresolved across your projects"
-          : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
+          : projectCount === 0
+            ? `${count} unresolved`
+            : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
   const detailTitle = single && selected ? heading : null,
     detailSubtitle =
       (selected?.kind === "runtime" ? null : selected?.projectName) ??

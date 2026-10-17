@@ -209,7 +209,9 @@ Codex runtime item appears first in the Inbox (`ensemble inbox list --kind
 runtime`). Turning the runtime off and on in Settings → Runtime replaces it with
 a fresh one and begins a new schedule; if it stays unavailable, the same
 `kickstart -k` recovers it. Turning the runtime off cancels pending retries.
-Restart state lives in memory, so a service restart starts afresh.
+Restart state lives in memory, so a service restart starts afresh. The "next at"
+time is the service's local time on the `/runtime` page and the browser's or
+CLI's local time elsewhere.
 
 The LaunchAgent in `~/Library/LaunchAgents` is meant to start the service when
 the user logs into the GUI session; the procedure does not claim unattended

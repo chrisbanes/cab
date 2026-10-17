@@ -625,6 +625,37 @@ test("a runtime lost during an attempt is counted once and retried after the att
   );
 });
 
+test("a scheduler wake that fails after a restart is a service failure, not a failed start", async () => {
+  await withService({}, async ({ service, clock, created, latest }) => {
+    await service.start();
+    const internals = service as unknown as {
+      wakeScheduler: () => Promise<void>;
+    };
+    internals.wakeScheduler = async () => {
+      throw new Error("scheduler failed to wake");
+    };
+    latest("codex").crash();
+    clock.advance(30_000);
+    await settle(() => service.backgroundFailureObserved());
+    await settle(() => clock.pending() === 0);
+    assert.equal(created.codex.length, 2);
+    // The healthy runtime was never recorded as a failed attempt, and nothing retries.
+    clock.advance(day);
+    await flush();
+    assert.equal(
+      created.codex.length,
+      2,
+      "no second attempt after the failure",
+    );
+    assert.equal(
+      restartOf(service, "codex")?.attempts.some(
+        (a) => a.outcome === "failed",
+      ) ?? false,
+      false,
+    );
+  });
+});
+
 test("stopping the service during backoff leaves no retry and stops promptly", async () => {
   await withService({}, async ({ service, clock, created, latest }) => {
     await service.start();

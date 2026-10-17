@@ -519,7 +519,11 @@ export class Readiness {
       "fail",
       reasons.join("; "),
       other
-        ? (unavailableFix ?? fixes.harness)
+        ? unavailableFix
+          ? rejected > 0
+            ? `${unavailableFix}; or edit the profile's model or reasoning effort`
+            : unavailableFix
+          : fixes.harness
         : (notEnabledFix ??
             (unknownSettings ? fixes.harnessSettings : fixes.harness)),
     );

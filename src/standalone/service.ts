@@ -1230,6 +1230,8 @@ export class StandaloneService {
           this.acquired?.supervisor?.cancelObservations();
           await this.acquired?.githubSynchronizer?.stop().catch(() => {});
           await this.acquired?.deliveryCoordinator?.stop().catch(() => {});
+          // An attempt may be mid-start: let it land in `runtimes` so it is stopped below.
+          await Promise.all([...this.runtimeToggles.values()]);
           await Promise.all([
             ...[...this.runtimes.values()].map((runtime) =>
               stopRuntime(runtime).catch(() => {}),
@@ -1582,9 +1584,16 @@ export class StandaloneService {
         state.attempts = attempt;
         try {
           await this.reconcileRuntime(harness);
-        } catch {
-          // A reconcile that threw has left the runtime absent; keep the schedule going.
-          if (!this.runtimeUnavailableSince.has(harness))
+        } catch (error) {
+          if (
+            this.runtimes.has(harness) &&
+            !this.runtimeUnavailableSince.has(harness)
+          )
+            // The runtime started and the scheduler wake after it failed: like any wake failure,
+            // that is fatal to the service. It is not a failed start of a healthy runtime.
+            this.handleBackgroundFailure(generation, "scheduler-drain", error);
+          else if (!this.runtimeUnavailableSince.has(harness))
+            // A reconcile that threw before listing a runtime; keep the schedule going.
             this.noteRuntimeUnavailable(harness, "start-failed");
         } finally {
           state.inFlight = false;
