@@ -427,6 +427,11 @@ test("auth login defaults to the local connection and says where the token comes
   );
   assert.equal(r.code, 2);
   assert.equal(r.json().error.code, "usage");
+  // Not the same-origin refusal: the empty name itself is refused, and named as such.
+  assert.match(
+    r.json().error.message,
+    /^ENSEMBLE_CONNECTION must be a connection name/,
+  );
   assert.deepEqual(readdirSyncSafe(e.configDir), ["connections.json"]);
   assert.deepEqual(
     Object.keys(

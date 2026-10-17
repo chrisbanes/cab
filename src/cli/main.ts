@@ -728,7 +728,7 @@ async function login(
   if (!nameResult.success)
     throw new CliError(
       "usage",
-      "A connection name uses letters, digits, . _ - and starts with a letter or digit.",
+      `${values.connection === undefined ? "ENSEMBLE_CONNECTION" : "--connection"} must be a connection name: letters, digits, . _ - starting with a letter or digit.`,
     );
   if (!values.url) throw new CliError("usage", tokenSource(DEFAULT_ORIGIN));
   const name = nameResult.data;
