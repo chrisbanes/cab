@@ -13,7 +13,7 @@ See the [accepted operator CLI contract](docs/design/operator-cli.md).
 _Avoid_: Agent callback interface
 
 **Attention inbox**:
-A cross-project collection of unresolved questions, approvals and problems requiring operator action.
+A cross-project collection of unresolved questions, approvals and problems requiring operator action, including an execution runtime whose automatic restarts are exhausted.
 Routine progress and completed work that needs no decision belong outside this inbox.
 _Avoid_: Notification feed or conversation history
 
