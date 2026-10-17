@@ -15,6 +15,7 @@ import type { ReadinessCheck } from "../../src/operator/readiness.js";
 import { sourceCredentialExplanation } from "../../src/operator/source-credential.js";
 import type { z } from "zod";
 import { unavailableAlert } from "./execution-runtime.js";
+import { addClaudeHref } from "./settings-sections.js";
 
 /** One repository row. A typed row keeps its raw `text`; a discovered row carries the node ID. */
 export interface SetupRow {
@@ -342,7 +343,7 @@ export function readyCheckItems(input: {
                 ? {
                     link: {
                       label: "Add Claude",
-                      href: "/app/settings/runtime",
+                      href: addClaudeHref,
                     },
                   }
                 : {}),

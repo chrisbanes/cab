@@ -9,6 +9,7 @@ import {
 } from "../../src/operator/contracts.js";
 export { runtimeSummary };
 import type { Values } from "./settings-changes.js";
+import { settingsSectionHref } from "./settings-sections.js";
 
 export const harnessStateLabel: Record<HarnessStatus["state"], string> = {
   available: "Available",
@@ -150,7 +151,11 @@ const runtimeStatusRoute = {
   label: "Runtime status",
   href: "/app/settings/runtime",
 };
-const settingsRoute = { label: "Settings", href: "/app/settings" };
+// The Claude token reference is set in the Runtime and recovery section.
+const settingsRoute = {
+  label: "Settings",
+  href: settingsSectionHref("runtime"),
+};
 const recoveryRoute = (a: Assignment) => ({
   label: "Recovery",
   href: `/app/assignments/${a.assignmentId}/recovery`,

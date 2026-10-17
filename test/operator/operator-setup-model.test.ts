@@ -420,7 +420,7 @@ test("the ready check lists only what would make this lead's work wait", () => {
     {
       text: "claude-token reason",
       fix: "claude-token fix",
-      link: { label: "Add Claude", href: "/app/settings/runtime" },
+      link: { label: "Add Claude", href: "/app/settings/runtime#add-claude" },
     },
   ]);
   assert.equal(token.blocked, true);
@@ -441,7 +441,7 @@ test("the ready check lists only what would make this lead's work wait", () => {
     {
       text: "claude-token reason",
       fix: "claude-token fix",
-      link: { label: "Add Claude", href: "/app/settings/runtime" },
+      link: { label: "Add Claude", href: "/app/settings/runtime#add-claude" },
     },
   ]);
   // A Codex lead ignores it.

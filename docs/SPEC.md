@@ -633,8 +633,8 @@ starts collapsed behind "Add a repository". The project is created paused; the r
 check then replaces the setup form, and its primary action resumes the project and
 opens the composer, and its secondary action keeps it paused.
 Discovery reads with an installation credential reference: `env:NAME`, or the GitHub
-CLI login (`gh:github.com`), which Settings recommends and setup offers in one step
-when the service detects it. Discovery never reads with a login the operator did
+CLI login (`gh:github.com`), which Settings recommends, and which setup (step 3) and the Readiness GitHub
+discovery row each offer in one step when the service detects it. Discovery never reads with a login the operator did
 not choose for it. The discovery credential is excluded from agent and helper environments.
 Discovery, source selection and a linked GitHub Project do not grant repository
 access; access is exactly the repositories the operator adds. See

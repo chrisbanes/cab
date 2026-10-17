@@ -43,4 +43,6 @@ Each getting-started row has one action and no two rows open the same screen.
   fix on its own (a data directory mode) is fixed, not reported.
 - Leaving setup before Create discards the draft with a prompt; a created project
   stays paused until Resume.
-- GitHub is optional for a repository-free project and is offered once, in setup.
+- GitHub is optional for a repository-free project. Setup step 3 (behind Add a
+  repository) is the one place the first-run path offers the one-click GitHub CLI
+  login; Settings → Readiness offers it again later, as a separate step.

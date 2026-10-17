@@ -195,7 +195,12 @@ export function ghLoginCopy(gh: GhLogin) {
 const envName = /^[A-Z][A-Z0-9_]*$/;
 
 /** Frames 114 and 114b: the installation's read-only GitHub discovery credential. */
-export function DiscoveryCredentialRow(p: SettingsProps) {
+export function DiscoveryCredentialRow(
+  p: SettingsProps & {
+    /** A save or clear was recorded; the page re-reads what else shows this credential. */
+    onChange?: () => void;
+  },
+) {
   const loader = useCallback(
     (signal: AbortSignal) =>
       p.client.read("/api/operator/discovery", discoveryStatusSchema, signal),
@@ -231,6 +236,7 @@ export function DiscoveryCredentialRow(p: SettingsProps) {
       : "loading";
   const settled = () => {
     status.refresh();
+    p.onChange?.();
     setOpen(false);
     d.startOperation(fresh(), true);
   };

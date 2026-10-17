@@ -327,7 +327,7 @@ test("an unauthorized Claude failure names the token and Settings", () => {
   assert.match(notice?.message ?? "", /Claude rejected the configured token/);
   assert.deepEqual(
     notice?.routes.map((r) => r.href),
-    ["/app/settings", "/app/assignments/a1/recovery"],
+    ["/app/settings#runtime", "/app/assignments/a1/recovery"],
   );
   assert.deepEqual(
     waitRoute(
@@ -336,6 +336,40 @@ test("an unauthorized Claude failure names the token and Settings", () => {
           "Claude runtime unavailable: subscription token is unavailable",
       }),
     )?.routes.map((r) => r.href),
-    ["/app/settings/runtime", "/app/settings"],
+    ["/app/settings/runtime", "/app/settings#runtime"],
+  );
+});
+
+test("no runtime wait or failure route opens bare Settings", () => {
+  const hrefs: string[] = [];
+  for (const harness of ["Codex", "Claude"])
+    for (const reason of [
+      `${harness} runtime is not configured`,
+      `${harness} runtime unavailable; restart the service`,
+      `${harness} runtime unavailable: subscription token is unavailable`,
+      `${harness} runtime unavailable: the runtime failed`,
+    ])
+      hrefs.push(
+        ...(waitRoute(assignment({ waitReason: reason }))?.routes ?? []).map(
+          (r) => r.href,
+        ),
+      );
+  hrefs.push(
+    ...(
+      failureNotice(
+        assignment({
+          state: "held",
+          executionGeneration: generation("claude", {
+            classification: "permanent",
+            reasonCode: "unauthorized",
+          }),
+        }),
+      )?.routes ?? []
+    ).map((r) => r.href),
+  );
+  assert.ok(hrefs.length >= 6);
+  assert.deepEqual(
+    hrefs.filter((h) => h === "/app/settings"),
+    [],
   );
 });

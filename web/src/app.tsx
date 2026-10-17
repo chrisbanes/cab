@@ -61,6 +61,7 @@ import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
 import { ProjectSetup, type SetupHeader } from "./project-setup.js";
 import { SettingsWorkspace } from "./settings-index.js";
+import { landingDecision } from "./settings-sections.js";
 import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
 import { ProjectConfiguration } from "./project-config.js";
 import { settingsHeader } from "./settings-view.js";
@@ -463,6 +464,18 @@ function knownRoute(pathname: string) {
     new RegExp(`^/app/(?:projects|profiles)/${id}/settings$`).test(pathname)
   );
 }
+/**
+ * Each entry the shell makes or adopts carries the URL it was made for in its own state
+ * (`entryUrl`). Browsers may copy `history.state` into a new entry made by a native
+ * fragment change, so a saved scroll position in the state proves nothing by itself: only
+ * an entry reached at the URL stamped in its state is a traversal to the same entry. The
+ * stamp lives in the entry, so there is no in-memory registry to go stale.
+ */
+const absoluteUrl = (href: string) => new URL(href, location.href).href;
+const ownsState = () => {
+  const stamp = (history.state as { entryUrl?: unknown } | null)?.entryUrl;
+  return typeof stamp === "string" && stamp === location.href;
+};
 function pushAppEntry(href: string, navigationScope: string) {
   const fromSearch = location.pathname === "/app/search";
   history.pushState(
@@ -473,6 +486,7 @@ function pushAppEntry(href: string, navigationScope: string) {
         : location.pathname + location.search,
       navigationScope,
       navKey: crypto.randomUUID(),
+      entryUrl: absoluteUrl(href),
       entryIndex: (history.state?.entryIndex ?? 0) + 1,
       workspaceIndex: fromSearch
         ? (history.state?.workspaceIndex ?? 0)
@@ -489,12 +503,17 @@ export function App() {
   const acceptedIdentity = useRef<string | null>(null);
   const navigationScope = useRef(crypto.randomUUID());
   const clearPrivateNavigation = () => {
+    // The fragment names a section on the page, not private state, so it stays.
     const next =
       location.pathname === "/app/search"
         ? "/app/search"
-        : location.pathname + location.search;
+        : location.pathname + location.search + location.hash;
     history.replaceState(
-      { navigationScope: navigationScope.current, navKey: crypto.randomUUID() },
+      {
+        navigationScope: navigationScope.current,
+        navKey: crypto.randomUUID(),
+        entryUrl: absoluteUrl(next),
+      },
       "",
       next,
     );
@@ -559,7 +578,15 @@ export function App() {
           clearPrivateNavigation();
         if (identity)
           history.replaceState(
-            { ...history.state, navigationScope: navigationScope.current },
+            {
+              // Only a state made for this load is adopted; any other starts clean.
+              ...(history.state?.navigationScope === navigationScope.current
+                ? history.state
+                : null),
+              navigationScope: navigationScope.current,
+              navKey: history.state?.navKey ?? crypto.randomUUID(),
+              entryUrl: location.href,
+            },
             "",
           );
         acceptedIdentity.current = identity;
@@ -597,19 +624,32 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: current scope ref guards browser Back/Forward entries across authentication expiry.
   useEffect(() => {
     const pop = () => {
-      if (history.state?.navigationScope !== navigationScope.current) {
+      // A Settings entry reached at a URL it was not recorded for (a fragment changed
+      // natively, with the state copied or dropped) is a new entry: it starts clean, so
+      // no saved position or focus of another entry can be mistaken for its own.
+      const copied =
+        ["/app/settings", "/app/settings/runtime"].includes(
+          location.pathname,
+        ) && !ownsState();
+      if (
+        history.state?.navigationScope !== navigationScope.current ||
+        copied
+      ) {
         clearPrivateNavigation();
         restoreFocus.current = null;
       } else restoreFocus.current = history.state?.focusedHref ?? null;
       setDrawer(false);
       setPath(location.pathname + location.search);
       setNavigationVersion((n) => n + 1);
-      requestAnimationFrame(() =>
-        scrollTo(
-          0,
-          (history.state as { scrollY?: number } | null)?.scrollY ?? 0,
-        ),
-      );
+      const state = history.state as { scrollY?: number } | null;
+      const { pathname, hash } = location;
+      // Decided when the frame runs, with the page rendered, by the same function the
+      // Settings page lands with.
+      requestAnimationFrame(() => {
+        const decision = landingDecision(state, pathname, hash);
+        if (decision.action === "restore") scrollTo(0, decision.y);
+        else if (decision.action === "top") scrollTo(0, 0);
+      });
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
@@ -718,7 +758,11 @@ export function App() {
     addressPath === "/login" && session?.authenticated ? "/app" : addressPath;
   useEffect(() => {
     if (pathname !== addressPath) {
-      history.replaceState({ ...history.state }, "", "/app");
+      history.replaceState(
+        { ...history.state, entryUrl: absoluteUrl("/app") },
+        "",
+        "/app",
+      );
       setPath("/app");
     }
   }, [pathname, addressPath]);
@@ -1109,6 +1153,10 @@ export function App() {
               session={session}
               drafts={drafts.current}
               workspace={workspace.state.data}
+              workspaceSettled={
+                workspace.state.data !== null ||
+                workspace.state.status === "error"
+              }
               refresh={workspace.refresh}
               refreshNonce={refreshNonce}
             />

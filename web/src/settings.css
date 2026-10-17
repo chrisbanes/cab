@@ -17,6 +17,69 @@
   align-items: start;
 }
 
+.settings-index {
+  min-width: 0;
+}
+
+/* Frame 114: a section navigation column beside one column of sections. Not sticky: a
+   fixed bar would cover the target a link lands on. */
+.settings-layout {
+  display: grid;
+  gap: var(--space-12);
+  align-items: start;
+  min-width: 0;
+}
+
+.settings-nav-select {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.settings-nav-select > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-nav ul {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-nav li a {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 var(--space-8);
+  border-radius: var(--radius-md);
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+
+.settings-nav li a:hover {
+  color: var(--foreground);
+}
+
+.settings-nav li a[aria-current="true"] {
+  background: var(--overlay);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  color: var(--foreground);
+}
+
+@media (min-width: 760px) {
+  .settings-layout {
+    grid-template-columns: 168px minmax(0, 1fr);
+  }
+}
+
+@media (min-width: 1121px) {
+  .settings-layout {
+    grid-template-columns: 180px minmax(0, 1fr);
+  }
+}
+
 .settings-column {
   display: grid;
   gap: var(--space-12);
@@ -24,7 +87,6 @@
 }
 
 @media (min-width: 1121px) {
-  .settings-index,
   .settings-split-even {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
@@ -379,6 +441,7 @@
   .settings-discovery input,
   .settings-credentials-form input,
   .settings-credentials-form select,
+  .settings-nav select,
   .settings-tabs a,
   .runtime-limits > summary {
     min-height: 44px;

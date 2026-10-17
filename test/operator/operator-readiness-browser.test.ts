@@ -38,7 +38,10 @@ for (const [name, viewport] of [
       "/app/settings",
       viewport,
       undefined,
-      { serviceOptions: { runtimeHarnesses: ["codex", "claude"] } },
+      {
+        serviceOptions: { runtimeHarnesses: ["codex", "claude"] },
+        turnStarted: false,
+      },
     );
     const root = mkdtempSync(join(tmpdir(), "ensemble-ready-ui-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -55,16 +58,10 @@ for (const [name, viewport] of [
     const panel = page.locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Readiness", exact: true }),
     });
-    // First panel of the right column.
+    // Before a task starts a turn, Readiness is the first section.
     assert.equal(
-      await page
-        .locator(".settings-column")
-        .nth(1)
-        .locator(".settings-panel")
-        .first()
-        .getByRole("heading", { name: "Readiness", exact: true })
-        .count(),
-      1,
+      await page.locator("main h2").first().innerText(),
+      "Readiness",
     );
 
     const requests: string[] = [];

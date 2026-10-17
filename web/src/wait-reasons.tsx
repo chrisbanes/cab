@@ -8,7 +8,6 @@ import {
   fixLabels,
   type HoldLine,
   type Wait,
-  type WaitFix,
   type WaitLink,
   waitLabels,
 } from "../../src/operator/wait-reasons.js";
@@ -27,6 +26,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog.js";
+import { waitFixHref } from "./wait-fix-href.js";
 import "./wait-reasons.css";
 
 export interface WaitProps {
@@ -37,17 +37,6 @@ export interface WaitProps {
   /** Re-read whatever shows the waits after Resume project is recorded. */
   onChanged: () => void;
 }
-
-const fixHref = (fix: Exclude<WaitFix, { kind: "resume-project" }>) =>
-  fix.kind === "choose-lead"
-    ? `/app/projects/${fix.projectId}/settings`
-    : fix.kind === "readiness"
-      ? "/app/settings"
-      : fix.kind === "add-claude"
-        ? "/app/settings/runtime"
-        : fix.kind === "open-repositories"
-          ? `/app/projects/${fix.projectId}/settings?tab=github`
-          : `/app/profiles/${fix.profileId}/settings`;
 
 const linkHref = (link: WaitLink, taskId: string | null) =>
   link.kind === "task"
@@ -91,7 +80,7 @@ function WaitAction({
     );
   if (wait.fix)
     return (
-      <ActionLink variant={variant} href={fixHref(wait.fix)}>
+      <ActionLink variant={variant} href={waitFixHref(wait.fix)}>
         Fix: {fixLabels[wait.fix.kind]}
       </ActionLink>
     );

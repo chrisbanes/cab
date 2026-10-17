@@ -40,7 +40,7 @@ The discovery status read reports:
 
 It never reports the reference name or token, and runs no `gh auth token`. For
 discovery, detection only offers the login: Ensemble reads with it only after the
-operator chooses it in Settings or the setup alert, and never falls back to it
+operator chooses it in Settings, on the Readiness row or in the setup alert, and never falls back to it
 implicitly.
 
 Discovery and project source credentials are removed, by name and value, from the Codex runtime

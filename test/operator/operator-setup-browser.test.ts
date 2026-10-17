@@ -361,7 +361,7 @@ test("Setup falls back to typed entry without discovery and on first run", async
     await page
       .getByRole("link", { name: "Set discovery credential" })
       .getAttribute("href"),
-    "/app/settings",
+    "/app/settings#github-discovery",
   );
   // With no profiles the lead is chosen by creating one in place, never by leaving setup.
   await page.getByRole("group", { name: "New lead profile" }).waitFor();
@@ -1096,7 +1096,10 @@ test("Setup disables Resume with the reason and Add Claude for a Claude lead wit
     name: "Add Claude",
     exact: true,
   });
-  assert.equal(await addClaude.getAttribute("href"), "/app/settings/runtime");
+  assert.equal(
+    await addClaude.getAttribute("href"),
+    "/app/settings/runtime#add-claude",
+  );
   // The fix opens in a new tab, so this ready check is still here afterwards.
   assert.equal(await addClaude.getAttribute("target"), "_blank");
   const tab = page.context().waitForEvent("page");
@@ -1992,7 +1995,7 @@ test("Setup opens Add a repository for a rejected row and keeps it open for a ke
   );
 });
 
-test("Setup offers the GitHub CLI login exactly once, behind Add a repository", async (_t, journey) => {
+test("Setup offers the GitHub CLI login exactly once in the first-run path, behind Add a repository", async (_t, journey) => {
   const gh = createFakeGh();
   journey.cleanup(async () => gh.close(), "fake-gh.close");
   const { f, page } = await setupJourney(journey, {

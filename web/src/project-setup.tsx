@@ -53,6 +53,7 @@ import {
   verificationCopy,
 } from "./setup-model.js";
 import type { GhLogin } from "./discovery-credential.js";
+import { settingsSectionHref } from "./settings-sections.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
 import "./setup.css";
@@ -735,7 +736,10 @@ export function ProjectSetup(
                                 {`Use GitHub CLI login (@${ghLogin.login})`}
                               </Button>
                             )}
-                          <ActionLink variant="secondary" href="/app/settings">
+                          <ActionLink
+                            variant="secondary"
+                            href={settingsSectionHref("github-discovery")}
+                          >
                             Set discovery credential
                           </ActionLink>
                         </>
@@ -1124,7 +1128,7 @@ export function ProjectSetup(
           </p>
           <ActionLink
             variant="secondary"
-            href={firstRun ? "/app" : "/app/settings"}
+            href={firstRun ? "/app" : settingsSectionHref("projects")}
           >
             Cancel
           </ActionLink>

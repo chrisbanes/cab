@@ -44,7 +44,7 @@ test("Create profile saves with one message, a breadcrumb, boundary aside and Ca
     await page
       .getByRole("link", { name: "Cancel", exact: true })
       .getAttribute("href"),
-    "/app/settings",
+    "/app/settings#profiles",
   );
   await page.getByLabel("Profile name", { exact: true }).fill("Tester");
   await page.getByLabel("Summary", { exact: true }).fill("Testing");

@@ -47,6 +47,7 @@ import {
   workspaceLabels,
 } from "../../src/operator/project-labels.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
+import { useFragmentLanding } from "./settings-sections.js";
 import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
 import {
@@ -262,6 +263,8 @@ export function RuntimeSettings(p: SettingsProps) {
       }
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
+  // `/app/settings/runtime#add-claude` lands once the panel exists.
+  useFragmentLanding(Boolean(data));
   const labels = workspaceLabels(p.workspace);
   type ProjectRow = NonNullable<typeof data>["projects"][number];
   const labelOf = (r: ProjectRow) =>

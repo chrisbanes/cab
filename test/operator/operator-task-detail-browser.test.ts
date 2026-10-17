@@ -1108,7 +1108,7 @@ test("Task detail lists waits in order: Resume project confirms and sends one co
     await waits
       .getByRole("link", { name: "Fix: Add Claude" })
       .getAttribute("href"),
-    "/app/settings/runtime",
+    "/app/settings/runtime#add-claude",
   );
   assert.equal(
     await waits
