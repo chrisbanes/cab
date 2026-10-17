@@ -89,7 +89,7 @@ test("every documented browse command runs read-only with a coverage envelope", 
   const s = await startCliService(t);
   const native = await captureNativeResult(s.f, { withArtifact: true });
   const h = harness(t);
-  const help = await h.run(["--help"]);
+  const help = await h.run(["--help", "--all"]);
   assert.equal(help.code, 0);
   assert.match(
     help.out,

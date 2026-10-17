@@ -445,7 +445,7 @@ export async function applyFile(
   ];
   const document = await readChangeDocument(
     ctx.values.file,
-    `Prepare it first with ${prepares.join(", ")} (see 'ensemble --help'), then apply the file it writes.`,
+    `Prepare it first with ${prepares.join(", ")} (see 'ensemble --help --all'), then apply the file it writes.`,
   );
   if (AREA[document.kind] !== area)
     throw new CliError(

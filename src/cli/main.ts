@@ -25,12 +25,20 @@ import {
   defaultServiceHost,
   type InstallCli,
   type OperatorConnection,
+  localHelpArea,
   SERVICE_USAGE,
   serviceCommand,
+  serviceHelp,
   snapshotCommand,
 } from "./service.js";
 import { jsonLine, terminalSafe } from "./render.js";
-import { DEFAULT_FIX, fixLine, remedyFor } from "./remedy.js";
+import {
+  DEFAULT_FIX,
+  fixLine,
+  nextLine,
+  remedyFor,
+  shellWord,
+} from "./remedy.js";
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
@@ -86,20 +94,42 @@ const DEFAULT_ORIGIN = "http://127.0.0.1:8787";
 const tokenSource = (origin: string) =>
   `Create a token in Settings → CLI credentials in the web UI, then run: ensemble auth login --url ${origin}`;
 
-const USAGE = `Usage: ensemble <command> [options]
+/** The first command of each help view for someone who has not used the CLI yet. */
+const START_HERE = [
+  "auth login",
+  "doctor",
+  "project list",
+  "task list",
+  "task get",
+  "task create",
+  "inbox list",
+];
 
-Commands:
-  ${AUTH_LOGIN_USAGE}
-  auth status [--connection NAME]
-  auth logout [--connection NAME]
-  connection list
-  connection use NAME
-  connection remove NAME
-  task get TASK_ID [--connection NAME]
-${[...browseCommands.values(), ...writeCommands.values()].map((c) => `  ${c.usage}`).join("\n")}
+export const BUILTIN_USAGE = new Map([
+  ["auth login", AUTH_LOGIN_USAGE],
+  ["auth status", "auth status [--connection NAME]"],
+  ["auth logout", "auth logout [--connection NAME]"],
+  ["connection list", "connection list"],
+  ["connection use", "connection use NAME"],
+  ["connection remove", "connection remove NAME"],
+  ["task get", "task get TASK_ID [--connection NAME]"],
+]);
 
-${SERVICE_USAGE}
-Options:
+/** Every operator command's usage line by key ("area action", or "logs"/"doctor"). */
+const COMMAND_USAGE = new Map<string, string>([
+  ...BUILTIN_USAGE,
+  ...[...browseCommands, ...writeCommands].map(
+    ([key, c]) => [key, c.usage] as const,
+  ),
+]);
+const areaOf = (key: string) => key.split(" ")[0] ?? key;
+const LOCAL_AREAS = ["service", "snapshot"];
+const operatorAreas = () => [...new Set([...COMMAND_USAGE.keys()].map(areaOf))];
+const areaNames = () => [...operatorAreas(), ...LOCAL_AREAS];
+const indented = (lines: Iterable<string>) =>
+  [...lines].map((line) => `  ${line}\n`).join("");
+
+const OPTIONS_HELP = `Options:
   --output human|json   Result format (default human)
   --limit N             Page size, 1-200 (default 50; some reads cap lower)
   --cursor TOKEN        Continue from the More: line of the previous page
@@ -107,36 +137,106 @@ Options:
   --follow              logs only: poll every --interval S (1-30, default 2)
                         for at most --max-duration S (default 900, max 86400)
   --help                Show this help
+  --all                 With --help: list every command and option
   --version             Show the Ensemble version
+`;
 
-Task operations: task create, task message, task follow-up, question answer and
+const TASK_NOTE = `Task operations: task create, task message, task follow-up, question answer and
 approval decide cannot be undone. Reverse pairs: task stop/resume (Stop is
 best-effort cancellation of an open task; Resume clears only the operator
 Stop),
-add-dependency/remove-dependency and task configure --ready true/false.
-
-Runtimes: runtime enable and runtime disable are a reverse pair. Disabling never
+add-dependency/remove-dependency and task configure --ready true/false.`;
+const RUNTIME_NOTE = `Runtimes: runtime enable and runtime disable are a reverse pair. Disabling never
 cancels a running turn; work bound to that runtime waits until it is enabled again,
-and disabling one that bound tasks use needs --yes.
-
-Sources and delivery: delivery send-comment posts a public GitHub comment that
+and disabling one that bound tasks use needs --yes.`;
+const DELIVERY_NOTE = `Sources and delivery: delivery send-comment posts a public GitHub comment that
 Ensemble cannot edit or retract, and a confirm-comment decision is final (deny
 is the counterpart of approve). Removing a source selection discards its saved
 definition. preview-source has no deactivate command; saving any source change
 deactivates every selection. place-task is final once the task has an
 assignment. delivery refresh is installation-wide. send-comment --review-id
 first replays that review to check it is approved; an ID that is not an existing
-review records a new pending review instead, and nothing is posted.
-
-Recovery: recovery prepare writes an owner-only document from the observed
+review records a new pending review instead, and nothing is posted.`;
+const RECOVERY_NOTE = `Recovery: recovery prepare writes an owner-only document from the observed
 generation identity plus your --evidence-file; nothing is inferred, defaulted or
 confirmed by a flag. recovery submit sends it once. Adoption, recovery and
 conversation replacement cannot be undone, and none of them resumes the task or
 dispatches work; continue with a new task message after replacement. Adoption
-here records evidence and is unrelated to assignment apply-current.
+here records evidence and is unrelated to assignment apply-current.`;
 
-ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.
+/** The prose notes that name an area's commands. */
+const AREA_NOTES: Record<string, string[]> = {
+  task: [TASK_NOTE],
+  question: [TASK_NOTE],
+  approval: [TASK_NOTE],
+  runtime: [RUNTIME_NOTE],
+  delivery: [DELIVERY_NOTE],
+  project: [DELIVERY_NOTE],
+  recovery: [RECOVERY_NOTE],
+};
+
+const ORIGIN_NOTE =
+  "ORIGIN is https://HOST[:PORT], or http://127.0.0.1:PORT for a service on this machine.";
+
+const areasLine = () => `Areas: ${areaNames().join(", ")}`;
+/** What a usage error shows when no command or area could be recognised. */
+const areasBlock = () => `Usage: ensemble <command> [options]\n${areasLine()}`;
+
+/** `ensemble` and `ensemble --help`: where to start, and how to find the rest. */
+function startHelp() {
+  return `Usage: ensemble <command> [options]
+
+Start here:
+${indented(START_HERE.map((key) => COMMAND_USAGE.get(key) ?? key))}
+${areasLine()}
+
+  ensemble help AREA     The commands of one area (also: ensemble AREA --help)
+  ensemble --help --all  Every command and option
+
+Options:
+  --connection NAME     Use this saved connection
+  --output human|json   Result format (default human)
+  --help [--all]        Show help
+  --version             Show the Ensemble version
 `;
+}
+
+/** `ensemble help AREA` and `ensemble AREA --help`; undefined when `area` is not one. */
+function areaHelp(area: string | undefined) {
+  if (area === "service" || area === "snapshot") return serviceHelp(area);
+  const lines = [...COMMAND_USAGE]
+    .filter(([key]) => areaOf(key) === area)
+    .map(([, usage]) => usage);
+  if (!area || !lines.length) return undefined;
+  const single = COMMAND_USAGE.has(area);
+  return `Usage: ensemble ${area}${single ? "" : " <action>"} [options]
+
+${indented(lines)}
+${OPTIONS_HELP}${(AREA_NOTES[area] ?? []).map((note) => `\n${note}\n`).join("")}`;
+}
+
+/** `ensemble --help --all`: every command, with the local service commands in their own block. */
+const fullHelp = () => `Usage: ensemble <command> [options]
+
+Commands:
+${[...COMMAND_USAGE.values()].map((usage) => `  ${usage}`).join("\n")}
+
+${SERVICE_USAGE}
+${OPTIONS_HELP}
+${[TASK_NOTE, RUNTIME_NOTE, DELIVERY_NOTE, RECOVERY_NOTE].join("\n\n")}
+
+${ORIGIN_NOTE}
+`;
+
+/** The usage lines a usage error shows: the command's, else its area's, else the areas. */
+function usageBlock([first = "", second = ""]: string[]) {
+  const key = COMMAND_USAGE.has(first) ? first : `${first} ${second}`;
+  const exact = COMMAND_USAGE.get(key);
+  const lines = exact
+    ? [exact]
+    : [...COMMAND_USAGE].filter(([k]) => areaOf(k) === first).map(([, u]) => u);
+  return lines.length ? `Usage:\n${indented(lines)}` : `${areasBlock()}\n`;
+}
 
 const defaultDeps = (): CliDeps => ({
   env: process.env,
@@ -149,11 +249,88 @@ const defaultDeps = (): CliDeps => ({
   now: Date.now,
 });
 
+/** Every option of the operator commands. */
+export const OPTIONS = {
+  connection: { type: "string" },
+  url: { type: "string" },
+  "token-file": { type: "string" },
+  output: { type: "string" },
+  help: { type: "boolean" },
+  all: { type: "boolean" },
+  version: { type: "boolean" },
+  limit: { type: "string" },
+  cursor: { type: "string" },
+  project: { type: "string" },
+  state: { type: "string" },
+  type: { type: "string" },
+  after: { type: "string" },
+  before: { type: "string" },
+  historical: { type: "boolean" },
+  revision: { type: "string" },
+  out: { type: "string" },
+  file: { type: "string" },
+  "request-id": { type: "string" },
+  "expected-version": { type: "string" },
+  name: { type: "string" },
+  summary: { type: "string" },
+  instructions: { type: "string" },
+  "instructions-file": { type: "string" },
+  "capabilities-file": { type: "string" },
+  "restore-revision": { type: "string" },
+  revoked: { type: "string" },
+  paused: { type: "string" },
+  "lead-profile": { type: "string" },
+  "diagnostic-capture": { type: "string" },
+  id: { type: "string" },
+  enabled: { type: "string" },
+  "guidance-file": { type: "string" },
+  "credential-ref": { type: "string" },
+  candidates: { type: "string" },
+  "global-limit": { type: "string" },
+  "project-limit": { type: "string", multiple: true },
+  scope: { type: "string" },
+  task: { type: "string" },
+  assignment: { type: "string" },
+  execution: { type: "string" },
+  kind: { type: "string" },
+  severity: { type: "string" },
+  follow: { type: "boolean" },
+  yes: { type: "boolean" },
+  interval: { type: "string" },
+  "max-duration": { type: "string" },
+  "compare-current": { type: "boolean" },
+  title: { type: "string" },
+  outcome: { type: "string" },
+  "outcome-file": { type: "string" },
+  ready: { type: "string" },
+  blocker: { type: "string", multiple: true },
+  assignee: { type: "string" },
+  to: { type: "string" },
+  "message-file": { type: "string" },
+  "answers-file": { type: "string" },
+  decision: { type: "string" },
+  "expected-revision": { type: "string" },
+  "material-hash": { type: "string" },
+  "edit-file": { type: "string" },
+  selection: { type: "string" },
+  "body-file": { type: "string" },
+  "expected-task-version": { type: "string" },
+  "review-id": { type: "string" },
+  work: { type: "string" },
+  "evidence-file": { type: "string" },
+  "expected-conversation-revision": { type: "string" },
+} as const;
+
 export async function main(
   argv: string[],
   deps: CliDeps = defaultDeps(),
 ): Promise<number> {
   // Local commands on the service's own Mac, outside the operator CLI's options.
+  const local = localHelpArea(argv);
+  if (local) {
+    deps.stdout.write(serviceHelp(local));
+    return 0;
+  }
   if (argv[0] === "service")
     return serviceCommand(
       argv.slice(1),
@@ -165,81 +342,16 @@ export async function main(
   if (argv[0] === "snapshot") return snapshotCommand(argv.slice(1), deps);
   let json = false;
   let jsonl = false;
+  let positionals: string[] | undefined;
   try {
-    const { values, positionals } = parseArgs({
+    const parsed = parseArgs({
       args: argv,
       allowPositionals: true,
       strict: true,
-      options: {
-        connection: { type: "string" },
-        url: { type: "string" },
-        "token-file": { type: "string" },
-        output: { type: "string" },
-        help: { type: "boolean" },
-        version: { type: "boolean" },
-        limit: { type: "string" },
-        cursor: { type: "string" },
-        project: { type: "string" },
-        state: { type: "string" },
-        type: { type: "string" },
-        after: { type: "string" },
-        before: { type: "string" },
-        historical: { type: "boolean" },
-        revision: { type: "string" },
-        out: { type: "string" },
-        file: { type: "string" },
-        "request-id": { type: "string" },
-        "expected-version": { type: "string" },
-        name: { type: "string" },
-        summary: { type: "string" },
-        instructions: { type: "string" },
-        "instructions-file": { type: "string" },
-        "capabilities-file": { type: "string" },
-        "restore-revision": { type: "string" },
-        revoked: { type: "string" },
-        paused: { type: "string" },
-        "lead-profile": { type: "string" },
-        "diagnostic-capture": { type: "string" },
-        id: { type: "string" },
-        enabled: { type: "string" },
-        "guidance-file": { type: "string" },
-        "credential-ref": { type: "string" },
-        candidates: { type: "string" },
-        "global-limit": { type: "string" },
-        "project-limit": { type: "string", multiple: true },
-        scope: { type: "string" },
-        task: { type: "string" },
-        assignment: { type: "string" },
-        execution: { type: "string" },
-        kind: { type: "string" },
-        severity: { type: "string" },
-        follow: { type: "boolean" },
-        yes: { type: "boolean" },
-        interval: { type: "string" },
-        "max-duration": { type: "string" },
-        "compare-current": { type: "boolean" },
-        title: { type: "string" },
-        outcome: { type: "string" },
-        "outcome-file": { type: "string" },
-        ready: { type: "string" },
-        blocker: { type: "string", multiple: true },
-        assignee: { type: "string" },
-        to: { type: "string" },
-        "message-file": { type: "string" },
-        "answers-file": { type: "string" },
-        decision: { type: "string" },
-        "expected-revision": { type: "string" },
-        "material-hash": { type: "string" },
-        "edit-file": { type: "string" },
-        selection: { type: "string" },
-        "body-file": { type: "string" },
-        "expected-task-version": { type: "string" },
-        "review-id": { type: "string" },
-        work: { type: "string" },
-        "evidence-file": { type: "string" },
-        "expected-conversation-revision": { type: "string" },
-      },
+      options: OPTIONS,
     });
+    const { values } = parsed;
+    positionals = parsed.positionals;
     jsonl = values.output === "jsonl" && positionals[0] === "logs";
     if (
       values.output !== undefined &&
@@ -259,12 +371,34 @@ export async function main(
       deps.stdout.write(`ensemble ${pkg.version}\n`);
       return 0;
     }
-    if (values.help || positionals.length === 0) {
-      deps.stdout.write(USAGE);
-      if (values.help) return 0;
+    if (values.all && !values.help)
+      throw new CliError("usage", "--all only goes with --help.");
+    if (values.help) {
+      // `ensemble help AREA --help` is the area's help too.
+      const [first, second] = positionals;
+      deps.stdout.write(
+        (values.all
+          ? fullHelp()
+          : areaHelp(first === "help" ? second : first)) ?? startHelp(),
+      );
+      return 0;
+    }
+    if (positionals.length === 0) {
       // A bare invocation is a usage error: the help stays on stdout, the remedy goes to stderr.
+      deps.stdout.write(startHelp());
       if (!json) deps.stderr.write(`${fixLine(DEFAULT_FIX.usage ?? "")}\n`);
       return 2;
+    }
+    if (positionals[0] === "help") {
+      const [, area, ...extra] = positionals;
+      if (area === undefined)
+        throw new CliError("usage", "Name an area: ensemble help AREA.");
+      const help = areaHelp(area);
+      if (help === undefined)
+        throw new CliError("usage", `Unknown area '${area}'.`);
+      if (extra.length) throw new CliError("usage", "Unexpected arguments.");
+      deps.stdout.write(help);
+      return 0;
     }
     const result = await run(positionals, values, deps);
     if (result.streamed) return 0;
@@ -290,7 +424,13 @@ export async function main(
         : raw instanceof Error &&
             "code" in raw &&
             String(raw.code).startsWith("ERR_PARSE_ARGS")
-          ? new CliError("usage", `${raw.message}\n\n${USAGE}`)
+          ? new CliError(
+              "usage",
+              // Node's hint to pass a leading "-" word after "--" is wrong advice for `-h`.
+              raw.code === "ERR_PARSE_ARGS_UNKNOWN_OPTION"
+                ? `${raw.message.split(". To specify")[0]}.`
+                : raw.message,
+            )
           : new CliError("unavailable", "Unexpected CLI failure.", {
               fix: "Reads can be retried. After a write, check the state with the matching 'get' command before repeating it, and report the failure with the command you ran.",
             });
@@ -320,17 +460,34 @@ export async function main(
           },
         })}\n`,
       );
-    else
+    else {
+      const lines =
+        error.code === "usage" ? usageBlock(positionals ?? lenient(argv)) : "";
       deps.stderr.write(
-        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId && !error.extra.notSent ? `, request ${error.extra.requestId}` : ""})\n${terminalSafe(fixLine(remedyFor(error, category)))}\n`,
+        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId && !error.extra.notSent ? `, request ${error.extra.requestId}` : ""})\n${lines}${terminalSafe(fixLine(remedyFor(error, category)))}\n`,
       );
+    }
     return exit;
+  }
+}
+
+/** The words of a command line that did not parse, for the usage block of its error. */
+function lenient(argv: string[]) {
+  try {
+    return parseArgs({
+      args: argv,
+      allowPositionals: true,
+      strict: false,
+      options: OPTIONS,
+    }).positionals;
+  } catch {
+    return [];
   }
 }
 
 function expectArgs(positionals: string[], count: number) {
   if (positionals.length !== count)
-    throw new CliError("usage", `Unexpected arguments.\n\n${USAGE}`);
+    throw new CliError("usage", "Unexpected arguments.");
 }
 
 function rejectManaged(env: NodeJS.ProcessEnv) {
@@ -495,7 +652,7 @@ async function run(
     return { ...session?.result, ...output };
   }
   const command = browseCommands.get(key);
-  if (!command) throw new CliError("usage", `Unknown command.\n\n${USAGE}`);
+  if (!command) throw new CliError("usage", "Unknown command.");
   expectArgs(positionals, (singleWord ? 1 : 2) + command.positionals);
   rejectManaged(deps.env);
   let session: Awaited<ReturnType<typeof connect>> | undefined;
@@ -807,8 +964,26 @@ async function login(
       apiVersion: identity.apiVersion,
     },
     data: identity,
-    human: `Logged in to ${name} (${origin}) as ${identity.credential.name} (${identity.credential.scope}); expires ${new Date(identity.credential.expiresAt).toISOString()}.`,
+    human: `Logged in to ${name} (${origin}) as ${identity.credential.name} (${identity.credential.scope}); expires ${new Date(identity.credential.expiresAt).toISOString()}.\n${nextLine(await doctorCommandFor(config, name, deps))}`,
   };
+}
+
+/** The doctor command that reaches `name`: bare when that is what a bare command selects. */
+async function doctorCommandFor(
+  config: ConnectionConfig,
+  name: string,
+  deps: CliDeps,
+) {
+  try {
+    const { name: selected } = config.select(
+      await config.read(),
+      deps.env.ENSEMBLE_CONNECTION,
+    );
+    if (selected === name) return "ensemble doctor";
+  } catch (error) {
+    if (!(error instanceof CliError)) throw error;
+  }
+  return `ensemble doctor --connection ${shellWord(name)}`;
 }
 
 if (

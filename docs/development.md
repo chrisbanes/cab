@@ -149,6 +149,16 @@ The packaged `ensemble` executable (`package.json` `bin`, built to
 a checkout with `npm run build && npm pack`, then `npm install -g ./ensemble-*.tgz`,
 or run `node dist/src/cli/main.js` directly.
 
+`ensemble` (bare, which exits 2 with the `Fix:` line on stderr) and `ensemble --help`
+print a short start-here block: `auth login`, `doctor`, `project list`, `task list`,
+`task get`, `task create` and `inbox list`, the area names and these forms.
+`ensemble help AREA` and `ensemble AREA --help` print that area's commands (exit 0,
+stdout); `ensemble --help --all` lists every command and option, with the `service`
+and `snapshot` commands in their own block after the operator commands. Help is
+plain text on stdout, also with `--output json`. A usage error prints its message,
+then the usage lines of that command (or of its area, or the area names when the
+command is not recognised), then `Fix: Run 'ensemble --help'.`.
+
 1. Sign in to the web UI and create a credential under **Settings → CLI
    credentials**. Choose read-only or read/write and a lifetime of 7–90 days. The
    token is shown once; rotate to issue a replacement, then revoke the old one.
@@ -167,7 +177,8 @@ or run `node dist/src/cli/main.js` directly.
    regular, non-symlink file owned by you with mode `0600` or stricter, holding one
    token. The file is referenced, never copied. There is no literal-token flag and no
    plaintext fallback; without the Keychain or a token file, login fails with
-   `credential-store-unavailable`.
+   `credential-store-unavailable`. Success ends with `Next: ensemble doctor` (with
+   `--connection NAME` when that login is not the one a bare command selects).
 3. `ensemble auth status`, `ensemble task get TASK_ID [--output json]`,
    `ensemble connection list|use NAME|remove NAME` and `ensemble auth logout`.
    Logout and removal delete only local state; the server credential stays active
@@ -246,8 +257,9 @@ or run `node dist/src/cli/main.js` directly.
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
    outcome, 7 unsupported service. Write commands reject flags they do not use. Every
    human error of the operator commands ends with one `Fix:` line on stderr
-   (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors with the
-   same line but keep their own lifecycle error reporting. A
+   (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors (the
+   message, their own command lines and the same line) but keep their own lifecycle
+   error reporting. A
    write that succeeds may end with `Next:` or `Waiting:`/`Fix:` lines; JSON and
    JSONL output carry neither, so envelopes, codes and exit codes do not change.
    A refused or unresolved connection (nothing sent) omits the request ID from the

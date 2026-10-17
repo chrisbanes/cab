@@ -47,16 +47,17 @@ import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
-export const SERVICE_USAGE = `Local service commands (run on the service's Mac):
-  service install [TARBALL] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
+const SERVICE_COMMANDS = `  service install [TARBALL] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
   service upgrade VERSION_DIR [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
   service serve|operator|run|list ABSOLUTE_DATA_DIR [ARGS...]
-  snapshot create SOURCE_DATA_DIR SNAPSHOT
+`;
+const SNAPSHOT_COMMANDS = `  snapshot create SOURCE_DATA_DIR SNAPSHOT
   snapshot verify SNAPSHOT
   snapshot restore SNAPSHOT DESTINATION_DATA_DIR
-
+`;
+const SERVICE_NOTES = `
 SERVICE_OPTIONS:
   --state-dir DIR          default ~/Library/Application Support/Ensemble
   --log-dir DIR            default ~/Library/Logs/Ensemble
@@ -81,6 +82,34 @@ upgrade leaves the job stopped and reports the snapshot and logs; recover with
 a fixed release and another upgrade, or snapshot restore. uninstall removes the
 job and keeps data, auth, snapshots, versions and logs.
 `;
+
+export const SERVICE_USAGE = `Local service commands (run on the service's Mac):
+${SERVICE_COMMANDS}${SNAPSHOT_COMMANDS}${SERVICE_NOTES}`;
+
+type LocalArea = "service" | "snapshot";
+const LIFECYCLE_COMMANDS = ["install", "upgrade", "uninstall", "init-auth"];
+
+/**
+ * The area whose help `argv` asks for: `service --help`, `service
+ * install|upgrade|uninstall|init-auth ... --help` and `snapshot ... --help`. `service
+ * serve|operator|run|list` forwards every argument, `--help` included, to the service.
+ */
+export function localHelpArea(argv: string[]): LocalArea | undefined {
+  const [area, command] = argv;
+  if (area === "snapshot") return argv.includes("--help") ? area : undefined;
+  if (
+    area === "service" &&
+    (command === "--help" ||
+      (LIFECYCLE_COMMANDS.includes(command ?? "") && argv.includes("--help")))
+  )
+    return area;
+  return undefined;
+}
+
+export const serviceHelp = (area: LocalArea) =>
+  area === "service"
+    ? `Usage: ensemble service <command> [options]\n\n${SERVICE_COMMANDS}${SERVICE_NOTES}`
+    : `Usage: ensemble snapshot <command>\n\n${SNAPSHOT_COMMANDS}`;
 
 const STATE_DIR = "Library/Application Support/Ensemble";
 const RECORD_SCHEMA = "ensemble.service/v1";
@@ -1391,14 +1420,28 @@ export function defaultServiceHost(): ServiceHost {
   };
 }
 
-function usage(deps: CliDeps): number {
+/** A usage error names only the commands of the area it was typed in. */
+function usage(deps: CliDeps, area: LocalArea): number {
   deps.stderr.write(
-    `Usage:\n${SERVICE_USAGE}${fixLine(DEFAULT_FIX.usage ?? "")}\n`,
+    `ensemble: Unexpected arguments. (usage)\nUsage:\n${area === "service" ? SERVICE_COMMANDS : SNAPSHOT_COMMANDS}${fixLine(DEFAULT_FIX.usage ?? "")}\n`,
   );
   return 2;
 }
 
 const LABEL = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+
+export const LIFECYCLE_OPTIONS = {
+  "state-dir": { type: "string" },
+  "log-dir": { type: "string" },
+  "launch-agents-dir": { type: "string" },
+  label: { type: "string" },
+  port: { type: "string" },
+  connection: { type: "string" },
+  "token-file": { type: "string" },
+  "no-open": { type: "boolean" },
+  "diagnostic-retention-days": { type: "string" },
+  "diagnostic-storage-mib": { type: "string" },
+} as const;
 
 function parseLifecycleArgs(args: string[]) {
   try {
@@ -1406,18 +1449,7 @@ function parseLifecycleArgs(args: string[]) {
       args,
       allowPositionals: true,
       strict: true,
-      options: {
-        "state-dir": { type: "string" },
-        "log-dir": { type: "string" },
-        "launch-agents-dir": { type: "string" },
-        label: { type: "string" },
-        port: { type: "string" },
-        connection: { type: "string" },
-        "token-file": { type: "string" },
-        "no-open": { type: "boolean" },
-        "diagnostic-retention-days": { type: "string" },
-        "diagnostic-storage-mib": { type: "string" },
-      },
+      options: LIFECYCLE_OPTIONS,
     });
   } catch {
     return null;
@@ -1524,7 +1556,7 @@ export async function serviceCommand(
       (command === "uninstall" && parsed.options.diagnostic !== undefined) ||
       (command !== "install" && args.some((arg) => arg.startsWith("--port")))
     )
-      return usage(deps);
+      return usage(deps, "service");
     const { options } = parsed;
     if (command === "install")
       return installService(
@@ -1565,12 +1597,12 @@ export async function serviceCommand(
       return 1;
     }
   }
-  return usage(deps);
+  return usage(deps, "service");
 }
 
 async function initAuth(args: string[], deps: CliDeps): Promise<number> {
   const parsed = parseLifecycleArgs(args);
-  if (!parsed || parsed.positionals.length > 1) return usage(deps);
+  if (!parsed || parsed.positionals.length > 1) return usage(deps, "service");
   const home = deps.env.HOME;
   const stateDir =
     parsed.values["state-dir"] !== undefined
@@ -1578,7 +1610,8 @@ async function initAuth(args: string[], deps: CliDeps): Promise<number> {
       : home && isAbsolute(home)
         ? join(home, STATE_DIR)
         : undefined;
-  if (parsed.positionals[0] === undefined && !stateDir) return usage(deps);
+  if (parsed.positionals[0] === undefined && !stateDir)
+    return usage(deps, "service");
   // Checked first so that a non-interactive run creates nothing.
   if (!deps.stdin.isTTY || !(deps.stdout as NodeJS.WriteStream).isTTY) {
     deps.stderr.write(
@@ -1614,7 +1647,8 @@ export async function snapshotCommand(
 ): Promise<number> {
   const [command, ...args] = argv;
   const arity = { create: 2, verify: 1, restore: 2 }[command ?? ""];
-  if (arity === undefined || args.length !== arity) return usage(deps);
+  if (arity === undefined || args.length !== arity)
+    return usage(deps, "snapshot");
   const { runOperations } = await import("../standalone/operations-cli.js");
   return runOperations(
     [command === "create" ? "backup" : (command as string), ...args],

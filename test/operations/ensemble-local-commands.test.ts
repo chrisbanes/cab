@@ -99,8 +99,8 @@ test("ensemble service without a subcommand or data directory starts nothing", (
   assert.equal(list.out, "");
 });
 
-test("ensemble --help lists the local service and snapshot commands", () => {
-  const help = run(MAIN, ["--help"]);
+test("ensemble --help --all lists the local service and snapshot commands", () => {
+  const help = run(MAIN, ["--help", "--all"]);
   assert.equal(help.code, 0);
   for (const command of [
     "service init-auth",
@@ -112,4 +112,20 @@ test("ensemble --help lists the local service and snapshot commands", () => {
     assert.ok(help.out.includes(command), command);
   assert.ok(!help.out.includes("rollback"));
   assert.ok(!help.out.includes("render-launch-agent"));
+
+  // `ensemble service --help` shows the same service lines on stdout.
+  const service = run(MAIN, ["service", "--help"]);
+  assert.equal(service.code, 0);
+  assert.equal(service.err, "");
+  for (const command of [
+    "service init-auth",
+    "service serve|operator|run|list",
+  ])
+    assert.ok(service.out.includes(command), command);
+  assert.ok(!service.out.includes("snapshot create"));
+  // serve, operator, run and list hand `--help` to the service instead.
+  const forwarded = run(MAIN, ["service", "list", "--help"]);
+  assert.equal(forwarded.code, 1);
+  assert.equal(forwarded.out, "");
+  assert.equal(forwarded.err, "ensemble: service list failed\n");
 });
