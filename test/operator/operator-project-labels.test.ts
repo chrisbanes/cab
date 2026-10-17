@@ -351,3 +351,15 @@ test("generated labels from different groups cannot match, and a plain name matc
   assert.equal(labels.get(second.id)?.text, `Atlas \u00b7 ${second.id}`);
   assert.equal(labels.get(plain.id)?.text, `${plain.name} \u00b7 ${plain.id}`);
 });
+
+test("a project literally named like the unavailable placeholder keeps its plain name", () => {
+  const labels = projectLabels(
+    [
+      { id: id(1), name: null, leadProfileId: null },
+      { id: id(2), name: "Name unavailable", leadProfileId: null },
+    ],
+    [],
+  );
+  assert.equal(labels.get(id(2))?.text, "Name unavailable");
+  assert.equal(labels.get(id(1))?.text, "Name unavailable \u00b7 11111111");
+});

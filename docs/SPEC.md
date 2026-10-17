@@ -624,7 +624,7 @@ can always be saved under its own current name. Projects created before the rule
 keep their names; lists and selects tell them apart by the lead's name, or by the
 first eight characters of the project ID when the leads match or are missing
 (longer only when two IDs start alike); no two projects ever show the same label,
-and a unique name stays plain.
+and a unique name stays plain (except when it equals another project's full-ID label).
 When no profile exists, setup creates the lead profile inline, asking only for a name
 and runtime (summary and instructions are added later in Settings → Profiles),
 without losing other setup values. While discovery is unconfigured the repository step

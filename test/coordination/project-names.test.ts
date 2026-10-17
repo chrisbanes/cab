@@ -38,20 +38,22 @@ test("Turkish rules never apply: dotless i, dotted capital I and plain I follow 
   different("\u0131sparta", "isparta");
 });
 
-test("every table entry folds like its Unicode default folding, and a name folds one code point at a time", () => {
-  assert.ok(caseFoldingDifferences.size > 300);
-  for (const [code, folded] of caseFoldingDifferences)
-    assert.equal(
-      projectNameKey(String.fromCodePoint(code)),
-      folded.normalize("NFD"),
-      code.toString(16),
-    );
+test("the table lists only differences from lower casing, and a name folds one code point at a time", () => {
+  assert.ok(caseFoldingDifferences.size > 290);
+  // The table lists only what differs from per-code-point lower casing, and applies as listed.
+  for (const [code, folded] of caseFoldingDifferences) {
+    const character = String.fromCodePoint(code);
+    assert.notEqual(folded, character.toLowerCase(), code.toString(16));
+    assert.equal(projectNameKey(character), folded.normalize("NFD"));
+  }
   // Sigma forms agree wherever they sit in a word: no final-sigma context.
   same("\u03a3\u0391\u03a3", "\u03c3\u03b1\u03c2", "\u03c3\u03b1\u03c3");
   // Cherokee folds to upper case, small and capital forms alike.
   same("\u13a0", "\uab70");
   same("\u00c5", "\u212b", "\u00e5", "A\u030a");
   same("\ufb01", "FI", "fi");
+  // Composed and decomposed forms of a letter with iota subscript agree before folding.
+  same("\u1fb4", "\u03ac\u0345", "\u03b1\u0301\u0345");
   same("\u017f", "s", "S");
 });
 

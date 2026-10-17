@@ -30,7 +30,8 @@ type Suffix = NonNullable<ProjectLabel["suffix"]>;
  * ID) still equals it. Rungs are the lead name, ID prefixes of growing length, the full ID,
  * and for a plain name only the full ID. Each round moves at least one project one rung
  * and rungs end, so it terminates; two labels ending in different full IDs never match,
- * so it ends distinct. The result does not depend on input order.
+ * so it ends distinct, assuming IDs differ in more than letter case (they are generated
+ * lowercase UUIDs). The result does not depend on input order.
  */
 export function projectLabels(
   projects: readonly {
@@ -80,11 +81,13 @@ export function projectLabels(
       const full = ids.slice(-1)[0] as Suffix;
       entries.push({
         project,
-        shared: group.length > 1,
+        // An unavailable name is generated like a shared one, so a project literally named
+        // "Name unavailable" keeps its plain name.
+        shared: group.length > 1 || project.name === null,
         level: 0,
         rungs:
           group.length === 1
-            ? [null, full]
+            ? [null, ...(project.name === null ? ids : [full])]
             : lead !== null && leadCounts.get(projectNameKey(lead)) === 1
               ? [{ kind: "lead", text: lead }, ...ids]
               : ids,
