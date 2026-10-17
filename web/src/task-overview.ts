@@ -3,7 +3,7 @@ import { unmetText } from "../../src/operator/readiness-text.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { executionSummary } from "./execution-runtime.js";
 import { pullRequestReference } from "./delivery-presentation.js";
-import { shortId } from "./presentation.js";
+import { midSentence, shortId } from "./presentation.js";
 import { taskColumnOf } from "../../src/operator/task-presentation.js";
 import { nextActor, reasonLabels } from "./tasks.js";
 
@@ -80,8 +80,6 @@ export function criterionRows(
   });
 }
 
-const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
-
 type StatusData = Pick<
   Data,
   "task" | "execution" | "admission" | "waits" | "source" | "lead"
@@ -136,7 +134,7 @@ export function taskReadiness(data: Omit<StatusData, "lead">) {
                 : blocker
                   ? `Ready · waiting on ${blocker.repositoryName}#${blocker.number}`
                   : reason
-                    ? `Ready · ${lowerFirst(waitLabels[reason])}`
+                    ? `Ready · ${midSentence(waitLabels[reason])}`
                     : execution.state === "idle"
                       ? "Ready"
                       : `Ready · ${execution.state}`;

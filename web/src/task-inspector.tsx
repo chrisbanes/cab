@@ -2,6 +2,8 @@ import { CircleCheck, Clock, Diamond } from "lucide-react";
 import type { MouseEvent, ReactNode } from "react";
 import type { TaskRead } from "../../src/operator/contracts.js";
 import { isPlainClick, ShortId } from "./components.js";
+import { clockLabel } from "./presentation.js";
+import { commentAvailability } from "../../src/operator/github-reasons.js";
 import { holdNoticesBesideRequests } from "./inbox-presentation.js";
 import {
   pullRequestReference,
@@ -44,6 +46,7 @@ export function TaskInspector({
   selectResult: (resultId: string) => void;
 }) {
   const source = data.source,
+    comment = commentAvailability(data.commentPolicy),
     facts = executionFacts(data),
     requests = [...data.approvals, ...data.questions].filter(
       (q) => q.status === "open",
@@ -73,7 +76,9 @@ export function TaskInspector({
                   )}
                   <p>
                     Issue {state ?? "state unknown"} ·{" "}
-                    {synced ? `synced ${synced}` : "no successful sync"}
+                    {synced
+                      ? `synced ${clockLabel(Date.parse(synced))}`
+                      : "no successful sync"}
                     {problem && ` · ${problem}`}
                   </p>
                   <p className="muted">
@@ -107,9 +112,9 @@ export function TaskInspector({
               <p className="muted">None</p>
             )}
             <p>
-              GitHub commenting{" "}
-              {data.commentPolicy?.available ? "permitted" : "unavailable"}
+              GitHub commenting {comment.postable ? "permitted" : "unavailable"}
             </p>
+            {comment.sentence && <p className="muted">{comment.sentence}</p>}
           </Group>
           <p className="inspector-divider">Ensemble execution</p>
         </>
@@ -144,25 +149,28 @@ export function TaskInspector({
           <p className="muted">None</p>
         )}
       </Group>
-      <Group label="Dependencies">
-        {data.localDependencies.length ? (
-          <ul className="inspector-rows">
-            {data.localDependencies.map((d) => (
-              <li key={d.id}>
-                {d.state === "done" ? (
-                  <CircleCheck aria-hidden="true" data-tone="ok" />
-                ) : (
-                  <Clock aria-hidden="true" />
-                )}
-                <a href={`/app/tasks/${d.id}`}>{d.title ?? "Unavailable"}</a>
-                <span className="muted">{d.state}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="muted">None</p>
-        )}
-      </Group>
+      {/* An imported task's dependencies are the GitHub-managed block above; it owns no local edges. */}
+      {(!source || data.localDependencies.length > 0) && (
+        <Group label="Dependencies">
+          {data.localDependencies.length ? (
+            <ul className="inspector-rows">
+              {data.localDependencies.map((d) => (
+                <li key={d.id}>
+                  {d.state === "done" ? (
+                    <CircleCheck aria-hidden="true" data-tone="ok" />
+                  ) : (
+                    <Clock aria-hidden="true" />
+                  )}
+                  <a href={`/app/tasks/${d.id}`}>{d.title ?? "Unavailable"}</a>
+                  <span className="muted">{d.state}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted">None</p>
+          )}
+        </Group>
+      )}
       <Group label="Execution">
         <dl className="inspector-facts">
           <dt>State</dt>

@@ -39,6 +39,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   _t.after(() => {
     if (previousSource === undefined) delete process.env.FIXTURE_SOURCE;
     else process.env.FIXTURE_SOURCE = previousSource;
+    delete process.env.FIXTURE_COMMENTS_DELIVERY_CREDENTIAL;
   });
   const issue = {
     providerInstance: "github.com" as const,
@@ -162,6 +163,9 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   const taskId = String(f.service.githubSources().issue("I1")?.taskId);
   const lead = d.ensureLeadAssignment(taskId);
   await f.service.provisionTask(taskId);
+  // A unique non-empty delivery credential, set after provisioning so no runtime env snapshot
+  // holds its value (which would hold delivery).
+  process.env.FIXTURE_COMMENTS_DELIVERY_CREDENTIAL = `fixture-${randomUUID()}`;
   d.execute({
     type: "delivery.configure",
     actor: "operator",
@@ -169,7 +173,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     projectId,
     expectedVersion: 1,
     mode: "reviewable-pr",
-    credentialRef: null,
+    credentialRef: "env:FIXTURE_COMMENTS_DELIVERY_CREDENTIAL",
     grants: [{ action: "issue.comment", repositoryId: "R1", mode: "approval" }],
     requiredChecks: [],
   });

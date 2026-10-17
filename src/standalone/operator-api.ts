@@ -108,6 +108,7 @@ import {
   workspacePreviewReadSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
+import type { CommentReasonCode } from "../operator/github-reasons.js";
 import { deriveWaits } from "../operator/wait-reasons.js";
 import {
   type AttentionCode,
@@ -4328,6 +4329,16 @@ export class OperatorApi {
         this.service.taskHold(taskId) ||
         !this.domain().admission(taskId).eligible ||
         this.service.delivery().actionBlockers(taskId).length;
+    // The first reason that applies, in the order `reason` reports them.
+    const reasonCode: CommentReasonCode | null = !source
+      ? "no-source-issue"
+      : !grant
+        ? "no-comment-grant"
+        : held
+          ? "held"
+          : policy.credentialRef === null
+            ? "no-delivery-credential"
+            : null;
     return {
       available: Boolean(source && grant && !held),
       mode: grant?.mode ?? null,
@@ -4338,6 +4349,9 @@ export class OperatorApi {
           : held
             ? "Task admission or delivery is held"
             : null,
+      // `available` stays true without a delivery credential (the CLI reports it at send time);
+      // the code lets the web refuse the send instead.
+      reasonCode,
     };
   }
   private commentReviewReceipt(
