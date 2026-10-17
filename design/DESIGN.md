@@ -542,7 +542,7 @@ header; phone states without an artboard use the desktop copy.
 | --- | --- | --- |
 | Off in this browser, permission not asked, no browsers listed | `181-settings-notifications-off` | — |
 | On, with a test result, Turn off for this browser and the browsers list | `182-settings-notifications-on` | `185-phone-settings-notifications` |
-| This browser's other states in place of Turn on: blocked, unsupported or insecure address, unavailable on the service, set up with an old key | `183-settings-notifications-blocked` (text specimen) | — |
+| This browser's other states in place of Turn on: blocked, unsupported or insecure address, unavailable on the service, removed from the list, set up with an old key | `183-settings-notifications-blocked` (text specimen) | — |
 | Revoke confirmation with a failed or unknown request | `184-settings-notifications-revoke` | — |
 
 - The section opens with three plain lines. **What it says:** "Kind, project and
@@ -577,8 +577,10 @@ header; phone states without an artboard use the desktop copy.
   CLI credentials do, and the list reloads below.
 - This browser's state replaces the Turn on area (`183`): blocked in the browser's
   settings (with **Check again**), unsupported or not a secure address, unavailable on
-  the service (the rest of Settings keeps working) and set up with an old key (**Turn on
-  again**). Permission withdrawn after turning on shows the blocked state.
+  the service (the rest of Settings keeps working), removed from the list (revoked
+  elsewhere or removed by the push service; **Turn on again**) and set up with an old key
+  (**Turn on again**). Turning on again replaces the old subscription. Permission
+  withdrawn after turning on shows the blocked state.
 - Settings (account menu → `/app/settings`) is the only control surface. A notification
   click opens or focuses Ensemble at the exact Inbox selection, signing in first at the
   same address if the session has ended. Where the platform allows, the page closes a
