@@ -349,7 +349,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | --- | --- |
 | 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
-| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `47b-phone-task-actions-open`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
@@ -733,6 +733,7 @@ journey.
 | Desktop task, 1366 × 900 | `46a-task-overview-laptop` |
 | Full-content task inventory | `03-task-detail` |
 | Phone task, 390 × 844 | `47-phone-task-overview` |
+| Phone Task actions open | `47b-phone-task-actions-open` |
 | Phone evidence and earlier results | `48-phone-evidence-earlier-results` |
 | Empty, dependency, refresh and uncertainty specimens | `49-state-comparisons` |
 | Expanded local brief, question, history and retained draft | `50-local-task-brief-history-expanded` |
@@ -1539,9 +1540,9 @@ Presentation and interaction rules that the canvas does not show on its own.
   refreshes and a returning Back never open or close one.
 - The task header keeps Execution and Stop… only. On a phone (`47-phone-task-overview`)
   the detail header has Back, the task title, a mono subtitle (the source, such as
-  `acme/atlas#142`, or Local task) and one outline overflow action holding
-  Execution and Stop…; the decision card sits in the first viewport, and Message
-  lead is the bottom action.
+  `acme/atlas#142`, or Local task) and one outline "Task actions" disclosure holding
+  Execution and Stop… (open in `47b-phone-task-actions-open`); the decision card sits
+  in the first viewport, and the reply follows the latest result.
 - A task's legacy page (`/coordination/task/:id`) is linked once, as Approval and
   delivery forms, from its History tab; that page links `/task/:id` (Edit task and
   review source). The project page keeps Project settings and links to no legacy
@@ -2034,8 +2035,9 @@ as follows:
   from 760px, Execution plus, while the task is open, Stop…. Below 760px
   (`47-phone-task-overview`) the header is one row: an icon-only Back (named as
   below), the one-line title over a mono subtitle (`repository#N`, or "Local task"),
-  and one outline "Task actions" control holding Execution and Stop…. Production
-  draws that control as a native disclosure with a 44px summary, not an ARIA menu:
+  and one outline "Task actions" control holding Execution and Stop… (open in
+  `47b-phone-task-actions-open`). The control is a native disclosure with a 44px
+  summary, not an ARIA menu:
   it is the same element at every width and held open from 760px, so resizing never
   remounts the Stop confirmation; Escape closes the confirmation first, then the
   disclosure, and a tap outside closes it. The phone drops the outcome line and the
@@ -2095,9 +2097,9 @@ as follows:
 - Overview is one column of cards beside the inspector (280–320px, from 1024px;
   below the last card on narrower screens): the decision card, the latest result,
   the reply, then Shared brief, Evidence and Assignments · N as closed native
-  disclosures (`46a-task-overview-laptop` draws the brief and assignments so; the
-  Evidence card replaces frame 47's drill-in row and the unbuilt "Earlier results"
-  and "Changes since viewed" links). Each summary is one clamped line of recorded
+  disclosures (`46a-task-overview-laptop`, `03-task-detail` open, and
+  `47-phone-task-overview` draw all three; the "Earlier results" and "Changes since
+  viewed" links beside them stay unbuilt). Each summary is one clamped line of recorded
   facts: "Requirements · GitHub · 2 supplied criteria", "R2 · 1 validation record ·
   2 artifacts", and each assignment's short id and known state. A pointer line
   closes the tab: "Captured conversations, earlier results and delivery evidence
@@ -2218,7 +2220,7 @@ as follows:
   criterion" keeps its exact-reference draft, which names the criterion by its
   line in the brief ("criterion 3 in source revision 1"), not by its C label.
 - The phone keeps one reading column with the same tabs; the drill-in screens of
-  frames 47, 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
+  frames 48, 51 and 55, a sticky bottom bar and the GitHub source / Ensemble
   tab pair of phone frames 14 and 15 are not built, so reading position,
   expansions and unsent replies are not split across history entries. The tab
   list fits at 390px and scrolls inside itself only when narrower.
