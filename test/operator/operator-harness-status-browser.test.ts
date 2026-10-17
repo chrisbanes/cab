@@ -17,6 +17,7 @@ import {
   ClaudeShapedFixtureRuntime,
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-harness-status-browser");
 
@@ -473,9 +474,7 @@ test("a runtime toggle answered after its page was left focuses nothing", async 
   });
   await control.click();
   await reached;
-  await page
-    .getByRole("link", { name: "Search", exact: true })
-    .evaluate((element) => (element as HTMLElement).click());
+  await openSearchFromSidebar(page, { keepFocus: true });
   release();
   await page.waitForTimeout(250);
   assert.equal(

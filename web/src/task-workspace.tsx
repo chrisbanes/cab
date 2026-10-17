@@ -574,8 +574,13 @@ export function TaskWorkspace({
   captureRef.current = capture;
   useEffect(() => {
     scope.current = true;
-    const leave = (event: MouseEvent) => {
-      if ((event.target as Element | null)?.closest('a[href^="/app"]'))
+    // In-app links and the sidebar Search field both leave the task.
+    const leave = (event: Event) => {
+      if (
+        (event.target as Element | null)?.closest(
+          event.type === "submit" ? ".sidebar .search-work" : 'a[href^="/app"]',
+        )
+      )
         captureRef.current();
     };
     const intentionalFocus = (event: FocusEvent) => {
@@ -590,6 +595,7 @@ export function TaskWorkspace({
         restoreReadingFocus.current = false;
     };
     document.addEventListener("click", leave, true);
+    document.addEventListener("submit", leave, true);
     document.addEventListener("focusin", intentionalFocus);
     const timer = setInterval(() => pollRef.current(), 15000);
     return () => {
@@ -619,6 +625,7 @@ export function TaskWorkspace({
       }
       clearInterval(timer);
       document.removeEventListener("click", leave, true);
+      document.removeEventListener("submit", leave, true);
       document.removeEventListener("focusin", intentionalFocus);
     };
   }, [state, taskId]);

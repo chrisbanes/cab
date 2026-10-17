@@ -664,7 +664,17 @@ test("Setup keeps a revoked lead visible instead of sending a hidden one", async
     expectedVersion: 1,
     revoked: true,
   } as never);
+  // The form has no Refresh of its own: a read view's Refresh re-reads the workspace, and the
+  // kept draft is still there when the form is reopened.
+  await page
+    .getByRole("button", { name: "Operator account", exact: true })
+    .click();
+  await page.getByRole("menuitem", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page
+    .locator(".sidebar")
+    .getByRole("link", { name: "New project", exact: true })
+    .click();
   await lead
     .locator("option:checked", { hasText: "Lead profile unavailable" })
     .waitFor({ state: "attached" });
@@ -1502,9 +1512,9 @@ test("Setup does not unlock Resume on a workspace that was not re-read after the
   await review();
   await ready.getByText("Checking readiness…").waitFor();
   assert.equal(await resume.isDisabled(), true);
-  // The header Refresh re-reads the workspace; only then is the lead judged.
+  // The failed workspace read offers Try again; only a completed read lets the lead be judged.
   await page.unroute("**/api/operator/workspace");
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  await page.getByRole("button", { name: "Try again", exact: true }).click();
   await ready.getByText("Checking readiness…").waitFor({ state: "detached" });
   assert.equal(await resume.isEnabled(), true);
 });

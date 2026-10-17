@@ -4,11 +4,27 @@ import {
   clockLabel,
   codeSentence,
   shortId,
+  updatedLabel,
 } from "../../web/src/presentation.js";
 
 test("clock label is two-digit local hours and minutes", () => {
   assert.equal(clockLabel(new Date(2026, 9, 16, 9, 5).getTime()), "09:05");
   assert.equal(clockLabel(new Date(2026, 9, 16, 17, 50).getTime()), "17:50");
+});
+
+test("the updated label shows one time unless the reads show different clock labels", () => {
+  const at = (...time: [number, number, number, number?]) =>
+    new Date(2026, 9, time[3] ?? 16, time[0], time[1], time[2]).getTime();
+  assert.equal(updatedLabel(at(16, 48, 7), at(16, 48, 7)), "Updated 16:48");
+  assert.equal(updatedLabel(at(16, 48, 1), at(16, 48, 59)), "Updated 16:48");
+  assert.equal(
+    updatedLabel(at(16, 47, 59), at(16, 48, 0)),
+    "Updated 16:47–16:48",
+  );
+  assert.equal(
+    updatedLabel(at(23, 59, 30), at(0, 0, 10, 17)),
+    "Updated 23:59–00:00",
+  );
 });
 
 test("short identifier keeps the first eight characters unless told otherwise", () => {

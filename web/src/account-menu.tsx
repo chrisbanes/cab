@@ -9,7 +9,6 @@ import {
 import {
   ChevronsUpDown,
   ExternalLink,
-  Gauge,
   ListChecks,
   LogOut,
   Settings,
@@ -22,7 +21,7 @@ const menuItems = (menu: HTMLElement | null) =>
   Array.from(menu?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
 
 /**
- * Sidebar account menu: a WAI-ARIA menu button above the footer. Settings and Runtime are links;
+ * Sidebar account menu: a WAI-ARIA menu button above the footer. Settings and Getting started are links (a button once dismissed);
  * Sign out is a button that keeps the menu open while it is pending.
  */
 export function AccountMenu({
@@ -184,11 +183,6 @@ export function AccountMenu({
           </p>
           <hr />
           {link("/app/settings", <Settings aria-hidden="true" />, "Settings")}
-          {link(
-            "/app/settings/runtime",
-            <Gauge aria-hidden="true" />,
-            "Runtime",
-          )}
           {gettingStartedDismissed === false &&
             link(
               "/app/getting-started",

@@ -196,6 +196,11 @@ p {
   color: var(--fg-3);
 }
 
+.search-work[data-current] {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+
 .search-work:focus-within {
   outline: 2px solid var(--focus);
   outline-offset: 2px;

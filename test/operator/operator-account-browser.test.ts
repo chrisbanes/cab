@@ -201,7 +201,10 @@ for (const viewport of viewports)
     const title = page.getByLabel("Task title");
     await title.fill("Private draft title that must not survive expiry");
     f.advanceClock(61_000);
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    // Choosing the project reads its composer options, which finds the expired session.
+    await page
+      .getByLabel("Project", { exact: true })
+      .selectOption({ label: "Expiry project" });
     await page.getByRole("heading", { name: "Sign in", exact: true }).waitFor();
     const notice = page.getByRole("status");
     await notice
@@ -322,6 +325,9 @@ test("an unknown settings address keeps the phone menu header, not a detail head
   assert.equal(await page.getByRole("link", { name: /^Back to/ }).count(), 0);
 });
 
+const menuNames = async (menu: import("playwright").Locator) =>
+  (await menu.getByRole("menuitem").allInnerTexts()).map((t) => t.trim());
+
 test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-out", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[0]);
   await page.goto(`${web.origin}/app`);
@@ -348,7 +354,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     0,
   );
 
-  // Pointer: opens with the label and three items; an outside press closes it.
+  // Pointer: opens with the label and four items; an outside press closes it.
   await trigger.click();
   const menu = page.getByRole("menu");
   await menu.waitFor();
@@ -360,11 +366,10 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
       .getAttribute("href"),
     "/app/settings",
   );
+  // Runtime is reached from Settings, not from the account menu.
   assert.equal(
-    await menu
-      .getByRole("menuitem", { name: "Runtime", exact: true })
-      .getAttribute("href"),
-    "/app/settings/runtime",
+    await menu.getByRole("menuitem", { name: "Runtime", exact: true }).count(),
+    0,
   );
   assert.equal(
     await menu
@@ -383,7 +388,10 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     "/coordination",
   );
   await menu.getByRole("menuitem", { name: "Sign out", exact: true }).waitFor();
-  assert.equal(await menu.getByRole("menuitem").count(), 5);
+  assert.deepEqual(
+    (await menu.getByRole("menuitem").allInnerTexts()).map((t) => t.trim()),
+    ["Settings", "Getting started", "Approval and delivery forms", "Sign out"],
+  );
   await captureBrowserEvidence(page, "desktop-account-menu");
   await page.locator("main h1").click();
   await menu.waitFor({ state: "detached" });
@@ -407,8 +415,6 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await page.keyboard.press("Enter");
   await menu.waitFor();
   assert.equal(await focused(), "Settings");
-  await page.keyboard.press("ArrowDown");
-  assert.equal(await focused(), "Runtime");
   await page.keyboard.press("ArrowDown");
   assert.equal(await focused(), "Getting started");
   await page.keyboard.press("ArrowDown");
@@ -480,7 +486,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   await menu.waitFor();
   await page.keyboard.press("ArrowDown");
   await page.keyboard.press("Enter");
-  await page.waitForURL("**/app/settings/runtime");
+  await page.waitForURL("**/app/getting-started");
   await menu.waitFor({ state: "detached" });
   await page.keyboard.press("Tab");
   assert.equal(
@@ -488,9 +494,11 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     0,
     "history navigation leaves the menu closed",
   );
-  await page
-    .getByRole("menuitem", { name: "Runtime" })
-    .waitFor({ state: "detached" });
+  // Reopening after history navigation still lists the four entries.
+  await trigger.click();
+  assert.equal(await menu.getByRole("menuitem").count(), 4);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
 
   // Approval and delivery forms loads the server-rendered coordination index as a document.
   await trigger.click();
@@ -502,7 +510,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
     .getByRole("heading", { name: "Coordination", exact: true })
     .waitFor();
   await page.goBack();
-  await page.waitForURL("**/app/settings/runtime");
+  await page.waitForURL("**/app/getting-started");
   await trigger.waitFor();
 
   // Pending sign-out keeps the menu open and the item disabled.
@@ -566,7 +574,7 @@ test("desktop account menu: pointer, keyboard, pending and unknown-outcome sign-
   }
 });
 
-test("phone drawer shows the account group with Settings, Runtime and Sign out", async (_t, journey) => {
+test("phone drawer shows the account group with Settings, Getting started, Approval and delivery forms and Sign out", async (_t, journey) => {
   const { web, page } = await launch(journey, viewports[1]);
   await page.goto(`${web.origin}/app`);
   await submitPassword(page, web.password);
@@ -578,7 +586,6 @@ test("phone drawer shows the account group with Settings, Runtime and Sign out",
   await dialog.getByText("Signed in as Operator", { exact: true }).waitFor();
   for (const name of [
     "Settings",
-    "Runtime",
     "Getting started",
     "Approval and delivery forms",
   ]) {
@@ -594,7 +601,14 @@ test("phone drawer shows the account group with Settings, Runtime and Sign out",
       .evaluate((el) => el.getBoundingClientRect().height)) >= 44,
   );
   await captureBrowserEvidence(page, "phone-account-drawer");
-  await dialog.getByRole("link", { name: "Runtime", exact: true }).click();
+  assert.equal(
+    await dialog.getByRole("link", { name: "Runtime", exact: true }).count(),
+    0,
+  );
+  await dialog.getByRole("link", { name: "Settings", exact: true }).click();
+  await page.waitForURL("**/app/settings");
+  // Runtime stays reachable from Settings, and Back returns there.
+  await page.getByRole("link", { name: "Open runtime", exact: true }).click();
   await page.waitForURL("**/app/settings/runtime");
   const back = page.getByRole("link", {
     name: "Back to Settings",
@@ -673,6 +687,12 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   await menu
     .getByRole("menuitem", { name: "Show getting started", exact: true })
     .waitFor();
+  assert.deepEqual(await menuNames(menu), [
+    "Settings",
+    "Show getting started",
+    "Approval and delivery forms",
+    "Sign out",
+  ]);
   assert.equal(
     await menu
       .getByRole("menuitem", { name: "Getting started", exact: true })
@@ -693,6 +713,12 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   await menu
     .getByRole("menuitem", { name: "Getting started", exact: true })
     .waitFor();
+  assert.deepEqual(await menuNames(menu), [
+    "Settings",
+    "Getting started",
+    "Approval and delivery forms",
+    "Sign out",
+  ]);
   await page.keyboard.press("Escape");
   assert.deepEqual(commands, [
     "getting-started.configure",

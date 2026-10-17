@@ -11,6 +11,7 @@ import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { seedOwnQuestion } from "../fixtures/questions.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 
 const test = browserSuite("operator-inspection-navigation-browser");
 
@@ -63,7 +64,7 @@ test("inspection sections are reached from task origins and exact direct links w
   assert.equal(page.url(), boardURL);
 
   // Search origin → exact historical result → Files → back keeps the query.
-  await page.getByRole("link", { name: "Search", exact: true }).click();
+  await openSearchFromSidebar(page);
   await page
     .getByLabel("Search retained task, decision and result records")
     .fill("Navigable inspection result");

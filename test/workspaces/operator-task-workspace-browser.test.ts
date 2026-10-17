@@ -16,6 +16,7 @@ import {
 } from "../../web/src/lead-feedback.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { openSearchFromSidebar } from "../fixtures/shell-search.js";
 const test = browserSuite("operator-task-workspace-browser");
 /** Service vocabulary, digits and codes that never appear in a message (see the Settings wording test). */
 const serviceWords =
@@ -299,9 +300,7 @@ test("production workspace retains literal history, pending request, focused rep
   const navigationReadingY = await reading.evaluate(
     (el) => el.getBoundingClientRect().top,
   );
-  await page
-    .getByRole("link", { name: "Search", exact: true })
-    .evaluate((el) => (el as HTMLElement).click());
+  await openSearchFromSidebar(page, { keepFocus: true });
   await page
     .getByRole("button", { name: "Back to originating workspace", exact: true })
     .click();
@@ -645,9 +644,7 @@ test("production workspace retains literal history, pending request, focused rep
     if (type === "review.view") {
       // The exact request is kept with the task, not the page: leaving and coming back
       // finds the control still off and the check still there.
-      await page
-        .getByRole("link", { name: "Search", exact: true })
-        .evaluate((el) => (el as HTMLElement).click());
+      await openSearchFromSidebar(page, { keepFocus: true });
       await page
         .getByRole("button", {
           name: "Back to originating workspace",
@@ -920,9 +917,7 @@ test("a replayed auxiliary request focuses its control after the page commits", 
       .waitFor();
     await click("Check whether it saved");
     await reached;
-    await page
-      .getByRole("link", { name: "Search", exact: true })
-      .evaluate((el) => (el as HTMLElement).click());
+    await openSearchFromSidebar(page, { keepFocus: true });
     release();
     await page.waitForTimeout(250);
     assert.equal(
