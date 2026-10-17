@@ -4531,3 +4531,71 @@ for (const engine of ["chromium", "webkit"] as const)
       }
     },
   );
+
+for (const engine of ["chromium", "webkit"] as const)
+  testForEngine(
+    `A page restored from the back-forward cache starts with Task actions and Stop closed and keeps the cards (${engine})`,
+    engine,
+    async (_t, j) => {
+      const fixture = await openFixture(j, engine);
+      const a = await seed(fixture.f);
+      const { web, page } = await fixture.launch({ width: 390, height: 844 });
+      await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+      await taskTab(page, "Overview").waitFor();
+      const overflow = page.locator(
+        ".page-header details.task-header-overflow",
+      );
+      const toggle = page.locator(".page-header .task-header-overflow-toggle");
+      await openOverviewCard(page, "brief");
+      // A restored page: the overlays the operator had open are closed, the cards are as left.
+      // A frame first, so the browser's queued toggle event has reached the page as it would
+      // by the time a real restore happens.
+      const restore = async () => {
+        await settle(page);
+        await page.evaluate(() =>
+          window.dispatchEvent(
+            new PageTransitionEvent("pageshow", { persisted: true }),
+          ),
+        );
+      };
+      await toggle.click();
+      await overflow.and(page.locator("[open]")).waitFor();
+      await restore();
+      await page.waitForFunction(
+        () =>
+          !document
+            .querySelector(".task-header-overflow")
+            ?.hasAttribute("open"),
+      );
+      // The same with the Stop confirmation open behind it.
+      await toggle.click();
+      await page.locator(".task-header-actions button").click();
+      const dialog = page.getByRole("alertdialog");
+      await dialog.waitFor();
+      await restore();
+      await dialog.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        () =>
+          !document
+            .querySelector(".task-header-overflow")
+            ?.hasAttribute("open"),
+      );
+      assert.notEqual(
+        await overviewCard(page, "brief").getAttribute("open"),
+        null,
+      );
+
+      // Leaving by Execution and coming Back finds the overflow closed too.
+      await toggle.click();
+      await overflow.and(page.locator("[open]")).waitFor();
+      await page
+        .locator(`.task-header-actions a[href="/runtime/task/${a.taskId}"]`)
+        .click();
+      await page.waitForURL(
+        (url) => url.pathname === `/runtime/task/${a.taskId}`,
+      );
+      await page.goBack();
+      await taskTab(page, "Overview").waitFor();
+      assert.equal(await overflow.getAttribute("open"), null);
+    },
+  );

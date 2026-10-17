@@ -105,10 +105,12 @@ export function TaskHeaderActions({
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [phone, open]);
-  // A page restored from the back-forward cache after the Stop post starts closed again.
+  // A page restored from the back-forward cache (after Execution or the Stop post) starts
+  // closed again: the dialog and the phone overflow are visit-long overlays, not state to keep.
   useEffect(() => {
     const restored = (event: PageTransitionEvent) => {
       if (event.persisted) {
+        setMenuOpen(false);
         setOpen(false);
         setSent(false);
       }
