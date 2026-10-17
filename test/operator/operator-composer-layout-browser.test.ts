@@ -121,10 +121,16 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
   const panel = aside.getByRole("region", { name: "Inherited from Atlas" });
   await panel.getByText("Mira", { exact: true }).waitFor();
   await panel.getByText(/^Capacity: \d+\/\d+ project/).waitFor();
-  await aside
-    .getByRole("region", { name: "If you create it now" })
-    .getByText(/^Created ≠ running\./)
-    .waitFor();
+  // The caveat is part of a Will wait verdict only.
+  const verdictPanel = aside.getByRole("region", {
+    name: "If you create it now",
+  });
+  await verdictPanel.getByText(/^(Will wait|Starts now)$/).waitFor();
+  assert.equal(
+    await verdictPanel.getByText(/^Created ≠ running\./).count(),
+    await verdictPanel.getByText("Will wait", { exact: true }).count(),
+  );
+  assert.equal(await page.getByText(/16,000-character brief limit/).count(), 0);
   assert.equal(
     await panel
       .getByRole("link", { name: "View project instructions" })
@@ -254,13 +260,10 @@ test("Composer shows the inherited panel, one Optional settings panel and the st
     ]),
     ["sticky", true],
   );
-  const [first] = await page
-    .locator(".composer-prediction .wait-label")
-    .allTextContents();
-  // Status, then the hint, then the stacked buttons.
+  // Status, then the hint (never the verdict), then the stacked buttons.
   assert.deepEqual((await actions.innerText()).split(/\n+/).slice(0, 2), [
     savedOnDevice,
-    `${first ? `Will wait: ${first}.` : "Starts now."} Save draft keeps it without starting.`,
+    "Save draft keeps it without starting.",
   ]);
   await captureBrowserEvidence(page, "composer-phone-34");
   await summary.click();
@@ -396,8 +399,22 @@ test("Composer predicts start or wait before submission from the same waits", as
   });
   await open(page, web.origin, web.password, projectId);
   const prediction = page.locator(".composer-prediction");
-  const verdict = (text: string) =>
-    prediction.getByText(text, { exact: true }).waitFor();
+  const hint = page.locator(".composer-actions-end > p");
+  // The verdict is stated once, in the panel; the caveat goes with Will wait.
+  const verdict = async (text: "Starts now" | "Will wait") => {
+    await prediction.getByText(text, { exact: true }).waitFor();
+    assert.equal(
+      await prediction.getByText(/^Created ≠ running\./).count(),
+      text === "Will wait" ? 1 : 0,
+      `caveat after ${text}`,
+    );
+    assert.equal(
+      await hint.innerText(),
+      "Save draft keeps it without starting.",
+    );
+    const bar = await page.locator(".composer-actions").innerText();
+    assert.ok(!/Starts now|Will wait/.test(bar), bar);
+  };
   const reasons = prediction.locator("ol.wait-numbered > li");
   const labels = () => reasons.locator(".wait-label").allTextContents();
   await verdict("Starts now");
@@ -459,12 +476,30 @@ test("Composer predicts start or wait before submission from the same waits", as
     "Fix is secondary",
   );
   assert.equal(commands, 0);
+  // Clearing the last wait with its Fix leaves the numbered list mounted but drops the caveat.
+  await page.getByLabel("Command menu task").uncheck();
+  await verdict("Will wait");
+  await fix.click();
+  await page
+    .getByRole("alertdialog")
+    .getByRole("button", { name: "Resume", exact: true })
+    .click();
+  await verdict("Starts now");
+  assert.equal(await reasons.count(), 0);
+  await page.getByLabel("Command menu task").check();
+  await verdict("Will wait");
+  await reasons.first().waitFor();
+  assert.equal(
+    await labels().then((l) => l[0]),
+    "Blocked by a task dependency",
+  );
+  const afterFix = commands;
   // Save draft is unchanged by the prediction.
   await page.getByLabel("Task title").fill("Predicted draft");
   await page.getByLabel("Desired outcome").fill("Probe");
   await page.getByRole("button", { name: "Save draft", exact: true }).click();
   await page.getByText("Draft saved.", { exact: true }).waitFor();
-  assert.equal(commands, 1);
+  assert.equal(commands, afterFix + 1);
 });
 
 test("Composer, post-create line and task detail show a power-supervision hold", async (_t, j) => {
@@ -700,12 +735,13 @@ test("Composer bar keeps drafts, refused creation and admission distinct", async
   const button = (name: string) =>
     page.getByRole("button", { name, exact: true });
   await fill("Refused");
-  await page
-    .locator(".composer-actions")
-    .getByText(
-      "Will wait: Project paused. Save draft keeps it without starting.",
-    )
-    .waitFor();
+  const prediction = page.locator(".composer-prediction");
+  await prediction.getByText("Will wait", { exact: true }).waitFor();
+  await prediction.getByText(/^Created ≠ running\./).waitFor();
+  assert.equal(
+    await page.locator(".composer-actions-end > p").innerText(),
+    "Save draft keeps it without starting.",
+  );
 
   // A refused create keeps the input and both actions, above the bar.
   await page.route("**/api/operator/commands", (route) =>
@@ -763,4 +799,197 @@ test("Composer bar keeps drafts, refused creation and admission distinct", async
       ["task.create", true],
     ],
   );
+});
+
+test("Composer keeps the caveat and bar honest across project switches, failed options and a submit in flight", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId, leadId } = seed(f);
+  const d = f.service.domain();
+  const second = randomUUID();
+  d.execute({
+    type: "project.create",
+    key: randomUUID(),
+    actor: "operator",
+    projectId: second,
+    name: "Borealis",
+    leadProfileId: leadId,
+  });
+  const configure = (id: string, paused: boolean) =>
+    d.execute({
+      type: "project.configure",
+      actor: "operator",
+      key: randomUUID(),
+      projectId: id,
+      expectedVersion: Number(d.project(id).version),
+      paused,
+    });
+  configure(projectId, true);
+  configure(second, false);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await open(page, web.origin, web.password, projectId);
+  const prediction = page.locator(".composer-prediction");
+  const hint = page.locator(".composer-actions-end > p");
+  const saveDraftHint = "Save draft keeps it without starting.";
+  const caveat = page.getByText(/^Created ≠ running\./);
+  await prediction.getByText("Will wait", { exact: true }).waitFor();
+  assert.equal(await caveat.count(), 1);
+  assert.equal(await hint.innerText(), saveDraftHint);
+
+  // Switching project: while the new options load nothing of the old verdict remains.
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(`**/projects/${second}/composer-options`, async (route) => {
+    await gate;
+    await route.continue();
+  });
+  await page.getByLabel("Project", { exact: true }).selectOption(second);
+  await hint.waitFor();
+  assert.equal(await hint.innerText(), saveDraftHint);
+  assert.equal(await prediction.count(), 0);
+  assert.equal(await caveat.count(), 0);
+  assert.equal(await page.getByText("Will wait").count(), 0);
+  release();
+  await prediction.getByText("Starts now", { exact: true }).waitFor();
+  assert.equal(await caveat.count(), 0);
+  assert.equal(await hint.innerText(), saveDraftHint);
+
+  // A failed options load leaves no verdict, caveat or fallback claim.
+  await page.route(`**/projects/${projectId}/composer-options`, (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "internal", message: "down" } }),
+    }),
+  );
+  await page.getByLabel("Project", { exact: true }).selectOption(projectId);
+  await page.waitForFunction(
+    () => !document.querySelector(".composer-prediction"),
+  );
+  assert.equal(await caveat.count(), 0);
+  assert.equal(await hint.innerText(), saveDraftHint);
+  await page.unroute(`**/projects/${projectId}/composer-options`);
+
+  // A submit in flight shows no verdict either, and the draft is still saved once.
+  await page.getByLabel("Project", { exact: true }).selectOption(second);
+  await prediction.getByText("Starts now", { exact: true }).waitFor();
+  await page.getByLabel("Task title").fill("In flight");
+  await page.getByLabel("Desired outcome").fill("Probe");
+  let releaseCommand!: () => void;
+  const commandGate = new Promise<void>((resolve) => {
+    releaseCommand = resolve;
+  });
+  let commands = 0;
+  await page.route("**/api/operator/commands", async (route) => {
+    commands++;
+    await commandGate;
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Save draft", exact: true }).click();
+  await page.getByRole("button", { name: "Saving…" }).waitFor();
+  const bar = await page.locator(".composer-actions").innerText();
+  assert.ok(!/Starts now|Will wait|Creates ready work/.test(bar), bar);
+  assert.equal(await caveat.count(), 0);
+  releaseCommand();
+  await page.getByText("Draft saved.", { exact: true }).waitFor();
+  assert.equal(commands, 1);
+});
+
+test("Composer shows the brief-limit note only within 10% of the limit or over it", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const { projectId } = seed(f);
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  let commands = 0;
+  page.on("request", (r) => {
+    if (
+      r.method() === "POST" &&
+      new URL(r.url()).pathname === "/api/operator/commands"
+    )
+      commands++;
+  });
+  await open(page, web.origin, web.password, projectId);
+  const note = page.getByText(/16,000-character brief limit/);
+  const outcome = page.getByLabel("Desired outcome");
+  assert.equal(await note.count(), 0);
+
+  // Derived from the live outcome: below the threshold, at it, and back again.
+  await outcome.fill("x".repeat(14399));
+  assert.equal(await note.count(), 0);
+  await outcome.fill("x".repeat(14400));
+  await note.waitFor();
+  await outcome.fill("Short outcome.");
+  await note.waitFor({ state: "detached" });
+
+  // Context counts while Optional settings is collapsed.
+  await page.getByText(/^Optional settings/).click();
+  await page.getByLabel("Optional context").fill("c".repeat(400));
+  await page.getByText(/^Optional settings/).click();
+  assert.equal(
+    await page
+      .locator("details.composer-disclosure")
+      .evaluate((e) => (e as HTMLDetailsElement).open),
+    false,
+  );
+  await outcome.fill("x".repeat(14000));
+  await note.waitFor();
+
+  // Resume shows it on first render; Discard removes it.
+  await page.getByLabel("Task title").fill("Long brief");
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Resume unfinished input", exact: true })
+    .click();
+  await page.locator("main.page h1").waitFor();
+  assert.equal(await note.count(), 1);
+  await page.reload();
+  await page
+    .getByRole("button", { name: "Discard unfinished input", exact: true })
+    .click();
+  await page.locator("main.page h1").waitFor();
+  assert.equal(await note.count(), 0);
+
+  // Over the combined limit the note stays and nothing is posted.
+  await page.getByLabel("Project", { exact: true }).selectOption(projectId);
+  await page.getByLabel("Task title").fill("Too long");
+  await outcome.fill("x".repeat(15000));
+  await page.getByText(/^Optional settings/).click();
+  await page.getByLabel("Optional context").fill("c".repeat(1001));
+  await note.waitFor();
+  await page
+    .getByRole("button", { name: "Create and start", exact: true })
+    .click();
+  await page
+    .getByText(
+      "Combined outcome, context and links must be at most 16,000 characters.",
+    )
+    .waitFor();
+  assert.equal(await note.count(), 1);
+  assert.equal(commands, 0);
 });

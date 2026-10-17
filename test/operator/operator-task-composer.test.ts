@@ -102,7 +102,10 @@ function memoryStorage() {
 import { OperatorApi } from "../../src/standalone/operator-api.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import {
+  briefNearLimit,
   byteLength,
+  composeOutcome,
+  emptyInput,
   encodeOutcome,
   encodeRecovery,
   readRecovery,
@@ -823,4 +826,39 @@ test("a creation interrupted mid-send restores as unconfirmed with its own reque
   assert.equal(state.phase, "unknown");
   assert.equal(state.details.requestKey, state.frozen?.key);
   assert.equal(state.details.code, undefined);
+});
+test("brief limit note threshold counts the encoded outcome, context and links", () => {
+  const near = (o: Partial<ReturnType<typeof emptyInput>>) =>
+    briefNearLimit({ ...emptyInput(), ...o });
+  for (const [length, expected] of [
+    [14399, false],
+    [14400, true],
+    [16000, true],
+    [16001, true],
+  ] as const)
+    assert.equal(near({ outcome: "x".repeat(length) }), expected, `${length}`);
+  // The "\n\nContext:\n" separator (11 characters) counts toward the total.
+  assert.equal(
+    near({ outcome: "x".repeat(14000), context: "y".repeat(388) }),
+    false,
+  );
+  assert.equal(
+    near({ outcome: "x".repeat(14000), context: "y".repeat(389) }),
+    true,
+  );
+  const links = [`https://example.com/${"a".repeat(200)}`];
+  assert.equal(near({ outcome: "x".repeat(14300) }), false);
+  assert.equal(near({ outcome: "x".repeat(14300), links }), true);
+  // One length calculation serves the note and the submit check.
+  const input = {
+    ...emptyInput(),
+    outcome: "x".repeat(14400),
+    context: "c",
+    links,
+  };
+  assert.equal(composeOutcome(input), encodeOutcome(input));
+  assert.throws(
+    () => encodeOutcome({ ...emptyInput(), outcome: "x".repeat(16001) }),
+    /16,000/,
+  );
 });
