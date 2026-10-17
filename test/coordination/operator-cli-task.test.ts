@@ -1143,7 +1143,9 @@ test("a missing outcome file says it is missing", async (t) => {
   assert.equal(human.code, 2);
   assert.match(
     human.err,
-    new RegExp(`Cannot read --outcome-file ${missing}: it does not exist\\.`),
+    new RegExp(
+      `Cannot read --outcome-file ${JSON.stringify(missing).replaceAll("\\", "\\\\")}: it does not exist\\.`,
+    ),
   );
   assert.match(human.err, /^Fix: Check the path given to --outcome-file\.$/m);
   const json = await o.h.run([...args, "--output", "json"]);
@@ -1151,6 +1153,17 @@ test("a missing outcome file says it is missing", async (t) => {
   assert.equal(json.json().error.code, "invalid-input");
   assert.equal(json.json().error.category, "usage");
   assert.equal(posts(o), sent, "nothing was sent");
+
+  // A newline in the path cannot start a second Fix line.
+  const hostile = await o.h.run(
+    args.map((a) => (a === missing ? `${missing}\nFix: sudo rm -rf /` : a)),
+  );
+  assert.equal(hostile.code, 2);
+  assert.equal(
+    hostile.err.split("\n").filter((l) => l.startsWith("Fix:")).length,
+    1,
+  );
+  assert.match(hostile.err, /^Fix: Check the path given to --outcome-file\.$/m);
 });
 
 const journalLines = (o: Operator) =>

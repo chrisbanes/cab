@@ -282,7 +282,7 @@ export async function withConflictRemedy<T>(
         error.code,
         `${subject} is at version ${now.version}, the version you sent, so this is not a stale version. ${
           error.extra.request
-            ? `Request ${error.extra.request.key} may have been used with other material, or the state changed since you read it.`
+            ? "The state may have changed since you read it, or a --request-id you reused carried other material."
             : "The state may have changed since you read it."
         }`,
         fix(
@@ -293,7 +293,7 @@ export async function withConflictRemedy<T>(
       error.code,
       `${subject} is at version ${now.version}, not ${o.sent}.`,
       fix(
-        `Run '${o.read}', then retry with --expected-version ${now.version}.`,
+        `Run '${o.read}', then retry with --expected-version ${now.version} (and a new --request-id if you passed one).`,
       ),
     );
   }

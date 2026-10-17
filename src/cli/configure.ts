@@ -115,7 +115,7 @@ export async function readTextFile(path: string | undefined, flag: string) {
     );
     throw new CliError(
       "invalid-input",
-      `Cannot read --${flag} ${path}: ${why}.`,
+      `Cannot read --${flag} ${JSON.stringify(path)}: ${why}.`,
       {
         fix,
       },
@@ -149,13 +149,18 @@ export async function consistentRead<T>(
   );
 }
 
-export function checkExpected(current: number, expected: number | undefined) {
+/** `again` is what to do next: prepare again, or for a send command, run it again. */
+export function checkExpected(
+  current: number,
+  expected: number | undefined,
+  again = "prepare again",
+) {
   if (expected !== undefined && expected !== current)
     throw new CliError(
       "conflict",
-      `The target is at version ${current}, not ${expected}. Review the current state and prepare again.`,
+      `The target is at version ${current}, not ${expected}. Review the current state and ${again}.`,
       {
-        fix: `Review the target with its 'get' command, then prepare again with --expected-version ${current}.`,
+        fix: `Review the target with its 'get' command, then ${again} with --expected-version ${current}.`,
       },
     );
 }

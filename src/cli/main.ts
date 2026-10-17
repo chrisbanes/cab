@@ -278,7 +278,7 @@ export async function main(
             String(raw.code).startsWith("ERR_PARSE_ARGS")
           ? new CliError("usage", `${raw.message}\n\n${USAGE}`)
           : new CliError("unavailable", "Unexpected CLI failure.", {
-              fix: "Retry the command; if it keeps failing, report it with the command you ran.",
+              fix: "Reads can be retried. After a write, check the state with the matching 'get' command before repeating it, and report the failure with the command you ran.",
             });
     const [exit, category] =
       EXIT[error.code] ??
@@ -584,7 +584,15 @@ async function loadToken(name: string, connection: Connection, deps: CliDeps) {
         fix: `Run 'ensemble auth login --connection ${name} --url ${connection.url}' to store a credential.`,
       },
     );
-  if (credential.kind === "token-file") return readTokenFile(credential.path);
+  if (credential.kind === "token-file")
+    return readTokenFile(credential.path).catch((error: unknown) => {
+      if (error instanceof CliError && error.code === "invalid-token-file")
+        throw new CliError(error.code, error.message, {
+          ...error.extra,
+          fix: `${error.extra.fix ?? ""} Or log in again: 'ensemble auth login --connection ${name} --url ${connection.url} --token-file PATH'.`.trim(),
+        });
+      throw error;
+    });
   if (deps.platform !== "darwin")
     throw new CliError(
       "credential-store-unavailable",

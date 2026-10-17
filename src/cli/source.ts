@@ -295,7 +295,7 @@ async function readEdit(path: string | undefined): Promise<SourceEdit> {
     );
     throw new CliError(
       "invalid-input",
-      `Cannot read --edit-file ${path}: ${why}.`,
+      `Cannot read --edit-file ${JSON.stringify(path)}: ${why}.`,
       { fix },
     );
   }
@@ -613,7 +613,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
         if (!reused) {
           const { source } = (await readProject(session.client, projectId))
             .data;
-          checkExpected(source.version, expected);
+          checkExpected(source.version, expected, "run this command again");
           if (!source.selections.some((s) => s.id === selectionId))
             throw new CliError(
               "invalid-input",
@@ -761,7 +761,7 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
                 fix: `Run 'ensemble task get ${taskId}' to see where the task is placed.`,
               },
             );
-          checkExpected(placement.version, expected);
+          checkExpected(placement.version, expected, "run this command again");
           if (!placement.choices.some((c) => c.id === to))
             throw new CliError(
               "conflict",

@@ -38,7 +38,7 @@ export const DEFAULT_FIX: Record<string, string> = {
   "managed-assignment":
     "Run the command from your own terminal, outside the Ensemble-managed assignment.",
   "credential-store-unavailable":
-    "Unlock the macOS Keychain and retry, or log in with a token file: 'ensemble auth login --token-file PATH'.",
+    "On macOS unlock the Keychain and retry; otherwise log in with a token file: 'ensemble auth login --connection NAME --url ORIGIN --token-file PATH'.",
   "service-identity-changed": `Check the URL (${LIST}); if the service was reinstalled, ${LOGIN}.`,
   "output-exists":
     "Choose a path that does not exist yet, or move the existing file first.",
