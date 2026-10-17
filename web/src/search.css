@@ -1,4 +1,4 @@
-/* Search (`73-search`, `74-phone-search`): query, an inline filter row, then one bordered results panel. */
+/* Search (`73-search`, `74-phone-search`): query, one coverage line, then one bordered results panel whose header holds the count, the filters and Refresh. */
 .search-workspace {
   display: flex;
   flex-direction: column;
@@ -18,9 +18,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-8);
-}
-.search-nav {
-  justify-content: space-between;
 }
 .search-workspace form {
   display: flex;
@@ -56,6 +53,10 @@
   color: var(--fg);
   font-size: var(--type-sm);
 }
+.search-filters .search-pending {
+  flex: 1 1 100%;
+  color: var(--fg-2);
+}
 .search-history input {
   margin: 0;
   accent-color: var(--accent-edge);
@@ -70,9 +71,24 @@
   background: var(--surface);
   overflow: hidden;
 }
+.search-results-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8) 16px;
+  padding: 10px 16px;
+}
+/* Count and Refresh share the first row; the filters take the full row beneath them. The DOM
+   order is the visual order, so no `order` rule moves a control away from its Tab position. */
+.search-results-head .search-filters {
+  flex: 1 1 100%;
+}
+.search-results-head > button {
+  margin-left: auto;
+}
 .search-results h2 {
   margin: 0;
-  padding: 10px 16px;
   font-size: 15px;
   line-height: 22px;
 }
@@ -157,6 +173,17 @@
     min-width: 0;
     height: 44px;
   }
+  .search-results-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .search-results-head > button {
+    min-height: 44px;
+    margin-left: 0;
+  }
+  .search-results-head .small-heading {
+    align-self: flex-start;
+  }
   /* Two filter columns with labels above keep the four filters to two rows. */
   .search-filters {
     display: grid;
@@ -170,7 +197,8 @@
   .search-filters label > * {
     min-width: 0;
   }
-  .search-filters .search-history {
+  .search-filters .search-history,
+  .search-filters .search-pending {
     grid-column: 1 / -1;
     flex-direction: row;
     align-items: center;

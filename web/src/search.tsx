@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   searchReadSchema,
   type Session,
@@ -8,12 +15,7 @@ import type { z } from "zod";
 import type { OperatorClient } from "./api.js";
 import { useOperatorResource } from "./resource.js";
 import { CircleDot, History, Search as SearchIcon } from "lucide-react";
-import {
-  Button,
-  ActionLink,
-  ResourceStatus,
-  StatusBadge,
-} from "./components.js";
+import { Button, ResourceStatus, StatusBadge } from "./components.js";
 import { Badge } from "./ui/badge.js";
 import { Input } from "./ui/input.js";
 import { NativeSelect } from "./ui/native-select.js";
@@ -71,10 +73,31 @@ const localDay = (value: string | null) => {
   const d = new Date(Number(value));
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
+/** Back is offered only from the places a match is opened from: a task detail or an Inbox item. */
+const returnsToItem = (origin: unknown) => {
+  if (typeof origin !== "string") return false;
+  const url = new URL(origin, location.origin);
+  return (
+    (/^\/app\/tasks\/[^/]+$/.test(url.pathname) &&
+      url.pathname !== "/app/tasks/new") ||
+    (url.pathname === "/app/inbox" && Boolean(url.searchParams.get("request")))
+  );
+};
+type Filters = {
+  project: string;
+  type: string;
+  historical: boolean;
+  after: string;
+  before: string;
+};
+/**
+ * Every applied query or filter pushes an entry, and each entry remounts the page. The control
+ * that had focus is named here, with the entry it belongs to, so the next page focuses it again.
+ */
+let restoreFocus: { navKey: unknown; id: string } | null = null;
 export class SearchState {
   dataPath = "";
   data: z.infer<typeof searchReadSchema> | null = null;
-  origin: string | null = null;
   selected: string | null = null;
   scrollY = 0;
 }
@@ -107,10 +130,19 @@ export function Search({
     [historyInput, setHistorical] = useState(historical),
     [after, setAfter] = useState(localDay(params.get("after"))),
     [before, setBefore] = useState(localDay(params.get("before")));
-  if (state.origin === null)
-    state.origin =
-      (history.state as { workspaceOrigin?: string } | null)?.workspaceOrigin ??
-      "/app/tasks";
+  const origin = (history.state as { workspaceOrigin?: string } | null)
+    ?.workspaceOrigin;
+  const backToItem = returnsToItem(origin);
+  // Dates typed but not applied yet. They are part of the form: any control that commits reads them.
+  const datesPending =
+    after !== localDay(params.get("after")) ||
+    before !== localDay(params.get("before"));
+  useLayoutEffect(() => {
+    const id =
+      restoreFocus?.navKey === history.state?.navKey ? restoreFocus?.id : null;
+    restoreFocus = null;
+    if (id) document.getElementById(id)?.focus({ preventScroll: true });
+  }, []);
   const loader = useCallback(
     (signal: AbortSignal) =>
       client.read(
@@ -145,24 +177,54 @@ export function Search({
     },
     [state],
   );
-  function submit() {
+  /** Runs the search for the field's text (or the URL's, when blank) with the filters, `over` taking precedence. */
+  function submit(
+    over: Partial<Filters> = {},
+    focusId = document.activeElement?.id,
+  ) {
+    const f: Filters = {
+      project: projectInput,
+      type: typeInput,
+      historical: historyInput,
+      after,
+      before,
+      ...over,
+    };
+    const p = new URLSearchParams({
+      query: input.trim() ? input : query,
+      historical: String(f.historical),
+    });
+    if (f.project) p.set("projectId", f.project);
+    if (f.type) p.set("type", f.type);
+    if (f.after)
+      p.set("after", String(new Date(`${f.after}T00:00:00`).getTime()));
+    if (f.before)
+      p.set("before", String(new Date(`${f.before}T23:59:59.999`).getTime()));
+    const next = `/app/search?${p}`;
+    // The same search again (a repeated Enter or click) re-reads instead of stacking identical entries.
+    if (next === path) {
+      resource.refresh();
+      onRefresh?.();
+      return;
+    }
     state.data = null;
     state.scrollY = 0;
-    const p = new URLSearchParams({
-      query: input,
-      historical: String(historyInput),
-    });
-    if (projectInput) p.set("projectId", projectInput);
-    if (typeInput) p.set("type", typeInput);
-    if (after) p.set("after", String(new Date(`${after}T00:00:00`).getTime()));
-    if (before)
-      p.set("before", String(new Date(`${before}T23:59:59.999`).getTime()));
-    navigate(`/app/search?${p}`);
+    navigate(next);
+    restoreFocus = focusId
+      ? { navKey: history.state?.navKey, id: focusId }
+      : null;
   }
+  // Leaving a date field applies nothing: replacing the page on blur would detach the control
+  // being clicked before its own event arrives. Enter, or any other control, applies the form.
+  const dateEnter = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (datesPending) submit({}, e.currentTarget.id);
+  };
   return (
     <section className="search-workspace" aria-label="Retained record search">
-      <div className="search-nav">
-        {history.state?.origin ? (
+      {backToItem && (
+        <div className="search-nav">
           <Button
             variant="secondary"
             onClick={() => {
@@ -170,28 +232,13 @@ export function Search({
                 (history.state?.workspaceIndex ?? 0) -
                 (history.state?.entryIndex ?? 0);
               if (delta < 0) history.go(delta);
-              else navigate(state.origin ?? "/app/tasks");
+              else if (origin) navigate(origin);
             }}
           >
             Back to originating workspace
           </Button>
-        ) : (
-          <ActionLink variant="secondary" href={state.origin}>
-            Back to originating workspace
-          </ActionLink>
-        )}
-        {query && (
-          <Button
-            variant="secondary"
-            onClick={() => {
-              resource.refresh();
-              onRefresh?.();
-            }}
-          >
-            Refresh results
-          </Button>
-        )}
-      </div>
+        </div>
+      )}
       <form
         onSubmit={(e) => {
           e.preventDefault();
@@ -212,79 +259,20 @@ export function Search({
               maxLength={256}
             />
           </label>
-          <Button variant="secondary" disabled={!input.trim()}>
+          <Button
+            id="search-records"
+            variant="secondary"
+            disabled={!input.trim()}
+          >
             Search records
           </Button>
         </div>
-        <div className="search-filters">
-          <label htmlFor="search-project">
-            Project
-            <NativeSelect
-              id="search-project"
-              aria-label="Project"
-              value={projectInput}
-              onChange={(e) => setProject(e.target.value)}
-            >
-              <option value="">All permitted projects</option>
-              {workspace?.data.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name ?? "Unavailable"}
-                </option>
-              ))}
-            </NativeSelect>
-          </label>
-          <label htmlFor="search-type">
-            Type
-            <NativeSelect
-              id="search-type"
-              aria-label="Record type"
-              value={typeInput}
-              onChange={(e) => setType(e.target.value)}
-            >
-              <option value="">All types</option>
-              {["task", "decision", "result"].map((t) => (
-                <option key={t} value={t}>
-                  {typeLabel[t]}
-                </option>
-              ))}
-            </NativeSelect>
-          </label>
-          <label htmlFor="search-from-date">
-            From
-            <Input
-              id="search-from-date"
-              aria-label="From date"
-              className="control"
-              type="date"
-              value={after}
-              onChange={(e) => setAfter(e.target.value)}
-            />
-          </label>
-          <label htmlFor="search-through-date">
-            Through
-            <Input
-              id="search-through-date"
-              aria-label="Through date"
-              className="control"
-              type="date"
-              value={before}
-              onChange={(e) => setBefore(e.target.value)}
-            />
-          </label>
-          <label className="search-history">
-            <input
-              type="checkbox"
-              checked={historyInput}
-              onChange={(e) => setHistorical(e.target.checked)}
-            />
-            Include historical records
-          </label>
-        </div>
       </form>
-      <p className="metadata search-coverage">
-        Search covers permitted retained task, decision and result excerpts, up
-        to 16,000 characters each. Long source coverage is partial. It does not
-        search complete agent transcripts or generate summaries.
+      <p
+        className="metadata search-coverage"
+        title="Covers permitted retained task, decision and result excerpts, up to 16,000 characters each. Long source coverage is partial. It does not generate summaries."
+      >
+        Searches saved excerpts, not full agent transcripts.
       </p>
       {query && (
         <ResourceStatus state={resource.state} retry={resource.refresh} />
@@ -296,90 +284,195 @@ export function Search({
           {new Date(data.observedAt).toLocaleString()}.
         </p>
       )}
-      {query && data && (
-        <section className="search-results" aria-labelledby="search-count">
-          <h2 id="search-count" className="small-heading">
-            {data.data.matches.length}{" "}
-            {data.data.matches.length === 1 ? "match" : "matches"}{" "}
-            <span className="metadata">
-              · retained records only · {data.data.omittedCount} omitted or
-              inaccessible
-            </span>
-          </h2>
-          {!data.data.matches.length && (
-            <p className="search-empty">
-              No permitted retained match. Other or omitted history is outside
-              this search.
-            </p>
-          )}
-          <ul className="search-matches">
-            {data.data.matches.map((m) => (
-              <li
-                key={m.recordId}
-                data-search-record={m.recordId}
-                aria-current={
-                  state.selected === m.recordId ? "true" : undefined
-                }
-              >
-                <span className="search-match-head">
-                  <Badge variant="outline" className="metadata">
-                    {typeLabel[m.type]}
-                  </Badge>
-                  <span className="search-match-title">
-                    {m.taskTitle ?? "Title unavailable"}
-                  </span>
-                  {state.selected === m.recordId && (
-                    <StatusBadge tone="idle" icon={CircleDot}>
-                      Selected
-                    </StatusBadge>
-                  )}
-                  {m.historical && (
-                    <StatusBadge tone="idle" icon={History}>
-                      Historical
-                    </StatusBadge>
-                  )}
+      {query && (
+        <section
+          className="search-results"
+          aria-labelledby={data ? "search-count" : undefined}
+          aria-label={data ? undefined : "Search results"}
+        >
+          <div className="search-results-head">
+            {data && (
+              <h2 id="search-count" className="small-heading">
+                {data.data.matches.length}{" "}
+                {data.data.matches.length === 1 ? "match" : "matches"}{" "}
+                <span className="metadata">
+                  · retained records only · {data.data.omittedCount} omitted or
+                  inaccessible
                 </span>
-                <p className="search-excerpt">
-                  {m.excerpt === null ? (
-                    "Excerpt unavailable"
-                  ) : (
-                    <Highlighted
-                      text={excerptAround(m.excerpt, query)}
-                      query={query}
-                    />
-                  )}
-                </p>
-                <p className="identifier search-provenance">
-                  {m.projectName ?? "Project unavailable"} ·{" "}
-                  {m.historical ? "historical" : "current"} ·{" "}
-                  {new Date(m.createdAt).toLocaleString()}
-                </p>
-                <a
-                  href={m.href}
-                  onClick={() => {
-                    state.selected = m.recordId;
-                    state.scrollY = scrollY;
+              </h2>
+            )}
+            <Button
+              id="search-refresh"
+              variant="secondary"
+              onClick={() => {
+                if (datesPending) submit();
+                else resource.refresh();
+                onRefresh?.();
+              }}
+            >
+              Refresh results
+            </Button>
+            <div className="search-filters">
+              <label htmlFor="search-project">
+                Project
+                <NativeSelect
+                  id="search-project"
+                  aria-label="Project"
+                  value={projectInput}
+                  onChange={(e) => {
+                    setProject(e.target.value);
+                    submit({ project: e.target.value });
                   }}
                 >
-                  Open task → {destination[m.type]}
-                </a>
-              </li>
-            ))}
-          </ul>
-          {data.data.nextCursor && (
-            <div className="search-more">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  const p = new URLSearchParams(path.split("?")[1]);
-                  if (!data.data.nextCursor) return;
-                  p.set("cursor", data.data.nextCursor);
-                  navigate(`/app/search?${p}`);
-                }}
-              >
-                Next retained matches
-              </Button>
+                  <option value="">All permitted projects</option>
+                  {workspace?.data.projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name ?? "Unavailable"}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label htmlFor="search-type">
+                Type
+                <NativeSelect
+                  id="search-type"
+                  aria-label="Record type"
+                  value={typeInput}
+                  onChange={(e) => {
+                    setType(e.target.value);
+                    submit({ type: e.target.value });
+                  }}
+                >
+                  <option value="">All types</option>
+                  {["task", "decision", "result"].map((t) => (
+                    <option key={t} value={t}>
+                      {typeLabel[t]}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </label>
+              <label htmlFor="search-from-date">
+                From
+                <Input
+                  id="search-from-date"
+                  aria-label="From date"
+                  className="control"
+                  type="date"
+                  value={after}
+                  onChange={(e) => setAfter(e.target.value)}
+                  onKeyDown={dateEnter}
+                />
+              </label>
+              <label htmlFor="search-through-date">
+                Through
+                <Input
+                  id="search-through-date"
+                  aria-label="Through date"
+                  className="control"
+                  type="date"
+                  value={before}
+                  onChange={(e) => setBefore(e.target.value)}
+                  onKeyDown={dateEnter}
+                />
+              </label>
+              <label className="search-history">
+                <input
+                  id="search-historical"
+                  type="checkbox"
+                  checked={historyInput}
+                  onChange={(e) => {
+                    setHistorical(e.target.checked);
+                    submit({ historical: e.target.checked });
+                  }}
+                />
+                Include historical records
+              </label>
+              {datesPending && (
+                <p className="metadata search-pending" role="status">
+                  Dates not applied yet. Press Enter or Refresh results to apply
+                  them.
+                </p>
+              )}
             </div>
+          </div>
+          {data && (
+            <>
+              {!data.data.matches.length && (
+                <p className="search-empty">
+                  No permitted retained match. Other or omitted history is
+                  outside this search.
+                </p>
+              )}
+              <ul className="search-matches">
+                {data.data.matches.map((m) => (
+                  <li
+                    key={m.recordId}
+                    data-search-record={m.recordId}
+                    aria-current={
+                      state.selected === m.recordId ? "true" : undefined
+                    }
+                  >
+                    <span className="search-match-head">
+                      <Badge variant="outline" className="metadata">
+                        {typeLabel[m.type]}
+                      </Badge>
+                      <span className="search-match-title">
+                        {m.taskTitle ?? "Title unavailable"}
+                      </span>
+                      {state.selected === m.recordId && (
+                        <StatusBadge tone="idle" icon={CircleDot}>
+                          Selected
+                        </StatusBadge>
+                      )}
+                      {m.historical && (
+                        <StatusBadge tone="idle" icon={History}>
+                          Historical
+                        </StatusBadge>
+                      )}
+                    </span>
+                    <p className="search-excerpt">
+                      {m.excerpt === null ? (
+                        "Excerpt unavailable"
+                      ) : (
+                        <Highlighted
+                          text={excerptAround(m.excerpt, query)}
+                          query={query}
+                        />
+                      )}
+                    </p>
+                    <p className="identifier search-provenance">
+                      {m.projectName ?? "Project unavailable"} ·{" "}
+                      {m.historical ? "historical" : "current"} ·{" "}
+                      {new Date(m.createdAt).toLocaleString()}
+                    </p>
+                    <a
+                      href={m.href}
+                      onClick={() => {
+                        state.selected = m.recordId;
+                        state.scrollY = scrollY;
+                      }}
+                    >
+                      Open task → {destination[m.type]}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              {data.data.nextCursor && (
+                <div className="search-more">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      const p = new URLSearchParams(path.split("?")[1]);
+                      if (!data.data.nextCursor) return;
+                      p.set("cursor", data.data.nextCursor);
+                      navigate(`/app/search?${p}`);
+                    }}
+                  >
+                    Next retained matches
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </section>
       )}

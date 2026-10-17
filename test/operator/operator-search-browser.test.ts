@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -7,9 +7,31 @@ import {
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
+import { seedOwnQuestion } from "../fixtures/questions.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
-import { openSearchFromSidebar } from "../fixtures/shell-search.js";
+import {
+  openSearchFromSidebar,
+  searchDayEnd,
+  searchDayStart,
+  searchFieldLabel,
+  searchRecords,
+} from "../fixtures/shell-search.js";
 const test = browserSuite("operator-search-browser");
+const backName = "Back to originating workspace";
+
+/** Steps browser history until the URL matches, within a bound so a wrong stack fails fast. */
+async function historyUntil(
+  page: Page,
+  direction: "back" | "forward",
+  matches: (url: URL) => boolean,
+) {
+  for (let step = 0; step < 12; step++) {
+    if (direction === "back") await page.goBack();
+    else await page.goForward();
+    if (matches(new URL(page.url()))) return;
+  }
+  assert.fail(`History never reached the expected URL; at ${page.url()}`);
+}
 test("shared Search preserves exact historical target, dates, selected focus and both navigation origins across Back/Forward, failures and phone entry", async (_t, j) => {
   const f = await j.start("fixture.create", () =>
     createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
@@ -40,18 +62,14 @@ test("shared Search preserves exact historical target, dates, selected focus and
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "All tasks", exact: true }).waitFor();
   await openSearchFromSidebar(page);
-  await page
-    .getByLabel("Search retained task, decision and result records")
-    .fill("Shared command");
-  await page.getByLabel("Include historical records").check();
-  await page.getByLabel("Record type", { exact: true }).selectOption("result");
   const now = new Date(),
     day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-  await page.getByLabel("From date", { exact: true }).fill(day);
-  await page.getByLabel("Through date", { exact: true }).fill(day);
-  await page
-    .getByRole("button", { name: "Search records", exact: true })
-    .click();
+  await searchRecords(page, "Shared command", {
+    historical: true,
+    type: "result",
+    from: day,
+    through: day,
+  });
   await page.locator(`[data-search-record="${r.resultId}"]`).waitFor();
   const searchURL = page.url();
   await page
@@ -140,10 +158,10 @@ test("shared Search preserves exact historical target, dates, selected focus and
     1,
   );
   await page.unroute("**/api/operator/search?*");
-  await page
-    .getByRole("button", { name: "Back to originating workspace", exact: true })
-    .click();
-  assert.ok(page.url().includes("/app/tasks?view=board&q=Shared"));
+  // The board is not a task or an Inbox item, so there is no Back; browser Back still restores it.
+  assert.equal(await page.getByRole("button", { name: backName }).count(), 0);
+  await historyUntil(page, "back", (url) => url.pathname === "/app/tasks");
+  assert.equal(page.url(), `${web.origin}/app/tasks?view=board&q=Shared`);
   await page.goto(`${web.origin}/app/projects/${b.projectId}`);
   await page.getByRole("heading", { name: "Beta", exact: true }).waitFor();
   await page.setViewportSize({ width: 390, height: 844 });
@@ -175,10 +193,12 @@ test("shared Search preserves exact historical target, dates, selected focus and
     JSON.stringify(excerpts),
   );
   await captureBrowserEvidence(page, "390-shared-search");
-  await page
-    .getByRole("button", { name: "Back to originating workspace", exact: true })
-    .click();
-  assert.ok(page.url().endsWith(`/app/projects/${b.projectId}`));
+  assert.equal(await page.getByRole("button", { name: backName }).count(), 0);
+  await historyUntil(
+    page,
+    "back",
+    (url) => url.pathname === `/app/projects/${b.projectId}`,
+  );
   await page.setViewportSize({ width: 1366, height: 900 });
   await openSearchFromSidebar(page);
   await page
@@ -434,14 +454,10 @@ test("same-task historical Search entries preserve manual origin selections and 
   await brief.locator("summary").focus();
   const y = await brief.evaluate((el) => el.getBoundingClientRect().top);
   await openSearchFromSidebar(page, { keepFocus: true });
-  await page
-    .getByLabel("Search retained task, decision and result records")
-    .fill("Entry ancient result");
-  await page.getByLabel("Include historical records").check();
-  await page.getByLabel("Record type", { exact: true }).selectOption("result");
-  await page
-    .getByRole("button", { name: "Search records", exact: true })
-    .click();
+  await searchRecords(page, "Entry ancient result", {
+    historical: true,
+    type: "result",
+  });
   await page.locator(`[data-search-record="${old.resultId}"] a`).click();
   await page.getByText("Entry ancient result", { exact: true }).waitFor();
   assert.equal(
@@ -450,7 +466,12 @@ test("same-task historical Search entries preserve manual origin selections and 
   );
   await page.goBack();
   await page.locator(`[data-search-record="${old.resultId}"]`).waitFor();
-  await page.goBack();
+  // Each applied filter is its own Search entry, so the empty Search entry sits further back.
+  await historyUntil(
+    page,
+    "back",
+    (url) => url.pathname === "/app/search" && !url.search,
+  );
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
   await page.goBack();
   await page
@@ -489,7 +510,11 @@ test("same-task historical Search entries preserve manual origin selections and 
   await captureBrowserEvidence(page, "1366-restored-manual-task-entry");
   await page.goForward();
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
-  await page.goForward();
+  await historyUntil(
+    page,
+    "forward",
+    (url) => url.searchParams.get("type") === "result",
+  );
   await page.locator(`[data-search-record="${old.resultId}"]`).waitFor();
   await page.goForward();
   await page.getByText("Entry ancient result", { exact: true }).waitFor();
@@ -511,19 +536,20 @@ test("same-task historical Search entries preserve manual origin selections and 
     f.service.taskReview().read(a.taskId).results.at(-1)?.resultId,
   );
   await openSearchFromSidebar(page);
-  await page
-    .getByLabel("Search retained task, decision and result records")
-    .fill("Entry ancient result");
-  await page.getByLabel("Include historical records").check();
-  await page.getByLabel("Record type", { exact: true }).selectOption("result");
-  await page
-    .getByRole("button", { name: "Search records", exact: true })
-    .click();
+  await searchRecords(page, "Entry ancient result", {
+    historical: true,
+    type: "result",
+  });
   await page.locator(`[data-search-record="${old.resultId}"] a`).click();
   await page.getByText("Entry ancient result", { exact: true }).waitFor();
   await page.goBack();
   await page.locator(`[data-search-record="${old.resultId}"]`).waitFor();
-  await page.goBack();
+  // Each applied filter is its own Search entry, so the empty Search entry sits further back.
+  await historyUntil(
+    page,
+    "back",
+    (url) => url.pathname === "/app/search" && !url.search,
+  );
   await page.getByRole("heading", { name: "Search", exact: true }).waitFor();
   await page.goBack();
   await page.getByText("Entry latest result", { exact: true }).waitFor();
@@ -644,4 +670,952 @@ test("in-flight exact reply becomes original-key reconciliation across same-task
   } finally {
     release();
   }
+});
+
+test("Search shows Back only after arriving from a task or Inbox item", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const task = await seedReviewTask(
+    f,
+    "Back project",
+    "Back origin task",
+    "- [ ] Zebra anchor requirement",
+  );
+  const asked = await seedOwnQuestion(f, undefined, "Back origin question");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const back = page.getByRole("button", { name: backName, exact: true });
+  const searchField = page.getByLabel(searchFieldLabel);
+  const taskURL = `${web.origin}/app/tasks/${task.taskId}`;
+
+  // Direct entry, with and without a query, and a reload: nothing to go back to.
+  await page.goto(`${web.origin}/app/search`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await searchField.waitFor();
+  assert.equal(await back.count(), 0);
+  await page.goto(`${web.origin}/app/search?query=Zebra%20anchor`);
+  await page.locator("#search-count").waitFor();
+  assert.equal(await back.count(), 0);
+  // A reload purges the private query and the origin along with it.
+  await page.reload();
+  await searchField.waitFor();
+  assert.equal(new URL(page.url()).search, "");
+  assert.equal(await back.count(), 0);
+
+  // Overview, the board, a project page and the Inbox list are not items.
+  for (const origin of [
+    "/app",
+    "/app/tasks?view=board",
+    `/app/projects/${task.projectId}`,
+    "/app/inbox",
+  ]) {
+    await page.goto(`${web.origin}${origin}`);
+    if (origin === "/app/inbox")
+      await page.locator(".inbox-row").first().waitFor();
+    assert.equal(
+      page.url(),
+      `${web.origin}${origin}`,
+      "the origin is the list, not an item",
+    );
+    await openSearchFromSidebar(page);
+    assert.equal(await back.count(), 0, origin);
+  }
+
+  // A task detail: Back survives filter changes and a round trip through an opened match.
+  await page.goto(taskURL);
+  await page
+    .getByRole("heading", { name: "Back origin task", exact: true })
+    .waitFor();
+  await openSearchFromSidebar(page);
+  assert.equal(await back.count(), 1);
+  await page.reload();
+  await searchField.waitFor();
+  assert.equal(await back.count(), 0);
+  await page.goBack();
+  await page
+    .getByRole("heading", { name: "Back origin task", exact: true })
+    .waitFor();
+  await openSearchFromSidebar(page);
+  assert.equal(await back.count(), 1);
+  await searchRecords(page, "Zebra anchor", { type: "task" });
+  assert.equal(await back.count(), 1);
+  await page.locator("[data-search-record] a").first().click();
+  await page
+    .getByRole("heading", { name: "Back origin task", exact: true })
+    .waitFor();
+  await page
+    .getByRole("link", { name: "Back to originating view", exact: true })
+    .click();
+  await page.locator("#search-count").waitFor();
+  assert.equal(await back.count(), 1);
+  await back.click();
+  await page
+    .getByRole("heading", { name: "Back origin task", exact: true })
+    .waitFor();
+  assert.equal(page.url(), taskURL);
+  assert.equal(await searchField.count(), 0);
+
+  // An Inbox item returns to that exact item.
+  await page.goto(`${web.origin}/app/inbox`);
+  await page.locator(".inbox-row").first().click();
+  const pressed = page.locator(".inbox-row[aria-pressed='true']");
+  await pressed.waitFor();
+  const itemURL = page.url();
+  assert.match(new URL(itemURL).search, /^\?task=[^&]+&request=./);
+  await openSearchFromSidebar(page);
+  assert.equal(await back.count(), 1);
+  await searchRecords(page, "Restore focus", { historical: true });
+  assert.equal(await back.count(), 1);
+  await back.click();
+  await pressed.waitFor();
+  assert.equal(page.url(), itemURL);
+  assert.equal(await searchField.count(), 0);
+  assert.ok(asked.taskId);
+
+  // Signing out drops the origin: the next Search is not "from" anywhere.
+  await page.goto(taskURL);
+  await openSearchFromSidebar(page);
+  assert.equal(await back.count(), 1);
+  await signOutFromSidebar(page);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await searchField.waitFor();
+  assert.equal(await back.count(), 0);
+});
+
+test("Search leads with the field and shows filters beside the result count once there is a query", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(
+    f,
+    "Lead alpha",
+    "Leads alpha",
+    "- [ ] Leads requirement alpha",
+  );
+  a.result("Leads result alpha", {
+    sourceId: a.source.sourceId,
+    decisions: [{ text: "Leads decision alpha", attribution: "Task lead" }],
+  });
+  const b = await seedReviewTask(
+    f,
+    "Lead beta",
+    "Leads beta",
+    "- [ ] Leads requirement beta",
+  );
+  b.result("Leads result beta");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const searchReads: string[] = [];
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/operator/search")
+      searchReads.push(request.url());
+  });
+  const filters = {
+    project: page.getByLabel("Project", { exact: true }),
+    type: page.getByLabel("Record type", { exact: true }),
+    from: page.getByLabel("From date", { exact: true }),
+    through: page.getByLabel("Through date", { exact: true }),
+    historical: page.getByLabel("Include historical records"),
+  };
+  const searchParam = (name: string) =>
+    new URL(page.url()).searchParams.get(name);
+  const recordTypes = () =>
+    page
+      .locator("[data-search-record] .search-match-head > :first-child")
+      .allTextContents();
+  /** Waits for the Search page that replaces the current one, after `action` changed the URL. */
+  const replaced = async (action: () => Promise<unknown>) => {
+    await page
+      .locator(".search-workspace")
+      .evaluate((el) => el.setAttribute("data-replaced", ""));
+    await action();
+    await page
+      .locator(".search-workspace[data-replaced]")
+      .waitFor({ state: "detached" });
+  };
+  const renderedFrame = () =>
+    page.evaluate(
+      () => new Promise<void>((done) => requestAnimationFrame(() => done())),
+    );
+
+  // Before a query: the field and one coverage line, no filters.
+  await page.goto(`${web.origin}/app/search`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel(searchFieldLabel).waitFor();
+  for (const control of Object.values(filters))
+    assert.equal(await control.count(), 0);
+  assert.equal(
+    await page
+      .locator(".search-workspace")
+      .locator("input, select, button")
+      .first()
+      .getAttribute("id"),
+    "retained-query",
+  );
+  await page.getByText("Enter a phrase to search across projects.").waitFor();
+  const coverage = page.locator(".search-coverage");
+  assert.equal(
+    await coverage.innerText(),
+    "Searches saved excerpts, not full agent transcripts.",
+  );
+  assert.equal(
+    await coverage.getAttribute("title"),
+    "Covers permitted retained task, decision and result excerpts, up to 16,000 characters each. Long source coverage is partial. It does not generate summaries.",
+  );
+  const oneLine = () =>
+    coverage.evaluate((el) => {
+      const lineHeight = Number.parseFloat(getComputedStyle(el).lineHeight);
+      return el.getBoundingClientRect().height <= lineHeight * 1.5;
+    });
+  assert.equal(await oneLine(), true);
+
+  // After a query: every filter, the count and Refresh share the results header.
+  await searchRecords(page, "Leads");
+  const header = page.locator("section.search-results .search-results-head");
+  await page.locator("#search-count").waitFor();
+  for (const control of Object.values(filters))
+    assert.equal(await header.locator(control).count(), 1);
+  assert.equal(await header.locator("#search-count").count(), 1);
+  assert.equal(
+    await header
+      .getByRole("button", { name: "Refresh results", exact: true })
+      .count(),
+    1,
+  );
+  assert.equal(await page.locator("form").getByLabel("Record type").count(), 0);
+  assert.ok((await recordTypes()).includes("Task"));
+  assert.equal(await oneLine(), true);
+  await captureBrowserEvidence(page, "1366-search-header-filters");
+
+  // Type applies on change and every rendered match is of that type, whatever the order.
+  await replaced(async () => {
+    await filters.type.selectOption("result");
+    await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  });
+  await page.locator("[data-search-record]").first().waitFor();
+  const results = await recordTypes();
+  assert.ok(results.length > 0);
+  assert.ok(
+    results.every((type) => type === "Result"),
+    JSON.stringify(results),
+  );
+  assert.equal(await filters.type.inputValue(), "result");
+
+  // A new filter drops the cursor of the page it was read from.
+  await page.route("**/api/operator/search?*", async (route) => {
+    const url = new URL(route.request().url());
+    const response = await route.fetch();
+    const body = await response.json();
+    if (!url.searchParams.has("cursor"))
+      body.data.nextCursor = body.data.matches.at(-1)?.recordId ?? null;
+    await route
+      .fulfill({ response, json: body })
+      .catch((error) =>
+        assert.match(String(error), /already handled|Target.*closed/),
+      );
+  });
+  await replaced(async () => {
+    await filters.type.selectOption("");
+    await page.waitForURL((url) => !url.searchParams.has("type"));
+  });
+  await page
+    .getByRole("button", { name: "Next retained matches", exact: true })
+    .waitFor();
+  await replaced(async () => {
+    await page
+      .getByRole("button", { name: "Next retained matches", exact: true })
+      .click();
+    await page.waitForURL((url) => url.searchParams.has("cursor"));
+  });
+  await page.locator("#search-count").waitFor();
+  await replaced(async () => {
+    await filters.type.selectOption("task");
+    await page.waitForURL((url) => url.searchParams.get("type") === "task");
+  });
+  assert.equal(searchParam("cursor"), null);
+  await page.unroute("**/api/operator/search?*");
+
+  // Dates apply on Enter (or with another control), never on each keystroke or on blur.
+  const now = new Date(),
+    day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const before = searchReads.length,
+    entries = await page.evaluate(() => history.length);
+  await filters.from.fill(day);
+  await filters.from.blur();
+  await renderedFrame();
+  assert.equal(searchParam("after"), null);
+  assert.equal(searchReads.length, before);
+  assert.equal(await page.evaluate(() => history.length), entries);
+  await page.getByText("Dates not applied yet.").waitFor();
+  await replaced(async () => {
+    await filters.from.press("Enter");
+    await page.waitForURL(
+      (url) => url.searchParams.get("after") === searchDayStart(day),
+    );
+  });
+  assert.equal(await filters.from.inputValue(), day);
+  assert.equal(await page.getByText("Dates not applied yet.").count(), 0);
+  // Enter with nothing pending applies nothing.
+  const applied = await page.evaluate(() => history.length),
+    reads = searchReads.length;
+  await filters.from.press("Enter");
+  await renderedFrame();
+  assert.equal(await page.evaluate(() => history.length), applied);
+  assert.equal(searchReads.length, reads);
+  await filters.through.fill(day);
+  await renderedFrame();
+  assert.equal(searchParam("before"), null);
+  await replaced(async () => {
+    await filters.through.press("Enter");
+    await page.waitForURL(
+      (url) => url.searchParams.get("before") === searchDayEnd(day),
+    );
+  });
+  assert.equal(await filters.through.inputValue(), day);
+
+  // Back and Forward restore the filter values of each entry.
+  await replaced(async () => {
+    await filters.historical.check();
+    await page.waitForURL(
+      (url) => url.searchParams.get("historical") === "true",
+    );
+  });
+  await page.goBack();
+  await filters.historical.waitFor();
+  await page.waitForFunction(
+    () =>
+      !document.querySelector<HTMLInputElement>(".search-history input")
+        ?.checked,
+  );
+  assert.equal(searchParam("historical"), "false");
+  assert.equal(await filters.through.inputValue(), day);
+  await page.goBack();
+  await page.waitForFunction(
+    () =>
+      !document.querySelector<HTMLInputElement>("#search-through-date")?.value,
+  );
+  assert.equal(searchParam("before"), null);
+  assert.equal(await filters.type.inputValue(), "task");
+  await page.goForward();
+  await page.waitForFunction(
+    (value) =>
+      document.querySelector<HTMLInputElement>("#search-through-date")
+        ?.value === value,
+    day,
+  );
+  await page.goForward();
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>(".search-history input")
+        ?.checked === true,
+  );
+  assert.equal(searchParam("historical"), "true");
+
+  // A failed first read keeps the filters, and changing one reads again.
+  let failing = true;
+  await page.route("**/api/operator/search?*", (route) =>
+    failing
+      ? route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "unavailable" } }),
+        })
+      : route.continue(),
+  );
+  await page.goto(`${web.origin}/app/search?query=Leads`);
+  await page.getByRole("alert").waitFor();
+  assert.equal(await page.locator("#search-count").count(), 0);
+  for (const control of Object.values(filters))
+    assert.equal(await control.count(), 1);
+  failing = false;
+  await replaced(async () => {
+    await filters.type.selectOption("result");
+    await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  });
+  await page.locator("[data-search-record]").first().waitFor();
+  assert.ok((await recordTypes()).every((type) => type === "Result"));
+  assert.equal(await page.getByRole("alert").count(), 0);
+  await page.unroute("**/api/operator/search?*");
+
+  // A read held while a filter changes never renders over the newer one.
+  let release!: () => void, entered!: () => void, delivered!: () => void;
+  const barrier = new Promise<void>((resolve) => (release = resolve)),
+    entry = new Promise<void>((resolve) => (entered = resolve)),
+    done = new Promise<void>((resolve) => (delivered = resolve));
+  let held = false;
+  await page.route("**/api/operator/search?*", async (route) => {
+    if (held) return route.continue();
+    held = true;
+    const response = await route.fetch();
+    entered();
+    await barrier;
+    await route
+      .fulfill({ response })
+      .catch((error) =>
+        assert.match(String(error), /already handled|Target.*closed/),
+      )
+      .finally(delivered);
+  });
+  await page.goto(`${web.origin}/app/search?query=Leads`);
+  await entry;
+  await replaced(async () => {
+    await filters.type.selectOption("result");
+    await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  });
+  await page.locator("[data-search-record]").first().waitFor();
+  release();
+  await done;
+  await renderedFrame();
+  assert.equal(searchParam("type"), "result");
+  assert.equal(await filters.type.inputValue(), "result");
+  assert.ok((await recordTypes()).every((type) => type === "Result"));
+  await page.unroute("**/api/operator/search?*");
+
+  // Phone: the header controls stay 44px and the note stays one line.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${web.origin}/app/search`);
+  await searchRecords(page, "Leads");
+  const heights = await page
+    .locator(
+      ".search-results-head select, .search-results-head input[type=date], .search-results-head .search-history, .search-results-head button",
+    )
+    .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+  assert.equal(heights.length, 6);
+  assert.ok(
+    heights.every((h) => h >= 44),
+    JSON.stringify(heights),
+  );
+  assert.equal(await oneLine(), true);
+  assert.ok(
+    (await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    )) <= 1,
+  );
+  await captureBrowserEvidence(page, "390-search-header-filters");
+});
+
+test("Search keeps keyboard focus through every filter commit and reads in DOM order", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(
+    f,
+    "Focus alpha",
+    "Focus alpha",
+    "- [ ] Focus requirement alpha",
+  );
+  a.result("Focus result alpha");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const field = (name: string) => page.getByLabel(name, { exact: true });
+  const searchParam = (name: string) =>
+    new URL(page.url()).searchParams.get(name);
+  const activeId = () => page.evaluate(() => document.activeElement?.id ?? "");
+  const waitActive = (id: string) =>
+    page.waitForFunction((id) => document.activeElement?.id === id, id);
+  const day = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  /** Presses `key` until focus leaves the date input; its segments each take a press. */
+  const leave = async (id: string, key: "Tab" | "Shift+Tab") => {
+    for (let press = 0; press < 6; press++) {
+      await page.keyboard.press(key);
+      if ((await activeId()) !== id) return;
+    }
+    assert.fail(`Focus never left #${id}`);
+  };
+  /** Controls whose reading order (row, then column) differs from their DOM order. */
+  const outOfOrder = () =>
+    page.locator(".search-workspace").evaluate((root) => {
+      const controls = [
+        ...root.querySelectorAll<HTMLElement>("input, select, button, a[href]"),
+      ].filter((el) => el.getClientRects().length > 0);
+      const rects = controls.map((el) => el.getBoundingClientRect());
+      return controls.flatMap((el, i) => {
+        const prev = rects[i - 1],
+          rect = rects[i];
+        if (!prev || !rect) return [];
+        const sameRow = rect.top < prev.bottom - 1;
+        const ordered = sameRow ? rect.left >= prev.left : rect.top >= prev.top;
+        return ordered ? [] : [el.id || el.textContent];
+      });
+    });
+
+  await page.goto(`${web.origin}/app/search`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel(searchFieldLabel).waitFor();
+  await searchRecords(page, "Focus");
+
+  // Reading order is DOM order at desktop and phone, and Tab walks it.
+  assert.deepEqual(await outOfOrder(), []);
+  await page.locator("#retained-query").focus();
+  const walked = ["retained-query"];
+  for (let press = 0; press < 20; press++) {
+    await page.keyboard.press("Tab");
+    const id = await activeId();
+    if (id !== walked.at(-1)) walked.push(id);
+    if (id === "search-historical") break;
+  }
+  assert.deepEqual(walked, [
+    "retained-query",
+    "search-records",
+    "search-refresh",
+    "search-project",
+    "search-type",
+    "search-from-date",
+    "search-through-date",
+    "search-historical",
+  ]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.deepEqual(await outOfOrder(), []);
+  await page.setViewportSize({ width: 1366, height: 900 });
+
+  // A select keeps focus when its change applies.
+  await field("Record type").focus();
+  await field("Record type").selectOption("result");
+  await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  await waitActive("search-type");
+
+  // The checkbox keeps focus when Space applies it.
+  await field("Include historical records").focus();
+  await page.keyboard.press("Space");
+  await page.waitForURL((url) => url.searchParams.get("historical") === "true");
+  await waitActive("search-historical");
+
+  // Tab out of From applies nothing and lands on Through; Enter there applies both dates at once.
+  const entriesBefore = await page.evaluate(() => history.length);
+  await field("From date").fill(day(-2));
+  await leave("search-from-date", "Tab");
+  await waitActive("search-through-date");
+  assert.equal(searchParam("after"), null);
+  assert.equal(await field("From date").inputValue(), day(-2));
+  await page.getByText("Dates not applied yet.").waitFor();
+  await field("Through date").fill(day(0));
+  await page.keyboard.press("Enter");
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("after") === searchDayStart(day(-2)) &&
+      url.searchParams.get("before") === searchDayEnd(day(0)),
+  );
+  await waitActive("search-through-date");
+  assert.equal(await page.evaluate(() => history.length), entriesBefore + 1);
+  assert.equal(await page.getByText("Dates not applied yet.").count(), 0);
+
+  // Shift+Tab out of From applies nothing and lands on Type; changing Type applies both (here clearing it).
+  await field("From date").fill(day(-1));
+  await leave("search-from-date", "Shift+Tab");
+  await waitActive("search-type");
+  assert.equal(searchParam("after"), searchDayStart(day(-2)));
+  await field("Record type").selectOption("");
+  await page.waitForURL(
+    (url) =>
+      url.searchParams.get("after") === searchDayStart(day(-1)) &&
+      !url.searchParams.has("type"),
+  );
+  await waitActive("search-type");
+
+  // Refresh results keeps focus and does not replace the page.
+  await page
+    .locator(".search-workspace")
+    .evaluate((el) => el.setAttribute("data-replaced", ""));
+  await page.locator("#search-refresh").focus();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/operator/search",
+    ),
+    page.keyboard.press("Enter"),
+  ]);
+  assert.equal(await activeId(), "search-refresh");
+  assert.equal(
+    await page.locator(".search-workspace[data-replaced]").count(),
+    1,
+  );
+
+  // Searching again keeps focus on the field that was used, or on the button.
+  await page.locator("#retained-query").fill("Focus alpha");
+  await page.keyboard.press("Enter");
+  await page.waitForURL(
+    (url) => url.searchParams.get("query") === "Focus alpha",
+  );
+  await waitActive("retained-query");
+  await page.locator("#retained-query").fill("Focus result");
+  await page.locator("#search-records").focus();
+  await page.keyboard.press("Enter");
+  await page.waitForURL(
+    (url) => url.searchParams.get("query") === "Focus result",
+  );
+  await waitActive("search-records");
+
+  // Repeating the same search re-reads without stacking identical entries.
+  await page.locator("#search-count").waitFor();
+  const applied = await page.evaluate(() => history.state?.entryIndex ?? 0);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === "/api/operator/search",
+    ),
+    page.keyboard.press("Enter"),
+  ]);
+  assert.equal(
+    await page.evaluate(() => history.state?.entryIndex ?? 0),
+    applied,
+  );
+  assert.equal(await activeId(), "search-records");
+
+  // A dirty date is not applied when focus goes to a result link, and the click is not lost.
+  const searchURL = page.url();
+  await page.locator("[data-search-record] a").first().waitFor();
+  await field("From date").fill(day(-3));
+  await page.locator("[data-search-record] a").first().click();
+  await page.waitForURL((url) => url.pathname.startsWith("/app/tasks/"));
+  await page.goBack();
+  await page.waitForURL(searchURL);
+  assert.equal(await field("From date").inputValue(), day(-1));
+});
+
+test("Search applies the whole header form in one navigation, whichever control commits it", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const a = await seedReviewTask(
+    f,
+    "Matrix alpha",
+    "Matrix alpha",
+    "- [ ] Matrix alpha",
+  );
+  a.result("Matrix result alpha");
+  const b = await seedReviewTask(
+    f,
+    "Matrix beta",
+    "Matrix beta",
+    "- [ ] Matrix beta",
+  );
+  b.result("Matrix result beta");
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  const field = (name: string) => page.getByLabel(name, { exact: true });
+  const searchParam = (name: string) =>
+    new URL(page.url()).searchParams.get(name);
+  // The app numbers the entries it pushes; history.length stops growing at the browser's limit.
+  const entries = () => page.evaluate(() => history.state?.entryIndex ?? 0);
+  const waitActive = (id: string) =>
+    page.waitForFunction((id) => document.activeElement?.id === id, id);
+  const day = (offset: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const open = async () => {
+    // Re-entering the current URL would be a reload, which purges the private query.
+    await page.goto("about:blank");
+    await page.goto(`${web.origin}/app/search?query=Matrix`);
+    await page.locator("#search-count").waitFor();
+  };
+  const replaced = async (action: () => Promise<unknown>) => {
+    await page
+      .locator(".search-workspace")
+      .evaluate((el) => el.setAttribute("data-replaced", ""));
+    await action();
+    await page
+      .locator(".search-workspace[data-replaced]")
+      .waitFor({ state: "detached" });
+  };
+
+  await page.goto(`${web.origin}/app/search`);
+  await page.getByLabel("Password").fill(web.password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page.getByLabel(searchFieldLabel).waitFor();
+
+  type Pending = { from?: string; through?: string };
+  const states: Record<string, Pending> = {
+    clean: {},
+    "dirty From": { from: day(-2) },
+    "dirty Through": { through: day(0) },
+    "both dirty": { from: day(-2), through: day(0) },
+    "From after Through": { from: day(0), through: day(-2) },
+  };
+  // Each control commits the form: its own change plus whatever dates are typed.
+  const controls: Record<
+    string,
+    {
+      id: string;
+      params: Record<string, string>;
+      act: (pending: Pending) => Promise<unknown>;
+    }
+  > = {
+    Project: {
+      id: "search-project",
+      params: { projectId: a.projectId },
+      act: async () => {
+        await field("Project").focus();
+        await field("Project").selectOption(a.projectId);
+      },
+    },
+    Type: {
+      id: "search-type",
+      params: { type: "result" },
+      act: async () => {
+        await field("Record type").focus();
+        await field("Record type").selectOption("result");
+      },
+    },
+    "Include historical records": {
+      id: "search-historical",
+      params: { historical: "true" },
+      act: () => field("Include historical records").click(),
+    },
+    "Search records": {
+      id: "search-records",
+      params: {},
+      act: () =>
+        page
+          .getByRole("button", { name: "Search records", exact: true })
+          .click(),
+    },
+    "Enter in the field": {
+      id: "retained-query",
+      params: {},
+      act: async () => {
+        await page.locator("#retained-query").focus();
+        await page.keyboard.press("Enter");
+      },
+    },
+    "Refresh results": {
+      id: "search-refresh",
+      params: {},
+      act: () =>
+        page
+          .getByRole("button", { name: "Refresh results", exact: true })
+          .click(),
+    },
+    "Enter in a date": {
+      id: "",
+      params: {},
+      act: (pending) =>
+        field(pending.from ? "From date" : "Through date").press("Enter"),
+    },
+  };
+  for (const [control, spec] of Object.entries(controls)) {
+    for (const [state, pending] of Object.entries(states)) {
+      const dirty = Boolean(pending.from || pending.through);
+      if (control === "Enter in a date" && !dirty) continue;
+      const label = `${control} with ${state} dates`;
+      await open();
+      if (pending.from) await field("From date").fill(pending.from);
+      if (pending.through) await field("Through date").fill(pending.through);
+      if (dirty) await page.getByText("Dates not applied yet.").waitFor();
+      const before = await entries();
+      // Refresh only re-reads when nothing is pending; typed dates are applied with it otherwise.
+      const navigates = !(control === "Refresh results" && !dirty);
+      const expected: Record<string, string | null> = {
+        query: "Matrix",
+        historical: "false",
+        projectId: null,
+        type: null,
+        after: pending.from ? searchDayStart(pending.from) : null,
+        before: pending.through ? searchDayEnd(pending.through) : null,
+        ...spec.params,
+      };
+      if (navigates) {
+        await replaced(async () => {
+          await spec.act(pending);
+          await page.waitForURL((url) =>
+            Object.entries(expected).every(
+              ([name, value]) => url.searchParams.get(name) === value,
+            ),
+          );
+        });
+      } else {
+        await Promise.all([
+          page.waitForResponse(
+            (r) => new URL(r.url()).pathname === "/api/operator/search",
+          ),
+          spec.act(pending),
+        ]);
+      }
+      assert.equal(await entries(), before + (navigates ? 1 : 0), label);
+      if (navigates)
+        for (const [name, value] of Object.entries(expected))
+          assert.equal(searchParam(name), value, `${label}: ${name}`);
+      else assert.equal(page.url(), `${web.origin}/app/search?query=Matrix`);
+      assert.equal(
+        await page.getByText("Dates not applied yet.").count(),
+        0,
+        label,
+      );
+      assert.equal(
+        await field("From date").inputValue(),
+        pending.from ?? "",
+        label,
+      );
+      assert.equal(
+        await field("Through date").inputValue(),
+        pending.through ?? "",
+        label,
+      );
+      assert.equal(
+        await field("Include historical records").isChecked(),
+        expected.historical === "true",
+        label,
+      );
+      assert.equal(
+        await field("Record type").inputValue(),
+        expected.type ?? "",
+        label,
+      );
+      assert.equal(
+        await field("Project").inputValue(),
+        expected.projectId ?? "",
+        label,
+      );
+      if (navigates && spec.id) await waitActive(spec.id);
+      await page.locator("#search-count").waitFor();
+      if (state === "From after Through") {
+        // The range is applied as typed and reads as no match, not as an error.
+        await page.getByText(/No permitted retained match/).waitFor();
+      } else {
+        await page.locator("[data-search-record]").first().waitFor();
+        if (expected.projectId) {
+          const provenance = await page
+            .locator(".search-provenance")
+            .allTextContents();
+          assert.ok(
+            provenance.length > 0 &&
+              provenance.every((t) => t.startsWith("Matrix alpha · ")),
+            label,
+          );
+        }
+        if (expected.type) {
+          const kinds = await page
+            .locator("[data-search-record] .search-match-head > :first-child")
+            .allTextContents();
+          assert.ok(
+            kinds.length > 0 && kinds.every((k) => k === "Result"),
+            label,
+          );
+        }
+      }
+    }
+  }
+
+  // Rapid consecutive commits: a read held from before never renders over the final form.
+  let release!: () => void, entered!: () => void, delivered!: () => void;
+  const barrier = new Promise<void>((resolve) => (release = resolve)),
+    entry = new Promise<void>((resolve) => (entered = resolve)),
+    done = new Promise<void>((resolve) => (delivered = resolve));
+  let held = false;
+  await page.route("**/api/operator/search?*", async (route) => {
+    if (held) return route.continue();
+    held = true;
+    const response = await route.fetch();
+    entered();
+    await barrier;
+    await route
+      .fulfill({ response })
+      .catch((error) =>
+        assert.match(String(error), /already handled|Target.*closed/),
+      )
+      .finally(delivered);
+  });
+  await page.goto(`${web.origin}/app/search?query=Matrix`);
+  await entry;
+  await replaced(async () => {
+    await field("Record type").selectOption("result");
+    await page.waitForURL((url) => url.searchParams.get("type") === "result");
+  });
+  await replaced(async () => {
+    await field("Include historical records").click();
+    await page.waitForURL(
+      (url) => url.searchParams.get("historical") === "true",
+    );
+  });
+  await page.locator("[data-search-record]").first().waitFor();
+  release();
+  await done;
+  await page.evaluate(
+    () => new Promise<void>((r) => requestAnimationFrame(() => r())),
+  );
+  assert.equal(searchParam("type"), "result");
+  assert.equal(await field("Include historical records").isChecked(), true);
+  assert.equal(await field("Record type").inputValue(), "result");
+  const kinds = await page
+    .locator("[data-search-record] .search-match-head > :first-child")
+    .allTextContents();
+  assert.ok(kinds.length > 0 && kinds.every((k) => k === "Result"));
+  await page.unroute("**/api/operator/search?*");
+
+  // Back and Forward restore each entry's dates and filters.
+  await field("From date").fill(day(-2));
+  await field("Through date").fill(day(0));
+  await replaced(async () => {
+    await field("Through date").press("Enter");
+    await page.waitForURL((url) => url.searchParams.has("before"));
+  });
+  await page.goBack();
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>("#search-from-date")?.value ===
+      "",
+  );
+  assert.equal(searchParam("after"), null);
+  assert.equal(await field("Include historical records").isChecked(), true);
+  await page.goForward();
+  await page.waitForFunction(
+    (value) =>
+      document.querySelector<HTMLInputElement>("#search-from-date")?.value ===
+      value,
+    day(-2),
+  );
+  assert.equal(await field("Through date").inputValue(), day(0));
+  assert.equal(searchParam("before"), searchDayEnd(day(0)));
 });
