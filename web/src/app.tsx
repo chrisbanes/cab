@@ -579,7 +579,10 @@ export function App() {
         if (identity)
           history.replaceState(
             {
-              ...history.state,
+              // Only a state made for this load is adopted; any other starts clean.
+              ...(history.state?.navigationScope === navigationScope.current
+                ? history.state
+                : null),
               navigationScope: navigationScope.current,
               navKey: history.state?.navKey ?? crypto.randomUUID(),
               entryUrl: location.href,

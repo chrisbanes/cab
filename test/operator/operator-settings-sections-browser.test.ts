@@ -779,7 +779,7 @@ test("entries made before a reload start clean in the new document and land thei
   await page.reload();
   await nav(page).waitFor();
   // Each load has its own navigation scope, so an entry from the earlier document keeps
-  // no saved position or focus (the privacy guard); it lands its fragment like a new entry.
+  // no saved state (the privacy guard); it lands its fragment like a new entry.
   await page.goBack();
   await page.waitForURL(/#profiles$/);
   onScreen(await landed(page, "H2", "Profiles"));
@@ -796,6 +796,39 @@ test("entries made before a reload start clean in the new document and land thei
   await nextFrames(page);
   await nextFrames(page);
   assert.equal(await page.evaluate(() => scrollY), 90);
+});
+
+test("leaving through the sidebar keeps the position Back restores", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  await page.evaluate(() => scrollTo(0, 150));
+  // Clicked in script so the page keeps the position it was left at.
+  await page
+    .getByRole("link", { name: "Tasks", exact: true })
+    .first()
+    .evaluate((a) => (a as HTMLElement).click());
+  await page.waitForURL("**/app/tasks");
+  await page.goBack();
+  await page.waitForURL(/\/app\/settings$/);
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(await page.evaluate(() => scrollY), 150);
+});
+
+test("a state without this load's scope is not adopted as an owned entry", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  // A foreign state with a saved position, as an old build or another script could leave.
+  await page.evaluate(() => {
+    history.replaceState({ scrollY: 500 }, "", "/app/settings#profiles");
+  });
+  await page.reload();
+  onScreen(await landed(page, "H2", "Profiles"));
+  assert.equal(
+    await page.evaluate(() => (history.state as { scrollY?: number }).scrollY),
+    undefined,
+  );
 });
 
 for (const fragment of ["bogus", "readiness-unknown"])
