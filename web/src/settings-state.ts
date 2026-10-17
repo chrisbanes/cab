@@ -305,7 +305,11 @@ export class ConfigurationDraft {
         return true;
     return false;
   }
-  initialize(values: Record<string, string | boolean | string[]>) {
+  initialize(
+    values: Record<string, string | boolean | string[]>,
+    /** The input a refused or conflicting save was about was undone, so its outcome goes too. */
+    undone = false,
+  ) {
     if (!this.dirty && !this.frozen) {
       // A read at another version was saved by someone else, so the confirmation of this
       // session's save no longer describes what the page now shows.
@@ -317,7 +321,7 @@ export class ConfigurationDraft {
         this.details = {};
       }
       // A refused or conflicting save belongs to input that is gone now.
-      if (this.phase === "rejected" || this.phase === "conflict") {
+      if (undone && (this.phase === "rejected" || this.phase === "conflict")) {
         this.generation++;
         this.lifecycle.reset();
         this.phase = "editing";
