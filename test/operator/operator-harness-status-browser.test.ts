@@ -18,6 +18,8 @@ import {
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
+import { claudePolicyLimits } from "../../src/standalone/claude.js";
+import { codexPolicyDisclosure } from "../../src/standalone/execution-policy.js";
 
 const test = browserSuite("operator-harness-status-browser");
 
@@ -58,6 +60,13 @@ for (const [name, viewport] of [
       1,
     );
     await runtimes.getByText("Available", { exact: true }).waitFor();
+    assert.equal(await runtimeLimits(page, "Claude").count(), 0);
+    assert.equal(await runtimeLimits(page, "Codex").count(), 1);
+    await runtimes
+      .getByText(
+        "Effective policy appears once the Claude runtime is available.",
+      )
+      .waitFor();
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-runtime-harnesses`);
   });
@@ -90,6 +99,10 @@ for (const [name, viewport] of [
         "Command network access is disabled. Approval policy is never.",
       )
       .waitFor();
+    // The third Claude line sits in the closed limits disclosure.
+    await runtimeRow(page, "Claude")
+      .getByText("Limits and untested surfaces · 12")
+      .click();
     await runtimes
       .getByText("confined to the same roots by Ensemble's hook", {
         exact: false,
@@ -136,6 +149,7 @@ test("Claude not enabled: policy appears once available and settings stay free t
   await page
     .getByText("Effective policy appears once the Claude runtime is available.")
     .waitFor();
+  assert.equal(await runtimeLimits(page, "Claude").count(), 0);
   await page.goto(`${web.origin}/app/settings/profiles/new`);
   await page.getByLabel("Runtime", { exact: true }).selectOption("claude");
   assert.equal(
@@ -198,6 +212,8 @@ const runtimeRow = (page: Page, name: string) =>
   runtimesPanel(page).locator(".settings-row", {
     has: page.getByRole("heading", { name, exact: true }),
   });
+const runtimeLimits = (page: Page, name: string) =>
+  runtimeRow(page, name).locator("details.runtime-limits");
 const commandPosts = (page: Page) => {
   const posts: string[] = [];
   page.on("request", (r) => {
@@ -555,3 +571,259 @@ test("with both runtimes off, Readiness fails with its fix and points at Runtime
   await check.getByText("Enable a runtime in Settings → Runtime").waitFor();
   await captureBrowserEvidence(page, "1366-readiness-no-runtime");
 });
+
+const hiddenClaudeLine = "File-editing tools are confined to the same roots";
+const hiddenLimits = [
+  hiddenClaudeLine,
+  ...claudePolicyLimits,
+  ...codexPolicyDisclosure().limits,
+];
+const evidenceReferences = ["F6.3", "F6.4", "F5.5", "#827"];
+
+for (const [name, viewport] of [
+  ["1366", desktop],
+  ["390", phone],
+] as const)
+  test(`runtime limits sit in a closed disclosure per runtime under the switch, status and two policy lines at ${name}`, async (_t, journey) => {
+    const { page } = await startSettings(
+      journey,
+      "/app/settings/runtime",
+      viewport,
+      undefined,
+      claudeEnabled,
+    );
+    for (const [runtime, count] of [
+      ["Codex", 2],
+      ["Claude", 12],
+    ] as const) {
+      const row = runtimeRow(page, runtime),
+        details = runtimeLimits(page, runtime),
+        summary = details.locator("summary"),
+        visible = `Limits and untested surfaces · ${count}`;
+      await row.getByRole("switch", { name: `${runtime} enabled` }).waitFor();
+      await row.getByText("Available", { exact: true }).waitFor();
+      assert.equal(await details.count(), 1);
+      assert.equal(
+        await details.evaluate((e) => e.hasAttribute("open")),
+        false,
+      );
+      assert.equal(await summary.innerText(), visible);
+      const label = await summary.getAttribute("aria-label");
+      assert.equal(label, `${runtime} limits and untested surfaces · ${count}`);
+      // Label in name (WCAG 2.5.3) ignores case.
+      assert.ok(
+        label?.toLowerCase().includes(visible.toLowerCase()),
+        "label contains the visible text",
+      );
+      if (name === "390")
+        assert.ok(
+          (await summary.evaluate((e) => e.getBoundingClientRect().height)) >=
+            44,
+          "phone target is 44px",
+        );
+    }
+    for (const line of codexPolicyDisclosure().lines)
+      await runtimeRow(page, "Codex")
+        .getByText(line, { exact: true })
+        .waitFor();
+    for (const line of [
+      "Commands run in Claude Code's sandbox",
+      "Command network access is denied. There are no interactive approvals.",
+    ])
+      await runtimeRow(page, "Claude").getByText(line).first().waitFor();
+
+    const rowsText = [
+      await runtimeRow(page, "Codex").innerText(),
+      await runtimeRow(page, "Claude").innerText(),
+    ].join("\n");
+    const pageText = await page.locator("main").innerText();
+    for (const hidden of [...hiddenLimits, ...evidenceReferences]) {
+      assert.equal(rowsText.includes(hidden), false, `row hides ${hidden}`);
+      assert.equal(pageText.includes(hidden), false, `page hides ${hidden}`);
+    }
+    for (const [runtime, strings] of [
+      ["Codex", codexPolicyDisclosure().limits],
+      ["Claude", [hiddenClaudeLine, ...claudePolicyLimits]],
+    ] as const) {
+      const content = await runtimeLimits(page, runtime).evaluate(
+        (e) => e.textContent ?? "",
+      );
+      for (const text of strings)
+        assert.ok(content.includes(text), `${runtime} keeps ${text}`);
+    }
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-runtime-limits-closed`);
+
+    await runtimeLimits(page, "Claude").locator("summary").click();
+    for (const text of [hiddenClaudeLine, ...claudePolicyLimits])
+      await runtimeLimits(page, "Claude")
+        .getByText(text, { exact: false })
+        .first()
+        .waitFor();
+    assert.equal(
+      await runtimeLimits(page, "Claude").evaluate((e) =>
+        e.hasAttribute("open"),
+      ),
+      true,
+    );
+    assert.equal(
+      await runtimeLimits(page, "Codex").evaluate((e) =>
+        e.hasAttribute("open"),
+      ),
+      false,
+      "opening Claude leaves Codex closed",
+    );
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-runtime-limits-open`);
+  });
+
+test("an open runtime limits disclosure stays open across Refresh and starts closed after navigating back", async (_t, journey) => {
+  const { page, web } = await startSettings(
+    journey,
+    "/app/settings/runtime",
+    desktop,
+    undefined,
+    claudeEnabled,
+  );
+  const claude = runtimeLimits(page, "Claude"),
+    codex = runtimeLimits(page, "Codex"),
+    isOpen = (locator: typeof claude) =>
+      locator.evaluate((e) => e.hasAttribute("open"));
+  await claude.locator("summary").click();
+  assert.equal(await isOpen(claude), true);
+  // An expando is lost if the element is replaced, which `open` alone would not show.
+  await claude.evaluate((e) => {
+    (e as HTMLElement & { probe?: boolean }).probe = true;
+  });
+  const reads = ["runtime", "workspace"].map((read) =>
+    page.waitForResponse(
+      (r) => new URL(r.url()).pathname === `/api/operator/${read}`,
+    ),
+  );
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  for (const read of reads) await (await read).finished();
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+  assert.equal(await isOpen(claude), true);
+  assert.equal(await isOpen(codex), false);
+  assert.equal(
+    await claude.evaluate(
+      (e) => (e as HTMLElement & { probe?: boolean }).probe === true,
+    ),
+    true,
+    "the same element survives the refresh",
+  );
+  assert.equal(
+    await page.evaluate(
+      () =>
+        localStorage.length + sessionStorage.length + location.search.length,
+    ),
+    0,
+    "open state is stored nowhere",
+  );
+
+  // In-app route change and back: the page is not reloaded, so module state would survive.
+  await page.locator('a[href="/app/inbox"]').first().click();
+  await runtimesPanel(page).waitFor({ state: "detached" });
+  await page.goBack();
+  await runtimeRow(page, "Claude").getByRole("switch").waitFor();
+  assert.equal(await isOpen(claude), false);
+  assert.equal(await isOpen(codex), false);
+
+  await claude.locator("summary").click();
+  await page.goto(`${web.origin}/app/settings/runtime`);
+  await runtimeRow(page, "Claude").getByRole("switch").waitFor();
+  assert.equal(await isOpen(claude), false, "a reload starts closed");
+});
+
+test("the runtime limits disclosure toggles with Enter and Space and keeps focus on its summary", async (_t, journey) => {
+  const { page } = await startSettings(
+    journey,
+    "/app/settings/runtime",
+    desktop,
+    undefined,
+    claudeEnabled,
+  );
+  const row = runtimeRow(page, "Claude"),
+    summary = runtimeLimits(page, "Claude").locator("summary"),
+    summaryFocused = () =>
+      summary.evaluate((e) => e === document.activeElement),
+    open = () =>
+      runtimeLimits(page, "Claude").evaluate((e) => e.hasAttribute("open"));
+  await row.getByRole("switch", { name: "Claude enabled" }).focus();
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await summaryFocused(),
+    true,
+    "Tab leaves the switch for the summary",
+  );
+  await page.keyboard.press("Enter");
+  assert.equal(await open(), true);
+  assert.equal(await summaryFocused(), true);
+  await page.keyboard.press("Space");
+  assert.equal(await open(), false);
+  assert.equal(await summaryFocused(), true);
+  // Shift+Tab returns to this row's switch: DOM order is the on-screen order.
+  await page.keyboard.press("Shift+Tab");
+  assert.equal(
+    await row
+      .getByRole("switch", { name: "Claude enabled" })
+      .evaluate((e) => e === document.activeElement),
+    true,
+  );
+  assert.deepEqual(
+    await row.evaluate((e) => [
+      ...new Set(
+        [...e.querySelectorAll("*")].map((el) => getComputedStyle(el).order),
+      ),
+    ]),
+    ["0"],
+    "no element in the row is reordered with CSS",
+  );
+});
+
+for (const [name, viewport] of [
+  ["1366", desktop],
+  ["390", phone],
+] as const)
+  test(`the runtime page orders Add Claude, Execution runtimes, Capacity, then Task recovery destinations at ${name}`, async (_t, journey) => {
+    const { page } = await startSettings(
+      journey,
+      "/app/settings/runtime",
+      viewport,
+      undefined,
+      claudeEnabled,
+    );
+    await runtimesPanel(page).waitFor();
+    const headings = await page.locator(".settings-page h2").allInnerTexts();
+    const at = (title: string) => headings.indexOf(title);
+    assert.ok(at("Add Claude") >= 0, "Add Claude is listed");
+    assert.ok(at("Add Claude") < at("Execution runtimes"));
+    assert.ok(at("Execution runtimes") < at("Capacity"));
+    assert.ok(at("Capacity") < at("Task recovery destinations"));
+    const tops = await page.evaluate(() =>
+      [
+        "Add Claude",
+        "Execution runtimes",
+        "Capacity",
+        "Task recovery destinations",
+      ].map(
+        (title) =>
+          [...document.querySelectorAll(".settings-page h2")]
+            .find((h) => h.textContent === title)
+            ?.getBoundingClientRect().top ?? NaN,
+      ),
+    );
+    // At 1366 the recovery destinations are a second column beside the first three.
+    const stacked = name === "390" ? tops : tops.slice(0, 3);
+    assert.ok(
+      stacked.every((top, i) => i === 0 || stacked[i - 1]! < top),
+      `visual order follows DOM order: ${tops.join(", ")}`,
+    );
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-runtime-panel-order`);
+  });

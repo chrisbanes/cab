@@ -33,7 +33,7 @@ import {
   harnessReason,
   harnessStateLabel,
 } from "./execution-runtime.js";
-import { ExecutionNotices, PolicyDisclosure } from "./execution-notice.js";
+import { ExecutionNotices, RuntimePolicy } from "./execution-notice.js";
 import { useOperatorResource } from "./resource.js";
 import {
   ActionLink,
@@ -277,6 +277,46 @@ export function RuntimeSettings(p: SettingsProps) {
             <div className="settings-column">
               <AddClaudePanel {...p} />
               <Panel
+                title="Execution runtimes"
+                description="Work for a runtime that is not enabled or unavailable waits; it never falls back to another runtime."
+              >
+                {p.workspace?.data.harnesses.map((h) => (
+                  <div className="settings-row" key={h.harness}>
+                    <div className="settings-row-heading">
+                      <h3 className="small-heading">
+                        {executionHarnessLabels[h.harness]}
+                      </h3>
+                      <StatusBadge
+                        tone={
+                          h.state === "unavailable"
+                            ? "error"
+                            : h.state === "available"
+                              ? "success"
+                              : "idle"
+                        }
+                        icon={
+                          h.state === "not-configured" ? CircleSlash : undefined
+                        }
+                      >
+                        {harnessStateLabel[h.state]}
+                      </StatusBadge>
+                    </div>
+                    <RuntimeToggle
+                      {...p}
+                      status={h}
+                      reload={resource.refresh}
+                    />
+                    <h4 className="small-heading">
+                      Effective execution policy
+                    </h4>
+                    <RuntimePolicy
+                      harness={h.harness}
+                      workspace={p.workspace}
+                    />
+                  </div>
+                ))}
+              </Panel>
+              <Panel
                 title="Capacity"
                 description="Waiting for workers, people or feedback releases a slot."
               >
@@ -357,46 +397,6 @@ export function RuntimeSettings(p: SettingsProps) {
                     refresh={resource.refresh}
                   />
                 </form>
-              </Panel>
-              <Panel
-                title="Execution runtimes"
-                description="Work for a runtime that is not enabled or unavailable waits; it never falls back to another runtime."
-              >
-                {p.workspace?.data.harnesses.map((h) => (
-                  <div className="settings-row" key={h.harness}>
-                    <div className="settings-row-heading">
-                      <h3 className="small-heading">
-                        {executionHarnessLabels[h.harness]}
-                      </h3>
-                      <StatusBadge
-                        tone={
-                          h.state === "unavailable"
-                            ? "error"
-                            : h.state === "available"
-                              ? "success"
-                              : "idle"
-                        }
-                        icon={
-                          h.state === "not-configured" ? CircleSlash : undefined
-                        }
-                      >
-                        {harnessStateLabel[h.state]}
-                      </StatusBadge>
-                    </div>
-                    <RuntimeToggle
-                      {...p}
-                      status={h}
-                      reload={resource.refresh}
-                    />
-                    <h4 className="small-heading">
-                      Effective execution policy
-                    </h4>
-                    <PolicyDisclosure
-                      harness={h.harness}
-                      workspace={p.workspace}
-                    />
-                  </div>
-                ))}
               </Panel>
             </div>
             <section
