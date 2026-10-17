@@ -113,6 +113,14 @@ export function createFakeGh(state: FakeGhState = "signed-in"): FakeGh {
         return [];
       }
     },
-    close: () => rmSync(dir, { recursive: true, force: true }),
+    // A `gh` the service started can still be appending to its logs as the test ends, which
+    // makes the directory not empty by the time it is removed.
+    close: () =>
+      rmSync(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 50,
+      }),
   };
 }

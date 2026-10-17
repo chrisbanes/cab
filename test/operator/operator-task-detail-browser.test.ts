@@ -446,7 +446,13 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
   });
   const boardScroll = await board.evaluate((e) => e.scrollLeft);
   assert.ok(boardScroll > 0, "the board scrolls horizontally");
-  await card.click();
+  // The card sits in the first column, off screen at this scroll. A pointer click would first
+  // scroll the board to it, and whether that scroll is recorded before the navigation depends
+  // on load; opening it from the keyboard leaves the board where it is.
+  await card.evaluate((el) =>
+    (el as HTMLElement).focus({ preventScroll: true }),
+  );
+  await page.keyboard.press("Enter");
   const back = page.getByRole("link", {
     name: "Back to originating view",
     exact: true,
@@ -459,7 +465,8 @@ test("Task detail Back returns to the originating Board entry", async (_t, j) =>
     page.context().waitForEvent("page"),
     back.click({ modifiers: ["ControlOrMeta"] }),
   ]);
-  await tab.waitForLoadState("domcontentloaded");
+  // A new tab reads about:blank until its navigation commits.
+  await tab.waitForURL((u) => u.protocol === "http:");
   assert.equal(new URL(tab.url()).search, "?view=board");
   await tab.close();
   assert.equal(page.url(), taskUrl);

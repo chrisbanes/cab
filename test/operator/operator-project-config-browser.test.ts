@@ -2488,6 +2488,10 @@ test("GitHub source private values unavailable keeps rows kept and saveable", as
   await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
   await changes(page).getByText("Ref for acme/atlas: main → HEAD").waitFor();
   const body = commandBody(page);
+  // The saved version moves, so the page reads the private values once more.
+  const reread = page.waitForResponse((r) =>
+    r.url().endsWith("/private-values"),
+  );
   await save.click();
   const sent = await body;
   assert.deepEqual(sent.selections, [
@@ -2507,7 +2511,9 @@ test("GitHub source private values unavailable keeps rows kept and saveable", as
     ),
     true,
   );
-  // Reading again brings both values back.
+  // Reading again brings both values back. That read must have failed before the route goes,
+  // or it would succeed on its own and replace the buttons this clicks.
+  await reread;
   await page.unroute("**/private-values");
   await retry.first().click();
   await page.getByLabel("Search query", { exact: true }).waitFor();
