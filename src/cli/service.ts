@@ -5,6 +5,7 @@ import {
   closeSync,
   constants,
   existsSync,
+  fstatSync,
   fsyncSync,
   lstatSync,
   mkdirSync,
@@ -19,7 +20,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer } from "node:net";
-import { hostname } from "node:os";
+import { hostname, userInfo } from "node:os";
 import {
   basename,
   dirname,
@@ -42,12 +43,12 @@ import {
   isInBound,
 } from "../operator/diagnostic-retention.js";
 import { connectionNameSchema } from "./connections.js";
-import { DEFAULT_FIX, fixLine } from "./remedy.js";
+import { DEFAULT_FIX, fixLine, shellWord } from "./remedy.js";
 import type { CliDeps } from "./types.js";
 
 // Service modules load on demand so the operator CLI never loads service state or SQLite.
 
-const SERVICE_COMMANDS = `  service install [TARBALL] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
+const SERVICE_COMMANDS = `  service install [TARBALL] [--mode agent|daemon] [--connection NAME] [--token-file PATH] [--no-open] [SERVICE_OPTIONS]
   service upgrade VERSION_DIR [--connection NAME] [SERVICE_OPTIONS]
   service uninstall [SERVICE_OPTIONS]
   service init-auth [AUTH_FILE] [--state-dir DIR]
@@ -76,6 +77,12 @@ to TARBALL unpacked into STATE/versions. It asks once for the operator password
 credential (90 days, kept in the Keychain or --token-file), runs doctor and opens
 the app. Those steps never undo a started service; if one fails, install prints
 the manual login line. --connection defaults to local; --no-open skips the browser.
+install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone logs
+in. It runs as you, never as root: it renders and records the plist, then prints the
+sudo commands that install and start it; run them, then run the same install command
+again to verify. It does not sign in, run doctor or open the app. The two modes are
+never both installed; uninstall prints the matching sudo commands for a daemon. upgrade
+refuses a daemon install; see the macOS operations guide for the switch-back procedure.
 upgrade stops the job, takes a verified snapshot, starts VERSION_DIR and checks
 readiness through a logged-in CLI connection with a read credential. A failed
 upgrade leaves the job stopped and reports the snapshot and logs; recover with
@@ -151,7 +158,14 @@ export type ServiceHost = {
   /** Opens a URL in the default browser. */
   open(url: string, signal?: AbortSignal): Promise<void>;
   hostname(): string;
+  /** The account the service runs as (never `$HOME`): its user name and home directory. */
+  account(): { name: string; home: string };
+  /** Where the stored github.com login keeps its token; never reads the token. */
+  ghTokenStorage(): Promise<GhTokenStorage>;
 };
+
+export type GhTokenStorage = "keyring" | "file" | "unknown";
+export type ServiceMode = "agent" | "daemon";
 
 /** The interactive CLI work around install; absent when a caller cannot sign in. */
 export type InstallCli = {
@@ -177,12 +191,18 @@ export type FirstRun = {
   connection: string;
   tokenFile?: string | undefined;
   open: boolean;
+  /** Defaults to the LaunchAgent. */
+  mode?: ServiceMode | undefined;
 };
 
 export type ServiceOptions = {
   stateDir: string;
   logDir: string;
   agentsDir: string;
+  /** Where a LaunchDaemon plist is installed; /Library/LaunchDaemons, set only by the CLI and tests. */
+  daemonsDir: string;
+  /** The uid that must own an installed daemon plist; 0 (root) unless a test says otherwise. */
+  daemonPlistOwner?: number | undefined;
   label: string;
   port: number;
   /** Absent keeps the recorded value, null clears it, a number sets it. */
@@ -220,6 +240,9 @@ const configurationSchema = z
     stderrPath: z.string(),
     diagnosticRetentionDays: boundedInteger(diagnosticRetentionDays).optional(),
     diagnosticStorageMib: boundedInteger(diagnosticStorageMib).optional(),
+    /** LaunchDaemon only. */
+    userName: z.string().optional(),
+    home: z.string().optional(),
   })
   .strict();
 type Configuration = z.infer<typeof configurationSchema>;
@@ -227,12 +250,22 @@ type Configuration = z.infer<typeof configurationSchema>;
 const recordSchema = z
   .object({
     schema: z.literal(RECORD_SCHEMA),
+    // A record without `mode` is a LaunchAgent written before daemon mode; an older CLI
+    // refuses one with it (strict), so it cannot act on a daemon install.
+    mode: z.enum(["agent", "daemon"]).default("agent"),
     label: z.string(),
     version: z.string(),
     plistSha256: z.string().regex(/^[0-9a-f]{64}$/),
     configuration: configurationSchema,
   })
-  .strict();
+  .strict()
+  .refine(
+    ({ mode, configuration: { userName, home } }) =>
+      mode === "daemon"
+        ? userName !== undefined && home !== undefined
+        : userName === undefined && home === undefined,
+    "daemon account fields do not match the mode",
+  );
 type InstallRecord = z.infer<typeof recordSchema>;
 
 const manifestSchema = z.object({
@@ -269,6 +302,10 @@ class Service {
   readonly target: string;
   readonly activation: string;
   readonly launchdDir: string;
+  /** LaunchDaemon: the job's launchd target and the plist as staged and as installed. */
+  readonly systemTarget: string;
+  readonly stagedDaemon: string;
+  readonly installedDaemon: string;
   readonly recordPath: string;
   readonly dataDir: string;
   readonly authFile: string;
@@ -287,6 +324,9 @@ class Service {
     this.target = `gui/${host.uid}/${label}`;
     this.activation = join(agentsDir, `${label}.plist`);
     this.launchdDir = join(stateDir, "launchd");
+    this.systemTarget = `system/${label}`;
+    this.stagedDaemon = join(this.launchdDir, `${label}.plist`);
+    this.installedDaemon = join(options.daemonsDir, `${label}.plist`);
     this.recordPath = join(this.launchdDir, `${label}.json`);
     this.dataDir = join(stateDir, "data");
     this.authFile = join(stateDir, "auth", "operator-auth.json");
@@ -455,12 +495,22 @@ class Service {
     }
   }
 
-  /** The label's launchd job, or null when it is not loaded. */
-  async loadedJob(): Promise<{
+  /** What the record says: absent, the mode it holds, or unreadable. */
+  recordMode(): "none" | ServiceMode | "invalid" {
+    if (!existsSync(this.recordPath)) return "none";
+    try {
+      return this.readRecord()?.mode ?? "none";
+    } catch {
+      return "invalid";
+    }
+  }
+
+  /** The label's launchd job (the LaunchAgent unless `target` says otherwise), or null when it is not loaded. */
+  async loadedJob(target = this.target): Promise<{
     path: string | undefined;
     pid: number | undefined;
   } | null> {
-    const result = await this.host.launchctl(["print", this.target]);
+    const result = await this.host.launchctl(["print", target]);
     if (result.status === NOT_LOADED) return null;
     if (result.status !== 0) throw new ServiceFailure("launchctl print failed");
     // Top-level fields are indented by exactly one tab; nested sections by more.
@@ -546,10 +596,13 @@ class Service {
     return stopped;
   }
 
-  prepareDirectories() {
+  prepareDirectories(daemon = false) {
     const { stateDir, logDir, agentsDir } = this.options;
     for (const [path, name, exclusive] of [
-      [agentsDir, "LaunchAgents directory", false],
+      // A daemon is staged in the launchd directory; nothing is written to the LaunchAgents one.
+      ...(daemon
+        ? []
+        : ([[agentsDir, "LaunchAgents directory", false]] as const)),
       [logDir, "Log directory", true],
       [this.dataDir, "Data directory", true],
       [join(stateDir, "snapshots"), "Snapshot directory", true],
@@ -576,6 +629,7 @@ class Service {
       | "diagnosticRetentionDays"
       | "diagnosticStorageMib"
     >,
+    daemon = false,
   ): Promise<{ record: InstallRecord; logs: string[] }> {
     const { label, logDir, diagnostic } = this.options;
     const resolved = (override: number | null | undefined, kept?: number) =>
@@ -586,6 +640,8 @@ class Service {
     );
     const storage = resolved(diagnostic?.storageMib, base.diagnosticStorageMib);
     const prefix = join(logDir, `${label}.${version}.${this.stamp()}`);
+    const account = daemon ? this.host.account() : undefined;
+    const destination = daemon ? this.stagedDaemon : this.activation;
     const configuration: Configuration = {
       label,
       nodePath: join(root, "node", "bin", "node"),
@@ -600,12 +656,13 @@ class Service {
         ? {}
         : { diagnosticRetentionDays: retention }),
       ...(storage === undefined ? {} : { diagnosticStorageMib: storage }),
+      ...(account ? { userName: account.name, home: account.home } : {}),
     };
     const logs = [configuration.stdoutPath, configuration.stderrPath];
     // Staged beside the activation so the final rename stays on one filesystem; launchd
     // loads only the directory's own .plist files, not this private subdirectory.
     const staging = mkdtempSync(
-      join(this.options.agentsDir, `.${label}.staging-`),
+      join(dirname(destination), `.${label}.staging-`),
     );
     try {
       const staged = join(staging, `${label}.plist`);
@@ -619,13 +676,14 @@ class Service {
         throw new ServiceFailure("plutil -lint rejected the plist");
       const record: InstallRecord = {
         schema: RECORD_SCHEMA,
+        mode: daemon ? "daemon" : "agent",
         label,
         version,
         plistSha256: sha256(staged),
         configuration,
       };
       this.writeRecord(record);
-      this.host.rename(staged, this.activation);
+      this.host.rename(staged, destination);
       return { record, logs };
     } finally {
       rmSync(staging, { recursive: true, force: true });
@@ -640,6 +698,77 @@ class Service {
     ]);
     if (result.status !== 0)
       throw new ServiceFailure("launchctl bootstrap failed");
+  }
+
+  daemonMismatch() {
+    return refuse(
+      `The ${this.options.label} job or ${this.installedDaemon} does not match the install record; nothing was changed`,
+    );
+  }
+
+  /**
+   * The installed daemon plist's hash, or null when it is absent. It must be a regular file
+   * (never a symlink) owned by root and writable by no one else, as launchd itself requires;
+   * the checks and the hash read one open descriptor.
+   */
+  installedDaemonHash(): string | null {
+    let fd: number;
+    try {
+      fd = openSync(
+        this.installedDaemon,
+        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw this.daemonMismatch();
+    }
+    try {
+      const state = fstatSync(fd);
+      if (
+        !state.isFile() ||
+        state.uid !== (this.options.daemonPlistOwner ?? 0) ||
+        (state.mode & 0o022) !== 0
+      )
+        throw this.daemonMismatch();
+      return createHash("sha256").update(readFileSync(fd)).digest("hex");
+    } finally {
+      closeSync(fd);
+    }
+  }
+
+  /** Whether the staged plist is the one the record describes. */
+  stagedDaemonMatches(record: InstallRecord): boolean {
+    try {
+      return sha256(this.stagedDaemon) === record.plistSha256;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Whether any artifact of the mode other than `installing` is present, whoever made it. */
+  async otherModeConflict(installing: ServiceMode): Promise<boolean> {
+    const present = (path: string) =>
+      lstatSync(path, { throwIfNoEntry: false }) !== undefined;
+    if (installing === "agent")
+      return (
+        this.recordMode() === "daemon" ||
+        (await this.loadedJob(this.systemTarget)) !== null ||
+        present(this.installedDaemon)
+      );
+    return (
+      this.recordMode() === "agent" ||
+      (await this.loadedJob()) !== null ||
+      present(this.activation)
+    );
+  }
+
+  /** The commands the operator runs with sudo to install and start the staged daemon plist. */
+  installSteps(): string[] {
+    const installed = shellWord(this.installedDaemon);
+    return [
+      `sudo /usr/bin/install -m 0644 -o root -g wheel ${shellWord(this.stagedDaemon)} ${installed}`,
+      `sudo /bin/launchctl bootstrap system ${installed}`,
+    ];
   }
 
   checkInterrupt() {
@@ -923,14 +1052,33 @@ export async function issueInstallCredential(
   return { outcome, credentialActive, sessionOpen };
 }
 
-/** Install the LaunchAgent for the release at `releaseRoot`; undoes itself on failure. */
-export function installService(
+/**
+ * Refuses before any lock, directory or launchctl call when the command runs as root:
+ * Ensemble never runs as root, and a root-owned state tree would break the real owner.
+ */
+async function refusedAsRoot(
+  host: ServiceHost,
+  io: ServiceIo,
+  operation: string,
+): Promise<number | null> {
+  if (host.uid !== 0) return null;
+  const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
+  io.stderr.write(
+    `${JSON.stringify({ ok: false, operation, stage: "preflight", error: ROOT_REFUSAL, jobStopped: null })}\n`,
+  );
+  return 1;
+}
+
+/** Install the LaunchAgent (or prepare the LaunchDaemon) for the release at `releaseRoot`; undoes itself on failure. */
+export async function installService(
   options: ServiceOptions,
   releaseRoot: string,
   host: ServiceHost,
   io: ServiceIo,
   first: FirstRun = { connection: "local", open: false },
 ): Promise<number> {
+  const refused = await refusedAsRoot(host, io, "install");
+  if (refused !== null) return refused;
   // A first install has no state directory yet; create it so the lock below covers it.
   try {
     if (
@@ -957,6 +1105,7 @@ async function installServiceLocked(
 ): Promise<number> {
   const service = new Service(options, host, io);
   const { tarball, cli } = first;
+  const daemon = (first.mode ?? "agent") === "daemon";
   let stage = "preflight";
   let record: InstallRecord | null = null;
   let logs: string[] = [];
@@ -981,9 +1130,29 @@ async function installServiceLocked(
       if (!existsSync(dirname(first.tokenFile)))
         throw refuse(`The directory for ${first.tokenFile} does not exist`);
     }
-    if (await service.loadedJob())
+    if (await service.otherModeConflict(daemon ? "daemon" : "agent"))
+      throw refuse(
+        `${options.label} is already present in ${daemon ? "agent" : "daemon"} mode; run \`ensemble service uninstall\` first (a daemon prints sudo steps to finish), then install in ${daemon ? "daemon" : "agent"} mode. Nothing was changed`,
+      );
+    if (daemon && service.recordMode() === "daemon") {
+      if (tarball)
+        throw refuse(
+          `${options.label} is already installed as a daemon; run \`ensemble service uninstall\` before installing another release`,
+        );
+      stage = "verify";
+      return await verifyDaemon(service, first, version as string, (next) => {
+        stage = next;
+      });
+    }
+    if (await service.loadedJob(daemon ? service.systemTarget : undefined))
       throw refuse(`The ${options.label} job is already loaded`);
-    if (existsSync(service.recordPath) || existsSync(service.activation))
+    if (
+      existsSync(service.recordPath) ||
+      (daemon
+        ? lstatSync(service.installedDaemon, { throwIfNoEntry: false }) !==
+          undefined
+        : existsSync(service.activation))
+    )
       throw refuse(
         `${options.label} is already installed; use service upgrade or service uninstall`,
       );
@@ -998,7 +1167,8 @@ async function installServiceLocked(
     // is needed to create the auth file.
     let password: string | undefined;
     service.checkInterrupt();
-    if (cli?.interactive)
+    // A daemon install signs in nowhere, so it asks only to create a missing auth file.
+    if (cli?.interactive && (!daemon || authMissing))
       try {
         password =
           (await cli.readPassword(
@@ -1031,13 +1201,23 @@ async function installServiceLocked(
     }
     service.checkInterrupt();
     stage = "render";
-    service.prepareDirectories();
-    ({ record, logs } = await service.activate(version as string, root, {
-      dataDirectory: service.dataDir,
-      authFile: service.authFile,
-      origin: service.origin,
-      port: options.port,
-    }));
+    service.prepareDirectories(daemon);
+    ({ record, logs } = await service.activate(
+      version as string,
+      root,
+      {
+        dataDirectory: service.dataDir,
+        authFile: service.authFile,
+        origin: service.origin,
+        port: options.port,
+      },
+      daemon,
+    ));
+    if (daemon) {
+      // Nothing reaches launchd: the operator runs the printed steps with sudo.
+      await finishDaemonInstall(service, version as string, logs, false);
+      return 0;
+    }
     service.checkInterrupt();
     stage = "start";
     await service.bootstrap();
@@ -1049,6 +1229,7 @@ async function installServiceLocked(
     service.write("stdout", {
       ok: true,
       operation: "install",
+      mode: "agent",
       label: options.label,
       version,
       origin: service.origin,
@@ -1062,7 +1243,14 @@ async function installServiceLocked(
     return 0;
   } catch (error) {
     let jobStopped: boolean | null = null;
-    if (!NO_JOB_STAGES.includes(stage)) {
+    if (daemon) {
+      // No job was touched. A render that failed after the record was written leaves only
+      // what this run created: the first run proved neither existed.
+      if (stage === "render") {
+        rmSync(service.recordPath, { force: true });
+        rmSync(service.stagedDaemon, { force: true });
+      }
+    } else if (!NO_JOB_STAGES.includes(stage)) {
       jobStopped = await service.leaveStopped(record);
       // Without a confirmed exit the record stays, so uninstall can finish the job.
       try {
@@ -1081,6 +1269,106 @@ async function installServiceLocked(
     });
     return 1;
   }
+}
+
+const GH_KEYCHAIN_WARNING =
+  "The GitHub CLI login is in the login keychain, which a LaunchDaemon cannot read before you log in; run `gh auth login --insecure-storage` on this Mac (see the macOS operations guide).";
+
+/** The fixed keychain warning, written without failing the install. */
+async function warnGhKeychain(service: Service) {
+  try {
+    if ((await service.host.ghTokenStorage()) === "keyring")
+      service.io.stderr.write(`${GH_KEYCHAIN_WARNING}\n`);
+  } catch {
+    // A warning only.
+  }
+}
+
+/**
+ * Report a daemon install: either it still needs the operator's sudo steps (`started` false)
+ * or launchd already runs the verified plist. Never throws past its caller's catch.
+ */
+async function finishDaemonInstall(
+  service: Service,
+  version: string,
+  logs: string[],
+  started: boolean,
+  first?: FirstRun,
+) {
+  const steps = started ? [] : service.installSteps();
+  service.write("stdout", {
+    ok: true,
+    operation: "install",
+    mode: "daemon",
+    label: service.options.label,
+    version,
+    origin: service.origin,
+    plist: started ? service.installedDaemon : service.stagedDaemon,
+    logs,
+    started,
+    steps,
+  });
+  await warnGhKeychain(service);
+  if (first) {
+    await finishInstall(service, first, {
+      connection: null,
+      credentialName: "",
+      credentialActive: false,
+      sessionOpen: false,
+    });
+    return;
+  }
+  const line = (text: string) => service.io.stderr.write(`${text}\n`);
+  line("Run these commands to install and start the service at boot:");
+  for (const step of steps) line(step);
+  line(
+    "Then run the same `ensemble service install --mode daemon` command again to verify.",
+  );
+}
+
+/**
+ * Re-run of a daemon install: confirms what launchd and /Library hold against the record
+ * without changing anything. Running and matching: wait for /app. Otherwise reprint the steps.
+ */
+async function verifyDaemon(
+  service: Service,
+  first: FirstRun,
+  version: string,
+  setStage: (stage: string) => void,
+): Promise<number> {
+  const record = service.readRecord() as InstallRecord;
+  if (version !== record.version)
+    throw refuse(
+      `${record.label} is installed at ${record.version}; run \`ensemble service uninstall\` before installing ${version}`,
+    );
+  if (service.options.port !== record.configuration.port)
+    throw refuse(
+      `${record.label} is installed on port ${record.configuration.port}; pass --port ${record.configuration.port}`,
+    );
+  const job = await service.loadedJob(service.systemTarget);
+  const installed = service.installedDaemonHash();
+  if (
+    (installed !== null && installed !== record.plistSha256) ||
+    (job !== null &&
+      (job.path !== service.installedDaemon || installed === null))
+  )
+    throw service.daemonMismatch();
+  const logs = [
+    record.configuration.stdoutPath,
+    record.configuration.stderrPath,
+  ];
+  if (job !== null) {
+    setStage("health");
+    await service.waitForApp(record.configuration.origin);
+    await finishDaemonInstall(service, record.version, logs, true, first);
+    return 0;
+  }
+  if (!service.stagedDaemonMatches(record))
+    throw refuse(
+      `The staged plist ${service.stagedDaemon} does not match the install record; run \`ensemble service uninstall\`, then install again`,
+    );
+  await finishDaemonInstall(service, record.version, logs, false);
+  return 0;
 }
 
 /** What the sign-in left behind: the stored connection name (else null) and any cleanup that failed. */
@@ -1181,13 +1469,15 @@ async function finishInstall(
 }
 
 /** Stop, snapshot, re-render for `target`, start and check readiness. Never rolls back. */
-export function upgradeService(
+export async function upgradeService(
   options: ServiceOptions,
   target: string,
   connection: OperatorConnection,
   host: ServiceHost,
   io: ServiceIo,
 ): Promise<number> {
+  const refused = await refusedAsRoot(host, io, "upgrade");
+  if (refused !== null) return refused;
   return withLock(options, host, io, "upgrade", () =>
     upgradeServiceLocked(options, target, connection, host, io),
   );
@@ -1210,6 +1500,10 @@ async function upgradeServiceLocked(
     if (!record)
       throw refuse(
         `${options.label} is not installed; run \`ensemble service install\``,
+      );
+    if (record.mode === "daemon")
+      throw refuse(
+        "service upgrade does not support a LaunchDaemon install; switch back first: run `ensemble service uninstall` (and the sudo steps it prints), `ensemble service install`, upgrade, then uninstall and `ensemble service install --mode daemon` again (see the macOS operations guide)",
       );
     const from = record.version;
     const version = service.releaseVersion(target);
@@ -1312,11 +1606,13 @@ async function upgradeServiceLocked(
 }
 
 /** Remove the owned job and its activation; keep data, auth, snapshots, versions and logs. */
-export function uninstallService(
+export async function uninstallService(
   options: ServiceOptions,
   host: ServiceHost,
   io: ServiceIo,
 ): Promise<number> {
+  const refused = await refusedAsRoot(host, io, "uninstall");
+  if (refused !== null) return refused;
   return withLock(options, host, io, "uninstall", () =>
     uninstallServiceLocked(options, host, io),
   );
@@ -1330,7 +1626,18 @@ async function uninstallServiceLocked(
   const service = new Service(options, host, io);
   try {
     const record = service.readRecord();
+    if (record?.mode === "daemon")
+      return await uninstallDaemon(service, record);
     const job = await service.loadedJob();
+    if (
+      record === null &&
+      ((await service.loadedJob(service.systemTarget)) !== null ||
+        lstatSync(service.installedDaemon, { throwIfNoEntry: false }) !==
+          undefined)
+    )
+      throw refuse(
+        `The ${options.label} job or ${service.installedDaemon} was not created by this installation; nothing was changed`,
+      );
     const installed =
       record !== null || job !== null || existsSync(service.activation);
     if (installed) {
@@ -1345,6 +1652,7 @@ async function uninstallServiceLocked(
     service.write("stdout", {
       ok: true,
       operation: "uninstall",
+      mode: "agent",
       label: options.label,
       installed,
     });
@@ -1359,11 +1667,57 @@ async function uninstallServiceLocked(
   }
 }
 
+/**
+ * A daemon is stopped and removed with sudo, which Ensemble never runs: print the steps for
+ * what is still loaded or installed, and drop the record only once both are gone.
+ */
+async function uninstallDaemon(
+  service: Service,
+  record: InstallRecord,
+): Promise<number> {
+  const { label } = service.options;
+  const job = await service.loadedJob(service.systemTarget);
+  const hash = service.installedDaemonHash();
+  if (
+    (hash !== null && hash !== record.plistSha256) ||
+    (job !== null && job.path !== service.installedDaemon)
+  )
+    throw service.daemonMismatch();
+  const steps = [
+    ...(job === null
+      ? []
+      : [`sudo /bin/launchctl bootout ${shellWord(service.systemTarget)}`]),
+    ...(hash === null
+      ? []
+      : [`sudo /bin/rm -f ${shellWord(service.installedDaemon)}`]),
+  ];
+  const complete = steps.length === 0;
+  if (complete) {
+    rmSync(service.stagedDaemon, { force: true });
+    rmSync(service.recordPath, { force: true });
+  } else {
+    service.io.stderr.write(
+      `Run these commands, then run \`ensemble service uninstall\` again to finish:\n${steps.join("\n")}\n`,
+    );
+  }
+  service.write("stdout", {
+    ok: true,
+    operation: "uninstall",
+    mode: "daemon",
+    label,
+    installed: true,
+    complete,
+    ...(complete ? {} : { steps }),
+  });
+  return 0;
+}
+
 function run(
   command: string,
   args: string[],
   timeout = 20_000,
   signal?: AbortSignal,
+  env: NodeJS.ProcessEnv = childProcessEnvironment(),
 ): Promise<{ status: number; stdout: string }> {
   return new Promise((done) =>
     execFile(
@@ -1372,7 +1726,7 @@ function run(
       {
         encoding: "utf8",
         timeout,
-        env: childProcessEnvironment(),
+        env,
         // Aborting kills the child.
         ...(signal ? { signal } : {}),
       },
@@ -1383,6 +1737,93 @@ function run(
         }),
     ),
   );
+}
+
+const GH_TOKEN_VARIABLES = [
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "GH_ENTERPRISE_TOKEN",
+  "GITHUB_ENTERPRISE_TOKEN",
+];
+const ghStatusSchema = z.object({
+  hosts: z.record(
+    z.string(),
+    z.array(
+      z.object({
+        active: z.boolean().optional(),
+        tokenSource: z.string().optional(),
+      }),
+    ),
+  ),
+});
+
+/**
+ * Where the stored github.com login keeps its token, from `gh auth status --json hosts`,
+ * which reports the source and never the token. The token variables are removed so it
+ * describes the stored login a LaunchDaemon would see. Anything unreadable is `unknown`.
+ */
+export async function ghTokenStorage(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<GhTokenStorage> {
+  const scrubbed = childProcessEnvironment(env);
+  for (const name of GH_TOKEN_VARIABLES) delete scrubbed[name];
+  scrubbed.GH_PROMPT_DISABLED = "1";
+  const result = await run(
+    "gh",
+    [
+      "auth",
+      "status",
+      "--active",
+      "--hostname",
+      "github.com",
+      "--json",
+      "hosts",
+    ],
+    10_000,
+    undefined,
+    scrubbed,
+  );
+  if (result.status !== 0) return "unknown";
+  try {
+    const source = ghStatusSchema
+      .parse(JSON.parse(result.stdout))
+      .hosts["github.com"]?.find(
+        (entry) => entry.active !== false,
+      )?.tokenSource;
+    if (source === "keyring") return "keyring";
+    return source !== undefined && isAbsolute(source) ? "file" : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+/**
+ * The keychain warning `ensemble doctor` shows on a daemon host: only when a daemon install
+ * record exists under the default state directory and the gh login is in the keychain.
+ */
+export async function daemonGhWarning(
+  env: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  if (!env.HOME || !isAbsolute(env.HOME)) return null;
+  const directory = join(env.HOME, STATE_DIR, "launchd");
+  try {
+    const isDaemon = readdirSync(directory).some((name) => {
+      if (!name.endsWith(".json")) return false;
+      try {
+        return (
+          recordSchema.parse(
+            JSON.parse(readFileSync(join(directory, name), "utf8")),
+          ).mode === "daemon"
+        );
+      } catch {
+        return false;
+      }
+    });
+    if (!isDaemon) return null;
+  } catch {
+    return null;
+  }
+  return (await ghTokenStorage(env)) === "keyring" ? GH_KEYCHAIN_WARNING : null;
 }
 
 export function defaultServiceHost(): ServiceHost {
@@ -1421,6 +1862,11 @@ export function defaultServiceHost(): ServiceHost {
       await run("/usr/bin/open", [url], 20_000, signal);
     },
     hostname,
+    account: () => {
+      const { username, homedir } = userInfo();
+      return { name: username, home: homedir };
+    },
+    ghTokenStorage: () => ghTokenStorage(process.env),
   };
 }
 
@@ -1433,6 +1879,7 @@ function usage(deps: CliDeps, area: LocalArea): number {
 }
 
 const LABEL = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
+const DAEMONS_DIR = "/Library/LaunchDaemons";
 
 export const LIFECYCLE_OPTIONS = {
   "state-dir": { type: "string" },
@@ -1445,6 +1892,7 @@ export const LIFECYCLE_OPTIONS = {
   "no-open": { type: "boolean" },
   "diagnostic-retention-days": { type: "string" },
   "diagnostic-storage-mib": { type: "string" },
+  mode: { type: "string" },
 } as const;
 
 function parseLifecycleArgs(args: string[]) {
@@ -1487,6 +1935,7 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
     "Library/LaunchAgents",
   );
   const label = values.label ?? "local.ensemble.service";
+  const mode = values.mode ?? "agent";
   const port = values.port ?? "8787";
   const retentionDays = diagnosticValue(
     values["diagnostic-retention-days"],
@@ -1502,6 +1951,7 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
     !stateDir ||
     !logDir ||
     !agentsDir ||
+    (mode !== "agent" && mode !== "daemon") ||
     !LABEL.test(label) ||
     !/^[1-9]\d{0,4}$/.test(port) ||
     Number(port) > 65_535
@@ -1511,6 +1961,7 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
     stateDir,
     logDir,
     agentsDir,
+    daemonsDir: DAEMONS_DIR,
     label,
     port: Number(port),
     ...(retentionDays === undefined && storageMib === undefined
@@ -1528,6 +1979,8 @@ function lifecycleOptions(args: string[], env: NodeJS.ProcessEnv) {
     connection: values.connection,
     tokenFile: values["token-file"],
     noOpen: values["no-open"] === true,
+    mode: mode as ServiceMode,
+    modeGiven: values.mode !== undefined,
   };
 }
 
@@ -1553,7 +2006,10 @@ export async function serviceCommand(
       parsed.positionals.length < (command === "upgrade" ? 1 : 0) ||
       (command === "uninstall" && parsed.connection !== undefined) ||
       (command !== "install" &&
-        (parsed.tokenFile !== undefined || parsed.noOpen)) ||
+        (parsed.tokenFile !== undefined ||
+          parsed.noOpen ||
+          parsed.modeGiven)) ||
+      (parsed.mode === "daemon" && parsed.tokenFile !== undefined) ||
       (parsed.connection !== undefined &&
         command === "install" &&
         !connectionNameSchema.safeParse(parsed.connection).success) ||
@@ -1575,6 +2031,7 @@ export async function serviceCommand(
           connection: parsed.connection ?? "local",
           tokenFile: parsed.tokenFile && resolve(parsed.tokenFile),
           open: !parsed.noOpen,
+          mode: parsed.mode,
         },
       );
     if (command === "uninstall") return uninstallService(options, host(), deps);
@@ -1606,7 +2063,13 @@ export async function serviceCommand(
 
 async function initAuth(args: string[], deps: CliDeps): Promise<number> {
   const parsed = parseLifecycleArgs(args);
-  if (!parsed || parsed.positionals.length > 1) return usage(deps, "service");
+  if (!parsed || parsed.positionals.length > 1 || parsed.values.mode)
+    return usage(deps, "service");
+  if (process.getuid?.() === 0) {
+    const { ROOT_REFUSAL } = await import("../standalone/launchd.js");
+    deps.stderr.write(`${ROOT_REFUSAL}\n`);
+    return 1;
+  }
   const home = deps.env.HOME;
   const stateDir =
     parsed.values["state-dir"] !== undefined

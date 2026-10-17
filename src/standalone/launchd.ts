@@ -30,7 +30,20 @@ export type LaunchAgentConfiguration = {
   /** Written only when set; the service's own defaults apply otherwise. */
   diagnosticRetentionDays?: number | undefined;
   diagnosticStorageMib?: number | undefined;
+  /** LaunchDaemon only: the account the job runs as and its HOME. Set both or neither. */
+  userName?: string | undefined;
+  home?: string | undefined;
 };
+
+export const ROOT_REFUSAL =
+  "Ensemble does not run as root; run it as the account that owns the service";
+
+/** Ensemble never runs as root, in any mode; a fixed message so no path or cause leaks. */
+export function assertNotRoot(uid: number | undefined): void {
+  if (uid === 0) throw new Error(ROOT_REFUSAL);
+}
+
+const USER_NAME = /^[a-z_][a-z0-9_.-]{0,254}$/i;
 
 const LABEL =
   /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
@@ -118,6 +131,22 @@ function validateConfiguration(configuration: LaunchAgentConfiguration): void {
   )
     throw new Error("Operator port is invalid");
   validateOrigin(configuration.origin);
+  if (
+    (configuration.userName === undefined) !==
+    (configuration.home === undefined)
+  )
+    throw new Error("LaunchDaemon account and home must be set together");
+  if (configuration.userName !== undefined) {
+    if (
+      !USER_NAME.test(configuration.userName) ||
+      configuration.userName.toLowerCase() === "root"
+    )
+      throw new Error("LaunchDaemon user name is invalid");
+    // Canonical, but not private: HOME is the account's own directory.
+    const home = canonicalExistingPath(configuration.home as string, "HOME");
+    if (!lstatSync(home).isDirectory())
+      throw new Error("HOME must be a real directory");
+  }
   for (const [value, bound, label] of [
     [
       configuration.diagnosticRetentionDays,
@@ -200,7 +229,11 @@ export function renderLaunchAgent(
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  ${stringElement(configuration.label)}
+  ${stringElement(configuration.label)}${
+    configuration.userName === undefined
+      ? ""
+      : `\n  <key>UserName</key>\n  ${stringElement(configuration.userName)}`
+  }
   <key>ProgramArguments</key>
   <array>
 ${argumentsList.map((argument) => `    ${stringElement(argument)}`).join("\n")}
@@ -208,7 +241,11 @@ ${argumentsList.map((argument) => `    ${stringElement(argument)}`).join("\n")}
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    ${stringElement(LAUNCHD_PATH)}
+    ${stringElement(LAUNCHD_PATH)}${
+      configuration.home === undefined
+        ? ""
+        : `\n    <key>HOME</key>\n    ${stringElement(configuration.home)}`
+    }
     <key>ENSEMBLE_OPERATOR_AUTH_FILE</key>
     ${stringElement(configuration.authFile)}
     <key>ENSEMBLE_OPERATOR_ORIGIN</key>

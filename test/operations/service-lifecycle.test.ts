@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  appendFileSync,
   chmodSync,
   closeSync,
+  copyFileSync,
   constants,
   existsSync,
   lstatSync,
@@ -22,14 +24,18 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer } from "node:net";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
+import { z } from "zod";
 import {
   defaultServiceHost,
+  ghTokenStorage,
   type FirstRun,
+  type GhTokenStorage,
   type InstallCli,
   installService,
   type OperatorConnection,
   type ServiceHost,
   type ServiceOptions,
+  SERVICE_USAGE,
   serviceCommand,
   uninstallService,
   upgradeService,
@@ -37,6 +43,7 @@ import {
 import type { CliDeps } from "../../src/cli/types.js";
 import { StandaloneDataDirectory } from "../../src/standalone/data-directory.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
+import { fakeStatusGh } from "../fixtures/fake-status-gh.js";
 import { markedDataDirectory } from "../fixtures/marked-data.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -49,6 +56,12 @@ class FakeLaunchd {
   calls: string[][] = [];
   events: string[] = [];
   jobs = new Map<string, { path: string; pid: number }>();
+  /** Jobs in the `system` domain, keyed by label; the gui `jobs` map is untouched by them. */
+  systemJobs = new Map<string, { path: string; pid: number }>();
+  /** The account a daemon plist runs as; setup points `home` at the fixture home. */
+  home = "";
+  ghStorage: GhTokenStorage = "unknown";
+  ghProbes = 0;
   alive = new Set<number>();
   linted: string[] = [];
   fetched: string[] = [];
@@ -84,8 +97,12 @@ class FakeLaunchd {
         this.calls.push(args);
         const [command, target = ""] = args;
         const label = target.split("/").at(-1) ?? "";
+        const system = target.startsWith("system/") || args[1] === "system";
+        // Daemon mode must never mutate launchd: no test needs a system mutation to succeed.
+        if (system && command !== "print")
+          throw new Error(`unexpected system launchctl ${command}`);
         if (command === "print") {
-          const job = this.jobs.get(label);
+          const job = (system ? this.systemJobs : this.jobs).get(label);
           return job
             ? {
                 status: 0,
@@ -162,6 +179,11 @@ class FakeLaunchd {
         this.opened.push(url);
       },
       hostname: () => "test-host",
+      account: () => ({ name: "operator", home: this.home }),
+      ghTokenStorage: async () => {
+        this.ghProbes += 1;
+        return this.ghStorage;
+      },
       ...this.overrides,
     };
   }
@@ -305,12 +327,16 @@ async function setup(
     stateDir,
     logDir: join(home, "Library", "Logs", "Ensemble"),
     agentsDir: join(home, "Library", "LaunchAgents"),
+    daemonsDir: join(root, "daemons"),
+    daemonPlistOwner: UID,
     label: "local.ensemble.test",
     port: await freePort(),
   };
   const snapshots = join(stateDir, "snapshots");
   mkdirSync(snapshots, { mode: 0o700 });
   const launchd = new FakeLaunchd(snapshots);
+  launchd.home = home;
+  mkdirSync(options.daemonsDir, { mode: 0o755 });
   const activation = join(options.agentsDir, `${options.label}.plist`);
   const recordPath = join(stateDir, "launchd", `${options.label}.json`);
   const record = () => JSON.parse(readFileSync(recordPath, "utf8"));
@@ -329,6 +355,24 @@ async function setup(
     const code = await uninstallService(options, launchd.host(), io);
     return { code, ...out };
   };
+  const installDaemon = async (first: Partial<FirstRun> = {}) => {
+    const { out, io } = capture();
+    const code = await installService(options, releaseA, launchd.host(), io, {
+      connection: "local",
+      open: false,
+      ...first,
+      mode: "daemon",
+    });
+    return { code, ...out };
+  };
+  const installDaemonWith = (io: ReturnType<typeof capture>["io"]) =>
+    installService(options, releaseA, launchd.host(), io, {
+      connection: "local",
+      open: false,
+      mode: "daemon",
+    });
+  const staged = join(stateDir, "launchd", `${options.label}.plist`);
+  const installed = join(options.daemonsDir, `${options.label}.plist`);
   return {
     home,
     stateDir,
@@ -342,6 +386,10 @@ async function setup(
     snapshots,
     install,
     uninstall,
+    installDaemon,
+    installDaemonWith,
+    staged,
+    installed,
   };
 }
 
@@ -417,6 +465,7 @@ test("lifecycle options default under HOME", async (t) => {
   );
   assert.deepEqual(fake.calls, [
     ["print", `gui/${UID}/local.ensemble.service`],
+    ["print", "system/local.ensemble.service"],
   ]);
   assert.equal(JSON.parse(out.stdout).installed, false);
   // The checkout is not a release under the default state directory.
@@ -1962,5 +2011,701 @@ test("a token file that already exists is refused before anything changes or any
     assert.deepEqual(f.launchd.requests, []);
     assert.deepEqual(f.launchd.mutations(), []);
     assert.deepEqual(tree(f.home), before);
+  }
+});
+
+/** A path as the printed sudo steps quote it: bare when plain, else single-quoted. */
+const quoted = (path: string) =>
+  /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path}'`;
+const ROOT_MESSAGE =
+  "Ensemble does not run as root; run it as the account that owns the service";
+const KEYCHAIN_WARNING = "gh auth login --insecure-storage";
+
+type Fixture = Awaited<ReturnType<typeof setup>>;
+
+/** Copies the staged plist into the daemons directory and loads it, as the sudo steps would. */
+function runSudoSteps(f: Fixture) {
+  copyFileSync(f.staged, f.installed);
+  chmodSync(f.installed, 0o644);
+  f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 5000 });
+}
+
+const stateTrees = (f: Fixture) =>
+  [f.stateDir, f.options.agentsDir, f.options.daemonsDir].map(tree);
+
+test("daemon mode install renders, lints and records without touching launchd", async (t) => {
+  const f = await setup(t);
+  const result = await f.installDaemon();
+  assert.equal(result.code, 0, result.stderr);
+  const output = JSON.parse(result.stdout);
+  assert.equal(output.ok, true);
+  assert.equal(output.mode, "daemon");
+  assert.equal(output.started, false);
+  assert.equal(output.plist, f.staged);
+  // The state path holds a space, so the steps are quoted.
+  assert.ok(f.staged.includes(" "));
+  assert.deepEqual(output.steps, [
+    `sudo /usr/bin/install -m 0644 -o root -g wheel ${quoted(f.staged)} ${quoted(f.installed)}`,
+    `sudo /bin/launchctl bootstrap system ${quoted(f.installed)}`,
+  ]);
+  for (const step of output.steps) assert.ok(result.stderr.includes(step));
+  assert.match(
+    result.stderr,
+    /Then run the same `ensemble service install --mode daemon` command again to verify\./,
+  );
+
+  const record = f.record();
+  assert.equal(record.mode, "daemon");
+  assert.equal(record.plistSha256, sha256(f.staged));
+  assert.equal(record.configuration.userName, "operator");
+  assert.equal(record.configuration.home, f.home);
+  assert.equal(statSync(f.staged).mode & 0o777, 0o600);
+  const plist = readFileSync(f.staged, "utf8");
+  assert.match(plist, /<key>UserName<\/key>\s*<string>operator<\/string>/);
+  assert.equal(environment(f.staged).HOME, f.home);
+  assert.deepEqual(readdirSync(join(f.stateDir, "launchd")).sort(), [
+    "local.ensemble.test.json",
+    "local.ensemble.test.plist",
+  ]);
+
+  // Only reads reach launchd; nothing is written to either plist directory.
+  assert.ok(f.launchd.calls.length > 0);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.equal(existsSync(f.options.agentsDir), false);
+  assert.deepEqual(readdirSync(f.options.daemonsDir), []);
+  assert.deepEqual(f.launchd.fetched, []);
+  assert.deepEqual(f.launchd.requests, []);
+  assert.equal(f.launchd.linted.length, 1);
+  assert.match(
+    f.launchd.linted[0] ?? "",
+    /\/launchd\/\.local\.ensemble\.test\.staging-[^/]+\/local\.ensemble\.test\.plist$/,
+  );
+  assert.equal(
+    existsSync(join(f.stateDir, ".local.ensemble.test.lock")),
+    false,
+  );
+});
+
+test("daemon mode plist passes plutil -lint", {
+  skip: process.platform !== "darwin",
+}, async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  execFileSync("/usr/bin/plutil", ["-lint", f.staged]);
+});
+
+test("daemon mode failed render or lint leaves no record or staged plist and never calls launchd", async (t) => {
+  const failures: [string, Partial<ServiceHost>][] = [
+    [
+      "the move",
+      {
+        rename: () => {
+          throw Object.assign(new Error("cross-device link"), {
+            code: "EXDEV",
+          });
+        },
+      },
+    ],
+    ["the lint", { lint: async () => false }],
+  ];
+  for (const [name, overrides] of failures) {
+    const f = await setup(t);
+    f.launchd.overrides = overrides;
+    const result = await f.installDaemon();
+    assert.equal(result.code, 1, name);
+    const report = JSON.parse(result.stderr);
+    assert.equal(report.stage, "render", name);
+    assert.equal(report.jobStopped, null, name);
+    assert.deepEqual(readdirSync(join(f.stateDir, "launchd")), [], name);
+    assert.deepEqual(f.launchd.mutations(), [], name);
+    assert.deepEqual(readdirSync(f.options.daemonsDir), [], name);
+  }
+});
+
+test("daemon mode re-run verifies the installed plist and job against the record", async (t) => {
+  const f = await setup(t);
+  const first = JSON.parse((await f.installDaemon()).stdout);
+  const recordBytes = readFileSync(f.recordPath);
+  const recordState = statSync(f.recordPath);
+  const sameRecord = () => {
+    const now = statSync(f.recordPath);
+    assert.deepEqual(readFileSync(f.recordPath), recordBytes);
+    assert.equal(now.ino, recordState.ino);
+    assert.equal(now.mtimeMs, recordState.mtimeMs);
+  };
+
+  // Not loaded yet: the same steps again, and nothing recorded again.
+  f.launchd.calls = [];
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const result = await f.installDaemon();
+    assert.equal(result.code, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.started, false);
+    assert.deepEqual(output.steps, first.steps);
+    sameRecord();
+    assert.deepEqual(f.launchd.mutations(), []);
+    assert.deepEqual(f.launchd.fetched, []);
+  }
+
+  // The operator ran the steps: loaded, matching, and the app answers.
+  runSudoSteps(f);
+  const verified = await f.installDaemon();
+  assert.equal(verified.code, 0, verified.stderr);
+  const output = JSON.parse(verified.stdout);
+  assert.equal(output.started, true);
+  assert.deepEqual(output.steps, []);
+  assert.equal(output.plist, f.installed);
+  assert.deepEqual(f.launchd.fetched, [
+    `http://127.0.0.1:${f.options.port}/app`,
+  ]);
+  assert.match(verified.stderr, /ensemble auth login --connection local/);
+  assert.match(verified.stderr, /Open http:\/\/127\.0\.0\.1:\d+\/app/);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.deepEqual(f.launchd.requests, []);
+  sameRecord();
+});
+
+test("daemon mode re-run refuses a plist or job that does not match the record", async (t) => {
+  const cases: [string, (f: Fixture) => unknown, RegExp][] = [
+    [
+      "tampered plist, job loaded",
+      (f) => {
+        runSudoSteps(f);
+        appendFileSync(f.installed, "\n<!-- changed -->\n");
+      },
+      /does not match the install record/,
+    ],
+    [
+      "tampered plist, not loaded",
+      (f) => {
+        copyFileSync(f.staged, f.installed);
+        appendFileSync(f.installed, "\n<!-- changed -->\n");
+      },
+      /does not match the install record/,
+    ],
+    [
+      "job loaded from another path",
+      (f) => {
+        copyFileSync(f.staged, f.installed);
+        f.launchd.systemJobs.set(f.options.label, {
+          path: "/elsewhere.plist",
+          pid: 5000,
+        });
+      },
+      /does not match the install record/,
+    ],
+    [
+      "job loaded without the installed plist",
+      (f) =>
+        f.launchd.systemJobs.set(f.options.label, {
+          path: f.installed,
+          pid: 5000,
+        }),
+      /does not match the install record/,
+    ],
+    [
+      "symlinked plist with the recorded content",
+      (f) => symlinkSync(f.staged, f.installed),
+      /does not match the install record/,
+    ],
+    [
+      "plist writable by others",
+      (f) => {
+        copyFileSync(f.staged, f.installed);
+        chmodSync(f.installed, 0o666);
+      },
+      /does not match the install record/,
+    ],
+    [
+      "plist not owned by root",
+      (f) => {
+        copyFileSync(f.staged, f.installed);
+        chmodSync(f.installed, 0o644);
+        f.options.daemonPlistOwner = UID + 1;
+      },
+      /does not match the install record/,
+    ],
+    [
+      "staged plist changed",
+      (f) => appendFileSync(f.staged, "\n<!-- changed -->\n"),
+      /staged plist .* does not match the install record/,
+    ],
+    [
+      "staged plist missing",
+      (f) => rmSync(f.staged),
+      /staged plist .* does not match the install record/,
+    ],
+    [
+      "different port",
+      (f) => {
+        f.options.port += 1;
+      },
+      /installed on port \d+; pass --port \d+/,
+    ],
+  ];
+  for (const [name, arrange, error] of cases) {
+    const f = await setup(t);
+    assert.equal((await f.installDaemon()).code, 0, name);
+    arrange(f);
+    const bytes = readFileSync(f.recordPath);
+    f.launchd.calls = [];
+    const result = await f.installDaemon();
+    assert.equal(result.code, 1, name);
+    assert.match(JSON.parse(result.stderr).error, error, name);
+    assert.deepEqual(readFileSync(f.recordPath), bytes, name);
+    assert.deepEqual(f.launchd.mutations(), [], name);
+    assert.deepEqual(f.launchd.fetched, [], name);
+  }
+
+  // Another release, or a tarball, never re-runs over the record.
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  const releaseB = release(f.stateDir, "0.2.0");
+  const { out, io } = capture();
+  assert.equal(
+    await installService(f.options, releaseB, f.launchd.host(), io, {
+      connection: "local",
+      open: false,
+      mode: "daemon",
+    }),
+    1,
+  );
+  assert.match(JSON.parse(out.stderr).error, /installed at 0\.1\.0/);
+  const tarball = join(f.home, "release.tgz");
+  writeFileSync(tarball, "");
+  const withTarball = await f.installDaemon({ tarball });
+  assert.equal(withTarball.code, 1);
+  assert.match(JSON.parse(withTarball.stderr).error, /already installed/);
+  assert.equal(f.record().version, "0.1.0");
+});
+
+test("daemon mode install refuses while the LaunchAgent exists, and agent install refuses while the daemon exists", async (t) => {
+  type Arrange = (f: Fixture) => Promise<unknown> | unknown;
+  const agentArtifacts: [string, Arrange][] = [
+    [
+      "agent record",
+      async (f) => {
+        assert.equal((await f.install()).code, 0);
+        rmSync(f.activation);
+        f.launchd.jobs.clear();
+      },
+    ],
+    [
+      "gui job",
+      (f) =>
+        f.launchd.jobs.set(f.options.label, { path: "/other.plist", pid: 7 }),
+    ],
+    [
+      "agent plist",
+      (f) => {
+        mkdirSync(f.options.agentsDir, { recursive: true });
+        writeFileSync(f.activation, "<plist/>");
+      },
+    ],
+  ];
+  const daemonArtifacts: [string, Arrange][] = [
+    [
+      "daemon record",
+      async (f) => assert.equal((await f.installDaemon()).code, 0),
+    ],
+    [
+      "system job",
+      (f) =>
+        f.launchd.systemJobs.set(f.options.label, {
+          path: "/other.plist",
+          pid: 7,
+        }),
+    ],
+    ["daemons directory plist", (f) => writeFileSync(f.installed, "<plist/>")],
+  ];
+  for (const [direction, artifacts] of [
+    ["daemon", agentArtifacts],
+    ["agent", daemonArtifacts],
+  ] as const)
+    for (const [name, arrange] of artifacts) {
+      const f = await setup(t);
+      await arrange(f);
+      const before = stateTrees(f);
+      f.launchd.calls = [];
+      f.launchd.fetched = [];
+      const result =
+        direction === "daemon" ? await f.installDaemon() : await f.install();
+      const label = `${direction} install over ${name}`;
+      assert.equal(result.code, 1, label);
+      const report = JSON.parse(result.stderr);
+      assert.equal(report.stage, "preflight", label);
+      assert.match(
+        report.error,
+        new RegExp(
+          `already present in ${direction === "daemon" ? "agent" : "daemon"} mode; run .ensemble service uninstall`,
+        ),
+        label,
+      );
+      assert.deepEqual(stateTrees(f), before, label);
+      assert.deepEqual(f.launchd.mutations(), [], label);
+      assert.deepEqual(f.launchd.fetched, [], label);
+    }
+});
+
+test("daemon mode uninstall prints the sudo steps until the job and plist are gone, then removes the record", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  const bootout = `sudo /bin/launchctl bootout system/${f.options.label}`;
+  const remove = `sudo /bin/rm -f ${quoted(f.installed)}`;
+
+  f.launchd.calls = [];
+  let result = await f.uninstall();
+  assert.equal(result.code, 0, result.stderr);
+  let output = JSON.parse(result.stdout);
+  assert.equal(output.mode, "daemon");
+  assert.equal(output.complete, false);
+  assert.deepEqual(output.steps, [bootout, remove]);
+  assert.match(result.stderr, /ensemble service uninstall` again/);
+  assert.equal(existsSync(f.recordPath), true);
+  assert.equal(existsSync(f.staged), true);
+  assert.deepEqual(f.launchd.mutations(), []);
+
+  // Only the plist is left: only its removal is printed.
+  f.launchd.systemJobs.clear();
+  output = JSON.parse((await f.uninstall()).stdout);
+  assert.equal(output.complete, false);
+  assert.deepEqual(output.steps, [remove]);
+
+  rmSync(f.installed);
+  result = await f.uninstall();
+  assert.equal(result.code, 0, result.stderr);
+  output = JSON.parse(result.stdout);
+  assert.equal(output.complete, true);
+  assert.equal("steps" in output, false);
+  assert.equal(existsSync(f.recordPath), false);
+  assert.equal(existsSync(f.staged), false);
+  assert.deepEqual(f.launchd.mutations(), []);
+  assert.deepEqual(readdirSync(join(f.stateDir, "launchd")), []);
+
+  // Nothing installed any more.
+  assert.equal(JSON.parse((await f.uninstall()).stdout).installed, false);
+});
+
+test("daemon mode uninstall refuses daemon artifacts it does not own", async (t) => {
+  const cases: [string, (f: Fixture) => unknown][] = [
+    [
+      "a system job without a record",
+      (f) =>
+        f.launchd.systemJobs.set(f.options.label, {
+          path: f.installed,
+          pid: 7,
+        }),
+    ],
+    [
+      "a daemons directory plist without a record",
+      (f) => writeFileSync(f.installed, "<plist/>"),
+    ],
+  ];
+  for (const [name, arrange] of cases) {
+    const f = await setup(t);
+    arrange(f);
+    const before = stateTrees(f);
+    const jobs = f.launchd.systemJobs.size;
+    const result = await f.uninstall();
+    assert.equal(result.code, 1, name);
+    assert.match(
+      JSON.parse(result.stderr).error,
+      /not created by this installation/,
+    );
+    assert.deepEqual(stateTrees(f), before, name);
+    assert.equal(f.launchd.systemJobs.size, jobs, name);
+    assert.deepEqual(f.launchd.mutations(), [], name);
+  }
+
+  // With a record, a plist or job that differs from it is not ours either.
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  writeFileSync(f.installed, "<plist>other</plist>");
+  const before = stateTrees(f);
+  const result = await f.uninstall();
+  assert.equal(result.code, 1);
+  assert.match(
+    JSON.parse(result.stderr).error,
+    /does not match the install record/,
+  );
+  assert.deepEqual(stateTrees(f), before);
+});
+
+test("daemon mode switch-back restores the LaunchAgent, and the LaunchAgent switches to daemon", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
+
+  const agent = await f.install();
+  assert.equal(agent.code, 0, agent.stderr);
+  assert.equal(JSON.parse(agent.stdout).mode, "agent");
+  assert.deepEqual(f.launchd.mutations(), [
+    ["bootstrap", `gui/${UID}`, f.activation],
+  ]);
+  assert.equal(existsSync(f.activation), true);
+  assert.equal(f.record().mode, "agent");
+  assert.equal(f.record().configuration.userName, undefined);
+
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal(existsSync(f.activation), false);
+  const daemon = await f.installDaemon();
+  assert.equal(daemon.code, 0, daemon.stderr);
+  assert.equal(f.record().mode, "daemon");
+  assert.equal(JSON.parse(daemon.stdout).started, false);
+});
+
+test("daemon mode upgrade refuses before stopping anything", async (t) => {
+  const f = await setup(t, true);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  const releaseB = release(f.stateDir, "0.2.0");
+  const reads: string[] = [];
+  const connection: OperatorConnection = {
+    origin: async () => {
+      reads.push("origin");
+      return "http://127.0.0.1:1";
+    },
+    readiness: async () => {
+      reads.push("readiness");
+      return [];
+    },
+  };
+  const bytes = readFileSync(f.recordPath);
+  f.launchd.calls = [];
+  const { out, io } = capture();
+  const code = await upgradeService(
+    f.options,
+    releaseB,
+    connection,
+    f.launchd.host(),
+    io,
+  );
+  assert.equal(code, 1);
+  const report = JSON.parse(out.stderr);
+  assert.equal(report.stage, "preflight");
+  assert.equal(report.jobStopped, null);
+  assert.match(report.error, /switch back first/);
+  assert.match(report.error, /service install --mode daemon/);
+  assert.deepEqual(f.launchd.calls, []);
+  assert.deepEqual(reads, []);
+  assert.deepEqual(readdirSync(f.snapshots), []);
+  assert.deepEqual(readFileSync(f.recordPath), bytes);
+  assert.equal(f.launchd.systemJobs.size, 1);
+});
+
+test("daemon mode root refusal changes nothing", async (t) => {
+  const f = await setup(t);
+  f.launchd.overrides = { uid: 0 };
+  const before = stateTrees(f);
+  const unused: OperatorConnection = {
+    origin: async () => {
+      throw new Error("unused");
+    },
+    readiness: async () => {
+      throw new Error("unused");
+    },
+  };
+  const fresh = { ...f.options, stateDir: join(f.home, "fresh state") };
+  const tarball = join(f.home, "release.tgz");
+  writeFileSync(tarball, "");
+  const runs: [
+    string,
+    (io: ReturnType<typeof capture>["io"]) => Promise<number>,
+  ][] = [
+    [
+      "agent install",
+      (io) => installService(f.options, f.releaseA, f.launchd.host(), io),
+    ],
+    ["daemon install", (io) => f.installDaemonWith(io)],
+    [
+      "daemon install of a tarball into a new state directory",
+      (io) =>
+        installService(fresh, f.releaseA, f.launchd.host(), io, {
+          tarball,
+          connection: "local",
+          open: false,
+          mode: "daemon",
+        }),
+    ],
+    [
+      "upgrade",
+      (io) =>
+        upgradeService(f.options, f.releaseA, unused, f.launchd.host(), io),
+    ],
+    ["uninstall", (io) => uninstallService(f.options, f.launchd.host(), io)],
+  ];
+  for (const [name, run] of runs) {
+    const { out, io } = capture();
+    assert.equal(await run(io), 1, name);
+    const report = JSON.parse(out.stderr);
+    assert.equal(report.ok, false, name);
+    assert.equal(report.stage, "preflight", name);
+    assert.equal(report.error, ROOT_MESSAGE, name);
+    assert.equal(report.jobStopped, null, name);
+    assert.equal(out.stderr.includes(f.home), false, name);
+  }
+  assert.deepEqual(f.launchd.calls, []);
+  assert.deepEqual(stateTrees(f), before);
+  assert.equal(existsSync(fresh.stateDir), false);
+  assert.equal(f.launchd.ghProbes, 0);
+});
+
+test("daemon mode install warns about a keychain gh login without blocking", async (t) => {
+  for (const storage of ["file", "unknown"] as const) {
+    const f = await setup(t);
+    f.launchd.ghStorage = storage;
+    const result = await f.installDaemon();
+    assert.equal(result.code, 0, storage);
+    assert.equal(result.stderr.includes(KEYCHAIN_WARNING), false, storage);
+  }
+  const f = await setup(t);
+  f.launchd.ghStorage = "keyring";
+  const result = await f.installDaemon();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).started, false);
+  assert.ok(result.stderr.includes(KEYCHAIN_WARNING));
+  assert.match(
+    result.stderr,
+    /login keychain, which a LaunchDaemon cannot read before you log in/,
+  );
+  // A re-run warns too, and a failing probe never fails the install.
+  assert.ok((await f.installDaemon()).stderr.includes(KEYCHAIN_WARNING));
+  f.launchd.overrides = {
+    ghTokenStorage: async () => {
+      throw new Error("probe failed");
+    },
+  };
+  assert.equal((await f.installDaemon()).code, 0);
+
+  // The LaunchAgent never probes.
+  const agent = await setup(t);
+  agent.launchd.ghStorage = "keyring";
+  const installedAgent = await agent.install();
+  assert.equal(installedAgent.code, 0, installedAgent.stderr);
+  assert.equal(agent.launchd.ghProbes, 0);
+  assert.equal(installedAgent.stderr.includes(KEYCHAIN_WARNING), false);
+});
+
+test("daemon mode gh token storage probe never reads a token", async (t) => {
+  const gh = fakeStatusGh(t);
+  assert.equal(await ghTokenStorage(gh.env("keyring")), "keyring");
+  const lines = readFileSync(gh.log, "utf8").trim().split("\n");
+  assert.equal(
+    lines[0],
+    "auth status --active --hostname github.com --json hosts",
+  );
+  assert.deepEqual(lines.slice(1), [
+    "GH_TOKEN=unset",
+    "GITHUB_TOKEN=unset",
+    "GH_ENTERPRISE_TOKEN=unset",
+    "GITHUB_ENTERPRISE_TOKEN=unset",
+    "GH_PROMPT_DISABLED=1",
+  ]);
+  const everything = readFileSync(gh.log, "utf8");
+  assert.equal(/auth token|--show-token/.test(everything), false);
+
+  const outcomes: [string, GhTokenStorage][] = [
+    ["/Users/operator/.config/gh/hosts.yml", "file"],
+    ["GH_TOKEN", "unknown"],
+    ["", "unknown"],
+    ["fail", "unknown"],
+    ["garbage", "unknown"],
+  ];
+  for (const [mode, expected] of outcomes) {
+    const result = await ghTokenStorage(gh.env(mode));
+    assert.equal(result, expected, mode);
+    assert.equal(JSON.stringify(result).includes("canary"), false);
+  }
+  // No gh on the PATH is unknown, not an error.
+  assert.equal(
+    await ghTokenStorage({ ...gh.env("keyring"), PATH: "/nonexistent" }),
+    "unknown",
+  );
+});
+
+test("daemon mode CLI parses --mode only for install", async (t) => {
+  const f = await setup(t);
+  const fake = new FakeLaunchd(f.snapshots);
+  const { io } = capture();
+  const deps = { env: { HOME: f.home }, ...io } as unknown as CliDeps;
+  const unused = (): OperatorConnection => {
+    throw new Error("unused");
+  };
+  const run = (...argv: string[]) =>
+    serviceCommand(argv, deps, unused, () => fake.host());
+  for (const argv of [
+    ["install", "--mode", "daemon", "--token-file", "x"],
+    ["install", "--mode", "bogus"],
+    ["install", "--mode"],
+    ["upgrade", f.releaseA, "--mode", "daemon"],
+    ["upgrade", f.releaseA, "--mode", "agent"],
+    ["uninstall", "--mode", "daemon"],
+    ["uninstall", "--mode", "agent"],
+    ["init-auth", "--mode", "daemon"],
+  ])
+    assert.equal(await run(...argv), 2, argv.join(" "));
+  // Accepted: each then refuses (the checkout is not a release) before touching launchd.
+  for (const mode of ["agent", "daemon"])
+    assert.equal(await run("install", "--mode", mode), 1, mode);
+  assert.deepEqual(fake.mutations(), []);
+  assert.match(SERVICE_USAGE, /service install .*\[--mode agent\|daemon\]/);
+});
+
+test("daemon mode records are refused by a v1 reader without mode, and a record without mode is an agent", async (t) => {
+  const olderReader = z
+    .object({
+      schema: z.literal("ensemble.service/v1"),
+      label: z.string(),
+      version: z.string(),
+      plistSha256: z.string(),
+      configuration: z
+        .object({
+          label: z.string(),
+          nodePath: z.string(),
+          cliPath: z.string(),
+          dataDirectory: z.string(),
+          authFile: z.string(),
+          origin: z.string(),
+          port: z.number(),
+          stdoutPath: z.string(),
+          stderrPath: z.string(),
+        })
+        .strict(),
+    })
+    .strict();
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(olderReader.safeParse(f.record()).success, false);
+
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal((await f.install()).code, 0);
+  // An agent record is also written with its mode, so an older CLI changes nothing.
+  assert.equal(olderReader.safeParse(f.record()).success, false);
+  const { mode: _mode, ...legacy } = f.record();
+  writeFileSync(f.recordPath, JSON.stringify(legacy));
+  assert.equal(olderReader.safeParse(legacy).success, true);
+  const result = await f.uninstall();
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).mode, "agent");
+  assert.equal(existsSync(f.activation), false);
+
+  // A daemon record without its account, or an agent record with one, is invalid.
+  assert.equal((await f.installDaemon()).code, 0);
+  const record = f.record();
+  for (const broken of [
+    {
+      ...record,
+      configuration: { ...record.configuration, userName: undefined },
+    },
+    { ...record, mode: "agent" },
+  ]) {
+    writeFileSync(f.recordPath, JSON.stringify(broken));
+    const refused = await f.uninstall();
+    assert.equal(refused.code, 1);
+    assert.match(
+      JSON.parse(refused.stderr).error,
+      /install record .* is invalid/,
+    );
   }
 });

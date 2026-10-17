@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { readinessSchema } from "../../src/operator/readiness.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
+import { fakeStatusGh } from "../fixtures/fake-status-gh.js";
 import { startCliService } from "../fixtures/operator-cli.js";
 import { tmpdir } from "../fixtures/temp.js";
 
@@ -131,4 +140,117 @@ test("doctor exits 5 when the service is unavailable and takes no arguments", as
   assert.equal(down.json().error.code, "unavailable");
   const extra = await h.run(["doctor", "extra"]);
   assert.equal(extra.code, 2);
+});
+
+const WARNING = "gh auth login --insecure-storage";
+
+/** A temporary HOME, with a LaunchDaemon install record under the default state directory when asked. */
+function daemonHome(
+  t: Parameters<typeof harness>[0],
+  mode: "daemon" | "agent" | null,
+) {
+  const home = mkdtempSync(join(tmpdir(), "ensemble-doctor-home-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  if (mode) {
+    const launchd = join(
+      home,
+      "Library",
+      "Application Support",
+      "Ensemble",
+      "launchd",
+    );
+    mkdirSync(launchd, { recursive: true });
+    writeFileSync(
+      join(launchd, "local.ensemble.service.json"),
+      JSON.stringify({
+        schema: "ensemble.service/v1",
+        mode,
+        label: "local.ensemble.service",
+        version: "0.1.0",
+        plistSha256: "0".repeat(64),
+        configuration: {
+          label: "local.ensemble.service",
+          nodePath: "/n",
+          cliPath: "/c",
+          dataDirectory: "/d",
+          authFile: "/a",
+          origin: "http://127.0.0.1:8787",
+          port: 8787,
+          stdoutPath: "/o",
+          stderrPath: "/e",
+          ...(mode === "daemon" ? { userName: "operator", home } : {}),
+        },
+      }),
+    );
+  }
+  return home;
+}
+
+test("doctor daemon host warns about a keychain gh login on stderr only", async (t) => {
+  const s = await startCliService(t);
+  const read = await s.issue("read", "doctor");
+  const h = await loggedIn(t, s.origin, read.token);
+  const gh = fakeStatusGh(t);
+  const home = daemonHome(t, "daemon");
+  const env = {
+    ...gh.env("keyring"),
+    ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
+    HOME: home,
+  };
+  const result = await h.run(["doctor", "--output", "json"], { env });
+  assert.equal(result.code, 0, result.err);
+  const api = readinessSchema.parse(
+    await (await s.bearer(read.token, "/api/operator/readiness")).json(),
+  );
+  assert.deepEqual(result.json().data, api.data);
+  assert.ok(result.err.includes(WARNING));
+  assert.equal(result.out.includes(WARNING), false);
+  for (const text of [result.out, result.err])
+    assert.equal(text.includes("canary"), false);
+  const argv = readFileSync(gh.log, "utf8");
+  assert.equal(
+    argv.split("\n")[0],
+    "auth status --active --hostname github.com --json hosts",
+  );
+  assert.equal(/auth token|--show-token/.test(argv), false);
+});
+
+test("doctor daemon host stays silent without a daemon record or with a file login", async (t) => {
+  const s = await startCliService(t);
+  const read = await s.issue("read", "doctor");
+  const h = await loggedIn(t, s.origin, read.token);
+
+  const gh = fakeStatusGh(t);
+  const none = await h.run(["doctor", "--output", "json"], {
+    env: {
+      ...gh.env("keyring"),
+      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
+      HOME: daemonHome(t, null),
+    },
+  });
+  assert.equal(none.code, 0, none.err);
+  assert.equal(none.err.includes(WARNING), false);
+  assert.equal(existsSync(gh.log), false, "gh is never run without a record");
+
+  const agent = await h.run(["doctor", "--output", "json"], {
+    env: {
+      ...gh.env("keyring"),
+      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
+      HOME: daemonHome(t, "agent"),
+    },
+  });
+  assert.equal(agent.code, 0, agent.err);
+  assert.equal(agent.err.includes(WARNING), false);
+  assert.equal(existsSync(gh.log), false, "a LaunchAgent record never runs gh");
+
+  const file = await h.run(["doctor", "--output", "json"], {
+    env: {
+      ...gh.env("/Users/operator/.config/gh/hosts.yml"),
+      ENSEMBLE_CLI_CONFIG_DIR: h.configDir,
+      HOME: daemonHome(t, "daemon"),
+    },
+  });
+  assert.equal(file.code, 0, file.err);
+  assert.equal(file.err.includes(WARNING), false);
+  assert.equal(existsSync(gh.log), true, "gh ran for the daemon record");
 });
