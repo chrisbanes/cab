@@ -186,7 +186,6 @@ export function ImportPanel(
             await d.reconcile(client, session.csrfToken);
           else if (unusableNow) {
             // A new preview waits for a usable credential; the action beside it says why.
-            setRun({ version: at, ids: scope, refresh: "none" });
             return;
           } else if (d.phase !== "conflict" || d.credentialRefusal) {
             // A refused preview was never recorded, so it starts again under a fresh key.
@@ -373,7 +372,8 @@ export function ImportPanel(
                 for (const { d } of drafts)
                   if (d.phase === "conflict" && !d.credentialRefusal) d.purge();
                 p.refreshConfiguration();
-                setSettled((n) => n + 1);
+                // The control that had focus is gone; the heading is always there.
+                heading.current?.focus();
               },
             }}
           />
@@ -399,6 +399,11 @@ export function ImportPanel(
               </>
             }
           />
+        )}
+        {working && !(offered && !blocked) && (
+          <p className="body" role="status">
+            Refreshing from GitHub…
+          </p>
         )}
         {mine?.refresh === "failed" && (
           <ActionOutcome

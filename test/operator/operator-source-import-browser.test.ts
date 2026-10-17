@@ -614,8 +614,12 @@ test("Refresh again reports on the sources of the press it continues", async (_t
   const { page } = await start(journey);
   const seen = track(page);
   let lose = true;
+  const gate = hold();
   await page.route("**/api/operator/source-refresh", async (route) => {
-    if (!lose) return route.continue();
+    if (!lose) {
+      await gate.released;
+      return route.continue();
+    }
     lose = false;
     await route.fetch();
     await route.abort();
@@ -630,6 +634,9 @@ test("Refresh again reports on the sources of the press it continues", async (_t
     .getByText(/^Synced \d\d:\d\d/)
     .waitFor();
   await warning.getByRole("button", { name: "Refresh again" }).click();
+  // The retry's own progress is shown while it runs.
+  await page.getByText("Refreshing from GitHub…").waitFor();
+  gate.release();
   await page.getByRole("link", { name: "View imported tasks" }).waitFor();
   await outcomeMessages(page)
     .filter({ hasText: /^Previewed/ })
