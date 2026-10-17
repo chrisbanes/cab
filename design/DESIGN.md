@@ -2046,7 +2046,9 @@ as follows:
   delivery", bound pull request, checks, feedback, blockers, actions and "Refresh
   delivery status") shows only for a task with a GitHub source, a linked project
   repository (`repositoryLinked` on the task read) or a bound pull request, and the
-  heading is "Changes" otherwise. Exactly one sentence sits above the reply box,
+  heading is "Changes" otherwise. A settled refresh result leaves with the
+  controls; the "Check whether it saved" for a refresh whose response was lost
+  stays until it is resolved, then goes. Exactly one sentence sits above the reply box,
   for the selected destination: the lead's resume, receive or unavailable line, "This
   project has no lead to message yet.", or the comment policy (a reason from the
   server, or what posting does). The "Immutable reference" line sits below the box.

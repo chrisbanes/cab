@@ -2772,3 +2772,138 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
   }
   await page.unrouteAll({ behavior: "wait" });
 });
+
+test("Delivery feedback leaves with the delivery controls and returns with them", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "Local task",
+    "Write the guide.",
+  );
+  a.result("Guide drafted");
+  setLinkedRepository(fixture.f, a.projectId, true);
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page.getByLabel("Editable reply").fill("Keep this draft");
+  await openTaskTab(page, "Changes");
+  const changes = page.locator("#changes");
+  const refresh = changes.getByRole("button", {
+    name: "Refresh delivery status",
+  });
+  await refresh.click();
+  await changes
+    .getByText("Delivery status refreshed.", { exact: true })
+    .waitFor();
+
+  // The last repository goes away: the settled feedback leaves with the control.
+  setLinkedRepository(fixture.f, a.projectId, false);
+  await refreshTask(page, a.taskId);
+  await refresh.waitFor({ state: "detached" });
+  assert.equal(await changes.getByText(/Delivery status refreshed/).count(), 0);
+  assert.equal(await changes.locator("h3").first().innerText(), "Changes");
+
+  // It comes back with the repository, and the draft was never touched.
+  setLinkedRepository(fixture.f, a.projectId, true);
+  await refreshTask(page, a.taskId);
+  await refresh.waitFor();
+  await openTaskTab(page, "Overview");
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Keep this draft",
+  );
+});
+
+test("An unconfirmed delivery refresh stays checkable after delivery stops applying", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "Local task",
+    "Write the guide.",
+  );
+  a.result("Guide drafted");
+  setLinkedRepository(fixture.f, a.projectId, true);
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await openTaskTab(page, "Changes");
+  const bodies: { key?: string; type?: string }[] = [];
+  let lost = true;
+  await page.route("**/api/operator/commands", async (route) => {
+    const body = route.request().postDataJSON() as {
+      key?: string;
+      type?: string;
+    };
+    if (body.type !== "delivery.refresh") return route.fallback();
+    bodies.push(body);
+    if (lost) {
+      lost = false;
+      await route.fetch();
+      await route.abort("connectionreset");
+    } else await route.continue();
+  });
+  const changes = page.locator("#changes");
+  await changes
+    .getByRole("button", { name: "Refresh delivery status" })
+    .click();
+  const check = changes.getByRole("button", { name: "Check whether it saved" });
+  await check.waitFor();
+
+  // Delivery stops applying while the outcome is unknown: the check stays, the control goes.
+  setLinkedRepository(fixture.f, a.projectId, false);
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByRole("button", { name: "Refresh delivery status" })
+    .waitFor({ state: "detached" });
+  await check.waitFor();
+  await changes.getByText(/We couldn't confirm/).waitFor();
+
+  // Checking replays the same request; once settled, no delivery feedback remains.
+  await check.click();
+  await check.waitFor({ state: "detached" });
+  assert.equal(await changes.getByText(/We couldn't confirm/).count(), 0);
+  assert.equal(await changes.getByText(/Delivery status refreshed/).count(), 0);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0]!.key, bodies[1]!.key);
+});
+
+test("A task that loses its GitHub source mid-edit sends the draft to the lead, visibly", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, "allow");
+  const { web, page, commands } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await page.getByRole("button", { name: "Post GitHub comment" }).click();
+  await page.getByLabel("Editable reply").fill("Exact comment body");
+  await page
+    .getByRole("button", { name: "Post comment", exact: true })
+    .waitFor();
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.source = null;
+      await route.fulfill({ response, json });
+    },
+  );
+  await refreshTask(page, a.taskId);
+  // The destination, its sentence and the send label all say lead; nothing is posted.
+  await page.getByRole("button", { name: "Send to task lead" }).waitFor();
+  assert.equal(
+    await page.getByRole("button", { name: "Post comment" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByRole("button", { name: "Post GitHub comment" }).count(),
+    0,
+  );
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  assert.deepEqual(await sentencesAboveReply(page), [
+    `P:${leadReceivesNotice("Task lead")}`,
+  ]);
+  assert.deepEqual(commands, []);
+  await page.unrouteAll({ behavior: "wait" });
+});

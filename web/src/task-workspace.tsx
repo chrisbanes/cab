@@ -1965,16 +1965,18 @@ export function TaskWorkspace({
               })
             }
             refreshDisabled={Boolean(unconfirmed)}
-            unconfirmed={
-              unconfirmedCheck("delivery.refresh") ||
-              (!pending && !state.uncertain && deliveryOutcome && (
+            unconfirmed={unconfirmedCheck("delivery.refresh")}
+            outcome={
+              !pending &&
+              !state.uncertain &&
+              deliveryOutcome && (
                 <ActionOutcome
                   key={`${deliveryOutcome.tone}:${deliveryOutcome.message}`}
                   tone={deliveryOutcome.tone}
                   message={deliveryOutcome.message}
                   details={deliveryOutcome.details}
                 />
-              ))
+              )
             }
           />
         </TabPanel>
@@ -2638,6 +2640,7 @@ function Changes({
   refresh,
   refreshDisabled,
   unconfirmed,
+  outcome,
 }: {
   data: TaskRead["data"];
   selected:
@@ -2650,8 +2653,10 @@ function Changes({
   changed: () => void;
   refresh: () => void;
   refreshDisabled: boolean;
-  /** The check for a refresh whose response was lost, shown beside its button. */
+  /** The check for a refresh whose response was lost; it stays until resolved, even once delivery stops applying. */
   unconfirmed: ReactNode;
+  /** The last settled refresh's outcome; it leaves with the delivery controls. */
+  outcome: ReactNode;
 }) {
   const changes = selected?.metadata.changes,
     d = data.delivery,
@@ -2759,7 +2764,7 @@ function Changes({
           Refresh delivery status
         </Button>
       )}
-      {unconfirmed}
+      {unconfirmed || (delivers && outcome)}
       {delivers && (
         <p>
           Refresh reads provider state; it does not post, approve, merge or
