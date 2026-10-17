@@ -474,8 +474,8 @@ unavailable") and an Inbox link, no question text, task content, error text or c
 Opening it shows that request after sign-in. It never answers or approves anything.
 
 - **Key.** The operator process creates `STATE/auth/operator-push-vapid.json` (mode `0600`,
-  owner-only, beside the operator auth file) when it first starts, for a fresh install, an
-  upgraded install or a LaunchDaemon install alike; it needs no plist change. A key file
+  owner-only, beside the operator auth file) when it first starts, for a fresh or an
+  upgraded install; it needs no plist change. A key file
   that is a symbolic link, owned by another user, readable by others, oversized or corrupt
   is refused: Settings → Notifications then reads "Unavailable on the service" and the rest
   of the operator UI keeps running. The private key lives only in this file, never in the

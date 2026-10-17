@@ -243,13 +243,18 @@ async function readKeyFile(file: string): Promise<string | undefined> {
 }
 
 /** The link() step creates the final name without replacing a file a racing creator made. */
-async function createKeyFile(file: string): Promise<void> {
+async function createKeyFile(
+  file: string,
+  privateKeySource: () => Buffer,
+): Promise<void> {
+  // The full 32-byte scalar is kept as generated: ECDH.getPrivateKey() drops leading zero bytes.
+  const privateKey = privateKeySource();
   const ecdh = createECDH("prime256v1");
-  ecdh.generateKeys();
+  ecdh.setPrivateKey(privateKey);
   const contents = `${JSON.stringify({
     format: KEY_FILE_FORMAT,
     version: 1,
-    privateKey: b64(ecdh.getPrivateKey()),
+    privateKey: b64(privateKey),
     publicKey: b64(ecdh.getPublicKey()),
   })}\n`;
   const temporary = join(
@@ -277,12 +282,15 @@ async function createKeyFile(file: string): Promise<void> {
  * The VAPID key pair for this service. It lives only in this owner-only file; an unsafe, corrupt
  * or unreadable file fails closed with a fixed error that names neither its contents nor a key.
  */
-export async function loadOrCreateVapidKeys(file: string): Promise<VapidKeys> {
+export async function loadOrCreateVapidKeys(
+  file: string,
+  privateKeySource: () => Buffer = () => randomBytes(32),
+): Promise<VapidKeys> {
   try {
     if (!isAbsolute(file)) throw new PushError("unavailable");
     let contents = await readKeyFile(file);
     if (contents === undefined) {
-      await createKeyFile(file);
+      await createKeyFile(file, privateKeySource);
       contents = await readKeyFile(file);
     }
     if (contents === undefined) throw new PushError("unavailable");

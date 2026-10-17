@@ -258,6 +258,26 @@ test("the VAPID key file is created owner-only and reused, including by concurre
   }
 });
 
+test("a private key with leading zero bytes is created, stored in full and loaded again", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ensemble-vapid-"));
+  try {
+    await chmod(directory, 0o700);
+    const file = join(directory, "vapid.json");
+    const scalar = Buffer.alloc(32, 0x11);
+    scalar[0] = 0;
+    scalar[1] = 0;
+    const created = await loadOrCreateVapidKeys(file, () => scalar);
+    const stored = JSON.parse(await readFile(file, "utf8"));
+    assert.equal(Buffer.from(stored.privateKey, "base64url").length, 32);
+    // A second process reads what the first wrote.
+    const loaded = await loadOrCreateVapidKeys(file);
+    assert.equal(loaded.publicKey, created.publicKey);
+    assert.equal(loaded.keyId, created.keyId);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("an unsafe VAPID key file fails closed without revealing its contents", async () => {
   await unsafe(async (file) => {
     await loadOrCreateVapidKeys(file);
