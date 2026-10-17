@@ -277,9 +277,10 @@ from the Codex runtime after the next restart.
 Each project's GitHub source configuration chooses its own `gh:github.com` or
 `env:NAME` reference. Discovery configuration does not select a source credential
 or provide a fallback. When guided setup detects a signed-in GitHub CLI account in
-the source's candidate environment, it shows the account and records
-`gh:github.com` for the new project's source; otherwise the source starts without a
-credential and the ready check says so. Change or Clear it in the project's GitHub
+the source's candidate environment and the new project has a repository, it shows
+the account and records `gh:github.com` for the new project's source; otherwise the
+source starts without a credential (a project with a repository says so in its ready
+check; a repository-free project shows none). Change or Clear it in the project's GitHub
 source settings; a cleared source stays cleared. Configure the source in project settings, preview its
 current version to activate it, then refresh observations to import tasks.
 Preview activation and successful import are separate evidence.

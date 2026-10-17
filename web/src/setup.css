@@ -1,7 +1,10 @@
-/* Guided project setup and folder picker (frames 115–117b and 131). */
+/* Guided project setup and folder picker (frames 115–117c and 131). Steps 1, 2 and 3 share
+   one column; the aside follows them in the DOM and sits beside them from 1121px, as in
+   the composer. The DOM sequence is the visual sequence; nothing here reorders. */
 
 .setup-grid {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-12);
   align-items: start;
   min-width: 0;
@@ -9,8 +12,24 @@
 
 @media (min-width: 1121px) {
   .setup-grid {
-    grid-template-columns: minmax(0, 1.06fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+    column-gap: var(--space-24);
   }
+}
+
+/* The rejection or unknown outcome heads the form; the bar closes it. */
+.setup-outcome,
+.setup-submit {
+  grid-column: 1 / -1;
+}
+
+.setup-outcome:empty {
+  display: none;
+}
+
+/* The collapsed step 3 has nothing inside; revealed content keeps the panel's rhythm. */
+.setup-repositories-content {
+  display: contents;
 }
 
 .setup-field-stack {
@@ -72,10 +91,6 @@
 
 .setup-explainer li::before {
   content: "· ";
-}
-
-.setup-submit {
-  flex-wrap: wrap;
 }
 
 .setup-inline-actions {
@@ -168,19 +183,46 @@
   }
 }
 
-/* Create and Cancel share a row; the outcome notices follow it at full width. */
+/* The sticky bar follows .composer-actions: the note (or the reason Create is blocked),
+   Cancel, then Create. It bleeds into the page padding. */
 .setup-submit {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: var(--space-12);
+  padding: var(--space-16) var(--space-20)
+    calc(var(--space-16) + var(--operator-safe-area-inset-bottom));
+  margin: 0 calc(-1 * var(--space-20));
+  border-top: 1px solid var(--border);
+  background: var(--surface);
 }
 
-.setup-submit > .settings-actions {
-  margin-block: 0;
+.setup-submit > p {
+  flex: 1 1 16rem;
+  margin: 0;
 }
 
-.setup-submit > [role="alert"],
-.setup-submit > [role="status"] {
-  flex-basis: 100%;
-  order: 2;
+.setup-submit [aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 759px) {
+  /* Cancel and Create share one row under the full-width note. */
+  .setup-submit {
+    align-items: stretch;
+  }
+
+  .setup-submit > p {
+    flex-basis: 100%;
+  }
+
+  .setup-submit > :is(a, button) {
+    flex: 1 1 0;
+  }
 }
 
 .setup-ready,

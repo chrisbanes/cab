@@ -17,6 +17,7 @@ import { settingsHeader } from "../../web/src/settings-view.js";
 import {
   blankRow,
   buildProjectCreate,
+  createHold,
   duplicateRows,
   emptyRow,
   folderCaption,
@@ -25,6 +26,7 @@ import {
   pickerStart,
   type ReadinessRead,
   readyCheckItems,
+  type SetupDraftPhase,
   rowsFromDraft,
   rowsToDraft,
   setupSourceCredentialCopy,
@@ -245,6 +247,16 @@ test("setup headers follow the first-run and settings frames", () => {
       (c) => c.label,
     ),
     ["Settings", "Projects", "Create project"],
+  );
+  // Setup latches the heading for the visit, so the project it creates keeps it.
+  assert.equal(
+    settingsHeader("/app/settings/projects/new", "", workspace(1), true)?.title,
+    "Set up your first project",
+  );
+  assert.equal(
+    settingsHeader("/app/settings/projects/new", "", workspace(0), false)
+      ?.title,
+    "Create project",
   );
 });
 
@@ -596,17 +608,25 @@ test("the ready check judges the lead's own model and effort against the support
   );
 });
 
-test("setup sends the source credential only for a signed-in source login", () => {
-  const rows = [emptyRow("discovered")];
-  const signedIn = buildProjectCreate(values, rows, "", {
-    state: "signed-in",
-    login: "octo",
-  }).command;
+test("setup sends the source credential only for a signed-in login and at least one repository", () => {
+  const rows = [
+    {
+      ...typeRepository(emptyRow("typed"), "acme/atlas"),
+      ref: "main",
+      path: "~/src/atlas",
+    },
+  ];
+  const login = { state: "signed-in" as const, login: "octo" };
+  const signedIn = buildProjectCreate(values, rows, "", login).command;
   assert.equal(
     (signedIn as { sourceCredentialRef?: string }).sourceCredentialRef,
     "gh:github.com",
   );
   assert.equal(operatorCommandSchema.safeParse(signedIn).success, true);
+  // A repository-free project has no source to use the login, so none is recorded.
+  const free = buildProjectCreate(values, [emptyRow("discovered")], "", login);
+  assert.equal("sourceCredentialRef" in free.command, false);
+  assert.equal(operatorCommandSchema.safeParse(free.command).success, true);
   for (const gh of [
     undefined,
     null,
@@ -695,4 +715,70 @@ test("the ready check states the recorded source credential with a settings link
     assert.deepEqual(sourceCredentialLine(id, unavailable), {
       text: "GitHub source credential: status unavailable.",
     });
+});
+
+test("Create is held or actionable by one function of the project and the lead profile", () => {
+  const phases: SetupDraftPhase[] = [
+    "editing",
+    "pending",
+    "rejected",
+    "conflict",
+    "unknown",
+    "recorded",
+  ];
+  const projectHold: Record<SetupDraftPhase, string | null> = {
+    editing: null,
+    rejected: null,
+    conflict: null,
+    pending: "Creating the project…",
+    unknown: "Check whether the project was created first.",
+    recorded: "The project is already created.",
+  };
+  const profileHold = (phase: SetupDraftPhase, name: string) =>
+    phase === "pending"
+      ? "Wait for the lead profile to be created."
+      : phase === "unknown"
+        ? "Check whether the lead profile was saved first."
+        : phase !== "recorded" && name.trim()
+          ? "Create the lead profile first, or clear its name."
+          : null;
+  for (const project of phases)
+    for (const profile of phases)
+      for (const profileName of ["", "  ", "Ada"])
+        for (const profileForm of [false, true]) {
+          const expected =
+            projectHold[project] ??
+            (profileForm ? profileHold(profile, profileName) : null);
+          assert.equal(
+            createHold({ project, profileForm, profile, profileName }),
+            expected,
+            `${project} / form ${profileForm} / ${profile} / "${profileName}"`,
+          );
+        }
+  // Spot checks of the cells that matter, stated outright rather than derived.
+  const held = (
+    project: SetupDraftPhase,
+    profile: SetupDraftPhase,
+    profileName: string,
+  ) => createHold({ project, profileForm: true, profile, profileName });
+  // A refused profile stays a hold when it is unedited and once it is edited: the phase is
+  // `rejected` in both, so only the typed content can decide.
+  assert.match(
+    held("editing", "rejected", "x".repeat(513)) ?? "",
+    /Create the lead profile first/,
+  );
+  assert.match(
+    held("editing", "rejected", "Ada") ?? "",
+    /Create the lead profile first/,
+  );
+  assert.equal(held("editing", "rejected", ""), null);
+  assert.equal(held("editing", "recorded", "Ada"), null);
+  // A refused project can be edited and sent again.
+  assert.equal(held("rejected", "editing", ""), null);
+  assert.equal(held("conflict", "editing", ""), null);
+  // The project outcome outranks the profile.
+  assert.equal(
+    held("unknown", "pending", "Ada"),
+    "Check whether the project was created first.",
+  );
 });
