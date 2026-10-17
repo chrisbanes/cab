@@ -1211,7 +1211,7 @@ below this summary. Material uncertainty is never hidden in the disclosure.
   PDF has page navigation and fit/zoom. Unsupported/binary, oversized, excluded,
   changing, failed and missing states explain what is and is not available.
   There are no editing, terminal, download or export actions.
-- Show ignored / Hide ignored is reversible and initially off. Sensitive
+- Show ignored files (an explorer-footer checkbox) is reversible and initially off. Sensitive
   exclusions apply to lists, direct previews, captures and retained evidence in
   both states. Access failures use non-leaking explanations. Unsafe paths,
   symlink escapes, cross-task anchors and inconsistent reads cannot yield a
@@ -1367,7 +1367,13 @@ Long filenames elide in the narrow rail; hover/focus discloses the exact path,
 and the selected file's breadcrumb/provenance exposes it without ambiguity.
 Screen 78 (`78-files-current-observation`) is drawn with the explorer labels `CommandMenu.tsx` and
 `CommandMenu.test…` wrapped onto two lines; the implementation uses single-line
-elision with exact-path disclosure as specified here. Tabs open bounded read-only
+elision with exact-path disclosure as specified here. The implemented explorer opens at a
+repository root and is one level deep rather than the drawn tree (Right and Left enter and
+leave a folder); it marks changed files A, M, D, R or T from the Branch comparison the Changes
+tab has already read, gives folders that hold changes a muted dot and lists deleted files as
+inert D rows, keeps one toolbar Refresh, puts Show ignored files in the explorer footer as a
+checkbox beside "Sensitive exclusions still apply.", and moves the file's hash and read times
+under a collapsed Provenance & limits disclosure. Tabs open bounded read-only
 previews, not editable buffers. Closing a tab only closes its preview; it cannot
 remove a draft comment. Source is unwrapped with horizontal scrolling and sticky
 gutters; Wrap is a presentation toggle that keeps logical line numbers. The editor

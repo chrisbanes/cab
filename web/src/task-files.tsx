@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -15,7 +16,7 @@ import {
 import type { OperatorClient } from "./api.js";
 import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
 import { comparisonReadKey } from "./comparison-read-match.js";
-import { Button, StatusBadge } from "./components.js";
+import { Button } from "./components.js";
 import {
   changeLetter,
   changeMarkers,
@@ -795,24 +796,26 @@ export function FilePreviewBody({
               />
               {comment && (
                 <>
-                  <p className="muted" aria-live="polite">
-                    {tab.selectedRange
-                      ? `Selected lines ${tab.selectedRange.startLine}–${tab.selectedRange.endLine}`
-                      : "Select a line, or use Set start and Set end for a range, to comment."}
-                  </p>
-                  <CommentAction
-                    originKey={comment.originKey}
-                    label={comment.label}
-                    anchor={
-                      tab.selectedRange
-                        ? comment.anchorFor(
-                            tab.selectedRange.startLine,
-                            tab.selectedRange.endLine,
-                            data.sha256,
-                          )
-                        : null
-                    }
-                  />
+                  <div className="task-actions file-comment-actions">
+                    <p className="muted" aria-live="polite">
+                      {tab.selectedRange
+                        ? `Selected lines ${tab.selectedRange.startLine}–${tab.selectedRange.endLine}`
+                        : "Select a line, or use Set start and Set end for a range, to comment."}
+                    </p>
+                    <CommentAction
+                      originKey={comment.originKey}
+                      label={comment.label}
+                      anchor={
+                        tab.selectedRange
+                          ? comment.anchorFor(
+                              tab.selectedRange.startLine,
+                              tab.selectedRange.endLine,
+                              data.sha256,
+                            )
+                          : null
+                      }
+                    />
+                  </div>
                   <ReviewComposer originKey={comment.originKey} />
                 </>
               )}
@@ -1125,7 +1128,27 @@ export function TaskFiles({
             ),
         )
       : [];
+  const refreshing =
+    directoryResource.state.pending ||
+    Boolean(activeTab && previewResource.state.pending);
   const currentPath = pathLabel(state.scope, state.path);
+  const locationCrumbs = [
+    { label: "Workspace", scope: { kind: "workspace" } as const, path: [] },
+    ...(state.scope.kind === "repository"
+      ? [
+          {
+            label: `Repository ${state.scope.repositoryId}`,
+            scope: state.scope,
+            path: [] as string[],
+          },
+        ]
+      : []),
+    ...state.path.map((part, index) => ({
+      label: part,
+      scope: state.scope,
+      path: state.path.slice(0, index + 1),
+    })),
+  ];
   const selectedLabel = activeTab
     ? pathLabel(activeTab.scope, activeTab.path)
     : null;
@@ -1166,36 +1189,14 @@ export function TaskFiles({
       <div className="task-actions file-toolbar">
         <Button
           variant="secondary"
-          onClick={() => navigate({ kind: "workspace" }, [])}
-          disabled={state.scope.kind === "workspace" && state.path.length === 0}
-        >
-          Workspace root
-        </Button>
-        {state.scope.kind === "repository" && (
-          <Button
-            variant="secondary"
-            onClick={() => navigate(state.scope, [])}
-            disabled={state.path.length === 0}
-          >
-            Repository root
-          </Button>
-        )}
-        <Button
-          variant="secondary"
-          onClick={() => directoryResource.refresh()}
-          disabled={directoryResource.state.pending}
-        >
-          {directoryResource.state.pending ? "Refreshing…" : "Refresh files"}
-        </Button>
-        <Button
-          variant="secondary"
-          aria-pressed={state.showIgnored}
+          disabled={refreshing}
+          aria-busy={refreshing}
           onClick={() => {
-            state.showIgnored = !state.showIgnored;
-            changed();
+            directoryResource.refresh();
+            if (activeTab) previewResource.refresh();
           }}
         >
-          {state.showIgnored ? "Hide ignored files" : "Show ignored files"}
+          Refresh
         </Button>
       </div>
       {directoryResource.state.error && (
@@ -1214,11 +1215,6 @@ export function TaskFiles({
           This directory listing is truncated at the service entry bound.
         </p>
       )}
-      {directory && directory.ignoreStatus === "incomplete" && (
-        <p role="status">
-          Ignore status is incomplete, so some ignored files may be omitted.
-        </p>
-      )}
       <div className="file-workbench" data-mobile-view={state.mobileView}>
         <aside
           className="file-rail"
@@ -1226,7 +1222,29 @@ export function TaskFiles({
           aria-label="File explorer"
         >
           <h4>Explorer</h4>
-          <p className="file-current-location">{currentPath}</p>
+          <nav className="file-location" aria-label="Explorer location">
+            {locationCrumbs.map((crumb, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: breadcrumb depth is its identity; labels can repeat.
+              <Fragment key={`${index}:${crumb.label}`}>
+                {index > 0 && <span aria-hidden="true">›</span>}
+                {index === locationCrumbs.length - 1 ? (
+                  <span
+                    className="file-location-current"
+                    aria-current="location"
+                  >
+                    {crumb.label}
+                  </span>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    onClick={() => navigate(crumb.scope, crumb.path)}
+                  >
+                    {crumb.label}
+                  </Button>
+                )}
+              </Fragment>
+            ))}
+          </nav>
           {markers && (
             <p className="file-observation">
               Changes marked from the Branch comparison
@@ -1419,6 +1437,27 @@ export function TaskFiles({
                 : "Loading this location…"}
             </p>
           )}
+          <div className="file-rail-footer">
+            <label className="check-field">
+              <input
+                type="checkbox"
+                className="native-check"
+                checked={state.showIgnored}
+                onChange={(event) => {
+                  state.showIgnored = event.target.checked;
+                  changed();
+                }}
+              />
+              Show ignored files
+            </label>
+            <p className="muted">Sensitive exclusions still apply.</p>
+            {directory?.ignoreStatus === "incomplete" && (
+              <p role="status">
+                Ignore status is incomplete, so some ignored files may be
+                omitted.
+              </p>
+            )}
+          </div>
         </aside>
         <div
           className="file-reading-area"
@@ -1574,24 +1613,11 @@ export function TaskFiles({
                     }}
                   />
                 )}
-                <Button
-                  className="file-refresh-preview"
-                  variant="secondary"
-                  disabled={previewResource.state.pending}
-                  onClick={() => previewResource.refresh()}
-                >
-                  {previewResource.state.pending
-                    ? "Refreshing selected file…"
-                    : "Refresh selected file"}
-                </Button>
               </div>
             </div>
           )}
         </div>
       </div>
-      <StatusBadge>
-        {directory?.ignoreStatus ?? "loading"} ignore status
-      </StatusBadge>
     </section>
   );
 }

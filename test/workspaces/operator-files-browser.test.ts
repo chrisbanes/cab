@@ -132,6 +132,16 @@ function sourceRepository(
   return path;
 }
 
+/** The Workspace crumb of whichever location trail is on screen: the explorer's, or the open file's on a phone. */
+const workspaceRoot = (page: Page) =>
+  page
+    .getByRole("tabpanel", { name: "Files" })
+    .getByRole("button", { name: "Workspace", exact: true })
+    .first();
+
+const focusedEntry = (page: Page) =>
+  page.evaluate(() => document.activeElement?.classList.contains("file-entry"));
+
 function guideMarkdown(version: string) {
   const longBody = Array.from(
     { length: 72 },
@@ -476,9 +486,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     ),
     false,
   );
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   const alphaRootButton = page.getByRole("button", {
     name: /alpha, repository, full path Repository alpha/,
   });
@@ -766,9 +774,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
       url.searchParams.get("path") === "guide.md"
     );
   });
-  await page
-    .getByRole("button", { name: "Refresh selected file", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   const refreshedPayload = (await (await refreshResponse).json()) as {
     data: { state: string; preview?: { text?: string; sha256?: string } };
   };
@@ -851,13 +857,22 @@ test("production Files keeps scoped previews stable, inert and navigable across 
           : null,
       };
     });
+  // Read deep in the file, as before, when the old file-level Refresh sat under the text.
+  await previewScroll.evaluate((element) =>
+    element.scrollTo(0, element.scrollHeight),
+  );
+  await page.waitForFunction(() => {
+    const element = document.querySelector(".file-preview-scroll");
+    return (
+      element !== null &&
+      element.scrollTop + element.clientHeight >= element.scrollHeight - 1
+    );
+  });
   const beforeFailedRefresh = await inspectReadingArea();
   const scrollBeforeFailedRefresh = beforeFailedRefresh.scrollTop;
   expected503Window = true;
   expected503WindowStartedAt = Date.now();
-  await page
-    .getByRole("button", { name: "Refresh selected file", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await failureRequestSeen;
   const afterClickBeforeResponse = await inspectReadingArea();
   _t.diagnostic(
@@ -925,9 +940,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   const betaHash = createHash("sha256")
     .update("BETA_ONLY repository content\n")
     .digest("hex");
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /beta, repository, full path Repository beta/,
@@ -954,9 +967,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .waitFor({ state: "attached" });
   const betaReads = previewPaths.filter((path) => path === "beta.txt").length;
 
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /alpha, repository, full path Repository alpha/,
@@ -1007,9 +1018,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     betaReads,
   );
 
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /alpha, repository, full path Repository alpha/,
@@ -1049,9 +1058,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     0,
   );
 
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /alpha, repository, full path Repository alpha/,
@@ -1094,9 +1101,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     false,
   );
 
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /alpha, repository, full path Repository alpha/,
@@ -1107,9 +1112,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     .getByText("This file will be removed after its first preview.")
     .waitFor();
   unlinkSync(join(alpha.workspacePath, "gone.txt"));
-  await page
-    .getByRole("button", { name: "Refresh selected file", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
   await page
     .getByRole("status")
     .getByText(/Preview is missing/)
@@ -1127,17 +1130,13 @@ test("production Files keeps scoped previews stable, inert and navigable across 
     ).includes("missing"),
   );
 
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /alpha, repository, full path Repository alpha/,
     })
     .click();
-  await page
-    .getByRole("button", { name: "Show ignored files", exact: true })
-    .click();
+  await page.getByRole("checkbox", { name: "Show ignored files" }).check();
   const ignoredButton = page.getByRole("button", { name: /hidden\.log/ });
   await ignoredButton.waitFor();
   await ignoredButton.click();
@@ -1154,9 +1153,7 @@ test("production Files keeps scoped previews stable, inert and navigable across 
   );
   assert.equal(excludedResponse.body.includes(alphaSource), false);
 
-  await page
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await page
     .getByRole("button", {
       name: /alpha, repository, full path Repository alpha/,
@@ -1342,12 +1339,14 @@ async function startMarkedFiles(
   page.setDefaultTimeout(15_000);
   const comparisonRequests: string[] = [];
   const directoryRequests: string[] = [];
+  const previewRequests: string[] = [];
   const consoleErrors: string[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
     if (url.pathname.endsWith("/comparisons"))
       comparisonRequests.push(request.url());
     if (url.pathname.endsWith("/files")) directoryRequests.push(request.url());
+    if (url.pathname.endsWith("/preview")) previewRequests.push(request.url());
   });
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
@@ -1365,6 +1364,7 @@ async function startMarkedFiles(
     workspaces,
     comparisonRequests,
     directoryRequests,
+    previewRequests,
     consoleErrors,
     /** The explorer list for a location, matched by its label prefix. */
     list: (location: string) =>
@@ -1373,9 +1373,6 @@ async function startMarkedFiles(
       files.locator(".file-entry").filter({ hasText: name }),
   };
 }
-
-const focusedEntry = (page: Page) =>
-  page.evaluate(() => document.activeElement?.classList.contains("file-entry"));
 
 test("Files opens at the repository root with changed files marked from the Branch comparison", async (_t, j) => {
   const s = await startMarkedFiles(j, {
@@ -1462,9 +1459,7 @@ test("Files first-open location yields to a link and does not repeat", async (_t
   await s.list("Repository alpha").waitFor();
 
   // Going back to the workspace root stays there across tab switches and a remount.
-  await files
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await s.list("Workspace").waitFor();
   await openTaskTab(page, "Changes");
   await openTaskTab(page, "Files");
@@ -1502,9 +1497,7 @@ test("Files markers follow the Changes tab's repository, base branch and refresh
   assert.equal(await marker(/^README\.md/), "");
 
   // alpha has not been read by the Changes tab yet: no marker and no claim about it.
-  await files
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await files.getByRole("button", { name: /^alpha, repository,/ }).click();
   await s.list("Repository alpha").waitFor();
   await s.entry(/^added\.md/).waitFor();
@@ -1527,16 +1520,12 @@ test("Files markers follow the Changes tab's repository, base branch and refresh
   assert.equal(await marker(/^▸ src/), "•");
 
   // beta never borrows alpha's markers.
-  await files
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await files.getByRole("button", { name: /^beta, repository,/ }).click();
   await s.list("Repository beta").waitFor();
   await files.getByText(unmarked).waitFor();
   assert.equal(await marker(/^README\.md/), "");
-  await files
-    .getByRole("button", { name: "Workspace root", exact: true })
-    .click();
+  await workspaceRoot(page).click();
   await files.getByRole("button", { name: /^alpha, repository,/ }).click();
   await s
     .entry(/^added\.md/)
@@ -1561,9 +1550,7 @@ test("Files markers follow the Changes tab's repository, base branch and refresh
     .waitFor();
   // The listing predates late.md, so it has no row until Files re-reads its listing.
   assert.equal(await s.entry(/^late\.md/).count(), 0);
-  await files
-    .getByRole("button", { name: "Refresh files", exact: true })
-    .click();
+  await files.getByRole("button", { name: "Refresh", exact: true }).click();
   await s
     .entry(/^late\.md/)
     .locator(".file-entry-marker", { hasText: "A" })
@@ -1714,9 +1701,7 @@ test("Files shows a one-line file header with hash and read times under Provenan
     "changed on disk\n",
   );
   const refreshRead = previewRead("keep.txt");
-  await files
-    .getByRole("button", { name: "Refresh selected file", exact: true })
-    .click();
+  await files.getByRole("button", { name: "Refresh", exact: true }).click();
   const refreshedAt = (
     (await (await refreshRead).json()) as { observedAt: number }
   ).observedAt;
@@ -1743,4 +1728,237 @@ test("Files shows a one-line file header with hash and read times under Provenan
     .getByText(/^paper\.pdf · application\/pdf · [\d,]+ bytes · \d{2}:\d{2}$/)
     .waitFor();
   assert.deepEqual(s.consoleErrors, []);
+});
+
+test("Files keeps one toolbar Refresh, a reversible Show ignored checkbox and a primary Add review comment", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "alpha", ref: "main" }],
+    prepare: (workspaces) =>
+      writeFileSync(
+        join(workspaces.alpha as string, "hidden.log"),
+        "ignored\n",
+      ),
+  });
+  const { page, files } = s;
+  await s.list("Repository alpha").waitFor();
+
+  // The toolbar holds one Refresh; the old location buttons and ignore badge are gone.
+  const refreshButtons = files.getByRole("button", { name: /^Refresh/ });
+  assert.equal(await refreshButtons.count(), 1);
+  assert.equal(await refreshButtons.first().innerText(), "Refresh");
+  for (const gone of [
+    "Refresh files",
+    "Refresh selected file",
+    "Workspace root",
+    "Repository root",
+  ])
+    assert.equal(await files.getByRole("button", { name: gone }).count(), 0);
+  assert.equal(await files.getByText(/ignore status/i).count(), 0);
+
+  // The explorer location is a trail: Workspace › Repository alpha.
+  const trail = files.getByRole("navigation", { name: "Explorer location" });
+  assert.deepEqual(await trail.getByRole("button").allInnerTexts(), [
+    "Workspace",
+  ]);
+  assert.equal(
+    await trail.locator("[aria-current='location']").innerText(),
+    "Repository alpha",
+  );
+  await files.getByRole("button", { name: /^▸ src,|^src,/ }).click();
+  await s.list("Repository alpha/src").waitFor();
+  assert.deepEqual(await trail.getByRole("button").allInnerTexts(), [
+    "Workspace",
+    "Repository alpha",
+  ]);
+  await trail
+    .getByRole("button", { name: "Repository alpha", exact: true })
+    .click();
+  await s.list("Repository alpha").waitFor();
+  await page.waitForFunction(() =>
+    document.activeElement?.classList.contains("file-entry"),
+  );
+  await workspaceRoot(page).click();
+  await s.list("Workspace").waitFor();
+  await files.getByRole("button", { name: /^alpha, repository,/ }).click();
+  await s.list("Repository alpha").waitFor();
+
+  // Show ignored files is a footer checkbox: off at first, reversible, exclusions stay.
+  const showIgnored = files.getByRole("checkbox", {
+    name: "Show ignored files",
+  });
+  assert.equal(await showIgnored.isChecked(), false);
+  await files.getByText("Sensitive exclusions still apply.").waitFor();
+  assert.equal(await s.entry(/^hidden\.log/).count(), 0);
+  await showIgnored.check();
+  await s.entry(/^hidden\.log/).waitFor();
+  await showIgnored.uncheck();
+  await s.entry(/^hidden\.log/).waitFor({ state: "detached" });
+
+  // Add review comment is secondary and off until a line is chosen, then primary and apart.
+  await files.getByRole("button", { name: /^keep\.txt,/ }).click();
+  const add = files.getByRole("button", {
+    name: "Add review comment",
+    exact: true,
+  });
+  await add.waitFor();
+  // The button's variant is its class: primary uses the primary fill, secondary does not.
+  const isPrimary = () =>
+    add.evaluate((element) => element.classList.contains("bg-primary"));
+  assert.equal(await add.isDisabled(), true);
+  assert.equal(await isPrimary(), false);
+  await files.getByRole("button", { name: "Line 1: unchanged" }).click();
+  await page.waitForFunction(() =>
+    Array.from(document.querySelectorAll("button")).some(
+      (button) =>
+        button.textContent === "Add review comment" && !button.disabled,
+    ),
+  );
+  assert.equal(await isPrimary(), true);
+  const boxes = await files
+    .locator(".file-preview")
+    .getByRole("button")
+    .evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const box = button.getBoundingClientRect();
+        return {
+          name: button.textContent,
+          left: box.left,
+          right: box.right,
+          top: box.top,
+          bottom: box.bottom,
+        };
+      }),
+    );
+  const own = boxes.find((box) => box.name === "Add review comment");
+  assert.ok(own);
+  for (const other of boxes.filter((box) => box !== own))
+    assert.ok(
+      other.right <= own.left ||
+        other.left >= own.right ||
+        other.bottom <= own.top ||
+        other.top >= own.bottom,
+      `Add review comment overlaps ${other.name}`,
+    );
+  assert.deepEqual(s.consoleErrors, []);
+});
+
+test("Files one toolbar Refresh re-reads the listing and the open file, and keeps both when a read fails", async (_t, j) => {
+  const s = await startMarkedFiles(j, {
+    repositories: [{ id: "alpha", ref: "main" }],
+  });
+  const { page, files } = s;
+  const filesUrl = /\/api\/operator\/tasks\/[^/]+\/files\?/;
+  const previewUrl = /\/api\/operator\/tasks\/[^/]+\/preview\?/;
+  const refresh = files.getByRole("button", { name: "Refresh", exact: true });
+  const settled = (request: "files" | "preview") =>
+    page.waitForResponse((response) =>
+      new URL(response.url()).pathname.endsWith(`/${request}`),
+    );
+  /** Holds every matching read until the returned function opens the gate. */
+  const hold = async (url: RegExp) => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(url, async (route) => {
+      await gate;
+      await route.continue();
+    });
+    return release;
+  };
+  await s.list("Repository alpha").waitFor();
+
+  // With no file open, Refresh re-reads only the listing.
+  let directories = s.directoryRequests.length;
+  let previews = s.previewRequests.length;
+  let read = settled("files");
+  await refresh.click();
+  await read;
+  assert.equal(s.directoryRequests.length, directories + 1);
+  assert.equal(s.previewRequests.length, previews);
+
+  // With a file open, it re-reads both.
+  await files.getByRole("button", { name: /^keep\.txt,/ }).click();
+  await files
+    .locator(".file-header-line", { hasText: /^keep\.txt · / })
+    .waitFor();
+  directories = s.directoryRequests.length;
+  previews = s.previewRequests.length;
+  const both = Promise.all([settled("files"), settled("preview")]);
+  await refresh.click();
+  await both;
+  assert.equal(s.directoryRequests.length, directories + 1);
+  assert.equal(s.previewRequests.length, previews + 1);
+
+  // It is off while either read is pending, and back when they have settled.
+  for (const url of [previewUrl, filesUrl]) {
+    const release = await hold(url);
+    await refresh.click();
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button")).some(
+        (button) => button.textContent === "Refresh" && button.disabled,
+      ),
+    );
+    assert.equal(await refresh.isDisabled(), true);
+    release();
+    await page.waitForFunction(() =>
+      Array.from(document.querySelectorAll("button")).some(
+        (button) => button.textContent === "Refresh" && !button.disabled,
+      ),
+    );
+    await page.unroute(url);
+  }
+
+  // A failed preview read keeps the last preview and says so.
+  const failures: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") failures.push(message.text());
+  });
+  await page.route(previewUrl, (route) =>
+    route.fulfill({ status: 503, contentType: "text/plain", body: "down" }),
+  );
+  await refresh.click();
+  await files
+    .getByRole("alert")
+    .getByText(
+      /File preview refresh failed. The last successful preview is retained/,
+    )
+    .waitFor();
+  await files.getByRole("button", { name: "Line 1: unchanged" }).waitFor();
+  await files
+    .locator(".file-header-line", { hasText: /^keep\.txt · / })
+    .waitFor();
+  await page.unroute(previewUrl);
+
+  // A failed listing read keeps the last listing and says so.
+  await page.route(filesUrl, (route) =>
+    route.fulfill({ status: 503, contentType: "text/plain", body: "down" }),
+  );
+  await refresh.click();
+  await files
+    .getByRole("alert")
+    .getByText(
+      /File listing refresh failed. The last successful listing is retained/,
+    )
+    .waitFor();
+  await s.entry(/^keep\.txt/).waitFor();
+  await page.unroute(filesUrl);
+  await refresh.click();
+  await files.getByRole("alert").waitFor({ state: "detached" });
+
+  // After the last tab closes, Refresh still re-reads the listing.
+  await files.getByRole("button", { name: "Close keep.txt tab" }).click();
+  await files.getByText("Select a file to open its preview.").waitFor();
+  directories = s.directoryRequests.length;
+  previews = s.previewRequests.length;
+  read = settled("files");
+  await refresh.click();
+  await read;
+  assert.equal(s.directoryRequests.length, directories + 1);
+  assert.equal(s.previewRequests.length, previews);
+  assert.ok(failures.every((text) => /503/.test(text)));
+  assert.deepEqual(
+    s.consoleErrors.filter((text) => !/503/.test(text)),
+    [],
+  );
 });

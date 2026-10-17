@@ -1330,6 +1330,7 @@ nav {
   margin-top: 0;
 }
 .task-files .file-toolbar [data-slot="button"],
+.task-files .file-location [data-slot="button"],
 .task-files .file-breadcrumbs [data-slot="button"],
 .task-files .pdf-controls [data-slot="button"],
 .task-files .file-preview-controls [data-slot="button"] {
@@ -1365,12 +1366,31 @@ nav {
 .file-rail h4 {
   margin: 0 8px 8px;
 }
-.file-current-location {
+.file-location {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
   margin: 8px;
   color: var(--muted-foreground);
+}
+.file-location-current {
   font-family: var(--font-mono);
   font-size: var(--type-xs);
   overflow-wrap: anywhere;
+}
+.file-rail-footer {
+  margin: 8px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+}
+.file-rail-footer p {
+  margin: 4px 0;
+  color: var(--muted-foreground);
+  font-size: var(--type-xs);
+}
+.file-comment-actions p {
+  margin: 0;
 }
 .file-reading-area {
   display: flex;

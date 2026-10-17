@@ -855,7 +855,7 @@ export function CommentAction({
     review.state.composer !== null && review.state.composerShown;
   return (
     <Button
-      variant="secondary"
+      variant={anchor ? "primary" : "secondary"}
       disabled={
         !anchor ||
         !review.draft ||
