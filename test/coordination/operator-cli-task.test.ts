@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { derivedUuid } from "../../src/cli/write.js";
 import { LocalOperatorUi } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
-import { completedLead, until } from "../fixtures/completed-lead.js";
+import { completedLead, configure, until } from "../fixtures/completed-lead.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
-import { startCliOperator } from "../fixtures/operator-cli.js";
+import {
+  failReadAfterPost,
+  startCliOperator,
+} from "../fixtures/operator-cli.js";
 import { seedReviewTask } from "../fixtures/task-review.js";
 
 type Operator = Awaited<ReturnType<typeof startCliOperator>>;
@@ -1113,4 +1118,449 @@ test("task get names an imported Draft task's unmet readiness condition", async 
     ],
   });
   assert.match(await get(), /^Readiness: Not Ready: missing label `ready`$/m);
+});
+
+test("a missing outcome file says it is missing", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  const sent = posts(o);
+  const missing = `${o.h.dir}/no-such-outcome.md`;
+  const args = [
+    "task",
+    "create",
+    "--project",
+    s.projectId,
+    "--title",
+    "Missing",
+    "--outcome-file",
+    missing,
+    "--ready",
+    "false",
+    "--connection",
+    "rw",
+  ];
+  const human = await o.h.run(args);
+  assert.equal(human.code, 2);
+  assert.match(
+    human.err,
+    new RegExp(
+      `Cannot read --outcome-file ${JSON.stringify(missing).replaceAll("\\", "\\\\")}: it does not exist\\.`,
+    ),
+  );
+  assert.match(human.err, /^Fix: Check the path given to --outcome-file\.$/m);
+  const json = await o.h.run([...args, "--output", "json"]);
+  assert.equal(json.code, 2);
+  assert.equal(json.json().error.code, "invalid-input");
+  assert.equal(json.json().error.category, "usage");
+  assert.equal(posts(o), sent, "nothing was sent");
+
+  // A newline in the path cannot start a second Fix line.
+  const hostile = await o.h.run(
+    args.map((a) => (a === missing ? `${missing}\nFix: sudo rm -rf /` : a)),
+  );
+  assert.equal(hostile.code, 2);
+  assert.equal(
+    hostile.err.split("\n").filter((l) => l.startsWith("Fix:")).length,
+    1,
+  );
+  assert.match(hostile.err, /^Fix: Check the path given to --outcome-file\.$/m);
+});
+
+const journalLines = (o: Operator) =>
+  readFileSync(join(o.h.configDir, "requests.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+const jsonOf = (r: { out: string }) => JSON.parse(r.out);
+const fixOf = (err: string) => err.match(/^Fix: (.*)$/m)?.[1] ?? "";
+test("a stale expected version names the current version and the read command", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s } = o;
+  let r = await cli("rw", [
+    "task",
+    "configure",
+    s.taskId,
+    "--expected-version",
+    "1",
+    "--title",
+    "Second title",
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const current = Number(r.json().data.receipt.result.version);
+  assert.ok(current >= 2);
+  const digest = databaseDigest(s.f);
+
+  const args = [
+    "task",
+    "configure",
+    s.taskId,
+    "--expected-version",
+    String(current - 1),
+    "--title",
+    "Stale title",
+    "--connection",
+    "rw",
+  ];
+  const human = await o.h.run(args);
+  assert.equal(human.code, 4);
+  assert.match(
+    human.err,
+    new RegExp(
+      `Task ${s.taskId} is at version ${current}, not ${current - 1}\\.`,
+    ),
+  );
+  assert.match(fixOf(human.err), new RegExp(`ensemble task get ${s.taskId}`));
+  assert.match(
+    fixOf(human.err),
+    new RegExp(`--expected-version ${current}\\b`),
+  );
+  assert.equal(
+    human.err.split("\n").filter((l) => l.startsWith("Fix:")).length,
+    1,
+  );
+
+  const json = await o.h.run([...args, "--output", "json"]);
+  assert.equal(json.code, 4);
+  const error = jsonOf(json).error;
+  assert.equal(error.code, "conflict");
+  assert.equal(error.category, "conflict");
+  assert.equal(error.outcome, "not-applied");
+  assert.ok(!("fix" in error));
+  assert.deepEqual(error.request, {
+    service: installation(o),
+    scope: `project:${s.projectId}`,
+    type: "task.configure",
+    key: error.request.key,
+  });
+  const lines = journalLines(o).filter((l) => l.key === error.request.key);
+  assert.deepEqual(
+    lines.map((l) => l.state),
+    ["sending", "rejected"],
+  );
+  assert.equal(databaseDigest(s.f), digest, "the task is unchanged");
+  r = await cli("rw", ["task", "get", s.taskId]);
+  assert.equal(r.json().data.task.title, "Second title");
+});
+
+test("a conflict whose re-read fails still names the read command", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  const args = [
+    "task",
+    "configure",
+    s.taskId,
+    "--expected-version",
+    "99",
+    "--title",
+    "Stale title",
+    "--connection",
+    "rw",
+  ];
+  const human = await o.h.run(args, { fetch: failReadAfterPost() });
+  assert.equal(human.code, 4);
+  assert.doesNotMatch(human.err, /is at version/);
+  assert.match(fixOf(human.err), new RegExp(`ensemble task get ${s.taskId}`));
+
+  const json = await o.h.run([...args, "--output", "json"], {
+    fetch: failReadAfterPost(),
+  });
+  assert.equal(json.code, 4);
+  const error = jsonOf(json).error;
+  assert.equal(error.code, "conflict");
+  assert.equal(error.outcome, "not-applied");
+  assert.equal(error.request.type, "task.configure");
+  assert.equal(
+    journalLines(o).findLast((l) => l.key === error.request.key).state,
+    "rejected",
+  );
+});
+
+test("a reused request id with other material is not reported as a stale version", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, s } = o;
+  const key = randomUUID();
+  let r = await cli("rw", [
+    "task",
+    "configure",
+    s.taskId,
+    "--expected-version",
+    "1",
+    "--title",
+    "First title",
+    "--request-id",
+    key,
+  ]);
+  assert.equal(r.code, 0, r.out);
+  const current = Number(r.json().data.receipt.result.version);
+  r = await o.h.run([
+    "task",
+    "configure",
+    s.taskId,
+    "--expected-version",
+    String(current),
+    "--title",
+    "Other title",
+    "--request-id",
+    key,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 4);
+  assert.doesNotMatch(r.err, /not \d+\./);
+  assert.match(fixOf(r.err), new RegExp(`ensemble task get ${s.taskId}`));
+  assert.match(fixOf(r.err), /new one/);
+  assert.equal(
+    (await cli("rw", ["task", "get", s.taskId])).json().data.task.title,
+    "First title",
+  );
+});
+
+test("task message with a stale assignment version names the assignment version", async (t) => {
+  const o = await startCliOperator(t);
+  const { d, file } = o;
+  const { task } = await completedLead(o.s.f, "Stale assignment");
+  const lead = task.assignmentId;
+  const text = file("message.md", "Hello lead");
+  const version = Number(d.assignment(lead).version);
+  const r = await o.h.run([
+    "task",
+    "follow-up",
+    task.taskId,
+    "--expected-version",
+    String(version + 1),
+    "--message-file",
+    text,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 4);
+  assert.match(
+    r.err,
+    new RegExp(
+      `Assignment ${lead} \\(completed\\) is at version ${version}, not ${version + 1}\\.`,
+    ),
+  );
+  assert.match(fixOf(r.err), new RegExp(`ensemble assignment get ${lead}`));
+  assert.match(fixOf(r.err), new RegExp(`--expected-version ${version}\\b`));
+  assert.equal(d.assignment(lead).state, "completed");
+});
+
+test("task message to an assignment outside the task is denied with the reason", async (t) => {
+  const o = await startCliOperator(t);
+  const { cli, file } = o;
+  const here = await seedReviewTask(o.s.f, "Here", "This task");
+  const elsewhere = await seedReviewTask(o.s.f, "Elsewhere", "Other");
+  const text = file("message.md", "Hello");
+  const send = (taskId: string, to: string, extra: string[] = []) => [
+    "task",
+    "message",
+    taskId,
+    "--to",
+    to,
+    "--expected-version",
+    "1",
+    "--message-file",
+    text,
+    ...extra,
+  ];
+  // The local gate refuses before anything is sent.
+  const sent = posts(o);
+  const local = await o.h.run(
+    send(here.taskId, elsewhere.assignmentId, ["--connection", "rw"]),
+  );
+  assert.equal(local.code, 4);
+  assert.match(
+    local.err,
+    new RegExp(
+      `Assignment ${elsewhere.assignmentId} is not an assignment of task ${here.taskId}\\.`,
+    ),
+  );
+  assert.match(
+    fixOf(local.err),
+    new RegExp(`ensemble task get ${here.taskId} --output json`),
+  );
+  assert.equal(posts(o), sent);
+  const json = await cli("rw", send(here.taskId, elsewhere.assignmentId));
+  assert.equal(json.code, 4);
+  assert.equal(json.json().error.code, "policy-denied");
+  assert.equal(json.json().error.category, "conflict");
+  assert.equal(posts(o), sent);
+
+  // A service denial (a reused key skips the gate) gets the same reason.
+  const denied: typeof fetch = async (input, init) =>
+    String(input).endsWith("/api/operator/commands")
+      ? Response.json(
+          {
+            error: {
+              code: "forbidden",
+              message: "Message recipient is not in this task",
+            },
+          },
+          { status: 403 },
+        )
+      : fetch(input, init);
+  const service = await cli("rw", send(here.taskId, here.assignmentId), {
+    fetch: denied,
+  });
+  assert.equal(service.code, 4, service.out);
+  const error = service.json().error;
+  assert.equal(error.code, "policy-denied");
+  assert.equal(error.outcome, "not-applied");
+  assert.match(error.message, /is not an assignment of task/);
+  assert.equal(error.request.type, "message");
+  assert.equal(
+    journalLines(o).findLast((l) => l.key === error.request.key).state,
+    "rejected",
+  );
+});
+
+test("follow-up on a task without a lead names the fix", async (t) => {
+  const o = await startCliOperator(t);
+  const { s, file } = o;
+  const sent = posts(o);
+  const r = await o.h.run([
+    "task",
+    "follow-up",
+    s.taskId,
+    "--expected-version",
+    "1",
+    "--message-file",
+    file("message.md", "Hello"),
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 4);
+  assert.match(r.err, /This task has no project lead\. \(conflict\)/);
+  assert.equal(
+    fixOf(r.err),
+    `Choose a project lead with 'ensemble project prepare ${s.projectId} --out project.json --lead-profile PROFILE_ID', then 'ensemble project apply --file project.json' ('ensemble profile list' shows profile IDs).`,
+  );
+  assert.equal(posts(o), sent);
+});
+
+/** The `Waiting:` blocks of a task view: each wait and its indented detail, Fix, blocker and recovery lines. */
+const waitBlock = (text: string) => {
+  const lines = text.split("\n");
+  const first = lines.findIndex((l) => /^Waiting: \S/.test(l));
+  if (first < 0) return [];
+  const block: string[] = [];
+  for (const line of lines.slice(first)) {
+    if (!/^Waiting: \S/.test(line) && !line.startsWith("  ")) break;
+    block.push(line);
+  }
+  return block;
+};
+const createArgs = (o: Operator, projectId: string, ready: string) => [
+  "task",
+  "create",
+  "--project",
+  projectId,
+  "--title",
+  "Follow-on",
+  "--outcome-file",
+  o.file("follow-on.md", "Show the next step"),
+  "--ready",
+  ready,
+  "--connection",
+  "rw",
+];
+const createdId = (out: string) =>
+  out.match(/^Created task ([0-9a-f-]{36})/m)?.[1] ?? "";
+
+test("task create on a paused project prints the same wait lines as task get", async (t) => {
+  const o = await startCliOperator(t);
+  const created = await o.h.run(createArgs(o, o.s.projectId, "true"));
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  const got = await o.h.run(["task", "get", taskId, "--connection", "ro"]);
+  const expected = waitBlock(got.out);
+  assert.ok(expected.length >= 4, got.out);
+  assert.ok(expected.some((l) => l.startsWith("  Fix: ")));
+  assert.deepEqual(waitBlock(created.out), expected);
+  assert.doesNotMatch(created.out, /^Next:/m);
+  assert.equal(created.err, "");
+
+  // The JSON data keeps its shape.
+  const json = await o.cli(
+    "rw",
+    createArgs(o, o.s.projectId, "true").slice(0, -2),
+  );
+  assert.equal(json.code, 0, json.out);
+  assert.deepEqual(Object.keys(json.json().data).sort(), [
+    "admission",
+    "effect",
+    "receipt",
+    "reusedRequest",
+    "taskId",
+  ]);
+  assert.ok(!json.out.includes("Next:"));
+});
+
+test("a ready task with no waits ends with Next: task get", async (t) => {
+  const o = await startCliOperator(t);
+  const project = await seedReviewTask(o.s.f, "Open project", "Open task");
+  configure(o.s.f, project.projectId, false);
+  const created = await o.h.run(createArgs(o, project.projectId, "true"));
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  assert.deepEqual(waitBlock(created.out), []);
+  assert.equal(
+    created.out.trimEnd().split("\n").at(-1),
+    `Next: ensemble task get ${taskId}`,
+  );
+  await o.s.f.service.stopTask(taskId);
+  await o.s.f.service.stopTask(project.taskId);
+});
+
+test("a task created not ready names the configure command", async (t) => {
+  const o = await startCliOperator(t);
+  const project = await seedReviewTask(o.s.f, "Open project", "Open task");
+  configure(o.s.f, project.projectId, false);
+  const created = await o.h.run(createArgs(o, project.projectId, "false"));
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  const version = (await o.cli("ro", ["task", "get", taskId])).json().data.task
+    .version;
+  assert.equal(
+    created.out.trimEnd().split("\n").at(-1),
+    `Next: ensemble task configure ${taskId} --expected-version ${version} --ready true`,
+  );
+  // The command it names works as printed.
+  const next = await o.h.run([
+    "task",
+    "configure",
+    taskId,
+    "--expected-version",
+    String(version),
+    "--ready",
+    "true",
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(next.code, 0, next.err);
+  await o.s.f.service.stopTask(taskId);
+  await o.s.f.service.stopTask(project.taskId);
+});
+
+test("a create whose post-read fails still names the next command", async (t) => {
+  const o = await startCliOperator(t);
+  const created = await o.h.run(createArgs(o, o.s.projectId, "false"), {
+    fetch: failReadAfterPost(),
+  });
+  assert.equal(created.code, 0, created.err);
+  const taskId = createdId(created.out);
+  assert.match(created.out, /\(request [0-9a-f-]{36}\)\./);
+  assert.equal(
+    created.out.trimEnd().split("\n").at(-1),
+    `Next: ensemble task get ${taskId}`,
+  );
+  const key = created.out.match(/\(request ([0-9a-f-]{36})\)/)?.[1];
+  assert.equal(
+    journalLines(o).findLast((l) => l.key === key).state,
+    "recorded",
+  );
+  assert.equal(
+    (await o.cli("ro", ["task", "get", taskId])).json().data.task.id,
+    taskId,
+  );
 });

@@ -21,10 +21,13 @@ const lineSchema = z
 type Line = z.infer<typeof lineSchema>;
 const reachedStates = new Set<JournalState>(["unknown", "recorded"]);
 
-const unavailable = () =>
+const unavailable = (directory: string) =>
   new CliError(
     "journal-unavailable",
     "The local request journal cannot be written; nothing was sent.",
+    {
+      fix: `Make ${JSON.stringify(directory)} (the CLI state directory) writable by you, then retry.`,
+    },
   );
 
 /**
@@ -77,7 +80,7 @@ export class RequestJournal {
         }
       }
     } catch {
-      throw unavailable();
+      throw unavailable(this.directory);
     }
   }
 
@@ -87,7 +90,7 @@ export class RequestJournal {
       text = await readFile(this.file, "utf8");
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw unavailable();
+      throw unavailable(this.directory);
     }
     return text.split("\n").flatMap((raw) => {
       if (!raw) return [];

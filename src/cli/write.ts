@@ -237,3 +237,64 @@ export async function sendCommand(
     );
   }
 }
+
+/**
+ * Runs one write and, when the service answers `conflict`, re-reads the current version
+ * (best effort) and rethrows the same code and `extra`, so the exit code, request identity
+ * and journal state are untouched. A failed re-read leaves the service's message.
+ */
+export async function withConflictRemedy<T>(
+  run: () => Promise<T>,
+  o: {
+    /** Names the resource in the message, such as `Task ID`. */
+    subject: string;
+    /** The `--expected-version` that was sent, if any. */
+    sent: number | undefined;
+    /** The command that reads the resource, such as `ensemble task get ID`. */
+    read: string;
+    /** The current version, if it can be read now. */
+    current: () => Promise<{ version: number; state?: string } | undefined>;
+  },
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!(error instanceof CliError) || error.code !== "conflict") throw error;
+    const now = await o.current().catch(() => undefined);
+    const fix = (text: string) => ({ ...error.extra, fix: text });
+    if (o.sent === undefined)
+      throw new CliError(
+        error.code,
+        error.message,
+        fix(`Run '${o.read}' to see why, then retry.`),
+      );
+    if (!now)
+      throw new CliError(
+        error.code,
+        error.message,
+        fix(
+          `Run '${o.read}' to read the current version, then retry with --expected-version set to it.`,
+        ),
+      );
+    const subject = `${o.subject}${now.state ? ` (${now.state})` : ""}`;
+    if (now.version === o.sent)
+      throw new CliError(
+        error.code,
+        `${subject} is at version ${now.version}, the version you sent, so this is not a stale version. ${
+          error.extra.request
+            ? "The state may have changed since you read it, or a --request-id you reused carried other material."
+            : "The state may have changed since you read it."
+        }`,
+        fix(
+          `Run '${o.read}' to check the state; if you passed --request-id, retry with a new one.`,
+        ),
+      );
+    throw new CliError(
+      error.code,
+      `${subject} is at version ${now.version}, not ${o.sent}.`,
+      fix(
+        `Run '${o.read}', then retry with --expected-version ${now.version} (and a new --request-id if you passed one).`,
+      ),
+    );
+  }
+}

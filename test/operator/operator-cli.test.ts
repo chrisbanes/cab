@@ -7,20 +7,29 @@ import {
   readFileSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
-import type { BrowseContext } from "../../src/cli/browse.js";
-import { KeychainCredentialStore } from "../../src/cli/connections.js";
+import { type BrowseContext, cursorQuery } from "../../src/cli/browse.js";
+import { browseCommands, writeCommands } from "../../src/cli/commands.js";
+import { CHANGE_COMMANDS } from "../../src/cli/configure.js";
+import {
+  CliError,
+  KeychainCredentialStore,
+  readTokenFile,
+} from "../../src/cli/connections.js";
+import { type CliDeps, EXIT } from "../../src/cli/main.js";
+import { CATEGORY_FIX, DEFAULT_FIX, remedyFor } from "../../src/cli/remedy.js";
 import { logsCommand } from "../../src/cli/logs-follow.js";
 import {
   fakeServer,
   harness,
   MemoryKeychain,
 } from "../fixtures/cli-harness.js";
-import { startCliService } from "../fixtures/operator-cli.js";
+import { startCliOperator, startCliService } from "../fixtures/operator-cli.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 const { version } = JSON.parse(readFileSync("package.json", "utf8"));
@@ -543,4 +552,515 @@ test("streamed logs cannot drive the terminal in human or JSON Lines output", as
   assert.ok(!lines.includes("\u009b"));
   const item = JSON.parse(lines.split("\n")[0] as string);
   assert.equal(item.item.name, hostile);
+});
+
+const syntheticToken = () => `ens_${randomUUID()}_${"A".repeat(43)}`;
+const refused =
+  (code: string): typeof fetch =>
+  async () => {
+    throw Object.assign(new TypeError("fetch failed"), { cause: { code } });
+  };
+const fixLines = (text: string) =>
+  text.split("\n").filter((line) => /^Fix: /.test(line));
+
+test("every CLI error code has a one-line Fix remedy", () => {
+  for (const code of Object.keys(EXIT)) {
+    const fix = DEFAULT_FIX[code];
+    assert.ok(fix && !fix.includes("\n"), `${code} has a one-line default`);
+    assert.equal(remedyFor(new CliError(code, "x"), "usage"), fix);
+  }
+  for (const code of Object.keys(DEFAULT_FIX))
+    assert.ok(code in EXIT, `${code} is an error code of the CLI`);
+  for (const category of [
+    "usage",
+    "authentication",
+    "conflict",
+    "unavailable",
+    "uncertain",
+    "unsupported",
+  ]) {
+    const fix = remedyFor(new CliError("service-only-code", "x"), category);
+    assert.ok(fix && !fix.includes("\n"), `${category} has a one-line default`);
+  }
+  assert.equal(
+    remedyFor(
+      new CliError("conflict", "x", { fix: "site remedy." }),
+      "conflict",
+    ),
+    "site remedy.",
+  );
+  // Text inside a fix cannot start a second Fix line.
+  assert.equal(
+    remedyFor(
+      new CliError("conflict", "x", { fix: "a\nFix: b\r\nc" }),
+      "conflict",
+    ),
+    "a Fix: b c",
+  );
+  for (const fix of [
+    ...Object.values(DEFAULT_FIX),
+    ...Object.values(CATEGORY_FIX),
+  ])
+    assert.ok(!/chmod (?!600\b)|sudo|\brm -/.test(fix), fix);
+});
+
+test("human errors end with exactly one Fix line and JSON errors are unchanged", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t);
+  assert.equal(
+    (
+      await h.run([
+        "auth",
+        "login",
+        "--connection",
+        "home",
+        "--url",
+        s.origin,
+        "--token-file",
+        h.tokenFile((await s.issue("read")).token),
+      ])
+    ).code,
+    0,
+  );
+  const tooLarge: typeof fetch = async (input, init) =>
+    String(input).includes("/api/operator/tasks/")
+      ? Response.json(
+          { error: { code: "body-too-large", message: "Too big." } },
+          { status: 413 },
+        )
+      : fetch(input, init);
+  const notADirectory = join(h.dir, "not-a-directory");
+  writeFileSync(notADirectory, "x");
+  const sites: [string, string[], Partial<CliDeps>, number, string][] = [
+    ["usage", ["task", "get"], {}, 2, "usage"],
+    [
+      "unexpected failure",
+      ["connection", "list"],
+      { env: { ENSEMBLE_CLI_CONFIG_DIR: notADirectory } },
+      5,
+      "unavailable",
+    ],
+    [
+      "unknown service code",
+      ["task", "get", s.taskId],
+      { fetch: tooLarge },
+      2,
+      "body-too-large",
+    ],
+  ];
+  for (const [name, args, extra, exit, code] of sites) {
+    const human = await h.run(args, extra);
+    assert.equal(human.code, exit, name);
+    assert.equal(human.out, "", name);
+    assert.equal(fixLines(human.err).length, 1, name);
+    const last = human.err.trimEnd().split("\n").at(-1) ?? "";
+    assert.match(last, /^Fix: \S.*\S$/, name);
+    assert.match(human.err, new RegExp(`\\(${code}[,)]`), name);
+
+    const json = await h.run([...args, "--output", "json"], extra);
+    assert.equal(json.code, exit, name);
+    assert.equal(json.err, "", name);
+    assert.deepEqual(
+      Object.keys(json.json().error).sort(),
+      ["category", "code", "message", "outcome", "requestId", "retryable"],
+      name,
+    );
+    assert.equal(json.json().error.code, code, name);
+    assert.ok(!json.out.includes("Fix:"), name);
+  }
+});
+
+test("a refused or unresolved connection names the origin and no request id", async (t) => {
+  const o = await startCliOperator(t);
+  const origin = o.s.origin;
+  const login = (code: string, h = harness(t)) =>
+    h.run(
+      [
+        "auth",
+        "login",
+        "--connection",
+        "a",
+        "--url",
+        "http://127.0.0.1:9",
+        "--token-file",
+        h.tokenFile(syntheticToken()),
+      ],
+      { fetch: refused(code) },
+    );
+  for (const code of ["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"]) {
+    // A read: the request never left, so the human line has no request id.
+    const r = await login(code);
+    assert.equal(r.code, 5, code);
+    assert.match(
+      r.err,
+      /^ensemble: The service is unavailable\. \(unavailable\)\n/,
+    );
+    assert.ok(!r.err.includes("request"), code);
+    assert.deepEqual(fixLines(r.err), [
+      "Fix: Check that the service at http://127.0.0.1:9 is running, or check the URL with 'ensemble connection list'.",
+    ]);
+  }
+  // The machine-readable id stays.
+  const h = harness(t);
+  const json = await h.run(
+    [
+      "auth",
+      "login",
+      "--connection",
+      "a",
+      "--url",
+      "http://127.0.0.1:9",
+      "--token-file",
+      h.tokenFile(syntheticToken()),
+      "--output",
+      "json",
+    ],
+    { fetch: refused("ECONNREFUSED") },
+  );
+  assert.equal(json.code, 5);
+  assert.equal(json.json().error.code, "unavailable");
+  assert.match(json.json().error.requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(json.json().error.outcome, "not-applied");
+  assert.equal(json.json().error.retryable, true);
+
+  // A write refused before sending: definitely not applied, with its receipt identity.
+  const post: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("/api/operator/commands"))
+      return refused("ECONNREFUSED")(input, init);
+    return fetch(input, init);
+  };
+  const human = await o.h.run(
+    ["task", "stop", o.s.taskId, "--connection", "rw"],
+    { fetch: post },
+  );
+  assert.equal(human.code, 5);
+  assert.ok(!human.err.includes("request"), human.err);
+  assert.deepEqual(fixLines(human.err), [
+    `Fix: Check that the service at ${origin} is running, or check the URL with 'ensemble connection list'.`,
+  ]);
+  const stop = await o.cli("rw", ["task", "stop", o.s.taskId], { fetch: post });
+  assert.equal(stop.code, 5);
+  const error = stop.json().error;
+  assert.equal(error.code, "unavailable");
+  assert.equal(error.outcome, "not-applied");
+  assert.match(error.requestId, /^[0-9a-f-]{36}$/);
+  assert.equal(error.request.type, "task.stop");
+  const journal = readFileSync(join(o.h.configDir, "requests.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((line) => line.key === error.request.key);
+  assert.deepEqual(
+    journal.map((line) => line.state),
+    ["sending", "rejected"],
+  );
+  assert.equal(o.s.f.service.isTaskStopped(o.s.taskId), false);
+
+  // A reset after the request may have been sent keeps its id.
+  const reset = await o.h.run(
+    ["task", "get", o.s.taskId, "--connection", "ro"],
+    {
+      fetch: async (input, init) =>
+        String(input).includes("/api/operator/tasks/")
+          ? refused("ECONNRESET")(input, init)
+          : fetch(input, init),
+    },
+  );
+  assert.equal(reset.code, 5);
+  assert.match(reset.err, /\(unavailable, request [0-9a-f-]{36}\)/);
+  assert.equal(fixLines(reset.err).length, 1);
+});
+
+test("a TLS verification failure has no request id in human output", async (t) => {
+  const h = harness(t);
+  const args = [
+    "auth",
+    "login",
+    "--connection",
+    "a",
+    "--url",
+    "https://ensemble.example",
+    "--token-file",
+    h.tokenFile(syntheticToken()),
+  ];
+  const r = await h.run(args, { fetch: refused("SELF_SIGNED_CERT_IN_CHAIN") });
+  assert.equal(r.code, 5);
+  assert.match(r.err, /\(tls-verification-failed\)\n/);
+  assert.ok(!r.err.includes("request"), r.err);
+  assert.equal(fixLines(r.err).length, 1);
+  assert.match(r.err, /Fix: .*NODE_EXTRA_CA_CERTS/);
+  const json = await h.run([...args, "--output", "json"], {
+    fetch: refused("SELF_SIGNED_CERT_IN_CHAIN"),
+  });
+  assert.equal(json.json().error.code, "tls-verification-failed");
+  assert.match(json.json().error.requestId, /^[0-9a-f-]{36}$/);
+});
+
+test("a rejected token file names the fix", async (t) => {
+  const h = harness(t);
+  const login = (file: string) =>
+    h.run([
+      "auth",
+      "login",
+      "--connection",
+      "a",
+      "--url",
+      "http://127.0.0.1:9",
+      "--token-file",
+      file,
+    ]);
+  const real = h.tokenFile(syntheticToken());
+  chmodSync(real, 0o644);
+  let r = await login(real);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /\(invalid-token-file\)/);
+  assert.match(r.err, /Token file rejected: its mode is 0644; it must be 0600/);
+  assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 ${real}`]);
+
+  const missing = join(h.dir, "missing.token");
+  r = await login(missing);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Token file rejected: it does not exist\./);
+  assert.deepEqual(fixLines(r.err), [
+    "Fix: Check the path given to --token-file.",
+  ]);
+
+  chmodSync(real, 0o600);
+  const link = join(h.dir, "link.token");
+  symlinkSync(real, link);
+  r = await login(link);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /Token file rejected: it is a symlink\./);
+  assert.deepEqual(fixLines(r.err), [
+    "Fix: Pass the file itself, not a symlink to it.",
+  ]);
+
+  // Nothing was sent, saved or stored by any refusal.
+  assert.deepEqual(h.fetches, []);
+  assert.deepEqual(readdirSyncSafe(h.configDir), []);
+  assert.equal(h.keychain.items.size, 0);
+
+  // Another owner's file never recommends a chmod.
+  const foreign = await readTokenFile(
+    real,
+    (process.getuid?.() ?? 0) + 1,
+  ).catch((error: unknown) => error);
+  assert.ok(foreign instanceof CliError);
+  assert.equal(foreign.code, "invalid-token-file");
+  assert.match(foreign.message, /it is owned by another user/);
+  assert.ok(!foreign.extra.fix?.includes("chmod"));
+  // A path that a shell would expand is quoted so the fix cannot run anything.
+  const odd = join(h.dir, "$(touch pwned)`x`.token");
+  writeFileSync(odd, `${syntheticToken()}\n`, { mode: 0o644 });
+  r = await login(odd);
+  assert.deepEqual(fixLines(r.err), [`Fix: chmod 600 '${odd}'`]);
+});
+
+test("defaults name a runnable command for auth and cursor failures", async (t) => {
+  const s = await startCliService(t);
+  const h = harness(t);
+  const fix = (err: string) => fixLines(err)[0] ?? "";
+
+  // No saved connection at all.
+  let r = await h.run(["task", "get", s.taskId]);
+  assert.equal(r.code, 2);
+  assert.match(r.err, /\(connection-not-found\)/);
+  assert.match(
+    fix(r.err),
+    /ensemble auth login --connection NAME --url ORIGIN/,
+  );
+
+  // A revoked credential.
+  const revoked = await s.issue("read", "revoked");
+  const login = (name: string) =>
+    h.run([
+      "auth",
+      "login",
+      "--connection",
+      name,
+      "--url",
+      s.origin,
+      "--token-file",
+      h.tokenFile(revoked.token),
+    ]);
+  assert.equal((await login("gone")).code, 0);
+  s.f.service.operatorCredentials().revoke(revoked.credential.id);
+  r = await h.run(["task", "get", s.taskId, "--connection", "gone"]);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /\(credential-invalid[,)]/);
+  assert.match(fix(r.err), /ensemble auth login/);
+
+  // A connection that was logged out names the exact login to repeat.
+  r = await h.run(["auth", "logout", "--connection", "gone"]);
+  assert.equal(r.code, 0, r.err);
+  r = await h.run(["task", "get", s.taskId, "--connection", "gone"]);
+  assert.equal(r.code, 3);
+  assert.match(r.err, /\(credential-not-found\)/);
+  assert.equal(
+    fix(r.err),
+    `Fix: Run 'ensemble auth login --connection gone --url ${s.origin}' to store a credential.`,
+  );
+
+  // An unknown connection name.
+  r = await h.run(["task", "get", s.taskId, "--connection", "nowhere"]);
+  assert.equal(r.code, 2);
+  assert.match(fix(r.err), /ensemble connection list/);
+
+  // A cursor the service refuses restarts without --cursor.
+  const cursor = Buffer.from(
+    JSON.stringify({
+      v: 1,
+      k: "task list",
+      q: cursorQuery({}),
+      c: randomUUID(),
+    }),
+  ).toString("base64url");
+  const read = await s.issue("read", "paging");
+  assert.equal(
+    (
+      await h.run([
+        "auth",
+        "login",
+        "--connection",
+        "paging",
+        "--url",
+        s.origin,
+        "--token-file",
+        h.tokenFile(read.token),
+      ])
+    ).code,
+    0,
+  );
+  r = await h.run([
+    "task",
+    "list",
+    "--cursor",
+    cursor,
+    "--connection",
+    "paging",
+  ]);
+  assert.equal(r.code, 4);
+  assert.match(r.err, /\(cursor-stale[,)]/);
+  assert.match(fix(r.err), /without --cursor/);
+  assert.equal(fixLines(r.err).length, 1);
+});
+
+const builtinCommands = [
+  "auth login",
+  "auth status",
+  "auth logout",
+  "connection list",
+  "connection use",
+  "connection remove",
+  "task get",
+];
+const knownCommand = (words: string[]) => {
+  const [first, second] = words;
+  if (first === "service" || first === "snapshot") return true;
+  const keys = [
+    ...builtinCommands,
+    ...browseCommands.keys(),
+    ...writeCommands.keys(),
+  ];
+  return keys.some(
+    (key) =>
+      key === `${first} ${second}` || (!key.includes(" ") && key === first),
+  );
+};
+
+test("every command a remedy names exists in the CLI", () => {
+  // The per-kind table that remedies draw their prepare and read commands from.
+  for (const [kind, commands] of Object.entries(CHANGE_COMMANDS)) {
+    for (const command of [commands.prepare, commands.read(randomUUID())]) {
+      const words = command.split(" ").slice(1);
+      assert.ok(knownCommand(words), `${kind}: ${command}`);
+    }
+  }
+  // Every `ensemble <command>` written in a CLI source file, remedy or not.
+  const dir = join(process.cwd(), "src", "cli");
+  const unknown: string[] = [];
+  let seen = 0;
+  assert.equal(knownCommand(["task", "bogus"]), false, "the check can fail");
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".ts")))
+    for (const m of readFileSync(join(dir, name), "utf8").matchAll(
+      /\bensemble ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?/g,
+    )) {
+      seen++;
+      if (!knownCommand([m[1] ?? "", m[2] ?? ""]))
+        unknown.push(`${name}: ${m[0]}`);
+    }
+  assert.ok(seen > 50, `scanned ${seen} command mentions`);
+  assert.deepEqual(unknown, []);
+});
+
+test("service and snapshot usage errors end with one Fix line", async (t) => {
+  const h = harness(t);
+  for (const args of [
+    ["service", "bogus"],
+    ["snapshot", "create"],
+  ]) {
+    const r = await h.run(args);
+    assert.equal(r.code, 2, args.join(" "));
+    assert.equal(r.out, "");
+    assert.equal(fixLines(r.err).length, 1);
+    assert.equal(
+      r.err.trimEnd().split("\n").at(-1),
+      "Fix: Run 'ensemble --help'.",
+    );
+  }
+});
+
+test("every usage-error path ends with one Fix line and help and version stay clean", async (t) => {
+  const h = harness(t);
+  // [name, args, stream carrying the usage text]
+  const paths: [string, string[], "stdout" | "stderr"][] = [
+    ["bare invocation", [], "stdout"],
+    ["unknown top-level command", ["bogus"], "stderr"],
+    ["unknown subcommand", ["task", "bogus"], "stderr"],
+    ["the word help", ["help"], "stderr"],
+    ["missing positionals", ["task", "get"], "stderr"],
+    ["unknown flag", ["task", "list", "--bogus-flag"], "stderr"],
+    ["invalid --output", ["task", "list", "--output", "yaml"], "stderr"],
+    ["service usage", ["service", "bogus"], "stderr"],
+    ["snapshot usage", ["snapshot", "create"], "stderr"],
+  ];
+  for (const [name, args, stream] of paths) {
+    const r = await h.run(args);
+    assert.equal(r.code, 2, name);
+    const usage = stream === "stdout" ? r.out : r.err;
+    if (name !== "invalid --output") assert.match(usage, /Usage:/, name);
+    if (stream === "stderr") assert.equal(r.out, "", name);
+    assert.equal(fixLines(r.err).length, 1, name);
+    assert.equal(
+      r.err.trimEnd().split("\n").at(-1),
+      "Fix: Run 'ensemble --help'.",
+      name,
+    );
+    // JSON: the error envelope (or, for a bare invocation, today's usage text) is unchanged
+    // and nothing is written to stderr.
+    // These commands take no --output, so there is no JSON variant of them.
+    if (["invalid --output", "service usage", "snapshot usage"].includes(name))
+      continue;
+    const json = await h.run([...args, "--output", "json"]);
+    assert.equal(json.code, 2, name);
+    // A flag-parse failure is raised before --output is read, so it stays human-only.
+    if (name === "unknown flag") continue;
+    assert.equal(json.err, "", name);
+    assert.ok(!json.out.includes("Fix:"), name);
+    if (args.length)
+      assert.deepEqual(
+        Object.keys(json.json().error).sort(),
+        ["category", "code", "message", "outcome", "requestId", "retryable"],
+        name,
+      );
+  }
+  for (const [name, args] of [
+    ["--help", ["--help"]],
+    ["--version", ["--version"]],
+  ] as const) {
+    const r = await h.run([...args]);
+    assert.equal(r.code, 0, name);
+    assert.equal(r.err, "", name);
+    assert.ok(!r.out.includes("Fix:"), name);
+  }
 });

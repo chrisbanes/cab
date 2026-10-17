@@ -34,19 +34,30 @@ export function connectionOrigin(value: string): string {
   return url.origin;
 }
 
-function transportFailure(error: unknown, requestId: string): CliError {
+/** Failures before any byte was sent: the request never reached the service. */
+const NOT_SENT = /^(?:ECONNREFUSED|ENOTFOUND|EAI_AGAIN)$/;
+const TLS_FAILURE = /CERT|TLS|SSL|SELF_SIGNED|VERIFY/;
+
+function transportFailure(
+  error: unknown,
+  requestId: string,
+  origin: string,
+): CliError {
   const code = String(
     (error as { cause?: { code?: unknown } })?.cause?.code ?? "",
   );
-  return /CERT|TLS|SSL|SELF_SIGNED|VERIFY/.test(code)
+  // A failed TLS handshake happens before the HTTP request is written.
+  return TLS_FAILURE.test(code)
     ? new CliError(
         "tls-verification-failed",
         "The service certificate could not be verified. For a private CA set NODE_EXTRA_CA_CERTS.",
-        { requestId, retryable: false },
+        { requestId, retryable: false, notSent: true },
       )
     : new CliError("unavailable", "The service is unavailable.", {
         requestId,
         retryable: true,
+        fix: `Check that the service at ${origin} is running, or check the URL with 'ensemble connection list'.`,
+        ...(NOT_SENT.test(code) ? { notSent: true } : {}),
       });
 }
 
@@ -72,7 +83,7 @@ export class ServiceClient {
         },
       });
     } catch (error) {
-      throw transportFailure(error, requestId);
+      throw transportFailure(error, requestId, this.origin);
     }
     if (
       response.type === "opaqueredirect" ||
@@ -172,13 +183,8 @@ export class ServiceClient {
         (error as { cause?: { code?: unknown } })?.cause?.code ?? "",
       );
       // Only failures before any byte was sent prove the command was not applied.
-      if (/^(?:ECONNREFUSED|ENOTFOUND|EAI_AGAIN)$/.test(code))
-        throw new CliError("unavailable", "The service is unavailable.", {
-          requestId,
-          retryable: true,
-        });
-      if (/CERT|TLS|SSL|SELF_SIGNED|VERIFY/.test(code))
-        throw transportFailure(error, requestId);
+      if (NOT_SENT.test(code) || TLS_FAILURE.test(code))
+        throw transportFailure(error, requestId, this.origin);
       throw unknown();
     }
     if (

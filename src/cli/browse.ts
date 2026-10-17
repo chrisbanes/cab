@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CliError } from "./connections.js";
+import { shellWord } from "./remedy.js";
 import type { ServiceClient } from "./transport.js";
 import type { CliDeps, Result, Values } from "./types.js";
 
@@ -209,9 +210,6 @@ export async function readWithCursor<T>(
     throw error;
   }
 }
-
-const shellWord = (word: string) =>
-  /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
 
 export function nextCommand(ctx: BrowseContext, token: string): string {
   const v = ctx.values;

@@ -330,7 +330,10 @@ Human-readable output is the terminal default. `--output json` emits a versioned
 envelope containing data, observation time, resolved identity, pagination and
 coverage/omission information. Structured errors include a stable code, request
 identity, retryability and any known outcome. Send diagnostics to stderr; never
-mix progress messages into JSON stdout. Following uses explicitly selected JSONL
+mix progress messages into JSON stdout. A human error of the operator commands ends with one
+`Fix:` line naming the command or action that resolves it (`service` and `snapshot`
+keep their own lifecycle errors and add the line only to usage errors); the remedy is terminal text only
+and is not a field of the JSON envelope. Following uses explicitly selected JSONL
 or readable output, bounded polling and resumable cursors.
 
 List reads default to 50 items and cap pages at 200. Filters are server-side.

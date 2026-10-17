@@ -175,11 +175,17 @@ function commentGates(read: TaskRead, expected: number) {
     throw new CliError(
       "policy-denied",
       `Comments are not available for this task: ${policy?.reason ?? "not reported"}. Nothing was sent.`,
+      {
+        fix: `Run 'ensemble delivery get ${read.data.task.id}' to see the comment policy.`,
+      },
     );
   if (read.data.task.version !== expected)
     throw new CliError(
       "conflict",
       `The task is at version ${read.data.task.version}, not ${expected}. Nothing was sent.`,
+      {
+        fix: `Retry with --expected-task-version ${read.data.task.version}; 'ensemble delivery get ${read.data.task.id}' shows the task.`,
+      },
     );
   return policy;
 }
@@ -437,13 +443,19 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "conflict",
               "Not confirmed: the review's revision or material hash does not match, it is already decided, or the task, source or policy changed since the review. The decision is unchanged.",
-              error.extra,
+              {
+                ...error.extra,
+                fix: `Run 'ensemble delivery get ${taskId}' for the review's current revision and material hash, then decide again.`,
+              },
             );
           if (error instanceof CliError && error.code === "policy-denied")
             throw new CliError(
               "policy-denied",
               "Not approved: the project policy does not grant issue comments for this repository. The decision is unchanged; a denial can still be recorded.",
-              error.extra,
+              {
+                ...error.extra,
+                fix: `Record a denial instead (--decision denied), or ask the project owner to grant issue comments; 'ensemble delivery get ${taskId}' shows the policy.`,
+              },
             );
           throw error;
         });
@@ -517,6 +529,9 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "policy-denied",
               "This project requires an approved review before posting: run 'delivery review-comment', then 'delivery confirm-comment', then send with --review-id. Nothing was sent.",
+              {
+                fix: `Run 'ensemble delivery review-comment ${taskId}' first.`,
+              },
             );
         }
         if (reviewId) {
@@ -542,7 +557,10 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
                 throw new CliError(
                   "conflict",
                   `The body or task version differs from review ${reviewId}, or the task changed. Nothing was sent; a changed comment needs a new review.`,
-                  error.extra,
+                  {
+                    ...error.extra,
+                    fix: `Run 'ensemble delivery review-comment ${taskId}' for a changed comment; 'ensemble delivery get ${taskId}' shows the task.`,
+                  },
                 );
               throw error;
             });
@@ -551,11 +569,17 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
             throw new CliError(
               "unavailable",
               `Review ${reviewId} could not be read back. Nothing was sent.`,
+              {
+                fix: `Run 'ensemble delivery get ${taskId}' to check the review, then send again.`,
+              },
             );
           if ((review.data as ReviewReceipt).decision !== "approved")
             throw new CliError(
               "policy-denied",
               `Review ${reviewId} is ${(review.data as ReviewReceipt).decision}, not approved. Nothing was sent.`,
+              {
+                fix: `Run 'ensemble delivery get ${taskId}' to see the review, or create a new one with 'ensemble delivery review-comment ${taskId}'.`,
+              },
             );
         }
         const request: RequestIdentity = {
@@ -598,7 +622,11 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
               throw new CliError(
                 "journal-unavailable",
                 `The service recorded operation ${key} (${recorded.state}) without returning its receipt, and the local journal cannot record it. Rerun with --request-id ${key}; do not use a new key.`,
-                { retryable: true, request },
+                {
+                  retryable: true,
+                  request,
+                  fix: `Make the CLI state directory writable, then rerun with --request-id ${key}; do not use a new key.`,
+                },
               );
             });
             throw new CliError(
@@ -612,7 +640,10 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           throw new CliError(
             error.code,
             `Not sent: ${error.code === "conflict" ? "the task, its source or the delivery policy changed, or this request ID was used with other material" : "the project policy denies this comment"}. Nothing was posted.`,
-            error.extra,
+            {
+              ...error.extra,
+              fix: `Run 'ensemble delivery get ${taskId}' to see the task and policy, then rerun with a new --request-id.`,
+            },
           );
         });
         const r = sent.receipt as Extract<CommandReceipt, { kind: "delivery" }>;
@@ -623,13 +654,19 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
           throw new CliError(
             "policy-denied",
             `Denied: ${r.reason ?? "delivery authority denied"}. Nothing was posted; operation ${key} stays denied. ${retry}`,
-            { request },
+            {
+              request,
+              fix: `Run 'ensemble delivery get ${taskId}' to see why the policy denied it.`,
+            },
           );
         if (r.state === "confirmed-failure")
           throw new CliError(
             "conflict",
             `Failed: ${r.reason ?? "the provider refused it"}. Nothing was posted; operation ${key} stays failed. ${retry}`,
-            { request },
+            {
+              request,
+              fix: `Run 'ensemble delivery get ${taskId}' to see the failure, fix its cause, then send again with a new --request-id.`,
+            },
           );
         if (r.state !== "confirmed-success")
           throw new CliError(

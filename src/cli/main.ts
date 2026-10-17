@@ -30,6 +30,7 @@ import {
   snapshotCommand,
 } from "./service.js";
 import { jsonLine, terminalSafe } from "./render.js";
+import { DEFAULT_FIX, fixLine, remedyFor } from "./remedy.js";
 import { RequestJournal } from "./request-journal.js";
 import { closureSuffix, waitLines } from "./task-write.js";
 import { unmetReason } from "../operator/readiness-text.js";
@@ -249,7 +250,10 @@ export async function main(
     }
     if (values.help || positionals.length === 0) {
       deps.stdout.write(USAGE);
-      return values.help ? 0 : 2;
+      if (values.help) return 0;
+      // A bare invocation is a usage error: the help stays on stdout, the remedy goes to stderr.
+      if (!json) deps.stderr.write(`${fixLine(DEFAULT_FIX.usage ?? "")}\n`);
+      return 2;
     }
     const result = await run(positionals, values, deps);
     if (result.streamed) return 0;
@@ -276,7 +280,9 @@ export async function main(
             "code" in raw &&
             String(raw.code).startsWith("ERR_PARSE_ARGS")
           ? new CliError("usage", `${raw.message}\n\n${USAGE}`)
-          : new CliError("unavailable", "Unexpected CLI failure.");
+          : new CliError("unavailable", "Unexpected CLI failure.", {
+              fix: "Reads can be retried. After a write, check the state with the matching 'get' command before repeating it, and report the failure with the command you ran.",
+            });
     const [exit, category] =
       EXIT[error.code] ??
       (error.extra.status === 409
@@ -305,7 +311,7 @@ export async function main(
       );
     else
       deps.stderr.write(
-        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId ? `, request ${error.extra.requestId}` : ""})\n`,
+        `ensemble: ${terminalSafe(error.message)} (${error.code}${error.extra.requestId && !error.extra.notSent ? `, request ${error.extra.requestId}` : ""})\n${terminalSafe(fixLine(remedyFor(error, category)))}\n`,
       );
     return exit;
   }
@@ -504,8 +510,11 @@ function operatorConnection(
   return {
     async origin() {
       rejectManaged(deps.env);
-      const { connection } = config.select(await config.read(), requested);
-      await loadToken(connection, deps);
+      const { name, connection } = config.select(
+        await config.read(),
+        requested,
+      );
+      await loadToken(name, connection, deps);
       return connection.url;
     },
     async readiness(signal) {
@@ -538,7 +547,7 @@ async function connect(
   capabilities: readonly string[],
 ) {
   const { name, connection } = config.select(await config.read(), requested);
-  const token = await loadToken(connection, deps);
+  const token = await loadToken(name, connection, deps);
   const client = new ServiceClient(
     connectionOrigin(connection.url),
     token,
@@ -549,6 +558,9 @@ async function connect(
     throw new CliError(
       "service-identity-changed",
       `The service at ${connection.url} is a different installation than when ${name} logged in. Run 'ensemble auth login' again if this is expected.`,
+      {
+        fix: `If the reinstall is expected, run 'ensemble auth login --connection ${name} --url ${connection.url}'; otherwise check the URL with 'ensemble connection list'.`,
+      },
     );
   return {
     name,
@@ -565,14 +577,25 @@ async function connect(
   };
 }
 
-async function loadToken(connection: Connection, deps: CliDeps) {
+async function loadToken(name: string, connection: Connection, deps: CliDeps) {
   const credential = connection.credential;
   if (!credential)
     throw new CliError(
       "credential-not-found",
       "This connection is logged out. Run 'ensemble auth login'.",
+      {
+        fix: `Run 'ensemble auth login --connection ${name} --url ${connection.url}' to store a credential.`,
+      },
     );
-  if (credential.kind === "token-file") return readTokenFile(credential.path);
+  if (credential.kind === "token-file")
+    return readTokenFile(credential.path).catch((error: unknown) => {
+      if (error instanceof CliError && error.code === "invalid-token-file")
+        throw new CliError(error.code, error.message, {
+          ...error.extra,
+          fix: `${error.extra.fix ?? ""} Or log in again: 'ensemble auth login --connection ${name} --url ${connection.url} --token-file PATH'.`.trim(),
+        });
+      throw error;
+    });
   if (deps.platform !== "darwin")
     throw new CliError(
       "credential-store-unavailable",

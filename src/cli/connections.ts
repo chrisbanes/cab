@@ -23,6 +23,10 @@ export class CliError extends Error {
       credentialReason?: z.infer<typeof sourceCredentialReasonSchema>;
       /** Set on write failures so the envelope carries the receipt identity. */
       request?: RequestIdentity;
+      /** One-line human remedy for this site; printed as `Fix:` and never put in JSON. */
+      fix?: string;
+      /** True only when the failure proves the request never reached the service. */
+      notSent?: boolean;
     } = {},
   ) {
     super(message);
@@ -127,7 +131,9 @@ export class ConnectionConfig {
     }
     const connection = config.connections[name];
     if (!connection)
-      throw new CliError("connection-not-found", `Unknown connection ${name}`);
+      throw new CliError("connection-not-found", `Unknown connection ${name}`, {
+        fix: "Run 'ensemble connection list' for the saved names, or log in with 'ensemble auth login --connection NAME --url ORIGIN'.",
+      });
     return { name, connection };
   }
 }
@@ -246,7 +252,11 @@ export async function readTokenFile(
   const text = await readOwnerOnlyFile(
     path,
     uid,
-    (why) => new CliError("invalid-token-file", `Token file rejected: ${why}.`),
+    (why, fix) =>
+      new CliError("invalid-token-file", `Token file rejected: ${why}.`, {
+        fix,
+      }),
+    "Check the path given to --token-file.",
   );
   const token = text.trim();
   // The token schema is fixed-length, so an oversized file fails here too.

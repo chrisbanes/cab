@@ -12,6 +12,7 @@ import {
   readTextFile,
 } from "./configure.js";
 import { CliError } from "./connections.js";
+import { fixLine, nextLine } from "./remedy.js";
 import { keyValues } from "./render.js";
 import type { RequestIdentity } from "./types.js";
 import {
@@ -22,6 +23,7 @@ import {
   type WriteCommand,
   type WriteContext,
   type WriteOutput,
+  withConflictRemedy,
 } from "./write.js";
 
 export const TASK_WRITE = ["cli.identity", "task.read", "task.write"] as const;
@@ -109,7 +111,7 @@ export function waitLines(waits: readonly Wait[], taskId: string): string[] {
   return waits.flatMap((w) => [
     `Waiting: ${waitLabels[w.code]}`,
     ...(w.detail ? [`  ${w.detail}`] : []),
-    ...(w.fix ? cliFix(w.fix).map((line) => `  Fix: ${line}`) : []),
+    ...(w.fix ? cliFix(w.fix).map((line) => `  ${fixLine(line)}`) : []),
     ...w.links.map((link) =>
       link.kind === "task"
         ? `  Blocked by task ${link.id} (${link.label})`
@@ -122,6 +124,26 @@ export function waitLines(waits: readonly Wait[], taskId: string): string[] {
               : `  ${link.label}`,
     ),
   ]);
+}
+
+/**
+ * What a write prints last about the task it touched: the task's own wait lines (as in
+ * `task get`), else the command to run next. `suggestReady` names the configure command
+ * for a task that is not ready yet. A failed post-read still names `task get`.
+ */
+export function followLines(
+  after: TaskData | undefined,
+  taskId: string,
+  suggestReady = false,
+): string[] {
+  if (after?.waits.length) return waitLines(after.waits, taskId);
+  if (after && suggestReady && !after.task.ready)
+    return [
+      nextLine(
+        `ensemble task configure ${taskId} --expected-version ${after.task.version} --ready true`,
+      ),
+    ];
+  return [nextLine(`ensemble task get ${taskId}`)];
 }
 
 /** `queued` only when the task is ready and admissible now; holds still decide. */
@@ -157,6 +179,19 @@ export function writeOutput(o: {
   };
 }
 
+/** What `withConflictRemedy` needs for a task's `--expected-version`. */
+export const taskVersion = (
+  session: Session,
+  taskId: string,
+  sent: number | undefined,
+) => ({
+  subject: `Task ${taskId}`,
+  sent,
+  read: `ensemble task get ${taskId}`,
+  current: () =>
+    readAfter(session, taskId).then((t) => t && { version: t.task.version }),
+});
+
 const isTask = (receipt: CommandReceipt, taskId: string) =>
   receipt.kind === "domain" &&
   "state" in receipt.result &&
@@ -180,15 +215,19 @@ async function domainTaskWrite(
     { scope, type },
     { taskId, ...fields },
   );
-  const { receipt, request } = await sendCommand(ctx, session, {
-    scope,
-    type,
-    key,
-    digest,
-    resource: taskId,
-    command: exactCommand({ type, projectId, taskId, ...fields }, key),
-    match: (r) => isTask(r, taskId),
-  });
+  const { receipt, request } = await withConflictRemedy(
+    () =>
+      sendCommand(ctx, session, {
+        scope,
+        type,
+        key,
+        digest,
+        resource: taskId,
+        command: exactCommand({ type, projectId, taskId, ...fields }, key),
+        match: (r) => isTask(r, taskId),
+      }),
+    taskVersion(session, taskId, fields.expectedVersion as number),
+  );
   const after = await readAfter(session, taskId);
   return writeOutput({
     request,
@@ -213,6 +252,21 @@ async function messageText(ctx: WriteContext) {
     );
   return text;
 }
+
+/** The service's only operator-message denial without a reference: the recipient is not in the task. */
+const notAnAssignment = (
+  taskId: string,
+  recipient: string,
+  extra: CliError["extra"] = {},
+) =>
+  new CliError(
+    "policy-denied",
+    `Assignment ${recipient} is not an assignment of task ${taskId}.`,
+    {
+      ...extra,
+      fix: `Run 'ensemble task get ${taskId} --output json' and use an assignment ID from its assignments list.`,
+    },
+  );
 
 async function sendMessage(
   ctx: WriteContext,
@@ -241,17 +295,34 @@ async function sendMessage(
     command,
   );
   if (!reused) gate();
-  const { receipt, request } = await sendCommand(ctx, session, {
-    scope,
-    type: "message",
-    key,
-    digest,
-    resource: taskId,
-    command: exactCommand(command, key),
-    match: (r) =>
-      r.kind === "coordination" &&
-      r.taskId === taskId &&
-      r.recipientAssignmentId === recipient,
+  const { receipt, request } = await withConflictRemedy(
+    () =>
+      sendCommand(ctx, session, {
+        scope,
+        type: "message",
+        key,
+        digest,
+        resource: taskId,
+        command: exactCommand(command, key),
+        match: (r) =>
+          r.kind === "coordination" &&
+          r.taskId === taskId &&
+          r.recipientAssignmentId === recipient,
+      }),
+    {
+      subject: `Assignment ${recipient}`,
+      sent: expected,
+      read: `ensemble assignment get ${recipient}`,
+      current: () =>
+        readAfter(session, taskId).then((t) => {
+          const a = t?.assignments.find((x) => x.assignmentId === recipient);
+          return a && { version: a.version, state: a.state };
+        }),
+    },
+  ).catch((error: unknown) => {
+    if (error instanceof CliError && error.code === "policy-denied")
+      throw notAnAssignment(taskId, recipient, error.extra);
+    throw error;
   });
   const name =
     task.assignments.find((a) => a.assignmentId === recipient)?.name ??
@@ -370,6 +441,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           lines: after ? taskStatusLines(after) : [["Task", taskId]],
           notes: [
             "Task creation cannot be undone: use 'task configure --ready false' or 'task stop' to hold it.",
+            ...followLines(after, taskId, true),
           ],
           data: { taskId, ...(after ? { admission: after.admission } : {}) },
         });
@@ -476,13 +548,17 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
             const lead = task.assignments.find(
               (a) => a.assignmentId === recipient,
             );
+            if (!lead) throw notAnAssignment(taskId, recipient);
             if (
               recipient === task.leadAssignmentId &&
-              lead?.state === "completed"
+              lead.state === "completed"
             )
               throw new CliError(
                 "usage",
                 `The project lead has completed; use 'ensemble task follow-up ${taskId}' to resume it.`,
+                {
+                  fix: `Run 'ensemble task follow-up ${taskId} --expected-version N --message-file FILE', with N from 'ensemble assignment get ${recipient}'.`,
+                },
               );
           },
         );
@@ -503,8 +579,14 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
         const session = await connectWrite(ctx, TASK_WRITE);
         const task = (await readTask(session, taskId)).data;
         const lead = task.leadAssignmentId;
+        const chooseLead = cliFix({
+          kind: "choose-lead",
+          projectId: task.task.projectId,
+        });
         if (!lead)
-          throw new CliError("conflict", "This task has no project lead.");
+          throw new CliError("conflict", "This task has no project lead.", {
+            fix: `Choose a project lead with '${chooseLead[0]}', then '${chooseLead[1]}' ('ensemble profile list' shows profile IDs).`,
+          });
         return sendMessage(
           ctx,
           session,
@@ -520,6 +602,12 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
                 task.leadFeedback?.mode === "receives"
                   ? `The lead has not completed; use 'ensemble task message ${taskId} --to ${lead}'.`
                   : "The lead cannot be resumed: the task is not open or the lead is unavailable.",
+                {
+                  fix:
+                    task.leadFeedback?.mode === "receives"
+                      ? `Run 'ensemble task message ${taskId} --to ${lead} --expected-version N --message-file FILE', with N from 'ensemble assignment get ${lead}'.`
+                      : `Run 'ensemble task get ${taskId}' to see the task's state and lead.`,
+                },
               );
           },
         );

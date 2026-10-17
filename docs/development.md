@@ -228,7 +228,14 @@ or run `node dist/src/cli/main.js` directly.
    `operation get` and the exact retry. Exit codes: 2 invalid input, 3
    authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
-   outcome, 7 unsupported service. Write commands reject flags they do not use.
+   outcome, 7 unsupported service. Write commands reject flags they do not use. Every
+   human error of the operator commands ends with one `Fix:` line on stderr
+   (`src/cli/remedy.ts`). `service` and `snapshot` print their usage errors with the
+   same line but keep their own lifecycle error reporting. A
+   write that succeeds may end with `Next:` or `Waiting:`/`Fix:` lines; JSON and
+   JSONL output carry neither, so envelopes, codes and exit codes do not change.
+   A refused or unresolved connection (nothing sent) omits the request ID from the
+   human line only.
 
 
 6. Execution diagnostics, with either credential scope:
@@ -304,7 +311,12 @@ or run `node dist/src/cli/main.js` directly.
      and `task add-dependency|remove-dependency TASK_ID --blocker ID
      --expected-version N`. Imported tasks keep provider-owned title and outcome
      (`policy-denied`) and readiness. The task and initial-assignment ids are derived
-     from the request key, so a retry rebuilds the same command.
+     from the request key, so a retry rebuilds the same command. `task create` and
+     `task resume` end with the task's `Waiting:`/`Fix:` lines, as `task get` prints
+     them, or with a `Next:` command (`task get`, or `task configure ... --ready
+     true` for a task created not ready). A stale `--expected-version` on a task or
+     assignment write is `conflict` (exit 4) naming the current version and the
+     read command to run.
    - `task message TASK_ID --to ASSIGNMENT_ID --expected-version N --message-file
      FILE` addresses a pending or running assignment for its next eligible turn; it
      admits no work. A completed project lead is refused with a pointer to `task
