@@ -2049,9 +2049,11 @@ test("daemon mode install renders, lints and records without touching launchd", 
     `sudo /bin/launchctl bootstrap system ${quoted(f.installed)}`,
   ]);
   for (const step of output.steps) assert.ok(result.stderr.includes(step));
-  assert.match(
+  assert.ok(
+    result.stderr.includes(
+      `Then run the same install command again, with the same options and no TARBALL, to verify: ${quoted(join(f.stateDir, "versions", "0.1.0", "bin", "ensemble"))} service install --mode daemon`,
+    ),
     result.stderr,
-    /Then run the same `ensemble service install --mode daemon` command again to verify\./,
   );
 
   const record = f.record();
@@ -2147,9 +2149,26 @@ test("daemon mode re-run verifies the installed plist and job against the record
     assert.deepEqual(f.launchd.fetched, []);
   }
 
+  // Only the copy was run: the root-owned plist matches, so only loading is printed.
+  copyFileSync(f.staged, f.installed);
+  chmodSync(f.installed, 0o644);
+  const copied = await f.installDaemon();
+  assert.equal(copied.code, 0, copied.stderr);
+  assert.deepEqual(JSON.parse(copied.stdout).steps, [first.steps[1]]);
+  assert.equal(JSON.parse(copied.stdout).started, false);
+  assert.ok(!copied.stderr.includes("/usr/bin/install"));
+  // That no longer needs the staged copy.
+  const stagedBytes = readFileSync(f.staged);
+  rmSync(f.staged);
+  assert.deepEqual(JSON.parse((await f.installDaemon()).stdout).steps, [
+    first.steps[1],
+  ]);
+  writeFileSync(f.staged, stagedBytes);
+  rmSync(f.installed);
+
   // The operator ran the steps: loaded, matching, and the app answers.
   runSudoSteps(f);
-  const verified = await f.installDaemon();
+  const verified = await f.installDaemon({ open: true });
   assert.equal(verified.code, 0, verified.stderr);
   const output = JSON.parse(verified.stdout);
   assert.equal(output.started, true);
@@ -2162,6 +2181,8 @@ test("daemon mode re-run verifies the installed plist and job against the record
   assert.match(verified.stderr, /Open http:\/\/127\.0\.0\.1:\d+\/app/);
   assert.deepEqual(f.launchd.mutations(), []);
   assert.deepEqual(f.launchd.requests, []);
+  // Verifying never opens the browser, even when open is the default.
+  assert.deepEqual(f.launchd.opened, []);
   sameRecord();
 });
 

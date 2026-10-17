@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+import { daemonGhWarning } from "../../src/cli/service.js";
 import { readinessSchema } from "../../src/operator/readiness.js";
 import { fakeServer, harness } from "../fixtures/cli-harness.js";
 import { fakeStatusGh } from "../fixtures/fake-status-gh.js";
@@ -253,4 +254,12 @@ test("doctor daemon host stays silent without a daemon record or with a file log
   assert.equal(file.code, 0, file.err);
   assert.equal(file.err.includes(WARNING), false);
   assert.equal(existsSync(gh.log), true, "gh ran for the daemon record");
+});
+
+test("doctor daemon host never runs gh as root", async (t) => {
+  const gh = fakeStatusGh(t);
+  const env = { ...gh.env("keyring"), HOME: daemonHome(t, "daemon") };
+  assert.equal(await daemonGhWarning(env, 0), null);
+  assert.equal(existsSync(gh.log), false, "gh is not run as root");
+  assert.ok((await daemonGhWarning(env, 501))?.includes(WARNING));
 });

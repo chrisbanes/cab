@@ -226,18 +226,24 @@ sudo /bin/launchctl bootstrap system /Library/LaunchDaemons/local.ensemble.servi
 The printed commands quote paths that need it. Install exits 0 with `"mode":"daemon"`,
 `"started":false` and the two commands in `"steps"`. In daemon mode it only ever calls
 `launchctl print`; it never writes under `/Library`, never runs `bootstrap` or
-`bootout`, and does not sign in, run `doctor` or open the app. The first
-command copies the staged file as it is at that moment, and a root-owned job then
-runs what that plist says, so run it soon after install and check that
-`plutil -p` of the staged file shows `UserName` as your account; anything that
-can write `STATE` as you could change it. Then run the same `ensemble service install --mode daemon`
-command again to verify. The re-run compares `system/<label>` and
+`bootout`, and does not sign in or run `doctor`. The first
+command copies the staged file as it is at that moment (and follows a symbolic
+link at that path), and launchd then runs what the copied plist says, so run it
+soon after install and first check that `shasum -a 256` of the staged file equals
+`plistSha256` in the install record; anything that can write `STATE` as you could
+change the file. Then run the same install command again to verify, with the same
+options and no TARBALL, from the installed release (`"$STATE/versions/<version>/bin/ensemble"
+service install --mode daemon`; install prints the exact line). Use the same
+`--state-dir` and label in both modes: the exclusion between modes checks the
+record and `/Library`, and a record in another state directory is invisible to it.
+If the copy ran but the job is not loaded, the re-run prints only the `launchctl
+bootstrap` step. The re-run compares `system/<label>` and
 `/Library/LaunchDaemons/<label>.plist` with the install record: the plist must be a
 regular file (not a symbolic link) owned by root that others cannot write, with
 the recorded sha256, and the loaded job's path must be that plist. When they match it
 waits for `/app` and exits 0 with `"started":true` and no steps, then prints the
-manual `ensemble auth login` line, `ensemble doctor` and the app URL, as the
-LaunchAgent install does when it could not sign in. When the job is not loaded it
+manual `ensemble auth login` line, `ensemble doctor` and the app URL (it never opens
+the browser), as the LaunchAgent install does when it could not sign in. When the job is not loaded it
 prints the steps again with `"started":false`. When the plist or job differs from
 the record it refuses and changes nothing; so does a different release, a tarball
 or a different port. The re-run writes nothing, so it is safe to repeat.
@@ -249,11 +255,11 @@ environment variable and no secret. It is world-readable in `/Library/LaunchDaem
 Logs stay in the log directory, `<label>.<version>.<UTC time>.{out,err}.log`.
 Install and the service refuse `root` as the account.
 
-There is one install record per label (`STATE/launchd/<label>.json`), which now
+There is one install record per label (`STATE/launchd/<label>.json`), which
 carries `"mode"`: `agent` or `daemon`. The modes are never both active. Install in
 one mode refuses, changing nothing, while a record, loaded job or plist of the other
 exists, and tells you to uninstall first. A record without `mode` is read as a
-LaunchAgent. A CLI from before this change refuses a record that carries `mode`
+LaunchAgent. A CLI that predates `mode` refuses a record that carries `mode`
 as invalid and changes nothing, so do not manage a daemon (or a newer LaunchAgent)
 install with an older release's CLI.
 
@@ -284,7 +290,7 @@ record and exits 0 with `"complete":true`; that is also the point from which
 daemon job or plist exists without a record, or differs from it. Data, auth,
 snapshots, releases and logs are kept as with the LaunchAgent.
 
-The JSON results gain `"mode"` on install and uninstall; daemon install adds
+The JSON results include `"mode"` on install and uninstall; daemon install adds
 `"started"` and `"steps"`, and daemon uninstall adds `"complete"` and, while it is
 false, `"steps"`.
 
@@ -326,7 +332,8 @@ maintainer's Mac:
    prints a path, not `keyring`.
 2. If the LaunchAgent is installed, run `ensemble service uninstall`. Then run
    `ensemble service install --mode daemon`, the two printed `sudo` commands, and
-   the install command again; it must report `"started":true`.
+   the install command again from the installed release's `bin/ensemble` with no
+   TARBALL; it must report `"started":true`.
 3. Run `sudo fdesetup authrestart`. Without logging in, collect from another
    machine or after the later login: `sudo launchctl print system/local.ensemble.service`
    state and pid; `ps -o lstart= -p <pid>` against the login time from `last -1 $USER`

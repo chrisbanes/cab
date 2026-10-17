@@ -80,7 +80,7 @@ the manual login line. --connection defaults to local; --no-open skips the brows
 install --mode daemon prepares a LaunchDaemon that starts at boot, before anyone logs
 in. It runs as you, never as root: it renders and records the plist, then prints the
 sudo commands that install and start it; run them, then run the same install command
-again to verify. It does not sign in, run doctor or open the app. The two modes are
+again, with the same options and no TARBALL, to verify. It does not sign in or run doctor. The two modes are
 never both installed; uninstall prints the matching sudo commands for a daemon. upgrade
 refuses a daemon install; see the macOS operations guide for the switch-back procedure.
 upgrade stops the job, takes a verified snapshot, starts VERSION_DIR and checks
@@ -762,11 +762,22 @@ class Service {
     );
   }
 
+  /** The command that verifies a daemon install: the installed release's own CLI, no TARBALL. */
+  verifyCommand(version: string): string {
+    return `${shellWord(join(this.options.stateDir, "versions", version, "bin", "ensemble"))} service install --mode daemon`;
+  }
+
   /** The commands the operator runs with sudo to install and start the staged daemon plist. */
-  installSteps(): string[] {
+  installSteps(alreadyInstalled = false): string[] {
     const installed = shellWord(this.installedDaemon);
     return [
-      `sudo /usr/bin/install -m 0644 -o root -g wheel ${shellWord(this.stagedDaemon)} ${installed}`,
+      // A root-owned copy that already matches the record is not copied again from the
+      // operator-writable staged file; only loading it remains.
+      ...(alreadyInstalled
+        ? []
+        : [
+            `sudo /usr/bin/install -m 0644 -o root -g wheel ${shellWord(this.stagedDaemon)} ${installed}`,
+          ]),
       `sudo /bin/launchctl bootstrap system ${installed}`,
     ];
   }
@@ -1137,7 +1148,7 @@ async function installServiceLocked(
     if (daemon && service.recordMode() === "daemon") {
       if (tarball)
         throw refuse(
-          `${options.label} is already installed as a daemon; run \`ensemble service uninstall\` before installing another release`,
+          `${options.label} is already installed as a daemon; verify it with the install command and no TARBALL, or run \`ensemble service uninstall\` before installing another release`,
         );
       stage = "verify";
       return await verifyDaemon(service, first, version as string, (next) => {
@@ -1215,7 +1226,7 @@ async function installServiceLocked(
     ));
     if (daemon) {
       // Nothing reaches launchd: the operator runs the printed steps with sudo.
-      await finishDaemonInstall(service, version as string, logs, false);
+      await finishDaemonInstall(service, version as string, logs, false, false);
       return 0;
     }
     service.checkInterrupt();
@@ -1244,8 +1255,9 @@ async function installServiceLocked(
   } catch (error) {
     let jobStopped: boolean | null = null;
     if (daemon) {
-      // No job was touched. A render that failed after the record was written leaves only
-      // what this run created: the first run proved neither existed.
+      // No job was touched. A render that failed after the record was written removes the
+      // record (the first run proved none existed) and this label's staged plist in our own
+      // private directory.
       if (stage === "render") {
         rmSync(service.recordPath, { force: true });
         rmSync(service.stagedDaemon, { force: true });
@@ -1293,9 +1305,10 @@ async function finishDaemonInstall(
   version: string,
   logs: string[],
   started: boolean,
+  alreadyInstalled: boolean,
   first?: FirstRun,
 ) {
-  const steps = started ? [] : service.installSteps();
+  const steps = started ? [] : service.installSteps(alreadyInstalled);
   service.write("stdout", {
     ok: true,
     operation: "install",
@@ -1310,19 +1323,24 @@ async function finishDaemonInstall(
   });
   await warnGhKeychain(service);
   if (first) {
-    await finishInstall(service, first, {
-      connection: null,
-      credentialName: "",
-      credentialActive: false,
-      sessionOpen: false,
-    });
+    // Verifying never opens the browser; the app URL is still printed.
+    await finishInstall(
+      service,
+      { ...first, open: false },
+      {
+        connection: null,
+        credentialName: "",
+        credentialActive: false,
+        sessionOpen: false,
+      },
+    );
     return;
   }
   const line = (text: string) => service.io.stderr.write(`${text}\n`);
   line("Run these commands to install and start the service at boot:");
   for (const step of steps) line(step);
   line(
-    "Then run the same `ensemble service install --mode daemon` command again to verify.",
+    `Then run the same install command again, with the same options and no TARBALL, to verify: ${service.verifyCommand(version)}`,
   );
 }
 
@@ -1360,14 +1378,21 @@ async function verifyDaemon(
   if (job !== null) {
     setStage("health");
     await service.waitForApp(record.configuration.origin);
-    await finishDaemonInstall(service, record.version, logs, true, first);
+    await finishDaemonInstall(service, record.version, logs, true, true, first);
     return 0;
   }
-  if (!service.stagedDaemonMatches(record))
+  // Present and matching, not loaded: only loading remains, so the staged copy is not needed.
+  if (installed === null && !service.stagedDaemonMatches(record))
     throw refuse(
       `The staged plist ${service.stagedDaemon} does not match the install record; run \`ensemble service uninstall\`, then install again`,
     );
-  await finishDaemonInstall(service, record.version, logs, false);
+  await finishDaemonInstall(
+    service,
+    record.version,
+    logs,
+    false,
+    installed !== null,
+  );
   return 0;
 }
 
@@ -1803,7 +1828,10 @@ export async function ghTokenStorage(
  */
 export async function daemonGhWarning(
   env: NodeJS.ProcessEnv,
+  uid: number | undefined = process.getuid?.(),
 ): Promise<string | null> {
+  // Never run gh as root: it could create root-owned state under the operator's HOME.
+  if (uid === 0) return null;
   if (!env.HOME || !isAbsolute(env.HOME)) return null;
   const directory = join(env.HOME, STATE_DIR, "launchd");
   try {
