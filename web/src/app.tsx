@@ -714,6 +714,19 @@ export function App() {
       setPath("/app");
     }
   }, [pathname, addressPath]);
+  // Until a task starts a turn Home shows only the getting-started card, so a turn started
+  // elsewhere (task page, CLI, another session) is picked up when Home is entered again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-read on entering Home, not on every refresh of the reads it inspects.
+  useEffect(() => {
+    if (
+      pathname === "/app" &&
+      workspace.state.fetchedAt !== null &&
+      workspace.state.data?.data.gettingStarted.turnStarted === false
+    ) {
+      workspaceRefresh.current();
+      taskRefresh.current();
+    }
+  }, [pathname, navigationVersion]);
   const navigate = (next: string) => {
     history.replaceState({ ...history.state, scrollY }, "");
     pushAppEntry(next, navigationScope.current);
@@ -903,6 +916,10 @@ export function App() {
       );
     },
   };
+  // Home is only the getting-started card until a task starts a turn; no read yet shows neither.
+  const showBoard =
+    pathname !== "/app" ||
+    workspace.state.data?.data.gettingStarted.turnStarted === true;
   const waitProps = {
     client,
     session,
@@ -1204,35 +1221,37 @@ export function App() {
               {pathname === "/app" && (
                 <GettingStarted mode="home" {...waitProps} />
               )}
-              <TaskViews
-                state={tasks.state}
-                requests={inboxSummary.state}
-                refresh={() => {
-                  tasks.refresh();
-                  refreshAll();
-                }}
-                workspace={workspace.state.data}
-                path={path}
-                navigate={navigate}
-                {...(projectId
-                  ? {
-                      projectId,
-                      resume: {
-                        ...waitProps,
-                        onChanged: () => {
-                          tasks.refresh();
-                          refreshAll();
+              {showBoard && (
+                <TaskViews
+                  state={tasks.state}
+                  requests={inboxSummary.state}
+                  refresh={() => {
+                    tasks.refresh();
+                    refreshAll();
+                  }}
+                  workspace={workspace.state.data}
+                  path={path}
+                  navigate={navigate}
+                  {...(projectId
+                    ? {
+                        projectId,
+                        resume: {
+                          ...waitProps,
+                          onChanged: () => {
+                            tasks.refresh();
+                            refreshAll();
+                          },
                         },
-                      },
-                    }
-                  : {})}
-                overview={pathname === "/app"}
-                operator={
-                  pathname === "/app"
-                    ? { client, session, questions: questionStates.current }
-                    : undefined
-                }
-              />
+                      }
+                    : {})}
+                  overview={pathname === "/app"}
+                  operator={
+                    pathname === "/app"
+                      ? { client, session, questions: questionStates.current }
+                      : undefined
+                  }
+                />
+              )}
             </>
           )}
         </main>

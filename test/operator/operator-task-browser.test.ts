@@ -1177,9 +1177,12 @@ for (const viewport of [
     });
     const row = (name: string) =>
       checklist.getByRole("listitem", { name, exact: true });
+    // The empty task list still points at getting started; Home is the card itself.
     await page
       .getByRole("link", { name: "See getting started", exact: true })
       .waitFor();
+    await page.goto(`${web.origin}/app`);
+    await checklist.waitFor();
     // Codex is not on every test host's PATH; the Runtime row reads the check as given.
     await page.route("**/api/operator/readiness", async (route) => {
       const response = await route.fetch(),
@@ -1191,14 +1194,22 @@ for (const viewport of [
     });
     await page.goto(`${web.origin}/app`);
     await row("Runtime").getByText("Done", { exact: true }).waitFor();
-    await row("Lead profile").getByText("Next", { exact: true }).waitFor();
+    await row("Project").getByText("Next", { exact: true }).waitFor();
     assert.equal(
-      await row("Lead profile")
-        .getByRole("link", { name: "Create in project setup" })
+      await row("Project")
+        .getByRole("link", { name: "Create project" })
         .getAttribute("href"),
       "/app/settings/projects/new",
     );
-    assert.equal(await page.getByText(/existing operator controls/).count(), 0);
+    // Until a task starts a turn Home is only the card: no board, no empty-state line.
+    assert.equal(
+      await page.getByRole("region", { name: "Across your projects" }).count(),
+      0,
+    );
+    assert.equal(
+      await page.getByRole("link", { name: "See getting started" }).count(),
+      0,
+    );
     await screenshot(page, `${viewport.width}-no-projects`);
     await page.unroute("**/api/operator/readiness");
     const ids = await seedCatalog(f);

@@ -8,6 +8,7 @@ import {
   type ChecklistRow,
   checklistRows,
   homeRows,
+  REQUIRED_ROWS,
 } from "../../web/src/getting-started-model.js";
 import type { ReadinessRead } from "../../web/src/setup-model.js";
 
@@ -45,6 +46,9 @@ const readiness = (
 const workspace = (
   o: {
     profile?: boolean;
+    /** The project's lead; defaults to the profile when there is one. */
+    lead?: boolean;
+    revoked?: boolean;
     project?: "paused" | "enabled";
     turnStarted?: boolean;
   } = {},
@@ -56,7 +60,7 @@ const workspace = (
           name: "fixture-app",
           version: 2,
           paused: o.project === "paused",
-          leadProfileId: o.profile ? profileId : null,
+          leadProfileId: (o.lead ?? o.profile) ? profileId : null,
         },
       ]
     : [],
@@ -67,7 +71,7 @@ const workspace = (
           name: "Ada",
           summary: "",
           version: 1,
-          revoked: false,
+          revoked: o.revoked ?? false,
           runtime: { harness: "codex" },
         },
       ]
@@ -96,29 +100,106 @@ const byId = (all: ChecklistRow[]) =>
 const states = (all: ChecklistRow[]) =>
   Object.fromEntries(all.map((row) => [row.id, row.status]));
 
-test("a fresh installation has Runtime Done and Lead profile as the one primary Next", () => {
+test("a fresh installation counts three required rows and makes Project the one primary Next", () => {
   const all = rows(workspace());
   assert.deepEqual(
     all.map((r) => r.id),
-    ["runtime", "github", "lead", "project", "first-task", "claude"],
+    ["runtime", "github", "project", "first-task", "claude"],
   );
+  assert.deepEqual(REQUIRED_ROWS, ["runtime", "project", "first-task"]);
   assert.deepEqual(states(all), {
     runtime: "done",
     github: "optional",
-    lead: "next",
-    project: "not-started",
+    project: "next",
     "first-task": "not-started",
     claude: "optional",
   });
   assert.deepEqual(
     all.filter((r) => r.primary).map((r) => r.id),
-    ["lead"],
+    ["project"],
   );
-  assert.deepEqual(byId(all).lead?.action, {
+  const { project, "first-task": first } = byId(all);
+  assert.equal(project?.detail, "No projects yet.");
+  assert.deepEqual(project?.action, {
     kind: "link",
-    label: "Create in project setup",
+    label: "Create project",
     href: "/app/settings/projects/new",
   });
+  assert.equal(first?.detail, "Needs a project first.");
+  assert.deepEqual(first?.action, {
+    kind: "unavailable",
+    label: "Create task",
+  });
+});
+
+test("Project is not Done with a lead profile but no project", () => {
+  const project = byId(rows(workspace({ profile: true }))).project;
+  assert.equal(project?.status, "next");
+  assert.equal(project?.detail, "No projects yet. Lead profile Ada is ready.");
+  assert.deepEqual(project?.action, {
+    kind: "link",
+    label: "Create project",
+    href: "/app/settings/projects/new",
+  });
+});
+
+test("Project is not Done when the enabled project has no lead", () => {
+  const all = byId(
+    rows(workspace({ profile: true, lead: false, project: "enabled" })),
+  );
+  assert.equal(all.project?.status, "next");
+  assert.equal(all.project?.primary, true);
+  assert.equal(
+    all.project?.detail,
+    "fixture-app has no lead profile. Tasks wait for a lead.",
+  );
+  assert.deepEqual(all.project?.action, {
+    kind: "link",
+    label: "Choose a lead",
+    href: `/app/projects/${projectId}/settings`,
+  });
+  assert.deepEqual(all["first-task"]?.action, {
+    kind: "link",
+    label: "Create task",
+    href: `/app/tasks/new?project=${projectId}`,
+  });
+});
+
+test("Project is not Done when the lead profile is revoked", () => {
+  const all = byId(
+    rows(workspace({ profile: true, revoked: true, project: "enabled" })),
+  );
+  assert.equal(all.project?.status, "next");
+  assert.match(all.project?.detail ?? "", /has no usable lead profile/);
+  assert.deepEqual(all.project?.action, {
+    kind: "link",
+    label: "Choose a lead",
+    href: `/app/projects/${projectId}/settings`,
+  });
+  assert.doesNotMatch(all.project?.detail ?? "", /Lead profile Ada/);
+});
+
+test("Project is Done with an enabled project and a usable lead", () => {
+  const all = byId(rows(workspace({ profile: true, project: "enabled" })));
+  assert.equal(all.project?.status, "done");
+  assert.equal(all["first-task"]?.status, "next");
+  assert.equal(all["first-task"]?.primary, true);
+});
+
+test("an incomplete Project needs attention once a turn has started", () => {
+  const all = rows(
+    workspace({
+      profile: true,
+      lead: false,
+      project: "enabled",
+      turnStarted: true,
+    }),
+  );
+  assert.equal(byId(all).project?.status, "attention");
+  assert.deepEqual(
+    homeRows(all, true).map((r) => r.id),
+    ["project"],
+  );
 });
 
 test("Runtime is Next, Done, Needs attention after a later row is Done, or Checking", () => {
@@ -128,7 +209,10 @@ test("Runtime is Next, Done, Needs attention after a later row is Done, or Check
     "next",
   );
   const regressed = byId(
-    rows(workspace({ profile: true }), readiness({ "codex-login": "fail" })),
+    rows(
+      workspace({ profile: true, project: "enabled" }),
+      readiness({ "codex-login": "fail" }),
+    ),
   );
   assert.equal(regressed.runtime?.status, "attention");
   assert.equal(regressed.runtime?.detail, "codex-login reason");
@@ -199,7 +283,7 @@ test("Runtime passes on any enabled runtime and sends a missing one to Settings 
   );
 });
 
-test("GitHub is optional, never primary, and offers the signed-in gh login", () => {
+test("GitHub never offers a one-click login", () => {
   const signedIn = byId(
     rows(
       workspace(),
@@ -210,9 +294,12 @@ test("GitHub is optional, never primary, and offers the signed-in gh login", () 
   assert.equal(signedIn?.status, "optional");
   assert.equal(signedIn?.primary, false);
   assert.deepEqual(signedIn?.action, {
-    kind: "gh-login",
-    login: "fixture-user",
+    kind: "link",
+    label: "Set discovery credential",
+    href: "/app/settings",
   });
+  assert.match(signedIn?.detail ?? "", /@fixture-user/);
+  assert.match(signedIn?.detail ?? "", /Project setup/);
   assert.match(signedIn?.detail ?? "", /Optional for repository-free projects/);
   const done = byId(
     rows(
@@ -237,7 +324,6 @@ test("GitHub is optional, never primary, and offers the signed-in gh login", () 
 
 test("a paused project is not Done: its action is Resume (143b)", () => {
   const all = byId(rows(workspace({ profile: true, project: "paused" })));
-  assert.equal(all.lead?.status, "done");
   assert.equal(all.project?.status, "next");
   assert.equal(all.project?.primary, true);
   assert.deepEqual(all.project?.action, { kind: "resume", projectId });
@@ -265,7 +351,7 @@ test("First task is Done once a turn has started, and earlier gaps then need att
     workspace({ profile: true, project: "enabled", turnStarted: true }),
   );
   assert.deepEqual(homeRows(healthy, true), []);
-  assert.equal(homeRows(healthy, false).length, 6);
+  assert.equal(homeRows(healthy, false).length, 5);
 });
 
 test("a claude that is not runnable needs attention even when the token is readable", () => {

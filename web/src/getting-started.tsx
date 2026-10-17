@@ -6,7 +6,7 @@ import {
   Clock,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import {
   discoveryStatusSchema,
   type OperatorCommand,
@@ -17,6 +17,7 @@ import {
   type ChecklistRow,
   checklistRows,
   homeRows,
+  REQUIRED_ROWS,
   type RowStatus,
 } from "./getting-started-model.js";
 import { useOperatorResource } from "./resource.js";
@@ -85,6 +86,7 @@ export function GettingStarted({
   ...p
 }: WaitProps & { mode: "home" | "page" }) {
   const scope = p.session.csrfToken;
+  const reasonId = useId();
   const readiness = useOperatorResource(
     scope,
     useCallback(
@@ -105,14 +107,12 @@ export function GettingStarted({
       [p.client],
     ),
   );
-  const ghDraft = useDraft(p.drafts, "discovery.configure:getting-started");
   const dismissDraft = useDraft(p.drafts, GETTING_STARTED_DRAFT);
   // A confirmation from an earlier visit no longer describes the list.
   useEffect(() => {
-    if (ghDraft.phase === "recorded") ghDraft.purge();
     if (mode === "home" && dismissDraft.phase === "recorded")
       dismissDraft.purge();
-  }, [ghDraft, dismissDraft, mode]);
+  }, [dismissDraft, mode]);
   const read: ReadinessRead = readiness.state.error
     ? { state: "unavailable" }
     : readiness.state.data
@@ -144,7 +144,7 @@ export function GettingStarted({
   };
   if (!rows.length && mode === "home") return null;
   const required = all.filter((r) =>
-    ["runtime", "lead", "project", "first-task"].includes(r.id),
+    (REQUIRED_ROWS as readonly string[]).includes(r.id),
   );
   const attention = required.find((r) => r.status === "attention");
   return (
@@ -168,7 +168,9 @@ export function GettingStarted({
             >
               <div className="getting-started-text">
                 <h3 className="small-heading">{row.title}</h3>
-                <p className="metadata muted">{row.detail}</p>
+                <p className="metadata muted" id={`${reasonId}-${row.id}`}>
+                  {row.detail}
+                </p>
               </div>
               <Badge variant={variant}>
                 {Icon && <Icon aria-hidden="true" />}
@@ -178,7 +180,7 @@ export function GettingStarted({
                 <RowAction
                   row={row}
                   p={{ ...p, onChanged: changed }}
-                  ghDraft={ghDraft}
+                  reasonId={`${reasonId}-${row.id}`}
                   resume={resume}
                 />
               </div>
@@ -186,14 +188,6 @@ export function GettingStarted({
           );
         })}
       </ol>
-      <DraftMessage
-        draft={ghDraft}
-        success="Discovery now uses your GitHub CLI login."
-        check={async () => {
-          await ghDraft.reconcile(p.client, p.session.csrfToken);
-          if (ghDraft.phase === "recorded") changed();
-        }}
-      />
       {target && (
         <ResumeOutcome
           p={{ ...p, onChanged: changed }}
@@ -245,12 +239,12 @@ export function GettingStarted({
 function RowAction({
   row,
   p,
-  ghDraft,
+  reasonId,
   resume,
 }: {
   row: ChecklistRow;
   p: WaitProps;
-  ghDraft: ConfigurationDraft;
+  reasonId: string;
   resume: ConfigurationDraft;
 }) {
   const variant = row.primary ? "primary" : "secondary";
@@ -265,29 +259,17 @@ function RowAction({
         label="Resume"
       />
     );
-  if (action.kind === "gh-login")
-    return ghDraft.phase === "unknown" ? null : (
+  // Native `disabled` is out of the tab order; the control stays focusable so its reason is read.
+  if (action.kind === "unavailable")
+    return (
       <Button
         type="button"
         variant="secondary"
-        disabled={ghDraft.phase === "pending"}
-        onClick={async () => {
-          ghDraft.startOperation({ key: key() });
-          await ghDraft.submit(
-            p.client,
-            {
-              type: "discovery.configure",
-              key: ghDraft.values.key,
-              credentialRef: "gh:github.com",
-            },
-            p.session.csrfToken,
-          );
-          if (ghDraft.phase === "recorded") p.onChanged();
-        }}
+        aria-disabled="true"
+        aria-describedby={reasonId}
+        className="aria-disabled:opacity-50"
       >
-        {ghDraft.phase === "pending"
-          ? "Saving…"
-          : `Use GitHub CLI login (@${action.login})`}
+        {action.label}
       </Button>
     );
   return (
