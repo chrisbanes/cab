@@ -364,6 +364,25 @@ test("task stop and resume print hold labels, not hold codes", async (t) => {
   });
 });
 
+test("a replayed resume while Stop is in effect does not report a task hold", async (t) => {
+  const o = await startCliOperator(t);
+  const { s } = o;
+  const key = randomUUID();
+  const run = (verb: "stop" | "resume", args: string[] = []) =>
+    o.h.run(["task", verb, s.taskId, ...args, "--connection", "rw"]);
+  assert.equal((await run("stop")).code, 0);
+  assert.equal((await run("resume", ["--request-id", key])).code, 0);
+  assert.equal((await run("stop")).code, 0);
+  const replay = await run("resume", ["--request-id", key]);
+  assert.equal(replay.code, 0, replay.err);
+  assert.ok(replay.out.includes("Stop is in effect"), replay.out);
+  assert.deepEqual(
+    cells(replay.out.split("\n").find((l) => l.startsWith("Holds:"))),
+    ["Holds:", "Stop requested"],
+  );
+  assert.doesNotMatch(replay.out, /still held/);
+});
+
 test("task resume with remaining holds prints the task's wait lines or Next", async (t) => {
   const o = await startCliOperator(t);
   const { s } = o;

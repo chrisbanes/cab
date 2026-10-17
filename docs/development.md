@@ -209,7 +209,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    Tables lead with the title or name and end with the full id, which every command
    takes: `task list` is `Title`, `Project` (the name, and omitted under `--project`),
    `State` and `Next` (the web UI's column and who acts next), `Lead` and `Task id`;
-   `task search` is `Title`, `Project`, `Type`, `Created`, `Excerpt` and `Task id`;
+   `task search` is `Title`, `Project` (omitted under `--project`), `Type`, `Created`, `Excerpt` and `Task id`;
    `project list` is `Name`, `Lead` (the profile's name), `Paused`, `Version` and
    `Project id`; `profile list` is `Name`, `Revoked`, `Version`, `Summary` and
    `Profile id`. `project list` and `profile list` end with a `Runtime:` line only when
@@ -404,7 +404,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    - `task stop TASK_ID [--expected-version N]` is best-effort cancellation: new
      turns are held, and effects may continue until termination is verified. It
      reads nothing first. `task resume TASK_ID [--expected-version N]` clears only
-     the operator Stop and lists the holds that remain by those names. Both are receipted
+     the operator Stop and lists the holds that remain by the UI's names (`Task hold`, `Ownership held`). Both are receipted
      `task.stop`/`task.resume` commands; the web UI's Stop and the retained forms
      use the same hold.
 

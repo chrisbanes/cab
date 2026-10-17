@@ -80,13 +80,7 @@ const control = (verb: "stop" | "resume"): [string, WriteCommand] => [
         if (!receipt.stopCleared) effect = "none";
         else if (receipt.requeued > 0) effect = "queued";
         const remaining = after
-          ? taskHeldLabels({
-              ...after,
-              execution: {
-                ...after.execution,
-                holds: { ...after.execution.holds, stop: false },
-              },
-            })
+          ? taskHeldLabels(after).filter((label) => label !== "Stop requested")
           : [];
         notes.push(
           receipt.stopCleared

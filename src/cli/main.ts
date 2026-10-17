@@ -31,7 +31,7 @@ import {
   serviceHelp,
   snapshotCommand,
 } from "./service.js";
-import { jsonLine, terminalSafe } from "./render.js";
+import { jsonLine, terminalSafe, unavailable } from "./render.js";
 import {
   DEFAULT_FIX,
   fixLine,
@@ -640,7 +640,7 @@ async function run(
         `Version: ${task.version}`,
         ...(lead
           ? [
-              `Lead:    ${lead.name}${leadAssignmentId ? ` (assignment ${leadAssignmentId})` : ""}`,
+              `Lead:    ${unavailable(lead.name)}${leadAssignmentId ? ` (assignment ${leadAssignmentId})` : ""}`,
             ]
           : []),
         `Execution: ${read.data.execution.state}${held.length ? `; held: ${held.join(", ")}` : ""}`,

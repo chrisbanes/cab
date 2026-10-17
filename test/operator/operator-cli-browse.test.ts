@@ -611,6 +611,25 @@ test("task get names the lead assignment, execution and who acts next", async (t
     /^State: +(Ready|Running|Waiting|Paused|Stopping|Uncertain|Draft|Done|Cancelled)\b/,
   );
 
+  // A lead name the service withholds reads as unavailable, never `null`.
+  const withheld = await h.run(["task", "get", id], {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (!String(input).endsWith(`/api/operator/tasks/${id}`)) return response;
+      const body = (await response.json()) as Json;
+      body.data.lead.name = null;
+      return new Response(JSON.stringify(body), {
+        status: response.status,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+  assert.match(
+    line(withheld.out, "Lead") ?? "",
+    new RegExp(
+      `^Lead: +\\(unavailable\\) \\(assignment ${leadAssignmentId}\\)$`,
+    ),
+  );
   // A project with no lead has no Lead line; its Waiting line says so.
   const bare = (await h.run(["task", "get", s.taskId])).out;
   assert.equal(line(bare, "Lead"), undefined);
