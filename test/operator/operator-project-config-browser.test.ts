@@ -471,6 +471,156 @@ test("a reveal leaves no trace in the URL, history or storage", async (_t, journ
   assert.equal(requests.filter((r) => r.includes("/private-values")).length, 1);
 });
 
+const projectTabs = (page: Page) =>
+  page.getByRole("navigation", { name: "Project configuration sections" });
+/** Leave the open tab for another and come back, remounting its form. */
+const leaveAndReturn = async (page: Page, tab: string, other: string) => {
+  await projectTabs(page).getByRole("link", { name: other }).click();
+  await projectTabs(page).getByRole("link", { name: other }).waitFor();
+  await page.waitForFunction(
+    (name) =>
+      document
+        .querySelector(
+          '[aria-label="Project configuration sections"] a[aria-current="page"]',
+        )
+        ?.textContent?.trim() === name,
+    other,
+  );
+  await projectTabs(page).getByRole("link", { name: tab }).click();
+  await page.waitForFunction(
+    (name) =>
+      document
+        .querySelector(
+          '[aria-label="Project configuration sections"] a[aria-current="page"]',
+        )
+        ?.textContent?.trim() === name,
+    tab,
+  );
+};
+const noChanges = async (page: Page) =>
+  assert.equal(await changes(page).getByRole("listitem").count(), 0);
+
+test("a reverted private edit is no edit after leaving the page or adopting a newer version", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  const name = page.getByLabel("Project name", { exact: true });
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("CHANGED");
+  await changes(page)
+    .getByText("Instructions edited", { exact: true })
+    .waitFor();
+  await instructionsField(page).fill(SENTINEL);
+  await noChanges(page);
+  assert.equal(await saveProject(page).isDisabled(), true);
+  // Leaving and returning keeps no edit: the field is kept again and nothing can be sent.
+  await leaveAndReturn(page, "General", "Routing");
+  await revealButton(page, "instructions").waitFor();
+  await noChanges(page);
+  assert.equal(await saveProject(page).isDisabled(), true);
+
+  // Reveal, edit and revert, then another writer changes the same text and a name edit conflicts.
+  await name.fill("Atlas II");
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("CHANGED AGAIN");
+  await instructionsField(page).fill(SENTINEL);
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "THEIR NEWER TEXT",
+  });
+  const revision = Number(d.project(ids.atlas).instructionsRevision);
+  const first = commandBody(page);
+  await saveProject(page).click();
+  assert.equal("instructions" in (await first), false);
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await revealButton(page, "instructions").waitFor();
+  const second = commandBody(page);
+  await saveProject(page).click();
+  const sent = await second;
+  assert.equal("instructions" in sent, false, "unchanged text is not resent");
+  assert.equal(sent.name, "Atlas II");
+  await savedOutcome(page);
+  assert.equal(d.project(ids.atlas).instructions, "THEIR NEWER TEXT");
+  assert.equal(Number(d.project(ids.atlas).instructionsRevision), revision);
+});
+
+test("an edited private text stays edited after leaving the page and can still be reverted", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("EDIT ONE");
+  await leaveAndReturn(page, "General", "Routing");
+  // Still dirty after the remount: the edit shows, Save is on, and the line names the field.
+  assert.equal(await instructionsField(page).inputValue(), "EDIT ONE");
+  await changes(page)
+    .getByText("Instructions edited", { exact: true })
+    .waitFor();
+  assert.equal(await saveProject(page).isEnabled(), true);
+  // The baseline travelled with the edit, so typing the saved text back is no edit.
+  await instructionsField(page).fill(SENTINEL);
+  await noChanges(page);
+  assert.equal(await saveProject(page).isDisabled(), true);
+  await instructionsField(page).fill("EDIT TWO");
+  const body = commandBody(page);
+  await saveProject(page).click();
+  const sent = await body;
+  assert.equal(sent.instructions, "EDIT TWO");
+  assert.equal("name" in sent, false, "only the edited field is sent");
+  await savedOutcome(page);
+  assert.equal(d.project(ids.atlas).instructions, "EDIT TWO");
+});
+
+test("an edit made against older text says it was changed elsewhere before it replaces it", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings",
+  );
+  const d = f.service.domain();
+  await revealButton(page, "instructions").click();
+  await instructionsField(page).fill("MY EDIT");
+  assert.equal(
+    await page.getByText("changed elsewhere", { exact: false }).count(),
+    0,
+  );
+  d.execute({
+    type: "project.configure",
+    actor: "operator",
+    key: randomUUID(),
+    projectId: ids.atlas,
+    expectedVersion: Number(d.project(ids.atlas).version),
+    instructions: "THEIR TEXT",
+  });
+  await saveProject(page).click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  // The edit stays, the saved text is read again, and the difference is stated, not hidden.
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  assert.equal(await instructionsField(page).inputValue(), "MY EDIT");
+  assert.equal(await showsText(page, "THEIR TEXT"), false);
+  // Typing the text it started from is still no edit.
+  await instructionsField(page).fill(SENTINEL);
+  await noChanges(page);
+  assert.equal(d.project(ids.atlas).instructions, "THEIR TEXT");
+});
+
 test("revealing after another writer saved opens the newer version", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,
@@ -908,6 +1058,38 @@ test("Routing saves candidates in place without sending guidance, and edits reve
   } finally {
     await page.unroute("**/api/operator/commands");
   }
+});
+
+test("routing guidance reverted or edited keeps its state after leaving the tab", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:relay/settings?tab=routing",
+  );
+  const d = f.service.domain();
+  const field = page.getByRole("textbox", {
+    name: "Routing guidance",
+    exact: true,
+  });
+  const save = page.getByRole("button", { name: "Save routing", exact: true });
+  await revealButton(page, "routing guidance").click();
+  await field.fill("CHANGED");
+  await field.fill("PRIVATE ROUTING GUIDANCE");
+  await noChanges(page);
+  await leaveAndReturn(page, "Routing", "General");
+  await revealButton(page, "routing guidance").waitFor();
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
+  await revealButton(page, "routing guidance").click();
+  await field.fill("EDITED GUIDANCE");
+  await leaveAndReturn(page, "Routing", "General");
+  assert.equal(await field.inputValue(), "EDITED GUIDANCE");
+  await changes(page)
+    .getByText("Routing guidance edited", { exact: true })
+    .waitFor();
+  await field.fill("PRIVATE ROUTING GUIDANCE");
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(d.routing(ids.relay).guidance, "PRIVATE ROUTING GUIDANCE");
 });
 
 test("Routing names TypeSafe availability in words and who allocates when it can't choose", async (_t, journey) => {
@@ -1676,6 +1858,105 @@ test("an edited query and local path survive adopting a newer source version unl
   assert.deepEqual(await changes(page).getByRole("listitem").allInnerTexts(), [
     "Local path changed for acme/atlas",
   ]);
+});
+
+test("a reverted query or local path is kept again, and an edit survives leaving the tab", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/projects/:atlas/settings?tab=github",
+  );
+  const d = f.service.domain();
+  const api = new OperatorApi(f.service, [f.directory]);
+  const query = page.getByLabel("Search query", { exact: true });
+  const path = page.getByLabel("Local repository path", { exact: true });
+  const save = page.getByRole("button", { name: "Save changes", exact: true });
+  await query.waitFor();
+  const storedPath = await path.inputValue();
+  // Edit and revert both values: nothing is listed, nothing can be sent.
+  await query.fill("CHANGED QUERY");
+  await path.fill("/changed/path");
+  await changes(page).getByText("Search query edited for S-2").waitFor();
+  await query.fill("PRIVATE SAVED QUERY");
+  await path.fill(storedPath);
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
+  // An edit survives leaving the tab, and typing the saved text back afterwards reverts it.
+  await query.fill("EDIT ONE");
+  await leaveAndReturn(page, "GitHub source", "General");
+  assert.equal(await query.inputValue(), "EDIT ONE");
+  await changes(page).getByText("Search query edited for S-2").waitFor();
+  await query.fill("PRIVATE SAVED QUERY");
+  await noChanges(page);
+  assert.equal(await save.isDisabled(), true);
+  // Edited and reverted, then another writer changes the same query: nothing stale is kept.
+  await query.fill("MINE");
+  await query.fill("PRIVATE SAVED QUERY");
+  await page.getByLabel("Linked repository ref", { exact: true }).fill("HEAD");
+  const writer = (text: string) =>
+    api.execute({
+      type: "github.configure",
+      key: randomUUID(),
+      projectId: ids.atlas,
+      expectedVersion: d.githubConfiguration(ids.atlas).version,
+      selections: [
+        { id: "S-1", keep: true },
+        { id: "S-2", kind: "search", query: text },
+        { id: "S-3", keep: true },
+      ],
+      readiness: {
+        mode: "all",
+        conditions: [{ kind: "label", name: "ready" }],
+      },
+      repositories: [{ repositoryId: "acme/atlas", ref: "main" }],
+    } as Parameters<OperatorApi["execute"]>[0]);
+  await writer("THEIR QUERY");
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll("input")].some(
+      (e) => e.value === "THEIR QUERY",
+    ),
+  );
+  const body = commandBody(page);
+  await save.click();
+  const sent = await body;
+  assert.deepEqual(sent.selections, [
+    { id: "S-1", keep: true },
+    { id: "S-2", keep: true },
+    { id: "S-3", keep: true },
+  ]);
+  await savedOutcome(page);
+  const kept = d
+    .githubConfiguration(ids.atlas)
+    .selections.find((x) => x.id === "S-2");
+  assert.equal(kept?.kind === "search" && kept.query, "THEIR QUERY");
+  assert.equal(
+    await realpath(
+      d.githubConfiguration(ids.atlas).repositories[0]?.path ?? "",
+    ),
+    await realpath(storedPath),
+  );
+
+  // A real edit against older text says so after the other writer's change is adopted.
+  await query.fill("MY REAL EDIT");
+  await page.getByLabel("Linked repository ref", { exact: true }).fill("main");
+  await writer("THEIR SECOND QUERY");
+  await save.click();
+  await page.getByText("A newer version was saved elsewhere.").waitFor();
+  await refresh(page);
+  await outcomeMessages(page)
+    .getByRole("button", { name: "Review changes" })
+    .click();
+  await page
+    .getByText(
+      "This was changed elsewhere since you started editing. Saving replaces it.",
+    )
+    .waitFor();
+  assert.equal(await query.inputValue(), "MY REAL EDIT");
 });
 
 test("an unknown source save with rows removed elsewhere keeps its one action and message", async (_t, journey) => {

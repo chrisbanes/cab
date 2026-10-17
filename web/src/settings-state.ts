@@ -201,6 +201,28 @@ export class ConfigurationDraft {
     this.changed();
     return true;
   }
+  /**
+   * Record an edit of a private text together with the text it was edited against
+   * (`<field>Base`). Typing the baseline back removes the edit, so a field holds a string
+   * only while it really differs, and that survives leaving and returning to the page.
+   */
+  setPrivate(field: string, value: string, baseline: string) {
+    if (
+      this.phase === "pending" ||
+      this.phase === "recorded" ||
+      this.lifecycle.uncertain
+    )
+      return false;
+    const { [field]: _value, [`${field}Base`]: _base, ...rest } = this.values;
+    this.values =
+      value === baseline
+        ? rest
+        : { ...rest, [field]: value, [`${field}Base`]: baseline };
+    this.dirty = true;
+    this.savedAt = null;
+    this.changed();
+    return true;
+  }
   /** The loaded values the current input started from; adoption compares against it. */
   private base: Record<string, string | boolean | string[]> = {};
   initialize(values: Record<string, string | boolean | string[]>) {

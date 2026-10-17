@@ -153,9 +153,15 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     if (field === "repositories" && rows.some((r) => !r.removed))
       d.set("removeAll", false);
   };
-  const update = (field: string, index: number, patch: SourceRow) => {
+  const update = (
+    field: string,
+    index: number,
+    patch: SourceRow | undefined,
+    /** The row without the patch's keys, when the patch is undefined (an edit reverted). */
+    reverted?: SourceRow,
+  ) => {
     const rows = parseRows(v[field]);
-    rows[index] = { ...rows[index], ...patch };
+    rows[index] = patch ? { ...rows[index], ...patch } : (reverted ?? {});
     setRows(field, rows);
   };
   const drop = (field: string, index: number) =>
@@ -180,6 +186,8 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     label: string,
     /** What shows until the operator edits the field. */
     fallback = "",
+    /** Replaces the plain row update, for a saved value that tracks its baseline. */
+    change?: (value: string) => void,
   ) => (
     <label className="field body" htmlFor={`source-${field}-${index}-${name}`}>
       {label}
@@ -192,7 +200,11 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           rowError(field, index, name) ? `source-${field}-error` : undefined
         }
         value={String(parseRows(v[field])[index]?.[name] ?? fallback)}
-        onChange={(e) => update(field, index, { [name]: e.target.value })}
+        onChange={(e) =>
+          change
+            ? change(e.target.value)
+            : update(field, index, { [name]: e.target.value })
+        }
       />
     </label>
   );
@@ -205,9 +217,36 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
     unavailable: string,
     baseline: string | undefined,
   ) => {
-    const edited = typeof parseRows(v[field])[index]?.[name] === "string";
+    const row = parseRows(v[field])[index];
+    const edited = typeof row?.[name] === "string";
+    // The text an edit started from; typing it back removes the edit, so the row is kept again.
+    const base = edited ? String(row?.[`${name}Base`] ?? "") : baseline;
     if (baseline !== undefined || edited)
-      return input(field, index, name, label, baseline ?? "");
+      return (
+        <>
+          {input(field, index, name, label, baseline ?? "", (value) => {
+            const {
+              [name]: _value,
+              [`${name}Base`]: _base,
+              ...rest
+            } = row ?? {};
+            update(
+              field,
+              index,
+              value === (base ?? "")
+                ? undefined
+                : { [name]: value, [`${name}Base`]: base ?? "" },
+              rest,
+            );
+          })}
+          {edited && baseline !== undefined && baseline !== base && (
+            <p className="metadata muted" role="status">
+              This was changed elsewhere since you started editing. Saving
+              replaces it.
+            </p>
+          )}
+        </>
+      );
     return (
       <div className="field body">
         <span>{label}</span>

@@ -26,6 +26,7 @@ import {
   useLoadedDraft,
   useNewerPrivateRead,
   usePrivateValues,
+  useRereadForEdit,
 } from "./settings.js";
 
 const profileLabel = (r: ProjectConfigurationData["profiles"][number]) =>
@@ -109,6 +110,16 @@ export function RoutingTab(p: TabProps) {
     priv.state.data?.data.routing.version,
     priv.state.fetchedAt,
     p.refreshConfiguration,
+  );
+  useRereadForEdit(
+    data.routing.version,
+    typeof d.values.guidance === "string" &&
+      (d.phase === "editing" ||
+        d.phase === "conflict" ||
+        d.phase === "rejected"),
+    priv.state.data?.data.routing.version,
+    priv.state.pending,
+    priv.refresh,
   );
   const lines = routingChanges(data, d.values, revealed);
   const candidates = Array.isArray(d.values.candidateProfileIds)

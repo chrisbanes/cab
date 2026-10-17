@@ -181,6 +181,51 @@ test("Reviewer profile edits in place, restores and revokes, and edits revealed 
   assert.equal(await showsText(page, "PRIVATE"), false);
 });
 
+test("profile instructions reverted or edited keep their state after leaving the page", async (_t, journey) => {
+  const { f, ids, page } = await startSettings(
+    journey,
+    "/app/profiles/:reviewer/settings",
+  );
+  const reviewer = ids.profiles.Reviewer as string;
+  const save = page.getByRole("button", { name: "Save profile", exact: true });
+  const changes = page.getByRole("region", { name: "Changes to save" });
+  const field = page.getByRole("textbox", {
+    name: "Instructions",
+    exact: true,
+  });
+  const reveal = page.getByRole("button", { name: "Reveal instructions" });
+  const leaveAndReturn = async () => {
+    await page
+      .getByRole("navigation", { name: "Breadcrumb" })
+      .getByRole("link", { name: "Settings", exact: true })
+      .click();
+    await page
+      .getByRole("link", { name: "Reviewer", exact: false })
+      .first()
+      .click();
+    await page.getByLabel("Summary", { exact: true }).waitFor();
+  };
+  await reveal.click();
+  await field.fill("CHANGED");
+  await field.fill("PRIVATE REVIEWER INSTRUCTIONS");
+  assert.equal(await changes.getByRole("listitem").count(), 0);
+  await leaveAndReturn();
+  await reveal.waitFor();
+  assert.equal(await save.isDisabled(), true);
+  await reveal.click();
+  await field.fill("EDITED INSTRUCTIONS");
+  await leaveAndReturn();
+  assert.equal(await field.inputValue(), "EDITED INSTRUCTIONS");
+  await changes.getByText("Instructions edited", { exact: true }).waitFor();
+  await field.fill("PRIVATE REVIEWER INSTRUCTIONS");
+  assert.equal(await changes.getByRole("listitem").count(), 0);
+  assert.equal(await save.isDisabled(), true);
+  assert.equal(
+    f.service.domain().profile(reviewer).instructions,
+    "PRIVATE REVIEWER INSTRUCTIONS",
+  );
+});
+
 test("a profile conflict keeps typed input until the newer version is reviewed", async (_t, journey) => {
   const { f, ids, page } = await startSettings(
     journey,

@@ -423,8 +423,10 @@ export function adoptSourceRows(source: Source, v: Values) {
           ...latest,
           rowKey: r.rowKey ?? crypto.randomUUID(),
           ...(r.removed ? { removed: true } : {}),
-          // An edited query stays until the operator saves or discards it.
-          ...(typeof r.query === "string" ? { query: r.query } : {}),
+          // An edited query stays until the operator saves or discards it, with its baseline.
+          ...(typeof r.query === "string"
+            ? { query: r.query, queryBase: String(r.queryBase ?? "") }
+            : {}),
         }),
       ),
     ),

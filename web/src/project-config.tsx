@@ -40,6 +40,7 @@ import {
   useLoadedDraft,
   useNewerPrivateRead,
   usePrivateValues,
+  useRereadForEdit,
   type SettingsProps,
 } from "./settings.js";
 import { SourceTab } from "./source-config.js";
@@ -277,6 +278,16 @@ function GeneralTab(p: TabProps) {
     priv.state.data?.data.project.version,
     priv.state.fetchedAt,
     p.refreshConfiguration,
+  );
+  useRereadForEdit(
+    data.project.version,
+    typeof d.values.instructions === "string" &&
+      (d.phase === "editing" ||
+        d.phase === "conflict" ||
+        d.phase === "rejected"),
+    priv.state.data?.data.project.version,
+    priv.state.pending,
+    priv.refresh,
   );
   const lines = projectChanges(data, d.values, revealed);
   const v = d.values;

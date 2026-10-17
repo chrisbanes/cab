@@ -171,6 +171,26 @@ export function useNewerPrivateRead(
   }, [readAt]);
 }
 /**
+ * An edited private text must be compared with what is saved now, so read it again when the
+ * loaded version moved past the last private read (for example after reviewing another
+ * writer's save). Runs when the loaded version or the edit state changes, not per render.
+ */
+export function useRereadForEdit(
+  loaded: number | undefined,
+  edited: boolean,
+  read: number | undefined,
+  pending: boolean,
+  refresh: () => void,
+) {
+  const latest = useRef(refresh);
+  latest.current = refresh;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: act per loaded version and edit state only.
+  useEffect(() => {
+    if (edited && loaded !== undefined && read !== loaded && !pending)
+      latest.current();
+  }, [loaded, edited]);
+}
+/**
  * "Kept · Reveal" until the signed-in operator reveals a private text, then the same
  * multiline field. Revealed text is shown from `revealed` and enters the draft only once
  * the operator edits it, so an unedited reveal is never sent or kept across pages.
@@ -201,6 +221,9 @@ export function PrivateTextField({
     area = useRef<HTMLTextAreaElement>(null),
     focusNext = useRef(false),
     edited = typeof draft.values[field] === "string",
+    // The text the edit started from; typing it back removes the edit.
+    base = edited ? String(draft.values[`${field}Base`] ?? "") : revealed,
+    changedElsewhere = edited && revealed !== undefined && revealed !== base,
     open = edited || revealed !== undefined,
     loading = state.pending,
     failed = !loading && state.error !== null;
@@ -227,7 +250,9 @@ export function PrivateTextField({
             aria-describedby={error ? `${id}-error` : undefined}
             className="control"
             value={edited ? String(draft.values[field]) : (revealed ?? "")}
-            onChange={(e) => draft.set(field, e.target.value)}
+            onChange={(e) =>
+              draft.setPrivate(field, e.target.value, base ?? "")
+            }
           />
           {error && (
             <span id={`${id}-error`} className="error-text" role="alert">
@@ -235,6 +260,12 @@ export function PrivateTextField({
             </span>
           )}
         </label>
+        {changedElsewhere && (
+          <p className="metadata muted" role="status">
+            This was changed elsewhere since you started editing. Saving
+            replaces it.
+          </p>
+        )}
         {children}
       </div>
     );

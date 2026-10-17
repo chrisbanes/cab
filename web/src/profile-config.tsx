@@ -46,6 +46,7 @@ import {
   useLoadedDraft,
   useNewerPrivateRead,
   usePrivateValues,
+  useRereadForEdit,
   type SettingsProps,
 } from "./settings.js";
 import type { ConfigurationDraft } from "./settings-state.js";
@@ -325,6 +326,16 @@ export function ProfileConfiguration(p: SettingsProps & { profileId: string }) {
     priv.state.data?.data.profile.version,
     priv.state.fetchedAt,
     resource.refresh,
+  );
+  useRereadForEdit(
+    data?.profile.version,
+    typeof d.values.instructions === "string" &&
+      (d.phase === "editing" ||
+        d.phase === "conflict" ||
+        d.phase === "rejected"),
+    priv.state.data?.data.profile.version,
+    priv.state.pending,
+    priv.refresh,
   );
   const lines = data ? profileChanges(data, d.values, revealed) : [];
   const name = data?.profile.name ?? "this profile";
