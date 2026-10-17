@@ -656,6 +656,45 @@ test("a scheduler wake that fails after a restart is a service failure, not a fa
   });
 });
 
+test("a start that fails while an attempt is still looking for the executable stops the runtime that attempt then spawns", async () => {
+  const gate = deferred();
+  let gated = false;
+  await withService(
+    { resolve: () => (gated ? gate.promise.then(() => true) : true) },
+    async ({ service, clock, created }) => {
+      const internals = service as unknown as {
+        wakeScheduler: () => Promise<void>;
+      };
+      // The service is published, a boot-time failure's sleep fires, and then start() fails.
+      internals.wakeScheduler = async () => {
+        (created.codex[0] as FakeRuntime).crash();
+        gated = true;
+        clock.advance(30_000);
+        await flush();
+        throw new Error("scheduler failed to wake");
+      };
+      const starting = service.start().then(
+        () => "started",
+        (error: Error) => error.message,
+      );
+      let settled = false;
+      void starting.then(() => {
+        settled = true;
+      });
+      await flush(300);
+      assert.equal(settled, false, "teardown waits for the attempt in flight");
+      gate.resolve();
+      assert.equal(await starting, "scheduler failed to wake");
+      assert.equal(created.codex.length, 2, "the attempt spawned once, late");
+      assert.ok(
+        (created.codex[1] as FakeRuntime).stops >= 1,
+        "teardown waited for it and stopped it",
+      );
+      assert.equal(clock.pending(), 0);
+    },
+  );
+});
+
 test("stopping the service during backoff leaves no retry and stops promptly", async () => {
   await withService({}, async ({ service, clock, created, latest }) => {
     await service.start();
