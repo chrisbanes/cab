@@ -7,6 +7,7 @@ import {
   until,
   scriptedDeliveryProvider,
 } from "../fixtures/delivery-integration.js";
+import { OperatorApi } from "../../src/standalone/operator-api.js";
 
 for (const mode of ["reviewable-pr", "through-merge"] as const) {
   test(`assembled ${mode} uses production HTTP parsing, own closure, terminal completion and durable reopen`, async () => {
@@ -95,6 +96,21 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     }
   });
 }
+
+test("the delivery read links an imported task's pull request in its own repository", async () => {
+  const f = await createReleaseDeliveryFixture("reviewable-pr");
+  try {
+    await f.register();
+    const read = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery;
+    assert.equal(read?.binding?.url, "https://github.com/org/repo/pull/7");
+    assert.equal(read.binding.repositoryName, "org/repo");
+    assert.equal(read.binding.draft, false);
+  } finally {
+    await f.close();
+  }
+});
 
 test("connected feedback is literal and deduplicated; changed settlement, outage and task Stop remain conservative across restart", async () => {
   const f = await createReleaseDeliveryFixture();

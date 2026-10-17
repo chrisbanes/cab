@@ -2080,6 +2080,25 @@ as follows:
   A task without a GitHub source always sends a lead message: its reply moves to the
   lead with the lead's own draft and reference, and the GitHub draft and its approval are
   kept apart (editing that draft withdraws the approval) for when the source returns.
+- The delivery block's bound-PR lines read as follows. The PR line is a link
+  "<repository>#<number>" (new tab, `noopener noreferrer`) followed by a state badge
+  (Open, Draft, Closed or Merged, each with its symbol) and "head" with the 8-character
+  head, the full SHA on hover. The link is the delivery read's `binding.url`, which the
+  server builds only when the imported source is the PR's own repository and its name is
+  a verified `owner/name`; the web renders an anchor only for an `https://github.com/`
+  URL, and a read carrying any other URL fails as an invalid response. Without a link
+  the line reads "PR #<number>" and the sentence "No GitHub link: this PR's repository
+  name was not observed." (no repository id is shown). The provider line is "GitHub
+  read HH:MM", or "Last GitHub read failed; showing the read from HH:MM." with the
+  error in Details. Checks read "<name>: Passed | Pending | Failed", with
+  "· on an earlier head <id>" for a check of another head; with no checks observed one
+  line says "No checks or repair owner were observed on this head.", and otherwise
+  "No repair owner is recorded for this pull request." follows the checks. Each blocker
+  is a sentence ("Waiting for the current PR head to be settled."; an unmapped code
+  reads "Delivery is waiting on a condition this version can't describe.") with its code
+  only in Details. Difference from `71-delivery-alternatives`: the delivery read carries
+  no repair owner, so alternative A's recorded repair assignment is not built; the block
+  says none is recorded. Settlement controls stay on the legacy page.
 - Stop task submits the retained `/runtime/control/stop` form and lands on the
   Execution page, where the Stop observation and Resume live. Unsent reply text on
   the task page is not carried across that navigation; Keep running, Escape and

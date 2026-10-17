@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -54,16 +54,29 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
       .waitFor();
     await openTask();
     const changes = page.locator("#changes");
-    await changes
-      .getByText(`PR #7 · org/repo · OPEN · head ${f.scripted.state.head}`, {
-        exact: true,
-      })
-      .waitFor();
-    await changes
-      .getByText(`build: success · head ${f.scripted.state.head}`, {
-        exact: true,
-      })
-      .waitFor();
+    await expectPullRequest(changes, f.scripted.state.head);
+    await changes.getByText("build: Passed", { exact: true }).waitFor();
+    // Each service blocker reads as a sentence; its code is only in Details.
+    const blockers = (
+      await new OperatorApi(f.service, [f.directory]).readTask(f.taskId)
+    ).data.delivery?.blockers;
+    if (mode === "reviewable-pr")
+      assert.ok(
+        blockers?.includes("reviewable-pr-awaiting-current-settlement"),
+        String(blockers),
+      );
+    for (const code of blockers ?? [])
+      assert.equal(
+        (await changes.innerText()).includes(code),
+        false,
+        `${code} shown outside Details`,
+      );
+    if (mode === "reviewable-pr")
+      await changes
+        .getByText("Waiting for the current PR head to be settled.", {
+          exact: true,
+        })
+        .waitFor();
     assert.equal(f.scripted.state.writes, 0);
     await sharedDestinations(page, web.origin, f.taskId, f.projectId);
     await openTask();
@@ -74,11 +87,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
         exact: true,
       })
       .click();
-    await changes
-      .getByText(`build: failure · head ${f.scripted.state.head}`, {
-        exact: true,
-      })
-      .waitFor();
+    await changes.getByText("build: Failed", { exact: true }).waitFor();
     assert.equal((await f.merge()).success, false);
     assert.equal(f.scripted.state.writes, 0);
     f.scripted.state.feedback = true;
@@ -103,15 +112,8 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
         exact: true,
       })
       .click();
-    await changes
-      .getByText(`PR #7 · org/repo · OPEN · head ${f.scripted.state.head}`, {
-        exact: true,
-      })
-      .waitFor();
-    assert.equal(
-      await changes.getByText(new RegExp(`head ${oldHead}`)).count(),
-      0,
-    );
+    await expectPullRequest(changes, f.scripted.state.head);
+    assert.equal(await changes.locator(`abbr[title="${oldHead}"]`).count(), 0);
     f.scripted.state.outage = true;
     await changes
       .getByRole("button", {
@@ -119,7 +121,9 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
         exact: true,
       })
       .click();
-    await changes.getByText(/Stale \/ failed read/).waitFor();
+    await changes
+      .getByText(/^Last GitHub read failed; showing the read from \d\d:\d\d\.$/)
+      .waitFor();
     assert.equal(f.service.domain().task(f.taskId).state, "open");
     assert.equal(f.scripted.state.writes, 0);
     f.scripted.state.outage = false;
@@ -130,11 +134,7 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
         exact: true,
       })
       .click();
-    await changes
-      .getByText(`build: success · head ${f.scripted.state.head}`, {
-        exact: true,
-      })
-      .waitFor();
+    await changes.getByText("build: Passed", { exact: true }).waitFor();
     await f.terminal(1);
     await f.waitTurn(2);
     if (mode === "reviewable-pr") {
@@ -245,6 +245,17 @@ for (const mode of ["reviewable-pr", "through-merge"] as const) {
     assert.equal(f.scripted.state.writes, writes);
     assert.equal(f.runtime.turns, 0);
   });
+}
+
+/** The PR line links the PR in its own repository and shows the exact head the provider reported. */
+async function expectPullRequest(changes: Locator, head: string) {
+  const link = changes.getByRole("link", { name: "org/repo#7", exact: true });
+  await link.waitFor();
+  assert.equal(
+    await link.getAttribute("href"),
+    "https://github.com/org/repo/pull/7",
+  );
+  await changes.locator(`abbr[title="${head}"]`).first().waitFor();
 }
 
 async function sharedDestinations(

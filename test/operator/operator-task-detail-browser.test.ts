@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
-import { chromium, webkit, type Browser, type Page } from "playwright";
+import {
+  chromium,
+  webkit,
+  type Browser,
+  type Locator,
+  type Page,
+} from "playwright";
 import {
   browserSuite,
   captureBrowserEvidence,
@@ -23,6 +29,7 @@ import {
   leadUnavailableNotice,
 } from "../../web/src/lead-feedback.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
+import { clockLabel } from "../../web/src/presentation.js";
 
 const test = browserSuite("ui-task-detail");
 const testForEngine = (
@@ -2770,6 +2777,238 @@ test("Task detail identifiers are short mono metadata and tokens read as sentenc
       false,
     );
   }
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+test("The delivery block links the PR, says its state and blockers in words, and says when checks were not observed", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "PR task",
+    "Ship it.",
+  );
+  a.result("Guide drafted");
+  const other = await seedReviewTask(
+    fixture.f,
+    "Elsewhere",
+    "Other task",
+    "No PR here.",
+  );
+  other.result("Nothing bound");
+  setLinkedRepository(fixture.f, a.projectId, true);
+  setLinkedRepository(fixture.f, other.projectId, true);
+  const { web, page } = await fixture.launch();
+  const head = "1".repeat(40),
+    earlier = "c".repeat(40),
+    observedAt = new Date(2026, 9, 16, 9, 7, 30).getTime(),
+    url = "https://github.com/acme/app/pull/12";
+  const read = (
+    binding: Record<string, unknown> | null,
+    blockers: string[] = [],
+  ) => ({
+    mode: "reviewable-pr",
+    policyVersion: 1,
+    blockers,
+    omittedBlockerCount: 0,
+    omittedActionCount: 0,
+    binding: binding && {
+      revision: 1,
+      number: 12,
+      repositoryName: "acme/app",
+      url,
+      headSha: head,
+      state: "OPEN",
+      observedAt,
+      readError: null,
+      omittedCheckCount: 0,
+      omittedFeedbackCount: 0,
+      checks: [],
+      feedback: [],
+      ...binding,
+    },
+    actions: [],
+  });
+  const reads = new Map<string, unknown>();
+  await page.route(
+    (u) => u.pathname.startsWith("/api/operator/tasks/"),
+    async (route) => {
+      const id = new URL(route.request().url()).pathname.split("/").at(-1)!;
+      if (!reads.has(id)) return route.fallback();
+      const response = await route.fetch();
+      const json = await response.json();
+      json.data.delivery = reads.get(id);
+      await route.fulfill({ response, json });
+    },
+  );
+  const open = async (path: string) => {
+    await page.evaluate((target) => {
+      history.pushState({}, "", target);
+      dispatchEvent(new PopStateEvent("popstate"));
+    }, path);
+    await page.locator("main.page h1").waitFor();
+    await openTaskTab(page, "Changes");
+  };
+  reads.set(
+    a.taskId,
+    read({}, [
+      "reviewable-pr-awaiting-current-settlement",
+      "delivery-new-unknown-code",
+    ]),
+  );
+  reads.set(other.taskId, read(null));
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await openTaskTab(page, "Changes");
+  const changes = page.locator("#changes");
+  const prLink = changes.getByRole("link", { name: "acme/app#12" });
+  const line = changes.locator("p", {
+    has: page.getByRole("link", { name: "acme/app#12" }),
+  });
+  const flat = async (l: Locator) =>
+    (await l.innerText()).replace(/\s+/g, " ").trim();
+  const settle = "Waiting for the current PR head to be settled.";
+  const fallback =
+    "Delivery is waiting on a condition this version can't describe.";
+
+  // Open, no checks observed, two blockers (one unknown): words first, codes only in Details.
+  await refreshTask(page, a.taskId);
+  await prLink.waitFor();
+  assert.equal(await prLink.getAttribute("href"), url);
+  assert.match((await prLink.getAttribute("rel")) ?? "", /noopener/);
+  assert.equal(await prLink.getAttribute("target"), "_blank");
+  assert.equal(await flat(line), "acme/app#12 Open head 11111111");
+  assert.equal(await line.locator("abbr").getAttribute("title"), head);
+  await changes
+    .getByText("No checks or repair owner were observed on this head.", {
+      exact: true,
+    })
+    .waitFor();
+  await changes.getByText(`GitHub read ${clockLabel(observedAt)}`).waitFor();
+  await changes.getByText(settle, { exact: true }).waitFor();
+  await changes.getByText(fallback, { exact: true }).waitFor();
+  assert.equal(
+    await changes.getByText("No repair owner is recorded").count(),
+    0,
+  );
+  const text = () => changes.evaluate((el) => (el as HTMLElement).innerText);
+  for (const code of [
+    "reviewable-pr-awaiting-current-settlement",
+    "delivery-new-unknown-code",
+  ])
+    assert.equal((await text()).includes(code), false, code);
+  const settleRow = changes.locator("div", { hasText: settle }).last();
+  await settleRow.getByText("Details", { exact: true }).click();
+  await settleRow
+    .getByText("reviewable-pr-awaiting-current-settlement", { exact: true })
+    .waitFor();
+  assert.equal((await text()).includes("delivery-new-unknown-code"), false);
+
+  // Each state reads in words.
+  for (const [binding, badge] of [
+    [{ draft: true }, "Draft"],
+    [{ state: "CLOSED" }, "Closed"],
+    [{ state: "MERGED" }, "Merged"],
+  ] as const) {
+    reads.set(a.taskId, read(binding));
+    await refreshTask(page, a.taskId);
+    await line.getByText(badge, { exact: true }).waitFor();
+    assert.equal(await flat(line), `acme/app#12 ${badge} head 11111111`);
+  }
+  await changes
+    .getByText("PR merged; task completion still requires", { exact: false })
+    .waitFor();
+
+  // Checks read in words; one on an earlier head says so; the repair owner is never invented.
+  reads.set(
+    a.taskId,
+    read({
+      checks: [
+        { name: "build", sha: head, status: "failure" },
+        { name: "lint", sha: earlier, status: "success" },
+        { name: "e2e", sha: head, status: "pending" },
+      ],
+    }),
+  );
+  await refreshTask(page, a.taskId);
+  await changes.getByText("build: Failed", { exact: true }).waitFor();
+  await changes.getByText("e2e: Pending", { exact: true }).waitFor();
+  const lint = changes.locator("p", { hasText: /^lint:/ });
+  assert.equal(await flat(lint), "lint: Passed · on an earlier head cccccccc");
+  assert.equal(await lint.locator("abbr").getAttribute("title"), earlier);
+  await changes
+    .getByText("No repair owner is recorded for this pull request.", {
+      exact: true,
+    })
+    .waitFor();
+  assert.equal(
+    await changes.getByText("were observed on this head").count(),
+    0,
+  );
+
+  // A failed provider read says the checks are the earlier read's; the code is only in Details.
+  reads.set(
+    a.taskId,
+    read({ readError: "provider-read-unavailable" }, [
+      "delivery-provider-read-unavailable",
+    ]),
+  );
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByText(
+      `Last GitHub read failed; showing the read from ${clockLabel(observedAt)}.`,
+      { exact: true },
+    )
+    .waitFor();
+  await changes
+    .getByText(
+      "The last GitHub read failed, so delivery state may be out of date.",
+      { exact: true },
+    )
+    .waitFor();
+  assert.equal((await text()).includes("provider-read-unavailable"), false);
+  assert.equal(
+    (await text()).includes("delivery-provider-read-unavailable"),
+    false,
+  );
+
+  // Without a verified link the line is plain text and never shows a repository id.
+  reads.set(a.taskId, read({ url: undefined, repositoryName: "R_kgDOabc" }));
+  await refreshTask(page, a.taskId);
+  await changes
+    .getByText("No GitHub link: this PR's repository name was not observed.", {
+      exact: false,
+    })
+    .waitFor();
+  assert.equal(await changes.getByRole("link", { name: /#12/ }).count(), 0);
+  assert.equal(await changes.locator('a[href*="/pull/"]').count(), 0);
+  assert.equal((await text()).includes("R_kgDOabc"), false);
+  assert.match(
+    await flat(changes.locator("p", { hasText: /^PR #12/ })),
+    /^PR #12 Open head 11111111/,
+  );
+
+  // Navigating to a task without a PR and back leaves nothing of the other read behind.
+  reads.set(
+    a.taskId,
+    read({ checks: [{ name: "build", sha: head, status: "success" }] }),
+  );
+  await open(`/app/tasks/${other.taskId}`);
+  await changes
+    .getByRole("button", { name: "Refresh delivery status" })
+    .waitFor();
+  assert.equal(await changes.getByText(/#12|PR #|build:/).count(), 0);
+  await open(`/app/tasks/${a.taskId}`);
+  await prLink.waitFor();
+  await changes.getByText("build: Passed", { exact: true }).waitFor();
+  assert.equal(await changes.getByText("No GitHub link").count(), 0);
+
+  // An unsafe link fails the task read closed: no link is rendered from it.
+  reads.set(a.taskId, read({ url: "javascript:alert(1)" }));
+  await page.reload();
+  await page.locator("main.page h1").waitFor();
+  await page.locator(".resource-status-error").first().waitFor();
+  assert.equal(await page.locator('a[href^="javascript:"]').count(), 0);
+  assert.equal(await page.getByText("acme/app#12").count(), 0);
   await page.unrouteAll({ behavior: "wait" });
 });
 

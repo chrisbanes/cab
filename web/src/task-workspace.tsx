@@ -25,7 +25,13 @@ import {
 } from "../../src/operator/contracts.js";
 import { holdLines } from "../../src/operator/wait-reasons.js";
 import type { OperatorClient } from "./api.js";
-import { ActionLink, Button, ResourceStatus, ShortId } from "./components.js";
+import {
+  ActionLink,
+  Button,
+  ResourceStatus,
+  ShortId,
+  StatusBadge,
+} from "./components.js";
 import { useOperatorResource } from "./resource.js";
 import type {
   ReplyOutcome,
@@ -33,9 +39,17 @@ import type {
 } from "./task-workspace-state.js";
 import {
   ActionOutcome,
+  OutcomeDetails,
   type OutcomeField,
   detailRows,
 } from "./action-feedback.js";
+import {
+  checkStatusWord,
+  deliveryBlockerSentence,
+  pullRequestStateLabel,
+  safePullRequestUrl,
+} from "./delivery-presentation.js";
+import { clockLabel } from "./presentation.js";
 import { failureCause } from "./outcome-copy.js";
 import { NativeSelect } from "./ui/native-select.js";
 import { Textarea } from "./ui/textarea.js";
@@ -2642,6 +2656,36 @@ function Artifact({
     </figure>
   );
 }
+function PullRequestLine({
+  binding,
+}: {
+  binding: NonNullable<NonNullable<TaskRead["data"]["delivery"]>["binding"]>;
+}) {
+  const href = safePullRequestUrl(binding.url),
+    tone = {
+      MERGED: "success",
+      CLOSED: "warning",
+      OPEN: "idle",
+    } as const;
+  return (
+    <p>
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer">
+          {binding.repositoryName}#{binding.number}
+        </a>
+      ) : (
+        <>PR #{binding.number}</>
+      )}{" "}
+      <StatusBadge tone={tone[binding.state]}>
+        {pullRequestStateLabel(binding.state, binding.draft)}
+      </StatusBadge>{" "}
+      head <ShortId value={binding.headSha} />
+      {!href && (
+        <> No GitHub link: this PR's repository name was not observed.</>
+      )}
+    </p>
+  );
+}
 function Changes({
   data,
   selected,
@@ -2712,16 +2756,20 @@ function Changes({
       )}
       {d?.binding && (
         <>
+          <PullRequestLine binding={d.binding} />
           <p>
-            PR #{d.binding.number} · {d.binding.repositoryName} ·{" "}
-            {d.binding.state} · head {d.binding.headSha}
+            {d.binding.readError ? (
+              <>
+                Last GitHub read failed; showing the read from{" "}
+                {clockLabel(d.binding.observedAt)}.
+              </>
+            ) : (
+              <>GitHub read {clockLabel(d.binding.observedAt)}</>
+            )}
           </p>
-          <p>
-            Provider state as of {date(d.binding.observedAt)} ·{" "}
-            {d.binding.readError
-              ? "Stale / failed read"
-              : "last successful read"}
-          </p>
+          {d.binding.readError && (
+            <OutcomeDetails fields={[["Read error", d.binding.readError]]} />
+          )}
           {d.binding.omittedCheckCount > 0 && (
             <p>
               Provider check coverage is partial; {d.binding.omittedCheckCount}{" "}
@@ -2732,10 +2780,21 @@ function Changes({
           )}
           {d.binding.checks.map((c) => (
             <p key={`${c.name}:${c.sha}`}>
-              {c.name}: {c.status} · head {c.sha}{" "}
-              {c.sha !== d.binding?.headSha ? "stale checked head" : ""}
+              {c.name}: {checkStatusWord(c.status)}
+              {c.sha !== d.binding?.headSha && (
+                <>
+                  {" "}
+                  · on an earlier head <ShortId value={c.sha} />
+                </>
+              )}
             </p>
           ))}
+          {d.binding.checks.length === 0 &&
+          d.binding.omittedCheckCount === 0 ? (
+            <p>No checks or repair owner were observed on this head.</p>
+          ) : (
+            <p>No repair owner is recorded for this pull request.</p>
+          )}
           {d.binding.omittedFeedbackCount > 0 && (
             <p>
               {d.binding.omittedFeedbackCount} retained provider feedback
@@ -2766,7 +2825,13 @@ function Changes({
           coverage is partial.
         </p>
       )}
-      {delivers && d?.blockers.map((b) => <p key={b}>{b}</p>)}
+      {delivers &&
+        d?.blockers.map((b) => (
+          <div key={b}>
+            <p>{deliveryBlockerSentence(b)}</p>
+            <OutcomeDetails fields={[["Code", b]]} />
+          </div>
+        ))}
       {delivers && (
         <Button
           variant="secondary"
