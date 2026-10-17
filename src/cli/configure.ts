@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { z } from "zod";
 import {
   configurationImpactSchema,
   operatorCommandSchema,
@@ -40,7 +42,6 @@ export type Prepared = {
   changes: Change[];
   diff: string[];
   impact?: unknown;
-  impactLines?: string[];
   notes: string[];
   gaps: CoverageGap[];
 };
@@ -256,6 +257,16 @@ export function requireOut(ctx: WriteContext): string {
   return out;
 }
 
+/** Refuses an `--out` that cannot name a change document, before anything connects. */
+export function checkOut(ctx: WriteContext) {
+  const { out } = ctx.values;
+  if (out === "" || out === "-")
+    throw new CliError(
+      "usage",
+      "A change document must be a file; omit --out to use ./ensemble-<kind>-<id8>.json.",
+    );
+}
+
 /** Reads until the target version is stable across the other reads, retrying once. */
 export async function consistentRead<T>(
   read: () => Promise<T>,
@@ -324,14 +335,50 @@ export async function readImpact(
   return {
     impact,
     gaps: read.data.truncated ? (["item-omitted"] as CoverageGap[]) : [],
-    lines: [
-      `Affected assignments (${impact.label}, observed ${isoTime(impact.observedAt)}): ${impact.total} bound; ${impact.wouldBecomeStale} would become stale, ${impact.alreadyStale} already stale, ${impact.held} held, ${impact.completed} completed.`,
-      ...(impact.assignmentIds.length
-        ? [`  ${impact.assignmentIds.join("\n  ")}`]
-        : []),
-      `  ${impact.note}`,
-    ],
   };
+}
+
+const storedImpact = z.object({
+  label: z.string(),
+  observedAt: z.number(),
+  total: z.number(),
+  wouldBecomeStale: z.number(),
+  alreadyStale: z.number(),
+  held: z.number(),
+  completed: z.number(),
+  assignmentIds: z.array(z.string()),
+  note: z.string(),
+});
+
+/** The affected-assignments lines of a stored impact; none when it is absent or unreadable. */
+const impactLines = (impact: unknown): string[] => {
+  const parsed = storedImpact.safeParse(impact);
+  if (!parsed.success) return [];
+  const i = parsed.data;
+  return [
+    "",
+    `Affected assignments (${i.label}, observed ${isoTime(i.observedAt)}): ${i.total} bound; ${i.wouldBecomeStale} would become stale, ${i.alreadyStale} already stale, ${i.held} held, ${i.completed} completed.`,
+    ...(i.assignmentIds.length ? [`  ${i.assignmentIds.join("\n  ")}`] : []),
+    `  ${i.note}`,
+  ];
+};
+
+/** What a change document says it will do, from its stored preview alone; prepare and `--dry-run` print it. */
+function documentLines(document: ChangeDocument): string[] {
+  const { changes, diff, impact, notes } = document.preview;
+  const shown = boundLines(diff.lines, 200);
+  return [
+    "",
+    "Changes:",
+    ...changes.map(
+      (c) =>
+        `  ${c.field}: ${c.from === "" ? "(empty)" : (c.from ?? (isCreation(document.kind) ? "(new)" : "(unavailable)"))} -> ${c.to ?? "(none)"}`,
+    ),
+    ...(shown.lines.length ? ["", ...shown.lines] : []),
+    ...(shown.truncated || diff.truncated ? ["(diff truncated)"] : []),
+    ...impactLines(impact),
+    ...notes.map((n) => `Note: ${n}`),
+  ];
 }
 
 /** Validates, size-checks and writes the change document; nothing is sent. */
@@ -353,47 +400,43 @@ export async function writePrepared(
     ...prepared.gaps,
     ...(diff.truncated ? (["item-omitted"] as const) : []),
   ];
-  const { path, document } = await writeChangeDocument(requireOut(ctx), {
-    schema: CHANGE_SCHEMA,
-    kind: prepared.kind,
-    preparedAt: ctx.deps.now(),
-    service: {
-      installationId: session.identity.service.installationId,
-      origin: session.identity.service.origin,
+  const { path, document } = await writeChangeDocument(
+    { out: ctx.values.out, cwd: ctx.deps.cwd ?? process.cwd() },
+    {
+      schema: CHANGE_SCHEMA,
+      kind: prepared.kind,
+      preparedAt: ctx.deps.now(),
+      service: {
+        installationId: session.identity.service.installationId,
+        origin: session.identity.service.origin,
+      },
+      target: targetOf(command),
+      expected: expectedOf(command),
+      command,
+      preview: {
+        changes: prepared.changes,
+        diff,
+        impact: prepared.impact ?? null,
+        notes: prepared.notes,
+      },
     },
-    target: targetOf(command),
-    expected: expectedOf(command),
-    command,
-    preview: {
-      changes: prepared.changes,
-      diff,
-      impact: prepared.impact ?? null,
-      notes: prepared.notes,
-    },
-  });
-  const shown = boundLines(diff.lines, 200);
+  );
   return {
     data: { file: path, document },
     coverage: coverage(ctx.deps.now(), gaps, prepared.notes),
     human: [
       `Prepared ${document.kind} for ${document.target.scope} on ${session.name} (${document.service.origin}, installation ${document.service.installationId}).`,
       `Wrote ${path} (digest ${document.digest}). Nothing was sent.`,
-      "",
-      "Changes:",
-      ...prepared.changes.map(
-        (c) =>
-          `  ${c.field}: ${c.from === "" ? "(empty)" : (c.from ?? (isCreation(prepared.kind) ? "(new)" : "(unavailable)"))} -> ${c.to ?? "(none)"}`,
-      ),
-      ...(shown.lines.length ? ["", ...shown.lines] : []),
-      ...(shown.truncated || diff.truncated ? ["(diff truncated)"] : []),
-      ...(prepared.impactLines ? ["", ...prepared.impactLines] : []),
-      ...prepared.notes.map((n) => `Note: ${n}`),
+      ...documentLines(document),
       ...gaps.map((g) => `Gap: ${g}`),
       "",
-      `Apply with: ensemble ${AREA[document.kind]} apply --file ${path}`,
+      applyWith(document.kind, path),
     ].join("\n"),
   };
 }
+
+const applyWith = (kind: ChangeKind, path: string) =>
+  `Apply with: ensemble ${AREA[kind]} apply --file ${shellWord(path)}`;
 
 function effectNote(document: ChangeDocument): string[] {
   const c = document.command;
@@ -429,13 +472,8 @@ function effectNote(document: ChangeDocument): string[] {
   ];
 }
 
-/** Revalidates a change document and sends exactly its command once. */
-export async function applyFile(
-  ctx: WriteContext,
-  area: string,
-): Promise<WriteOutput> {
-  if (!ctx.values.file) throw new CliError("usage", "--file FILE is required.");
-  const requested = optionalRequestId(ctx.values);
+/** Reads a change document and runs every local check `apply` makes; nothing connects. */
+async function checkedDocument(file: string, area: string) {
   const prepares = [
     ...new Set(
       changeKinds
@@ -444,7 +482,7 @@ export async function applyFile(
     ),
   ];
   const document = await readChangeDocument(
-    ctx.values.file,
+    file,
     `Prepare it first with ${prepares.join(", ")} (see 'ensemble --help --all'), then apply the file it writes.`,
   );
   if (AREA[document.kind] !== area)
@@ -452,7 +490,7 @@ export async function applyFile(
       "change-document-invalid",
       `This is a ${document.kind} change; apply it with 'ensemble ${AREA[document.kind]} apply'.`,
       {
-        fix: `Run 'ensemble ${AREA[document.kind]} apply --file ${shellWord(ctx.values.file)}'.`,
+        fix: `Run 'ensemble ${AREA[document.kind]} apply --file ${shellWord(file)}'.`,
       },
     );
   let exact: Record<string, unknown>;
@@ -475,6 +513,36 @@ export async function applyFile(
       "change-document-invalid",
       "Change document rejected: its command, target and expected revisions disagree.",
     );
+  return { document, command };
+}
+
+/** Revalidates a change document and sends exactly its command once. */
+export async function applyFile(
+  ctx: WriteContext,
+  area: string,
+): Promise<WriteOutput> {
+  const { file } = ctx.values;
+  if (!file) throw new CliError("usage", "--file FILE is required.");
+  if (ctx.values["dry-run"]) {
+    if (ctx.values["request-id"] !== undefined)
+      throw new CliError(
+        "usage",
+        "--dry-run sends nothing, so it takes no --request-id.",
+      );
+    const { document } = await checkedDocument(file, area);
+    return {
+      data: { file: resolve(file), document },
+      human: [
+        `${document.kind} for ${document.target.scope}, prepared for ${document.service.origin} (installation ${document.service.installationId}). Nothing was sent.`,
+        ...documentLines(document),
+        "",
+        "Not checked against the service; apply re-checks the version and installation.",
+        applyWith(document.kind, resolve(file)),
+      ].join("\n"),
+    };
+  }
+  const requested = optionalRequestId(ctx.values);
+  const { document, command } = await checkedDocument(file, area);
   const creation = isCreation(document.kind);
   const session = await ctx.connect([
     "cli.identity",
@@ -500,8 +568,9 @@ export async function applyFile(
     type: document.kind,
     key,
   };
+  const prior = await ctx.journal.state(identity);
   // Only an attempt that may have reached the service can make an existing ID ours.
-  if (creation && !(await ctx.journal.state(identity))?.reached) {
+  if (creation && !prior?.reached) {
     // A duplicate ID with a fresh key is not yet a typed service error.
     const path = `/api/operator/${AREA[document.kind]}s/${document.target.id}/configuration`;
     const exists = await session.client
@@ -541,14 +610,38 @@ export async function applyFile(
       );
     throw error;
   });
+  // `true` only on this machine's own record of a receipt; `null` when the earlier attempt
+  // (or a key given by hand) cannot be told from a first apply.
+  const replayed =
+    prior?.recorded === true
+      ? true
+      : prior?.reached || (requested !== undefined && !prior)
+        ? null
+        : false;
+  const head = `Applied ${document.kind} to ${document.target.scope} (request ${key}).`;
+  const receiptText = keyValues(receiptLines(receipt));
   return {
     request,
-    data: { receipt, file: ctx.values.file, digest: document.digest },
-    human: [
-      `Applied ${document.kind} to ${document.target.scope} (request ${key}).`,
-      keyValues(receiptLines(receipt)),
-      ...effectNote(document),
-    ].join("\n"),
+    data: { receipt, file, digest: document.digest, replayed },
+    human: (replayed === true
+      ? [
+          "Already applied (replay); nothing changed.",
+          `Request ${key} was recorded for ${document.kind} on ${document.target.scope}.`,
+          receiptText,
+        ]
+      : [
+          head,
+          ...(replayed === null
+            ? [
+                prior
+                  ? `An earlier attempt with request ${key} lost its reply; the change is applied once.`
+                  : `If request ${key} was applied before, this is its recorded receipt; the change is applied once.`,
+              ]
+            : []),
+          receiptText,
+          ...effectNote(document),
+        ]
+    ).join("\n"),
   };
 }
 

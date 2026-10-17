@@ -286,6 +286,22 @@ test("every other admission reason still produces a hold notice", () => {
   assert.equal(unexplained[0]?.title, "Execution held");
 });
 
+test("a hold notice keeps a proper noun's capitals when the wait label sits inside the title", () => {
+  for (const [code, label] of [
+    ["claude-token-unavailable", "Claude token unavailable"],
+    ["runtime-unavailable", "runtime unavailable"],
+    ["capacity", "capacity full"],
+  ] as const) {
+    const notices = holdNotices(
+      task([], { waits: [{ code, fix: null, links: [] }] }),
+      "approve",
+      null,
+    );
+    assert.equal(notices.length, 1, code);
+    assert.equal(notices[0]?.title, `Execution held (${label})`);
+  }
+});
+
 test("a power hold notice lists the supervisor's reason in the waits' order", () => {
   const reason = "Power-event history is incomplete or ambiguous";
   const withPower = (

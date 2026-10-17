@@ -230,8 +230,16 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
 5. Configuration changes, with a read/write credential to apply:
    - `profile prepare PROFILE_ID`, `profile prepare-create`, `project prepare
      PROJECT_ID`, `project prepare-create`, `project prepare-routing PROJECT_ID` and
-     `capacity prepare` read the current state and write a change document to a new
-     `--out` file (mode `0600`). Nothing is sent. A document holds one command, the
+     `capacity prepare` read the current state and write a change document with mode
+     `0600`, to `--out FILE` or by default to `./ensemble-<kind>-<id8>.json` (kind
+     such as `project-configure`, id8 the first eight characters of the target's ID;
+     `ensemble-capacity-configure.json` for capacity). A default name that is taken
+     becomes `-2` to `-99`, chosen by creating the file exclusively, so a prepare
+     never overwrites a document and two at once never share one; when all 99 are
+     taken the prepare is refused (`output-exists`). An explicit `--out` still
+     refuses an existing path, and `--out -` and an empty `--out` are refused
+     (`usage`). The `Apply with:` line quotes the path as one shell word. Nothing is
+     sent. A document holds one command, the
      service installation, the target and expected revision (capacity: the limits it
      was prepared against), a diff and a preparation-time affected-assignment list.
      That list is informational: assignments created later may also become stale,
@@ -243,6 +251,12 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      (`wrong-service`), then sends exactly the stored command. It never prompts,
      rebases or overwrites: a stale revision or capacity value is `conflict` (exit
      4); prepare again.
+   - `apply --file FILE --dry-run` validates the document as `apply` does (owner-only,
+     size, schema, digest, kind, command) and prints its stored change, the origin and
+     installation it was prepared for and the `Apply with:` command, without connecting
+     (no request, no journal line; `data` is `{file, document}`). It does not check
+     staleness or the installation, and says so; `apply` still refuses both. It takes no
+     `--request-id`.
    - Profile and project instructions are `--instructions TEXT|-` (`-` reads standard
      input, text only, as for `task create --outcome -`) or `--instructions-file PATH`
      on `profile|project prepare-create` and `profile|project prepare`; give one, and
@@ -272,8 +286,14 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    it never holds request bodies, instructions or tokens. Re-running `apply` on the
    same document reuses that key, so the service replays the recorded receipt. A
    lost or ambiguous response exits 6 with the full identity, a ready-to-run
-   `operation get` and the exact retry. Exit codes: 2 invalid input, 3
-   authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
+   `operation get` and the exact retry. `apply` reports what it knows of that from
+   this machine's journal alone, in `data.replayed`: `true` when the journal already
+   holds a receipt for the key (the output starts `Already applied (replay); nothing
+   changed.` and omits the effect notes), `null` when an earlier attempt may have
+   lost its reply, or `--request-id` names a key the journal has not seen (the
+   second line says so; the change is still applied once), and `false` for a first
+   apply. A replay of a key applied from another machine reads as `null`. Exit codes:
+   2 invalid input, 3 authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
    outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted, and `--version` and `--help` are answered before any command. Every
    human error of the operator commands ends with one `Fix:` line on stderr
@@ -284,6 +304,14 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    JSONL output carry neither, so envelopes, codes and exit codes do not change.
    A refused or unresolved connection (nothing sent) omits the request ID from the
    human line only.
+
+   The `--expected-*` flags check different records, so each command's help prints one
+   line under its usage naming the record its flag refers to and the command that shows
+   it (the task, an assignment, a profile, a project or its routing, the source
+   configuration, a placement conflict, a question, an approval or a comment review). No flag is renamed:
+   `--expected-version`, `--expected-revision`, `--expected-task-version` and
+   `--expected-conversation-revision` keep their meaning, and `task configure` keeps
+   reading the version itself when `--expected-version` is omitted.
 
 
 6. Execution diagnostics, with either credential scope:
@@ -433,7 +461,7 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
      task's unmet conditions. Queries, filters, paths and reference names are never shown. A
      partial observation is gap `evidence-gap`, an unavailable one
      `redaction-unavailable`, and an unreadable saved value `content-unavailable`.
-   - `project prepare-source PROJECT_ID --out FILE --edit-file FILE
+   - `project prepare-source PROJECT_ID [--out FILE] --edit-file FILE
      [--expected-version N]` writes a `github.configure` change document; apply it
      with `project apply --file FILE`. The edit file (at most 64 KiB, not a symlink)
      is strict JSON with any of `addSelections` (selection definitions without

@@ -347,7 +347,7 @@ carried into [Interaction notes](#interaction-notes), not drawn.
 | --- | --- |
 | 01 Core surfaces | `01-attention-overview`, `02-inbox-approval`, `03-task-detail`, `04-tasks-board`, `05-composer`, `06-workspace-changes-review`, `09-phone-inbox-queue`, `10-phone-question`, `114-settings-index` |
 | 02 Inbox & questions | `06-inbox-question-audience`, `08-inbox-empty`, `19-inbox-grouped-questions`, `20-task-answering-grouped-request`, `32-inbox-approved-dependency-held`, `22-question-states-specimen`, `17-imported-source-overview-inbox`, `21-phone-grouped-questions`, `21b-phone-grouped-questions-scrolled`, `27-phone-question-evidence`, `28-phone-question-failed-answer`, `29-phone-question-stale-read`, `30-phone-question-answer-sent`, `31-phone-inbox-anchored-return`, `33-phone-exact-approval-source-hold`, `800g-phone-grouped-question-short` |
-| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
+| 03 Task views | `46a-task-overview-laptop`, `36-task-known-repair`, `45-task-repair-unknown`, `37-task-completed-result`, `43-desktop-lifecycle-outcomes`, `49-state-comparisons`, `54-compact-progress-entry-points`, `12-imported-task-source-execution`, `12b-imported-task-comment-unavailable`, `05-task-history-grouped`, `50-local-task-brief-history-expanded`, `132-task-stop-confirmation`, `16-github-sync-comment-outcomes`, `13-imported-task-expanded-history`, `14-phone-imported-task-source`, `15-phone-imported-task-ensemble`, `38-phone-repair-responsibility`, `39-phone-created-waiting-capacity`, `40-phone-completed-result`, `41-phone-cancelled`, `42-phone-provider-closed`, `47-phone-task-overview`, `48-phone-evidence-earlier-results`, `51-phone-expanded-brief-reply`, `52-phone-empty-local-task`, `53-phone-failed-refresh-uncertain`, `55-phone-parallel-delegation` |
 | 04 Results & review | `57-task-revised-result`, `58-compare-evidence`, `59-inspect-criterion-feedback`, `64-changes-since-viewed`, `56-review-components`, `fixture-before-r2`, `fixture-after-r3`, `60-phone-feedback-failed`, `61-phone-message-sent`, `62-phone-before-after`, `63-phone-comparison-unavailable`, `65-phone-revised-result`, `66-phone-changes-since-viewed` |
 | 05 Assignment, delivery & search | `67-assignment-context`, `69-changes-delivery`, `71-delivery-alternatives`, `73-search`, `75-search-states`, `68-phone-assignment-context`, `70-phone-changes-delivery`, `72-phone-delivery-alternatives`, `74-phone-search`, `76-phone-search-states` |
 | 06 Workspace inspection | `78-files-current-observation`, `79-files-generated-markdown`, `81-changes-comparison-alternatives`, `82-result-r3-retained-files`, `83-review-complete-draft`, `84-last-turn-capture-states`, `85-generated-output-previews`, `86-inspection-capture-states`, `87-review-anchor-states`, `104-review-sent-original-comments`, `105-result-r3-retained-diff`, `106-keyboard-review-journey`, `77-workspace-inspection-specimen`, `107-editor-inspection-specimen`, `88-phone-task-files-list`, `89-phone-deleted-side-range-selection`, `90-phone-edit-anchored-draft-comment`, `91-phone-complete-review-first-scroll`, `92-phone-complete-review-summary-scroll`, `93-phone-generated-markdown-preview`, `94-phone-review-sending`, `95-phone-review-confirmed-failure`, `96-phone-review-unknown-outcome`, `97-phone-review-sent`, `98-phone-retained-result-bytes`, `99-phone-generated-pdf-preview`, `100-phone-generated-raster-preview`, `101-phone-local-base-selection`, `102-phone-unsettled-turn-missing-file`, `103-phone-auth-expired-private-state-cleared` |
@@ -1495,6 +1495,11 @@ Presentation and interaction rules that the canvas does not show on its own.
   as a sentence that says so rather than "unavailable" as a value. A reason or state
   code reads as a sentence in the web UI, with the code in Details. Where an unknown
   is the message itself (ownership uncertain), the headline states it once.
+- A label written to start a sentence ("GitHub dependencies unconfirmed") keeps its
+  proper nouns (GitHub, Claude, Ensemble) when it is composed mid-sentence
+  ("Ready · GitHub dependencies unconfirmed"); every other label lowercases its first
+  letter ("Ready · project paused"). One helper, `midSentence`, does this
+  (`12b-imported-task-comment-unavailable` shows the examples).
 - Identifiers are short mono metadata (R1, A-9bd4, an 8-character SHA), never part
   of a sentence. The full value is on hover, copy or in Details.
 - One refresh per page. Read views keep the page-level Refresh, which only
@@ -2015,7 +2020,10 @@ Production task detail, composer and Stop confirmation
 as follows:
 
 - `03-task-detail` governs every task, local or imported, with
-  `12-imported-task-source-execution` for the imported inspector and
+  `12-imported-task-source-execution` for the imported inspector (its sync line reads
+  "Issue open · synced 10:54"), `12b-imported-task-comment-unavailable` for the
+  unavailable-commenting inspector line, the reply tab and the four reason sentences,
+  and
   `47-phone-task-overview`, `53-phone-failed-refresh-uncertain` and
   `55-phone-parallel-delegation` for the phone composition. The shell page header
   keeps Back, the title, the first line of the recorded desired outcome as its
@@ -2089,14 +2097,18 @@ as follows:
   id and the history button), Requested by → result to and Known state columns,
   and reflows to stacked rows on a phone.
 - The inspector shows, for an imported task, a "GitHub source · read-only" group
-  (identity link, issue state, latest successful sync and any sync failure or
+  (identity link, issue state, latest successful sync as the app's clock label
+  — "synced 17:50" — and any sync failure or
   incomplete observation — "sync unavailable", "partial sync" or "sync
   incomplete" — "GitHub owns the issue.
   Ensemble coordinates the work.", the native blockers as "Dependencies · managed
-  in GitHub" and whether GitHub commenting is permitted), then "Ensemble
+  in GitHub" and whether GitHub commenting is permitted; when it is unavailable, the
+  one sentence for the reason follows as a muted line), then "Ensemble
   execution"; then for every task Holds (each open request and each hold title,
   counted; the other open approvals when one is selected, none when no
-  approval is selected), Dependencies (local dependencies as links, or "None"), Execution
+  approval is selected), Dependencies (local dependencies as links, or "None", for a
+  task without a GitHub source; an imported task has only the GitHub-managed block above, since
+  GitHub owns its dependencies), Execution
   (state, running assignments, the lead's runtime and, only for a task with a
   GitHub source, a linked repository or a bound pull request, the delivery mode
   and bound pull request) and Results & artifacts (each recorded result, newest first, opening
@@ -2114,8 +2126,15 @@ as follows:
   controls; the "Check whether it saved" for a refresh whose response was lost
   stays until it is resolved, then goes. Exactly one sentence sits above the reply box,
   for the selected destination: the lead's resume, receive or unavailable line, "This
-  project has no lead to message yet.", or the comment policy (a reason from the
-  server, or what posting does). The "Immutable reference" line sits below the box.
+  project has no lead to message yet.", or the comment policy (the reason sentence for
+  the task read's `commentPolicy.reasonCode`, or what posting does). The reasons are no GitHub
+  issue, no comment grant, a hold, and no delivery credential; each has one sentence in
+  `src/operator/github-reasons.ts`, shown identically in the inspector, above the box and
+  on the tab. A read without `reasonCode` falls back to its `reason` text. While comments
+  are unavailable (`12b-imported-task-comment-unavailable`) the "Post GitHub comment" tab stays focusable with `aria-disabled`,
+  does nothing on click, Enter or Space, and is described by that sentence; the draft and
+  destination are kept, and the tab works again when the reason clears. The "Immutable
+  reference" line sits below the box.
   A task without a GitHub source always sends a lead message: its reply moves to the
   lead with the lead's own draft and reference, and the GitHub draft and its approval are
   kept apart (editing that draft withdraws the approval) for when the source returns.

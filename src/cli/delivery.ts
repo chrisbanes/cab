@@ -41,7 +41,14 @@ function deliveryView(read: TaskRead) {
     projectId: task.projectId,
     taskVersion: task.version,
     delivery: delivery ?? null,
-    commentPolicy: commentPolicy ?? null,
+    // The CLI contract is the three policy fields; `reasonCode` is for the web.
+    commentPolicy: commentPolicy
+      ? {
+          available: commentPolicy.available,
+          mode: commentPolicy.mode,
+          reason: commentPolicy.reason,
+        }
+      : null,
     issue: source
       ? {
           repositoryName: source.repositoryName,
@@ -317,6 +324,8 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
       usage:
         "delivery review-comment TASK_ID --body-file FILE --expected-task-version N [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-task-version: the task's version ('ensemble task get TASK_ID'); required.",
       flags: ["body-file", "expected-task-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
@@ -380,6 +389,8 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
       usage:
         "delivery confirm-comment TASK_ID --review-id UUID --expected-revision N --material-hash HASH --decision approved|denied [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-revision: the comment review's revision, printed by 'ensemble delivery review-comment' and shown by 'ensemble delivery get TASK_ID'; required.",
       flags: [
         "review-id",
         "expected-revision",
@@ -480,6 +491,8 @@ export const deliveryWriteCommands = new Map<string, WriteCommand>([
       usage:
         "delivery send-comment TASK_ID --body-file FILE --expected-task-version N [--review-id UUID] [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-task-version: the task's version ('ensemble task get TASK_ID'); required.",
       flags: ["body-file", "expected-task-version", "review-id", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");

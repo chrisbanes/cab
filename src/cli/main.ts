@@ -125,6 +125,11 @@ const COMMAND_USAGE = new Map<string, string>([
     ([key, c]) => [key, c.usage] as const,
   ),
 ]);
+/** A usage line, and under it, when the command has one, the line saying what its expected-* flags check. */
+const helpEntry = (key: string, usage: string) => {
+  const expects = writeCommands.get(key)?.expects;
+  return expects === undefined ? [usage] : [usage, `  ${expects}`];
+};
 const areaOf = (key: string) => key.split(" ")[0] ?? key;
 const LOCAL_AREAS = ["service", "snapshot"];
 const operatorAreas = () => [...new Set([...COMMAND_USAGE.keys()].map(areaOf))];
@@ -142,6 +147,7 @@ const OPTIONS_HELP = `Options:
   --help                Show this help
   --all                 With --help: list every command and option
   --verbose             execution list/get and logs only: also print capture notes
+  --dry-run             apply only: print the stored change; connect and send nothing
   --version             Show the Ensemble version
 `;
 
@@ -210,7 +216,7 @@ function areaHelp(area: string | undefined) {
   if (area === "service" || area === "snapshot") return serviceHelp(area);
   const lines = [...COMMAND_USAGE]
     .filter(([key]) => areaOf(key) === area)
-    .map(([, usage]) => usage);
+    .flatMap(([key, usage]) => helpEntry(key, usage));
   if (!area || !lines.length) return undefined;
   const single = COMMAND_USAGE.has(area);
   return `Usage: ensemble ${area}${single ? "" : " <action>"} [options]
@@ -223,7 +229,7 @@ ${OPTIONS_HELP}${(AREA_NOTES[area] ?? []).map((note) => `\n${note}\n`).join("")}
 const fullHelp = () => `Usage: ensemble <command> [options]
 
 Commands:
-${[...COMMAND_USAGE.values()].map((usage) => `  ${usage}`).join("\n")}
+${indented([...COMMAND_USAGE].flatMap(([key, usage]) => helpEntry(key, usage))).trimEnd()}
 
 ${SERVICE_USAGE}
 ${OPTIONS_HELP}
@@ -262,6 +268,7 @@ export const OPTIONS = {
   help: { type: "boolean" },
   all: { type: "boolean" },
   verbose: { type: "boolean" },
+  "dry-run": { type: "boolean" },
   version: { type: "boolean" },
   limit: { type: "string" },
   cursor: { type: "string" },

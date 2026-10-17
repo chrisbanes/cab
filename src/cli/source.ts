@@ -32,7 +32,7 @@ import {
   type Change,
   checkExpected,
   positiveIntFlag,
-  requireOut,
+  checkOut,
   writePrepared,
 } from "./configure.js";
 import { openFailure } from "./change-document.js";
@@ -558,12 +558,14 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
     "project prepare-source",
     {
       usage:
-        "project prepare-source PROJECT_ID --out FILE --edit-file FILE [--expected-version N]",
+        "project prepare-source PROJECT_ID [--out FILE] --edit-file FILE [--expected-version N]",
       positionals: 1,
+      expects:
+        "--expected-version: the source configuration's version ('Source version' in 'ensemble project sources PROJECT_ID'); omitted, the version this command reads.",
       flags: ["out", "edit-file", "expected-version"],
       async run(ctx) {
         const id = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
-        requireOut(ctx);
+        checkOut(ctx);
         const expected = positiveIntFlag(
           ctx.values["expected-version"],
           "expected-version",
@@ -587,6 +589,8 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
       usage:
         "project preview-source PROJECT_ID --selection ID --expected-version N [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-version: the source configuration's version ('Source version' in 'ensemble project sources PROJECT_ID'); required.",
       flags: ["selection", "expected-version", "request-id"],
       async run(ctx) {
         const projectId = uuidArg(ctx.positionals[2] ?? "", "PROJECT_ID");
@@ -722,6 +726,8 @@ export const sourceWriteCommands = new Map<string, WriteCommand>([
       usage:
         "project place-task TASK_ID --to PROJECT_ID --expected-version N [--request-id UUID]",
       positionals: 1,
+      expects:
+        "--expected-version: the placement conflict's version (the Version column of 'ensemble project sources PROJECT_ID' for the task's current project); required.",
       flags: ["to", "expected-version", "request-id"],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");

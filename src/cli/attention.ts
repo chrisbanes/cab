@@ -272,6 +272,8 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
       usage:
         "question answer TASK_ID INTERACTION_ID --expected-revision N --answers-file FILE [--request-id UUID]",
       positionals: 2,
+      expects:
+        "--expected-revision: the question's revision ('ensemble question get TASK_ID INTERACTION_ID'); required.",
       flags: ["expected-revision", "answers-file", "request-id"],
       async run(ctx) {
         const { taskId, interactionId } = ids(ctx.positionals);
@@ -379,6 +381,8 @@ export const attentionWriteCommands = new Map<string, WriteCommand>([
       usage:
         "approval decide TASK_ID INTERACTION_ID --decision approved|denied --expected-revision N [--material-hash HASH] [--request-id UUID]",
       positionals: 2,
+      expects:
+        "--expected-revision: the approval's revision ('ensemble approval get TASK_ID INTERACTION_ID'); required.",
       flags: ["decision", "expected-revision", "material-hash", "request-id"],
       async run(ctx) {
         const { taskId, interactionId } = ids(ctx.positionals);

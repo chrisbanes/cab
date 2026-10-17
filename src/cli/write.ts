@@ -36,6 +36,8 @@ export type WriteCommand = {
   usage: string;
   /** Arguments after the area and action. */
   positionals: number;
+  /** One help line under the usage: which record each `--expected-*` flag checks. */
+  expects?: string;
   flags: readonly string[];
   run(ctx: WriteContext): Promise<WriteOutput>;
 };

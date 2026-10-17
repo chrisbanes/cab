@@ -2012,7 +2012,22 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   );
   const source = (await github.textContent()) ?? "";
   assert.match(source, /fixture\/source#42/);
-  assert.match(source, /Issue open · (synced \S+|no successful sync)/);
+  // The sync time reads as the app's clock label, computed in the page's own timezone.
+  const syncedAt = read.data.source.memberships
+    .map(
+      (m: { sync: { lastSuccessfulAt: string | null } }) =>
+        m.sync.lastSuccessfulAt,
+    )
+    .filter((t: string | null): t is string => t !== null)
+    .sort()
+    .at(-1);
+  assert.ok(syncedAt, "the fixture records a successful sync");
+  const clock = await page.evaluate((iso) => {
+    const date = new Date(iso);
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }, syncedAt);
+  assert.match(source, new RegExp(`Issue open · synced ${clock}(?!\\d|:)`));
+  assert.doesNotMatch(source, /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
   assert.match(
     source,
     /GitHub owns the issue\. Ensemble coordinates the work\./,
@@ -2020,6 +2035,17 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   assert.match(source, /Dependencies · managed in GitHub/);
   assert.match(source, /outside\/repo#7\s*Open blocker/);
   assert.match(source, /GitHub commenting (permitted|unavailable)/);
+  // One Dependencies block, the GitHub-managed one: Ensemble's own group is for local tasks.
+  assert.deepEqual(
+    await inspector
+      .locator(".inspector-label")
+      .evaluateAll((els) =>
+        els
+          .map((e) => e.textContent ?? "")
+          .filter((t) => t.startsWith("Dependencies")),
+      ),
+    ["Dependencies · managed in GitHub"],
+  );
   // Nothing in the GitHub group can write.
   assert.equal(
     await github.locator("button, form, input, textarea").count(),
@@ -2049,6 +2075,20 @@ test("An imported task separates read-only GitHub source from Ensemble execution
   );
   await page.reload();
   await github.getByText(/· partial sync$/).waitFor();
+  await page.unrouteAll({ behavior: "wait" });
+  // No successful sync reads as words, never a blank time.
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${ids.importedId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      for (const m of json.data.source.memberships)
+        m.sync = { ...m.sync, lastSuccessfulAt: null };
+      await route.fulfill({ response, json });
+    },
+  );
+  await page.reload();
+  await github.getByText(/^Issue open · no successful sync/).waitFor();
   await page.unrouteAll({ behavior: "wait" });
   await page.reload();
   await github.getByText(/^Issue open/).waitFor();
@@ -2258,6 +2298,18 @@ test("A local task without a repository shows no GitHub reply or delivery lines"
   });
   assert.equal(await github.count(), 0);
   assert.equal(await delivery.count(), 0);
+  assert.equal(await inspector.getByText(/GitHub commenting/).count(), 0);
+  // A local task owns Ensemble's one Dependencies block, never a GitHub-managed one.
+  assert.deepEqual(
+    await inspector
+      .locator(".inspector-label")
+      .evaluateAll((els) =>
+        els
+          .map((e) => e.textContent ?? "")
+          .filter((t) => t.startsWith("Dependencies")),
+      ),
+    ["Dependencies"],
+  );
   await openTaskTab(page, "Changes");
   assert.equal(await refreshDelivery.count(), 0);
   assert.equal(await page.locator("#changes h3").innerText(), "Changes");
@@ -2409,6 +2461,7 @@ test("A project without a lead says so above the reply box", async (_t, j) => {
 test("The GitHub reply says what posting does in one sentence and keeps its draft when the policy changes", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "approval");
+  _t.after(a.restoreCredential);
   const { web, page, commands } = await fixture.launch();
   await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
   await page.getByRole("button", { name: "Post GitHub comment" }).click();
@@ -2427,14 +2480,63 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   ]);
 
   // The grant goes away after GitHub was selected: the reason replaces the sentence.
+  const noGrant = "This project doesn't permit GitHub issue comments.";
   a.setGrant(null);
   await refreshTask(page, a.taskId);
+  await page.getByText(noGrant, { exact: true }).first().waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${noGrant}`]);
+  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(await tab.getAttribute("aria-disabled"), "true");
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  assert.deepEqual(commands, []);
+
+  // The grant returns: the tab works again, still on GitHub, with the draft kept.
+  a.setGrant("allow");
+  await refreshTask(page, a.taskId);
   await page
-    .getByText("No project grant for issue comments.", { exact: true })
+    .getByText("Posts a comment on the GitHub issue.", { exact: true })
     .waitFor();
-  assert.deepEqual(await sentencesAboveReply(page), [
-    "P:No project grant for issue comments.",
-  ]);
+  assert.equal(await tab.getAttribute("aria-disabled"), null);
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isEnabled(),
+    true,
+  );
+
+  // No delivery credential: `available` stays true on the server but the web offers no send,
+  // even in allow mode with GitHub selected.
+  const noCredential = "This project has no GitHub delivery credential set.";
+  a.setGrant("allow", false);
+  await refreshTask(page, a.taskId);
+  await page.getByText(noCredential, { exact: true }).first().waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post comment", exact: true })
+      .isDisabled(),
+    true,
+  );
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Exact comment body",
+  );
+  a.setGrant("approval", false);
+  await refreshTask(page, a.taskId);
+  await page.getByText(noCredential, { exact: true }).first().waitFor();
+  assert.deepEqual(await sentencesAboveReply(page), [`P:${noCredential}`]);
   assert.equal(
     await page
       .getByRole("button", { name: "Post comment", exact: true })
@@ -2443,15 +2545,128 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   );
   assert.equal(
     await page
-      .getByRole("button", { name: "Post GitHub comment" })
+      .getByRole("button", { name: "Review exact GitHub comment" })
       .isDisabled(),
     true,
   );
-  assert.equal(
-    await page.getByLabel("Editable reply").inputValue(),
-    "Exact comment body",
-  );
   assert.deepEqual(commands, []);
+});
+
+/** The inspector's GitHub group text and the tab's accessible reason, for one sentence. */
+const unavailableComment = async (page: Page, sentence: string) => {
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  await inspector.getByText(sentence, { exact: true }).waitFor();
+  assert.match(
+    (await inspector.innerText()).replace(/\s+/g, " "),
+    /GitHub commenting unavailable/,
+  );
+  const tab = page.getByRole("button", { name: "Post GitHub comment" });
+  assert.equal(await tab.getAttribute("aria-disabled"), "true");
+  assert.equal(await tab.getAttribute("title"), sentence);
+  const described = await tab.getAttribute("aria-describedby");
+  assert.ok(described);
+  assert.equal(
+    await page.locator(`[id="${described}"]`).textContent(),
+    sentence,
+  );
+  return tab;
+};
+
+test("An unavailable GitHub comment gives its reason in the inspector and on a focusable tab that does nothing", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, "allow");
+  _t.after(a.restoreCredential);
+  const { web, page, commands } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const lead = page.getByRole("button", { name: "Message task lead" });
+  await lead.waitFor();
+  const inspector = page.locator('aside[aria-label="Task context"]');
+  await inspector.getByText("GitHub commenting permitted").waitFor();
+  assert.equal(
+    await page
+      .getByRole("button", { name: "Post GitHub comment" })
+      .getAttribute("aria-disabled"),
+    null,
+  );
+  assert.equal(await page.locator("#github-comment-reason").count(), 0);
+
+  const cases: [string, () => void][] = [
+    [
+      "This project doesn't permit GitHub issue comments.",
+      () => a.setGrant(null),
+    ],
+    [
+      "This project has no GitHub delivery credential set.",
+      () => a.setGrant("allow", false),
+    ],
+    [
+      "Comments wait while the task's admission or delivery is held.",
+      () => {
+        a.setGrant("allow");
+        const d = fixture.f.service.domain();
+        d.execute({
+          type: "project.configure",
+          actor: "operator",
+          key: randomUUID(),
+          projectId: a.projectId,
+          expectedVersion: Number(d.project(a.projectId).version),
+          paused: true,
+        });
+      },
+    ],
+  ];
+  for (const [sentence, arrange] of cases) {
+    arrange();
+    await refreshTask(page, a.taskId);
+    const tab = await unavailableComment(page, sentence);
+    // Tab from the sibling destination reaches it, so the reason is readable by keyboard.
+    await lead.focus();
+    await page.keyboard.press("Tab");
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.textContent),
+      "Post GitHub comment",
+    );
+    // Neither Enter, Space nor a click selects it: the lead's sentence stays above the box.
+    const before = await sentencesAboveReply(page);
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
+    await tab.click({ force: true });
+    assert.deepEqual(await sentencesAboveReply(page), before);
+    assert.equal(
+      await page
+        .getByRole("button", { name: "Post comment", exact: true })
+        .count(),
+      0,
+    );
+  }
+  assert.deepEqual(commands, []);
+});
+
+test("An older task read without a reason code falls back to its reason text", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedImportedCommentTask(fixture.f, null);
+  _t.after(a.restoreCredential);
+  let reason: string | null = "No project grant for issue comments";
+  const { web, page } = await fixture.launch();
+  await page.route(
+    (url) => url.pathname === `/api/operator/tasks/${a.taskId}`,
+    async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      delete json.data.commentPolicy.reasonCode;
+      json.data.commentPolicy.reason = reason;
+      await route.fulfill({ response, json });
+    },
+  );
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  await unavailableComment(page, "No project grant for issue comments.");
+  // Neither a reason nor a code: one generic sentence, never a blank.
+  reason = null;
+  await refreshTask(page, a.taskId);
+  await unavailableComment(
+    page,
+    "GitHub comments aren't available for this task.",
+  );
 });
 
 test("The viewing reference appears only once a result exists", async (_t, j) => {
@@ -3138,6 +3353,7 @@ test("An unconfirmed delivery refresh stays checkable after delivery stops apply
 test("A task that loses its GitHub source mid-edit moves to the lead with the lead's own draft and keeps its GitHub approval apart", async (_t, j) => {
   const fixture = await openFixture(j);
   const a = await seedImportedCommentTask(fixture.f, "approval");
+  _t.after(a.restoreCredential);
   const sourceId = fixture.f.service
     .taskReview()
     .sources(a.taskId)

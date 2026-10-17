@@ -14,6 +14,8 @@ export type CliDeps = {
   commandTimeoutMs?: number;
   /** Following waits with this; tests inject it. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /** Where a prepare with no `--out` writes its document (default `process.cwd()`); tests inject it. */
+  cwd?: string;
   /** Aborted on SIGINT by the CLI entry point. */
   signal?: AbortSignal;
 };
@@ -85,6 +87,7 @@ export type Values = {
   "max-duration"?: string | undefined;
   "compare-current"?: boolean | undefined;
   verbose?: boolean | undefined;
+  "dry-run"?: boolean | undefined;
   title?: string | undefined;
   outcome?: string | undefined;
   "outcome-file"?: string | undefined;

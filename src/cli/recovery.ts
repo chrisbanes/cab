@@ -558,6 +558,8 @@ export const recoveryWriteCommands = new Map<string, WriteCommand>([
       usage:
         "recovery prepare PATH ASSIGNMENT_ID --out FILE (--work WORK_ID --evidence-file FILE | --expected-version N --expected-conversation-revision N)",
       positionals: 2,
+      expects:
+        "--expected-version and --expected-conversation-revision: the assignment's version and conversation revision ('ensemble recovery get ASSIGNMENT_ID'); required for conversation-replace, refused for the other paths.",
       flags: [
         "out",
         "work",
