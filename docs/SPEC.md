@@ -615,6 +615,11 @@ configuration. When discovery is unavailable or a list is truncated, setup accep
 typed values and says so. The service lists folders only under the operator's home folder, and a typed
 repository is recorded with a provisional identity until discovery can name it.
 Advanced routing and external source configuration can follow later.
+A project name is unique ignoring case and surrounding spaces. Setup and
+configuration refuse a name another project has, naming that project, and a project
+can always be saved under its own current name. Projects created before the rule
+keep their names; lists and selects tell them apart by the lead's name, or by the
+first eight characters of the project ID when the leads match or are missing.
 When no profile exists, setup creates the lead profile inline, asking only for a name
 and runtime (summary and instructions are added later in Settings → Profiles),
 without losing other setup values. While discovery is unconfigured the repository step

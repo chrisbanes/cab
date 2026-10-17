@@ -16,7 +16,9 @@ import {
   DomainOperationError,
   DomainPolicyError,
   DomainStaleDispositionError,
+  ProjectNameTakenError,
 } from "./domain-errors.js";
+import { projectNameKey } from "./project-names.js";
 import {
   defaultProfileRuntime,
   type ExecutionHarness,
@@ -49,6 +51,7 @@ export {
   DomainOperationError,
   DomainPolicyError,
   DomainStaleDispositionError,
+  ProjectNameTakenError,
   TaskNotOpenError,
 } from "./domain-errors.js";
 
@@ -807,6 +810,8 @@ export class DomainStore {
       return prior.result;
     }
     this.operator(command);
+    // Not authoritative (apply decides in the transaction); it spares probing repositories.
+    this.assertProjectNameAvailable(command.name);
     const release = this.select(command.sourceCredentialRef);
     try {
       const verified: LinkedRepository[] = [];
@@ -1207,9 +1212,20 @@ export class DomainStore {
   projects(): Row[] {
     return this.db
       .prepare(
-        "SELECT p.id, p.name, p.version, p.paused, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision ORDER BY p.name",
+        "SELECT p.id, p.name, p.version, p.paused, p.leadProfileId, p.instructionsRevision, i.instructions FROM domain_projects p JOIN project_instruction_revisions i ON i.projectId = p.id AND i.revision = p.instructionsRevision ORDER BY p.name, p.id",
       )
       .all() as Row[];
+  }
+
+  /** Refuses a name any project has, ignoring case. */
+  private assertProjectNameAvailable(name: string): void {
+    const key = projectNameKey(name);
+    const taken = (
+      this.db
+        .prepare("SELECT name FROM domain_projects ORDER BY name, id")
+        .all() as Row[]
+    ).find((row) => projectNameKey(String(row.name)) === key);
+    if (taken) throw new ProjectNameTakenError(String(taken.name));
   }
 
   /** Whether `projects()` lists this project, by primary key. */
@@ -1912,6 +1928,7 @@ export class DomainStore {
       case "project.create": {
         this.operator(command);
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
+        this.assertProjectNameAvailable(command.name);
         const repositories = verifiedRepositories ?? [];
         if ((command.repositories?.length ?? 0) !== repositories.length)
           throw new Error(
@@ -1966,6 +1983,13 @@ export class DomainStore {
         const current = this.project(command.projectId);
         this.version(current, command.expectedVersion);
         if (command.leadProfileId) this.activeProfile(command.leadProfileId);
+        // Saving under its own name (or only changing its case) never conflicts with itself.
+        if (
+          command.name !== undefined &&
+          projectNameKey(command.name) !==
+            projectNameKey(String(present(current, "name")))
+        )
+          this.assertProjectNameAvailable(command.name);
         const revision =
           Number(current.instructionsRevision) +
           (command.instructions === undefined ? 0 : 1);
