@@ -2128,7 +2128,7 @@ test("attention summary names the uncertain or stopping task and links to the In
   });
   assert.match(
     (await action.getAttribute("href")) ?? "",
-    /^\/app\/tasks\/[0-9a-f-]{36}$/,
+    /^\/app\/tasks\/[0-9a-f-]{36}\?section=decisions$/,
   );
   const navCount = await page
     .locator('.sidebar a[href="/app/inbox"] .nav-count')
@@ -2141,6 +2141,14 @@ test("attention summary names the uncertain or stopping task and links to the In
   assert.equal(await inbox.getAttribute("href"), "/app/inbox");
   const list = await taskIds(page);
   await shot(page, "1366-tasks-attention-bar");
+  // Like the Inbox, it lands on the task's decision card with the hold lines in view.
+  await action.click();
+  const card = page.locator("section#decisions");
+  await card.getByRole("list", { name: "Also held", exact: true }).waitFor();
+  const box = await card.boundingBox();
+  assert.ok(box && box.y >= 0 && box.y < (page.viewportSize()?.height ?? 0));
+  await page.goBack();
+  await summary.waitFor();
   await page.getByRole("button", { name: "Board", exact: true }).click();
   await summary.waitFor();
   assert.deepEqual(await taskIds(page), list);
