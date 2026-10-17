@@ -55,7 +55,9 @@ export function ReadinessPanel(
   const checks = readiness.state.data?.data.checks;
   const d = useDraft(p.drafts, "discovery.configure:readiness");
   useEffect(() => d.startOperation({ key: key() }), [d]);
-  // A recorded offer is spent once a read made after it answers; Clear then brings it back.
+  const announced = useRef<number | null>(null);
+  // A recorded offer is spent once a read made after it answers and the save has been
+  // announced; Clear then brings it back.
   const { fetchedAt, pending } = discovery.state;
   useEffect(() => {
     if (
@@ -63,6 +65,7 @@ export function ReadinessPanel(
       !pending &&
       fetchedAt !== null &&
       d.savedAt !== null &&
+      announced.current === d.savedAt &&
       fetchedAt >= d.savedAt
     )
       d.startOperation({ key: key() });
@@ -80,7 +83,6 @@ export function ReadinessPanel(
   // whichever instance sent it (this one may have mounted while the save was pending).
   // Focus moves to the check only if it was still on the offer, or nowhere: the offer leaves
   // once Readiness re-reads.
-  const announced = useRef<number | null>(null);
   const { onDiscoveryChange } = p;
   useEffect(() => {
     if (d.phase !== "recorded" || d.savedAt === null) return;
