@@ -218,7 +218,7 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
           <Button
             type="button"
             variant="secondary"
-            aria-label={`Try again to load the ${label.toLowerCase()}`}
+            aria-label={`Try again to load the ${label.toLowerCase()} for ${String(parseRows(v[field])[index]?.[name === "query" ? "id" : "repositoryId"] ?? "")}`}
             aria-busy={priv.state.pending || undefined}
             aria-disabled={priv.state.pending || undefined}
             onClick={() => {
