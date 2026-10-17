@@ -15,7 +15,7 @@ import { clockLabel } from "./presentation.js";
 import { SourceNameText } from "./source-names.js";
 import { type SourceNaming, sourceCredentialCopy } from "./settings-view.js";
 import type { ObservationResource } from "./sync-placement.js";
-import type { ConfigurationDraft } from "./settings-state.js";
+import { type ConfigurationDraft, outcomeCopy } from "./settings-state.js";
 
 type Observed = z.infer<
   typeof sourceObservationSchema
@@ -40,7 +40,7 @@ interface Run {
 export const credentialReasonId = "source-credential-reason";
 
 /** The key of one source's preview at one source version; app-wide, so a retry reuses it. */
-export const importDraftKey = (
+const importDraftKey = (
   projectId: string,
   version: number,
   selectionId: string,
@@ -103,9 +103,11 @@ export function ImportPanel(
     running = useRef(false),
     generation = useRef(0),
     latest = useRef(p),
+    lastRun = useRef<Run | null>(null),
     wantsFocus = useRef(false),
     titleId = useId();
   latest.current = p;
+  lastRun.current = run;
   // A press stops issuing steps once the page or project it belongs to is gone.
   // biome-ignore lint/correctness/useExhaustiveDependencies: restart per project.
   useEffect(() => {
@@ -149,22 +151,24 @@ export function ImportPanel(
   }, [p.savePhase, shown]);
   // After a press the control that was used may be gone, so the outcome takes the focus.
   useEffect(() => {
-    if (settled > 0) outcome.current?.focus();
+    if (settled > 0)
+      (outcome.current?.childElementCount ? outcome : heading).current?.focus();
   }, [settled]);
 
   /** Preview every saved inactive source once, then refresh once; a retry resumes. */
   async function go(refreshOnly = false) {
     // The synchronous guard stops a double press; busy also covers a press made before a remount.
     const now = latest.current,
-      at = now.data.source.version,
-      pendingNow = now.data.source.selections.filter(named),
-      todo = pendingNow.filter((s) => !s.active).map((s) => s.id),
-      scope = unimported(now).map((s) => s.id);
-    if (
-      running.current ||
-      now.data.source.credential?.usable === false ||
-      todo.some((id) => draft(id, at).phase === "pending")
-    )
+      // A refresh-only retry reports on the sources of the press it continues.
+      retry = refreshOnly ? lastRun.current : null,
+      at = retry?.version ?? now.data.source.version,
+      todo = now.data.source.selections
+        .filter(named)
+        .filter((s) => !s.active)
+        .map((s) => s.id),
+      scope = retry?.ids ?? unimported(now).map((s) => s.id),
+      unusableNow = now.data.source.credential?.usable === false;
+    if (running.current || todo.some((id) => draft(id, at).phase === "pending"))
       return;
     running.current = true;
     const gen = generation.current,
@@ -180,7 +184,11 @@ export function ImportPanel(
           if (d.phase === "recorded") continue;
           if (d.phase === "unknown")
             await d.reconcile(client, session.csrfToken);
-          else if (d.phase !== "conflict" || d.credentialRefusal) {
+          else if (unusableNow) {
+            // A new preview waits for a usable credential; the action beside it says why.
+            setRun({ version: at, ids: scope, refresh: "none" });
+            return;
+          } else if (d.phase !== "conflict" || d.credentialRefusal) {
             // A refused preview was never recorded, so it starts again under a fresh key.
             if (d.phase === "rejected" || d.phase === "conflict") d.purge();
             if (!d.values.key)
@@ -357,7 +365,7 @@ export function ImportPanel(
         {changedElsewhere && (
           <ActionOutcome
             tone="warning"
-            message="Another change was saved to these sources. Nothing was refreshed."
+            message={`${outcomeCopy.conflict} Nothing was refreshed.`}
             action={{
               label: "Review changes",
               onClick: () => {
@@ -365,6 +373,7 @@ export function ImportPanel(
                 for (const { d } of drafts)
                   if (d.phase === "conflict" && !d.credentialRefusal) d.purge();
                 p.refreshConfiguration();
+                setSettled((n) => n + 1);
               },
             }}
           />
@@ -390,11 +399,6 @@ export function ImportPanel(
               </>
             }
           />
-        )}
-        {working && (
-          <p className="body" role="status">
-            Working…
-          </p>
         )}
         {mine?.refresh === "failed" && (
           <ActionOutcome
@@ -443,7 +447,7 @@ export function ImportPanel(
               if (!busy && !unusable) void go();
             }}
           >
-            Preview and import now
+            {busy ? "Importing…" : "Preview and import now"}
           </Button>
         </div>
       )}

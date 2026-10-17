@@ -41,16 +41,15 @@ import {
   sourceCredentialCopy,
   sourceCredentialSummary,
   savedLine,
-  sourceHeading,
   sourceStatusLine,
 } from "./settings-view.js";
-import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
-import { clockLabel } from "./presentation.js";
+import { OutcomeDetails } from "./action-feedback.js";
 import { credentialReasonId, ImportPanel } from "./source-import.js";
 import {
   hasProjectSource,
   savedSourceName,
-  SourceNameText,
+  SourceHeading,
+  sourceDetails,
 } from "./source-names.js";
 import { Alert } from "./ui/alert.js";
 import { Input } from "./ui/input.js";
@@ -60,7 +59,6 @@ import {
   useReadinessDiscovery,
 } from "./readiness-picker.js";
 import { ObservationCounts, readinessAnchor } from "./observation-counts.js";
-import { selectionCountsText } from "../../src/operator/readiness-text.js";
 import type { ObservationResource } from "./sync-placement.js";
 
 const withKeys = (rows: object[]) =>
@@ -360,26 +358,17 @@ export function SourceTab(p: TabProps & { observations: ObservationResource }) {
   /** The Remove and Undo names carry the S-n id, so two rows with one name stay distinct. */
   const rowName = (n: SourceNaming, id: unknown) =>
     `${n.private ? "Saved search" : n.name} (${String(id)})`;
-  const details = (r: SourceRow, n: SourceNaming): OutcomeField[] => {
-    const o = observedRow(r.id);
-    return [
-      ["Source ID", String(r.id)],
-      ["Kind", n.kind],
-      ...(r.kind === "project" && r.descriptor
-        ? ([["Project", String(r.descriptor)]] as OutcomeField[])
-        : []),
-      ...(o?.lastAttemptAt && Number.isFinite(Date.parse(o.lastAttemptAt))
-        ? ([
-            ["Newest attempt", clockLabel(Date.parse(o.lastAttemptAt))],
-          ] as OutcomeField[])
-        : []),
-      ...(o?.counts && observed
-        ? ([
-            ["Counts", selectionCountsText(o.counts, observed.readiness)],
-          ] as OutcomeField[])
-        : []),
-    ];
-  };
+  const details = (r: SourceRow, n: SourceNaming) =>
+    sourceDetails(
+      {
+        id: String(r.id),
+        kind: String(r.kind),
+        descriptor: r.descriptor ? String(r.descriptor) : null,
+      },
+      n,
+      observedRow(r.id),
+      observed?.readiness,
+    );
   // Nothing unsaved: the form is clean, so what is saved is what the page shows.
   const quiet = !isLocked && !d.dirty && lines.length === 0;
   return (
@@ -1059,18 +1048,5 @@ function SourceCredential({
         </fieldset>
       )}
     </Panel>
-  );
-}
-
-/** A row heading: the name (marked private when it is a saved query), then the kind. */
-function SourceHeading({ naming }: { naming: SourceNaming }) {
-  const heading = sourceHeading(naming);
-  return heading === naming.name ? (
-    <SourceNameText naming={naming} />
-  ) : (
-    <>
-      <SourceNameText naming={naming} />
-      {heading.slice(naming.name.length)}
-    </>
   );
 }

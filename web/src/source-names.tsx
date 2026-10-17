@@ -4,7 +4,20 @@ import { useReadinessDiscovery } from "./readiness-picker.js";
 import type { SourcePrivate } from "./settings-changes.js";
 import type { TabProps } from "./project-config.js";
 import { usePrivateValues } from "./settings.js";
-import { type SourceNaming, sourceName } from "./settings-view.js";
+import {
+  type SourceNaming,
+  sourceHeading,
+  sourceName,
+} from "./settings-view.js";
+import type { z } from "zod";
+import type { sourceObservationSchema } from "../../src/operator/contracts.js";
+import { selectionCountsText } from "../../src/operator/readiness-text.js";
+import type { OutcomeField } from "./action-feedback.js";
+import { clockLabel } from "./presentation.js";
+
+type Project = z.infer<
+  typeof sourceObservationSchema
+>["data"]["projects"][number];
 
 type Selection = TabProps["data"]["source"]["selections"][number];
 
@@ -64,4 +77,37 @@ export function useSavedSourceNames(p: TabProps) {
     projectIds: [],
   });
   return (s: Selection) => savedSourceName(s, known, discovery.choices);
+}
+
+/** A row heading: the name (marked private when it is a saved query), then the kind. */
+export function SourceHeading({ naming }: { naming: SourceNaming }) {
+  return (
+    <>
+      <SourceNameText naming={naming} />
+      {sourceHeading(naming).slice(naming.name.length)}
+    </>
+  );
+}
+
+/** The Details of a source row: its id and kind, then what its last read observed. */
+export function sourceDetails(
+  source: { id: string | null; kind: string; descriptor: string | null },
+  naming: SourceNaming,
+  read: Project["selections"][number] | undefined,
+  rule: Project["readiness"] | undefined,
+): OutcomeField[] {
+  const attempt = read?.lastAttemptAt ? Date.parse(read.lastAttemptAt) : NaN;
+  return [
+    ...(source.id ? [["Source ID", source.id] as const] : []),
+    ...(naming.kind ? [["Kind", naming.kind] as const] : []),
+    ...(source.kind === "project" && source.descriptor
+      ? [["Project", source.descriptor] as const]
+      : []),
+    ...(Number.isFinite(attempt)
+      ? [["Newest attempt", clockLabel(attempt)] as const]
+      : []),
+    ...(read?.counts && rule
+      ? [["Counts", selectionCountsText(read.counts, rule)] as const]
+      : []),
+  ];
 }

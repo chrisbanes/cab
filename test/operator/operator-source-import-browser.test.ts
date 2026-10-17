@@ -193,7 +193,6 @@ test("GitHub source sections read 1, 2, 3 in DOM order", async (_t, journey) => 
       ),
     [],
   );
-  const firstControl = page.getByLabel("Selection kind").first();
   await page
     .getByRole("button", { name: /^Remove / })
     .first()
@@ -210,7 +209,6 @@ test("GitHub source sections read 1, 2, 3 in DOM order", async (_t, journey) => 
       ),
     );
   }
-  void firstControl;
   const second = visited.indexOf("2 · Readiness matching"),
     third = visited.indexOf("3 · Repository access");
   assert.ok(second >= 0 && third > second, `tab order ${visited.join("|")}`);
@@ -612,6 +610,65 @@ test("a lost refresh reply that reached the service leaves nothing to import aft
   assert.equal(seen.refreshes(), 1);
 });
 
+test("Refresh again reports on the sources of the press it continues", async (_t, journey) => {
+  const { page } = await start(journey);
+  const seen = track(page);
+  let lose = true;
+  await page.route("**/api/operator/source-refresh", async (route) => {
+    if (!lose) return route.continue();
+    lose = false;
+    await route.fetch();
+    await route.abort();
+  });
+  await importButton(page).click();
+  const warning = outcomeMessages(page).filter({
+    hasText: "We couldn't confirm the refresh.",
+  });
+  await warning.waitFor();
+  // The reads now show every source synced; the retry still answers for this press.
+  await row(page, "acme/atlas")
+    .getByText(/^Synced \d\d:\d\d/)
+    .waitFor();
+  await warning.getByRole("button", { name: "Refresh again" }).click();
+  await page.getByRole("link", { name: "View imported tasks" }).waitFor();
+  await outcomeMessages(page)
+    .filter({ hasText: /^Previewed/ })
+    .waitFor();
+  await outcomeMessages(page)
+    .filter({ hasText: /Read acme\/atlas.* completely/ })
+    .waitFor();
+  assert.equal(seen.previews.length, 3);
+  assert.equal(seen.refreshes(), 2);
+});
+
+test("Refresh again still runs when the credential stopped being usable", async (_t, journey) => {
+  try {
+    const { page } = await start(journey);
+    const seen = track(page);
+    let drop = true;
+    await page.route("**/api/operator/source-refresh", (route) => {
+      if (!drop) return route.continue();
+      drop = false;
+      delete process.env.FIXTURE_GITHUB;
+      return route.abort();
+    });
+    await importButton(page).click();
+    const warning = outcomeMessages(page).filter({
+      hasText: "We couldn't confirm the refresh.",
+    });
+    await warning.waitFor();
+    // The re-read shows the credential unusable, and the retry is not a silent no-op.
+    await page.locator("#source-credential-reason").waitFor();
+    await warning.getByRole("button", { name: "Refresh again" }).click();
+    await outcomeMessages(page)
+      .filter({ hasText: /nothing was imported from/ })
+      .waitFor();
+    assert.equal(seen.refreshes(), 2);
+  } finally {
+    process.env.FIXTURE_GITHUB = "offline-import-source-value";
+  }
+});
+
 test("double click sends each step once", async (_t, journey) => {
   const { page } = await start(journey);
   const seen = track(page);
@@ -624,12 +681,12 @@ test("double click sends each step once", async (_t, journey) => {
   await outcomeMessages(page)
     .filter({ hasText: /^Previewed/ })
     .waitFor();
-  const button = importButton(page);
+  const button = importPanel(page).getByRole("button", { name: "Importing…" });
   assert.equal(await button.getAttribute("aria-disabled"), "true");
   await button.focus();
   assert.equal(
     await page.evaluate(() => document.activeElement?.textContent),
-    "Preview and import now",
+    "Importing…",
     "an unavailable action stays focusable",
   );
   await button.click({ force: true });
@@ -667,6 +724,13 @@ test("source edited between save and import", async (_t, journey) => {
   const stale = seen.previews[0];
   await warning.getByRole("button", { name: "Review changes" }).click();
   await importButton(page).waitFor();
+  assert.equal(
+    await page.evaluate(
+      () => document.activeElement?.closest("section.settings-panel") !== null,
+    ),
+    true,
+    "focus stays in the panel after the control that had it is gone",
+  );
   await importButton(page).click();
   await page.getByRole("link", { name: "View imported tasks" }).waitFor();
   const fresh = seen.previews.at(-1);
@@ -703,7 +767,7 @@ test("an unusable credential keeps the action focusable with its reason", async 
 });
 
 test("private query never leaves the session view", async (_t, journey) => {
-  const { page, ids, web } = await start(journey);
+  const { page, web } = await start(journey);
   const query = "PRIVATE SAVED QUERY";
   const leaks: string[] = [];
   page.on("console", (m) => {
@@ -735,6 +799,20 @@ test("private query never leaves the session view", async (_t, journey) => {
     ),
     false,
   );
+  // No attribute (labels, descriptions, titles) and not document.title carries the query.
+  assert.equal(
+    await page.evaluate(
+      (needle) =>
+        document.title.includes(needle) ||
+        [...document.querySelectorAll("body *")].some((e) =>
+          [...e.attributes].some(
+            (a) => a.name !== "value" && a.value.includes(needle),
+          ),
+        ),
+      query,
+    ),
+    false,
+  );
   await captureSettingsEvidence(page, "import-issues-private-name");
   await page.goto(`${web.origin}/app/settings`);
   await page.getByText("S-2 search").waitFor();
@@ -745,7 +823,6 @@ test("private query never leaves the session view", async (_t, journey) => {
     ),
     false,
   );
-  void ids;
 });
 
 // ---- T4: Sync & placement -----------------------------------------------------------------

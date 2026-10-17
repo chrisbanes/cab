@@ -9,9 +9,12 @@ import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import type { ConfigurationDraft } from "./settings-state.js";
-import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
-import { clockLabel } from "./presentation.js";
-import { SourceNameText, useSavedSourceNames } from "./source-names.js";
+import { OutcomeDetails } from "./action-feedback.js";
+import {
+  SourceHeading,
+  sourceDetails,
+  useSavedSourceNames,
+} from "./source-names.js";
 import {
   activationLine,
   type SourceNaming,
@@ -19,7 +22,6 @@ import {
   sourceHeading,
   sourceStatusLine,
 } from "./settings-view.js";
-import { selectionCountsText } from "../../src/operator/readiness-text.js";
 import {
   DraftField,
   DraftMessage,
@@ -254,32 +256,22 @@ function SourceObservations(
           naming = saved
             ? p.naming(saved)
             : { name: "Selection unavailable", kind: "", private: false },
-          details: OutcomeField[] = [
-            ...(s.selectionId
-              ? ([["Source ID", s.selectionId]] as OutcomeField[])
-              : []),
-            ...(naming.kind ? ([["Kind", naming.kind]] as OutcomeField[]) : []),
-            ...(saved?.kind === "project" && saved.descriptor
-              ? ([["Project", saved.descriptor]] as OutcomeField[])
-              : []),
-            ...(s.lastAttemptAt && Number.isFinite(Date.parse(s.lastAttemptAt))
-              ? ([
-                  ["Newest attempt", clockLabel(Date.parse(s.lastAttemptAt))],
-                ] as OutcomeField[])
-              : []),
-            ...(s.counts
-              ? ([
-                  ["Counts", selectionCountsText(s.counts, observed.readiness)],
-                ] as OutcomeField[])
-              : []),
-          ];
+          details = sourceDetails(
+            {
+              id: s.selectionId,
+              kind: saved?.kind ?? "",
+              descriptor: saved?.descriptor ?? null,
+            },
+            naming,
+            s,
+            observed.readiness,
+          );
         return (
           <article className="settings-row" key={s.selectionId ?? i}>
             <div className="settings-row-heading">
               <div>
                 <h3 className="small-heading">
-                  <SourceNameText naming={naming} />
-                  {sourceHeading(naming).slice(naming.name.length)}
+                  <SourceHeading naming={naming} />
                 </h3>
                 <p className="body">
                   {sourceStatusLine(s, observed.readiness)}
