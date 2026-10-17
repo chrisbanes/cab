@@ -309,11 +309,18 @@ or run `node dist/src/cli/main.js` directly.
 7. Operating tasks and attention. `inbox list`, `question get` and `approval get`
    work with either scope; the rest need a read/write credential (a read-only one
    exits 3 before anything is sent):
-   - `task create --project ID --title T --outcome-file FILE --ready true|false
-     [--blocker ID]... [--assignee PROFILE_ID]`, `task configure TASK_ID
-     --expected-version N [--title T] [--outcome-file FILE] [--ready true|false]`
-     and `task add-dependency|remove-dependency TASK_ID --blocker ID
-     --expected-version N`. Imported tasks keep provider-owned title and outcome
+   - `task create --project ID --title T (--outcome TEXT|- | --outcome-file FILE)
+     [--ready true|false] [--blocker ID]... [--assignee PROFILE_ID]`, `task configure
+     TASK_ID [--expected-version N] [--title T] [--outcome TEXT|- | --outcome-file
+     FILE] [--ready true|false]` and `task add-dependency|remove-dependency TASK_ID
+     --blocker ID --expected-version N`. `--outcome -` reads standard input (text
+     only, up to 1 MiB, until it closes; Ctrl-C cancels), and the inline and file
+     forms are mutually exclusive. `task create` is ready unless `--ready false`.
+     `task configure` without `--expected-version` sends the version of the task read
+     it already makes; an edit between that read and the send is a `conflict` (exit
+     4). A lost reply is an unknown outcome (exit 6): the same command again reads the
+     new version and is a new request, and the old `--request-id` is refused as
+     `conflict` rather than applied twice. Imported tasks keep provider-owned title and outcome
      (`policy-denied`) and readiness. The task and initial-assignment ids are derived
      from the request key, so a retry rebuilds the same command. `task create` and
      `task resume` end with the task's `Waiting:`/`Fix:` lines, as `task get` prints

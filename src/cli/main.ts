@@ -218,6 +218,7 @@ export async function main(
         "max-duration": { type: "string" },
         "compare-current": { type: "boolean" },
         title: { type: "string" },
+        outcome: { type: "string" },
         "outcome-file": { type: "string" },
         ready: { type: "string" },
         blocker: { type: "string", multiple: true },

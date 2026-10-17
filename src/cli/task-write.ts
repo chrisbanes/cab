@@ -8,6 +8,7 @@ import { uuidArg } from "./browse.js";
 import {
   boolFlag,
   exactCommand,
+  inlineText,
   positiveIntFlag,
   readTextFile,
 } from "./configure.js";
@@ -205,9 +206,14 @@ async function domainTaskWrite(
   fields: Record<string, unknown>,
   summary: string,
   notes: string[],
+  /** Fills `expectedVersion` from the pre-read when the flag was omitted. */
+  fillVersion = false,
 ) {
   const session = await connectWrite(ctx, TASK_WRITE);
-  const { projectId } = (await readTask(session, taskId)).data.task;
+  const read = (await readTask(session, taskId)).data.task;
+  const { projectId } = read;
+  if (fillVersion && fields.expectedVersion === undefined)
+    fields = { ...fields, expectedVersion: read.version };
   const scope = `project:${projectId}`;
   const { key, digest, reused } = await chooseKey(
     ctx,
@@ -353,11 +359,12 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
     "task create",
     {
       usage:
-        "task create --project ID --title T --outcome-file FILE --ready true|false [--blocker ID]... [--assignee PROFILE_ID] [--request-id UUID]",
+        "task create --project ID --title T (--outcome TEXT|- | --outcome-file FILE) [--ready true|false] [--blocker ID]... [--assignee PROFILE_ID] [--request-id UUID]",
       positionals: 0,
       flags: [
         "project",
         "title",
+        "outcome",
         "outcome-file",
         "ready",
         "blocker",
@@ -367,14 +374,15 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
       async run(ctx) {
         const v = ctx.values;
         const projectId = uuidArg(v.project ?? "", "--project");
-        const ready = boolFlag(v.ready, "ready");
-        if (ready === undefined)
-          throw new CliError("usage", "--ready true|false is required.");
+        const ready = boolFlag(v.ready, "ready") ?? true;
         if (v.title === undefined)
           throw new CliError("usage", "--title T is required.");
-        const outcome = await readTextFile(v["outcome-file"], "outcome-file");
+        const outcome = await inlineText(ctx, "outcome");
         if (outcome === undefined)
-          throw new CliError("usage", "--outcome-file FILE is required.");
+          throw new CliError(
+            "usage",
+            "--outcome TEXT (or - for standard input) or --outcome-file FILE is required.",
+          );
         if (!outcome.trim())
           throw new CliError("invalid-input", "The outcome must not be blank.");
         const blockers = (v.blocker ?? []).map((b) => uuidArg(b, "--blocker"));
@@ -452,36 +460,43 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
     "task configure",
     {
       usage:
-        "task configure TASK_ID --expected-version N [--title T] [--outcome-file FILE] [--ready true|false] [--request-id UUID]",
+        "task configure TASK_ID [--expected-version N] [--title T] [--outcome TEXT|- | --outcome-file FILE] [--ready true|false] [--request-id UUID]",
       positionals: 1,
       flags: [
         "expected-version",
         "title",
+        "outcome",
         "outcome-file",
         "ready",
         "request-id",
       ],
       async run(ctx) {
         const taskId = uuidArg(ctx.positionals[2] ?? "", "TASK_ID");
-        const expectedVersion = requiredVersion(ctx);
-        const ready = boolFlag(ctx.values.ready, "ready");
-        const outcome = await readTextFile(
-          ctx.values["outcome-file"],
-          "outcome-file",
+        // Omitted, the version comes from the task read the write already makes.
+        const expectedVersion = positiveIntFlag(
+          ctx.values["expected-version"],
+          "expected-version",
         );
+        const ready = boolFlag(ctx.values.ready, "ready");
+        if (
+          ctx.values.title === undefined &&
+          ctx.values.outcome === undefined &&
+          ctx.values["outcome-file"] === undefined &&
+          ready === undefined
+        )
+          throw new CliError(
+            "usage",
+            "Give at least one of --title, --outcome, --outcome-file or --ready.",
+          );
+        const outcome = await inlineText(ctx, "outcome");
         const fields = {
-          expectedVersion,
+          ...(expectedVersion === undefined ? {} : { expectedVersion }),
           ...(ctx.values.title === undefined
             ? {}
             : { title: ctx.values.title }),
           ...(outcome === undefined ? {} : { outcome }),
           ...(ready === undefined ? {} : { ready }),
         };
-        if (Object.keys(fields).length === 1)
-          throw new CliError(
-            "usage",
-            "Give at least one of --title, --outcome-file or --ready.",
-          );
         return domainTaskWrite(
           ctx,
           taskId,
@@ -491,6 +506,7 @@ export const taskWriteCommands = new Map<string, WriteCommand>([
           ready === undefined
             ? []
             : [`Reverse with 'task configure --ready ${!ready}'.`],
+          true,
         );
       },
     },
