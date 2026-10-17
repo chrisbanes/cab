@@ -1117,7 +1117,9 @@ export function TaskFiles({
   const markers = markerRepository
     ? changeMarkers(comparisonRead, markerRepository, state.path)
     : null;
-  const markersUnusable = comparisonRead !== undefined && markers === null;
+  const listed = directory?.state === "ready";
+  const markersUnusable =
+    listed && comparisonRead !== undefined && markers === null;
   const deletedRows =
     markers && directory?.state === "ready"
       ? markers.deleted.filter(
@@ -1245,7 +1247,7 @@ export function TaskFiles({
               </Fragment>
             ))}
           </nav>
-          {markers && (
+          {listed && markers && (
             <p className="file-observation">
               Changes marked from the Branch comparison
               {markers.baseBranch ? ` against ${markers.baseBranch}` : ""} read
