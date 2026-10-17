@@ -1287,6 +1287,7 @@ test("Search keeps keyboard focus through every filter commit and reads in DOM o
   await waitActive("search-records");
 
   // Repeating the same search re-reads without stacking identical entries.
+  await page.locator("#search-count").waitFor();
   const applied = await page.evaluate(() => history.state?.entryIndex ?? 0);
   await Promise.all([
     page.waitForResponse(
