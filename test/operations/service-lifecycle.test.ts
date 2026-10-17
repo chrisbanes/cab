@@ -63,6 +63,8 @@ class FakeLaunchd {
   ghStorage: GhTokenStorage = "unknown";
   ghProbes = 0;
   alive = new Set<number>();
+  /** Start time of a pid that is not the default, to model pid reuse. */
+  pidStarts = new Map<number, string>();
   linted: string[] = [];
   fetched: string[] = [];
   clock = Date.UTC(2026, 9, 14, 12);
@@ -137,9 +139,25 @@ class FakeLaunchd {
         return true;
       },
       captureIdentity: async (pid) =>
-        this.identityUnavailable ? null : { pid },
+        this.identityUnavailable
+          ? null
+          : {
+              processId: String(pid),
+              processStartedAt: this.pidStarts.get(pid) ?? "start-0",
+              bootId: "boot-1",
+            },
+      // As the real verifier: absent, reused (another start time) or a new boot is gone.
       exited: async (identity) => {
-        const exited = !this.alive.has((identity as { pid: number }).pid);
+        const { processId, processStartedAt, bootId } = identity as {
+          processId: string;
+          processStartedAt: string;
+          bootId: string;
+        };
+        const pid = Number(processId);
+        const exited =
+          !this.alive.has(pid) ||
+          (this.pidStarts.get(pid) ?? "start-0") !== processStartedAt ||
+          bootId !== "boot-1";
         if (exited) this.events.push("exited");
         return exited;
       },
@@ -2028,6 +2046,13 @@ function runSudoSteps(f: Fixture) {
   copyFileSync(f.staged, f.installed);
   chmodSync(f.installed, 0o644);
   f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 5000 });
+  f.launchd.alive.add(5000);
+}
+
+/** What the operator's `bootout` and `rm` leave: no job and no plist; the process is separate. */
+function runSudoUninstallSteps(f: Fixture) {
+  f.launchd.systemJobs.clear();
+  rmSync(f.installed, { force: true });
 }
 
 const stateTrees = (f: Fixture) =>
@@ -2183,7 +2208,27 @@ test("daemon mode re-run verifies the installed plist and job against the record
   assert.deepEqual(f.launchd.requests, []);
   // Verifying never opens the browser, even when open is the default.
   assert.deepEqual(f.launchd.opened, []);
-  sameRecord();
+  // The running service is recorded, as the process to confirm gone at uninstall.
+  const observed = f.record();
+  assert.deepEqual(observed.observedProcess, {
+    processId: "5000",
+    processStartedAt: "start-0",
+    bootId: "boot-1",
+  });
+  assert.deepEqual(
+    { ...observed, observedProcess: undefined },
+    { ...JSON.parse(recordBytes.toString("utf8")), observedProcess: undefined },
+  );
+  // Verifying the same process again rewrites nothing.
+  const stable = statSync(f.recordPath);
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(statSync(f.recordPath).ino, stable.ino);
+  assert.equal(statSync(f.recordPath).mtimeMs, stable.mtimeMs);
+  // A restarted job is a different process: the record follows it.
+  f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 5001 });
+  f.launchd.alive.add(5001);
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(f.record().observedProcess.processId, "5001");
 });
 
 test("daemon mode re-run refuses a plist or job that does not match the record", async (t) => {
@@ -2394,6 +2439,9 @@ test("daemon mode uninstall prints the sudo steps until the job and plist are go
   assert.deepEqual(output.steps, [remove]);
 
   rmSync(f.installed);
+  // The job's process, recorded while it was loaded, has exited too.
+  assert.equal(f.record().observedProcess.processId, "5000");
+  f.launchd.alive.delete(5000);
   result = await f.uninstall();
   assert.equal(result.code, 0, result.stderr);
   output = JSON.parse(result.stdout);
@@ -2729,4 +2777,229 @@ test("daemon mode records are refused by a v1 reader without mode, and a record 
       /install record .* is invalid/,
     );
   }
+});
+
+/** Installs the daemon, runs its steps and has uninstall record the running process. */
+async function runningDaemon(t: { after(fn: () => void): void }) {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal(
+    JSON.parse(readFileSync(f.recordPath, "utf8")).observedProcess.processId,
+    "5000",
+  );
+  // The operator boots the job out and removes the plist; the process is separate.
+  runSudoUninstallSteps(f);
+  return f;
+}
+
+const HOLD = /could not be confirmed stopped/;
+
+test("daemon mode uninstall keeps the record while the booted-out process is still alive", async (t) => {
+  const f = await runningDaemon(t);
+  const bytes = readFileSync(f.recordPath);
+  const before = stateTrees(f);
+  f.launchd.calls = [];
+  // Still terminating: bootout removed the registration, the process did not exit.
+  const held = await f.uninstall();
+  assert.equal(held.code, 1);
+  const error = JSON.parse(held.stderr).error;
+  assert.match(error, HOLD);
+  assert.match(error, /recorded process may still be running/);
+  assert.match(
+    error,
+    /launchctl print system\/local\.ensemble\.test` exits 113/,
+  );
+  assert.match(error, /lsof -nP -iTCP:\d+ -sTCP:LISTEN/);
+  assert.deepEqual(readFileSync(f.recordPath), bytes);
+  assert.deepEqual(stateTrees(f), before);
+  assert.deepEqual(f.launchd.mutations(), []);
+
+  // Nothing else may start while it is held: the record still names the daemon.
+  const agent = await f.install();
+  assert.equal(agent.code, 1);
+  assert.match(
+    JSON.parse(agent.stderr).error,
+    /already present in daemon mode/,
+  );
+  assert.deepEqual(f.launchd.mutations(), []);
+  const { out, io } = capture();
+  const connection: OperatorConnection = {
+    origin: async () => "http://127.0.0.1:1",
+    readiness: async () => [],
+  };
+  assert.equal(
+    await upgradeService(
+      f.options,
+      release(f.stateDir, "0.2.0"),
+      connection,
+      f.launchd.host(),
+      io,
+    ),
+    1,
+  );
+  assert.match(JSON.parse(out.stderr).error, /switch back first/);
+  // A daemon install only re-verifies the recorded daemon; it records and starts nothing.
+  const rerun = await f.installDaemon();
+  assert.equal(JSON.parse(rerun.stdout).started, false);
+  assert.deepEqual(readFileSync(f.recordPath), bytes);
+
+  // Held again on a repeat, then complete once the process has exited.
+  assert.equal((await f.uninstall()).code, 1);
+  f.launchd.alive.delete(5000);
+  const done = await f.uninstall();
+  assert.equal(done.code, 0, done.stderr);
+  assert.equal(JSON.parse(done.stdout).complete, true);
+  assert.equal(existsSync(f.recordPath), false);
+  assert.equal((await f.install()).code, 0, "the LaunchAgent can start now");
+});
+
+test("daemon mode uninstall treats a reused pid as the process gone", async (t) => {
+  const f = await runningDaemon(t);
+  // Pid 5000 lives on, but it is another process now: another start time.
+  f.launchd.pidStarts.set(5000, "start-9");
+  const done = await f.uninstall();
+  assert.equal(done.code, 0, done.stderr);
+  assert.equal(JSON.parse(done.stdout).complete, true);
+  assert.equal(existsSync(f.recordPath), false);
+});
+
+test("daemon mode uninstall holds while the port is still in use", async (t) => {
+  const f = await runningDaemon(t);
+  f.launchd.alive.delete(5000);
+  const listener = createServer().listen(f.options.port, "127.0.0.1");
+  await new Promise((done) => listener.once("listening", done));
+  try {
+    const held = await f.uninstall();
+    assert.equal(held.code, 1);
+    assert.match(
+      JSON.parse(held.stderr).error,
+      /port \d+ on 127\.0\.0\.1 is still in use/,
+    );
+    assert.equal(existsSync(f.recordPath), true);
+  } finally {
+    await new Promise((done) => listener.close(done));
+  }
+  assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
+});
+
+test("daemon mode uninstall holds a process that was never recorded or could not be identified", async (t) => {
+  // The operator booted it out by hand before Ensemble ever saw it loaded: a log file shows it ran.
+  let f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  writeFileSync(f.record().configuration.stdoutPath, "started\n");
+  let held = await f.uninstall();
+  assert.equal(held.code, 1);
+  assert.match(
+    JSON.parse(held.stderr).error,
+    /no service process was ever recorded/,
+  );
+  assert.equal(existsSync(f.recordPath), true);
+
+  // Its port is busy and no process was recorded.
+  f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  const listener = createServer().listen(f.options.port, "127.0.0.1");
+  await new Promise((done) => listener.once("listening", done));
+  try {
+    held = await f.uninstall();
+    assert.equal(held.code, 1);
+    assert.match(JSON.parse(held.stderr).error, /ever recorded/);
+  } finally {
+    await new Promise((done) => listener.close(done));
+  }
+
+  // The process was loaded but its identity could not be read: held, with the process gone.
+  f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  f.launchd.identityUnavailable = true;
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal(f.record().observedProcess, "unknown");
+  runSudoUninstallSteps(f);
+  f.launchd.alive.delete(5000);
+  held = await f.uninstall();
+  assert.equal(held.code, 1);
+  assert.match(JSON.parse(held.stderr).error, /could not be identified/);
+  assert.equal(existsSync(f.recordPath), true);
+
+  // A job that was loaded with no process needs only a free port.
+  f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  f.launchd.systemJobs.set(f.options.label, { path: f.installed, pid: 0 });
+  copyFileSync(f.staged, f.installed);
+  chmodSync(f.installed, 0o644);
+  f.launchd.overrides = {};
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal(f.record().observedProcess, null);
+  runSudoUninstallSteps(f);
+  assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
+});
+
+test("daemon mode verify and uninstall runs interleave without losing the recorded process", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.installDaemon()).code, 0);
+  runSudoSteps(f);
+  const recorded = () => f.record().observedProcess?.processId;
+  assert.equal((await f.installDaemon()).code, 0);
+  assert.equal(recorded(), "5000");
+  assert.equal((await f.uninstall()).code, 0);
+  assert.equal(recorded(), "5000");
+  assert.equal(
+    (await f.installDaemon()).code,
+    0,
+    "verify while the steps are pending",
+  );
+  assert.equal(recorded(), "5000");
+  // After bootout the process is still running; verify and uninstall both keep the record.
+  runSudoUninstallSteps(f);
+  assert.equal((await f.uninstall()).code, 1);
+  assert.equal(recorded(), "5000");
+  assert.equal((await f.uninstall()).code, 1);
+  f.launchd.alive.delete(5000);
+  assert.equal(JSON.parse((await f.uninstall()).stdout).complete, true);
+  assert.equal(existsSync(f.recordPath), false);
+});
+
+test("daemon mode only an agent record never carries an observed process", async (t) => {
+  const f = await setup(t);
+  assert.equal((await f.install()).code, 0);
+  writeFileSync(
+    f.recordPath,
+    JSON.stringify({ ...f.record(), observedProcess: null }),
+  );
+  const refused = await f.uninstall();
+  assert.equal(refused.code, 1);
+  assert.match(
+    JSON.parse(refused.stderr).error,
+    /install record .* is invalid/,
+  );
+});
+
+test("daemon mode exit confirmation treats a reused pid or a new boot as gone, and a live process as running", {
+  skip: process.platform !== "darwin",
+}, async () => {
+  const host = defaultServiceHost();
+  const identity = (await host.captureIdentity(process.pid)) as {
+    processId: string;
+    processStartedAt: string;
+    bootId: string;
+  };
+  assert.ok(identity, "this process has an identity");
+  assert.equal(await host.exited(identity), false);
+  assert.equal(
+    await host.exited({
+      ...identity,
+      processStartedAt: "Thu Jan  1 00:00:00 1970",
+    }),
+    true,
+  );
+  assert.equal(
+    await host.exited({ ...identity, bootId: "another-boot" }),
+    true,
+  );
+  const child = spawnSync("/bin/sleep", ["0"]);
+  assert.equal(child.status, 0);
+  assert.equal(await host.exited({ ...identity, processId: "99999999" }), true);
 });

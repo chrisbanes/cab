@@ -284,11 +284,29 @@ sudo /bin/rm -f /Library/LaunchDaemons/local.ensemble.service.plist
 ```
 
 It keeps the record and staged plist; run `service uninstall` again after the
-commands. When the job and the plist are gone it removes the staged plist and the
-record and exits 0 with `"complete":true`; that is also the point from which
-`service install` restores the LaunchAgent. It refuses, changing nothing, when a
-daemon job or plist exists without a record, or differs from it. Data, auth,
-snapshots, releases and logs are kept as with the LaunchAgent.
+commands. Removing the job does not stop its process at once, so the record also
+keeps the service process Ensemble last saw. `service install --mode daemon`
+re-runs, and `service uninstall` while the job is loaded, read it with
+`launchctl print` and store its pid, start time and boot session in the record
+(`observedProcess`; `null` for a loaded job with no process, `"unknown"` when its
+identity could not be read). Nothing is ever signalled. When the job and the plist are
+gone, uninstall clears the record only once that process is confirmed gone: its pid is
+absent, belongs to a process with another start time, or predates this boot, and
+`127.0.0.1:PORT` is free. Then it removes the staged plist and the record and exits 0
+with `"complete":true`; that is also the point from which `service install` restores
+the LaunchAgent, and until then install in the other mode, and upgrade, stay refused.
+If the process is still running or cannot be identified, no process was ever recorded
+and a log file exists or the port is busy, or the port is still in use, it exits 1
+and keeps the record. Its message gives the read-only checks (`launchctl print
+system/<label>` exits 113, `lsof -nP -iTCP:PORT -sTCP:LISTEN` prints nothing,
+`ps -axo pid,lstart,command` shows no release `cli.js` process); run uninstall again
+once the process has exited, or, after confirming nothing runs, delete the record and
+the staged plist by hand. A daemon that was installed but never started has no process
+to wait for, so uninstall completes at once. That inference needs launchd to create
+the log files when it starts the job, which [#1149](https://github.com/chrisbanes/ensemble/issues/1149)
+checks. It refuses, changing nothing, when a daemon job or plist exists without a
+record, or differs from it. Data, auth, snapshots, releases and logs are kept as with
+the LaunchAgent.
 
 The JSON results include `"mode"` on install and uninstall; daemon install adds
 `"started"` and `"steps"`, and daemon uninstall adds `"complete"` and, while it is

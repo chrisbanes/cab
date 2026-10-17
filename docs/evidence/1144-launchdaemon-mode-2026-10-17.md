@@ -44,7 +44,7 @@ The printed `sudo` steps were never run.
 | Staged plist | `UserName` `chris`, `HOME` `/Users/chris`, the fixed `PATH`, the auth-file path, the origin, both log paths, `RunAtLoad` true, `KeepAlive` false, and no other environment variable. No token or password appears. |
 | Directories | The LaunchAgents directory was never created; the daemons directory was not written (`ls /Library/LaunchDaemons` unchanged). `STATE/launchd` held only the record and the staged plist (both mode `0600`). |
 | `launchctl print system/<label>` after install | Exit 113. |
-| `service uninstall` | Exit 0: `"mode":"daemon"`, `"installed":true`, `"complete":true`, because nothing was loaded or installed. The record and staged plist were removed; data, auth and versions remained. |
+| `service uninstall` | Exit 0: `"mode":"daemon"`, `"installed":true`, `"complete":true`, because nothing was loaded or installed, no process was ever recorded, no log file existed and the port was free. The record and staged plist were removed; data, auth and versions remained. |
 
 ## Untested here
 
