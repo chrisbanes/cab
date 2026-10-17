@@ -334,7 +334,9 @@ test("uncertain effect and independent Stop remain visible after restart; expire
     .fill("Retain the supplied outcome");
   const tasksBefore = f.service.domain().tasks(f.projectId).length;
   f.advanceClock(61_000);
-  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  // Choosing the project again reads its composer options, which finds the expired session.
+  await page.getByLabel("Project", { exact: true }).selectOption("");
+  await page.getByLabel("Project", { exact: true }).selectOption(f.projectId);
   await page.getByLabel("Password").waitFor();
   assert.equal(f.scripted.state.writes, 0);
   assert.equal(f.service.domain().tasks(f.projectId).length, tasksBefore);
