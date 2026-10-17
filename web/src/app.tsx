@@ -56,7 +56,7 @@ import { unavailableAlert } from "./execution-runtime.js";
 import { ConfigurationDrafts } from "./settings-state.js";
 import { ProjectSetup, type SetupHeader } from "./project-setup.js";
 import { SettingsWorkspace } from "./settings-index.js";
-import { landingElement } from "./settings-sections.js";
+import { landingDecision } from "./settings-sections.js";
 import { ProfileConfiguration, ProfileCreate } from "./profile-config.js";
 import { ProjectConfiguration } from "./project-config.js";
 import { settingsHeader } from "./settings-view.js";
@@ -458,8 +458,21 @@ function knownRoute(pathname: string) {
     new RegExp(`^/app/(?:projects|profiles)/${id}/settings$`).test(pathname)
   );
 }
+/**
+ * The URL each history entry the shell made or adopted had, by entry key. Browsers may copy
+ * `history.state` into a new entry made by a native fragment change, so a saved scroll
+ * position in the state proves nothing about the entry: only an entry reached again at the
+ * URL it was recorded for is a traversal to the same entry.
+ */
+const entryUrls = new Map<string, string>();
+const currentUrl = () => location.pathname + location.search + location.hash;
+const ownsState = () => {
+  const key = (history.state as { navKey?: string } | null)?.navKey;
+  return key !== undefined && entryUrls.get(key) === currentUrl();
+};
 function pushAppEntry(href: string, navigationScope: string) {
   const fromSearch = location.pathname === "/app/search";
+  const navKey = crypto.randomUUID();
   history.pushState(
     {
       origin: location.pathname + location.search,
@@ -467,7 +480,7 @@ function pushAppEntry(href: string, navigationScope: string) {
         ? history.state?.workspaceOrigin
         : location.pathname + location.search,
       navigationScope,
-      navKey: crypto.randomUUID(),
+      navKey,
       entryIndex: (history.state?.entryIndex ?? 0) + 1,
       workspaceIndex: fromSearch
         ? (history.state?.workspaceIndex ?? 0)
@@ -476,6 +489,7 @@ function pushAppEntry(href: string, navigationScope: string) {
     "",
     href,
   );
+  entryUrls.set(navKey, currentUrl());
 }
 export function App() {
   const drafts = useRef(new ConfigurationDrafts());
@@ -489,11 +503,13 @@ export function App() {
       location.pathname === "/app/search"
         ? "/app/search"
         : location.pathname + location.search + location.hash;
+    const navKey = crypto.randomUUID();
     history.replaceState(
-      { navigationScope: navigationScope.current, navKey: crypto.randomUUID() },
+      { navigationScope: navigationScope.current, navKey },
       "",
       next,
     );
+    entryUrls.set(navKey, currentUrl());
     setPath(next);
   };
   const clientRef = useRef<OperatorClient | null>(null);
@@ -553,11 +569,18 @@ export function App() {
           history.state.navigationScope !== navigationScope.current
         )
           clearPrivateNavigation();
-        if (identity)
+        if (identity) {
+          const navKey = history.state?.navKey ?? crypto.randomUUID();
           history.replaceState(
-            { ...history.state, navigationScope: navigationScope.current },
+            {
+              ...history.state,
+              navigationScope: navigationScope.current,
+              navKey,
+            },
             "",
           );
+          entryUrls.set(navKey, currentUrl());
+        }
         acceptedIdentity.current = identity;
         setLogoutPending(false);
         setStillSignedIn(false);
@@ -593,21 +616,31 @@ export function App() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: current scope ref guards browser Back/Forward entries across authentication expiry.
   useEffect(() => {
     const pop = () => {
-      if (history.state?.navigationScope !== navigationScope.current) {
+      // A Settings entry reached at a URL it was not recorded for (a fragment changed
+      // natively, with the state copied or dropped) is a new entry: it starts clean, so
+      // no saved position or focus of another entry can be mistaken for its own.
+      const copied =
+        ["/app/settings", "/app/settings/runtime"].includes(
+          location.pathname,
+        ) && !ownsState();
+      if (
+        history.state?.navigationScope !== navigationScope.current ||
+        copied
+      ) {
         clearPrivateNavigation();
         restoreFocus.current = null;
       } else restoreFocus.current = history.state?.focusedHref ?? null;
       setDrawer(false);
       setPath(location.pathname + location.search);
       setNavigationVersion((n) => n + 1);
-      const saved = (history.state as { scrollY?: number } | null)?.scrollY;
+      const state = history.state as { scrollY?: number } | null;
       const { pathname, hash } = location;
-      // Decided when the frame runs, with the page rendered: an entry without a saved
-      // position that the Settings page lands on itself is left to it; anything else
-      // (including a fragment the page has no target for yet) is restored to the top.
+      // Decided when the frame runs, with the page rendered, by the same function the
+      // Settings page lands with.
       requestAnimationFrame(() => {
-        if (saved === undefined && landingElement(pathname, hash)) return;
-        scrollTo(0, saved ?? 0);
+        const decision = landingDecision(state, pathname, hash);
+        if (decision.action === "restore") scrollTo(0, decision.y);
+        else if (decision.action === "top") scrollTo(0, 0);
       });
     };
     addEventListener("popstate", pop);
@@ -718,6 +751,7 @@ export function App() {
   useEffect(() => {
     if (pathname !== addressPath) {
       history.replaceState({ ...history.state }, "", "/app");
+      if (history.state?.navKey) entryUrls.set(history.state.navKey, "/app");
       setPath("/app");
     }
   }, [pathname, addressPath]);

@@ -126,22 +126,43 @@ function land(target: HTMLElement) {
 let landedIdentity: string | null = null;
 
 /**
- * A landing is a history entry and the fragment it names, not the entry alone: native
- * hash-only navigation (address bar, script, a link the shell does not intercept) and
- * traversal between such entries can keep one entry key while the fragment changes.
+ * What a page does for the entry it is now on. The shell guarantees that a saved scroll
+ * position in the state belongs to the entry itself (it starts any entry reached by a
+ * fragment change from clean state), so it is a restoration to keep; otherwise the page
+ * lands on its fragment target, or the shell restores the top.
+ */
+export type LandingDecision =
+  | { action: "restore"; y: number }
+  | { action: "land"; target: HTMLElement }
+  | { action: "top" };
+
+export function landingDecision(
+  state: { scrollY?: number } | null,
+  pathname: string,
+  hash: string,
+): LandingDecision {
+  if (typeof state?.scrollY === "number")
+    return { action: "restore", y: state.scrollY };
+  const target = landingElement(pathname, hash);
+  return target ? { action: "land", target } : { action: "top" };
+}
+
+/**
+ * A landing is a history entry and the fragment it names, not the entry alone: the entry
+ * key can stay while the fragment changes.
  */
 const landingIdentity = () =>
   `${(history.state as { navKey?: string } | null)?.navKey ?? ""}|${location.pathname}${location.hash}`;
 
 /**
- * Land on the element `landingElement` finds for the URL, once per landing identity and
- * only when that entry has no saved scroll position (a Back or Forward restore keeps the
- * app's own scroll and focus restore). `ready` holds the landing until the page can no
- * longer reorder or grow its target. Several hooks on one page may call this: the first
- * whose target is on the page lands, and a target that appears later (a check's article
- * after its read) is landed on by whichever hook sees it. The identity is read on every
- * render, the shell re-renders on each popstate, and a changed identity ends the previous
- * landing (its settle observer and refocus) before the next begins.
+ * Land where `landingDecision` says, once per landing identity (a restoration also counts
+ * as done, so a target drawn later does not land on a restored entry). `ready` holds the
+ * landing until the page can no longer reorder or grow its target. Several hooks on one
+ * page may call this: the first whose target is on the page lands, and a target that
+ * appears later (a check's article after its read) is landed on by whichever hook sees it.
+ * The identity is read on every render, the shell re-renders on each popstate, and a
+ * changed identity ends the previous landing (its settle observer and refocus) before the
+ * next begins.
  */
 export function useFragmentLanding(ready: boolean) {
   const identity = landingIdentity();
@@ -155,15 +176,14 @@ export function useFragmentLanding(ready: boolean) {
   );
   useEffect(() => {
     if (!ready || landedIdentity === identity) return;
-    const target = landingElement(location.pathname, location.hash);
-    if (!target) return;
+    const decision = landingDecision(
+      history.state,
+      location.pathname,
+      location.hash,
+    );
+    if (decision.action === "top") return;
     landedIdentity = identity;
     landedHere.current = true;
-    if (
-      typeof (history.state as { scrollY?: number } | null)?.scrollY ===
-      "number"
-    )
-      return;
-    return land(target);
+    if (decision.action === "land") return land(decision.target);
   }, [identity, ready]);
 }

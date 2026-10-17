@@ -515,6 +515,7 @@ test("native hash-only navigation lands, switches targets and leaves unsupported
     a.id = "bare";
     a.href = "#cli-credentials";
     a.textContent = "bare fragment";
+    a.style.cssText = "position:fixed;top:0;left:0;z-index:99";
     document.querySelector("main")?.prepend(a);
   });
   await page.locator("#bare").click();
@@ -597,6 +598,119 @@ test("a second hook becoming ready later does not land again or take focus from 
     await page.evaluate(() => document.activeElement?.textContent),
     "Create profile",
   );
+});
+
+/**
+ * Leaves the page on an entry that has a saved position of its own: land on Profiles, move
+ * a little, follow the Readiness link, and come Back. Returns the saved scroll position.
+ */
+async function backToSavedEntry(page: Page) {
+  const link = (name: string) =>
+    nav(page).getByRole("link", { name, exact: true });
+  await link("Profiles").click();
+  await landed(page, "H2", "Profiles");
+  await page.evaluate(() => scrollTo(0, 60));
+  await link("Readiness").click();
+  await landed(page, "H2", "Readiness");
+  await page.goBack();
+  await page.waitForURL(/#profiles$/);
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(await page.evaluate(() => scrollY), 60);
+  return 60;
+}
+
+/** Ways to change the fragment that start a new entry, from the entry the page is on. */
+const forwardMethods: [
+  string,
+  (page: Page, origin: string, hash: string) => Promise<void>,
+][] = [
+  [
+    "an address-bar edit",
+    async (page, origin, hash) => {
+      await page.goto(`${origin}/app/settings#${hash}`);
+    },
+  ],
+  ["a script hash assignment", (page, _origin, hash) => setHash(page, hash)],
+  [
+    "a bare fragment link",
+    async (page, _origin, hash) => {
+      await page.evaluate((h) => {
+        const a = document.createElement("a");
+        a.id = "bare";
+        a.href = `#${h}`;
+        a.textContent = "bare fragment";
+        document.querySelector("main")?.prepend(a);
+      }, hash);
+      // Clicked in script so the page keeps the position it was left at.
+      await page.locator("#bare").evaluate((a) => (a as HTMLElement).click());
+    },
+  ],
+  [
+    "an app link",
+    async (page, _origin, hash) => {
+      await page.evaluate((h) => {
+        const a = document.createElement("a");
+        a.id = "applink";
+        a.href = `/app/settings#${h}`;
+        a.textContent = "app link";
+        a.style.cssText = "position:fixed;top:0;left:0;z-index:99";
+        document.querySelector("main")?.prepend(a);
+      }, hash);
+      await page
+        .locator("#applink")
+        .evaluate((a) => (a as HTMLElement).click());
+    },
+  ],
+];
+for (const [method, go] of forwardMethods)
+  for (const [hash, supported] of [
+    ["cli-credentials", true],
+    ["bogus", false],
+  ] as const)
+    test(`a new entry from ${method} to #${hash} after Back to a saved position ${supported ? "lands" : "does not land"}`, async (_t, journey) => {
+      const { page, web } = await startSettings(journey, "/app/settings");
+      await nav(page).waitFor();
+      await page.getByRole("article", { name: "Codex login" }).waitFor();
+      const saved = await backToSavedEntry(page);
+      await trackFocus(page);
+      await go(page, web.origin, hash);
+      if (supported) onScreen(await landed(page, "H2", "CLI credentials"));
+      else {
+        await nextFrames(page);
+        await nextFrames(page);
+        assert.deepEqual(await focusLog(page), []);
+        if (method !== "an app link")
+          assert.equal(await page.evaluate(() => scrollY), 0);
+      }
+      // Going Back to the saved entry restores its own position and lands nothing.
+      const focused = (await focusLog(page)).length;
+      await page.goBack();
+      await page.waitForURL(/#profiles$/);
+      await nextFrames(page);
+      await nextFrames(page);
+      assert.equal(await page.evaluate(() => scrollY), saved);
+      assert.equal((await focusLog(page)).length, focused);
+    });
+
+test("an entry that copies a saved position is a new entry, and its source still restores", async (_t, journey) => {
+  const { page } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  const saved = await backToSavedEntry(page);
+  // pushState copies the whole state, saved position included, into an entry at another fragment.
+  await page.evaluate(() => {
+    history.pushState({ ...history.state }, "", "#cli-credentials");
+    history.back();
+  });
+  await page.waitForURL(/#profiles$/);
+  await nextFrames(page);
+  await nextFrames(page);
+  assert.equal(await page.evaluate(() => scrollY), saved);
+  await trackFocus(page);
+  await page.goForward();
+  onScreen(await landed(page, "H2", "CLI credentials"));
+  assert.deepEqual(await focusLog(page), ["CLI credentials"]);
 });
 
 for (const fragment of ["bogus", "readiness-unknown"])
