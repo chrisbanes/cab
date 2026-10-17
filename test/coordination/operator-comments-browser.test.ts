@@ -13,6 +13,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
+import { seedTaskResult } from "../fixtures/task-review.js";
 import { openTaskTab } from "../fixtures/task-tabs.js";
 
 const test = browserSuite("operator-comments-browser");
@@ -158,7 +159,7 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   });
   await f.service.refreshGitHub();
   const taskId = String(f.service.githubSources().issue("I1")?.taskId);
-  d.ensureLeadAssignment(taskId);
+  const lead = d.ensureLeadAssignment(taskId);
   await f.service.provisionTask(taskId);
   d.execute({
     type: "delivery.configure",
@@ -178,6 +179,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
     projectId,
     expectedVersion: Number(d.project(projectId).version),
     paused: false,
+  });
+  // A viewing reference needs a result to view.
+  seedTaskResult(f, taskId, String(lead?.id), "Recorded fixture result", {
+    sourceId: f.service.taskReview().sources(taskId).at(-1)!.sourceId,
   });
   const web = await j.start("fixture.web", () => f.startWeb());
   browser = await j.start("browser.launch", () => chromium.launch());
@@ -611,6 +616,10 @@ test("approval-mode exact operator review and unknown remote comment retain orig
   );
   issue.body = "Supplied GitHub brief";
   await f.service.refreshGitHub();
+  // The viewing reference names the latest result's source, so the restored view needs a result on it.
+  seedTaskResult(f, taskId, String(lead?.id), "Result on the restored source", {
+    sourceId: f.service.taskReview().sources(taskId).at(-1)!.sourceId,
+  });
   const milestones: {
     atMs: number;
     step: string;

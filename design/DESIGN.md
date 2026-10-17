@@ -2063,6 +2063,10 @@ as follows:
 - Frame 57's entries under the latest result stay: Files, Changes, Review,
   "Assignment context & identifiers", "Assignment history" and "Message lead"
   open their tab in place and move to the section, without a history entry.
+- The viewing-reference block under the latest result (the "No viewing baseline …"
+  or changes line, "Set viewing reference" and its disclaimer) shows only once the
+  task has a result. A check for a viewing write whose response was lost stays
+  visible regardless.
 - Criteria read C1, C2… in the brief and in the result's rows with the recorded
   outcome ("Supported by recorded evidence", "Failed recorded check",
   "Unverified"); no overall pass is derived. The literal brief, checklist syntax

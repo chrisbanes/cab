@@ -2440,3 +2440,41 @@ test("The GitHub reply says what posting does in one sentence and keeps its draf
   );
   assert.deepEqual(commands, []);
 });
+
+test("The viewing reference appears only once a result exists", async (_t, j) => {
+  const fixture = await openFixture(j);
+  const a = await seedReviewTask(
+    fixture.f,
+    "Fieldnotes",
+    "Local task",
+    "Write the guide.",
+  );
+  const { web, page } = await fixture.launch();
+  await signIn(page, web.origin, web.password, `/app/tasks/${a.taskId}`);
+  const review = page.locator("#review");
+  await review.getByText("No result recorded.", { exact: true }).waitFor();
+  const view = review.getByRole("button", { name: "Set viewing reference" });
+  assert.equal(await view.count(), 0);
+  assert.equal(await review.getByText(/No viewing baseline/).count(), 0);
+  assert.equal(
+    await review.getByText(/Viewing records availability/).count(),
+    0,
+  );
+
+  // The first result arrives while the page is open: the block appears with the draft kept.
+  await page.getByLabel("Editable reply").fill("Keep this draft");
+  a.result("Guide drafted");
+  await refreshTask(page, a.taskId);
+  await view.waitFor();
+  await review
+    .getByText(
+      "No viewing baseline. Comparison with previously viewed material is unknown.",
+      { exact: true },
+    )
+    .waitFor();
+  await review.getByText(/Viewing records availability only/).waitFor();
+  assert.equal(
+    await page.getByLabel("Editable reply").inputValue(),
+    "Keep this draft",
+  );
+});

@@ -33,6 +33,59 @@ export function setLinkedRepository(
       ),
   );
 }
+/** Records one result for `producerAssignmentId` as if its work had just reported it. */
+export function seedTaskResult(
+  f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  taskId: string,
+  producerAssignmentId: string,
+  summary: string,
+  metadata?: Partial<ReviewMetadata>,
+) {
+  const d = f.service.domain();
+  let resultId = "";
+  const workId = randomUUID();
+  f.seedPersistedState((db) => {
+    const c = new CoordinationStore(db, d),
+      s = new ExecutionState(db);
+    db.prepare(
+      "INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval) VALUES(?,?,'fixture','/tmp/fixture','running',?,?,'chatgpt','workspaceWrite','never')",
+    ).run(randomUUID(), workId, workId, workId);
+    s.bindTask(workId, {
+      taskId,
+      assignmentId: producerAssignmentId,
+      assignmentVersion: Number(d.assignment(producerAssignmentId).version),
+      instructionsRevision: 1,
+      profileRevision: 1,
+    });
+    db.prepare("UPDATE domain_assignments SET state='running' WHERE id=?").run(
+      producerAssignmentId,
+    );
+    const revision = c.results(taskId).length + 1;
+    db.prepare(
+      "INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES(?,?,1,?)",
+    ).run(workId, producerAssignmentId, revision);
+    f.service
+      .taskReview()
+      .captureAssignment(
+        producerAssignmentId,
+        "Fixture work preparation",
+        workId,
+      );
+    const batch = c.bindDeliveryBatch(producerAssignmentId, workId);
+    if (batch) c.completeDeliveryBatch(workId);
+    resultId = c.recordResult({
+      threadId: workId,
+      turnId: workId,
+      callId: randomUUID(),
+      tool: "ensemble_report_result",
+      arguments: { summary, ...(metadata ? { review: metadata } : {}) },
+    }).result.resultId;
+    db.prepare(
+      "UPDATE execution_intents SET state='completed' WHERE workId=?",
+    ).run(workId);
+  });
+  return { resultId, workId };
+}
 /** An imported GitHub task with a lead, and an `issue.comment` grant that `setGrant` can change. */
 export async function seedImportedCommentTask(
   f: Awaited<ReturnType<typeof createOperatorFixture>>,
@@ -180,55 +233,11 @@ export async function seedReviewTask(
   await f.service.provisionTask(taskId, repositories);
   const assignmentId = String(assignment.id),
     source = f.service.taskReview().sources(taskId)[0]!;
-  function result(
+  const result = (
     summary: string,
     metadata?: Partial<ReviewMetadata>,
     producerAssignmentId = assignmentId,
-  ) {
-    let resultId = "";
-    const workId = randomUUID();
-    f.seedPersistedState((db) => {
-      const c = new CoordinationStore(db, d),
-        s = new ExecutionState(db);
-      db.prepare(
-        "INSERT INTO execution_intents(id,workId,prompt,workspace,state,threadId,turnId,accountType,sandbox,approval) VALUES(?,?,'fixture','/tmp/fixture','running',?,?,'chatgpt','workspaceWrite','never')",
-      ).run(randomUUID(), workId, workId, workId);
-      s.bindTask(workId, {
-        taskId,
-        assignmentId: producerAssignmentId,
-        assignmentVersion: Number(d.assignment(producerAssignmentId).version),
-        instructionsRevision: 1,
-        profileRevision: 1,
-      });
-      db.prepare(
-        "UPDATE domain_assignments SET state='running' WHERE id=?",
-      ).run(producerAssignmentId);
-      const revision = c.results(taskId).length + 1;
-      db.prepare(
-        "INSERT INTO task_work_revisions(workId,assignmentId,conversationRevision,workRevision) VALUES(?,?,1,?)",
-      ).run(workId, producerAssignmentId, revision);
-      f.service
-        .taskReview()
-        .captureAssignment(
-          producerAssignmentId,
-          "Fixture work preparation",
-          workId,
-        );
-      const batch = c.bindDeliveryBatch(producerAssignmentId, workId);
-      if (batch) c.completeDeliveryBatch(workId);
-      resultId = c.recordResult({
-        threadId: workId,
-        turnId: workId,
-        callId: randomUUID(),
-        tool: "ensemble_report_result",
-        arguments: { summary, ...(metadata ? { review: metadata } : {}) },
-      }).result.resultId;
-      db.prepare(
-        "UPDATE execution_intents SET state='completed' WHERE workId=?",
-      ).run(workId);
-    });
-    return { resultId, workId };
-  }
+  ) => seedTaskResult(f, taskId, producerAssignmentId, summary, metadata);
   function delegatedResult(
     summary: string,
     metadata?: Partial<ReviewMetadata>,

@@ -1830,36 +1830,43 @@ export function TaskWorkspace({
                   !state.selectedResult && <p>No result recorded.</p>
                 )}
                 <EntryLinks reveal={reveal} />
-                <p className="metadata muted">{changes}</p>
-                <Button
-                  variant="secondary"
-                  data-unconfirmed-control="review.view"
-                  onClick={() =>
-                    void command({
-                      type: "review.view",
-                      key: crypto.randomUUID(),
-                      taskId,
-                      sourceId: state.selectedSource
-                        ? (source?.sourceId ?? null)
-                        : selected
-                          ? (meta?.metadata.sourceId ?? null)
-                          : (source?.sourceId ?? null),
-                      resultIds: selected ? [selected.resultId] : [],
-                    })
-                  }
-                  disabled={
-                    Boolean(state.selectedResult && !selected) ||
-                    Boolean(state.selectedSource && !source) ||
-                    Boolean(unconfirmed)
-                  }
-                >
-                  Set viewing reference
-                </Button>
+                {/* A viewing reference needs a result to view; a lost response stays checkable. */}
+                {data.results.length > 0 && (
+                  <>
+                    <p className="metadata muted">{changes}</p>
+                    <Button
+                      variant="secondary"
+                      data-unconfirmed-control="review.view"
+                      onClick={() =>
+                        void command({
+                          type: "review.view",
+                          key: crypto.randomUUID(),
+                          taskId,
+                          sourceId: state.selectedSource
+                            ? (source?.sourceId ?? null)
+                            : selected
+                              ? (meta?.metadata.sourceId ?? null)
+                              : (source?.sourceId ?? null),
+                          resultIds: selected ? [selected.resultId] : [],
+                        })
+                      }
+                      disabled={
+                        Boolean(state.selectedResult && !selected) ||
+                        Boolean(state.selectedSource && !source) ||
+                        Boolean(unconfirmed)
+                      }
+                    >
+                      Set viewing reference
+                    </Button>
+                  </>
+                )}
                 {unconfirmedCheck("review.view")}
-                <p>
-                  Viewing records availability only; it does not approve work or
-                  clear holds. Retained records may be incomplete.
-                </p>
+                {data.results.length > 0 && (
+                  <p>
+                    Viewing records availability only; it does not approve work
+                    or clear holds. Retained records may be incomplete.
+                  </p>
+                )}
                 <label htmlFor="retained-result-revision">
                   Result revision{" "}
                   <NativeSelect
