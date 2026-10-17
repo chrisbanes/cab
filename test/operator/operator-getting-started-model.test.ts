@@ -279,7 +279,11 @@ test("Runtime passes on any enabled runtime and sends a missing one to Settings 
         }),
       ),
     ).runtime?.action,
-    { kind: "link", label: "Open readiness check", href: "/app/settings" },
+    {
+      kind: "link",
+      label: "Open readiness check",
+      href: "/app/settings#readiness",
+    },
   );
 });
 
@@ -296,7 +300,7 @@ test("GitHub never offers a one-click login", () => {
   assert.deepEqual(signedIn?.action, {
     kind: "link",
     label: "Set discovery credential",
-    href: "/app/settings",
+    href: "/app/settings#github-discovery",
   });
   assert.match(signedIn?.detail ?? "", /@fixture-user/);
   assert.match(signedIn?.detail ?? "", /Project setup/);
@@ -312,7 +316,7 @@ test("GitHub never offers a one-click login", () => {
   assert.deepEqual(done?.action, {
     kind: "link",
     label: "Discovery settings",
-    href: "/app/settings",
+    href: "/app/settings#github-discovery",
   });
   // Configured but unreadable stays optional and points at the credential setting.
   assert.equal(
@@ -368,7 +372,7 @@ test("a claude that is not runnable needs attention even when the token is reada
   assert.deepEqual(failing?.action, {
     kind: "link",
     label: "Open readiness check",
-    href: "/app/settings",
+    href: "/app/settings#readiness-claude-executable",
   });
   assert.equal(failing?.primary, false);
   // Claude unused: no token and no claude is still optional; both passing is done.
@@ -402,7 +406,7 @@ test("Claude is Optional, Done, or Needs attention with Add Claude", () => {
   assert.deepEqual(failing?.action, {
     kind: "link",
     label: "Add Claude",
-    href: "/app/settings/runtime",
+    href: "/app/settings/runtime#add-claude",
   });
   // A removed token returns to Home after the first turn.
   assert.deepEqual(
@@ -415,4 +419,43 @@ test("Claude is Optional, Done, or Needs attention with Add Claude", () => {
     ).map((r) => r.id),
     ["claude"],
   );
+});
+
+test("no two checklist rows open the same screen", () => {
+  const links = (all: ChecklistRow[]) =>
+    all.flatMap((r) => (r.action.kind === "link" ? [r.action.href] : []));
+  const inputs: [string, ChecklistRow[]][] = [
+    ["a fresh install", rows(workspace())],
+    [
+      "runtime-enabled failing with Claude not configured",
+      rows(
+        workspace(),
+        readiness({
+          "runtime-enabled": "fail",
+          "codex-executable": "not-configured",
+          "codex-login": "not-configured",
+        }),
+      ),
+    ],
+    [
+      "Codex login failing with Claude unrunnable",
+      rows(
+        workspace(),
+        readiness({ "codex-login": "fail", "claude-executable": "fail" }),
+      ),
+    ],
+    [
+      "everything done",
+      rows(
+        workspace({ profile: true, project: "enabled", turnStarted: true }),
+        readiness({ "claude-token": "pass" }),
+        discovery({ configured: true, available: true, source: "gh" }),
+      ),
+    ],
+  ];
+  for (const [name, all] of inputs) {
+    const hrefs = links(all);
+    assert.ok(hrefs.length >= 3, name);
+    assert.equal(new Set(hrefs).size, hrefs.length, `${name}: ${hrefs}`);
+  }
 });

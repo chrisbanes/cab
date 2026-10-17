@@ -147,6 +147,7 @@ export function AddClaudePanel(p: SettingsProps) {
   );
   return (
     <Panel
+      id="add-claude"
       title="Add Claude"
       description="Make a Claude subscription token available to the service and confirm it works."
     >

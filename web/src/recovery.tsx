@@ -42,6 +42,7 @@ import {
   StatusBadge,
 } from "./components.js";
 import { capacityChanges, type Values } from "./settings-changes.js";
+import { useFragmentLanding } from "./settings-sections.js";
 import { holdPills, plural, recoveryRecordRuns } from "./settings-view.js";
 import { Alert } from "./ui/alert.js";
 import {
@@ -257,6 +258,8 @@ export function RuntimeSettings(p: SettingsProps) {
       }
     : null;
   useLoadedDraft(d, initial, resource.state.fetchedAt);
+  // `/app/settings/runtime#add-claude` lands once the panel exists.
+  useFragmentLanding(Boolean(data), (id) => id === "add-claude");
   const lines = data ? capacityChanges(data, d.values) : [];
   return (
     <div className="settings-page">

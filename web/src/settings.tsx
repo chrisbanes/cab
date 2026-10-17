@@ -361,12 +361,15 @@ export function ChangeList({
 }
 /** A titled panel of the settings layouts. */
 export function Panel({
+  id,
   title,
   description,
   action,
   className,
   children,
 }: {
+  /** The fragment that links to this section. */
+  id?: string;
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
@@ -374,7 +377,10 @@ export function Panel({
   children?: ReactNode;
 }) {
   return (
-    <section className={`settings-panel${className ? ` ${className}` : ""}`}>
+    <section
+      id={id}
+      className={`settings-panel${className ? ` ${className}` : ""}`}
+    >
       <div className="settings-panel-header">
         <div>
           <h2 className="settings-panel-title">{title}</h2>

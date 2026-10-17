@@ -216,6 +216,8 @@ export async function startSettings(
     readerFactory?: GitHubReaderFactory;
     /** Setup seams for the web listener, such as a fake discovery reader. */
     setup?: OperatorSetupSeams;
+    /** Answers the workspace read with this start state; the seeded world has started a turn. */
+    turnStarted?: boolean;
   } = {},
 ) {
   const f = await journey.start("fixture.create", () =>
@@ -251,9 +253,19 @@ export async function startSettings(
   const page = await browser.newPage({ viewport });
   journey.observe(page);
   page.setDefaultTimeout(5000);
+  if (options.turnStarted !== undefined)
+    await routeTurnStarted(page, options.turnStarted);
   await signIn(page, web, resolve(path, ids));
   return { f, ids, web, page };
 }
+/** The real workspace read, with the first-turn signal set (first run is `false`). */
+export const routeTurnStarted = (page: Page, turnStarted: boolean) =>
+  page.route("**/api/operator/workspace", async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    body.data.gettingStarted.turnStarted = turnStarted;
+    await route.fulfill({ response, json: body });
+  });
 type Ids = Awaited<ReturnType<typeof seedSettingsWorld>>;
 /** `:atlas`, `:relay`, `:assignment` and `:reviewer` placeholders in a path. */
 export const resolve = (path: string, ids: Ids) =>

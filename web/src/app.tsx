@@ -483,10 +483,11 @@ export function App() {
   const acceptedIdentity = useRef<string | null>(null);
   const navigationScope = useRef(crypto.randomUUID());
   const clearPrivateNavigation = () => {
+    // The fragment names a section on the page, not private state, so it stays.
     const next =
       location.pathname === "/app/search"
         ? "/app/search"
-        : location.pathname + location.search;
+        : location.pathname + location.search + location.hash;
     history.replaceState(
       { navigationScope: navigationScope.current, navKey: crypto.randomUUID() },
       "",
@@ -598,12 +599,13 @@ export function App() {
       setDrawer(false);
       setPath(location.pathname + location.search);
       setNavigationVersion((n) => n + 1);
-      requestAnimationFrame(() =>
-        scrollTo(
-          0,
-          (history.state as { scrollY?: number } | null)?.scrollY ?? 0,
-        ),
-      );
+      const saved = (history.state as { scrollY?: number } | null)?.scrollY;
+      // A Settings page lands on its fragment itself when the entry has no saved position.
+      const landsItself =
+        saved === undefined &&
+        location.hash !== "" &&
+        ["/app/settings", "/app/settings/runtime"].includes(location.pathname);
+      if (!landsItself) requestAnimationFrame(() => scrollTo(0, saved ?? 0));
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
@@ -1093,8 +1095,13 @@ export function App() {
               session={session}
               drafts={drafts.current}
               workspace={workspace.state.data}
+              workspaceSettled={
+                workspace.state.data !== null ||
+                workspace.state.status === "error"
+              }
               refresh={workspace.refresh}
               refreshNonce={refreshNonce}
+              navigate={navigate}
             />
           ) : pathname === "/app/settings/projects/new" ? (
             <ProjectSetup

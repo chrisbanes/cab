@@ -808,7 +808,7 @@ test("Getting started: menu entry, Dismiss and its undo, and Home after the firs
   assert.equal(await checklist.getByRole("listitem").count(), 1);
   assert.equal(
     await claude.getByRole("link", { name: "Add Claude" }).getAttribute("href"),
-    "/app/settings/runtime",
+    "/app/settings/runtime#add-claude",
   );
   await f.service.stopTask(taskId);
 });
@@ -1013,7 +1013,7 @@ for (const viewport of viewports)
       await github
         .getByRole("link", { name: "Set discovery credential" })
         .getAttribute("href"),
-      "/app/settings",
+      "/app/settings#github-discovery",
     );
     await page.goto(`${web.origin}/app/getting-started`);
     await page

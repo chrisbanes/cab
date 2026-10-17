@@ -2,6 +2,10 @@ import type {
   DiscoveryStatus,
   Workspace,
 } from "../../src/operator/contracts.js";
+import {
+  readinessCheckHref,
+  settingsSectionHref,
+} from "./settings-sections.js";
 import type { ReadinessRead } from "./setup-model.js";
 
 export type RowId = "runtime" | "github" | "project" | "first-task" | "claude";
@@ -147,7 +151,7 @@ export function checklistRows(input: {
         : {
             kind: "link",
             label: "Open readiness check",
-            href: "/app/settings",
+            href: settingsSectionHref("readiness"),
           },
     ),
     row(
@@ -167,7 +171,7 @@ export function checklistRows(input: {
       {
         kind: "link",
         label: githubDone ? "Discovery settings" : "Set discovery credential",
-        href: "/app/settings",
+        href: settingsSectionHref("github-discovery"),
       },
       githubDone ? "done" : "optional",
     ),
@@ -231,7 +235,7 @@ export function checklistRows(input: {
           {
             kind: "link",
             label: "Open readiness check",
-            href: "/app/settings",
+            href: readinessCheckHref("claude-executable"),
           },
           "attention",
         )
@@ -247,7 +251,11 @@ export function checklistRows(input: {
               : claude.status === "not-configured"
                 ? "Not configured."
                 : (claude.reason ?? "The Claude token isn't readable."),
-          { kind: "link", label: "Add Claude", href: "/app/settings/runtime" },
+          {
+            kind: "link",
+            label: "Add Claude",
+            href: "/app/settings/runtime#add-claude",
+          },
           !claude
             ? readiness.state === "loading"
               ? "checking"
