@@ -580,6 +580,25 @@ test("leaving Settings and coming back to the same entry lands again, and a re-r
   );
 });
 
+test("a second hook becoming ready later does not land again or take focus from the reader", async (_t, journey) => {
+  const { page, web } = await startSettings(journey, "/app/settings");
+  await nav(page).waitFor();
+  // The checks arrive well after the sections land, which readies the Readiness hook too.
+  await page.route("**/api/operator/readiness", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.continue();
+  });
+  await coldGoto(page, `${web.origin}/app/settings#profiles`);
+  onScreen(await landed(page, "H2", "Profiles"));
+  await page.getByRole("link", { name: "Create profile" }).focus();
+  await page.getByRole("article", { name: "Codex login" }).waitFor();
+  await nextFrames(page);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Create profile",
+  );
+});
+
 for (const fragment of ["bogus", "readiness-unknown"])
   test(`an unknown Settings fragment #${fragment} leaves the page at the top`, async (_t, journey) => {
     const { page, web } = await startSettings(journey, "/app/settings");
