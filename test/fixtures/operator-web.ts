@@ -22,6 +22,10 @@ import {
   LocalOperatorUi,
 } from "../../src/standalone/operator.js";
 import { OperatorApi } from "../../src/standalone/operator-api.js";
+import {
+  OperatorPush,
+  type OperatorPushOptions,
+} from "../../src/standalone/operator-push.js";
 import { serviceReadiness } from "../../src/standalone/readiness.js";
 import { OperatorAuth } from "../../src/standalone/operator-auth.js";
 import { coordinationOperatorRoutes } from "../../src/standalone/operator-coordination.js";
@@ -124,6 +128,14 @@ interface OwnedWeb {
   closeSteps: Map<string, FixtureStep>;
 }
 
+/** Browser push for a fixture web listener; ticks are manual unless an interval is given. */
+export type FixturePushOptions = Partial<
+  Pick<
+    OperatorPushOptions,
+    "transport" | "clock" | "intervalMs" | "timeoutMs" | "readInbox"
+  >
+>;
+
 export interface OperatorFixture<R extends Runtime> {
   directory: string;
   readonly runtime: R;
@@ -135,11 +147,14 @@ export interface OperatorFixture<R extends Runtime> {
   startWeb(
     controlPaths?: readonly string[],
     setup?: OperatorSetupSeams,
+    push?: FixturePushOptions,
   ): Promise<{
     origin: string;
     password: string;
     auth: OperatorAuth;
     http: LocalOperatorHttp;
+    /** Present when `push` options were given. */
+    push: OperatorPush | undefined;
     close(): Promise<void>;
   }>;
   removeDirectoryAfterServiceStop(): Promise<void>;
@@ -374,6 +389,7 @@ export async function createOperatorFixture<
     async startWeb(
       controlPaths: readonly string[] = [directory],
       setup?: OperatorSetupSeams,
+      pushOptions?: FixturePushOptions,
     ) {
       const id = ++listenerSequence;
       const owned: OwnedWeb = {
@@ -460,6 +476,15 @@ export async function createOperatorFixture<
             ghExecutable: setup?.ghExecutable ?? join(directory, "no-gh", "gh"),
           },
         );
+        const push = pushOptions
+          ? await OperatorPush.open({
+              intervalMs: null,
+              readInbox: (query) => api.readInbox(query),
+              ...pushOptions,
+              store: service.operatorPush(),
+              keyFile: join(directory, "operator-push-vapid.json"),
+            })
+          : undefined;
         const http = new LocalOperatorHttp(
           new LocalOperatorUi(
             service.domain(),
@@ -473,6 +498,7 @@ export async function createOperatorFixture<
           {
             routes,
             credentials: service.operatorCredentials(),
+            ...(push ? { push } : {}),
             web: new OperatorWebBoundary(
               bundle,
               api,
@@ -495,7 +521,7 @@ export async function createOperatorFixture<
             ),
           );
         };
-        return { origin, password, auth, http, close };
+        return { origin, password, auth, http, push, close };
       } finally {
         owned.starting = false;
       }
