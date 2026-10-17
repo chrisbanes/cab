@@ -11,6 +11,8 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 const test = browserSuite("operator-web-browser");
 import { chromium, type Browser, type Page } from "playwright";
+import { clockLabel } from "../../src/operator/clock-label.js";
+import { ManualRestartClock } from "../fixtures/restart-clock.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
 import { expireWithRead, reenterHome } from "../fixtures/operator-first-run.js";
 import { signOutFromSidebar } from "../fixtures/operator-account.js";
@@ -555,8 +557,18 @@ test("browser API guards, absolute expiry, successful logout and restart reject 
 });
 
 test("React shell announces an unavailable Codex runtime without a reload", async (_t, journey) => {
+  const restartClock = new ManualRestartClock();
   const f = await journey.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      journey.fixtureOptions,
+      undefined,
+      {
+        runtimeRestart: { clock: restartClock, wallNow: restartClock.wallNow },
+      },
+    ),
   );
   let browser: Browser | undefined;
   journey.cleanup(
@@ -578,8 +590,7 @@ test("React shell announces an unavailable Codex runtime without a reload", asyn
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Overview", exact: true }).waitFor();
   const banner = page.getByRole("alert").filter({
-    hasText:
-      "Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+    hasText: `Codex runtime unavailable — Restarting · attempt 1 of 3 · next at ${clockLabel(restartClock.wall + 30_000)}`,
   });
   await page.getByText("No projects yet.", { exact: true }).first().waitFor();
   assert.equal(await banner.count(), 0);
@@ -590,8 +601,18 @@ test("React shell announces an unavailable Codex runtime without a reload", asyn
 });
 
 test("React shell Inbox poll surfaces a runtime failure on its own", async (_t, journey) => {
+  const restartClock = new ManualRestartClock();
   const f = await journey.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    createOperatorFixture(
+      null,
+      undefined,
+      undefined,
+      journey.fixtureOptions,
+      undefined,
+      {
+        runtimeRestart: { clock: restartClock, wallNow: restartClock.wallNow },
+      },
+    ),
   );
   let browser: Browser | undefined;
   journey.cleanup(
@@ -619,8 +640,7 @@ test("React shell Inbox poll surfaces a runtime failure on its own", async (_t, 
   await loaded;
   await page.getByRole("heading", { name: "Inbox", exact: true }).waitFor();
   const banner = page.getByRole("alert").filter({
-    hasText:
-      "Codex runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+    hasText: `Codex runtime unavailable — Restarting · attempt 1 of 3 · next at ${clockLabel(restartClock.wall + 30_000)}`,
   });
   assert.equal(await banner.count(), 0);
   f.runtime.crash();

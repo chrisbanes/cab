@@ -42,6 +42,11 @@ import {
   executionHarnessLabels,
   executionIntentStateSchema,
 } from "../core/execution-runtime.js";
+import {
+  runtimeInboxHeadline,
+  runtimeInboxReason,
+  runtimeSettingsPath,
+} from "../operator/runtime-restart-copy.js";
 import type { StructuredQuestionSet } from "../core/structured-questions.js";
 import type { Readiness } from "../core/github-source-contracts.js";
 import type { TaskReadiness } from "../core/github-source.js";
@@ -72,6 +77,7 @@ import {
   folderListingSchema,
   folderListRequestSchema,
   type InboxItem,
+  type TaskInboxItem,
   inboxReadSchema,
   instructionProvenance,
   materialSchema,
@@ -2929,6 +2935,27 @@ export class OperatorApi {
       return null;
     }
   }
+  private runtimeInboxItems(): InboxItem[] {
+    return this.service.harnessStatuses().flatMap((status) =>
+      status.state === "unavailable" && status.restart?.state === "exhausted"
+        ? [
+            {
+              id: `runtime:${status.harness}`,
+              kind: "runtime" as const,
+              urgency: 0 as const,
+              createdAt: status.restart.since,
+              harness: status.harness,
+              since: status.restart.since,
+              headline: runtimeInboxHeadline(status.harness),
+              reason: runtimeInboxReason,
+              lastFailure: status.restart.lastFailure,
+              attempts: status.restart.attempts,
+              destination: runtimeSettingsPath,
+            },
+          ]
+        : [],
+    );
+  }
   async readInbox(params = new URLSearchParams()) {
     const allowed = ["cursor", "limit", "kind", "project"];
     if (
@@ -2944,7 +2971,9 @@ export class OperatorApi {
           .transform(Number)
           .pipe(z.number().max(100))
           .optional(),
-        kind: z.enum(["question", "approval", "intervention"]).optional(),
+        kind: z
+          .enum(["question", "approval", "intervention", "runtime"])
+          .optional(),
         project: uuid.optional(),
       })
       .safeParse({
@@ -2955,7 +2984,7 @@ export class OperatorApi {
     if (!filter.success) throw new OperatorApiError(400, "invalid-input");
     const { limit = 100, kind, project } = filter.data;
     const visibility = this.visibilityToken(),
-      items: InboxItem[] = [];
+      items: TaskInboxItem[] = [];
     const catalog = this.catalog();
     const tasks = catalog.map((t) => this.requireTask(t.id)),
       snapshot = this.workspaceSnapshot(catalog.map((t) => t.id)),
@@ -3063,10 +3092,15 @@ export class OperatorApi {
       )
         throw new OperatorApiError(503, "unavailable");
     }
-    const filtered = items.filter(
+    // Derived on every read from in-memory restart state; no row stores it. They belong to
+    // no project, so a project filter excludes them.
+    const filtered: InboxItem[] = [
+      ...this.runtimeInboxItems(),
+      ...items,
+    ].filter(
       (item) =>
         (!kind || item.kind === kind) &&
-        (!project || item.projectId === project),
+        (!project || (item.kind !== "runtime" && item.projectId === project)),
     );
     filtered.sort(
       (a, b) =>

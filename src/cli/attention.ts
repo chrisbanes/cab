@@ -76,13 +76,13 @@ function formLines(form: QuestionForm): string[] {
 
 const inboxList: BrowseCommand = {
   usage:
-    "inbox list [--kind question|approval|intervention] [--project ID] [--limit N] [--cursor TOKEN]",
+    "inbox list [--kind question|approval|intervention|runtime] [--project ID] [--limit N] [--cursor TOKEN]",
   positionals: 0,
   capabilities: ["cli.identity", "attention.read"],
   async run(ctx) {
     const kind = enumArg(
       ctx.values.kind,
-      ["question", "approval", "intervention"],
+      ["question", "approval", "intervention", "runtime"],
       "--kind",
     );
     const project = optionalUuid(ctx.values.project, "--project");
@@ -112,14 +112,26 @@ const inboxList: BrowseCommand = {
       human: items.length
         ? table(
             ["Kind", "Task", "Interaction", "Rev", "Requester", "Reason"],
-            items.map((i) => [
-              i.kind,
-              i.taskId,
-              i.interactionId ?? `(ensemble task get ${i.taskId})`,
-              i.revision === null ? "-" : String(i.revision),
-              oneLine(i.requesterName, 30),
-              oneLine(i.reason, 60),
-            ]),
+            items.map((i) =>
+              i.kind === "runtime"
+                ? // The Task column names the runtime; its detail is `runtime list`.
+                  [
+                    i.kind,
+                    i.harness,
+                    "(ensemble runtime list)",
+                    "-",
+                    "-",
+                    oneLine(i.reason, 60),
+                  ]
+                : [
+                    i.kind,
+                    i.taskId,
+                    i.interactionId ?? `(ensemble task get ${i.taskId})`,
+                    i.revision === null ? "-" : String(i.revision),
+                    oneLine(i.requesterName, 30),
+                    oneLine(i.reason, 60),
+                  ],
+            ),
           )
         : "Nothing needs attention.",
     });

@@ -18,18 +18,33 @@ import {
   OperatorFixtureRuntime,
 } from "../fixtures/operator-web.js";
 import { openSearchFromSidebar } from "../fixtures/shell-search.js";
+import { clockLabel } from "../../src/operator/clock-label.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
+import { ManualRestartClock } from "../fixtures/restart-clock.js";
 import { claudePolicyLimits } from "../../src/standalone/claude.js";
 import { codexPolicyDisclosure } from "../../src/standalone/execution-policy.js";
 
 const test = browserSuite("operator-harness-status-browser");
 
-/** Claude is enabled but fails to construct: unavailable since start. */
-const claudeUnavailable = {
-  runtimeFactory: (_context: unknown, harness: string) => {
-    if (harness === "claude") throw Error("Claude unavailable");
-    return new OperatorFixtureRuntime();
-  },
-  serviceOptions: { runtimeHarnesses: ["codex", "claude"] as const },
+/**
+ * Claude is enabled but fails to construct: unavailable since start, with its first automatic
+ * restart pending 30 s later on a clock that never advances.
+ */
+const claudeUnavailable = () => {
+  const clock = new ManualRestartClock();
+  return {
+    clock,
+    options: {
+      runtimeFactory: (_context: unknown, harness: string) => {
+        if (harness === "claude") throw Error("Claude unavailable");
+        return new OperatorFixtureRuntime();
+      },
+      serviceOptions: {
+        runtimeHarnesses: ["codex", "claude"] as const,
+        runtimeRestart: { clock, wallNow: clock.wallNow },
+      },
+    },
+  };
 };
 
 for (const [name, viewport] of [
@@ -37,24 +52,30 @@ for (const [name, viewport] of [
   ["390", phone],
 ] as const)
   test(`an unavailable Claude runtime raises one shell alert and is listed on Runtime at ${name}`, async (_t, journey) => {
+    const unavailable = claudeUnavailable();
     const { page } = await startSettings(
       journey,
       "/app/settings/runtime",
       viewport,
       undefined,
-      claudeUnavailable,
+      unavailable.options,
     );
+    const pending = `Restarting · attempt 1 of 3 · next at ${clockLabel(unavailable.clock.wall + 30_000)}`;
     const alerts = page
       .getByRole("alert")
       .filter({ hasText: "runtime unavailable" });
     await alerts.first().waitFor();
     assert.deepEqual(await alerts.allInnerTexts(), [
-      "Claude runtime unavailable — turn it off and on in Settings → Runtime, or restart the service",
+      `Claude runtime unavailable — ${pending}`,
     ]);
     const runtimes = page.locator(".settings-panel", {
       has: page.getByRole("heading", { name: "Execution runtimes" }),
     });
     await runtimes.getByText("Unavailable", { exact: true }).waitFor();
+    // The row's Fix says the same, in the same words.
+    await runtimeRow(page, "Claude")
+      .getByText(pending, { exact: true })
+      .waitFor();
     assert.equal(
       await runtimes.getByRole("heading", { name: "Codex" }).count(),
       1,
@@ -897,4 +918,39 @@ for (const [name, viewport] of [
     );
     await noPageOverflow(page);
     await captureBrowserEvidence(page, `${name}-runtime-panel-order`);
+  });
+
+for (const [name, viewport] of [
+  ["1366", desktop],
+  ["390", phone],
+] as const)
+  test(`an exhausted runtime says Retries exhausted on Runtime and in the shell alert at ${name}`, async (_t, journey) => {
+    const exhaustion = exhaustibleRuntime();
+    const { page, f } = await startSettings(
+      journey,
+      "/app/settings/runtime",
+      viewport,
+      undefined,
+      {
+        runtimeFactory: exhaustion.factory,
+        serviceOptions: exhaustion.serviceOptions,
+      },
+    );
+    await exhaustion.exhaust(f.runtime);
+    await page.reload();
+    const alerts = page
+      .getByRole("alert")
+      .filter({ hasText: "runtime unavailable" });
+    await alerts.first().waitFor();
+    assert.deepEqual(await alerts.allInnerTexts(), [
+      "Codex runtime unavailable — Retries exhausted; turn it off and on in Settings → Runtime, or restart the service",
+    ]);
+    await runtimeRow(page, "Codex")
+      .getByText(
+        "Retries exhausted · turn it off and on, or restart the service",
+        { exact: true },
+      )
+      .waitFor();
+    await noPageOverflow(page);
+    await captureBrowserEvidence(page, `${name}-runtime-exhausted`);
   });

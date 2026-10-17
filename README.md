@@ -144,6 +144,9 @@ owns delivery scope and status.
   operator's own Claude subscription, and Anthropic's
   [terms](https://code.claude.com/docs/en/legal-and-compliance) do not explicitly
   address a self-hosted single-operator service.
+- **Runtime restarts.** An enabled runtime that exits or fails to start is restarted
+  automatically after 30 s, 2 min and 10 min, then stops and raises one Inbox item for
+  the operator. Held turns stay held; a restart never relaunches or resumes work.
 
 Automated tests with real SQLite and Chromium, plus bounded live Codex and browser
 journeys, exercise these surfaces. Dated run records and their limits are in

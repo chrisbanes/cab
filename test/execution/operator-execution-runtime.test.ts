@@ -164,9 +164,9 @@ test("runtime waits map to explanations and routes; unknown wording does not", (
     "Claude runtime unavailable; restart the service",
   ]) {
     const unavailable = waitRoute(assignment({ waitReason: reason }));
-    assert.match(
-      unavailable?.message ?? "",
-      /Turn it off and on in Settings → Runtime.*restart the service.*see Recovery/,
+    assert.equal(
+      unavailable?.message,
+      "The Claude runtime is unavailable. Ensemble restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Queued work waits; running work is held, see Recovery.",
     );
     assert.deepEqual(routes(reason), [
       "/app/settings/runtime",
@@ -223,9 +223,9 @@ test("the profile runtime note names the recovery for each cause", () => {
     /Install `claude` on the service PATH, then turn it off and on in Settings → Runtime\./,
   );
   assert.doesNotMatch(missing ?? "", /Turn it on/);
-  assert.match(
-    harnessNote({ ...base("codex"), state: "unavailable", since: 1 }) ?? "",
-    /turn it off and on in Settings → Runtime, or restart the service/,
+  assert.equal(
+    harnessNote({ ...base("codex"), state: "unavailable", since: 1 }),
+    "The Codex runtime is unavailable. Ensemble restarts it automatically after 30 s, 2 min and 10 min; if those retries run out, turn it off and on in Settings → Runtime, or restart the service. Assignments using this profile wait meanwhile and never fall back to another runtime.",
   );
 });
 

@@ -5,6 +5,7 @@ import {
   runtimeSettingsSchema,
   workspaceSchema,
 } from "../operator/contracts.js";
+import { restartLine } from "../operator/runtime-restart-copy.js";
 import { type BrowseCommand, browseOutput, enumArg } from "./browse.js";
 import { exactCommand } from "./configure.js";
 import { CliError } from "./connections.js";
@@ -18,7 +19,11 @@ const API = "/api/operator";
 function stateLabel(status: HarnessStatus | undefined): string {
   if (!status) return "Unknown";
   if (status.state === "available") return "Available";
-  if (status.state === "unavailable") return "Unavailable";
+  if (status.state === "unavailable") {
+    if (!status.restart) return "Unavailable";
+    const line = restartLine(status.restart);
+    return `Unavailable (${line.charAt(0).toLowerCase()}${line.slice(1)})`;
+  }
   return status.reason === "disabled"
     ? "Not enabled (Disabled in Settings)"
     : `Not enabled (\`${status.harness}\` not found on PATH)`;
@@ -43,6 +48,9 @@ const runtimeList: BrowseCommand = {
         enabled: r.enabled,
         state: status?.state ?? null,
         reason: status?.state === "not-configured" ? status.reason : null,
+        ...(status?.state === "unavailable" && status.restart
+          ? { restart: status.restart }
+          : {}),
         boundTasks: r.boundTasks,
         label: stateLabel(status),
       };

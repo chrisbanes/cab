@@ -4,6 +4,8 @@ import { test } from "node:test";
 import type {
   InboxItem,
   QuestionRead,
+  RuntimeInboxItem,
+  TaskInboxItem,
   Workspace,
 } from "../../src/operator/contracts.js";
 import {
@@ -17,7 +19,7 @@ import {
 } from "../../web/src/overview-model.js";
 import { summary } from "../fixtures/task-summary.js";
 
-function item(o: Partial<InboxItem> = {}): InboxItem {
+function item(o: Partial<TaskInboxItem> = {}): TaskInboxItem {
   return {
     id: randomUUID(),
     kind: "question",
@@ -222,4 +224,35 @@ test("only a pending single-choice question is answered in its card", () => {
   );
   assert.equal(inlineAnswerable(q([choice], "stale")), false);
   assert.equal(inlineAnswerable(q(null)), false);
+});
+
+const runtimeItem = (): RuntimeInboxItem => ({
+  id: "runtime:codex",
+  kind: "runtime",
+  urgency: 0,
+  createdAt: 5_000,
+  harness: "codex",
+  since: 5_000,
+  headline: "Codex runtime unavailable",
+  reason: "Restart retries exhausted",
+  lastFailure: "exited",
+  attempts: [],
+  destination: "/app/settings/runtime",
+});
+
+test("an exhausted runtime ranks before every task request, counts in Needs you and is named by its runtime", () => {
+  const runtime = runtimeItem(),
+    held = summary({ execution: "uncertain" }),
+    uncertain = item({ kind: "intervention", createdAt: 1, taskId: held.id }),
+    question = item({ createdAt: 0 });
+  const tasks = [held];
+  assert.deepEqual(
+    orderAttention([question, uncertain, runtime], tasks).map((i) => i.id),
+    [runtime.id, uncertain.id, question.id],
+  );
+  assert.equal(overviewStats(tasks, read([question, runtime])).needsYou, 2);
+  assert.deepEqual(furtherRequests([runtime, question], 0), {
+    count: 2,
+    names: ["Codex runtime", "Project / Task"],
+  });
 });

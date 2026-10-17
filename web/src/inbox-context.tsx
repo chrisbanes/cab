@@ -1,5 +1,5 @@
 import { ArrowUpRight } from "lucide-react";
-import type { InboxItem } from "../../src/operator/contracts.js";
+import type { TaskInboxItem } from "../../src/operator/contracts.js";
 import { ResourceStatus } from "./components.js";
 import type { useInboxTask } from "./inbox-detail.js";
 import {
@@ -18,7 +18,7 @@ export function InboxContext({
   task: resource,
   open,
 }: {
-  item: InboxItem;
+  item: TaskInboxItem;
   task: ReturnType<typeof useInboxTask>;
   /** Still unresolved in the current queue; a recorded or resolved request has no next action. */
   open: boolean;

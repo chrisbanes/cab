@@ -14,7 +14,11 @@ import {
   requestKindLabel,
   taskContext,
 } from "../../web/src/inbox-presentation.js";
-import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
+import type {
+  RuntimeInboxItem,
+  TaskInboxItem,
+  TaskRead,
+} from "../../src/operator/contracts.js";
 import { orderWaits } from "../../src/operator/wait-reasons.js";
 
 const minute = 60_000;
@@ -31,7 +35,33 @@ test("relative age reads at the largest useful unit and never goes negative", ()
   assert.equal(ageLabel(now - 48 * 60 * minute, now), "2d");
 });
 
+const runtimeItem = (
+  harness: "codex" | "claude" = "codex",
+): RuntimeInboxItem => ({
+  id: `runtime:${harness}`,
+  kind: "runtime",
+  urgency: 0,
+  createdAt: 1_000,
+  harness,
+  since: 1_000,
+  headline: `${harness === "codex" ? "Codex" : "Claude"} runtime unavailable`,
+  reason: "Restart retries exhausted",
+  lastFailure: "exited",
+  attempts: [],
+  destination: "/app/settings/runtime",
+});
+
 test("kind and action labels cover every request kind", () => {
+  assert.equal(requestKindLabel("runtime"), "Runtime");
+  assert.equal(
+    requestActionLabel({ kind: "runtime" }),
+    "Open runtime settings",
+  );
+  assert.deepEqual(requestHeading(runtimeItem()), {
+    title: "Codex runtime unavailable",
+    subtitle: null,
+    reason: "Retries exhausted",
+  });
   for (const [kind, label, action] of [
     ["question", "Question", "Answer question"],
     ["approval", "Approval", "Review material & decide"],
@@ -59,7 +89,10 @@ test("kind and action labels cover every request kind", () => {
   );
 });
 
-const item = (kind: InboxItem["kind"], projectId: string): InboxItem => ({
+const item = (
+  kind: TaskInboxItem["kind"],
+  projectId: string,
+): TaskInboxItem => ({
   id: randomUUID(),
   kind,
   urgency: 1,
@@ -147,6 +180,18 @@ test("a request with neither headline nor task title has no title, so the page w
     }),
     { title: null, subtitle: "Docs", reason: null },
   );
+});
+
+test("a runtime item counts toward the total and its kind but under no project", () => {
+  const p = randomUUID(),
+    counts = filterCounts([
+      runtimeItem(),
+      runtimeItem("claude"),
+      item("question", p),
+    ]);
+  assert.equal(counts.total, 3);
+  assert.deepEqual(counts.project, { [p]: 1 });
+  assert.deepEqual(counts.kind, { runtime: 2, question: 1 });
 });
 
 test("filter counts add up per project and per kind", () => {
@@ -618,6 +663,27 @@ test("the queue groups interventions first, then questions and approvals, keepin
     ["requests"],
   );
   assert.deepEqual(queueGroups([]), []);
+});
+
+test("a runtime item leads the Intervention group and counts in its heading", () => {
+  const [r, i1, q1] = [
+      runtimeItem(),
+      item("intervention", "p"),
+      item("question", "p"),
+    ],
+    groups = queueGroups([r, i1, q1]);
+  assert.deepEqual(
+    groups.map(({ id, heading }) => ({ id, heading })),
+    [
+      { id: "intervention", heading: "Intervention · 2" },
+      { id: "requests", heading: "Questions & approvals · oldest first" },
+    ],
+  );
+  assert.deepEqual(groups[0]?.items, [r, i1]);
+  assert.deepEqual(
+    queueGroups([r]).map((g) => g.id),
+    ["intervention"],
+  );
 });
 
 test("a request's identity line names the requester, version and time from the read model", () => {

@@ -1,6 +1,15 @@
-import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
+import type {
+  InboxItem,
+  RuntimeInboxItem,
+  TaskInboxItem,
+  TaskRead,
+} from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { attentionNext, nextAttention } from "../../src/operator/attention.js";
+import {
+  retriesExhausted,
+  runtimeSettingsAction,
+} from "../../src/operator/runtime-restart-copy.js";
 import { clockLabel, midSentence } from "./presentation.js";
 import { taskColumnOf } from "./task-overview.js";
 import { nextActor } from "./tasks.js";
@@ -10,17 +19,22 @@ const kindLabels: Record<InboxItem["kind"], string> = {
   question: "Question",
   approval: "Approval",
   intervention: "Intervention",
+  runtime: "Runtime",
 };
 export const requestKindLabel = (kind: InboxItem["kind"]) => kindLabels[kind];
 
 /** The request's action: its attention code's when it has one, otherwise its kind's. */
 export const requestActionLabel = (
-  item: Pick<InboxItem, "kind" | "attentionCode">,
+  item:
+    | Pick<TaskInboxItem, "kind" | "attentionCode">
+    | Pick<RuntimeInboxItem, "kind">,
 ) =>
-  attentionNext[
-    item.attentionCode ??
-      (item.kind === "intervention" ? "execution-uncertain" : item.kind)
-  ].inboxAction;
+  item.kind === "runtime"
+    ? runtimeSettingsAction
+    : attentionNext[
+        item.attentionCode ??
+          (item.kind === "intervention" ? "execution-uncertain" : item.kind)
+      ].inboxAction;
 
 /**
  * What a request is called in the queue and the pane: the question or exact action when the read
@@ -28,16 +42,21 @@ export const requestActionLabel = (
  * shown; the intervention and native-delivery reasons are.
  */
 export function requestHeading(
-  item: Pick<
-    InboxItem,
-    | "kind"
-    | "headline"
-    | "taskTitle"
-    | "projectName"
-    | "reason"
-    | "attentionCode"
-  >,
+  item:
+    | Pick<
+        TaskInboxItem,
+        | "kind"
+        | "headline"
+        | "taskTitle"
+        | "projectName"
+        | "reason"
+        | "attentionCode"
+      >
+    | Pick<RuntimeInboxItem, "kind" | "headline">,
 ) {
+  // A runtime problem names the runtime; the queue says only that retries ran out.
+  if (item.kind === "runtime")
+    return { title: item.headline, subtitle: null, reason: retriesExhausted };
   const title = item.headline ?? item.taskTitle,
     subtitle = (
       item.headline ? [item.projectName, item.taskTitle] : [item.projectName]
@@ -69,7 +88,9 @@ export function filterCounts(items: readonly InboxItem[]) {
   const project: Record<string, number> = {},
     kind: Record<string, number> = {};
   for (const item of items) {
-    project[item.projectId] = (project[item.projectId] ?? 0) + 1;
+    // A runtime item belongs to no project: it counts toward the total and its kind only.
+    if (item.kind !== "runtime")
+      project[item.projectId] = (project[item.projectId] ?? 0) + 1;
     kind[item.kind] = (kind[item.kind] ?? 0) + 1;
   }
   return { total: items.length, project, kind };
@@ -224,12 +245,17 @@ export function holdNoticesBesideRequests(
   );
 }
 
-/** The queue's two groups in server order: interventions, then questions and approvals oldest first. */
+/**
+ * The queue's two groups in server order: runtime problems and interventions, then questions and
+ * approvals oldest first. A runtime item leads Intervention and counts in its heading.
+ */
 export function queueGroups<T extends Pick<InboxItem, "kind">>(
   rows: readonly T[],
 ) {
-  const interventions = rows.filter((row) => row.kind === "intervention"),
-    requests = rows.filter((row) => row.kind !== "intervention");
+  const isIntervention = (row: T) =>
+      row.kind === "intervention" || row.kind === "runtime",
+    interventions = rows.filter(isIntervention),
+    requests = rows.filter((row) => !isIntervention(row));
   return [
     {
       id: "intervention",
@@ -246,7 +272,7 @@ export function queueGroups<T extends Pick<InboxItem, "kind">>(
 
 /** "requester · version N · HH:MM": the identities the read model has; a missing one is omitted. */
 export const requestIdentity = (
-  item: Pick<InboxItem, "requesterName" | "revision" | "createdAt">,
+  item: Pick<TaskInboxItem, "requesterName" | "revision" | "createdAt">,
 ) =>
   [
     item.requesterName,
@@ -291,7 +317,7 @@ export const taskContext = (
         "task" | "execution" | "admission" | "source" | "lead" | "attention"
       >
     | undefined,
-  item: Pick<InboxItem, "kind" | "attentionCode">,
+  item: Pick<TaskInboxItem, "kind" | "attentionCode">,
   open: boolean,
 ) => ({
   source: !task

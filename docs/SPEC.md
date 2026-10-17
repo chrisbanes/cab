@@ -522,11 +522,12 @@ relevant controls together in task detail. Cover attention needed, normal work i
 progress and first-project/first-task experiences.
 
 The attention inbox contains unresolved questions, approvals and problems requiring
-operator intervention. Routine progress, completions requiring no decision and
+operator intervention, including an execution runtime whose automatic restarts are
+exhausted. Routine progress, completions requiring no decision and
 normal dependency waiting do not create attention items. Order attention by
 urgency, then age: execution uncertainty and problems requiring intervention first,
 then questions and approvals oldest first. Show project and task context on each
-item. Unresolved questions, pending approvals and failures remain visible even
+task item, or the runtime for a runtime problem. Unresolved questions, pending approvals and failures remain visible even
 when related history is collapsed.
 
 Each attention item explains the decision or intervention needed, its requester
@@ -700,7 +701,20 @@ Settings → Runtime or with `ensemble runtime enable|disable`
 ([ADR-1012](adr/1012-operator-controlled-runtime-enablement.md)). A missing setting
 means enabled. No runtime is required: the service starts and serves the operator UI
 with none enabled, and an enabled runtime that fails to start, Codex included, is
-unavailable without stopping the service. Disabling takes effect at once for new
+unavailable without stopping the service. An enabled runtime that exits, or fails to
+start at boot or in a retry, is restarted automatically after 30 s, 2 min and 10 min, and
+the count starts afresh once a restarted runtime has stayed available for 10 minutes. A
+restart replaces only the runtime process: held turns stay held for the recovery path,
+queued work is admitted only after the new runtime passes the usual startup checks, and
+nothing is relaunched or resumed implicitly. A disabled runtime is never restarted, and
+disabling it or stopping the service cancels pending retries. After the third failed
+attempt Ensemble stops retrying and raises one runtime item in the attention inbox. The
+item is derived from in-memory state, appears under All projects only and clears as soon
+as the runtime recovers; turning the runtime off and on, or restarting the service,
+starts a fresh schedule. Restart state is never persisted. The Runtime page, the shell
+alert and `runtime list` show "Restarting · attempt N of 3 · next at HH:MM" or "Retries
+exhausted", and a failure is described by one of four fixed reasons, never by runtime
+error text. Disabling takes effect at once for new
 admissions; running turns finish and are never cancelled, the runtime stops once no
 execution it owns remains, and work bound to it waits as not enabled until it is
 enabled again. Disabling a runtime that bound tasks use asks for confirmation with

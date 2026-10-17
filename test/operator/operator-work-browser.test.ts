@@ -8,6 +8,7 @@ import {
 } from "../fixtures/browser-diagnostics.js";
 import { taskSchema, type TaskRead } from "../../src/operator/contracts.js";
 import { createOperatorFixture } from "../fixtures/operator-web.js";
+import { exhaustibleRuntime } from "../fixtures/runtime-exhaustion.js";
 import {
   addProfile,
   addProject,
@@ -28,9 +29,33 @@ const desktop = { width: 1366, height: 900 },
   phone = { width: 390, height: 844 };
 
 /** One fixture, one Chromium page and the seeded catalog, signed in on `path`. */
-async function start(journey: BrowserJourney, path = "/app/tasks") {
+async function start(
+  journey: BrowserJourney,
+  path = "/app/tasks",
+  runtimes?: Pick<
+    ReturnType<typeof exhaustibleRuntime>,
+    "factory" | "serviceOptions"
+  >,
+  afterSeed?: (
+    f: Awaited<ReturnType<typeof createOperatorFixture>>,
+  ) => Promise<void>,
+) {
   const f = await journey.start("fixture.create", () =>
-    createOperatorFixture(null, undefined, undefined, journey.fixtureOptions),
+    runtimes
+      ? (createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+          runtimes.factory,
+          runtimes.serviceOptions,
+        ) as unknown as ReturnType<typeof createOperatorFixture>)
+      : createOperatorFixture(
+          null,
+          undefined,
+          undefined,
+          journey.fixtureOptions,
+        ),
   );
   let browser: Browser | undefined;
   journey.cleanup(
@@ -39,6 +64,7 @@ async function start(journey: BrowserJourney, path = "/app/tasks") {
     () => f.lifecycle.steps,
   );
   const ids = await seedCatalog(f);
+  await afterSeed?.(f);
   const web = await journey.start("fixture.web", () => f.startWeb());
   browser = await journey.start("browser.launch", () => chromium.launch());
   const page = await browser.newPage({ viewport: desktop });
@@ -2542,4 +2568,39 @@ test("the Updated line shows the last successful read and keeps it through a fai
       .count(),
     0,
   );
+});
+
+test("a runtime Needs you card comes first and links to runtime settings", async (_t, journey) => {
+  const exhaustion = exhaustibleRuntime();
+  const { page } = await start(journey, "/app", exhaustion, (f) =>
+    exhaustion.exhaust(f.runtime),
+  );
+  const attention = page.getByRole("region", {
+    name: "Needs you",
+    exact: true,
+  });
+  const cards = attention.locator(".overview-card");
+  await cards.first().waitFor();
+  const first = cards.first();
+  assert.equal(await first.getAttribute("data-kind"), "runtime");
+  const text = (await first.textContent()) ?? "";
+  for (const expected of [
+    "Runtime",
+    "Codex runtime unavailable",
+    "Restart retries exhausted",
+    "Open runtime settings",
+  ])
+    assert.ok(text.includes(expected), `${expected} in ${text}`);
+  assert.doesNotMatch(text, uuidText);
+  const link = first.getByRole("link", { name: "Open runtime settings" });
+  assert.equal(await link.getAttribute("href"), "/app/settings/runtime");
+  const describedBy = await link.getAttribute("aria-describedby");
+  assert.equal(await first.locator(`h3[id="${describedBy}"]`).count(), 1);
+  // The same total in the stat, the sidebar and the Open Inbox link.
+  const navCount = await page
+    .locator('.sidebar a[href="/app/inbox"] .nav-count')
+    .innerText();
+  assert.equal(await stat(page, "Needs you"), navCount);
+  await link.click();
+  await page.waitForURL("**/app/settings/runtime");
 });

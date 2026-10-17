@@ -306,6 +306,14 @@
 .inbox-approval-body > p {
   margin: 0;
 }
+/* A runtime's restart attempts, one line each in the order they ran. */
+.inbox-attempts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding-left: var(--space-16);
+}
 /* In the request pane the facts are one bordered grid, as the review frame draws them. */
 .inbox-detail .inbox-approval-facts {
   grid-template-columns: 140px minmax(0, 1fr);

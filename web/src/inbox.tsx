@@ -40,6 +40,7 @@ import {
   answerHolds,
   ApprovalDetail,
   InterventionDetail,
+  RuntimeDetail,
   useInboxTask,
 } from "./inbox-detail.js";
 import { InboxContext } from "./inbox-context.js";
@@ -72,7 +73,8 @@ export interface InboxHeader {
     title: string;
     subtitle?: string;
     back: { href: string; label: string };
-    action: ReactNode;
+    /** Absent for a request with no task to open. */
+    action?: ReactNode;
   };
 }
 export async function loadInbox(client: OperatorClient, signal: AbortSignal) {
@@ -170,16 +172,22 @@ export function Inbox({
     // A wide layout without a request in the URL shows the last chosen one, else the one it opened itself.
     implicit = !urlId && !single ? (state.selected ?? state.auto) : null,
     selectedId = urlId ?? implicit?.id ?? null,
-    taskId = urlTask ?? implicit?.taskId ?? null;
+    // A runtime item belongs to no task: its id alone selects it.
+    runtimeId = Boolean(selectedId?.startsWith("runtime:")),
+    taskId =
+      urlTask ??
+      (implicit?.kind === "runtime" ? null : implicit?.taskId) ??
+      null;
+  const sameRequest = (item: InboxItem) =>
+    item.id === selectedId &&
+    (item.kind === "runtime" || item.taskId === taskId);
   const items = resource.state.data?.items ?? [],
-    current = items.find(
-      (item) => item.id === selectedId && item.taskId === taskId,
-    );
+    current = items.find(sameRequest);
   if (current && urlId) state.selected = current;
   const selected = selectedId
     ? (current ??
       (urlId
-        ? state.selected?.id === selectedId && state.selected.taskId === taskId
+        ? state.selected && sameRequest(state.selected)
           ? state.selected
           : null
         : implicit))
@@ -188,7 +196,8 @@ export function Inbox({
   const rows = queueGroups(
     items.filter(
       (item) =>
-        (!state.project || item.projectId === state.project) &&
+        (!state.project ||
+          (item.kind !== "runtime" && item.projectId === state.project)) &&
         (!state.kind || item.kind === state.kind),
     ),
   ).flatMap((group) => group.items);
@@ -197,7 +206,10 @@ export function Inbox({
     client,
     session,
     // An intervention below the inspector width shows nothing from the task read.
-    selectedId && taskId && (inspector || selected?.kind !== "intervention")
+    selectedId &&
+      taskId &&
+      !runtimeId &&
+      (inspector || selected?.kind !== "intervention")
       ? taskId
       : null,
     resource.state.fetchedAt,
@@ -238,7 +250,9 @@ export function Inbox({
       selected && !current && resource.state.status === "fresh",
     ),
     recorded = Boolean(
-      selected && questions.recordedHere(selected.taskId, selected.id),
+      selected &&
+        selected.kind !== "runtime" &&
+        questions.recordedHere(selected.taskId, selected.id),
     );
   const subtitle =
     count === undefined || projectCount === undefined
@@ -247,40 +261,62 @@ export function Inbox({
         ? `${count} unresolved · confirmation retained`
         : count === 0
           ? "0 unresolved across your projects"
-          : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
+          : projectCount === 0
+            ? `${count} unresolved`
+            : `${count} unresolved across ${projectCount} project${projectCount === 1 ? "" : "s"}`;
   const detailTitle = single && selected ? heading : null,
-    detailSubtitle = selected?.projectName ?? undefined,
-    detailTask = selected?.taskId;
+    detailSubtitle =
+      (selected?.kind === "runtime" ? null : selected?.projectName) ??
+      undefined,
+    detailTask = selected?.kind === "runtime" ? undefined : selected?.taskId,
+    detailRuntime = selected?.kind === "runtime";
   useEffect(() => {
     onHeader?.(
-      detailTitle && detailTask
+      detailTitle && (detailTask || detailRuntime)
         ? {
             ...(subtitle ? { subtitle } : {}),
             detail: {
               title: detailTitle,
               ...(detailSubtitle ? { subtitle: detailSubtitle } : {}),
               back: { href: "/app/inbox", label: "Inbox" },
-              action: (
-                <ActionLink
-                  variant="secondary"
-                  href={`/app/tasks/${detailTask}`}
-                >
-                  Open task
-                </ActionLink>
-              ),
+              ...(detailTask
+                ? {
+                    action: (
+                      <ActionLink
+                        variant="secondary"
+                        href={`/app/tasks/${detailTask}`}
+                      >
+                        Open task
+                      </ActionLink>
+                    ),
+                  }
+                : {}),
             },
           }
         : subtitle
           ? { subtitle }
           : null,
     );
-  }, [onHeader, detailTitle, detailSubtitle, detailTask, subtitle]);
+  }, [
+    onHeader,
+    detailTitle,
+    detailSubtitle,
+    detailTask,
+    detailRuntime,
+    subtitle,
+  ]);
   useEffect(() => () => onHeader?.(null), [onHeader]);
   const labels = workspaceLabels(observation);
   const loaded = items,
     counts = filterCounts(loaded),
     projects = [
-      ...new Map(loaded.map((item) => [item.projectId, item.projectName])),
+      ...new Map(
+        loaded.flatMap((item) =>
+          item.kind === "runtime"
+            ? []
+            : [[item.projectId, item.projectName] as const],
+        ),
+      ),
     ],
     filtered = Boolean(state.project || state.kind),
     complete = Boolean(resource.state.data?.complete),
@@ -296,7 +332,9 @@ export function Inbox({
       ),
     };
     navigate(
-      `/app/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`,
+      item.kind === "runtime"
+        ? `/app/inbox?request=${encodeURIComponent(item.id)}`
+        : `/app/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`,
     );
   };
   /** After a recorded answer: leave the confirmation without opening another request. */
@@ -337,10 +375,14 @@ export function Inbox({
           <span className="inbox-row-reason">{heading.reason}</span>
         )}
         <span className="inbox-row-action">{requestActionLabel(item)} →</span>
-        {(item.requesterName || item.createdAt !== null) && (
+        {((item.kind !== "runtime" && item.requesterName) ||
+          item.createdAt !== null) && (
           <span className="inbox-row-meta">
-            {item.requesterName}
-            {item.requesterName && item.createdAt !== null && " · "}
+            {item.kind !== "runtime" && item.requesterName}
+            {item.kind !== "runtime" &&
+              item.requesterName &&
+              item.createdAt !== null &&
+              " · "}
             {item.createdAt !== null && (
               <time dateTime={new Date(item.createdAt).toISOString()}>
                 {clockLabel(item.createdAt)} · {ageLabel(item.createdAt, now)}
@@ -353,12 +395,12 @@ export function Inbox({
   };
   const isQuestion =
       selected?.kind === "question" ||
-      (!selected && !selectedId?.startsWith("intervention:")),
+      (!selected && !selectedId?.startsWith("intervention:") && !runtimeId),
     selectedHeading = selected ? requestHeading(selected) : null,
     KindIcon = selected ? requestKindIcons[selected.kind] : null,
     previous = position > 0 ? rows[position - 1] : undefined,
     next = position >= 0 ? rows[position + 1] : undefined;
-  const meta = selected && (
+  const meta = selected && selected.kind !== "runtime" && (
     <div className="inbox-detail-meta">
       {requestIdentity(selected) && (
         <p className="inbox-identity">{requestIdentity(selected)}</p>
@@ -434,6 +476,9 @@ export function Inbox({
               <option value="intervention">
                 Interventions · {counts.kind.intervention ?? 0}
               </option>
+              <option value="runtime">
+                Runtime · {counts.kind.runtime ?? 0}
+              </option>
             </NativeSelect>
             {queueRefresh && (
               <Button
@@ -503,14 +548,15 @@ export function Inbox({
         </p>
       </div>
       <section className="inbox-detail" aria-label="Selected request">
-        {selectedId && taskId ? (
+        {selectedId && (taskId || runtimeId) ? (
           <>
             {heading && selected && KindIcon && (
               <header className="inbox-detail-header">
                 <Badge
                   className="inbox-kind"
                   variant={
-                    selected.kind === "intervention"
+                    selected.kind === "intervention" ||
+                    selected.kind === "runtime"
                       ? "destructive"
                       : "attention"
                   }
@@ -525,13 +571,15 @@ export function Inbox({
                 )}
                 {!single && (
                   <span className="inbox-detail-tools">
-                    <a
-                      className="inbox-open-task"
-                      href={`/app/tasks/${selected.taskId}`}
-                    >
-                      Open task
-                      <ArrowUpRight aria-hidden="true" />
-                    </a>
+                    {selected.kind !== "runtime" && (
+                      <a
+                        className="inbox-open-task"
+                        href={`/app/tasks/${selected.taskId}`}
+                      >
+                        Open task
+                        <ArrowUpRight aria-hidden="true" />
+                      </a>
+                    )}
                     {position >= 0 && (
                       <>
                         <Button
@@ -567,7 +615,7 @@ export function Inbox({
                     </p>
                   )}
                   <h2>{selectedHeading?.title ?? "Selected request"}</h2>
-                  {selectedHeading?.reason && (
+                  {selectedHeading?.reason && selected.kind !== "runtime" && (
                     <p className="inbox-reason">{selectedHeading.reason}</p>
                   )}
                   {leftQueue && (
@@ -579,7 +627,7 @@ export function Inbox({
                 </div>
               )}
               {!isQuestion && meta}
-              {isQuestion ? (
+              {isQuestion && taskId ? (
                 <QuestionResponse
                   client={client}
                   session={session}
@@ -595,6 +643,8 @@ export function Inbox({
                 />
               ) : selected?.kind === "approval" ? (
                 <ApprovalDetail item={selected} resource={task} />
+              ) : selected?.kind === "runtime" ? (
+                <RuntimeDetail item={selected} />
               ) : selected ? (
                 <InterventionDetail item={selected} />
               ) : (
@@ -607,7 +657,7 @@ export function Inbox({
           <p>Select a request to review its complete form or exact material.</p>
         )}
       </section>
-      {inspector && selected && (
+      {inspector && selected && selected.kind !== "runtime" && (
         <InboxContext
           item={selected}
           task={task}

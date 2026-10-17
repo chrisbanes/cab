@@ -434,8 +434,9 @@ reuse and, for Stop and Resume, whether Stop is in effect after a possible repla
 which task command produced them, so an uncertain outcome is settled by retrying
 the same command with its key and checked with `task get`, `question get` or
 `approval get`. `GET /api/operator/inbox` accepts `limit` (1–100, default 100),
-`kind` (`question|approval|intervention`) and `project`, each at most once and
-applied before paging; a cursor from other parameters is `409`.
+`kind` (`question|approval|intervention|runtime`) and `project`, each at most once and
+applied before paging; a cursor from other parameters is `409`. A `runtime` item is
+derived on each read and carries `harness` and `since` instead of task fields.
 
 Sources and delivery drive the existing operator commands; no route, command or
 receipt is added. `project prepare-source` writes a `github.configure` change
