@@ -726,11 +726,18 @@ test("an open runtime limits disclosure stays open across Refresh and starts clo
     "open state is stored nowhere",
   );
 
-  await page.goto(`${web.origin}/app/settings`);
-  await page.goto(`${web.origin}/app/settings/runtime`);
+  // In-app route change and back: the page is not reloaded, so module state would survive.
+  await page.locator('a[href="/app/inbox"]').first().click();
+  await runtimesPanel(page).waitFor({ state: "detached" });
+  await page.goBack();
   await runtimeRow(page, "Claude").getByRole("switch").waitFor();
   assert.equal(await isOpen(claude), false);
   assert.equal(await isOpen(codex), false);
+
+  await claude.locator("summary").click();
+  await page.goto(`${web.origin}/app/settings/runtime`);
+  await runtimeRow(page, "Claude").getByRole("switch").waitFor();
+  assert.equal(await isOpen(claude), false, "a reload starts closed");
 });
 
 test("the runtime limits disclosure toggles with Enter and Space and keeps focus on its summary", async (_t, journey) => {
