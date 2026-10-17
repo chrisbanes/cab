@@ -2116,6 +2116,7 @@ test("the board column chips render only below the shell breakpoint", async (_t,
   );
   const bar = page.getByRole("toolbar", { name: "Board columns" });
   const cardCount = () => page.locator(".board-columns [data-task-id]").count();
+  // A fresh load, so Tab below starts from the top of the page.
   await page.goto(`${web.origin}/app/tasks?view=board&state=all`);
   await page.locator(".board-column").first().waitFor();
   const cards = await cardCount();
@@ -2184,6 +2185,23 @@ test("the board column chips render only below the shell breakpoint", async (_t,
       ),
     ["column-Uncertain"],
   );
+
+  // (e) Beside the sidebar, seven Active columns overflow the board: Tab still reaches Uncertain.
+  await page.setViewportSize({ width: 1200, height: 800 });
+  await page.goto(`${web.origin}/app/tasks?view=board`);
+  await page.locator(".board-column").first().waitFor();
+  assert.equal(await bar.count(), 0);
+  await page
+    .getByRole("link", { name: "Uncertain execution", exact: true })
+    .focus();
+  await page.waitForFunction(() => {
+    const board = document
+      .querySelector(".board-columns")!
+      .getBoundingClientRect();
+    const link = document.activeElement!.getBoundingClientRect();
+    return link.left >= board.left - 1 && link.left < board.right;
+  });
+  assert.ok(await noPageOverflow(page));
   assert.equal(commands(), 0);
 });
 

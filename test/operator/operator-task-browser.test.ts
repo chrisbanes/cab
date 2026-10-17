@@ -161,7 +161,7 @@ test("List and Board preserve identical filtered task IDs and never submit comma
       .evaluate((el) => el === document.activeElement),
     true,
   );
-  await screenshot(page, "1366-filtered-board");
+  await screenshot(page, "1120-filtered-board");
   assert.equal(posts, 0);
 });
 

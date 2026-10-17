@@ -1601,7 +1601,7 @@ Presentation and interaction rules that the canvas does not show on its own.
 - Enter on a focused card opens the task detail. Returning restores the filters,
   the column and the scroll position.
 - The Board keeps the attention summary and the Inbox link. Stopping and Uncertain
-  remain named column tabs with counts.
+  remain named columns with counts (tabs below 1121px).
 - Empty columns collapse to a narrow strip. Below the shell breakpoint (1120px and
   narrower) the column link bar is the reach path and keyboard route to a column and
   keeps every column and its count, including empty ones. From 1121px it is not
