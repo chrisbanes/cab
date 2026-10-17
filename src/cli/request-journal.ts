@@ -132,8 +132,9 @@ export class RequestJournal {
   }
 
   /**
-   * The latest state and digest for one full identity, and whether any attempt with it
-   * may have reached the service (in flight, unknown or recorded at any point).
+   * The latest state and digest for one full identity, whether any attempt with it may
+   * have reached the service (in flight, unknown or recorded at any point), and whether
+   * one of them was recorded: the service's receipt came back and was written here.
    */
   async state(identity: RequestIdentity) {
     const lines = (await this.lines()).filter(
@@ -151,6 +152,7 @@ export class RequestJournal {
         reached:
           match.state === "sending" ||
           lines.some((l) => reachedStates.has(l.state)),
+        recorded: lines.some((l) => l.state === "recorded"),
       }
     );
   }

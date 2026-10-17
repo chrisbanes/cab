@@ -568,8 +568,9 @@ export async function applyFile(
     type: document.kind,
     key,
   };
+  const prior = await ctx.journal.state(identity);
   // Only an attempt that may have reached the service can make an existing ID ours.
-  if (creation && !(await ctx.journal.state(identity))?.reached) {
+  if (creation && !prior?.reached) {
     // A duplicate ID with a fresh key is not yet a typed service error.
     const path = `/api/operator/${AREA[document.kind]}s/${document.target.id}/configuration`;
     const exists = await session.client
@@ -609,14 +610,38 @@ export async function applyFile(
       );
     throw error;
   });
+  // `true` only on this machine's own record of a receipt; `null` when the earlier attempt
+  // (or a key given by hand) cannot be told from a first apply.
+  const replayed =
+    prior?.recorded === true
+      ? true
+      : prior?.reached || (requested !== undefined && !prior)
+        ? null
+        : false;
+  const head = `Applied ${document.kind} to ${document.target.scope} (request ${key}).`;
+  const receiptText = keyValues(receiptLines(receipt));
   return {
     request,
-    data: { receipt, file: ctx.values.file, digest: document.digest },
-    human: [
-      `Applied ${document.kind} to ${document.target.scope} (request ${key}).`,
-      keyValues(receiptLines(receipt)),
-      ...effectNote(document),
-    ].join("\n"),
+    data: { receipt, file, digest: document.digest, replayed },
+    human: (replayed === true
+      ? [
+          "Already applied (replay); nothing changed.",
+          `Request ${key} was recorded for ${document.kind} on ${document.target.scope}.`,
+          receiptText,
+        ]
+      : [
+          head,
+          ...(replayed === null
+            ? [
+                prior
+                  ? `An earlier attempt with request ${key} lost its reply; the change is applied once.`
+                  : `If request ${key} was applied before, this is its recorded receipt; the change is applied once.`,
+              ]
+            : []),
+          receiptText,
+          ...effectNote(document),
+        ]
+    ).join("\n"),
   };
 }
 

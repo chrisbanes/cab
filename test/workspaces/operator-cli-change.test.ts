@@ -13,6 +13,7 @@ import {
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { test } from "node:test";
+import type { CliDeps } from "../../src/cli/types.js";
 import { harness, stdinOf } from "../fixtures/cli-harness.js";
 import { databaseDigest } from "../fixtures/database-digest.js";
 import {
@@ -165,7 +166,7 @@ test("profile changes prepare read-only, apply once and keep revisions immutable
     "rw",
   ]);
   assert.equal(applied.code, 0, applied.err);
-  assert.match(applied.out, /nothing was dispatched/);
+  assert.match(applied.out, /^Already applied \(replay\); nothing changed\./);
   assert.equal(Number(d.profile(seed.profileId).version), 5, "replayed once");
 
   // Restore revision 1 as a new revision.
@@ -1429,4 +1430,211 @@ test("apply --dry-run shows the stored change and sends nothing", async (t) => {
     assert.equal(r.json().data.document.kind, kind);
   }
   assert.equal(h.fetches.length, fetched);
+});
+
+test("apply says when it replays and when it settles a lost reply", async (t) => {
+  const { s, seed, h, d, file, out, cli, journal } = await setup(t);
+  const projectDoc = async (name: string) => {
+    const doc = out();
+    const r = await h.run([
+      "project",
+      "prepare",
+      seed.projectA,
+      "--name",
+      name,
+      "--out",
+      doc,
+      "--connection",
+      "ro",
+    ]);
+    assert.equal(r.code, 0, r.err);
+    return doc;
+  };
+  const version = () => Number(d.project(seed.projectA).version);
+  const posts = (machine = h) =>
+    machine.fetches.filter((f) => f.endsWith("/api/operator/commands")).length;
+  const isCommands = (input: Parameters<typeof fetch>[0]) =>
+    String(input).endsWith("/api/operator/commands");
+  const reset = () => {
+    throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
+  };
+  const lostApplied: Partial<CliDeps> = {
+    fetch: async (input, init) => {
+      const response = await fetch(input, init);
+      if (isCommands(input)) reset();
+      return response;
+    },
+  };
+  const lostUnsent: Partial<CliDeps> = {
+    fetch: async (input, init) => {
+      if (isCommands(input)) reset();
+      return fetch(input, init);
+    },
+  };
+  const applyHuman = (doc: string, extra: string[] = []) =>
+    h.run(["project", "apply", "--file", doc, ...extra, "--connection", "rw"]);
+  const first = (text: string) => text.split("\n")[0];
+
+  // 1. A true replay says so, sends the command again, and changes nothing.
+  const fresh = await projectDoc("Fresh");
+  let r = await applyHuman(fresh);
+  assert.equal(r.code, 0, r.err);
+  assert.match(first(r.out) ?? "", /^Applied project\.configure to project:/);
+  assert.match(r.out, /Configuration saved/);
+  const doc = await projectDoc("Replay");
+  const start = version();
+  const applied = await cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(applied.code, 0, applied.err);
+  assert.equal(applied.json().data.replayed, false);
+  assert.equal(version(), start + 1);
+  const sent = posts();
+  const again = await applyHuman(doc);
+  assert.equal(again.code, 0, again.err);
+  assert.equal(first(again.out), "Already applied (replay); nothing changed.");
+  assert.ok(again.out.includes(applied.json().request.key), again.out);
+  assert.doesNotMatch(again.out, /Configuration saved/);
+  const replay = await cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(replay.code, 0, replay.err);
+  assert.equal(replay.json().data.replayed, true);
+  assert.deepEqual(replay.json().request, applied.json().request);
+  assert.deepEqual(replay.json().data.receipt, applied.json().data.receipt);
+  assert.equal(version(), start + 1);
+  assert.equal(posts() - sent, 2);
+  // A later rejected attempt does not erase the record of the receipt.
+  r = await cli("rw", ["project", "apply", "--file", doc], {
+    fetch: async (input, init) => {
+      if (isCommands(input))
+        throw new TypeError("fetch failed", {
+          cause: { code: "ECONNREFUSED" },
+        });
+      return fetch(input, init);
+    },
+  });
+  assert.equal(r.code, 5, r.out);
+  assert.equal(journal().at(-1)?.state, "rejected");
+  r = await cli("rw", ["project", "apply", "--file", doc]);
+  assert.equal(r.json().data.replayed, true);
+
+  // 6. The JSON shape only gains `replayed`.
+  assert.deepEqual(Object.keys(replay.json().data).sort(), [
+    "digest",
+    "file",
+    "receipt",
+    "replayed",
+  ]);
+  assert.deepEqual(Object.keys(replay.json()), Object.keys(applied.json()));
+
+  // 2. A reply lost after the service applied the change: the rerun settles it once.
+  const lost = await projectDoc("Lost after applying");
+  const beforeLost = version();
+  r = await cli("rw", ["project", "apply", "--file", lost], lostApplied);
+  assert.equal(r.code, 6, r.out);
+  const lostKey = r.json().error.request.key;
+  assert.equal(version(), beforeLost + 1);
+  r = await cli("rw", ["project", "apply", "--file", lost]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.replayed, null);
+  assert.equal(r.json().request.key, lostKey);
+  assert.equal(version(), beforeLost + 1);
+
+  // 3. A reply lost before the service saw the request: the rerun applies it once.
+  const unsent = await projectDoc("Lost before sending");
+  const beforeUnsent = version();
+  r = await cli("rw", ["project", "apply", "--file", unsent], lostUnsent);
+  assert.equal(r.code, 6, r.out);
+  const unsentKey = r.json().error.request.key;
+  assert.equal(journal().at(-1)?.state, "unknown");
+  assert.equal(version(), beforeUnsent);
+  r = await h.run(["project", "apply", "--file", unsent, "--connection", "rw"]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(
+    r.out.split("\n")[1],
+    `An earlier attempt with request ${unsentKey} lost its reply; the change is applied once.`,
+  );
+  assert.equal(version(), beforeUnsent + 1);
+
+  // 4. A request key from another machine is not a replay this machine can know.
+  const login = async (machine: ReturnType<typeof harness>) => {
+    const issued = await s.issue("read-write", `machine-${randomUUID()}`);
+    const loggedIn = await machine.run([
+      "auth",
+      "login",
+      "--connection",
+      "rw",
+      "--url",
+      s.origin,
+      "--token-file",
+      machine.tokenFile(issued.token),
+    ]);
+    assert.equal(loggedIn.code, 0, loggedIn.err);
+  };
+  const key = applied.json().request.key;
+  const beforeOther = version();
+  const m1 = harness(t);
+  await login(m1);
+  r = await m1.run([
+    "project",
+    "apply",
+    "--file",
+    doc,
+    "--request-id",
+    key,
+    "--connection",
+    "rw",
+    "--output",
+    "json",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(r.json().data.replayed, null);
+  const m2 = harness(t);
+  await login(m2);
+  r = await m2.run([
+    "project",
+    "apply",
+    "--file",
+    doc,
+    "--request-id",
+    key,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(
+    r.out.split("\n")[1],
+    `If request ${key} was applied before, this is its recorded receipt; the change is applied once.`,
+  );
+  assert.equal(version(), beforeOther);
+
+  // 5. A creation replays the same way, and creates one profile.
+  const profileId = randomUUID();
+  const profileDoc = out();
+  r = await cli("ro", [
+    "profile",
+    "prepare-create",
+    "--name",
+    "Replay profile",
+    "--instructions-file",
+    file("replay.md", "Replay"),
+    "--id",
+    profileId,
+    "--out",
+    profileDoc,
+  ]);
+  assert.equal(r.code, 0, r.err + r.out);
+  r = await cli("rw", ["profile", "apply", "--file", profileDoc]);
+  assert.equal(r.code, 0, r.err + r.out);
+  assert.equal(r.json().data.replayed, false);
+  r = await h.run([
+    "profile",
+    "apply",
+    "--file",
+    profileDoc,
+    "--connection",
+    "rw",
+  ]);
+  assert.equal(r.code, 0, r.err);
+  assert.equal(first(r.out), "Already applied (replay); nothing changed.");
+  r = await cli("rw", ["profile", "apply", "--file", profileDoc]);
+  assert.equal(r.json().data.replayed, true);
+  assert.equal(Number(d.profile(profileId).version), 1);
 });

@@ -286,7 +286,13 @@ command is not recognised), then `Fix: Run 'ensemble --help'.`.
    it never holds request bodies, instructions or tokens. Re-running `apply` on the
    same document reuses that key, so the service replays the recorded receipt. A
    lost or ambiguous response exits 6 with the full identity, a ready-to-run
-   `operation get` and the exact retry. Exit codes: 2 invalid input, 3
+   `operation get` and the exact retry. `apply` reports what it knows of that from
+   this machine's journal alone, in `data.replayed`: `true` when the journal already
+   holds a receipt for the key (the output starts `Already applied (replay); nothing
+   changed.` and omits the effect notes), `null` when an earlier attempt may have
+   lost its reply, or `--request-id` names a key the journal has not seen (the
+   second line says so; the change is still applied once), and `false` for a first
+   apply. A replay of a key applied from another machine reads as `null`. Exit codes: 2 invalid input, 3
    authentication or scope, 4 conflict or policy denial (`policy-denied`), 5
    unavailable (including `journal-unavailable`, when nothing is sent), 6 unknown
    outcome, 7 unsupported service. Every operator command (including `auth`, `connection` and the read commands) refuses, before it acts, an option its usage line does not name (`usage`, exit 2, nothing sent or changed); `--connection`, `--output` and `--help` are always accepted, and `--version` and `--help` are answered before any command. Every
