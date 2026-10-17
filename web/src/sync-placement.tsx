@@ -9,12 +9,17 @@ import type { ResourceState } from "./resource.js";
 import type { TabProps } from "./project-config.js";
 import type { ProjectConfigurationData } from "./settings-changes.js";
 import type { ConfigurationDraft } from "./settings-state.js";
+import { OutcomeDetails, type OutcomeField } from "./action-feedback.js";
+import { clockLabel } from "./presentation.js";
+import { SourceNameText, useSavedSourceNames } from "./source-names.js";
 import {
   activationLine,
-  observationLabel,
-  observationSymbol,
+  type SourceNaming,
   sourceCredentialCopy,
+  sourceHeading,
+  sourceStatusLine,
 } from "./settings-view.js";
+import { selectionCountsText } from "../../src/operator/readiness-text.js";
 import {
   DraftField,
   DraftMessage,
@@ -33,12 +38,20 @@ export interface ObservationResource {
   refresh: () => void;
 }
 
+/**
+ * A source in the select. An option cannot be masked in evidence, so a saved query never
+ * appears there: a search reads as a saved search, told apart by its id.
+ */
+const optionName = (n: SourceNaming, id: string | null) =>
+  n.kind === "search" ? `Saved search (${id}) · search` : sourceHeading(n);
+
 /** The one saved line of a recorded placement, in plain words. */
 const placedLine = (d: ConfigurationDraft) =>
   `Saved. ${d.values.placementTitle || "The task"} now belongs to ${d.values.placementProject || "the chosen project"}.`;
 
 export function SyncTab(p: TabProps & { observations: ObservationResource }) {
   const { data } = p,
+    naming = useSavedSourceNames(p),
     preview = useDraft(p.drafts, `github.preview:${p.projectId}`);
   // After a preview is recorded the next read starts a new one, so the form never stays locked.
   useLoadedDraft(
@@ -60,6 +73,12 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
       sourceVersion: data.source.version,
       selections: data.source.selections,
       recorded: preview.phase === "recorded",
+      // A sentence never carries a saved query, so a search reads as a saved search here.
+      name: (id) => {
+        const s = data.source.selections.find((x) => x.id === id);
+        const n = s && naming(s);
+        return n ? (n.private ? "Saved search" : n.name) : "This source";
+      },
     });
   const unsettled = p.drafts
     .unsettledPlacements(p.projectId)
@@ -67,10 +86,7 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
   return (
     <div className="settings-split settings-split-even">
       <div className="settings-column">
-        <Panel
-          title="Preview and activation"
-          description="Previewing a source checks it against GitHub and activates it. Activation doesn't import tasks or prove a successful sync."
-        >
+        <Panel title="Preview and activation">
           {data.source.credential && !data.source.credential.usable && (
             <p className="body" role="alert">
               {sourceCredentialCopy(data.source.credential.reason)}{" "}
@@ -107,7 +123,7 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
                 .filter((s) => s.id !== null)
                 .map((s) => (
                   <option value={s.id ?? ""} key={s.id}>
-                    {s.id} ({s.kind === "project" ? "GitHub Project" : s.kind})
+                    {optionName(naming(s), s.id)}
                     {" · "}
                     {s.active ? "active" : "inactive"}
                   </option>
@@ -122,6 +138,7 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
               refresh={p.refreshConfiguration}
               review={() => preview.adoptVersion(data.source.version)}
               success={activation ? activation.line : null}
+              caveat="Previewing activates the source; it doesn't import tasks."
             >
               {activation?.refresh && <RefreshObservations {...p} />}
             </DraftOutcome>
@@ -132,7 +149,7 @@ export function SyncTab(p: TabProps & { observations: ObservationResource }) {
             )}
           </form>
         </Panel>
-        <SourceObservations {...p} />
+        <SourceObservations {...p} naming={naming} />
       </div>
       <div className="settings-column">
         {data.placements.map((c) => (
@@ -208,6 +225,9 @@ function SourceObservations(
     projectId: string;
     data: ProjectConfigurationData;
     observations: ObservationResource;
+    naming: (
+      s: ProjectConfigurationData["source"]["selections"][number],
+    ) => SourceNaming;
   },
 ) {
   const resource = p.observations,
@@ -216,67 +236,82 @@ function SourceObservations(
   // Withheld ids all read null, so a null never identifies one configuration row.
   const selection = (id: string | null) =>
     id === null ? undefined : p.data.source.selections.find((s) => s.id === id);
-  const descriptor = (id: string | null) => selection(id)?.descriptor;
   const observed = resource.state.data?.data.projects.find(
     (r) => r.projectId === p.projectId,
   );
   return (
     <Panel
-      title="Source status"
-      description="Refresh checks every enabled source in this installation. A refresh attempt doesn't mean the provider sync succeeded."
+      title="Source sync"
+      description="Refresh checks every enabled source in this installation."
     >
       <ResourceStatus
         label="Sources"
         state={resource.state}
         retry={resource.refresh}
       />
-      {observed?.selections.map((s, i) => (
-        <article className="settings-row" key={s.selectionId ?? i}>
-          <div className="settings-row-heading">
-            <div>
-              <h3 className="small-heading">
-                {[
-                  s.selectionId ?? "Selection unavailable",
-                  descriptor(s.selectionId),
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </h3>
-              <p className="body">
-                {s.selectionId ?? "Selection unavailable"}: {s.state}. Newest
-                attempt: {s.lastAttemptAt ?? "unavailable"}. Successful sync:{" "}
-                {s.lastSuccessfulAt ?? "unavailable"}.
-              </p>
+      {observed?.selections.map((s, i) => {
+        const saved = selection(s.selectionId),
+          naming = saved
+            ? p.naming(saved)
+            : { name: "Selection unavailable", kind: "", private: false },
+          details: OutcomeField[] = [
+            ...(s.selectionId
+              ? ([["Source ID", s.selectionId]] as OutcomeField[])
+              : []),
+            ...(naming.kind ? ([["Kind", naming.kind]] as OutcomeField[]) : []),
+            ...(saved?.kind === "project" && saved.descriptor
+              ? ([["Project", saved.descriptor]] as OutcomeField[])
+              : []),
+            ...(s.lastAttemptAt && Number.isFinite(Date.parse(s.lastAttemptAt))
+              ? ([
+                  ["Newest attempt", clockLabel(Date.parse(s.lastAttemptAt))],
+                ] as OutcomeField[])
+              : []),
+            ...(s.counts
+              ? ([
+                  ["Counts", selectionCountsText(s.counts, observed.readiness)],
+                ] as OutcomeField[])
+              : []),
+          ];
+        return (
+          <article className="settings-row" key={s.selectionId ?? i}>
+            <div className="settings-row-heading">
+              <div>
+                <h3 className="small-heading">
+                  <SourceNameText naming={naming} />
+                  {sourceHeading(naming).slice(naming.name.length)}
+                </h3>
+                <p className="body">
+                  {sourceStatusLine(s, observed.readiness)}
+                </p>
+              </div>
+              {saved && (
+                <StatusBadge
+                  tone="idle"
+                  icon={saved.active ? CircleCheck : undefined}
+                >
+                  {saved.active ? "Active" : "Inactive"}
+                </StatusBadge>
+              )}
+              {s.credentialReason && (
+                <p className="body">
+                  {sourceCredentialCopy(s.credentialReason)}{" "}
+                  <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
+                    Set or change source credential
+                  </a>
+                </p>
+              )}
             </div>
-            <StatusBadge tone="idle" icon={observationSymbol(s)}>
-              {observationLabel(s)}
-            </StatusBadge>
-            {selection(s.selectionId) && (
-              <StatusBadge
-                tone="idle"
-                icon={
-                  selection(s.selectionId)?.active ? CircleCheck : undefined
-                }
-              >
-                {selection(s.selectionId)?.active ? "Active" : "Inactive"}
-              </StatusBadge>
-            )}
-            {s.credentialReason && (
-              <p className="body">
-                {sourceCredentialCopy(s.credentialReason)}{" "}
-                <a href={`/app/projects/${p.projectId}/settings?tab=github`}>
-                  Set or change source credential
-                </a>
-              </p>
-            )}
-          </div>
-          <ObservationCounts
-            projectId={p.projectId}
-            rule={observed.readiness}
-            counts={s.counts}
-          />
-        </article>
-      ))}
+            <OutcomeDetails fields={details} />
+            <ObservationCounts
+              warningOnly
+              projectId={p.projectId}
+              rule={observed.readiness}
+              counts={s.counts}
+            />
+          </article>
+        );
+      })}
       <Button
         type="button"
         variant="secondary"
@@ -299,6 +334,7 @@ function SourceObservations(
       >
         Refresh all sources
       </Button>
+      <p className="metadata muted">An attempt isn't a successful sync.</p>
       {notice && (
         <p className="body" role="status">
           {notice}

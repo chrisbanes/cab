@@ -1441,8 +1441,12 @@ test("a reverted source edit leaves the form clean and picks up a later read", a
   await path.fill(storedPath);
   await ref.fill("HEAD");
   await ref.fill("main");
-  await page.getByRole("button", { name: "Remove S-3" }).click();
-  await page.getByRole("button", { name: "Undo remove S-3" }).click();
+  await page
+    .getByRole("button", { name: "Remove GitHub Project (S-3)" })
+    .click();
+  await page
+    .getByRole("button", { name: "Undo remove GitHub Project (S-3)" })
+    .click();
   await assertClean(page, "Save changes");
   const external = (mode: "all" | "any") =>
     api.execute({
@@ -2351,8 +2355,10 @@ test("GitHub source shows local paths and search queries plainly and edits them 
   );
   const d = f.service.domain();
   await page.getByRole("heading", { name: "1 · Discovery sources" }).waitFor();
-  await page.getByText("S-1 · Repository").waitFor();
-  await page.getByText("PVT_atlas · Filter kept · private").waitFor();
+  await page
+    .getByRole("heading", { name: "acme/atlas · repository issues" })
+    .waitFor();
+  await page.getByText("Filter kept · private").waitFor();
   const path = page.getByLabel("Local repository path", { exact: true });
   const query = page.getByLabel("Search query", { exact: true });
   await query.waitFor();
@@ -2380,7 +2386,9 @@ test("GitHub source shows local paths and search queries plainly and edits them 
     .waitFor();
   const save = page.getByRole("button", { name: "Save changes", exact: true });
   assert.equal(await save.isDisabled(), true, "showing values is no change");
-  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page
+    .getByRole("button", { name: "Remove GitHub Project (S-3)" })
+    .click();
   await page.getByText("Will be removed").waitFor();
   await changes(page).getByText("− S-3 · GitHub Project PVT_atlas").waitFor();
   await page.getByRole("button", { name: "Add source", exact: true }).click();
@@ -2388,7 +2396,7 @@ test("GitHub source shows local paths and search queries plainly and edits them 
     .getByLabel("Selection kind", { exact: true })
     .selectOption({ label: "Search" });
   await query.last().fill("PRIVATE NEW QUERY");
-  await page.getByText("New · inactive").waitFor();
+  await page.getByText("Not saved yet").waitFor();
   await changes(page).getByText("+ S-4 · Search · added inactive").waitFor();
   const checkout = await createCheckout(f.directory, "atlas-checkout-2");
   await query.first().fill("PRIVATE EDITED QUERY");
@@ -2431,8 +2439,12 @@ test("GitHub source shows local paths and search queries plainly and edits them 
     await realpath(checkout),
   );
   // The edited source reads inactive until it is previewed again, and the new values show.
-  await page.getByText("S-4 · Search").waitFor();
-  const row = page.locator(".settings-row", { hasText: "S-2 · Search" });
+  await page
+    .getByRole("heading", { name: "PRIVATE NEW QUERY · search" })
+    .waitFor();
+  const row = page.locator(".settings-row", {
+    hasText: "PRIVATE EDITED QUERY",
+  });
   await row.getByText("Inactive", { exact: true }).waitFor();
   await page.waitForFunction(
     (value) =>
@@ -2852,7 +2864,9 @@ test("GitHub source conflict keeps rows and an unknown save is checked once", as
     "/app/projects/:atlas/settings?tab=github",
   );
   const d = f.service.domain();
-  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page
+    .getByRole("button", { name: "Remove GitHub Project (S-3)" })
+    .click();
   await new OperatorApi(f.service, [f.directory]).execute({
     type: "github.configure",
     key: randomUUID(),
@@ -2877,7 +2891,9 @@ test("GitHub source conflict keeps rows and an unknown save is checked once", as
     .click();
   await page.getByText("Will be removed").waitFor();
   // The source saved elsewhere joins the form as a kept row instead of being dropped.
-  await page.getByText("S-5 · Search").waitFor();
+  await page
+    .getByRole("heading", { name: "PRIVATE ELSEWHERE · search" })
+    .waitFor();
   assert.equal((await changes(page).innerText()).includes("S-5"), false);
   const version = d.githubConfiguration(ids.atlas).version;
   await page.route("**/api/operator/commands", (r) => r.abort());
@@ -3290,7 +3306,9 @@ test("Save waits for a local path to be read again, and a same-kind replacement 
   const mine = await createCheckout(f.directory, "hold-mine");
   const theirs = await createCheckout(f.directory, "hold-theirs");
   await path.fill(mine);
-  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page
+    .getByRole("button", { name: "Remove GitHub Project (S-3)" })
+    .click();
   await api.execute({
     type: "github.configure",
     key: randomUUID(),
@@ -3343,7 +3361,7 @@ test("a pending removal is dropped when the source was replaced under the same i
   );
   const d = f.service.domain();
   const api = new OperatorApi(f.service, [f.directory]);
-  await page.getByRole("button", { name: "Remove S-2" }).click();
+  await page.getByRole("button", { name: "Remove Saved search (S-2)" }).click();
   await api.execute({
     type: "github.configure",
     key: randomUUID(),
@@ -3375,7 +3393,9 @@ test("an unknown source save with rows removed elsewhere keeps its one action an
     journey,
     "/app/projects/:atlas/settings?tab=github",
   );
-  await page.getByRole("button", { name: "Remove S-3" }).click();
+  await page
+    .getByRole("button", { name: "Remove GitHub Project (S-3)" })
+    .click();
   await page.route("**/api/operator/commands", (r) => r.abort());
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await page.getByText("We couldn't confirm the save.").waitFor();
@@ -3642,7 +3662,12 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
   await page.goto(
     web.origin + resolve("/app/projects/:atlas/settings?tab=sync", ids),
   );
-  const row = page.locator("article.settings-row").filter({ hasText: counts });
+  const row = page
+    .locator("article.settings-row")
+    .filter({ hasText: "acme/atlas" });
+  // The counts sit in Details; the sentence and the warning stay visible.
+  await row.getByText(/^Synced \d\d:\d\d · 3 issues observed/).waitFor();
+  await row.locator("summary").first().click();
   await row.getByText(counts, { exact: true }).waitFor();
   await row.getByText(warning, { exact: false }).waitFor();
   await row.getByRole("link", { name: "Check readiness conditions" }).click();
@@ -3650,14 +3675,18 @@ test("Sync and GitHub source show stored readiness counts and a zero-match warni
   await page.waitForFunction(
     () => document.activeElement?.id === "source-readiness",
   );
-  await page.getByText(`S-1: ${counts}`, { exact: true }).waitFor();
   await page.getByText(warning, { exact: false }).waitFor();
 
   complete = false;
   await f.service.refreshGitHub();
   await page.reload();
   await page
-    .getByText(`S-1: ${counts} · partial read; counts may be incomplete`, {
+    .getByText(/^Partly synced \d\d:\d\d · 3 issues observed so far/)
+    .first()
+    .waitFor();
+  await page.locator(".settings-row summary").first().click();
+  await page
+    .getByText(`${counts} · partial read; counts may be incomplete`, {
       exact: true,
     })
     .waitFor();

@@ -19,6 +19,8 @@ export function ObservationCounts({
   counts,
   label,
   sameTab = false,
+  warningOnly = false,
+  private: isPrivate = false,
 }: {
   /** Names the selection where the row does not. */
   label?: string;
@@ -27,18 +29,30 @@ export function ObservationCounts({
   counts: Project["selections"][number]["counts"] | undefined;
   /** On the GitHub source tab the link moves focus to the Readiness panel in place. */
   sameTab?: boolean;
+  /** The counts live in the row's Details; only the zero-match warning stays visible. */
+  warningOnly?: boolean;
+  /** The label is saved private text, so evidence masks it. */
+  private?: boolean;
 }) {
   if (!counts) return null;
   const warning = zeroMatchWarning(counts, rule);
   return (
     <>
-      <p className="body">
-        {label && `${label}: `}
-        {selectionCountsText(counts, rule)}
-      </p>
+      {!warningOnly && (
+        <p className="body">
+          {label && `${label}: `}
+          {selectionCountsText(counts, rule)}
+        </p>
+      )}
       {warning && (
         <p className="body">
-          <StatusBadge tone="warning">No match</StatusBadge> {warning}{" "}
+          <StatusBadge tone="warning">No match</StatusBadge>{" "}
+          {warningOnly && label && (
+            <>
+              <span data-private={isPrivate || undefined}>{label}</span>:{" "}
+            </>
+          )}
+          {warning}{" "}
           <a
             href={
               sameTab
