@@ -2040,20 +2040,22 @@ for (const [name, viewport] of [
   });
 
 test("a runtime link whose item has recovered says it is unavailable and reads no task", async (_t, j) => {
-  const { page, web } = await openInbox(
+  const { page, seeded } = await openInbox(
     j,
     1,
     { width: 1366, height: 900 },
     "/app/inbox?request=runtime%3Acodex",
   );
+  await page.getByText("Selected request is unavailable.").waitFor();
   const taskReads: string[] = [];
   page.on("request", (r) => {
     if (r.url().includes("/api/operator/tasks/")) taskReads.push(r.url());
   });
   // Load the link again with the listener in place, so a read at load would be seen.
   await page.reload();
-  await page.getByLabel("Password").fill(web.password);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await page
+    .locator(`.inbox-row[data-record-id="${seeded[0]!.interactionId}"]`)
+    .waitFor();
   await page.getByText("Selected request is unavailable.").waitFor();
   assert.equal(
     await page.locator('.inbox-row[data-kind="runtime"]').count(),

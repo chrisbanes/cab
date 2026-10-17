@@ -157,6 +157,7 @@ test("production retained result evidence keeps original bytes and opens current
     .waitFor();
   // The link names the item, so its Evidence card is open with that item selected.
   await page.locator("#result-evidence > details[open]").waitFor();
+  await retained.getByLabel("Retained evidence items").waitFor();
   assert.equal(
     await retained.locator('.retained-items [aria-pressed="true"]').count(),
     1,

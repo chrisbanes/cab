@@ -27,11 +27,19 @@ function fixture() {
   };
 }
 
-test("host identity persists across reopen and rejects a different host", () => {
+test("fresh schema omits retired bindings and host identity persists across reopen", () => {
   const f = fixture();
   try {
     const store = new Store(f.db);
     const hostKey = store.ensureHost("fake");
+    assert.deepEqual(
+      f.db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('assignments', 'project_host_bindings', 'conversation_bindings') ORDER BY name",
+        )
+        .all(),
+      [],
+    );
     assert.throws(() => store.ensureHost("other"), /host/i);
 
     const reopened = new Store(f.reopen());
@@ -39,20 +47,6 @@ test("host identity persists across reopen and rejects a different host", () => 
     assert.throws(() => reopened.ensureHost("other"), /host/i);
   } finally {
     f.close();
-  }
-});
-
-test("new database creates assignments without host-specific columns", () => {
-  const db = new DatabaseSync(":memory:");
-  try {
-    new Store(db).ensureHost("fake");
-    const columns = db.prepare("PRAGMA table_info(assignments)").all();
-    assert.deepEqual(
-      columns.map((column) => column.name),
-      ["id", "taskId", "projectId", "brief", "state", "result", "instructions"],
-    );
-  } finally {
-    db.close();
   }
 });
 
