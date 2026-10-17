@@ -191,8 +191,10 @@ dimensions.
   beside one column of bordered sections in the same order. Until a task starts a
   turn, Readiness comes first in the page and in the navigation (`114c-settings-first-run`);
   afterwards it is last. The order is the reading order: nothing is reordered with CSS. The
-  navigation is not sticky. On a phone a section select replaces it
-  (`179a-phone-settings-index`). Project configuration adds General, Routing, GitHub
+  navigation is not sticky. On a phone a section select with a **Go**
+  button replaces it (`179a-phone-settings-index`): choosing an option never
+  navigates, because arrow keys on a closed select fire change on some platforms; Go
+  jumps, and the same section again lands again. Project configuration adds General, Routing, GitHub
   source and Sync & placement tabs.
 
 ## Shared components

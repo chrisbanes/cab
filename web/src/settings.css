@@ -30,6 +30,16 @@
   min-width: 0;
 }
 
+.settings-nav-select {
+  display: flex;
+  gap: var(--space-8);
+}
+
+.settings-nav-select > span {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-nav ul {
   display: grid;
   gap: var(--space-4);
@@ -38,7 +48,7 @@
   list-style: none;
 }
 
-.settings-nav a {
+.settings-nav li a {
   display: flex;
   align-items: center;
   min-height: 30px;
@@ -48,11 +58,11 @@
   text-decoration: none;
 }
 
-.settings-nav a:hover {
+.settings-nav li a:hover {
   color: var(--foreground);
 }
 
-.settings-nav a[aria-current="true"] {
+.settings-nav li a[aria-current="true"] {
   background: var(--overlay);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--foreground);

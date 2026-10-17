@@ -104,8 +104,6 @@ function useProjectConfigurations(
 
 export function SettingsWorkspace(
   p: SettingsProps & {
-    /** Moves to an app path through the shell's history handling. */
-    navigate: (href: string) => void;
     /** True once the workspace read has an answer, data or failure. */
     workspaceSettled: boolean;
   },
@@ -170,6 +168,13 @@ export function SettingsWorkspace(
   // the first section.
   const current = fragmentSection() ?? order[0] ?? "projects";
   const phone = useMediaQuery("(max-width: 759px)");
+  // The select only chooses; Go jumps. A choice belongs to the section it was made from,
+  // so any other navigation shows the current section again.
+  const [picked, setPicked] = useState<{
+    from: SettingsSectionId;
+    id: SettingsSectionId;
+  } | null>(null);
+  const chosen = picked?.from === current ? picked.id : current;
   useFragmentLanding(p.workspaceSettled, (id) =>
     SETTINGS_SECTIONS.some((x) => x.id === id),
   );
@@ -442,21 +447,31 @@ export function SettingsWorkspace(
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="Settings sections">
           {phone ? (
-            <NativeSelect
-              aria-label="Settings section"
-              value={current}
-              onChange={(e) =>
-                p.navigate(
-                  settingsSectionHref(e.target.value as SettingsSectionId),
-                )
-              }
-            >
-              {order.map((id) => (
-                <option key={id} value={id}>
-                  {labels[id]}
-                </option>
-              ))}
-            </NativeSelect>
+            <div className="settings-nav-select">
+              <NativeSelect
+                aria-label="Settings section"
+                value={chosen}
+                onChange={(e) =>
+                  setPicked({
+                    from: current,
+                    id: e.target.value as SettingsSectionId,
+                  })
+                }
+              >
+                {order.map((id) => (
+                  <option key={id} value={id}>
+                    {labels[id]}
+                  </option>
+                ))}
+              </NativeSelect>
+              {/* Choosing never navigates: arrow keys on a closed select fire change. */}
+              <ActionLink
+                variant="secondary"
+                href={settingsSectionHref(chosen)}
+              >
+                Go
+              </ActionLink>
+            </div>
           ) : (
             <ul>
               {order.map((id) => (

@@ -1101,7 +1101,6 @@ export function App() {
               }
               refresh={workspace.refresh}
               refreshNonce={refreshNonce}
-              navigate={navigate}
             />
           ) : pathname === "/app/settings/projects/new" ? (
             <ProjectSetup

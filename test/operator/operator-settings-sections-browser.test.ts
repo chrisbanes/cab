@@ -400,20 +400,46 @@ for (const fragment of ["bogus", "readiness-unknown"])
     assert.deepEqual(errors, []);
   });
 
-test("Settings section select lands on a phone", async (_t, journey) => {
+test("Settings section select chooses and Go lands on a phone", async (_t, journey) => {
   const { page } = await startSettings(journey, "/app/settings", phone);
   await page.getByRole("combobox", { name: "Settings section" }).waitFor();
-  assert.equal(await nav(page).getByRole("link").count(), 0);
+  // The select replaces the section links; Go is the one link in the navigation.
+  assert.deepEqual(await nav(page).getByRole("link").allInnerTexts(), ["Go"]);
   const select = nav(page).getByRole("combobox", { name: "Settings section" });
+  const go = nav(page).getByRole("link", { name: "Go", exact: true });
   assert.deepEqual(
     await select.locator("option").allInnerTexts(),
     sections.map(([l]) => l),
   );
+  // Choosing only chooses: arrow keys on a closed select fire change on some platforms.
+  const before = page.url();
   await select.selectOption({ label: "GitHub discovery" });
+  await nextFrames(page);
+  assert.equal(page.url(), before);
+  assert.equal(await page.evaluate(() => scrollY), 0);
+  assert.equal(await select.inputValue(), "github-discovery");
+  await go.click();
   onScreen(await landed(page, "H2", "GitHub discovery"));
   assert.ok(page.url().endsWith("/app/settings#github-discovery"), page.url());
   assert.equal(await select.inputValue(), "github-discovery");
   await noPageOverflow(page);
+  // From the keyboard: the select, then Go, then Enter; the same section again lands again.
+  await page.evaluate(() => scrollTo(0, 0));
+  await select.focus();
+  await page.keyboard.press("Tab");
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.textContent),
+    "Go",
+  );
+  await page.keyboard.press("Enter");
+  onScreen(await landed(page, "H2", "GitHub discovery"));
+  // A choice not followed by Go is dropped when the section changes another way.
+  await select.selectOption({ label: "Routing" });
+  await page.goBack();
+  await page.goBack();
+  await page.waitForURL(/\/app\/settings$/);
+  await nextFrames(page);
+  assert.equal(await select.inputValue(), "projects");
 });
 
 test("Home checklist Settings actions land on their sections", async (_t, journey) => {
