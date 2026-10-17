@@ -9,7 +9,8 @@ and each step opens the screen that completes it.
 
 ## Entry points
 
-- Home (`/app`) while no task has run in this installation.
+- Home (`/app`) until a task starts a turn; the card is then the only content
+  below the page heading (no board, stat strip or task filters).
 - Account menu → Getting started (`/app/getting-started`), until it is dismissed.
 
 ## Checklist
@@ -17,23 +18,27 @@ and each step opens the screen that completes it.
 Each row is derived from current service state on every read; there is no stored
 wizard progress. A row shows Done, Next or Needs attention, with one action.
 
-| Row               | Done when                                                                          | Action                                                                                |
-| ----------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Runtime           | The Codex login is readable by the service ([readiness check](readiness-check.md)) | Open readiness check                                                                  |
-| GitHub            | A discovery credential is configured and readable                                  | **Use GitHub CLI login (@account)** when detected; otherwise Set discovery credential |
-| Lead profile      | At least one non-revoked profile exists                                            | Create in [project setup](project-setup.md)                                           |
-| Project           | At least one project exists and is enabled                                         | Create project, or **Resume** a paused one                                            |
-| First task        | A task has started a turn                                                          | Create task ([first task](first-task.md))                                             |
-| Claude (optional) | A Claude token reference is readable and `claude` is on the service `PATH`         | [Add Claude](claude-runtime.md); Open readiness check when `claude` is not runnable   |
+| Row               | Done when                                                                          | Action                                                                                                        |
+| ----------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Runtime           | The Codex login is readable by the service ([readiness check](readiness-check.md)) | Open readiness check                                                                                          |
+| GitHub            | A discovery credential is configured and readable                                  | Set discovery credential, or Discovery settings when done                                                     |
+| Project           | An enabled project has a lead profile that is not revoked                          | Create project; **Choose a lead** for an enabled project without one; **Resume** when every project is paused |
+| First task        | A task has started a turn                                                          | Create task ([first task](first-task.md)); unavailable until a project exists                                 |
+| Claude (optional) | A Claude token reference is readable and `claude` is on the service `PATH`         | [Add Claude](claude-runtime.md); Open readiness check when `claude` is not runnable                           |
 
 - Only the first incomplete required row is primary; the rest are secondary.
 - GitHub is optional for a repository-free project: the row says so and never blocks
-  the Project row.
-- A required row (Runtime, Lead profile, Project, First task) that is not done
+  the Project row. It is informational: the one-click **Use GitHub CLI login
+  (@account)** is offered once, in [project setup](project-setup.md) step 3.
+- Create task is shown but unavailable while no project exists: it stays focusable
+  and its reason ("Needs a project first.") is announced.
+- A required row (Runtime, Project, First task) that is not done
   shows Needs attention when a later required row is done or a turn has started;
   otherwise the first shows Next and the rest Not started.
-- The checklist leaves Home after the first task starts a turn; Home then shows only
-  rows that need attention. The account-menu entry remains until the operator
+- The summary counts the three required rows ("1 of 3 required steps done").
+- The checklist leaves Home after the first task starts a turn, including on
+  return to Home, reload or another session; Home then shows the board with only
+  the rows that need attention above it. The account-menu entry remains until the operator
   dismisses it from the checklist page.
 
 ## Recovery

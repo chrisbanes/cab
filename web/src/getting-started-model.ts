@@ -4,13 +4,7 @@ import type {
 } from "../../src/operator/contracts.js";
 import type { ReadinessRead } from "./setup-model.js";
 
-export type RowId =
-  | "runtime"
-  | "github"
-  | "lead"
-  | "project"
-  | "first-task"
-  | "claude";
+export type RowId = "runtime" | "github" | "project" | "first-task" | "claude";
 export type RowStatus =
   | "done"
   | "next"
@@ -22,7 +16,8 @@ export type RowStatus =
 export type RowAction =
   | { kind: "link"; label: string; href: string }
   | { kind: "resume"; projectId: string }
-  | { kind: "gh-login"; login: string };
+  /** Shown but not usable yet; the card keeps it focusable and announces the row's detail. */
+  | { kind: "unavailable"; label: string };
 export interface ChecklistRow {
   id: RowId;
   title: string;
@@ -32,6 +27,9 @@ export interface ChecklistRow {
   primary: boolean;
   action: RowAction;
 }
+
+/** The rows that count toward "N of 3 required steps done", in order. */
+export const REQUIRED_ROWS = ["runtime", "project", "first-task"] as const;
 
 const passes = (r: ReadinessRead, ids: readonly string[]) =>
   r.state === "ready"
@@ -51,8 +49,15 @@ export function checklistRows(input: {
   const { workspace, readiness, discovery } = input;
   const { turnStarted } = workspace.gettingStarted;
   const profiles = workspace.profiles.filter((p) => !p.revoked),
-    enabled = workspace.projects.find((p) => !p.paused),
-    paused = workspace.projects.find((p) => p.paused);
+    leads = new Set(profiles.map((p) => p.id)),
+    hasLead = (p: { leadProfileId: string | null }) =>
+      p.leadProfileId !== null && leads.has(p.leadProfileId),
+    enabledProjects = workspace.projects.filter((p) => !p.paused),
+    // Done needs an enabled project whose lead can run; a lead-less project waits for one.
+    ready = enabledProjects.find(hasLead),
+    leadless = enabledProjects[0],
+    paused = workspace.projects.find((p) => p.paused),
+    firstTaskProject = ready ?? leadless ?? paused;
   // A runtime row passes when some runtime is enabled and that runtime's own checks pass; a
   // disabled runtime's checks report not-configured, so they never pass.
   const enabledRuntime = passes(readiness, ["runtime-enabled"]);
@@ -77,8 +82,7 @@ export function checklistRows(input: {
   // Required rows in order; null is not known yet (readiness still loading or unreadable).
   const required: [RowId, boolean | null][] = [
     ["runtime", runtime],
-    ["lead", profiles.length > 0],
-    ["project", Boolean(enabled)],
+    ["project", Boolean(ready)],
     ["first-task", turnStarted],
   ];
   const firstIncomplete = required.find(([, done]) => done === false)?.[0];
@@ -153,73 +157,71 @@ export function checklistRows(input: {
         githubDone && !(discovery?.source === "gh" && gh?.state === "signed-in")
           ? "Discovery credential is readable."
           : gh?.state === "signed-in"
-            ? `Signed in to github.com as @${gh.login}.`
+            ? `Signed in to github.com as @${gh.login}.${
+                discovery?.configured
+                  ? ""
+                  : " Project setup can use this login for discovery."
+              }`
             : "No discovery credential."
       } Optional for repository-free projects.`,
-      !githubDone && !discovery?.configured && gh?.state === "signed-in"
-        ? { kind: "gh-login", login: gh.login }
-        : {
-            kind: "link",
-            label: githubDone
-              ? "Discovery settings"
-              : "Set discovery credential",
-            href: "/app/settings",
-          },
+      {
+        kind: "link",
+        label: githubDone ? "Discovery settings" : "Set discovery credential",
+        href: "/app/settings",
+      },
       githubDone ? "done" : "optional",
-    ),
-    row(
-      "lead",
-      "Lead profile",
-      profiles.length
-        ? `${profiles.length} ${profiles.length === 1 ? "profile" : "profiles"}`
-        : "No profiles yet.",
-      profiles.length
-        ? { kind: "link", label: "Open settings", href: "/app/settings" }
-        : {
-            kind: "link",
-            label: "Create in project setup",
-            href: "/app/settings/projects/new",
-          },
     ),
     row(
       "project",
       "Project",
-      enabled
-        ? `${enabled.name ?? "Project"} is running.`
-        : paused
-          ? `${paused.name ?? "Project"} is paused. Nothing runs until you resume it.`
-          : "No projects yet.",
-      enabled
+      ready
+        ? `${ready.name ?? "Project"} is running.`
+        : leadless
+          ? `${leadless.name ?? "Project"} has no ${
+              leadless.leadProfileId === null
+                ? "lead profile"
+                : "usable lead profile"
+            }. Tasks wait for a lead.`
+          : paused
+            ? `${paused.name ?? "Project"} is paused. Nothing runs until you resume it.`
+            : `No projects yet.${
+                profiles[0] ? ` Lead profile ${profiles[0].name} is ready.` : ""
+              }`,
+      ready
         ? {
             kind: "link",
             label: "Open project",
-            href: `/app/projects/${enabled.id}`,
+            href: `/app/projects/${ready.id}`,
           }
-        : paused
-          ? { kind: "resume", projectId: paused.id }
-          : {
+        : leadless
+          ? {
               kind: "link",
-              label: "Create project",
-              href: "/app/settings/projects/new",
-            },
+              label: "Choose a lead",
+              href: `/app/projects/${leadless.id}/settings`,
+            }
+          : paused
+            ? { kind: "resume", projectId: paused.id }
+            : {
+                kind: "link",
+                label: "Create project",
+                href: "/app/settings/projects/new",
+              },
     ),
     row(
       "first-task",
       "First task",
       turnStarted
         ? "A task has started a turn."
-        : enabled || paused
+        : firstTaskProject
           ? "No task has started yet."
           : "Needs a project first.",
-      {
-        kind: "link",
-        label: "Create task",
-        href: `/app/tasks/new${
-          (enabled ?? paused)
-            ? `?project=${encodeURIComponent((enabled ?? paused)?.id ?? "")}`
-            : ""
-        }`,
-      },
+      firstTaskProject
+        ? {
+            kind: "link",
+            label: "Create task",
+            href: `/app/tasks/new?project=${encodeURIComponent(firstTaskProject.id)}`,
+          }
+        : { kind: "unavailable", label: "Create task" },
     ),
     unrunnable
       ? row(
