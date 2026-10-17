@@ -127,3 +127,149 @@ test("labels do not depend on the order of the input", () => {
     );
   }
 });
+
+const uuid = (head: string, n: number) =>
+  `${head}-${String(n).padStart(4, "0")}-4000-8000-000000000000`;
+test("ids that share their first eight, twelve and sixteen characters widen until distinct", () => {
+  const projects = [
+    {
+      id: "aaaaaaaa-bbbb-4000-8000-000000000001",
+      name: "Atlas",
+      leadProfileId: null,
+    },
+    {
+      id: "aaaaaaaa-bbbb-4000-8000-000000000002",
+      name: "Atlas",
+      leadProfileId: null,
+    },
+    {
+      id: "aaaaaaaa-cccc-4000-8000-000000000003",
+      name: "Atlas",
+      leadProfileId: null,
+    },
+  ];
+  const labels = projectLabels(projects, []);
+  assert.deepEqual(
+    projects.map((p) => labels.get(p.id)?.text),
+    [
+      "Atlas · aaaaaaaa-bbbb-4000-8000-000000000001",
+      "Atlas · aaaaaaaa-bbbb-4000-8000-000000000002",
+      "Atlas · aaaaaaaa-cccc-4000-8000-000000000003",
+    ],
+  );
+  const twelve = projectLabels(
+    [
+      {
+        id: "aaaaaaaa-bbbb-4000-8000-000000000001",
+        name: "Atlas",
+        leadProfileId: null,
+      },
+      {
+        id: "aaaaaaaa-cccc-4000-8000-000000000002",
+        name: "Atlas",
+        leadProfileId: null,
+      },
+    ],
+    [],
+  );
+  assert.equal(
+    twelve.get("aaaaaaaa-bbbb-4000-8000-000000000001")?.suffix?.text,
+    "aaaaaaaa-bbb",
+  );
+});
+
+test("a lead named like another project's id prefix cannot make two labels equal", () => {
+  const projects = [
+    {
+      id: "11111111-0000-4000-8000-000000000001",
+      name: "Atlas",
+      leadProfileId: id(8),
+    },
+    {
+      id: "11111111-0000-4000-8000-000000000002",
+      name: "Atlas",
+      leadProfileId: id(9),
+    },
+    {
+      id: "22222222-0000-4000-8000-000000000003",
+      name: "Atlas",
+      leadProfileId: null,
+    },
+  ];
+  const labels = projectLabels(projects, [
+    { id: id(8), name: "Mira" },
+    { id: id(9), name: "22222222" },
+  ]);
+  const texts = projects.map((p) => labels.get(p.id)?.text);
+  assert.equal(new Set(texts).size, 3);
+  assert.equal(texts[0], "Atlas · Mira");
+  assert.notEqual(texts[1], texts[2]);
+});
+
+test("a lead named exactly like another project's full id still yields distinct labels", () => {
+  const other = "33333333-0000-4000-8000-000000000001";
+  const labels = projectLabels(
+    [
+      { id: other, name: "Atlas", leadProfileId: null },
+      {
+        id: "44444444-0000-4000-8000-000000000002",
+        name: "Atlas",
+        leadProfileId: id(8),
+      },
+    ],
+    [{ id: id(8), name: other }],
+  );
+  assert.equal(new Set([...labels.values()].map((l) => l.text)).size, 2);
+});
+
+test("every duplicate-name group is distinct and a unique name has no suffix, for adversarial ids, names and leads", () => {
+  let seed = 12345;
+  const random = (n: number) => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed % n;
+  };
+  const names = ["Atlas", "atlas", " ATLAS ", "Café", "Café", "Relay", "Solo"];
+  const leadNames = ["Mira", "mira", "Jonas", "22222222", "aaaaaaaa", null];
+  const prefixes = [
+    "aaaaaaaa",
+    "aaaaaaaa-bbbb",
+    "22222222",
+    "aaaaaaaa-bbbb-4000",
+  ];
+  for (let round = 0; round < 300; round++) {
+    const profiles = leadNames.map((name, index) => ({
+      id: uuid("99999999", index),
+      name,
+    }));
+    const projects = Array.from({ length: 2 + random(7) }, (_, index) => {
+      const prefix = prefixes[random(prefixes.length)] as string;
+      return {
+        // Unique by the trailing index, with adversarial shared prefixes.
+        id: `${prefix.padEnd(30, "0")}${String(index).padStart(6, "0")}`,
+        name: names[random(names.length)] as string,
+        leadProfileId:
+          random(3) === 0
+            ? null
+            : (profiles[random(profiles.length)] as { id: string }).id,
+      };
+    });
+    const labels = projectLabels(projects, profiles);
+    const byKey = new Map<string, typeof projects>();
+    for (const p of projects) {
+      const key = p.name.trim().normalize("NFC").toLowerCase();
+      byKey.set(key, [...(byKey.get(key) ?? []), p]);
+    }
+    for (const [, group] of byKey) {
+      const texts = group.map((p) =>
+        (labels.get(p.id)?.text ?? "").trim().normalize("NFC").toLowerCase(),
+      );
+      assert.equal(
+        new Set(texts).size,
+        group.length,
+        JSON.stringify({ projects, texts }),
+      );
+      if (group.length === 1)
+        assert.equal(labels.get(group[0]!.id)?.suffix, null);
+    }
+  }
+});

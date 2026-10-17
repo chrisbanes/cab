@@ -292,3 +292,66 @@ test("same-named projects stay distinguishable in the sidebar, selects and Inbox
     "Relay",
   ]);
 });
+
+test("same-named projects whose ids share their first eight characters stay distinct in selects and the sidebar", async (_t, j) => {
+  const f = await j.start("fixture.create", () =>
+    createOperatorFixture(null, undefined, undefined, j.fixtureOptions),
+  );
+  let browser: Browser | undefined;
+  j.cleanup(
+    (primary) => f.close(browser, primary),
+    "fixture.close",
+    () => f.lifecycle.steps,
+  );
+  const d = f.service.domain();
+  const lead = randomUUID();
+  d.execute({
+    type: "profile.create",
+    actor: "operator",
+    key: randomUUID(),
+    profileId: lead,
+    name: "Mira",
+    instructions: "Lead",
+    capabilities: "coordination",
+  } as never);
+  const twins = [
+    "abcdef12-0001-4000-8000-000000000000",
+    "abcdef12-0002-4000-8000-000000000000",
+  ];
+  for (const [index, projectId] of twins.entries())
+    d.execute({
+      type: "project.create",
+      actor: "operator",
+      key: randomUUID(),
+      projectId,
+      name: `Twin ${index}`,
+      leadProfileId: lead,
+    });
+  f.seedPersistedState((db) =>
+    db
+      .prepare("UPDATE domain_projects SET name = 'Twin' WHERE id IN (?, ?)")
+      .run(...twins),
+  );
+  const expected = twins.map(
+    (projectId) =>
+      [projectId, `Twin · ${projectId.slice(0, 16)}`] as [string, string],
+  );
+
+  const web = await j.start("fixture.web", () => f.startWeb());
+  browser = await j.start("browser.launch", () => chromium.launch());
+  const page = await browser.newPage({
+    viewport: { width: 1366, height: 900 },
+  });
+  j.observe(page);
+  page.setDefaultTimeout(5000);
+  await signIn(page, web.origin, web.password, "/app/tasks");
+  await sidebarLinks(page).first().waitFor();
+  assert.deepEqual(
+    await sidebar(page),
+    expected.map(([projectId, text]) => [`/app/projects/${projectId}`, text]),
+  );
+  assert.deepEqual(await options(page, "Project"), expected);
+  await page.goto(`${web.origin}/app/tasks/new`);
+  await page.getByRole("combobox", { name: "Project", exact: true }).waitFor();
+  assert.deepEqual(await options(page, "Project"), expected);
+});

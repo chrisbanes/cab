@@ -118,9 +118,12 @@ const badgeTones = {
 export function ShortId({
   value,
   focusable = true,
+  length,
 }: {
   value: string;
   focusable?: boolean;
+  /** Characters shown; the default suits a single identifier. */
+  length?: number;
 }) {
   return (
     <abbr
@@ -128,7 +131,7 @@ export function ShortId({
       title={value}
       tabIndex={focusable ? 0 : undefined}
     >
-      {shortId(value)}
+      {shortId(value, length)}
     </abbr>
   );
 }
@@ -150,7 +153,11 @@ export function ProjectName({
         <span className="muted">
           {" · "}
           {label.suffix.kind === "id" ? (
-            <ShortId value={id} focusable={false} />
+            <ShortId
+              value={id}
+              focusable={false}
+              length={label.suffix.text.length}
+            />
           ) : (
             label.suffix.text
           )}

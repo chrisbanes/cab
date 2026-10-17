@@ -1674,7 +1674,8 @@ Presentation and interaction rules that the canvas does not show on its own.
   before this rule share a name, the sidebar, project lists (Overview Projects,
   Settings → Projects, Runtime), filters and selects add the lead's
   name ("Atlas · Mira"), or the project ID's first eight characters in mono when
-  the leads match or a project has no lead (`116c-project-name-suffix-specimen`).
+  the leads match or a project has no lead, widened only when two IDs start alike so
+  every label in the group stays distinct (`116c-project-name-suffix-specimen`).
 - GitHub sources are named by what they read (acme/atlas issues, a search, the
   Atlas roadmap GitHub Project), with the S-n id in Details. A GitHub Project has
   no stored title, so its name is the title discovery lists for it and otherwise

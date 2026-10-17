@@ -11,10 +11,19 @@ export interface ProjectLabel {
 
 const unavailable = "Name unavailable";
 
+/** ID prefix lengths tried in order; the full ID is the last rung. */
+const idRungs = [8, 12, 16, 20, 24, 28, 32] as const;
+
 /**
  * Tells projects that share a name apart, derived from the current workspace read on every
  * call; nothing is stored. Compute it over all projects, never a filtered subset, so a
  * project reads the same on every surface.
+ *
+ * Invariant: within a group of projects whose names match (ignoring case, spacing and Unicode
+ * composition) every label is distinct under that same comparison, and a unique name has no
+ * suffix. A lead's name is the suffix when it is unique in the group; every other project
+ * gets an ID prefix, and the prefix grows by rungs until the whole group is distinct (a lead
+ * named like another project's ID prefix included), ending at the full ID.
  */
 export function projectLabels(
   projects: readonly {
@@ -30,7 +39,8 @@ export function projectLabels(
     groups.set(key, [...(groups.get(key) ?? []), project]);
   }
   const labels = new Map<string, ProjectLabel>();
-  for (const group of groups.values()) {
+  for (const members of groups.values()) {
+    const group = [...members].sort((a, b) => (a.id < b.id ? -1 : 1));
     const leadOf = (project: (typeof projects)[number]) =>
       profiles.find((p) => p.id === project.leadProfileId)?.name ?? null;
     const leadCounts = new Map<string, number>();
@@ -42,21 +52,34 @@ export function projectLabels(
           (leadCounts.get(projectNameKey(lead)) ?? 0) + 1,
         );
     }
-    for (const project of group) {
-      const lead = leadOf(project);
-      const suffix =
-        group.length === 1
-          ? null
-          : lead !== null && leadCounts.get(projectNameKey(lead)) === 1
-            ? ({ kind: "lead", text: lead } as const)
-            : // shortcut: id prefix collision is ~2^-32, widen to 12 chars if ever observed
-              ({ kind: "id", text: project.id.slice(0, 8) } as const);
-      labels.set(project.id, {
-        name: project.name,
-        suffix,
-        text: `${project.name ?? unavailable}${suffix ? ` · ${suffix.text}` : ""}`,
+    const build = (idLength: number, leads = true) =>
+      group.map((project): ProjectLabel => {
+        const lead = leadOf(project);
+        const suffix: ProjectLabel["suffix"] =
+          group.length === 1
+            ? null
+            : leads &&
+                lead !== null &&
+                leadCounts.get(projectNameKey(lead)) === 1
+              ? { kind: "lead", text: lead }
+              : { kind: "id", text: project.id.slice(0, idLength) };
+        return {
+          name: project.name,
+          suffix,
+          text: `${project.name ?? unavailable}${suffix ? ` · ${suffix.text}` : ""}`,
+        };
       });
-    }
+    const distinct = (built: ProjectLabel[]) =>
+      new Set(built.map((label) => projectNameKey(label.text))).size ===
+      built.length;
+    const maxLength = Math.max(...group.map((project) => project.id.length));
+    // Last resort, only for a lead named exactly like another project's full ID: IDs alone.
+    const built =
+      [...idRungs, maxLength].map((length) => build(length)).find(distinct) ??
+      build(maxLength, false);
+    group.forEach((project, index) => {
+      labels.set(project.id, built[index] as ProjectLabel);
+    });
   }
   return labels;
 }
