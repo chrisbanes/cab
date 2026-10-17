@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  type WaitCode,
+  waitCodes,
+  waitLabels,
+} from "../../src/operator/wait-reasons.js";
+import {
   clockLabel,
   codeSentence,
+  midSentence,
   outcomeLine,
   shortId,
   updatedLabel,
@@ -86,4 +92,37 @@ test("an inherited object key is not a mapped code", () => {
       codeSentence(code, { known: "Known." }, "Fallback."),
       "Fallback.",
     );
+});
+
+test("every wait label reads right mid-sentence, keeping proper nouns", () => {
+  const expected: Record<WaitCode, string> = {
+    "project-paused": "project paused",
+    "project-lead-unconfigured": "project has no lead",
+    "project-lead-revoked": "project lead revoked",
+    "runtime-unavailable": "runtime unavailable",
+    "claude-token-unavailable": "Claude token unavailable",
+    "profile-runtime-not-configured": "lead profile runtime not configured",
+    "power-held": "held by power supervision",
+    "repository-access-revoked": "repository access revoked",
+    "assignment-profile-revoked": "assignment profile revoked",
+    "assignment-profile-stale": "assignment profile changed",
+    "assignment-instructions-stale": "assignment instructions changed",
+    "assignment-profile-not-permitted": "assignment profile not permitted",
+    "assignment-held": "assignment held",
+    "assignment-recovery-unresolved": "assignment recovery unresolved",
+    "local-dependency": "blocked by a task dependency",
+    "imported-blockers-blocked": "blocked by a GitHub dependency",
+    "imported-blockers-unknown": "GitHub dependencies unconfirmed",
+    "source-held": "held by the source",
+    approval: "approval needs a decision",
+    "admission-blocked": "waiting to start",
+    capacity: "capacity full",
+  };
+  for (const code of waitCodes)
+    assert.equal(midSentence(waitLabels[code]), expected[code], code);
+  // A word that merely starts like a proper noun is not one.
+  assert.equal(midSentence("Githubless"), "githubless");
+  assert.equal(midSentence("Claude"), "Claude");
+  assert.equal(midSentence("Codex turn held"), "Codex turn held");
+  assert.equal(midSentence(""), "");
 });

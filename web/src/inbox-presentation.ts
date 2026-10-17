@@ -1,11 +1,9 @@
 import type { InboxItem, TaskRead } from "../../src/operator/contracts.js";
 import { type WaitCode, waitLabels } from "../../src/operator/wait-reasons.js";
 import { attentionNext, nextAttention } from "../../src/operator/attention.js";
-import { clockLabel } from "./presentation.js";
+import { clockLabel, midSentence } from "./presentation.js";
 import { taskColumnOf } from "./task-overview.js";
 import { nextActor } from "./tasks.js";
-
-const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
 /** One label per request kind; the record keeps every kind visible if the enum grows. */
 const kindLabels: Record<InboxItem["kind"], string> = {
@@ -191,7 +189,7 @@ export function holdNotices(
       const about = task.waits.find((wait) => wait.code === code)?.detail;
       notices.push({
         id: code,
-        title: `Execution held (${heldLabels[code] ?? lowerFirst(waitLabels[code as WaitCode])})`,
+        title: `Execution held (${heldLabels[code] ?? midSentence(waitLabels[code as WaitCode])})`,
         items: about ? [about] : [],
         detail: "Approving does not clear it.",
       });
@@ -314,5 +312,5 @@ export const taskContext = (
       ? nextActor(task.attention.codes, taskColumnOf(task)).text
       : item.attentionCode
         ? (nextAttention([item.attentionCode])?.text ?? null)
-        : `Next: you · ${lowerFirst(requestActionLabel(item))}`,
+        : `Next: you · ${midSentence(requestActionLabel(item))}`,
 });

@@ -1495,6 +1495,10 @@ Presentation and interaction rules that the canvas does not show on its own.
   as a sentence that says so rather than "unavailable" as a value. A reason or state
   code reads as a sentence in the web UI, with the code in Details. Where an unknown
   is the message itself (ownership uncertain), the headline states it once.
+- A label written to start a sentence ("GitHub dependencies unconfirmed") keeps its
+  proper nouns (GitHub, Claude, Codex, Ensemble) when it is composed mid-sentence
+  ("Ready · GitHub dependencies unconfirmed"); every other label lowercases its first
+  letter ("Ready · project paused"). One helper, `midSentence`, does this.
 - Identifiers are short mono metadata (R1, A-9bd4, an 8-character SHA), never part
   of a sentence. The full value is on hover, copy or in Details.
 - One refresh per page. Read views keep the page-level Refresh, which only

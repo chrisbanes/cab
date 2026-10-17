@@ -223,6 +223,14 @@ test("taskStatusLine states recorded state, wait and lead", () => {
     }),
     "Ready · waiting on acme/design-system#87 / Accountable project lead: Mira",
   );
+  // A label that starts with a proper noun keeps its capitals mid-sentence.
+  assert.equal(
+    line({
+      admission: { reasons: ["imported-blockers-unknown"] },
+      waits: [{ code: "imported-blockers-unknown" }],
+    }),
+    "Ready · GitHub dependencies unconfirmed / Accountable project lead: Mira",
+  );
   // The header names the first wait in the flow's order.
   assert.equal(
     line({ waits: [{ code: "local-dependency" }, { code: "capacity" }] }),

@@ -13,6 +13,15 @@ export function updatedLabel(first: number, last: number) {
   return a === b ? `Updated ${a}` : `Updated ${a}–${b}`;
 }
 
+/**
+ * A sentence-initial label placed mid-sentence: lowercase its first letter unless it starts with
+ * a proper noun ("GitHub dependencies unconfirmed" keeps its capitals, "Project paused" does not).
+ */
+export const midSentence = (label: string) =>
+  /^(GitHub|Claude|Codex|Ensemble)\b/.test(label)
+    ? label
+    : label.charAt(0).toLowerCase() + label.slice(1);
+
 /** A short identifier for mono metadata; the caller carries the full value on hover or in Details. */
 export const shortId = (value: string, length = 8) => value.slice(0, length);
 
