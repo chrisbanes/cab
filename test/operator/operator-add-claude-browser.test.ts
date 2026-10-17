@@ -17,7 +17,6 @@ import {
   desktop,
   noPageOverflow,
   phone,
-  reloadAfterSetupHome,
   startSettings,
   unpairedBadges,
 } from "../fixtures/operator-settings.js";
@@ -249,25 +248,66 @@ const FIELD = "Claude token reference";
 const SAVE = "Save reference";
 const SET = { name: "Set", exact: true } as const;
 const NOT_CONFIGURED = "Claude subscription token · not configured";
+type Started = Awaited<ReturnType<typeof open>>;
 /** The command posts the page sends. */
-const commands = (page: Awaited<ReturnType<typeof open>>["page"]) => {
+const commands = (page: Started["page"]) => {
   const sent: { credentialRef: unknown }[] = [];
   page.on("request", (r) => {
     if (r.method() === "POST" && r.url().endsWith("/api/operator/commands"))
-      sent.push(r.postDataJSON());
+      sent.push(r.postData() ? r.postDataJSON() : {});
   });
   return sent;
 };
-const activeLabel = (page: Awaited<ReturnType<typeof open>>["page"]) =>
+const activeLabel = (page: Started["page"]) =>
   page.evaluate(() => document.activeElement?.getAttribute("aria-label"));
+
+/**
+ * Opens the reference form with Set once the service home has been read. The read is shown
+ * nowhere, so the page tells us it has landed only by prefilling: Set again until it does.
+ * Each pass reads the page's own state, so no frame count or delay decides the outcome.
+ */
+async function setPrefilled(row: Started["row"]) {
+  const input = row.getByLabel(FIELD);
+  for (let attempt = 0; attempt < 100; attempt++) {
+    await row.getByRole("button", SET).click();
+    if ((await input.inputValue()) !== "") return input;
+    await row.getByRole("button", { name: "Cancel" }).click();
+  }
+  throw new Error("The home read never prefilled the reference.");
+}
+
+/** Lets the page run what the answered request queued, so a "nothing changed" check is not early. */
+const settled = (page: Started["page"]) =>
+  page.evaluate(async () => {
+    for (let hop = 0; hop < 3; hop++)
+      await new Promise<void>((done) => {
+        const channel = new MessageChannel();
+        channel.port1.onmessage = () => done();
+        channel.port2.postMessage(0);
+      });
+  });
+
+/**
+ * Answers the home read only when `release` is called. Release is idempotent and runs again
+ * in `finally`, so a failing test never leaves the handler waiting.
+ */
+async function heldHomeRead(page: Started["page"]) {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(HOME_READ, async (route) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  return release;
+}
 
 test("Add Claude prefills the token reference when none is set and Set sends it exactly", async (t, journey) => {
   const { f, home, page, row, readable } = await open(t, journey, desktop);
-  await reloadAfterSetupHome(page);
   await row.getByText(NOT_CONFIGURED).waitFor();
   const expected = `file:${home}${SUGGESTED}`;
-  await row.getByRole("button", SET).click();
-  const input = row.getByLabel(FIELD);
+  const input = await setPrefilled(row);
   assert.equal(await input.inputValue(), expected);
   const request = commandRequest(page);
   await row.getByRole("button", { name: SAVE }).click();
@@ -287,7 +327,7 @@ test("Add Claude never prefills over a configured reference", async (t, journey)
     key: crypto.randomUUID(),
     credentialRef: "env:FIXTURE_CONFIGURED_REFERENCE_4417",
   });
-  await reloadAfterSetupHome(page);
+  await page.reload();
   await row.getByText(/reference configured/).waitFor();
   await row.getByRole("button", { name: "Change", exact: true }).click();
   const input = row.getByLabel(FIELD);
@@ -300,90 +340,75 @@ test("Add Claude never prefills over a configured reference", async (t, journey)
   );
   await row.getByRole("button", { name: "Clear reference" }).click();
   await row.getByText(NOT_CONFIGURED).waitFor();
-  await row.getByRole("button", SET).click();
   assert.match(
-    await input.inputValue(),
+    await (await setPrefilled(row)).inputValue(),
     /^file:.*\/\.ensemble\/claude\/claude-token$/,
   );
 });
 
 test("Add Claude keeps a typed reference over a late home read", async (t, journey) => {
   const { page, row } = await open(t, journey, desktop);
-  let release: () => void = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route(HOME_READ, async (route) => {
-    await held;
-    await route.continue();
-  });
-  await page.reload();
-  await row.getByText(NOT_CONFIGURED).waitFor();
-  await row.getByRole("button", SET).click();
-  const input = row.getByLabel(FIELD);
-  assert.equal(await input.inputValue(), "");
-  await input.fill("file:/x/claude-token");
-  await input.focus();
-  const answered = page.waitForResponse((r) => r.url().endsWith("/setup/home"));
-  release();
-  await (await answered).finished();
-  await page.evaluate(
-    () =>
-      new Promise((done) =>
-        requestAnimationFrame(() => requestAnimationFrame(done)),
-      ),
-  );
-  assert.equal(await input.inputValue(), "file:/x/claude-token");
-  assert.equal(await activeLabel(page), FIELD);
-  const request = commandRequest(page);
-  await row.getByRole("button", { name: SAVE }).click();
-  assert.equal(
-    (await request).postDataJSON().credentialRef,
-    "file:/x/claude-token",
-  );
+  const release = await heldHomeRead(page);
+  try {
+    await page.reload();
+    await row.getByText(NOT_CONFIGURED).waitFor();
+    await row.getByRole("button", SET).click();
+    const input = row.getByLabel(FIELD);
+    assert.equal(await input.inputValue(), "");
+    await input.fill("file:/x/claude-token");
+    await input.focus();
+    const answered = page.waitForResponse((r) =>
+      r.url().endsWith("/setup/home"),
+    );
+    release();
+    await answered;
+    await settled(page);
+    assert.equal(await input.inputValue(), "file:/x/claude-token");
+    assert.equal(await activeLabel(page), FIELD);
+    const request = commandRequest(page);
+    await row.getByRole("button", { name: SAVE }).click();
+    assert.equal(
+      (await request).postDataJSON().credentialRef,
+      "file:/x/claude-token",
+    );
+  } finally {
+    release();
+  }
 });
 
 test("Add Claude leaves an open empty field empty when the home read lands late", async (t, journey) => {
   const { page, row } = await open(t, journey, desktop);
-  let release: () => void = () => {};
-  const held = new Promise<void>((resolve) => {
-    release = resolve;
-  });
-  await page.route(HOME_READ, async (route) => {
-    await held;
-    await route.continue();
-  });
-  await page.reload();
-  await row.getByText(NOT_CONFIGURED).waitFor();
-  await row.getByRole("button", SET).click();
-  const input = row.getByLabel(FIELD);
-  await input.focus();
-  const answered = page.waitForResponse((r) => r.url().endsWith("/setup/home"));
-  release();
-  await (await answered).finished();
-  await page.evaluate(
-    () =>
-      new Promise((done) =>
-        requestAnimationFrame(() => requestAnimationFrame(done)),
-      ),
-  );
-  assert.equal(await input.inputValue(), "");
-  assert.equal(await activeLabel(page), FIELD);
-  // The next open, with the home known, is prefilled.
-  await row.getByRole("button", { name: "Cancel" }).click();
-  await row.getByRole("button", SET).click();
-  assert.match(
-    await input.inputValue(),
-    /^file:\/.*\.ensemble\/claude\/claude-token$/,
-  );
+  const release = await heldHomeRead(page);
+  try {
+    await page.reload();
+    await row.getByText(NOT_CONFIGURED).waitFor();
+    await row.getByRole("button", SET).click();
+    const input = row.getByLabel(FIELD);
+    await input.focus();
+    const answered = page.waitForResponse((r) =>
+      r.url().endsWith("/setup/home"),
+    );
+    release();
+    await answered;
+    await settled(page);
+    assert.equal(await input.inputValue(), "");
+    assert.equal(await activeLabel(page), FIELD);
+    // The next open, with the home known, is prefilled.
+    await row.getByRole("button", { name: "Cancel" }).click();
+    assert.match(
+      await (await setPrefilled(row)).inputValue(),
+      /^file:\/.*\.ensemble\/claude\/claude-token$/,
+    );
+  } finally {
+    release();
+  }
 });
 
 test("Add Claude refuses ~ and $HOME with the expanded form", async (t, journey) => {
   const { f, home, page, row } = await open(t, journey, desktop);
-  await reloadAfterSetupHome(page);
   const sent = commands(page);
-  await row.getByRole("button", SET).click();
-  const input = row.getByLabel(FIELD);
+  // The prefill shows the home has been read, which the message offering it needs.
+  const input = await setPrefilled(row);
   for (const [typed, rest] of [
     [`~${SUGGESTED}`, SUGGESTED],
     [`file:~${SUGGESTED}`, SUGGESTED],
@@ -414,6 +439,8 @@ test("Add Claude refuses ~ and $HOME with the expanded form", async (t, journey)
   const request = commandRequest(page);
   await row.getByRole("button", { name: SAVE }).click();
   assert.equal((await request).postDataJSON().credentialRef, offered);
+  // The request is only sent; the row confirms the save has been recorded.
+  await row.getByText(/reference configured/).waitFor();
   assert.equal(f.service.domain().claudeTokenReference(), offered);
 });
 
@@ -431,14 +458,21 @@ for (const [label, answer] of [
   test(`Add Claude falls back to an empty field when the home read is ${label}`, async (t, journey) => {
     const { path } = tokenFile(t);
     const { f, page, row } = await open(t, journey, desktop);
-    await page.route(HOME_READ, (route) =>
-      route.fulfill({
+    let answeredRead: () => void = () => {};
+    const answered = new Promise<void>((resolve) => {
+      answeredRead = resolve;
+    });
+    await page.route(HOME_READ, async (route) => {
+      await route.fulfill({
         status: answer.status,
         contentType: "application/json",
         body: JSON.stringify(answer.body),
-      }),
-    );
-    await reloadAfterSetupHome(page);
+      });
+      answeredRead();
+    });
+    await page.reload();
+    await answered;
+    await settled(page);
     const sent = commands(page);
     await row.getByText(NOT_CONFIGURED).waitFor();
     await row.getByRole("button", SET).click();
@@ -457,15 +491,14 @@ for (const [label, answer] of [
     const request = commandRequest(page);
     await row.getByRole("button", { name: SAVE }).click();
     assert.equal((await request).postDataJSON().credentialRef, `file:${path}`);
+    await row.getByText(/reference configured/).waitFor();
     assert.equal(f.service.domain().claudeTokenReference(), `file:${path}`);
   });
 
 test("Add Claude discards the prefill on Cancel and re-derives it on the next Set", async (t, journey) => {
   const { f, home, page, row } = await open(t, journey, desktop);
-  await reloadAfterSetupHome(page);
   const sent = commands(page);
-  await row.getByRole("button", SET).click();
-  const input = row.getByLabel(FIELD);
+  const input = await setPrefilled(row);
   assert.equal(await input.inputValue(), `file:${home}${SUGGESTED}`);
   await row.getByRole("button", { name: "Cancel" }).click();
   assert.equal(await input.count(), 0);
@@ -486,25 +519,25 @@ test("the home path stays out of the URL, requests and browser storage", async (
   const urls: string[] = [];
   const posts: string[] = [];
   const bodies: string[] = [];
-  const reading: Promise<unknown>[] = [];
   page.on("request", (r) => {
     urls.push(r.url());
     if (!r.url().endsWith("/api/operator/commands") && r.postData())
       posts.push(r.postData() ?? "");
   });
-  page.on("response", (r) => {
-    const path = new URL(r.url()).pathname;
-    if (path.startsWith("/api/") && path !== "/api/operator/setup/home")
-      reading.push(
-        r.text().then(
-          (b) => bodies.push(`${path} ${b}`),
-          () => {},
-        ),
-      );
+  // Read each answer here, before the page receives it, so no body is left to read later.
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/operator/setup/home") return route.continue();
+    try {
+      const response = await route.fetch();
+      bodies.push(`${path} ${await response.text()}`);
+      await route.fulfill({ response });
+    } catch {
+      await route.abort().catch(() => {});
+    }
   });
-  await reloadAfterSetupHome(page);
-  await row.getByRole("button", SET).click();
-  const input = row.getByLabel(FIELD);
+  await page.reload();
+  const input = await setPrefilled(row);
   assert.ok((await input.inputValue()).includes(home));
   await input.fill(`~${SUGGESTED}`);
   await row.getByRole("button", { name: SAVE }).click();
@@ -517,7 +550,6 @@ test("the home path stays out of the URL, requests and browser storage", async (
   await row.getByRole("button", { name: SAVE }).click();
   await request;
   await row.getByText(/reference configured/).waitFor();
-  await Promise.all(reading);
   assert.ok(bodies.some((b) => b.startsWith("/api/operator/claude-token ")));
   const forms = [home, encodeURIComponent(home), encodeURI(home)];
   for (const form of forms) {
