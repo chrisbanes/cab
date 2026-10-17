@@ -1428,7 +1428,8 @@ reads the same Inbox every 15 seconds and sends one push per newly seen alert to
 active browser: a question or approval once per interaction, an intervention once per
 task and problem, and a runtime whose restarts ran out once per exhaustion episode,
 naming only the runtime. An alert already in the Inbox when the first browser subscribes
-sends nothing, an unchanged alert is never sent again, and a request that resolves and
+sends nothing (the first complete Inbox read, or the third partial read in a row, ends that
+silent start), an unchanged alert is never sent again, and a request that resolves and
 later returns is new. An alert is recorded before it is sent, so a crash can lose a push
 but never repeats one. A push carries only a title ("Question in Relay: 2 waiting",
 "Codex runtime unavailable") and an Inbox link, never question or approval text, a

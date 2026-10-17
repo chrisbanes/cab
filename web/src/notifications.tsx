@@ -114,7 +114,7 @@ export async function closeResolvedNotifications(
       closeResolved(
         open.map((n) => ({
           tag: n.tag,
-          // Not in every DOM typing; a notification without one counts as older than the read.
+          // Chromium sets it; where a browser does not, the notification counts as older than the read.
           timestamp: (n as { timestamp?: number }).timestamp ?? 0,
           close: () => n.close(),
         })),
@@ -225,19 +225,20 @@ export function NotificationsSection(p: SettingsProps) {
   }, [state, busy]);
 
   const fail = (error: unknown, did: string, resource?: string): Outcome => {
-    // An error that is not the service's own is the browser's push service refusing.
     const code =
       error instanceof ClientError
         ? error.code
         : error instanceof Error
-          ? "browser-push-failed"
+          ? "browser-setup-failed"
           : "request-failed";
     const cause =
       code === "browser-push-failed"
         ? "this browser's push service refused it"
-        : code === "conflict" && did.startsWith("turn on")
-          ? "20 browsers already receive notifications; revoke one first"
-          : failureCause(code);
+        : code === "browser-setup-failed"
+          ? "the browser couldn't set up notifications"
+          : code === "conflict" && did.startsWith("turn on")
+            ? "20 browsers already receive notifications; revoke one first"
+            : failureCause(code);
     return {
       tone: code === "command-outcome-unknown" ? "warning" : "error",
       message:
@@ -255,7 +256,7 @@ export function NotificationsSection(p: SettingsProps) {
     setTest(null);
     let created: PushSubscription | undefined;
     try {
-      if (!publicKey) throw new Error("unavailable");
+      if (!publicKey) throw new ClientError("unavailable", 503);
       // The permission prompt can only come from this press.
       const permission = await Notification.requestPermission();
       if (permission !== "granted") {
@@ -269,18 +270,27 @@ export function NotificationsSection(p: SettingsProps) {
           });
         return;
       }
-      await navigator.serviceWorker.register(WORKER_URL, {
-        scope: WORKER_SCOPE,
-        updateViaCache: "none",
-      });
-      const ready = await navigator.serviceWorker.ready;
-      // A subscription made under another key, or one the service dropped, is replaced.
-      if (state?.kind === "turn-on-again")
-        await (await ready.pushManager.getSubscription())?.unsubscribe();
-      created = await ready.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: base64UrlToBytes(publicKey),
-      });
+      let ready: ServiceWorkerRegistration;
+      try {
+        await navigator.serviceWorker.register(WORKER_URL, {
+          scope: WORKER_SCOPE,
+          updateViaCache: "none",
+        });
+        ready = await navigator.serviceWorker.ready;
+      } catch {
+        throw new ClientError("browser-setup-failed", 0);
+      }
+      try {
+        // A subscription made under another key, or one the service dropped, is replaced.
+        if (state?.kind === "turn-on-again")
+          await (await ready.pushManager.getSubscription())?.unsubscribe();
+        created = await ready.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: base64UrlToBytes(publicKey),
+        });
+      } catch {
+        throw new ClientError("browser-push-failed", 0);
+      }
       const json = created.toJSON();
       await p.client.subscribeNotifications(
         {
@@ -313,9 +323,12 @@ export function NotificationsSection(p: SettingsProps) {
     setTest(null);
     try {
       await p.client.revokeNotification(id, csrf);
-      await (await (await registration())?.pushManager.getSubscription())
-        ?.unsubscribe()
-        .catch(() => undefined);
+      // The service has already forgotten this browser; leaving the browser's own
+      // subscription behind is shown as Turn on again, so a failure here is not reported.
+      await (async () =>
+        (
+          await (await registration())?.pushManager.getSubscription()
+        )?.unsubscribe())().catch(() => undefined);
       focusNext.current = "off";
     } catch (error) {
       setOutcome(fail(error, "turn off notifications", id));

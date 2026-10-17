@@ -953,6 +953,56 @@ test("a partial first read does not end the baseline, so an item it could not se
   }
 });
 
+test("a task that never reads cannot hold the baseline open for ever", async () => {
+  const inbox = scripted();
+  const x = await pushFixture({ readInbox: inbox.readInbox });
+  try {
+    const a = x.subscribe();
+    const known = interventionFor(randomUUID());
+    inbox.set([known], false);
+    for (let i = 0; i < 3; i++) await x.tick();
+    assert.equal(
+      x.fake.requests.length,
+      0,
+      "what the baseline saw is not announced",
+    );
+    inbox.set([known, interventionFor(randomUUID())], false);
+    await x.tick();
+    assert.equal(
+      x.fake.for(a.device).length,
+      1,
+      "after three partial reads new alerts are sent",
+    );
+  } finally {
+    await x.f.close();
+  }
+});
+
+test("a stored endpoint outside the allowlist, or unparseable, is rejected at send time and never fetched", async () => {
+  const x = await pushFixture();
+  try {
+    const bad = x.subscribe("Tampered");
+    const broken = x.subscribe("Broken");
+    x.f.seedPersistedState((db) => {
+      db.prepare(
+        "UPDATE operator_push_subscriptions SET endpoint = ? WHERE id = ?",
+      ).run("https://evil.test/x", bad.row.id);
+      db.prepare(
+        "UPDATE operator_push_subscriptions SET endpoint = ? WHERE id = ?",
+      ).run("not a url", broken.row.id);
+    });
+    assert.equal(await x.push.test(bad.row.id), "rejected");
+    assert.equal(await x.push.test(broken.row.id), "rejected");
+    assert.equal(x.fake.requests.length, 0);
+    assert.equal(
+      x.push.read().subscriptions.find((r) => r.id === bad.row.id)?.lastFailure,
+      "rejected",
+    );
+  } finally {
+    await x.f.close();
+  }
+});
+
 test("a tick never overlaps itself and a stop in the middle of a read records nothing", async () => {
   const inbox = scripted();
   const x = await pushFixture({ readInbox: inbox.readInbox });

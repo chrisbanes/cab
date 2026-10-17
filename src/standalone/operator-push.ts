@@ -1,7 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { type Database, transaction } from "../core/store.js";
-import { inboxAlertKey, kindLabels } from "../operator/attention.js";
+import {
+  inboxAlertKey,
+  inboxSelectionHref,
+  kindLabels,
+} from "../operator/attention.js";
 import {
   type InboxItem,
   type PushSubscriptionRecord,
@@ -38,6 +42,8 @@ export const MAX_PENDING_DELIVERIES = 500;
 const RETRY_DELAYS_MS = [30_000, 120_000] as const;
 const MAX_RETRY_AFTER_MS = 600_000;
 const MAX_INBOX_PAGES = 100;
+/** Partial Inbox reads in a row that still end the silent baseline (45 s at the poll interval). */
+const MAX_PARTIAL_BASELINE_READS = 3;
 const PROJECT_NAME_LIMIT = 64;
 
 export type PushOutcome = z.infer<typeof pushTestOutcomeSchema>;
@@ -71,7 +77,7 @@ export function pushPayload(
       return {
         v: 1,
         title: `${kindLabels[item.kind]} in ${project}: ${waiting} waiting`,
-        url: `/app/inbox?task=${item.taskId}&request=${encodeURIComponent(item.id)}`,
+        url: inboxSelectionHref(item),
         tag,
       };
     }
@@ -79,7 +85,7 @@ export function pushPayload(
       return {
         v: 1,
         title: runtimeInboxHeadline(item.harness),
-        url: `/app/inbox?request=${encodeURIComponent(item.id)}`,
+        url: inboxSelectionHref(item),
         tag,
       };
     default: {
@@ -151,7 +157,8 @@ export class OperatorPushStore {
       );
       CREATE TABLE IF NOT EXISTS operator_push_state (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-        baselined INTEGER NOT NULL
+        baselined INTEGER NOT NULL,
+        partialReads INTEGER NOT NULL DEFAULT 0
       );
       INSERT OR IGNORE INTO operator_push_state(singleton, baselined) VALUES (1, 0);
     `);
@@ -332,21 +339,32 @@ export class OperatorPushStore {
               z.object({ key: z.string() }).parse({ ...(row as object) }).key,
           ),
       );
-      const baselined =
-        z.object({ baselined: z.number() }).parse({
+      const state = z
+        .object({ baselined: z.number(), partialReads: z.number() })
+        .parse({
           ...(this.db
-            .prepare("SELECT baselined FROM operator_push_state")
+            .prepare("SELECT baselined, partialReads FROM operator_push_state")
             .get() as object),
-        }).baselined === 1;
+        });
+      const baselined = state.baselined === 1;
       const fresh = [...new Set(current)].filter((key) => !known.has(key));
       const insert = this.db.prepare(
         "INSERT OR IGNORE INTO operator_push_alerts(key) VALUES (?)",
       );
       for (const key of fresh) insert.run(key);
-      // shortcut: a partial first read records what it saw without ending the baseline, so a
-      // task it could not read is not announced later; if reads stay partial nothing new is sent.
-      if (!baselined && complete)
-        this.db.prepare("UPDATE operator_push_state SET baselined = 1").run();
+      // A partial first read records what it saw without ending the baseline, so a task it could
+      // not read is not announced later. shortcut: after MAX_PARTIAL_BASELINE_READS partial reads
+      // in a row the baseline ends anyway, so a task that never reads cannot silence every alert.
+      if (!baselined) {
+        const partial = complete ? 0 : state.partialReads + 1;
+        const ends = complete || partial >= MAX_PARTIAL_BASELINE_READS;
+        this.db
+          .prepare(
+            "UPDATE operator_push_state SET baselined = ?, partialReads = ?",
+          )
+          .run(ends ? 1 : 0, partial);
+        return [];
+      }
       if (complete) {
         const present = new Set(current);
         const drop = this.db.prepare(
@@ -354,13 +372,13 @@ export class OperatorPushStore {
         );
         for (const key of known) if (!present.has(key)) drop.run(key);
       }
-      return baselined ? fresh : [];
+      return fresh;
     });
   }
 
   private resetLedger(): void {
     this.db.exec(
-      "DELETE FROM operator_push_alerts; UPDATE operator_push_state SET baselined = 0",
+      "DELETE FROM operator_push_alerts; UPDATE operator_push_state SET baselined = 0, partialReads = 0",
     );
   }
 
@@ -613,7 +631,13 @@ export class OperatorPush {
     const keys = this.keys;
     const target = this.store.target(delivery.subscriptionId);
     // A stored endpoint is checked again at send time, so a changed database cannot widen it.
-    if (target && !pushHostAllowed(new URL(target.endpoint).hostname)) {
+    if (
+      target &&
+      !(
+        URL.canParse(target.endpoint) &&
+        pushHostAllowed(new URL(target.endpoint).hostname)
+      )
+    ) {
       this.store.recordFailure(delivery.subscriptionId, "rejected");
       delivery.done?.("rejected");
       return;

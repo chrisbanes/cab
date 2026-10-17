@@ -110,7 +110,7 @@ export function validatePushEndpoint(input: unknown): ValidatedSubscription {
   )
     throw new PushError("invalid-input");
   const p256dh = decodeKey(keys.p256dh, 65);
-  decodeKey(keys.auth, 16);
+  const auth = decodeKey(keys.auth, 16);
   if (p256dh[0] !== 4) throw new PushError("invalid-input");
   try {
     // A trial agreement proves the bytes are a point on the curve.
@@ -124,7 +124,7 @@ export function validatePushEndpoint(input: unknown): ValidatedSubscription {
     endpoint: url.href,
     host,
     p256dh: b64(p256dh),
-    auth: b64(decodeKey(keys.auth, 16)),
+    auth: b64(auth),
     label,
   };
 }
