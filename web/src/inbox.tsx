@@ -13,7 +13,6 @@ import {
   inboxReadSchema,
   type InboxItem,
   type Session,
-  type TaskInboxItem,
   type Workspace,
 } from "../../src/operator/contracts.js";
 import {

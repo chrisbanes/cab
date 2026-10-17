@@ -1,9 +1,9 @@
 import {
   executionHarnessLabels,
   type InboxItem,
-  QuestionRead,
-  TaskListSummary,
-  Workspace,
+  type QuestionRead,
+  type TaskListSummary,
+  type Workspace,
 } from "../../src/operator/contracts.js";
 import {
   projectLabel,

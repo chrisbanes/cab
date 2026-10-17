@@ -15,7 +15,6 @@ import {
   taskContext,
 } from "../../web/src/inbox-presentation.js";
 import type {
-  InboxItem,
   RuntimeInboxItem,
   TaskInboxItem,
   TaskRead,
